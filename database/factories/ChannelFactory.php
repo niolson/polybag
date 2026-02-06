@@ -14,6 +14,7 @@ class ChannelFactory extends Factory
         return [
             'name' => fake()->company(),
             'channel_reference' => fake()->unique()->slug(2),
+            'icon' => null,
         ];
     }
 }

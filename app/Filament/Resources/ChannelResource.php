@@ -32,6 +32,17 @@ class ChannelResource extends Resource
                     ->required()
                     ->maxLength(255)
                     ->unique(ignoreRecord: true),
+                Forms\Components\Select::make('icon')
+                    ->options([
+                        'channel-amazon' => 'Amazon',
+                        'channel-walmart' => 'Walmart',
+                        'channel-tiktok' => 'TikTok',
+                        'channel-target' => 'Target',
+                        'channel-shopify' => 'Shopify',
+                        'channel-manual' => 'Manual',
+                    ])
+                    ->nullable()
+                    ->searchable(),
                 Forms\Components\Toggle::make('active')
                     ->default(true),
             ]);

@@ -16,7 +16,10 @@ use Filament\Resources\RelationManagers\RelationGroup;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components;
 use Filament\Schemas\Schema;
+use Filament\Support\Enums\FontWeight;
+use Filament\Support\Enums\IconPosition;
 use Filament\Tables;
+use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -57,20 +60,40 @@ class ShipmentResource extends Resource
     public static function form(Schema $form): Schema
     {
         return $form
+            ->columns(2)
             ->schema([
-                Components\Section::make('Reference')
+                // Left column — Shipment Details
+                Components\Section::make('Shipment Details')
+                    ->columnSpan(1)
                     ->schema([
                         Forms\Components\TextInput::make('shipment_reference')
                             ->required()
                             ->maxLength(255),
-                        Forms\Components\Select::make('shipping_method_id')
-                            ->relationship('shippingMethod', 'name')
-                            ->required(),
                         Forms\Components\Select::make('channel_id')
                             ->relationship('channel', 'name')
                             ->required(),
-                    ])->columns(3),
-                Components\Section::make('Recipient')
+                        Forms\Components\Select::make('shipping_method_id')
+                            ->relationship('shippingMethod', 'name')
+                            ->required(),
+                        Forms\Components\TextInput::make('value')
+                            ->numeric()
+                            ->prefix('$'),
+
+                        // Unmapped warnings (edit only)
+                        Forms\Components\Placeholder::make('unmapped_channel_warning')
+                            ->label('')
+                            ->content('⚠ Channel reference is unmapped. [Fix it](/app/unmapped-channel-references)')
+                            ->visible(fn (?Shipment $record): bool => $record !== null && $record->channel_id === null && filled($record->channel_reference)),
+
+                        Forms\Components\Placeholder::make('unmapped_shipping_warning')
+                            ->label('')
+                            ->content('⚠ Shipping method reference is unmapped. [Fix it](/app/unmapped-shipping-references)')
+                            ->visible(fn (?Shipment $record): bool => $record !== null && $record->shipping_method_id === null && filled($record->shipping_method_reference)),
+                    ]),
+
+                // Right column — Recipient & Address
+                Components\Section::make('Recipient & Address')
+                    ->columnSpan(1)
                     ->schema([
                         Forms\Components\TextInput::make('first_name')
                             ->maxLength(255),
@@ -87,34 +110,69 @@ class ShipmentResource extends Resource
                         Forms\Components\TextInput::make('email')
                             ->email()
                             ->maxLength(255),
-                    ])->columns(3),
-                Components\Section::make('Address')
-                    ->schema([
-                        Forms\Components\TextInput::make('address1')
-                            ->required()
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('address2')
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('city')
-                            ->required()
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('state')
-                            ->required()
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('zip')
-                            ->required()
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('country')
-                            ->required()
-                            ->maxLength(255)
-                            ->default('US'),
-                    ])->columns(3),
-                Components\Section::make('Value')
-                    ->schema([
-                        Forms\Components\TextInput::make('value')
-                            ->numeric()
-                            ->prefix('$'),
-                    ])->columns(1),
+
+                        Components\Section::make('Shipping Address')
+                            ->schema([
+                                Forms\Components\TextInput::make('address1')
+                                    ->required()
+                                    ->maxLength(255)
+                                    ->live(onBlur: true)
+                                    ->afterStateUpdated(fn (Forms\Set $set) => $set('checked', false)),
+                                Forms\Components\TextInput::make('address2')
+                                    ->maxLength(255)
+                                    ->live(onBlur: true)
+                                    ->afterStateUpdated(fn (Forms\Set $set) => $set('checked', false)),
+                                Forms\Components\TextInput::make('city')
+                                    ->required()
+                                    ->maxLength(255)
+                                    ->live(onBlur: true)
+                                    ->afterStateUpdated(fn (Forms\Set $set) => $set('checked', false)),
+                                Forms\Components\TextInput::make('state')
+                                    ->required()
+                                    ->maxLength(255)
+                                    ->live(onBlur: true)
+                                    ->afterStateUpdated(fn (Forms\Set $set) => $set('checked', false)),
+                                Forms\Components\TextInput::make('zip')
+                                    ->required()
+                                    ->maxLength(255)
+                                    ->live(onBlur: true)
+                                    ->afterStateUpdated(fn (Forms\Set $set) => $set('checked', false)),
+                                Forms\Components\TextInput::make('country')
+                                    ->required()
+                                    ->maxLength(255)
+                                    ->default('US')
+                                    ->live(onBlur: true)
+                                    ->afterStateUpdated(fn (Forms\Set $set) => $set('checked', false)),
+                            ])
+                            ->columns(2),
+
+                        Forms\Components\Hidden::make('checked'),
+
+                        // Validated address section (edit only, when validated)
+                        Components\Section::make('Validated Address')
+                            ->description('Address returned by USPS validation')
+                            ->icon('heroicon-o-check-badge')
+                            ->schema([
+                                Forms\Components\Placeholder::make('validated_address1_display')
+                                    ->label('Address 1')
+                                    ->content(fn (Shipment $record) => $record->validated_address1),
+                                Forms\Components\Placeholder::make('validated_address2_display')
+                                    ->label('Address 2')
+                                    ->content(fn (Shipment $record) => $record->validated_address2 ?: '—'),
+                                Forms\Components\Placeholder::make('validated_city_display')
+                                    ->label('City')
+                                    ->content(fn (Shipment $record) => $record->validated_city),
+                                Forms\Components\Placeholder::make('validated_state_display')
+                                    ->label('State')
+                                    ->content(fn (Shipment $record) => $record->validated_state),
+                                Forms\Components\Placeholder::make('validated_zip_display')
+                                    ->label('ZIP')
+                                    ->content(fn (Shipment $record) => $record->validated_zip),
+                            ])
+                            ->columns(2)
+                            ->collapsed()
+                            ->visible(fn (?Shipment $record): bool => $record !== null && $record->checked && filled($record->validated_address1)),
+                    ]),
             ]);
     }
 
@@ -128,6 +186,11 @@ class ShipmentResource extends Resource
             })
             ->columns([
                 Tables\Columns\TextColumn::make('shipment_reference'),
+                Tables\Columns\TextColumn::make('channel.name')
+                    ->label('Channel')
+                    ->icon(fn (Shipment $record): ?string => $record->channel?->icon)
+                    ->iconPosition(IconPosition::Before)
+                    ->placeholder('—'),
                 Tables\Columns\TextColumn::make('first_name'),
                 Tables\Columns\TextColumn::make('last_name'),
                 Tables\Columns\TextColumn::make('company'),
@@ -183,7 +246,7 @@ class ShipmentResource extends Resource
 
                         return $indicators;
                     }),
-            ])
+            ], layout: FiltersLayout::AboveContentCollapsible)
             ->defaultSort('created_at', 'desc')
             ->recordActions([
                 Actions\ViewAction::make(),
@@ -198,47 +261,105 @@ class ShipmentResource extends Resource
     public static function infolist(Schema $infolist): Schema
     {
         return $infolist
+            ->columns(2)
             ->schema([
+                // Left column — Shipment Details
                 Components\Section::make('Shipment Details')
-                    ->columnSpan(2)
+                    ->columnSpan(1)
                     ->schema([
-                        TextEntry::make('shipment_reference'),
+                        TextEntry::make('shipment_reference')
+                            ->weight(FontWeight::Bold),
+                        TextEntry::make('channel.name')
+                            ->label('Channel')
+                            ->icon(fn (Shipment $record): ?string => $record->channel?->icon)
+                            ->iconPosition(IconPosition::Before)
+                            ->placeholder('—'),
+                        TextEntry::make('shippingMethod.name')
+                            ->label('Shipping Method')
+                            ->placeholder('—'),
+                        TextEntry::make('value')
+                            ->money('USD'),
+                        TextEntry::make('created_at')
+                            ->dateTime(),
+                        TextEntry::make('updated_at')
+                            ->dateTime(),
+
+                        // Unmapped warnings
+                        TextEntry::make('channel_reference')
+                            ->label('Unmapped Channel')
+                            ->icon('heroicon-o-exclamation-triangle')
+                            ->color('warning')
+                            ->url('/app/unmapped-channel-references')
+                            ->visible(fn (Shipment $record): bool => $record->channel_id === null && filled($record->channel_reference)),
+
+                        TextEntry::make('shipping_method_reference')
+                            ->label('Unmapped Shipping Method')
+                            ->icon('heroicon-o-exclamation-triangle')
+                            ->color('warning')
+                            ->url('/app/unmapped-shipping-references')
+                            ->visible(fn (Shipment $record): bool => $record->shipping_method_id === null && filled($record->shipping_method_reference)),
+                    ]),
+
+                // Right column — Recipient & Address
+                Components\Section::make('Recipient & Address')
+                    ->columnSpan(1)
+                    ->schema([
                         TextEntry::make('first_name'),
                         TextEntry::make('last_name'),
-                        TextEntry::make('company'),
+                        TextEntry::make('company')
+                            ->placeholder('—'),
+                        TextEntry::make('phone')
+                            ->placeholder('—'),
+                        TextEntry::make('email')
+                            ->placeholder('—'),
+
+                        Components\Section::make(fn (Shipment $record): string => $record->checked && filled($record->validated_address1)
+                            ? 'Shipping Address (Validated)'
+                            : 'Shipping Address')
+                            ->description(fn (Shipment $record): ?string => $record->checked && filled($record->validated_address1)
+                                ? 'Showing USPS-validated address'
+                                : 'Not validated')
+                            ->icon(fn (Shipment $record): string => $record->checked && filled($record->validated_address1)
+                                ? 'heroicon-o-check-badge'
+                                : 'heroicon-o-map-pin')
+                            ->schema([
+                                TextEntry::make('effective_address1')
+                                    ->label('Address 1')
+                                    ->state(fn (Shipment $record): ?string => $record->checked && filled($record->validated_address1)
+                                        ? $record->validated_address1
+                                        : $record->address1),
+                                TextEntry::make('effective_address2')
+                                    ->label('Address 2')
+                                    ->state(fn (Shipment $record): ?string => $record->checked && filled($record->validated_address1)
+                                        ? $record->validated_address2
+                                        : $record->address2)
+                                    ->placeholder('—'),
+                                TextEntry::make('effective_city')
+                                    ->label('City')
+                                    ->state(fn (Shipment $record): ?string => $record->checked && filled($record->validated_address1)
+                                        ? $record->validated_city
+                                        : $record->city),
+                                TextEntry::make('effective_state')
+                                    ->label('State')
+                                    ->state(fn (Shipment $record): ?string => $record->checked && filled($record->validated_address1)
+                                        ? $record->validated_state
+                                        : $record->state),
+                                TextEntry::make('effective_zip')
+                                    ->label('ZIP')
+                                    ->state(fn (Shipment $record): ?string => $record->checked && filled($record->validated_address1)
+                                        ? $record->validated_zip
+                                        : $record->zip),
+                                TextEntry::make('country'),
+                            ])
+                            ->columns(2),
+
                         TextEntry::make('deliverability')
-                            ->label('Deliverable')
+                            ->label('Deliverability')
                             ->badge()
                             ->placeholder('Not checked'),
                         TextEntry::make('validation_message')
                             ->placeholder('N/A')
                             ->columnSpanFull(),
-                        Components\Grid::make(2)->schema([
-                            Components\Section::make('Address')
-                                ->schema([
-                                    TextEntry::make('address1'),
-                                    TextEntry::make('address2'),
-                                    TextEntry::make('city'),
-                                    TextEntry::make('state'),
-                                    TextEntry::make('zip'),
-                                ]),
-                            Components\Section::make('Validated Address')
-                                ->schema([
-                                    TextEntry::make('validated_address1'),
-                                    TextEntry::make('validated_address2'),
-                                    TextEntry::make('validated_city'),
-                                    TextEntry::make('validated_state'),
-                                    TextEntry::make('validated_zip'),
-                                ]),
-                        ]),
-                        TextEntry::make('country'),
-                        TextEntry::make('phone'),
-                        TextEntry::make('phone_extension')
-                            ->label('Phone Ext.'),
-                        TextEntry::make('email'),
-                        TextEntry::make('value')
-                            ->money('USD'),
-                        TextEntry::make('shippingMethod.name'),
                     ]),
             ]);
     }
