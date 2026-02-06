@@ -1,0 +1,107 @@
+<?php
+
+namespace App\Filament\Pages;
+
+use App\Enums\Role;
+use App\Filament\Concerns\NotifiesUser;
+use App\Models\Manifest;
+use App\Services\ManifestService;
+use App\Services\SettingsService;
+use BackedEnum;
+use Filament\Pages\Page;
+
+class EndOfDay extends Page
+{
+    use NotifiesUser;
+
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-clipboard-document-check';
+
+    protected static ?string $navigationLabel = 'End of Day';
+
+    protected string $view = 'filament.pages.end-of-day';
+
+    /** @var array<string, array<int, array<string, mixed>>> */
+    public array $unmanifestedByCarrier = [];
+
+    /** @var array<int, array<string, mixed>> */
+    public array $todaysManifests = [];
+
+    public static function canAccess(): bool
+    {
+        return auth()->user()->role->isAtLeast(Role::Manager);
+    }
+
+    public function mount(): void
+    {
+        $this->loadData();
+    }
+
+    public function loadData(): void
+    {
+        $this->unmanifestedByCarrier = ManifestService::getUnmanifestedPackages()
+            ->map(fn ($packages) => $packages->map(fn ($package) => [
+                'id' => $package->id,
+                'tracking_number' => $package->tracking_number,
+                'service' => $package->service,
+                'order_ref' => $package->shipment?->shipment_reference,
+                'shipped_at' => $package->shipped_at?->format('g:i A'),
+            ])->values()->all())
+            ->all();
+
+        $this->todaysManifests = Manifest::query()
+            ->whereDate('manifest_date', today())
+            ->latest()
+            ->get()
+            ->map(fn ($manifest) => [
+                'id' => $manifest->id,
+                'carrier' => $manifest->carrier,
+                'manifest_number' => $manifest->manifest_number,
+                'package_count' => $manifest->package_count,
+                'created_at' => $manifest->created_at->format('g:i A'),
+                'has_image' => ! empty($manifest->image),
+            ])
+            ->all();
+    }
+
+    public function generateManifest(string $carrier): void
+    {
+        $packages = ManifestService::getUnmanifestedPackages()->get($carrier);
+
+        if (! $packages || $packages->isEmpty()) {
+            $this->notifyWarning('No Packages', "No unmanifested packages found for {$carrier}.");
+
+            return;
+        }
+
+        $response = ManifestService::createManifest($carrier, $packages);
+
+        if (! $response->success) {
+            $this->notifyError('Manifest Error', $response->errorMessage ?? 'Failed to create manifest.');
+
+            return;
+        }
+
+        if ($response->image && ! SettingsService::get('suppress_printing', false)) {
+            $this->dispatch('print-report', data: $response->image);
+        }
+
+        $this->notifySuccess('Manifest Created', "Manifest {$response->manifestNumber} created for {$carrier}.");
+
+        $this->loadData();
+    }
+
+    public function reprintManifest(int $manifestId): void
+    {
+        $manifest = Manifest::find($manifestId);
+
+        if (! $manifest || empty($manifest->image)) {
+            $this->notifyError('Reprint Error', 'Manifest image not available.');
+
+            return;
+        }
+
+        $this->dispatch('print-report', data: $manifest->image);
+
+        $this->notifySuccess('Reprinting', "Manifest {$manifest->manifest_number} sent to printer.");
+    }
+}

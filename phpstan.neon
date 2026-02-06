@@ -1,0 +1,20 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+    - vendor/pestphp/pest/extension.neon
+
+parameters:
+    level: 1
+    paths:
+        - app
+        - tests
+    ignoreErrors:
+        # Filament uses __get magic method for $this->form
+        - '#Access to an undefined property .+::\$form#'
+        # Pest uses $this bindings in beforeEach/test closures
+        - '#Access to an undefined property PHPUnit\\Framework\\TestCase::\$#'
+        -
+            identifier: variable.undefined
+            message: '#Undefined variable: \$this#'
+            reportUnmatched: false
+        # Pest's TestCase binding provides actingAs from Laravel TestCase
+        - '#Call to an undefined method PHPUnit\\Framework\\TestCase::actingAs\(\)#'

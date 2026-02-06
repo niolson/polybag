@@ -1,0 +1,278 @@
+<?php
+
+use App\Http\Integrations\Fedex\FedexConnector;
+use App\Http\Integrations\Fedex\Requests\CreateShipment;
+use App\Http\Integrations\Fedex\Requests\Rates;
+use Saloon\Http\Faking\MockResponse;
+use Saloon\Laravel\Facades\Saloon;
+
+it('resolves production base URL by default', function (): void {
+    config([
+        'services.fedex.base_url' => 'https://apis.fedex.com',
+        'services.fedex.sandbox_url' => 'https://apis-sandbox.fedex.com',
+    ]);
+    \App\Services\SettingsService::clearCache();
+
+    $connector = new FedexConnector;
+
+    expect($connector->resolveBaseUrl())->toBe('https://apis.fedex.com');
+});
+
+it('resolves sandbox base URL when sandbox_mode is enabled', function (): void {
+    config([
+        'services.fedex.base_url' => 'https://apis.fedex.com',
+        'services.fedex.sandbox_url' => 'https://apis-sandbox.fedex.com',
+    ]);
+    \App\Models\Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
+    \App\Services\SettingsService::clearCache();
+
+    $connector = new FedexConnector;
+
+    expect($connector->resolveBaseUrl())->toBe('https://apis-sandbox.fedex.com');
+});
+
+it('requests correct endpoint for rates', function (): void {
+    $request = new Rates;
+
+    expect($request->resolveEndpoint())->toBe('/rate/v1/rates/quotes');
+});
+
+it('requests correct endpoint for create shipment', function (): void {
+    $request = new CreateShipment;
+
+    expect($request->resolveEndpoint())->toBe('/ship/v1/shipments');
+});
+
+it('builds correct rate request', function (): void {
+    config(['services.fedex.account_number' => 'TEST_ACCOUNT']);
+
+    Saloon::fake([
+        Rates::class => MockResponse::make([
+            'output' => ['rateReplyDetails' => []],
+        ]),
+    ]);
+
+    $connector = new FedexConnector;
+    $request = new Rates;
+    $request->body()->set([
+        'accountNumber' => [
+            'value' => config('services.fedex.account_number'),
+        ],
+        'requestedShipment' => [
+            'shipper' => [
+                'address' => [
+                    'postalCode' => '98072',
+                    'countryCode' => 'US',
+                ],
+            ],
+            'recipient' => [
+                'address' => [
+                    'postalCode' => '90210',
+                    'countryCode' => 'US',
+                ],
+            ],
+            'requestedPackageLineItems' => [
+                [
+                    'weight' => [
+                        'units' => 'LB',
+                        'value' => 5.0,
+                    ],
+                ],
+            ],
+        ],
+    ]);
+
+    $connector->send($request);
+
+    Saloon::assertSent(function (Rates $request) {
+        $body = $request->body()->all();
+
+        return $body['accountNumber']['value'] === 'TEST_ACCOUNT'
+            && $body['requestedShipment']['shipper']['address']['postalCode'] === '98072'
+            && $body['requestedShipment']['recipient']['address']['postalCode'] === '90210'
+            && $body['requestedShipment']['requestedPackageLineItems'][0]['weight']['value'] === 5.0;
+    });
+});
+
+it('builds correct create shipment request', function (): void {
+    config(['services.fedex.account_number' => 'TEST_ACCOUNT']);
+
+    Saloon::fake([
+        CreateShipment::class => MockResponse::make([
+            'output' => [
+                'transactionShipments' => [
+                    [
+                        'masterTrackingNumber' => '794644790293',
+                        'pieceResponses' => [
+                            [
+                                'trackingNumber' => '794644790293',
+                                'packageDocuments' => [
+                                    ['encodedLabel' => base64_encode('PDF content')],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]),
+    ]);
+
+    $connector = new FedexConnector;
+    $request = new CreateShipment;
+    $request->body()->set([
+        'labelResponseOptions' => 'LABEL',
+        'accountNumber' => ['value' => config('services.fedex.account_number')],
+        'requestedShipment' => [
+            'shipper' => [
+                'contact' => [
+                    'personName' => 'Shipping Center',
+                    'phoneNumber' => '5551234567',
+                ],
+                'address' => [
+                    'streetLines' => ['123 Warehouse Blvd'],
+                    'city' => 'Seattle',
+                    'stateOrProvinceCode' => 'WA',
+                    'postalCode' => '98101',
+                    'countryCode' => 'US',
+                ],
+            ],
+            'recipients' => [
+                [
+                    'contact' => [
+                        'personName' => 'John Doe',
+                        'phoneNumber' => '5559876543',
+                    ],
+                    'address' => [
+                        'streetLines' => ['456 Main St'],
+                        'city' => 'Beverly Hills',
+                        'stateOrProvinceCode' => 'CA',
+                        'postalCode' => '90210',
+                        'countryCode' => 'US',
+                    ],
+                ],
+            ],
+            'serviceType' => 'FEDEX_GROUND',
+            'packagingType' => 'YOUR_PACKAGING',
+            'labelSpecification' => [
+                'imageType' => 'PDF',
+                'labelStockType' => 'PAPER_4X6',
+            ],
+            'requestedPackageLineItems' => [
+                [
+                    'weight' => ['units' => 'LB', 'value' => 5.0],
+                    'dimensions' => [
+                        'length' => 12,
+                        'width' => 10,
+                        'height' => 8,
+                        'units' => 'IN',
+                    ],
+                ],
+            ],
+        ],
+    ]);
+
+    $response = $connector->send($request);
+
+    Saloon::assertSent(function (CreateShipment $request) {
+        $body = $request->body()->all();
+
+        return $body['labelResponseOptions'] === 'LABEL'
+            && $body['requestedShipment']['serviceType'] === 'FEDEX_GROUND'
+            && $body['requestedShipment']['shipper']['address']['city'] === 'Seattle'
+            && $body['requestedShipment']['recipients'][0]['address']['city'] === 'Beverly Hills';
+    });
+
+    $data = $response->json();
+    expect($data['output']['transactionShipments'][0]['masterTrackingNumber'])->toBe('794644790293');
+});
+
+it('parses rate response correctly', function (): void {
+    Saloon::fake([
+        Rates::class => MockResponse::make([
+            'output' => [
+                'rateReplyDetails' => [
+                    [
+                        'serviceType' => 'FEDEX_GROUND',
+                        'serviceName' => 'FedEx Ground',
+                        'ratedShipmentDetails' => [
+                            [
+                                'totalNetCharge' => 12.50,
+                                'totalBaseCharge' => 10.00,
+                                'totalNetChargeWithDutiesAndTaxes' => 12.50,
+                            ],
+                        ],
+                        'commit' => [
+                            'dateDetail' => [
+                                'dayOfWeek' => 'FRIDAY',
+                                'dayFormat' => '2025-01-17',
+                            ],
+                            'transitDays' => 'THREE_DAYS',
+                        ],
+                    ],
+                    [
+                        'serviceType' => 'FEDEX_EXPRESS_SAVER',
+                        'serviceName' => 'FedEx Express Saver',
+                        'ratedShipmentDetails' => [
+                            ['totalNetCharge' => 25.00],
+                        ],
+                        'commit' => [
+                            'transitDays' => 'TWO_DAYS',
+                        ],
+                    ],
+                ],
+            ],
+        ]),
+    ]);
+
+    $connector = new FedexConnector;
+    $request = new Rates;
+    $request->body()->set([
+        'accountNumber' => ['value' => 'TEST'],
+        'requestedShipment' => [
+            'shipper' => ['address' => ['postalCode' => '98072', 'countryCode' => 'US']],
+            'recipient' => ['address' => ['postalCode' => '90210', 'countryCode' => 'US']],
+            'requestedPackageLineItems' => [['weight' => ['units' => 'LB', 'value' => 5]]],
+        ],
+    ]);
+
+    $response = $connector->send($request);
+    $data = $response->json('output.rateReplyDetails');
+
+    expect($data)->toHaveCount(2)
+        ->and($data[0]['serviceType'])->toBe('FEDEX_GROUND')
+        ->and((float) $data[0]['ratedShipmentDetails'][0]['totalNetCharge'])->toBe(12.50)
+        ->and($data[0]['commit']['transitDays'])->toBe('THREE_DAYS')
+        ->and($data[1]['serviceType'])->toBe('FEDEX_EXPRESS_SAVER')
+        ->and((float) $data[1]['ratedShipmentDetails'][0]['totalNetCharge'])->toBe(25.00);
+});
+
+it('handles error responses', function (): void {
+    Saloon::fake([
+        Rates::class => MockResponse::make([
+            'errors' => [
+                [
+                    'code' => 'INVALID.INPUT.EXCEPTION',
+                    'message' => 'Invalid postal code',
+                ],
+            ],
+        ], 400),
+    ]);
+
+    $connector = new FedexConnector;
+    // Disable retry for this test to get the raw response
+    $connector->tries = 1;
+    $request = new Rates;
+    $request->body()->set([
+        'accountNumber' => ['value' => 'TEST'],
+        'requestedShipment' => [
+            'shipper' => ['address' => ['postalCode' => 'INVALID', 'countryCode' => 'US']],
+            'recipient' => ['address' => ['postalCode' => '90210', 'countryCode' => 'US']],
+            'requestedPackageLineItems' => [['weight' => ['units' => 'LB', 'value' => 5]]],
+        ],
+    ]);
+
+    $response = $connector->send($request);
+
+    expect($response->status())->toBe(400)
+        ->and($response->json('errors.0.code'))->toBe('INVALID.INPUT.EXCEPTION');
+});

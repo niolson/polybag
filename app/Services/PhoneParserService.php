@@ -1,0 +1,47 @@
+<?php
+
+namespace App\Services;
+
+use libphonenumber\NumberParseException;
+use libphonenumber\PhoneNumberUtil;
+
+class PhoneParserService
+{
+    public static function parse(string $rawPhone, string $defaultRegion = 'US'): PhoneParseResult
+    {
+        $util = PhoneNumberUtil::getInstance();
+
+        try {
+            $phoneNumber = $util->parse($rawPhone, $defaultRegion);
+
+            if (! $util->isValidNumber($phoneNumber)) {
+                return new PhoneParseResult(
+                    phone: null,
+                    extension: null,
+                    error: "Invalid phone number: {$rawPhone}",
+                );
+            }
+
+            $nationalNumber = (string) $phoneNumber->getNationalNumber();
+            $extension = $phoneNumber->getExtension();
+
+            // Truncate extension to 6 chars (FedEx max)
+            if ($extension !== null && $extension !== '') {
+                $extension = substr($extension, 0, 6);
+            } else {
+                $extension = null;
+            }
+
+            return new PhoneParseResult(
+                phone: $nationalNumber,
+                extension: $extension,
+            );
+        } catch (NumberParseException $e) {
+            return new PhoneParseResult(
+                phone: null,
+                extension: null,
+                error: "Unable to parse phone number: {$rawPhone}",
+            );
+        }
+    }
+}
