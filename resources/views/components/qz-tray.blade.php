@@ -3,42 +3,12 @@
     <span id="qz-status-text">Connecting to QZ Tray...</span>
 </div>
 
-<!-- QZ Tray Library -->
-<script src="https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.min.js"></script>
+<x-qz-tray-script />
 
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         const statusBanner = document.getElementById('qz-status');
         const statusText = document.getElementById('qz-status-text');
-
-        // Set up QZ Tray certificate authentication
-        function setupQzSecurity() {
-            if (typeof qz === 'undefined') return;
-
-            qz.security.setCertificatePromise(function(resolve, reject) {
-                fetch('/qz-certificate.pem')
-                    .then(response => response.ok ? response.text() : reject(response.statusText))
-                    .then(resolve)
-                    .catch(reject);
-            });
-
-            qz.security.setSignatureAlgorithm('SHA512');
-            qz.security.setSignaturePromise(function(toSign) {
-                return function(resolve, reject) {
-                    fetch('/qz/sign', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || ''
-                        },
-                        body: JSON.stringify({ request: toSign })
-                    })
-                    .then(response => response.ok ? response.text() : reject(response.statusText))
-                    .then(resolve)
-                    .catch(reject);
-                };
-            });
-        }
 
         // Show status during initial connection
         function showStatus(message, type = 'info') {

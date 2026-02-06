@@ -65,6 +65,6 @@ readonly class RateResponse
             ? ($this->deliveryCommitment ?? '')
             : ($this->transitTime ?? '');
 
-        return '$' . $price . ($detail ? " - {$detail}" : '');
+        return '$'.$price.($detail ? " - {$detail}" : '');
     }
 }

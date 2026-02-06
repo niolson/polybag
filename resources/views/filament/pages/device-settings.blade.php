@@ -126,40 +126,11 @@
         <span id="save-status" class="text-sm text-gray-500 hidden"></span>
     </div>
 
-    <!-- QZ Tray Library -->
-    <script src="https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.min.js"></script>
+    <x-qz-tray-script />
+    <x-scale-script />
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // Set up QZ Tray certificate authentication
-            function setupQzSecurity() {
-                if (typeof qz === 'undefined') return;
-
-                qz.security.setCertificatePromise(function(resolve, reject) {
-                    fetch('/qz-certificate.pem')
-                        .then(response => response.ok ? response.text() : reject(response.statusText))
-                        .then(resolve)
-                        .catch(reject);
-                });
-
-                qz.security.setSignatureAlgorithm('SHA512');
-                qz.security.setSignaturePromise(function(toSign) {
-                    return function(resolve, reject) {
-                        fetch('/qz/sign', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || ''
-                            },
-                            body: JSON.stringify({ request: toSign })
-                        })
-                        .then(response => response.ok ? response.text() : reject(response.statusText))
-                        .then(resolve)
-                        .catch(reject);
-                    };
-                });
-            }
-
             const labelPrinterSelect = document.getElementById('label-printer');
             const reportPrinterSelect = document.getElementById('report-printer');
             const refreshPrintersBtn = document.getElementById('refresh-printers');
@@ -357,46 +328,6 @@
             const scaleStatusDiv = document.getElementById('scale-status');
             const disconnectScaleBtn = document.getElementById('disconnect-scale');
 
-            function parseScaleData(data) {
-                const view = new DataView(data.buffer);
-
-                // USB HID scale report format (reportId sent separately):
-                // Byte 0: Status (2 = fault, 3 = zero, 4 = stable, 5 = in motion)
-                // Byte 1: Weight unit (2 = grams, 11 = ounces, 12 = pounds)
-                // Byte 2: Scale factor (power of 10, signed)
-                // Bytes 3-4: Weight value (little endian)
-
-                if (data.byteLength >= 5) {
-                    const status = view.getUint8(0);
-                    const unit = view.getUint8(1);
-                    const scaleFactor = view.getInt8(2);
-                    const weightRaw = view.getUint16(3, true);
-
-                    let weight = weightRaw * Math.pow(10, scaleFactor);
-
-                    // Convert to pounds if needed
-                    if (unit === 2) { // grams
-                        weight = weight / 453.592;
-                    } else if (unit === 11) { // ounces
-                        weight = weight / 16;
-                    }
-
-                    // Status codes: 2 = zero, 3 = in motion, 4 = stable, 5 = fault?
-                    let statusText = 'Unknown';
-                    let isStable = false;
-                    switch (status) {
-                        case 2: statusText = 'Zero'; isStable = true; break;
-                        case 3: statusText = 'In motion...'; break;
-                        case 4: statusText = 'Stable'; isStable = true; break;
-                        case 5: statusText = 'Fault'; break;
-                    }
-
-                    return { weight, status: statusText, isStable };
-                }
-
-                return null;
-            }
-
             function updateScaleDisplay(result) {
                 if (result) {
                     scaleWeightSpan.textContent = result.weight.toFixed(2);
@@ -448,7 +379,7 @@
                     scaleDevice = device;
 
                     device.addEventListener('inputreport', (event) => {
-                        const result = parseScaleData(event.data);
+                        const result = ScaleUtils.parseScaleData(event.data);
                         updateScaleDisplay(result);
                     });
 
@@ -515,14 +446,10 @@
                         return;
                     }
 
-                    let vendorId = localStorage.getItem('scaleVendorId');
-                    let productId = localStorage.getItem('scaleProductId');
+                    const { vendorId: vid, productId: pid } = ScaleUtils.getScaleIds();
                     let device = null;
 
-                    if (vendorId && productId) {
-                        // Try to find the saved device
-                        const vid = vendorId.startsWith('0x') ? parseInt(vendorId, 16) : parseInt(vendorId);
-                        const pid = productId.startsWith('0x') ? parseInt(productId, 16) : parseInt(productId);
+                    if (vid && pid) {
                         device = devices.find(d => d.vendorId === vid && d.productId === pid);
 
                         if (!device) {
@@ -561,7 +488,7 @@
                     scaleDevice = device;
 
                     device.addEventListener('inputreport', (event) => {
-                        const result = parseScaleData(event.data);
+                        const result = ScaleUtils.parseScaleData(event.data);
                         updateScaleDisplay(result);
                     });
 

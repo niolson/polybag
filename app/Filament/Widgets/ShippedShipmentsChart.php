@@ -4,7 +4,6 @@ namespace App\Filament\Widgets;
 
 use App\Models\Shipment;
 use Filament\Widgets\ChartWidget;
-use Illuminate\Support\Carbon;
 
 class ShippedShipmentsChart extends ChartWidget
 {
@@ -12,7 +11,7 @@ class ShippedShipmentsChart extends ChartWidget
 
     protected static ?int $sort = -3;
 
-    protected int | string | array $columnSpan = 'full';
+    protected int|string|array $columnSpan = 'full';
 
     public ?string $filter = 'week';
 

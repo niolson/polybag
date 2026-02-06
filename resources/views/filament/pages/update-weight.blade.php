@@ -100,93 +100,44 @@
     </div>
 
     <x-filament-actions::modals />
+    <x-scale-script />
 
     @script
     <script>
         let scaleDevice = null;
 
-        // Get scale IDs from localStorage
-        function getScaleIds() {
-            const vendorId = localStorage.getItem('scaleVendorId');
-            const productId = localStorage.getItem('scaleProductId');
-
-            return {
-                vendorId: vendorId ? (vendorId.startsWith('0x') ? parseInt(vendorId, 16) : parseInt(vendorId)) : null,
-                productId: productId ? (productId.startsWith('0x') ? parseInt(productId, 16) : parseInt(productId)) : null
-            };
-        }
-
         Alpine.data('scaleData', () => ({
             scaleConnected: false,
         }));
 
-        function getScaleFilters() {
-            const { vendorId, productId } = getScaleIds();
-            if (vendorId && productId) {
-                return [{ vendorId, productId }];
+        function handleScaleInput(event) {
+            const result = ScaleUtils.parseScaleData(event.data);
+            if (result !== null && result.isStable && result.weight > 0) {
+                $wire.data.weight = result.weight.toFixed(2);
             }
-            return [];
         }
 
         async function connectScale() {
             try {
                 const devices = await navigator.hid.requestDevice({
-                    filters: getScaleFilters()
+                    filters: ScaleUtils.getScaleFilters()
                 });
 
                 if (devices.length > 0) {
                     scaleDevice = devices[0];
                     await scaleDevice.open();
-
                     Alpine.store('scaleConnected', true);
-
-                    scaleDevice.addEventListener('inputreport', (event) => {
-                        const weight = parseScaleData(event.data);
-                        if (weight !== null && weight > 0) {
-                            $wire.data.weight = weight.toFixed(2);
-                        }
-                    });
-
+                    scaleDevice.addEventListener('inputreport', handleScaleInput);
                 }
             } catch (error) {
                 console.error('Failed to connect to scale:', error);
             }
         }
 
-        function parseScaleData(data) {
-            const dataView = new DataView(data.buffer);
-
-            if (data.byteLength >= 6) {
-                const reportId = dataView.getUint8(0);
-                const status = dataView.getUint8(1);
-                const unit = dataView.getUint8(2);
-                const scalingFactor = dataView.getInt8(3);
-                const weightLSB = dataView.getUint8(4);
-                const weightMSB = dataView.getUint8(5);
-
-                let weight = (weightMSB << 8) | weightLSB;
-                weight = weight * Math.pow(10, scalingFactor);
-
-                // Convert to pounds if in grams
-                if (unit === 2) { // grams
-                    weight = weight / 453.592;
-                } else if (unit === 11) { // ounces
-                    weight = weight / 16;
-                }
-
-                // Status: 4 = stable, 5 = under zero, 6 = over capacity
-                if (status === 4) {
-                    return weight;
-                }
-            }
-
-            return null;
-        }
-
         // Auto-connect to previously paired scale
         if (navigator.hid) {
             navigator.hid.getDevices().then(devices => {
-                const { vendorId, productId } = getScaleIds();
+                const { vendorId, productId } = ScaleUtils.getScaleIds();
                 const matchedDevice = devices.find(device => {
                     if (vendorId && productId) {
                         return device.vendorId === vendorId && device.productId === productId;
@@ -198,14 +149,7 @@
                     scaleDevice = matchedDevice;
                     scaleDevice.open().then(() => {
                         Alpine.store('scaleConnected', true);
-
-                        scaleDevice.addEventListener('inputreport', (event) => {
-                            const weight = parseScaleData(event.data);
-                            if (weight !== null && weight > 0) {
-                                $wire.data.weight = weight.toFixed(2);
-                            }
-                        });
-                        // Scale auto-connected
+                        scaleDevice.addEventListener('inputreport', handleScaleInput);
                     });
                 }
             });

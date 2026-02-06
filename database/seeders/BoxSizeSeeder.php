@@ -22,8 +22,8 @@ class BoxSizeSeeder extends Seeder
             ['code' => '07', 'height' => '10', 'width' => '10', 'length' => '10', 'max_weight' => '35', 'empty_weight' => '0', 'label' => '10x10x10', 'type' => 'BOX', 'fedex_package_type' => 'YOUR_PACKAGING'],
             ['code' => '09', 'height' => '14', 'width' => '12', 'length' => '12', 'max_weight' => '35', 'empty_weight' => '0', 'label' => '14x12x12', 'type' => 'BOX', 'fedex_package_type' => 'YOUR_PACKAGING'],
             ['code' => '08', 'height' => '16', 'width' => '10', 'length' => '8', 'max_weight' => '35', 'empty_weight' => '0', 'label' => '16x10x8', 'type' => 'BOX', 'fedex_package_type' => 'YOUR_PACKAGING'],
-            ['code' => "10", "height" => "16", "width" => "12", "length" => "12", "max_weight" => "35", "empty_weight" => "0", "label" => "16x12x12", "type" => "BOX", "fedex_package_type" => "YOUR_PACKAGING"],
-            
+            ['code' => '10', 'height' => '16', 'width' => '12', 'length' => '12', 'max_weight' => '35', 'empty_weight' => '0', 'label' => '16x12x12', 'type' => 'BOX', 'fedex_package_type' => 'YOUR_PACKAGING'],
+
             ['code' => '11', 'height' => '6', 'width' => '6', 'length' => '10', 'max_weight' => '35', 'empty_weight' => '0', 'label' => '6x6x10', 'type' => 'BOX', 'fedex_package_type' => 'YOUR_PACKAGING'],
             ['code' => '12', 'height' => '6', 'width' => '4', 'length' => '4', 'max_weight' => '35', 'empty_weight' => '0', 'label' => '6x4x4', 'type' => 'BOX', 'fedex_package_type' => 'YOUR_PACKAGING'],
             ['code' => '13', 'height' => '8', 'width' => '8', 'length' => '3', 'max_weight' => '35', 'empty_weight' => '0', 'label' => '8x8x3', 'type' => 'BOX', 'fedex_package_type' => 'YOUR_PACKAGING'],

@@ -22,7 +22,8 @@ function fakeExportSource(bool $exportEnabled = true, ?string $exportError = nul
         /** @var array<int, array<string, mixed>> */
         public static array $exportedData = [];
 
-        public function __construct(array $config = []) {}
+        public function __construct(array $config = []) // @phpstan-ignore constructor.unusedParameter
+        {}
 
         public function getSourceName(): string
         {
@@ -97,7 +98,7 @@ function createShippedPackage(?Channel $channel = null): Package
     ]);
 }
 
-it('exports package data using configured field mapping', function () {
+it('exports package data using configured field mapping', function (): void {
     $driverClass = fakeExportSource();
     $channel = Channel::factory()->create(['name' => 'TestChannel']);
     $package = createShippedPackage($channel);
@@ -134,7 +135,7 @@ it('exports package data using configured field mapping', function () {
     ]);
 });
 
-it('uses wildcard channel mapping as fallback', function () {
+it('uses wildcard channel mapping as fallback', function (): void {
     $driverClass = fakeExportSource();
     $channel = Channel::factory()->create(['name' => 'UnmappedChannel']);
     $package = createShippedPackage($channel);
@@ -164,7 +165,7 @@ it('uses wildcard channel mapping as fallback', function () {
     expect($driverClass::$exportedData)->toHaveCount(1);
 });
 
-it('skips export when no channel mapping matches', function () {
+it('skips export when no channel mapping matches', function (): void {
     $channel = Channel::factory()->create(['name' => 'UnmappedChannel']);
     $package = createShippedPackage($channel);
 
@@ -182,7 +183,7 @@ it('skips export when no channel mapping matches', function () {
     expect($result->destinationsSucceeded)->toBe(0);
 });
 
-it('marks package as exported on success', function () {
+it('marks package as exported on success', function (): void {
     $driverClass = fakeExportSource();
     $channel = Channel::factory()->create(['name' => 'TestChannel']);
     $package = createShippedPackage($channel);
@@ -210,7 +211,7 @@ it('marks package as exported on success', function () {
     expect($package->fresh()->exported)->toBeTrue();
 });
 
-it('does not mark package as exported when a destination fails', function () {
+it('does not mark package as exported when a destination fails', function (): void {
     $driverClass = fakeExportSource(exportError: 'Connection refused');
     $channel = Channel::factory()->create(['name' => 'TestChannel']);
     $package = createShippedPackage($channel);
@@ -241,7 +242,7 @@ it('does not mark package as exported when a destination fails', function () {
     expect($package->fresh()->exported)->toBeFalse();
 });
 
-it('skips disabled export sources', function () {
+it('skips disabled export sources', function (): void {
     $driverClass = fakeExportSource();
     $channel = Channel::factory()->create(['name' => 'TestChannel']);
     $package = createShippedPackage($channel);
@@ -270,7 +271,7 @@ it('skips disabled export sources', function () {
     expect($result->destinationsAttempted)->toBe(0);
 });
 
-it('exports unexported packages via exportUnexported', function () {
+it('exports unexported packages via exportUnexported', function (): void {
     $driverClass = fakeExportSource();
     $channel = Channel::factory()->create(['name' => 'TestChannel']);
 
@@ -321,7 +322,7 @@ it('exports unexported packages via exportUnexported', function () {
     expect($pkg2->fresh()->exported)->toBeTrue();
 });
 
-it('runs export command with dry-run option', function () {
+it('runs export command with dry-run option', function (): void {
     $channel = Channel::factory()->create(['name' => 'TestChannel']);
     $shipment = Shipment::factory()->create(['channel_id' => $channel->id, 'shipment_reference' => 'REF-CMD']);
     Package::factory()->shipped()->create([
@@ -337,7 +338,7 @@ it('runs export command with dry-run option', function () {
         ->assertExitCode(0);
 });
 
-it('runs export command with validate-only when no channel map configured', function () {
+it('runs export command with validate-only when no channel map configured', function (): void {
     config(['shipment-import.export_channel_map' => []]);
 
     $this->artisan('packages:export', ['--validate-only' => true])
@@ -345,7 +346,7 @@ it('runs export command with validate-only when no channel map configured', func
         ->assertExitCode(0);
 });
 
-it('handles multiple destinations per channel', function () {
+it('handles multiple destinations per channel', function (): void {
     $driverClass = fakeExportSource();
     $channel = Channel::factory()->create(['name' => 'MultiChannel']);
     $package = createShippedPackage($channel);

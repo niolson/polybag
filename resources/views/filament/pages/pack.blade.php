@@ -4,6 +4,7 @@
 
 <x-filament-panels::page>
     <x-qz-tray />
+    <x-scale-script />
 
     <div
         x-data="{
@@ -220,51 +221,15 @@
                 }
             },
 
-            getScaleIds() {
-                const vendorId = localStorage.getItem('scaleVendorId');
-                const productId = localStorage.getItem('scaleProductId');
-                return {
-                    vendorId: vendorId ? (vendorId.startsWith('0x') ? parseInt(vendorId, 16) : parseInt(vendorId)) : null,
-                    productId: productId ? (productId.startsWith('0x') ? parseInt(productId, 16) : parseInt(productId)) : null
-                };
-            },
-
-            parseScaleData(data) {
-                const view = new DataView(data.buffer);
-                if (data.byteLength >= 5) {
-                    const status = view.getUint8(0);
-                    const unit = view.getUint8(1);
-                    const scaleFactor = view.getInt8(2);
-                    const weightRaw = view.getUint16(3, true);
-                    let weight = weightRaw * Math.pow(10, scaleFactor);
-
-                    if (unit === 2) weight = weight / 453.592;
-                    else if (unit === 11) weight = weight / 16;
-
-                    if (status === 4 || status === 2) return weight;
-                }
-                return null;
-            },
-
             async connectScale() {
                 try {
-                    const { vendorId, productId } = this.getScaleIds();
-                    const filters = (vendorId && productId) ? [{ vendorId, productId }] : [];
+                    const filters = ScaleUtils.getScaleFilters();
                     const devices = await navigator.hid.requestDevice({ filters });
 
                     if (devices.length > 0) {
                         this.scaleDevice = devices[0];
                         await this.scaleDevice.open();
-                        this.scaleDevice.addEventListener('inputreport', (event) => {
-                            const weight = this.parseScaleData(event.data);
-                            if (weight !== null) {
-                                const formatted = weight.toFixed(2);
-                                if (formatted !== this.lastScaleWeight) {
-                                    this.lastScaleWeight = formatted;
-                                    this.weight = formatted;
-                                }
-                            }
-                        });
+                        this.setupScaleListener(this.scaleDevice);
                     }
                 } catch (error) {
                     console.error('Failed to connect scale:', error);
@@ -275,7 +240,7 @@
                 if (!this.hasWebHID) return;
                 try {
                     const devices = await navigator.hid.getDevices();
-                    const { vendorId, productId } = this.getScaleIds();
+                    const { vendorId, productId } = ScaleUtils.getScaleIds();
                     const matchedDevice = devices.find(device => {
                         if (vendorId && productId) {
                             return device.vendorId === vendorId && device.productId === productId;
@@ -286,21 +251,24 @@
                     if (matchedDevice) {
                         this.scaleDevice = matchedDevice;
                         await this.scaleDevice.open();
-                        this.scaleDevice.addEventListener('inputreport', (event) => {
-                            const weight = this.parseScaleData(event.data);
-                            if (weight !== null) {
-                                const formatted = weight.toFixed(2);
-                                if (formatted !== this.lastScaleWeight) {
-                                    this.lastScaleWeight = formatted;
-                                    this.weight = formatted;
-                                }
-                            }
-                        });
-                        // Scale auto-connected
+                        this.setupScaleListener(this.scaleDevice);
                     }
                 } catch (error) {
                     console.error('Failed to auto-connect scale:', error);
                 }
+            },
+
+            setupScaleListener(device) {
+                device.addEventListener('inputreport', (event) => {
+                    const result = ScaleUtils.parseScaleData(event.data);
+                    if (result !== null && result.isStable) {
+                        const formatted = result.weight.toFixed(2);
+                        if (formatted !== this.lastScaleWeight) {
+                            this.lastScaleWeight = formatted;
+                            this.weight = formatted;
+                        }
+                    }
+                });
             }
         }"
         @print-label.window="window.printLabel($event.detail.label, $event.detail.orientation)"

@@ -116,8 +116,7 @@ class SettingsService
     private static function getGroupMapCached(): array
     {
         return Cache::remember(self::CACHE_KEY.'_groups', self::CACHE_TTL, function () {
-            return Setting::all()
-                ->pluck('group', 'key')
+            return Setting::pluck('group', 'key')
                 ->all();
         });
     }

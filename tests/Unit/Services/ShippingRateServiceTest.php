@@ -590,4 +590,3 @@ it('throws exception when all carriers are inactive', function (): void {
     expect(fn () => ShippingRateService::getShippingRates($package->id))
         ->toThrow(NoActiveCarrierServicesException::class);
 });
-
