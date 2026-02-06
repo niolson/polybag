@@ -196,6 +196,7 @@ class AddressValidationService
         $shipment->validated_city = $address['city'] ?? null;
         $shipment->validated_state = $address['state'] ?? null;
         $shipment->validated_zip = $address['ZIPCode'] ?? null;
-        $shipment->validated_residential = ($response['additionalInfo']['business'] == 'Y' ? false : true) ?? null;
+        $businessFlag = $response['additionalInfo']['business'] ?? null;
+        $shipment->validated_residential = $businessFlag !== null ? $businessFlag !== 'Y' : null;
     }
 }

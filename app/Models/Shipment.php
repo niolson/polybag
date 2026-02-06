@@ -96,12 +96,13 @@ class Shipment extends Model
 
         $shippedPackageIds = $this->packages()->where('shipped', true)->pluck('id');
 
-        $allItemsShipped = $this->shipmentItems->every(function (ShipmentItem $item) use ($shippedPackageIds) {
-            $packedQty = PackageItem::where('shipment_item_id', $item->id)
-                ->whereIn('package_id', $shippedPackageIds)
-                ->sum('quantity');
+        $packedQuantities = PackageItem::whereIn('package_id', $shippedPackageIds)
+            ->selectRaw('shipment_item_id, SUM(quantity) as total_packed')
+            ->groupBy('shipment_item_id')
+            ->pluck('total_packed', 'shipment_item_id');
 
-            return $packedQty >= $item->quantity;
+        $allItemsShipped = $this->shipmentItems->every(function (ShipmentItem $item) use ($packedQuantities) {
+            return ($packedQuantities[$item->id] ?? 0) >= $item->quantity;
         });
 
         $this->update(['shipped' => $allItemsShipped]);

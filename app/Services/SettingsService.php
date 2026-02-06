@@ -75,10 +75,13 @@ class SettingsService
      */
     public static function getGroup(string $group): array
     {
+        $groupMap = self::getGroupMapCached();
         $settings = self::getAllCached();
 
-        return collect($settings)
-            ->filter(fn ($value, $key) => self::getGroupForKey($key) === $group)
+        return collect($groupMap)
+            ->filter(fn ($settingGroup) => $settingGroup === $group)
+            ->intersectByKeys($settings)
+            ->map(fn ($settingGroup, $key) => $settings[$key])
             ->all();
     }
 
@@ -88,6 +91,7 @@ class SettingsService
     public static function clearCache(): void
     {
         Cache::forget(self::CACHE_KEY);
+        Cache::forget(self::CACHE_KEY.'_groups');
     }
 
     /**
@@ -105,10 +109,16 @@ class SettingsService
     }
 
     /**
-     * Get the group for a key from the database.
+     * Get key => group mapping, cached alongside settings.
+     *
+     * @return array<string, string|null>
      */
-    private static function getGroupForKey(string $key): ?string
+    private static function getGroupMapCached(): array
     {
-        return Setting::where('key', $key)->value('group');
+        return Cache::remember(self::CACHE_KEY.'_groups', self::CACHE_TTL, function () {
+            return Setting::all()
+                ->pluck('group', 'key')
+                ->all();
+        });
     }
 }

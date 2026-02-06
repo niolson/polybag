@@ -28,6 +28,11 @@ class UspsAdapter implements CarrierAdapterInterface
     public function getRates(RateRequest $request, array $serviceCodes): Collection
     {
         $connector = USPSConnector::getUspsConnector();
+
+        if (empty($request->packages)) {
+            return collect();
+        }
+
         $package = $request->packages[0];
         $isInternational = $request->destinationCountry !== 'US';
 

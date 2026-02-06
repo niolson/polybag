@@ -50,6 +50,24 @@ return [
                 'query' => env('SHIPMENT_IMPORT_MARK_EXPORTED_QUERY', "update shipments set exported = 'y' where id = :shipment_reference"),
             ],
 
+            // Export: write package data back to the external database after shipping
+            'export' => [
+                'enabled' => env('SHIPMENT_EXPORT_DATABASE_ENABLED', false),
+                'query' => env('SHIPMENT_EXPORT_QUERY', 'UPDATE orders SET tracking_number = :tracking_number WHERE id = :shipment_reference'),
+                'field_mapping' => [
+                    // internal_name => query_parameter_name
+                    'tracking_number' => 'tracking_number',
+                    'weight' => 'weight',
+                    'height' => 'height',
+                    'width' => 'width',
+                    'length' => 'length',
+                    'cost' => 'cost',
+                    'carrier' => 'carrier',
+                    'service' => 'service',
+                    'shipment_reference' => 'shipment_reference',
+                ],
+            ],
+
             // Field mappings: external_field => internal_field
             'field_mapping' => [
                 'shipment' => [
@@ -100,6 +118,20 @@ return [
         //     'field_mapping' => [...],
         // ],
 
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Export Channel Map
+    |--------------------------------------------------------------------------
+    |
+    | Maps channel name to array of source names for package export.
+    | '*' is the default fallback for any channel not explicitly listed.
+    |
+    */
+    'export_channel_map' => [
+        // 'Amazon' => ['database'],
+        '*' => ['database'],
     ],
 
     /*

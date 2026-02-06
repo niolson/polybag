@@ -5,11 +5,13 @@ namespace App\Filament\Pages;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\Role;
 use App\Filament\Concerns\NotifiesUser;
+use App\Models\BoxSize;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\CacheService;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\SettingsService;
+use App\Services\ShipmentImport\PackageExportService;
 use App\Services\ShippingRateService;
 use BackedEnum;
 use Filament\Pages\Page;
@@ -90,6 +92,10 @@ class Pack extends Page
             $autoShip = false;
         }
 
+        if (! $this->validatePackingData()) {
+            return;
+        }
+
         if (! $this->isReadyToShip()) {
             $this->notifyError('Not Ready', 'Please ensure all items are packed and all dimensions are filled.');
 
@@ -109,6 +115,7 @@ class Pack extends Page
     private function manualShip(): void
     {
         $package = $this->createPackage();
+        $this->trackInProgressPackage($package->id);
         $this->redirect('/ship/'.$package->id);
     }
 
@@ -150,6 +157,22 @@ class Pack extends Page
             }
 
             $package->markShipped($response, auth()->id());
+
+            // Export package data to configured external systems
+            try {
+                $exportResult = app(PackageExportService::class)->exportPackage($package);
+                if ($exportResult->hasErrors()) {
+                    logger()->warning('Package export partial failure', [
+                        'package_id' => $package->id,
+                        'errors' => $exportResult->errors,
+                    ]);
+                }
+            } catch (\Exception $e) {
+                logger()->error('Package export failed', [
+                    'package_id' => $package->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
 
             // Store last shipped package for reprint/cancel commands
             Session::put('last_shipped_package_id', $package->id);
@@ -195,17 +218,25 @@ class Pack extends Page
 
     /**
      * Create a package from the current packing state.
-     * Removes any existing unshipped packages for the same shipment first.
+     * Cleans up any previous in-progress package from this user's session before creating.
      */
     private function createPackage(): Package
     {
         return DB::transaction(function () {
-            Package::where('shipment_id', $this->shipment->id)
-                ->where('shipped', false)
-                ->each(function (Package $orphan): void {
+            $previousPackageId = Session::get('in_progress_package_id');
+
+            if ($previousPackageId) {
+                $orphan = Package::where('id', $previousPackageId)
+                    ->where('shipped', false)
+                    ->first();
+
+                if ($orphan) {
                     $orphan->packageItems()->delete();
                     $orphan->delete();
-                });
+                }
+
+                Session::forget('in_progress_package_id');
+            }
 
             $package = Package::create([
                 'shipment_id' => $this->shipment->id,
@@ -229,6 +260,23 @@ class Pack extends Page
 
             return $package;
         });
+    }
+
+    /**
+     * Track a package as in-progress for this session (for orphan cleanup).
+     * Called after createPackage() in manual ship flow.
+     */
+    private function trackInProgressPackage(int $packageId): void
+    {
+        Session::put('in_progress_package_id', $packageId);
+    }
+
+    /**
+     * Clear the in-progress package tracking (after ship or auto-ship completes).
+     */
+    private function clearInProgressPackage(): void
+    {
+        Session::forget('in_progress_package_id');
     }
 
     /**
@@ -262,6 +310,58 @@ class Pack extends Page
         }
 
         $this->redirect("/pack/{$reference}");
+    }
+
+    /**
+     * Validate that packing data from the client is consistent with server state.
+     */
+    private function validatePackingData(): bool
+    {
+        if (! $this->shipment) {
+            $this->notifyError('Invalid State', 'No shipment loaded.');
+
+            return false;
+        }
+
+        // Validate box size exists if provided
+        if ($this->boxSizeId !== null && ! BoxSize::where('id', $this->boxSizeId)->exists()) {
+            $this->notifyError('Invalid Box Size', 'The selected box size does not exist.');
+
+            return false;
+        }
+
+        // Build a lookup of valid shipment item IDs and their product IDs for this shipment
+        $validItems = $this->shipment->shipmentItems()
+            ->pluck('product_id', 'id');
+
+        foreach ($this->packingItems as $packingItem) {
+            $itemId = $packingItem['id'] ?? null;
+            $productId = $packingItem['product_id'] ?? null;
+            $packed = $packingItem['packed'] ?? 0;
+
+            // Verify the shipment item belongs to this shipment
+            if (! $itemId || ! $validItems->has($itemId)) {
+                $this->notifyError('Invalid Item', 'One or more packing items do not belong to this shipment.');
+
+                return false;
+            }
+
+            // Verify the product ID matches
+            if ($productId != $validItems[$itemId]) {
+                $this->notifyError('Invalid Item', 'Product mismatch detected in packing items.');
+
+                return false;
+            }
+
+            // Verify quantity is a reasonable non-negative integer
+            if (! is_numeric($packed) || $packed < 0 || $packed > 10000) {
+                $this->notifyError('Invalid Quantity', 'Packed quantity is out of range.');
+
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function isReadyToShip(): bool

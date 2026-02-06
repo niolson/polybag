@@ -9,6 +9,7 @@ use App\Filament\Concerns\NotifiesUser;
 use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\SettingsService;
+use App\Services\ShipmentImport\PackageExportService;
 use App\Services\ShippingRateService;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -142,6 +143,22 @@ class Ship extends Page implements HasForms
             }
 
             $this->package->markShipped($response, auth()->id());
+
+            // Export package data to configured external systems
+            try {
+                $exportResult = app(PackageExportService::class)->exportPackage($this->package);
+                if ($exportResult->hasErrors()) {
+                    logger()->warning('Package export partial failure', [
+                        'package_id' => $this->package->id,
+                        'errors' => $exportResult->errors,
+                    ]);
+                }
+            } catch (\Exception $e) {
+                logger()->error('Package export failed', [
+                    'package_id' => $this->package->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
 
             if ($response->labelData && ! SettingsService::get('suppress_printing', false)) {
                 $this->printLabel($response->labelData, $response->labelOrientation ?? 'portrait');

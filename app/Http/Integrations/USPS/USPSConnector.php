@@ -88,6 +88,14 @@ class USPSConnector extends Connector
             $response = $connector->send($request);
             $paymentAuthorizationToken = $response->json('paymentAuthorizationToken');
 
+            if (empty($paymentAuthorizationToken)) {
+                logger()->error('USPS payment authorization failed', [
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                ]);
+                throw new \RuntimeException('USPS payment authorization returned empty token');
+            }
+
             Cache::put('usps_payment_authorization_token', $paymentAuthorizationToken, now()->addHours(7));
 
             return $paymentAuthorizationToken;

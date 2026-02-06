@@ -48,6 +48,11 @@ class FedexAdapter implements CarrierAdapterInterface
         }
 
         $connector = FedexConnector::getFedexConnector();
+
+        if (empty($request->packages)) {
+            return collect();
+        }
+
         $package = $request->packages[0];
 
         $apiRequest = new Rates;

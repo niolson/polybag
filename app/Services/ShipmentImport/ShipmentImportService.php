@@ -366,10 +366,6 @@ class ShipmentImportService
 
         // Return from cache if available
         if (isset($this->productCache[$sku])) {
-            if (config('shipment-import.behavior.auto_update_products', true)) {
-                $this->stats['products_updated']++;
-            }
-
             return $this->productCache[$sku];
         }
 

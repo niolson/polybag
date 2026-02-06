@@ -2,13 +2,14 @@
 
 namespace App\Services\ShipmentImport\Sources;
 
+use App\Contracts\ExportDestinationInterface;
 use App\Contracts\ImportSourceInterface;
 use App\Services\ShipmentImport\FieldMapper;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
-class DatabaseSource implements ImportSourceInterface
+class DatabaseSource implements ExportDestinationInterface, ImportSourceInterface
 {
     private array $config;
 
@@ -127,5 +128,58 @@ class DatabaseSource implements ImportSourceInterface
             ->statement($markExported['query'], [
                 'shipment_reference' => $shipmentReference,
             ]);
+    }
+
+    public function getDestinationName(): string
+    {
+        return 'database';
+    }
+
+    public function exportPackage(array $data): void
+    {
+        $exportConfig = $this->config['export'] ?? [];
+
+        if (empty($exportConfig['query'])) {
+            throw new InvalidArgumentException('Export query is not configured for database source.');
+        }
+
+        $query = $exportConfig['query'];
+
+        // Only pass parameters that the query actually references,
+        // so the field_mapping can be a superset of what the query needs.
+        preg_match_all('/:(\w+)/', $query, $matches);
+        $queryParams = array_flip($matches[1]);
+        $filteredData = array_intersect_key($data, $queryParams);
+
+        DB::connection($this->config['connection'])
+            ->statement($query, $filteredData);
+    }
+
+    public function validateExportConfiguration(): void
+    {
+        $exportConfig = $this->config['export'] ?? [];
+
+        if (empty($exportConfig['enabled'])) {
+            throw new InvalidArgumentException('Export is not enabled for database source.');
+        }
+
+        if (empty($exportConfig['query'])) {
+            throw new InvalidArgumentException('Export query is not configured for database source.');
+        }
+
+        // Test connection
+        $connection = $this->config['connection'] ?? null;
+
+        if (! $connection) {
+            throw new InvalidArgumentException('Database connection is not configured.');
+        }
+
+        try {
+            DB::connection($connection)->getPdo();
+        } catch (\Exception $e) {
+            throw new InvalidArgumentException(
+                "Cannot connect to database '{$connection}': ".$e->getMessage()
+            );
+        }
     }
 }

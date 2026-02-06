@@ -11,6 +11,7 @@ use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\User;
 use App\Services\SettingsService;
+use Illuminate\Support\Facades\Session;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
@@ -287,6 +288,9 @@ it('cleans up existing unshipped packages before creating a new one', function (
         'quantity' => 1,
     ]);
 
+    // Simulate that this user's session tracks the orphan as in-progress
+    Session::put('in_progress_package_id', $orphan->id);
+
     $packingItems = [[
         'id' => $shipmentItem->id,
         'product_id' => $product->id,
@@ -404,6 +408,9 @@ it('deletes orphaned package items when cleaning up unshipped packages', functio
         'product_id' => $product->id,
         'quantity' => 1,
     ]);
+
+    // Simulate that this user's session tracks the orphan as in-progress
+    Session::put('in_progress_package_id', $orphan->id);
 
     $packingItems = [[
         'id' => $shipmentItem->id,
