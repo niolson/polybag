@@ -95,7 +95,7 @@ class PackageResource extends Resource
                                 ->numeric()
                                 ->minValue(0.01)
                                 ->maxValue(150)
-                                ->suffix('lbs'),                                
+                                ->suffix('lbs'),
                         ]),
                         Forms\Components\TextInput::make('cost')
                             ->numeric()

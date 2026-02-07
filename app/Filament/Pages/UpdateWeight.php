@@ -117,7 +117,7 @@ class UpdateWeight extends Page implements HasForms
     private function findProductByBarcode(string $barcode): ?Product
     {
         return Product::where('sku', $barcode)
-            ->orWhere('upc', $barcode)
+            ->orWhere('barcode', $barcode)
             ->first();
     }
 }

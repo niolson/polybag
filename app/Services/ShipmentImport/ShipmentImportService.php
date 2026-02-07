@@ -175,7 +175,7 @@ class ShipmentImportService
             'address1', 'address2', 'city', 'state', 'zip', 'country',
             'phone', 'phone_extension', 'email', 'value',
             'validation_message', 'shipping_method_reference', 'shipping_method_id',
-            'channel_reference', 'updated_at',
+            'channel_reference', 'metadata', 'updated_at',
         ];
 
         // Phase 2a: Upsert mapped rows using composite unique key
@@ -298,6 +298,7 @@ class ShipmentImportService
             'shipping_method_id' => $this->resolveShippingMethodId($data),
             'channel_reference' => $data['channel_id'] ?? null,
             'channel_id' => $this->resolveChannelId($data),
+            'metadata' => isset($data['metadata']) ? json_encode($data['metadata']) : null,
         ];
     }
 
@@ -364,27 +365,34 @@ class ShipmentImportService
             return null;
         }
 
-        // Return from cache if available
-        if (isset($this->productCache[$sku])) {
-            return $this->productCache[$sku];
-        }
-
-        // Auto-create product if enabled
+        // Auto-create or update product if enabled
         if (config('shipment-import.behavior.auto_update_products', true)) {
-            $product = Product::create([
-                'sku' => $sku,
+            $updateData = array_filter([
                 'name' => $itemData['name'] ?? $sku,
                 'description' => $itemData['description'] ?? null,
                 'barcode' => $itemData['barcode'] ?? null,
                 'weight' => $itemData['weight'] ?? null,
-                'value' => $itemData['value'] ?? null,
-                'active' => true,
-            ]);
+            ], fn ($value) => $value !== null);
+
+            $product = Product::updateOrCreate(
+                ['sku' => $sku],
+                array_merge($updateData, ['active' => true])
+            );
 
             $this->productCache[$sku] = $product->id;
-            $this->stats['products_created']++;
+
+            if ($product->wasRecentlyCreated) {
+                $this->stats['products_created']++;
+            } elseif ($product->wasChanged()) {
+                $this->stats['products_updated']++;
+            }
 
             return $product->id;
+        }
+
+        // Return from cache if available (auto-update disabled)
+        if (isset($this->productCache[$sku])) {
+            return $this->productCache[$sku];
         }
 
         return null;

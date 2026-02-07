@@ -101,15 +101,23 @@ return [
             ],
         ],
 
-        // Future: Shopify GraphQL source
-        // 'shopify' => [
-        //     'driver' => \App\Services\ShipmentImport\Sources\ShopifySource::class,
-        //     'enabled' => env('SHIPMENT_IMPORT_SHOPIFY_ENABLED', false),
-        //     'shop_domain' => env('SHOPIFY_SHOP_DOMAIN'),
-        //     'access_token' => env('SHOPIFY_ACCESS_TOKEN'),
-        //     'api_version' => '2024-01',
-        //     'field_mapping' => [...],
-        // ],
+        'shopify' => [
+            'driver' => \App\Services\ShipmentImport\Sources\ShopifySource::class,
+            'enabled' => env('SHIPMENT_IMPORT_SHOPIFY_ENABLED', false),
+            'channel_name' => env('SHOPIFY_CHANNEL_NAME', 'Shopify'),
+            'shipping_method' => env('SHOPIFY_SHIPPING_METHOD'),
+            'notify_customer' => env('SHOPIFY_NOTIFY_CUSTOMER', false),
+
+            'export' => [
+                'enabled' => env('SHIPMENT_EXPORT_SHOPIFY_ENABLED', false),
+                'field_mapping' => [
+                    'tracking_number' => 'tracking_number',
+                    'carrier' => 'carrier',
+                    'shipment_reference' => 'shipment_reference',
+                    'fulfillment_order_id' => 'fulfillment_order_id',
+                ],
+            ],
+        ],
 
         // Future: Amazon SP-API source
         // 'amazon' => [

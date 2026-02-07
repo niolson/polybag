@@ -48,6 +48,7 @@ class Shipment extends Model
         'channel_reference',
         'channel_id',
         'shipped',
+        'metadata',
     ];
 
     protected $casts = [
@@ -57,6 +58,7 @@ class Shipment extends Model
         'value' => 'decimal:2',
         'deliverability' => Deliverability::class,
         'shipped' => 'boolean',
+        'metadata' => 'array',
     ];
 
     /**
