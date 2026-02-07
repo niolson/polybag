@@ -8,6 +8,8 @@ use Filament\Actions\Action;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Filament\Schemas\Components;
+use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 
@@ -20,6 +22,12 @@ class ViewPackage extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('ship')
+                ->label('Ship')
+                ->icon('heroicon-o-paper-airplane')
+                ->color('primary')
+                ->url(fn () => '/ship/'.$this->record->id)
+                ->disabled(fn () => $this->record->shipped),
             Action::make('reprint')
                 ->label('Reprint Label')
                 ->icon('heroicon-o-printer')
@@ -60,21 +68,33 @@ class ViewPackage extends ViewRecord
     public function infolist(Schema $infolist): Schema
     {
         return $infolist
+            ->columns(2)
             ->schema([
                 Section::make('Package Details')
+                    ->inlineLabel()
                     ->schema([
                         TextEntry::make('id')
                             ->label('Package ID'),
                         TextEntry::make('shipment.shipment_reference')
                             ->label('Shipment Reference'),
                         TextEntry::make('tracking_number')
+                            ->icon('heroicon-o-clipboard')
+                            ->iconPosition('after')
                             ->copyable(),
                         TextEntry::make('carrier'),
                         TextEntry::make('service'),
                         TextEntry::make('cost')
                             ->money('USD'),
-                        TextEntry::make('weight')
-                            ->suffix(' lbs'),
+                        Components\Fieldset::make('Dimensions')->columns(3)->schema([
+                            TextEntry::make('length')
+                                ->suffix(' in'),
+                            TextEntry::make('width')
+                                ->suffix(' in'),
+                            TextEntry::make('height')
+                                ->suffix(' in'),
+                            TextEntry::make('weight')
+                                ->suffix(' lbs'),
+                        ]),
                         TextEntry::make('shipped')
                             ->badge()
                             ->formatStateUsing(fn ($state) => $state ? 'Shipped' : 'Not Shipped')
@@ -83,42 +103,32 @@ class ViewPackage extends ViewRecord
                             ->dateTime(),
                         TextEntry::make('shippedBy.name')
                             ->label('Shipped By'),
-                    ])
-                    ->columns(3),
-
-                Section::make('Dimensions')
-                    ->schema([
-                        TextEntry::make('length')
-                            ->suffix(' in'),
-                        TextEntry::make('width')
-                            ->suffix(' in'),
-                        TextEntry::make('height')
-                            ->suffix(' in'),
-                        TextEntry::make('boxSize.name')
-                            ->label('Box Size'),
-                    ])
-                    ->columns(4),
+                    ]),
 
                 Section::make('Ship To')
+                    ->inlineLabel()
                     ->schema([
                         TextEntry::make('shipment.first_name')
                             ->label('First Name'),
                         TextEntry::make('shipment.last_name')
                             ->label('Last Name'),
                         TextEntry::make('shipment.company')
-                            ->label('Company'),
+                            ->label('Company')
+                            ->placeholder('—'),
                         TextEntry::make('shipment.address1')
                             ->label('Address'),
                         TextEntry::make('shipment.address2')
-                            ->label('Address 2'),
+                            ->label('Address 2')
+                            ->placeholder('—'),
                         TextEntry::make('shipment.city')
                             ->label('City'),
                         TextEntry::make('shipment.state')
                             ->label('State'),
                         TextEntry::make('shipment.zip')
                             ->label('ZIP'),
-                    ])
-                    ->columns(4),
+                        TextEntry::make('shipment.country')
+                            ->label('Country'),
+                    ]),
             ]);
     }
 }

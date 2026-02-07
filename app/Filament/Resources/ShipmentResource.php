@@ -64,7 +64,7 @@ class ShipmentResource extends Resource
             ->schema([
                 // Left column — Shipment Details
                 Components\Section::make('Shipment Details')
-                    ->columnSpan(1)
+                    ->inlineLabel()
                     ->schema([
                         Forms\Components\TextInput::make('shipment_reference')
                             ->required()
@@ -93,7 +93,7 @@ class ShipmentResource extends Resource
 
                 // Right column — Recipient & Address
                 Components\Section::make('Recipient & Address')
-                    ->columnSpan(1)
+                    ->inlineLabel()
                     ->schema([
                         Forms\Components\TextInput::make('first_name')
                             ->maxLength(255),
@@ -112,6 +112,7 @@ class ShipmentResource extends Resource
                             ->maxLength(255),
 
                         Components\Section::make('Shipping Address')
+                            ->inlineLabel()
                             ->schema([
                                 Forms\Components\TextInput::make('address1')
                                     ->required()
@@ -265,7 +266,7 @@ class ShipmentResource extends Resource
             ->schema([
                 // Left column — Shipment Details
                 Components\Section::make('Shipment Details')
-                    ->columnSpan(1)
+                    ->inlineLabel()
                     ->schema([
                         TextEntry::make('shipment_reference')
                             ->weight(FontWeight::Bold),
@@ -302,7 +303,7 @@ class ShipmentResource extends Resource
 
                 // Right column — Recipient & Address
                 Components\Section::make('Recipient & Address')
-                    ->columnSpan(1)
+                    ->inlineLabel()
                     ->schema([
                         TextEntry::make('first_name'),
                         TextEntry::make('last_name'),
@@ -322,6 +323,7 @@ class ShipmentResource extends Resource
                             ->icon(fn (Shipment $record): string => $record->checked && filled($record->validated_address1)
                                 ? 'heroicon-o-check-badge'
                                 : 'heroicon-o-map-pin')
+                            ->inlineLabel()
                             ->schema([
                                 TextEntry::make('effective_address1')
                                     ->label('Address 1')

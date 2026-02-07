@@ -24,7 +24,7 @@ class UnmappedShippingReferences extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-question-mark-circle';
 
-    protected static ?string $navigationLabel = 'Unmapped References';
+    protected static ?string $navigationLabel = 'Map Shipping References';
 
     protected static UnitEnum|string|null $navigationGroup = 'Settings';
 

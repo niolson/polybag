@@ -24,7 +24,7 @@ class UnmappedChannelReferences extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-question-mark-circle';
 
-    protected static ?string $navigationLabel = 'Unmapped Channels';
+    protected static ?string $navigationLabel = 'Map Channel References';
 
     protected static UnitEnum|string|null $navigationGroup = 'Settings';
 

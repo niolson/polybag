@@ -13,6 +13,7 @@ use Filament\Actions;
 use Filament\Forms;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -60,40 +61,79 @@ class PackageResource extends Resource
     public static function form(Schema $form): Schema
     {
         return $form
+            ->columns(2)
             ->schema([
-                Forms\Components\Select::make('shipment_id')
-                    ->relationship('shipment', 'shipment_reference')
-                    ->searchable()
-                    ->required(),
-                Forms\Components\TextInput::make('tracking_number')
-                    ->maxLength(255),
-                Forms\Components\TextInput::make('shipping_method')
-                    ->maxLength(255),
-                Forms\Components\TextInput::make('weight')
-                    ->numeric()
-                    ->minValue(0.01)
-                    ->maxValue(150)
-                    ->suffix('lbs'),
-                Forms\Components\TextInput::make('height')
-                    ->numeric()
-                    ->minValue(0.01)
-                    ->maxValue(999)
-                    ->suffix('in'),
-                Forms\Components\TextInput::make('width')
-                    ->numeric()
-                    ->minValue(0.01)
-                    ->maxValue(999)
-                    ->suffix('in'),
-                Forms\Components\TextInput::make('length')
-                    ->numeric()
-                    ->minValue(0.01)
-                    ->maxValue(999)
-                    ->suffix('in'),
-                Forms\Components\TextInput::make('cost')
-                    ->numeric()
-                    ->prefix('$'),
-                Forms\Components\Toggle::make('shipped'),
-                Forms\Components\Toggle::make('exported'),
+                // Left column — Package Details
+                Components\Section::make('Package Details')
+                    ->inlineLabel()
+                    ->schema([
+                        Forms\Components\Select::make('shipment_id')
+                            ->relationship('shipment', 'shipment_reference')
+                            ->searchable()
+                            ->required(),
+                        Forms\Components\TextInput::make('tracking_number')
+                            ->maxLength(255),
+                        Forms\Components\TextInput::make('shipping_method')
+                            ->maxLength(255),
+                        Components\Fieldset::make('Dimensions')->schema([
+                            Forms\Components\TextInput::make('length')
+                                ->numeric()
+                                ->minValue(0.01)
+                                ->maxValue(999)
+                                ->suffix('in'),
+                            Forms\Components\TextInput::make('width')
+                                ->numeric()
+                                ->minValue(0.01)
+                                ->maxValue(999)
+                                ->suffix('in'),
+                            Forms\Components\TextInput::make('height')
+                                ->numeric()
+                                ->minValue(0.01)
+                                ->maxValue(999)
+                                ->suffix('in'),
+                            Forms\Components\TextInput::make('weight')
+                                ->numeric()
+                                ->minValue(0.01)
+                                ->maxValue(150)
+                                ->suffix('lbs'),                                
+                        ]),
+                        Forms\Components\TextInput::make('cost')
+                            ->numeric()
+                            ->prefix('$'),
+                        Forms\Components\Toggle::make('shipped'),
+                        Forms\Components\Toggle::make('exported'),
+                    ]),
+
+                // Right column — Ship To (read-only context from shipment)
+                Components\Section::make('Ship To')
+                    ->inlineLabel()
+                    ->schema([
+                        Forms\Components\Placeholder::make('ship_to_name')
+                            ->label('Name')
+                            ->content(fn (?Package $record) => $record ? trim("{$record->shipment->first_name} {$record->shipment->last_name}") : '—'),
+                        Forms\Components\Placeholder::make('ship_to_company')
+                            ->label('Company')
+                            ->content(fn (?Package $record) => $record?->shipment->company ?: '—'),
+                        Forms\Components\Placeholder::make('ship_to_address')
+                            ->label('Address')
+                            ->content(fn (?Package $record) => $record?->shipment->address1 ?? '—'),
+                        Forms\Components\Placeholder::make('ship_to_address2')
+                            ->label('Address 2')
+                            ->content(fn (?Package $record) => $record?->shipment->address2 ?: '—'),
+                        Forms\Components\Placeholder::make('ship_to_city')
+                            ->label('City')
+                            ->content(fn (?Package $record) => $record?->shipment->city ?? '—'),
+                        Forms\Components\Placeholder::make('ship_to_state')
+                            ->label('State')
+                            ->content(fn (?Package $record) => $record?->shipment->state ?? '—'),
+                        Forms\Components\Placeholder::make('ship_to_zip')
+                            ->label('ZIP')
+                            ->content(fn (?Package $record) => $record?->shipment->zip ?? '—'),
+                        Forms\Components\Placeholder::make('ship_to_country')
+                            ->label('Country')
+                            ->content(fn (?Package $record) => $record?->shipment->country ?? '—'),
+                    ])
+                    ->visible(fn (?Package $record): bool => $record !== null),
             ]);
     }
 
