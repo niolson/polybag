@@ -309,7 +309,7 @@ class Pack extends Page
             return;
         }
 
-        $this->redirect("/pack/{$reference}");
+        $this->redirect('/pack/'.rawurlencode($reference));
     }
 
     /**

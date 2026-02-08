@@ -52,9 +52,12 @@ class DatabaseSource implements ExportDestinationInterface, ImportSourceInterfac
         try {
             DB::connection($connection)->getPdo();
         } catch (\Exception $e) {
-            throw new InvalidArgumentException(
-                "Cannot connect to database '{$connection}': ".$e->getMessage()
-            );
+            logger()->error('Import database connection failed', [
+                'connection' => $connection,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw new InvalidArgumentException('Cannot connect to import database. Check connection settings.');
         }
     }
 
@@ -177,9 +180,12 @@ class DatabaseSource implements ExportDestinationInterface, ImportSourceInterfac
         try {
             DB::connection($connection)->getPdo();
         } catch (\Exception $e) {
-            throw new InvalidArgumentException(
-                "Cannot connect to database '{$connection}': ".$e->getMessage()
-            );
+            logger()->error('Export database connection failed', [
+                'connection' => $connection,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw new InvalidArgumentException('Cannot connect to export database. Check connection settings.');
         }
     }
 }

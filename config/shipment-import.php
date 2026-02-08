@@ -24,6 +24,8 @@ return [
     */
     'sources' => [
 
+        // Security: The import DB user should have only SELECT privileges.
+        // If export is enabled, the export DB user needs UPDATE on the target table.
         'database' => [
             'driver' => \App\Services\ShipmentImport\Sources\DatabaseSource::class,
             'connection' => env('SHIPMENT_IMPORT_DB_CONNECTION', 'import'),
@@ -139,6 +141,7 @@ return [
     */
     'export_channel_map' => [
         // 'Amazon' => ['database'],
+        'Shopify' => ['shopify'],
         '*' => ['database'],
     ],
 

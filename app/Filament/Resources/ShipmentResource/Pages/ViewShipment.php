@@ -32,7 +32,7 @@ class ViewShipment extends ViewRecord
                 ->label('Pack')
                 ->icon('heroicon-o-archive-box')
                 ->color('primary')
-                ->url(fn () => '/pack/'.$this->record->shipment_reference),
+                ->url(fn () => '/pack/'.rawurlencode($this->record->shipment_reference)),
             Actions\EditAction::make(),
         ];
     }

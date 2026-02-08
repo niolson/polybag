@@ -9,19 +9,23 @@ class QzSignController extends Controller
     public function sign(Request $request)
     {
         $request->validate([
-            'request' => 'required|string',
+            'request' => 'required|string|max:2048',
         ]);
 
         $privateKeyPath = storage_path('app/private/qz-private-key.pem');
 
         if (! file_exists($privateKeyPath)) {
-            return response()->json(['error' => 'Private key not found'], 500);
+            logger()->error('QZ Tray signing failed: private key file not found', ['path' => $privateKeyPath]);
+
+            return response()->json(['error' => 'Signing service unavailable'], 500);
         }
 
         $privateKey = openssl_pkey_get_private(file_get_contents($privateKeyPath));
 
         if (! $privateKey) {
-            return response()->json(['error' => 'Invalid private key'], 500);
+            logger()->error('QZ Tray signing failed: invalid private key', ['path' => $privateKeyPath]);
+
+            return response()->json(['error' => 'Signing service unavailable'], 500);
         }
 
         $signature = null;
