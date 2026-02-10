@@ -52,6 +52,14 @@ return [
         'account_number' => env('FEDEX_ACCOUNT_NUMBER'),
     ],
 
+    'ups' => [
+        'base_url' => env('UPS_API_BASE_URL', 'https://onlinetools.ups.com'),
+        'sandbox_url' => env('UPS_API_SANDBOX_URL', 'https://wwwcie.ups.com'),
+        'client_id' => env('UPS_CLIENT_ID'),
+        'client_secret' => env('UPS_CLIENT_SECRET'),
+        'account_number' => env('UPS_ACCOUNT_NUMBER'),
+    ],
+
     'shopify' => [
         'shop_domain' => env('SHOPIFY_SHOP_DOMAIN'),
         'client_id' => env('SHOPIFY_CLIENT_ID'),

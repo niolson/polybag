@@ -204,7 +204,7 @@ class UspsAdapter implements CarrierAdapterInterface
 
             return ShipResponse::success(
                 trackingNumber: $response->metadata['trackingNumber'],
-                cost: (float) ($response->metadata['postage'] ?? 0),
+                cost: (float) ($response->metadata['postage'] ?? $request->selectedRate->price),
                 carrier: 'USPS',
                 service: $request->selectedRate->serviceName,
                 labelData: $response->label,
@@ -294,7 +294,7 @@ class UspsAdapter implements CarrierAdapterInterface
 
             return ShipResponse::success(
                 trackingNumber: $trackingNumber,
-                cost: (float) ($response->metadata['postage'] ?? 0),
+                cost: (float) ($response->metadata['postage'] ?? $request->selectedRate->price),
                 carrier: 'USPS',
                 service: $request->selectedRate->serviceName,
                 labelData: $response->label,
@@ -318,7 +318,7 @@ class UspsAdapter implements CarrierAdapterInterface
 
         foreach ($request->customsItems as $item) {
             $contentItem = [
-                'itemDescription' => substr($item->description, 0, 50),
+                'itemDescription' => mb_substr($item->description, 0, 50),
                 'itemQuantity' => $item->quantity,
                 'itemTotalValue' => round($item->unitValue * $item->quantity, 2),
                 'weightUOM' => 'lb',

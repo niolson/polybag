@@ -52,6 +52,22 @@ class CarrierServiceFactory extends Factory
         ]);
     }
 
+    public function upsGround(): static
+    {
+        return $this->state(fn () => [
+            'name' => 'UPS Ground',
+            'service_code' => '03',
+        ]);
+    }
+
+    public function upsNextDay(): static
+    {
+        return $this->state(fn () => [
+            'name' => 'UPS Next Day Air',
+            'service_code' => '01',
+        ]);
+    }
+
     public function inactive(): static
     {
         return $this->state(fn () => ['active' => false]);

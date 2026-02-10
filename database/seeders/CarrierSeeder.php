@@ -37,5 +37,20 @@ class CarrierSeeder extends Seeder
             ['name' => 'FedEx 2Day AM', 'service_code' => 'FEDEX_2_DAY_AM'],
             ['name' => 'FedEx Express Saver', 'service_code' => 'FEDEX_EXPRESS_SAVER'],
         ]);
+
+        $ups = Carrier::create([
+            'name' => 'UPS',
+        ]);
+        $ups->carrierServices()->createMany([
+            ['name' => 'UPS Ground', 'service_code' => '03'],
+            ['name' => 'UPS 3 Day Select', 'service_code' => '12'],
+            ['name' => 'UPS 2nd Day Air', 'service_code' => '02'],
+            ['name' => 'UPS Next Day Air Saver', 'service_code' => '13'],
+            ['name' => 'UPS Next Day Air', 'service_code' => '01'],
+            ['name' => 'UPS Next Day Air Early', 'service_code' => '14'],
+            ['name' => 'UPS Worldwide Express', 'service_code' => '07'],
+            ['name' => 'UPS Worldwide Expedited', 'service_code' => '08'],
+            ['name' => 'UPS Standard', 'service_code' => '11'],
+        ]);
     }
 }

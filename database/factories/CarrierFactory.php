@@ -27,6 +27,11 @@ class CarrierFactory extends Factory
         return $this->state(fn () => ['name' => 'FedEx']);
     }
 
+    public function ups(): static
+    {
+        return $this->state(fn () => ['name' => 'UPS']);
+    }
+
     public function inactive(): static
     {
         return $this->state(fn () => ['active' => false]);

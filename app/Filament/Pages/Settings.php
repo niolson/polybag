@@ -139,7 +139,7 @@ class Settings extends Page
                         ->schema([
                             Toggle::make('sandbox_mode')
                                 ->label('Sandbox Mode')
-                                ->helperText('When enabled, USPS and FedEx API calls use sandbox/test URLs instead of production.')
+                                ->helperText('When enabled, USPS, FedEx, and UPS API calls use sandbox/test URLs instead of production.')
                                 ->default(false)
                                 ->live(),
                             Toggle::make('suppress_printing')
@@ -217,6 +217,7 @@ class Settings extends Page
             Cache::forget('usps_authenticator');
             Cache::forget('usps_payment_authorization_token');
             Cache::forget('fedex_authenticator');
+            Cache::forget('ups_authenticator');
         }
 
         Notification::make()

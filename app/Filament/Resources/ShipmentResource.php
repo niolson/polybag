@@ -120,32 +120,32 @@ class ShipmentResource extends Resource
                                     ->required()
                                     ->maxLength(255)
                                     ->live(onBlur: true)
-                                    ->afterStateUpdated(fn (Forms\Set $set) => $set('checked', false)),
+                                    ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
                                 Forms\Components\TextInput::make('address2')
                                     ->maxLength(255)
                                     ->live(onBlur: true)
-                                    ->afterStateUpdated(fn (Forms\Set $set) => $set('checked', false)),
+                                    ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
                                 Forms\Components\TextInput::make('city')
                                     ->required()
                                     ->maxLength(255)
                                     ->live(onBlur: true)
-                                    ->afterStateUpdated(fn (Forms\Set $set) => $set('checked', false)),
+                                    ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
                                 Forms\Components\TextInput::make('state')
                                     ->required()
                                     ->maxLength(255)
                                     ->live(onBlur: true)
-                                    ->afterStateUpdated(fn (Forms\Set $set) => $set('checked', false)),
+                                    ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
                                 Forms\Components\TextInput::make('zip')
                                     ->required()
                                     ->maxLength(255)
                                     ->live(onBlur: true)
-                                    ->afterStateUpdated(fn (Forms\Set $set) => $set('checked', false)),
+                                    ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
                                 Forms\Components\TextInput::make('country')
                                     ->required()
                                     ->maxLength(255)
                                     ->default('US')
                                     ->live(onBlur: true)
-                                    ->afterStateUpdated(fn (Forms\Set $set) => $set('checked', false)),
+                                    ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
                             ])
                             ->columns(2),
 
