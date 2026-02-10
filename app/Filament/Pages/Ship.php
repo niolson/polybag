@@ -12,6 +12,7 @@ use App\Services\SettingsService;
 use App\Services\ShipmentImport\PackageExportService;
 use App\Services\ShippingRateService;
 use BackedEnum;
+use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Concerns\InteractsWithForms;
@@ -46,6 +47,10 @@ class Ship extends Page implements HasForms
 
     public array $formRateOptionDescriptions = [];
 
+    public ?string $deliverByDate = null;
+
+    public bool $allRatesLate = false;
+
     public ?array $data = [];
 
     public function mount($package_id = null): void
@@ -56,7 +61,7 @@ class Ship extends Page implements HasForms
             return;
         }
 
-        $this->package = Package::with(['packageItems.product', 'packageItems.shipmentItem', 'shipment', 'boxSize'])->findOrFail($package_id);
+        $this->package = Package::with(['packageItems.product', 'packageItems.shipmentItem', 'shipment.shippingMethod', 'boxSize'])->findOrFail($package_id);
 
         if ($this->package->shipped) {
             $this->notifyWarning('Already Shipped', 'This package has already been shipped.');
@@ -104,22 +109,105 @@ class Ship extends Page implements HasForms
 
     public function updateFormData(): void
     {
+        $deadline = $this->getDeliverByDate();
+        $this->deliverByDate = $deadline?->format('D, M j');
+
         $formRateOptionLabels = [];
         $formRateOptionDescriptions = [];
+        $onTimeKeys = [];
+        $lateKeys = [];
 
         foreach ($this->rateOptions as $key => $rateArray) {
             $rate = RateResponse::fromArray($rateArray);
             $formRateOptionLabels[$key] = $rate->formLabel();
-            $formRateOptionDescriptions[$key] = $rate->formDescription();
+            $description = $rate->formDescription();
+
+            if ($deadline) {
+                $parsed = $rate->parsedDeliveryDate();
+                if ($parsed && $parsed->gt($deadline)) {
+                    $description .= ' — LATE';
+                    $lateKeys[] = $key;
+                } elseif (! $parsed) {
+                    // Unknown delivery date with a deadline — mark uncertain
+                    $lateKeys[] = $key;
+                } else {
+                    $onTimeKeys[] = $key;
+                }
+            } else {
+                $onTimeKeys[] = $key;
+            }
+
+            $formRateOptionDescriptions[$key] = $description;
         }
 
-        $this->formRateOptionLabels = $formRateOptionLabels;
-        $this->formRateOptionDescriptions = $formRateOptionDescriptions;
+        // Sort: on-time first (by price), then late (by price)
+        $sortedKeys = collect($onTimeKeys)
+            ->sortBy(fn ($key) => $this->rateOptions[$key]['price'])
+            ->merge(collect($lateKeys)->sortBy(fn ($key) => $this->rateOptions[$key]['price']))
+            ->values();
 
+        $sortedLabels = [];
+        $sortedDescriptions = [];
+        $sortedOptions = [];
+        foreach ($sortedKeys as $newKey => $oldKey) {
+            $sortedLabels[$newKey] = $formRateOptionLabels[$oldKey];
+            $sortedDescriptions[$newKey] = $formRateOptionDescriptions[$oldKey];
+            $sortedOptions[$newKey] = $this->rateOptions[$oldKey];
+        }
+
+        $this->rateOptions = $sortedOptions;
+        $this->formRateOptionLabels = $sortedLabels;
+        $this->formRateOptionDescriptions = $sortedDescriptions;
+        $this->allRatesLate = $deadline && empty($onTimeKeys) && ! empty($lateKeys);
+
+        // Default to cheapest on-time rate, or cheapest overall if all late
         if (! empty($this->rateOptions)) {
-            $cheapestKey = collect($this->rateOptions)->sortBy('price')->keys()->first();
-            $this->form->fill(['rateOptions' => $cheapestKey]);
+            $defaultKey = collect($this->rateOptions)->sortBy('price')->keys()->first();
+
+            if (! empty($onTimeKeys)) {
+                // Find the first on-time key (already sorted by price in sortedOptions)
+                foreach ($sortedOptions as $key => $option) {
+                    if (in_array($key, array_keys($sortedLabels)) && ! str_contains($sortedDescriptions[$key] ?? '', 'LATE')) {
+                        $defaultKey = $key;
+                        break;
+                    }
+                }
+            }
+
+            $this->form->fill(['rateOptions' => $defaultKey]);
         }
+    }
+
+    private function getDeliverByDate(): ?Carbon
+    {
+        if (! $this->package) {
+            return null;
+        }
+
+        $shipment = $this->package->shipment;
+
+        // 1. Explicit deliver_by date on the shipment
+        if ($shipment->deliver_by) {
+            return $shipment->deliver_by;
+        }
+
+        // 2. Calculated from ShippingMethod.commitment_days
+        $commitmentDays = $shipment->shippingMethod?->commitment_days;
+        if ($commitmentDays) {
+            $date = Carbon::today();
+            $added = 0;
+            while ($added < $commitmentDays) {
+                $date->addDay();
+                if (! $date->isWeekend()) {
+                    $added++;
+                }
+            }
+
+            return $date;
+        }
+
+        // 3. No deadline
+        return null;
     }
 
     public function ship(): void

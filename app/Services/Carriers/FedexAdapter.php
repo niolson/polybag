@@ -137,12 +137,15 @@ class FedexAdapter implements CarrierAdapterInterface
             $transitDays = $detail['commit']['transitDays'] ?? null;
             $transitTime = is_string($transitDays) ? $transitDays : ($transitDays['minimumTransitTime'] ?? null);
 
+            // Prefer actual date (ISO format) over day-of-week string
+            $deliveryDate = $detail['commit']['dateDetail']['dayFormat'] ?? $detail['commit']['dateDetail']['dayOfWeek'] ?? null;
+
             $results->push(new RateResponse(
                 carrier: 'FedEx',
                 serviceCode: $detail['serviceType'],
                 serviceName: $detail['serviceName'] ?? $detail['serviceType'],
                 price: (float) ($ratedShipmentDetails['totalNetCharge'] ?? 0),
-                deliveryDate: $detail['commit']['dateDetail']['dayOfWeek'] ?? null,
+                deliveryDate: $deliveryDate,
                 transitTime: $transitTime,
                 metadata: [
                     'serviceType' => $detail['serviceType'],

@@ -107,8 +107,10 @@ it('auto-selects the cheapest shipping rate', function (): void {
     ]);
     $component->call('updateFormData');
 
+    // After updateFormData, rates are sorted by price ascending.
+    // $4.25 Priority Mail becomes key 0 (cheapest), so it's auto-selected.
     $component->assertFormFieldExists('rateOptions')
-        ->assertSet('data.rateOptions', 1);
+        ->assertSet('data.rateOptions', 0);
 });
 
 it('dispatches print-label event when suppress_printing is off', function (): void {

@@ -258,6 +258,7 @@ class ShopifySource implements ExportDestinationInterface, ImportSourceInterface
             'value' => round($totalValue, 2),
             'channel_id' => $this->config['channel_name'] ?? 'Shopify',
             'shipping_method_id' => $this->config['shipping_method'] ?? null,
+            'deliver_by' => null, // Shopify doesn't expose a deliver-by date; commitment_days fallback handles this
             'metadata' => [
                 'shopify_order_id' => $order['id'] ?? null,
                 'shopify_fulfillment_order_ids' => $fulfillmentOrderIds,

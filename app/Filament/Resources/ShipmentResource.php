@@ -78,6 +78,8 @@ class ShipmentResource extends Resource
                         Forms\Components\TextInput::make('value')
                             ->numeric()
                             ->prefix('$'),
+                        Forms\Components\DatePicker::make('deliver_by')
+                            ->label('Deliver By'),
 
                         // Unmapped warnings (edit only)
                         Forms\Components\Placeholder::make('unmapped_channel_warning')
@@ -197,6 +199,12 @@ class ShipmentResource extends Resource
                 Tables\Columns\TextColumn::make('company'),
                 Tables\Columns\TextColumn::make('shippingMethod.name')
                     ->label('Shipping Method'),
+                Tables\Columns\TextColumn::make('deliver_by')
+                    ->label('Deliver By')
+                    ->date()
+                    ->sortable()
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('deliverability')
                     ->label('Deliverable')
                     ->badge()
@@ -280,6 +288,10 @@ class ShipmentResource extends Resource
                             ->placeholder('—'),
                         TextEntry::make('value')
                             ->money('USD'),
+                        TextEntry::make('deliver_by')
+                            ->label('Deliver By')
+                            ->date()
+                            ->placeholder('—'),
                         TextEntry::make('created_at')
                             ->dateTime(),
                         TextEntry::make('updated_at')

@@ -25,6 +25,12 @@
                             <dt class="font-medium text-gray-500 dark:text-gray-400">Box</dt>
                             <dd class="mt-1">{{ $package->boxSize?->name ?? 'Custom' }}</dd>
                         </div>
+                        @if($deliverByDate)
+                            <div>
+                                <dt class="font-medium text-gray-500 dark:text-gray-400">Deliver by</dt>
+                                <dd class="mt-1 font-semibold text-primary-600 dark:text-primary-400">{{ $deliverByDate }}</dd>
+                            </div>
+                        @endif
                     </dl>
                 </x-filament::section>
 
@@ -73,6 +79,16 @@
                             <p class="text-sm text-gray-400 dark:text-gray-500">Check the shipping method configuration.</p>
                         </div>
                     @else
+                        @if($allRatesLate && $deliverByDate)
+                            <div class="rounded-lg bg-warning-50 dark:bg-warning-950 p-4 mb-4 border border-warning-300 dark:border-warning-700">
+                                <div class="flex items-center gap-2">
+                                    <x-filament::icon icon="heroicon-o-exclamation-triangle" class="w-5 h-5 text-warning-600 dark:text-warning-400" />
+                                    <p class="text-sm font-medium text-warning-800 dark:text-warning-200">
+                                        No options meet the deliver-by date of {{ $deliverByDate }}
+                                    </p>
+                                </div>
+                            </div>
+                        @endif
                         <form wire:submit="ship">
                             {{ $this->form }}
                         </form>

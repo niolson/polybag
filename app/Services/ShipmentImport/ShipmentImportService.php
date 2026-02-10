@@ -175,7 +175,7 @@ class ShipmentImportService
             'address1', 'address2', 'city', 'state', 'zip', 'country',
             'phone', 'phone_extension', 'email', 'value',
             'validation_message', 'shipping_method_reference', 'shipping_method_id',
-            'channel_reference', 'metadata', 'updated_at',
+            'channel_reference', 'deliver_by', 'metadata', 'updated_at',
         ];
 
         // Phase 2a: Upsert mapped rows using composite unique key
@@ -298,6 +298,7 @@ class ShipmentImportService
             'shipping_method_id' => $this->resolveShippingMethodId($data),
             'channel_reference' => $data['channel_id'] ?? null,
             'channel_id' => $this->resolveChannelId($data),
+            'deliver_by' => $data['deliver_by'] ?? null,
             'metadata' => isset($data['metadata']) ? json_encode($data['metadata']) : null,
         ];
     }

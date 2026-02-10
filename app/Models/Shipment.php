@@ -48,6 +48,7 @@ class Shipment extends Model
         'channel_reference',
         'channel_id',
         'shipped',
+        'deliver_by',
         'metadata',
     ];
 
@@ -58,6 +59,7 @@ class Shipment extends Model
         'value' => 'decimal:2',
         'deliverability' => Deliverability::class,
         'shipped' => 'boolean',
+        'deliver_by' => 'date',
         'metadata' => 'array',
     ];
 

@@ -2,6 +2,8 @@
 
 namespace App\DataTransferObjects\Shipping;
 
+use Carbon\Carbon;
+
 readonly class RateResponse
 {
     public function __construct(
@@ -58,13 +60,36 @@ readonly class RateResponse
         return "[{$this->carrier}] {$this->serviceName}";
     }
 
+    public function parsedDeliveryDate(): ?Carbon
+    {
+        if (! $this->deliveryDate) {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($this->deliveryDate);
+        } catch (\Exception) {
+            return null;
+        }
+    }
+
     public function formDescription(): string
     {
         $price = number_format($this->price, 2);
+
+        // Show actual delivery date when available
+        $parsed = $this->parsedDeliveryDate();
+        if ($parsed) {
+            $formatted = $parsed->format('D, M j');
+
+            return '$'.$price.' — Delivers '.$formatted;
+        }
+
+        // Fall back to commitment name or transit time
         $detail = $this->carrier === 'USPS'
             ? ($this->deliveryCommitment ?? '')
             : ($this->transitTime ?? '');
 
-        return '$'.$price.($detail ? " - {$detail}" : '');
+        return '$'.$price.($detail ? " — {$detail}" : '');
     }
 }
