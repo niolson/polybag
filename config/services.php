@@ -67,4 +67,13 @@ return [
         'api_version' => env('SHOPIFY_API_VERSION', '2025-01'),
     ],
 
+    'amazon' => [
+        'base_url' => env('AMAZON_SP_API_BASE_URL', 'https://sellingpartnerapi-na.amazon.com'),
+        'sandbox_url' => env('AMAZON_SP_API_SANDBOX_URL', 'https://sandbox.sellingpartnerapi-na.amazon.com'),
+        'client_id' => env('AMAZON_SP_API_CLIENT_ID'),
+        'client_secret' => env('AMAZON_SP_API_CLIENT_SECRET'),
+        'refresh_token' => env('AMAZON_SP_API_REFRESH_TOKEN'),
+        'marketplace_id' => env('AMAZON_SP_API_MARKETPLACE_ID', 'ATVPDKIKX0DER'),
+    ],
+
 ];

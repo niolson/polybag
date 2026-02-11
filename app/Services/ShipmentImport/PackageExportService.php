@@ -121,6 +121,7 @@ class PackageExportService
             'service' => $package->service,
             'shipment_reference' => $package->shipment?->shipment_reference,
             'fulfillment_order_id' => $package->shipment?->metadata['shopify_fulfillment_order_ids'][0] ?? null,
+            'amazon_order_id' => $package->shipment?->metadata['amazon_order_id'] ?? null,
         ];
 
         $mapped = [];

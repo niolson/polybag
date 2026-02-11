@@ -14,7 +14,7 @@ Planned features and improvements for Filament Shipping.
 ## Import Sources
 
 - [x] **Shopify GraphQL** — Import orders and export fulfillments via Shopify Admin API.
-- [ ] **Amazon SP-API** — Import orders via Amazon Selling Partner API.
+- [x] **Amazon SP-API** — Import orders and export fulfillments via Amazon Selling Partner API.
 
 ## Carriers
 
