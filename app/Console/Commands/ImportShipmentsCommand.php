@@ -140,7 +140,7 @@ class ImportShipmentsCommand extends Command
                     $s['shipment_reference'] ?? 'N/A',
                     trim(($s['first_name'] ?? '').' '.($s['last_name'] ?? '')),
                     $s['city'] ?? 'N/A',
-                    $s['state'] ?? 'N/A',
+                    $s['state_or_province'] ?? 'N/A',
                 ];
             })->toArray();
 

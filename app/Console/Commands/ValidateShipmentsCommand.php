@@ -102,13 +102,13 @@ class ValidateShipmentsCommand extends Command
                 trim("{$s->first_name} {$s->last_name}"),
                 $s->address1,
                 $s->city,
-                $s->state,
-                $s->zip,
+                $s->state_or_province,
+                $s->postal_code,
             ];
         })->toArray();
 
         $this->table(
-            ['Reference', 'Name', 'Address', 'City', 'State', 'ZIP'],
+            ['Reference', 'Name', 'Address', 'City', 'State/Province', 'Postal Code'],
             $sample
         );
 

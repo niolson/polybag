@@ -66,8 +66,8 @@ it('fetches rates from FedEx API', function (): void {
     ]);
 
     $request = new RateRequest(
-        originZip: '98072',
-        destinationZip: '90210',
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
         packages: [new PackageData(weight: 5.0, length: 12, width: 10, height: 8)],
     );
 
@@ -113,8 +113,8 @@ it('filters rates by service codes', function (): void {
     ]);
 
     $request = new RateRequest(
-        originZip: '98072',
-        destinationZip: '90210',
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
         packages: [new PackageData(weight: 5.0, length: 12, width: 10, height: 8)],
     );
 
@@ -182,8 +182,8 @@ it('returns empty collection when API returns no rates', function (): void {
     ]);
 
     $request = new RateRequest(
-        originZip: '98072',
-        destinationZip: '90210',
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
         packages: [new PackageData(weight: 5.0, length: 12, width: 10, height: 8)],
     );
 
@@ -226,8 +226,8 @@ it('creates shipment and returns tracking info', function (): void {
         lastName: 'Center',
         streetAddress: '123 Warehouse St',
         city: 'Seattle',
-        state: 'WA',
-        zip: '98072',
+        stateOrProvince: 'WA',
+        postalCode: '98072',
         company: 'Test Company',
         phone: '555-123-4567',
     );
@@ -237,8 +237,8 @@ it('creates shipment and returns tracking info', function (): void {
         lastName: 'Doe',
         streetAddress: '456 Main St',
         city: 'Los Angeles',
-        state: 'CA',
-        zip: '90210',
+        stateOrProvince: 'CA',
+        postalCode: '90210',
         phone: '555-987-6543',
     );
 
@@ -288,8 +288,8 @@ it('returns failure response when shipment creation fails', function (): void {
         lastName: 'Center',
         streetAddress: '123 Warehouse St',
         city: 'Seattle',
-        state: 'WA',
-        zip: '98072',
+        stateOrProvince: 'WA',
+        postalCode: '98072',
     );
 
     $toAddress = new AddressData(
@@ -297,8 +297,8 @@ it('returns failure response when shipment creation fails', function (): void {
         lastName: 'Doe',
         streetAddress: '456 Main St',
         city: 'Los Angeles',
-        state: 'CA',
-        zip: '90210',
+        stateOrProvince: 'CA',
+        postalCode: '90210',
     );
 
     $packageData = new PackageData(weight: 5.0, length: 12, width: 10, height: 8);

@@ -172,7 +172,7 @@ class ShipmentImportService
 
         $updateColumns = [
             'first_name', 'last_name', 'company',
-            'address1', 'address2', 'city', 'state', 'zip', 'country',
+            'address1', 'address2', 'city', 'state_or_province', 'postal_code', 'country',
             'phone', 'phone_extension', 'email', 'value',
             'validation_message', 'shipping_method_reference', 'shipping_method_id',
             'channel_reference', 'deliver_by', 'metadata', 'updated_at',
@@ -286,8 +286,8 @@ class ShipmentImportService
             'address1' => $data['address1'] ?? null,
             'address2' => $data['address2'] ?? null,
             'city' => $data['city'] ?? null,
-            'state' => $data['state'] ?? null,
-            'zip' => $data['zip'] ?? null,
+            'state_or_province' => $data['state_or_province'] ?? null,
+            'postal_code' => $data['postal_code'] ?? null,
             'country' => $data['country'] ?? 'US',
             'phone' => $data['phone'] ?? null,
             'phone_extension' => $phoneExtension,
@@ -423,6 +423,8 @@ class ShipmentImportService
      * Validate shipment data before import.
      *
      * Returns blocking errors (prevent import) and warnings (import proceeds with note).
+     * Postal code and state/province checks are warnings, not errors, to allow
+     * international orders to import even with missing data.
      *
      * @return array{errors: array<string>, warnings: array<string>}
      */
@@ -444,30 +446,26 @@ class ShipmentImportService
             $errors[] = 'Missing city';
         }
 
-        if (empty($data['state'])) {
-            $errors[] = 'Missing state';
-        }
-
-        if (empty($data['zip'])) {
-            $errors[] = 'Missing zip code';
-        }
-
-        // Validate zip code format (US)
         $country = $data['country'] ?? 'US';
-        if ($country === 'US' && ! empty($data['zip'])) {
-            $zip = preg_replace('/[^0-9]/', '', $data['zip']);
+
+        // Postal code: warn if missing for US, validate format if present
+        if (empty($data['postal_code'])) {
+            if ($country === 'US') {
+                $warnings[] = 'Missing postal code';
+            }
+        } elseif ($country === 'US') {
+            $zip = preg_replace('/[^0-9]/', '', $data['postal_code']);
             if (strlen($zip) !== 5 && strlen($zip) !== 9) {
-                $errors[] = 'Invalid US zip code format';
+                $warnings[] = 'Invalid US postal code format';
             }
         }
 
-        // Validate email format if provided (warning only - does not block import)
-        if (! empty($data['email']) && ! filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
-            $warnings[] = "Invalid email removed: {$data['email']}";
-        }
-
-        // Validate state code for US addresses
-        if ($country === 'US' && ! empty($data['state'])) {
+        // State/province: warn if missing for US/CA, validate code if present for US
+        if (empty($data['state_or_province'])) {
+            if (in_array($country, ['US', 'CA'], true)) {
+                $warnings[] = 'Missing state/province';
+            }
+        } elseif ($country === 'US') {
             $validStates = [
                 'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
                 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
@@ -476,10 +474,15 @@ class ShipmentImportService
                 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
                 'DC', 'PR', 'VI', 'GU', 'AS', 'MP', 'AA', 'AE', 'AP',
             ];
-            $state = strtoupper(trim($data['state']));
+            $state = strtoupper(trim($data['state_or_province']));
             if (strlen($state) === 2 && ! in_array($state, $validStates, true)) {
-                $errors[] = "Invalid US state code: {$state}";
+                $warnings[] = "Invalid US state code: {$state}";
             }
+        }
+
+        // Validate email format if provided (warning only - does not block import)
+        if (! empty($data['email']) && ! filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
+            $warnings[] = "Invalid email removed: {$data['email']}";
         }
 
         // Validate value if provided

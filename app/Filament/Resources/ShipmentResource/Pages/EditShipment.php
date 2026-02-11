@@ -38,7 +38,7 @@ class EditShipment extends EditRecord
     {
         $record = $this->getRecord();
 
-        foreach (['address1', 'address2', 'city', 'state', 'zip', 'country'] as $field) {
+        foreach (['address1', 'address2', 'city', 'state_or_province', 'postal_code', 'country'] as $field) {
             if (($data[$field] ?? null) !== $record->$field) {
                 $data['checked'] = false;
                 break;

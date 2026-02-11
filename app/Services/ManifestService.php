@@ -52,7 +52,7 @@ class ManifestService
                 'imageType' => 'PDF',
                 'labelType' => '8.5x11LABEL',
                 'mailingDate' => now()->format('Y-m-d'),
-                'entryFacilityZIPCode' => $fromAddress->zip,
+                'entryFacilityZIPCode' => $fromAddress->postalCode,
                 'destinationEntryFacilityType' => 'NONE',
                 'shipment' => [
                     'trackingNumbers' => $trackingNumbers,
@@ -63,8 +63,8 @@ class ManifestService
                     'streetAddress' => $fromAddress->streetAddress,
                     'secondaryAddress' => $fromAddress->streetAddress2,
                     'city' => $fromAddress->city,
-                    'state' => $fromAddress->state,
-                    'ZIPCode' => $fromAddress->zip,
+                    'state' => $fromAddress->stateOrProvince,
+                    'ZIPCode' => $fromAddress->postalCode,
                 ]),
             ]);
 

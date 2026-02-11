@@ -63,22 +63,22 @@ class UpsAdapter implements CarrierAdapterInterface
                     'Shipment' => [
                         'Shipper' => [
                             'Address' => [
-                                'PostalCode' => $request->originZip,
+                                'PostalCode' => $request->originPostalCode,
                                 'CountryCode' => 'US',
                             ],
                         ],
                         'ShipTo' => [
                             'Address' => array_filter([
                                 'City' => $request->destinationCity,
-                                'StateProvinceCode' => $request->destinationState,
-                                'PostalCode' => $request->destinationZip,
+                                'StateProvinceCode' => $request->destinationStateOrProvince,
+                                'PostalCode' => $request->destinationPostalCode,
                                 'CountryCode' => $request->destinationCountry,
                                 'ResidentialAddressIndicator' => $request->residential ? '' : null,
                             ], fn ($v) => $v !== null),
                         ],
                         'ShipFrom' => [
                             'Address' => [
-                                'PostalCode' => $request->originZip,
+                                'PostalCode' => $request->originPostalCode,
                                 'CountryCode' => 'US',
                             ],
                         ],
@@ -393,8 +393,8 @@ class UpsAdapter implements CarrierAdapterInterface
         return array_filter([
             'AddressLine' => $addressLines,
             'City' => $address->city,
-            'StateProvinceCode' => $address->state,
-            'PostalCode' => $address->zip,
+            'StateProvinceCode' => $address->stateOrProvince,
+            'PostalCode' => $address->postalCode,
             'CountryCode' => $address->country,
         ]);
     }

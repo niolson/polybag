@@ -46,7 +46,7 @@ class UspsAdapter implements CarrierAdapterInterface
                     ],
                 ],
             ],
-            'originZIPCode' => $request->originZip,
+            'originZIPCode' => $request->originPostalCode,
             'packageDescription' => [
                 'weight' => $package->weight,
                 'length' => $package->length,
@@ -57,7 +57,7 @@ class UspsAdapter implements CarrierAdapterInterface
             ],
         ];
         if (! $isInternational) {
-            $body['destinationZIPCode'] = $request->destinationZip;
+            $body['destinationZIPCode'] = $request->destinationPostalCode;
         }
 
         if ($isInternational) {
@@ -475,8 +475,8 @@ class UspsAdapter implements CarrierAdapterInterface
             'lastName' => $address->lastName,
             'streetAddress' => $address->streetAddress,
             'city' => $address->city,
-            'state' => $address->state,
-            'ZIPCode' => substr($address->zip, 0, 5),
+            'state' => $address->stateOrProvince,
+            'ZIPCode' => substr($address->postalCode, 0, 5),
         ];
 
         if ($address->company) {
@@ -506,12 +506,12 @@ class UspsAdapter implements CarrierAdapterInterface
             'countryISOAlpha2Code' => $address->country,
         ];
 
-        if ($address->state) {
-            $result['province'] = $address->state;
+        if ($address->stateOrProvince) {
+            $result['province'] = $address->stateOrProvince;
         }
 
-        if ($address->zip) {
-            $result['postalCode'] = $address->zip;
+        if ($address->postalCode) {
+            $result['postalCode'] = $address->postalCode;
         }
 
         if ($address->company) {

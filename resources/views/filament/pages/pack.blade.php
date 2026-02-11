@@ -421,7 +421,7 @@
             Shipment: {{ $shipment->shipment_reference }}
         </x-slot>
         <x-slot name="description">
-            {{ $shipment->first_name }} {{ $shipment->last_name }} - {{ $shipment->city }}, {{ $shipment->state }}
+            {{ $shipment->first_name }} {{ $shipment->last_name }} - {{ $shipment->city }}, {{ $shipment->state_or_province }}
         </x-slot>
 
         <div class="w-full overflow-x-auto">

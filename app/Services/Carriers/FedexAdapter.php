@@ -66,7 +66,7 @@ class FedexAdapter implements CarrierAdapterInterface
             'requestedShipment' => [
                 'shipper' => [
                     'address' => [
-                        'postalCode' => $request->originZip,
+                        'postalCode' => $request->originPostalCode,
                         'countryCode' => 'US',
                     ],
                 ],
@@ -74,7 +74,7 @@ class FedexAdapter implements CarrierAdapterInterface
                     'address' => [
                         // 'city' => $request->destinationCity,
                         // 'stateOrProvinceCode' => $request->destinationState,
-                        'postalCode' => $request->destinationZip,
+                        'postalCode' => $request->destinationPostalCode,
                         'countryCode' => $request->destinationCountry,
                     ],
                 ],
@@ -337,8 +337,8 @@ class FedexAdapter implements CarrierAdapterInterface
             'address' => [
                 'streetLines' => array_values($streetLines),
                 'city' => $address->city,
-                'stateOrProvinceCode' => $address->state,
-                'postalCode' => $address->zip,
+                'stateOrProvinceCode' => $address->stateOrProvince,
+                'postalCode' => $address->postalCode,
                 'countryCode' => $address->country,
             ],
         ];

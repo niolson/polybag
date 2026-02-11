@@ -44,8 +44,8 @@ class AddressValidationService
                 'streetAddress' => $shipment->address1,
                 'secondaryAddress' => $shipment->address2,
                 'city' => $shipment->city,
-                'state' => $shipment->state,
-                'ZIPCode' => substr($shipment->zip, 0, 5),
+                'state' => $shipment->state_or_province,
+                'ZIPCode' => substr($shipment->postal_code, 0, 5),
             ]);
 
             $response = $connector->send($request);
@@ -194,8 +194,8 @@ class AddressValidationService
         $shipment->validated_address1 = $address['streetAddress'] ?? null;
         $shipment->validated_address2 = $address['secondaryAddress'] ?? null;
         $shipment->validated_city = $address['city'] ?? null;
-        $shipment->validated_state = $address['state'] ?? null;
-        $shipment->validated_zip = $address['ZIPCode'] ?? null;
+        $shipment->validated_state_or_province = $address['state'] ?? null;
+        $shipment->validated_postal_code = $address['ZIPCode'] ?? null;
         $businessFlag = $response['additionalInfo']['business'] ?? null;
         $shipment->validated_residential = $businessFlag !== null ? $businessFlag !== 'Y' : null;
     }

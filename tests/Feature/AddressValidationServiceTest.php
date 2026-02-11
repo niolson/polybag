@@ -97,8 +97,8 @@ it('sets deliverability to Maybe for default address correction', function (): v
         ->and($shipment->validation_message)->toBe('More information is needed to deliver to this address.')
         ->and($shipment->validated_address1)->toBe('123 MAIN ST')
         ->and($shipment->validated_city)->toBe('ANYTOWN')
-        ->and($shipment->validated_state)->toBe('NY')
-        ->and($shipment->validated_zip)->toBe('10001')
+        ->and($shipment->validated_state_or_province)->toBe('NY')
+        ->and($shipment->validated_postal_code)->toBe('10001')
         ->and($shipment->checked)->toBeTrue();
 });
 
@@ -234,8 +234,8 @@ it('sets deliverability to Yes for exact match with DPV Y', function (): void {
         ->and($shipment->validation_message)->toBe('Address confirmed deliverable')
         ->and($shipment->validated_address1)->toBe('1600 PENNSYLVANIA AVE NW')
         ->and($shipment->validated_city)->toBe('WASHINGTON')
-        ->and($shipment->validated_state)->toBe('DC')
-        ->and($shipment->validated_zip)->toBe('20500')
+        ->and($shipment->validated_state_or_province)->toBe('DC')
+        ->and($shipment->validated_postal_code)->toBe('20500')
         ->and($shipment->validated_residential)->toBeFalse()
         ->and($shipment->checked)->toBeTrue();
 });

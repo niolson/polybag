@@ -46,7 +46,7 @@
                         @if($package->shipment->address2)
                             <div>{{ $package->shipment->address2 }}</div>
                         @endif
-                        <div>{{ $package->shipment->city }}, {{ $package->shipment->state }} {{ $package->shipment->zip }}</div>
+                        <div>{{ $package->shipment->city }}, {{ $package->shipment->state_or_province }} {{ $package->shipment->postal_code }}</div>
                     </address>
                 </x-filament::section>
 

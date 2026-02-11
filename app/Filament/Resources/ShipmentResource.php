@@ -53,7 +53,7 @@ class ShipmentResource extends Resource
     {
         return [
             'Name' => trim("{$record->first_name} {$record->last_name}"),
-            'Location' => trim("{$record->city}, {$record->state}"),
+            'Location' => trim("{$record->city}, {$record->state_or_province}"),
         ];
     }
 
@@ -130,13 +130,13 @@ class ShipmentResource extends Resource
                                     ->maxLength(255)
                                     ->live(onBlur: true)
                                     ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
-                                Forms\Components\TextInput::make('state')
-                                    ->required()
+                                Forms\Components\TextInput::make('state_or_province')
+                                    ->label('State/Province')
                                     ->maxLength(255)
                                     ->live(onBlur: true)
                                     ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
-                                Forms\Components\TextInput::make('zip')
-                                    ->required()
+                                Forms\Components\TextInput::make('postal_code')
+                                    ->label('Postal Code')
                                     ->maxLength(255)
                                     ->live(onBlur: true)
                                     ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
@@ -165,12 +165,12 @@ class ShipmentResource extends Resource
                                 Forms\Components\Placeholder::make('validated_city_display')
                                     ->label('City')
                                     ->content(fn (Shipment $record) => $record->validated_city),
-                                Forms\Components\Placeholder::make('validated_state_display')
-                                    ->label('State')
-                                    ->content(fn (Shipment $record) => $record->validated_state),
-                                Forms\Components\Placeholder::make('validated_zip_display')
-                                    ->label('ZIP')
-                                    ->content(fn (Shipment $record) => $record->validated_zip),
+                                Forms\Components\Placeholder::make('validated_state_or_province_display')
+                                    ->label('State/Province')
+                                    ->content(fn (Shipment $record) => $record->validated_state_or_province),
+                                Forms\Components\Placeholder::make('validated_postal_code_display')
+                                    ->label('Postal Code')
+                                    ->content(fn (Shipment $record) => $record->validated_postal_code),
                             ])
                             ->columns(2)
                             ->collapsed()
@@ -353,16 +353,16 @@ class ShipmentResource extends Resource
                                     ->state(fn (Shipment $record): ?string => $record->checked && filled($record->validated_address1)
                                         ? $record->validated_city
                                         : $record->city),
-                                TextEntry::make('effective_state')
-                                    ->label('State')
+                                TextEntry::make('effective_state_or_province')
+                                    ->label('State/Province')
                                     ->state(fn (Shipment $record): ?string => $record->checked && filled($record->validated_address1)
-                                        ? $record->validated_state
-                                        : $record->state),
-                                TextEntry::make('effective_zip')
-                                    ->label('ZIP')
+                                        ? $record->validated_state_or_province
+                                        : $record->state_or_province),
+                                TextEntry::make('effective_postal_code')
+                                    ->label('Postal Code')
                                     ->state(fn (Shipment $record): ?string => $record->checked && filled($record->validated_address1)
-                                        ? $record->validated_zip
-                                        : $record->zip),
+                                        ? $record->validated_postal_code
+                                        : $record->postal_code),
                                 TextEntry::make('country'),
                             ])
                             ->columns(2),

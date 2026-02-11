@@ -4,13 +4,13 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Origin ZIP Code
+    | Origin Postal Code
     |--------------------------------------------------------------------------
     |
-    | The ZIP code where shipments originate from.
+    | The postal code where shipments originate from.
     |
     */
-    'origin_zip' => env('SHIPPING_ORIGIN_ZIP', '98072'),
+    'origin_postal_code' => env('SHIPPING_ORIGIN_POSTAL_CODE', '98072'),
 
     /*
     |--------------------------------------------------------------------------
@@ -27,8 +27,8 @@ return [
         'street' => env('SHIPPING_FROM_STREET', ''),
         'street2' => env('SHIPPING_FROM_STREET2', ''),
         'city' => env('SHIPPING_FROM_CITY', ''),
-        'state' => env('SHIPPING_FROM_STATE', ''),
-        'zip_plus4' => env('SHIPPING_FROM_ZIP_PLUS4', ''),
+        'state' => env('SHIPPING_FROM_STATE_OR_PROVINCE', ''),
+        'postal_code_plus4' => env('SHIPPING_FROM_POSTAL_CODE_PLUS4', ''),
         'phone' => env('SHIPPING_FROM_PHONE', ''),
     ],
 

@@ -60,7 +60,7 @@ it('fetches USPS rates for a package', function (): void {
 
     $shipment = Shipment::factory()
         ->for($shippingMethod)
-        ->create(['zip' => '90210']);
+        ->create(['postal_code' => '90210']);
     $package = Package::factory()
         ->for($shipment)
         ->create([
@@ -112,7 +112,7 @@ it('fetches FedEx rates for a package', function (): void {
 
     $shipment = Shipment::factory()
         ->for($shippingMethod)
-        ->create(['zip' => '90210']);
+        ->create(['postal_code' => '90210']);
     $package = Package::factory()
         ->for($shipment)
         ->create([
@@ -188,7 +188,7 @@ it('fetches rates from multiple carriers', function (): void {
 
     $shipment = Shipment::factory()
         ->for($shippingMethod)
-        ->create(['zip' => '90210']);
+        ->create(['postal_code' => '90210']);
     $package = Package::factory()
         ->for($shipment)
         ->create();
@@ -361,7 +361,7 @@ it('falls back to all configured carriers when shipment has no shipping method',
     // Create shipment with NO shipping method
     $shipment = Shipment::factory()->create([
         'shipping_method_id' => null,
-        'zip' => '90210',
+        'postal_code' => '90210',
     ]);
     $package = Package::factory()
         ->for($shipment)
@@ -474,7 +474,7 @@ it('excludes inactive carrier services from rate shopping', function (): void {
 
     $shipment = Shipment::factory()
         ->for($shippingMethod)
-        ->create(['zip' => '90210']);
+        ->create(['postal_code' => '90210']);
     $package = Package::factory()
         ->for($shipment)
         ->create();
@@ -523,7 +523,7 @@ it('excludes carrier services with inactive carriers from rate shopping', functi
 
     $shipment = Shipment::factory()
         ->for($shippingMethod)
-        ->create(['zip' => '90210']);
+        ->create(['postal_code' => '90210']);
     $package = Package::factory()
         ->for($shipment)
         ->create();

@@ -140,8 +140,8 @@ it('imports shopify orders into shipments table with metadata', function (): voi
     expect($shipment->first_name)->toBe('Jane');
     expect($shipment->last_name)->toBe('Smith');
     expect($shipment->city)->toBe('Seattle');
-    expect($shipment->state)->toBe('WA');
-    expect($shipment->zip)->toBe('98101');
+    expect($shipment->state_or_province)->toBe('WA');
+    expect($shipment->postal_code)->toBe('98101');
     expect($shipment->country)->toBe('US');
     expect($shipment->email)->toBe('test@example.com');
     expect($shipment->channel_id)->toBe($channel->id);

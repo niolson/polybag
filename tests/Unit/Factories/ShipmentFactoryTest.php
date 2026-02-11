@@ -10,8 +10,8 @@ it('creates a basic shipment', function (): void {
         ->and($shipment->shipment_reference)->not->toBeNull()
         ->and($shipment->address1)->not->toBeNull()
         ->and($shipment->city)->not->toBeNull()
-        ->and($shipment->state)->not->toBeNull()
-        ->and($shipment->zip)->not->toBeNull()
+        ->and($shipment->state_or_province)->not->toBeNull()
+        ->and($shipment->postal_code)->not->toBeNull()
         ->and($shipment->country)->toBe('US')
         ->and($shipment->shipped)->toBeFalsy(); // shipped defaults to null/false
 });

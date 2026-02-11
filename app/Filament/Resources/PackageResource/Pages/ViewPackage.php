@@ -121,10 +121,10 @@ class ViewPackage extends ViewRecord
                             ->placeholder('—'),
                         TextEntry::make('shipment.city')
                             ->label('City'),
-                        TextEntry::make('shipment.state')
-                            ->label('State'),
-                        TextEntry::make('shipment.zip')
-                            ->label('ZIP'),
+                        TextEntry::make('shipment.state_or_province')
+                            ->label('State/Province'),
+                        TextEntry::make('shipment.postal_code')
+                            ->label('Postal Code'),
                         TextEntry::make('shipment.country')
                             ->label('Country'),
                     ]),

@@ -22,8 +22,8 @@ class ShipmentFactory extends Factory
             'address1' => fake()->streetAddress(),
             'address2' => fake()->optional()->secondaryAddress(),
             'city' => fake()->city(),
-            'state' => fake()->stateAbbr(),
-            'zip' => fake()->postcode(),
+            'state_or_province' => fake()->stateAbbr(),
+            'postal_code' => fake()->postcode(),
             'country' => 'US',
             'phone' => fake()->optional()->phoneNumber(),
             'phone_extension' => null,
@@ -45,8 +45,8 @@ class ShipmentFactory extends Factory
             'validation_message' => 'Address confirmed deliverable',
             'validated_address1' => $attributes['address1'],
             'validated_city' => $attributes['city'],
-            'validated_state' => $attributes['state'],
-            'validated_zip' => $attributes['zip'],
+            'validated_state_or_province' => $attributes['state_or_province'],
+            'validated_postal_code' => $attributes['postal_code'],
             'validated_country' => $attributes['country'],
         ]);
     }
@@ -83,8 +83,8 @@ class ShipmentFactory extends Factory
     {
         return $this->state(fn () => [
             'country' => fake()->randomElement(['CA', 'MX', 'GB', 'DE', 'FR', 'AU', 'JP']),
-            'state' => fake()->stateAbbr(),
-            'zip' => fake()->postcode(),
+            'state_or_province' => fake()->stateAbbr(),
+            'postal_code' => fake()->postcode(),
         ]);
     }
 

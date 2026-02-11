@@ -54,8 +54,8 @@ class Settings extends Page
             'from_address_street' => SettingsService::get('from_address.street', ''),
             'from_address_street2' => SettingsService::get('from_address.street2', ''),
             'from_address_city' => SettingsService::get('from_address.city', ''),
-            'from_address_state' => SettingsService::get('from_address.state', ''),
-            'from_address_zip' => SettingsService::get('from_address.zip', ''),
+            'from_address_state_or_province' => SettingsService::get('from_address.state_or_province', ''),
+            'from_address_postal_code' => SettingsService::get('from_address.postal_code', ''),
             'from_address_phone' => SettingsService::get('from_address.phone', ''),
             'packing_validation_enabled' => SettingsService::get('packing_validation_enabled', true),
             'transparency_enabled' => SettingsService::get('transparency_enabled', true),
@@ -103,13 +103,13 @@ class Settings extends Page
                                 ->label('City')
                                 ->required()
                                 ->maxLength(50),
-                            TextInput::make('from_address_state')
-                                ->label('State')
+                            TextInput::make('from_address_state_or_province')
+                                ->label('State/Province')
                                 ->required()
                                 ->maxLength(2)
                                 ->placeholder('WA'),
-                            TextInput::make('from_address_zip')
-                                ->label('ZIP Code')
+                            TextInput::make('from_address_postal_code')
+                                ->label('Postal Code')
                                 ->required()
                                 ->maxLength(10)
                                 ->placeholder('98072'),
@@ -180,8 +180,8 @@ class Settings extends Page
             'from_address.street' => $data['from_address_street'] ?? '',
             'from_address.street2' => $data['from_address_street2'] ?? '',
             'from_address.city' => $data['from_address_city'] ?? '',
-            'from_address.state' => $data['from_address_state'] ?? '',
-            'from_address.zip' => $data['from_address_zip'] ?? '',
+            'from_address.state_or_province' => $data['from_address_state_or_province'] ?? '',
+            'from_address.postal_code' => $data['from_address_postal_code'] ?? '',
             'from_address.phone' => $data['from_address_phone'] ?? '',
             'packing_validation_enabled' => $data['packing_validation_enabled'] ?? true,
             'transparency_enabled' => $data['transparency_enabled'] ?? true,
@@ -218,6 +218,7 @@ class Settings extends Page
             Cache::forget('usps_payment_authorization_token');
             Cache::forget('fedex_authenticator');
             Cache::forget('ups_authenticator');
+            Cache::forget('amazon_sp_api_access_token');
         }
 
         Notification::make()

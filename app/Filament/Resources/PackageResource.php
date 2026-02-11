@@ -123,12 +123,12 @@ class PackageResource extends Resource
                         Forms\Components\Placeholder::make('ship_to_city')
                             ->label('City')
                             ->content(fn (?Package $record) => $record?->shipment->city ?? '—'),
-                        Forms\Components\Placeholder::make('ship_to_state')
-                            ->label('State')
-                            ->content(fn (?Package $record) => $record?->shipment->state ?? '—'),
-                        Forms\Components\Placeholder::make('ship_to_zip')
-                            ->label('ZIP')
-                            ->content(fn (?Package $record) => $record?->shipment->zip ?? '—'),
+                        Forms\Components\Placeholder::make('ship_to_state_or_province')
+                            ->label('State/Province')
+                            ->content(fn (?Package $record) => $record?->shipment->state_or_province ?? '—'),
+                        Forms\Components\Placeholder::make('ship_to_postal_code')
+                            ->label('Postal Code')
+                            ->content(fn (?Package $record) => $record?->shipment->postal_code ?? '—'),
                         Forms\Components\Placeholder::make('ship_to_country')
                             ->label('Country')
                             ->content(fn (?Package $record) => $record?->shipment->country ?? '—'),

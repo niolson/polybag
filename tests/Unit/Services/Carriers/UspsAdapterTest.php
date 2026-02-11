@@ -79,8 +79,8 @@ it('fetches rates from USPS API', function (): void {
     ]);
 
     $request = new RateRequest(
-        originZip: '98072',
-        destinationZip: '90210',
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
         packages: [new PackageData(weight: 2.5, length: 10, width: 8, height: 6)],
     );
 
@@ -139,8 +139,8 @@ it('filters rates by service codes', function (): void {
     ]);
 
     $request = new RateRequest(
-        originZip: '98072',
-        destinationZip: '90210',
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
         packages: [new PackageData(weight: 2.5, length: 10, width: 8, height: 6)],
     );
 
@@ -191,8 +191,8 @@ it('filters out invalid processing categories', function (): void {
     ]);
 
     $request = new RateRequest(
-        originZip: '98072',
-        destinationZip: '90210',
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
         packages: [new PackageData(weight: 2.5, length: 10, width: 8, height: 6)],
     );
 
@@ -271,8 +271,8 @@ it('returns empty collection when API returns no rates', function (): void {
     ]);
 
     $request = new RateRequest(
-        originZip: '98072',
-        destinationZip: '90210',
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
         packages: [new PackageData(weight: 2.5, length: 10, width: 8, height: 6)],
     );
 
@@ -296,8 +296,8 @@ it('creates shipment and returns tracking info', function (): void {
         lastName: 'Center',
         streetAddress: '123 Warehouse St',
         city: 'Seattle',
-        state: 'WA',
-        zip: '98072',
+        stateOrProvince: 'WA',
+        postalCode: '98072',
     );
 
     $toAddress = new AddressData(
@@ -305,8 +305,8 @@ it('creates shipment and returns tracking info', function (): void {
         lastName: 'Doe',
         streetAddress: '456 Main St',
         city: 'Los Angeles',
-        state: 'CA',
-        zip: '90210',
+        stateOrProvince: 'CA',
+        postalCode: '90210',
     );
 
     $packageData = new PackageData(weight: 2.5, length: 10, width: 8, height: 6);
@@ -394,8 +394,8 @@ it('filters rate indicators for box type to include CP but exclude soft pack ind
     ]);
 
     $request = new RateRequest(
-        originZip: '98072',
-        destinationZip: '90210',
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
         packages: [new PackageData(weight: 2.5, length: 10, width: 8, height: 6, boxType: BoxSizeType::BOX)],
     );
 
@@ -460,8 +460,8 @@ it('filters rate indicators for polybag to include soft pack indicators but excl
     ]);
 
     $request = new RateRequest(
-        originZip: '98072',
-        destinationZip: '90210',
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
         packages: [new PackageData(weight: 2.5, length: 10, width: 8, height: 6, boxType: BoxSizeType::POLYBAG)],
     );
 
@@ -526,8 +526,8 @@ it('filters rate indicators for padded mailer same as polybag', function (): voi
     ]);
 
     $request = new RateRequest(
-        originZip: '98072',
-        destinationZip: '90210',
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
         packages: [new PackageData(weight: 2.5, length: 10, width: 8, height: 6, boxType: BoxSizeType::PADDED_MAILER)],
     );
 
@@ -592,8 +592,8 @@ it('allows all rate indicators when box type is null for backwards compatibility
     ]);
 
     $request = new RateRequest(
-        originZip: '98072',
-        destinationZip: '90210',
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
         packages: [new PackageData(weight: 2.5, length: 10, width: 8, height: 6, boxType: null)],
     );
 
@@ -614,8 +614,8 @@ it('handles API server error by throwing exception', function (): void {
     ]);
 
     $request = new RateRequest(
-        originZip: '98072',
-        destinationZip: '90210',
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
         packages: [new PackageData(weight: 2.5, length: 10, width: 8, height: 6)],
     );
 
@@ -631,8 +631,8 @@ it('handles malformed API response gracefully', function (): void {
     ]);
 
     $request = new RateRequest(
-        originZip: '98072',
-        destinationZip: '90210',
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
         packages: [new PackageData(weight: 2.5, length: 10, width: 8, height: 6)],
     );
 
@@ -672,11 +672,11 @@ it('handles international rate request', function (): void {
     ]);
 
     $request = new RateRequest(
-        originZip: '98072',
-        destinationZip: 'V6B 1A1',
+        originPostalCode: '98072',
+        destinationPostalCode: 'V6B 1A1',
         destinationCountry: 'CA',
         destinationCity: 'Vancouver',
-        destinationState: 'BC',
+        destinationStateOrProvince: 'BC',
         packages: [new PackageData(weight: 2.5, length: 10, width: 8, height: 6)],
     );
 
@@ -724,8 +724,8 @@ it('handles residential vs commercial addresses', function (): void {
 
     // Residential request
     $residentialRequest = new RateRequest(
-        originZip: '98072',
-        destinationZip: '90210',
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
         residential: true,
         packages: [new PackageData(weight: 2.5, length: 10, width: 8, height: 6)],
     );

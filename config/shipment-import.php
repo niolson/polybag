@@ -80,8 +80,8 @@ return [
                     'address1' => 'address1',
                     'address2' => 'address2',
                     'city' => 'city',
-                    'state' => 'state',
-                    'zip' => 'zip',
+                    'state' => 'state_or_province',
+                    'zip' => 'postal_code',
                     'country' => 'country',
                     'phone' => 'phone',
                     'phone_extension' => 'phone_extension',
@@ -121,12 +121,22 @@ return [
             ],
         ],
 
-        // Future: Amazon SP-API source
-        // 'amazon' => [
-        //     'driver' => \App\Services\ShipmentImport\Sources\AmazonSource::class,
-        //     'enabled' => env('SHIPMENT_IMPORT_AMAZON_ENABLED', false),
-        //     'field_mapping' => [...],
-        // ],
+        'amazon' => [
+            'driver' => \App\Services\ShipmentImport\Sources\AmazonSource::class,
+            'enabled' => env('SHIPMENT_IMPORT_AMAZON_ENABLED', false),
+            'channel_name' => env('AMAZON_CHANNEL_NAME', 'Amazon'),
+            'shipping_method' => env('AMAZON_SHIPPING_METHOD'),
+            'lookback_days' => env('AMAZON_IMPORT_LOOKBACK_DAYS', 30),
+            'export' => [
+                'enabled' => env('SHIPMENT_EXPORT_AMAZON_ENABLED', false),
+                'field_mapping' => [
+                    'tracking_number' => 'tracking_number',
+                    'carrier' => 'carrier',
+                    'shipment_reference' => 'shipment_reference',
+                    'amazon_order_id' => 'amazon_order_id',
+                ],
+            ],
+        ],
 
     ],
 
@@ -140,7 +150,7 @@ return [
     |
     */
     'export_channel_map' => [
-        // 'Amazon' => ['database'],
+        'Amazon' => ['amazon'],
         'Shopify' => ['shopify'],
         '*' => ['database'],
     ],

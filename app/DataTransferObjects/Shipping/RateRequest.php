@@ -10,11 +10,11 @@ readonly class RateRequest
      * @param  array<PackageData>  $packages
      */
     public function __construct(
-        public string $originZip,
-        public string $destinationZip,
+        public string $originPostalCode,
+        public string $destinationPostalCode,
         public string $destinationCountry = 'US',
         public ?string $destinationCity = null,
-        public ?string $destinationState = null,
+        public ?string $destinationStateOrProvince = null,
         public ?bool $residential = null,
         public array $packages = [],
     ) {}
@@ -24,11 +24,11 @@ readonly class RateRequest
         $shipment = $package->shipment;
 
         return new self(
-            originZip: config('shipping.origin_zip', '98072'),
-            destinationZip: $shipment->validated_zip ?? $shipment->zip,
+            originPostalCode: config('shipping.origin_postal_code', '98072'),
+            destinationPostalCode: $shipment->validated_postal_code ?? $shipment->postal_code,
             destinationCountry: $shipment->validated_country ?? $shipment->country ?? 'US',
             destinationCity: $shipment->validated_city ?? $shipment->city,
-            destinationState: $shipment->validated_state ?? $shipment->state,
+            destinationStateOrProvince: $shipment->validated_state_or_province ?? $shipment->state_or_province,
             residential: $shipment->validated_residential ?? $shipment->residential,
             packages: [PackageData::fromPackage($package)],
         );
