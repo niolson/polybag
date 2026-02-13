@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Web-based shipping application for packing and labeling shipments. Built with Laravel 12 + Filament.
 
-**Tech Stack:** PHP 8.2+, Laravel 12.0, Filament 4.0, Vite 7.0, Tailwind CSS 4.0, Pest 4.2
+**Tech Stack:** PHP 8.2+, Laravel 12.x, Filament 5.x, Livewire 4.x, Vite 7.0, Tailwind CSS 4.x, Pest 4.x
 
 **Database:** MySQL
 

@@ -318,7 +318,7 @@ class UspsAdapter implements CarrierAdapterInterface
 
         foreach ($request->customsItems as $item) {
             $contentItem = [
-                'itemDescription' => mb_substr($item->description, 0, 50),
+                'itemDescription' => mb_substr($item->description, 0, 30),
                 'itemQuantity' => $item->quantity,
                 'itemTotalValue' => round($item->unitValue * $item->quantity, 2),
                 'weightUOM' => 'lb',
@@ -471,20 +471,20 @@ class UspsAdapter implements CarrierAdapterInterface
     private function buildDomesticAddress(\App\DataTransferObjects\Shipping\AddressData $address): array
     {
         $result = [
-            'firstName' => $address->firstName,
-            'lastName' => $address->lastName,
-            'streetAddress' => $address->streetAddress,
-            'city' => $address->city,
+            'firstName' => mb_substr($address->firstName, 0, 30),
+            'lastName' => mb_substr($address->lastName, 0, 30),
+            'streetAddress' => mb_substr($address->streetAddress, 0, 50),
+            'city' => mb_substr($address->city, 0, 28),
             'state' => $address->stateOrProvince,
             'ZIPCode' => substr($address->postalCode, 0, 5),
         ];
 
         if ($address->company) {
-            $result['firm'] = $address->company;
+            $result['firm'] = mb_substr($address->company, 0, 38);
         }
 
         if ($address->streetAddress2) {
-            $result['secondaryAddress'] = $address->streetAddress2;
+            $result['secondaryAddress'] = mb_substr($address->streetAddress2, 0, 50);
         }
 
         return $result;
@@ -498,28 +498,28 @@ class UspsAdapter implements CarrierAdapterInterface
     private function buildInternationalAddress(\App\DataTransferObjects\Shipping\AddressData $address): array
     {
         $result = [
-            'firstName' => $address->firstName,
-            'lastName' => $address->lastName,
-            'streetAddress' => $address->streetAddress,
-            'city' => $address->city,
+            'firstName' => mb_substr($address->firstName, 0, 30),
+            'lastName' => mb_substr($address->lastName, 0, 30),
+            'streetAddress' => mb_substr($address->streetAddress, 0, 50),
+            'city' => mb_substr($address->city, 0, 30),
             'country' => $address->country,
             'countryISOAlpha2Code' => $address->country,
         ];
 
         if ($address->stateOrProvince) {
-            $result['province'] = $address->stateOrProvince;
+            $result['province'] = mb_substr($address->stateOrProvince, 0, 30);
         }
 
         if ($address->postalCode) {
-            $result['postalCode'] = $address->postalCode;
+            $result['postalCode'] = mb_substr($address->postalCode, 0, 12);
         }
 
         if ($address->company) {
-            $result['firm'] = $address->company;
+            $result['firm'] = mb_substr($address->company, 0, 38);
         }
 
         if ($address->streetAddress2) {
-            $result['secondaryAddress'] = $address->streetAddress2;
+            $result['secondaryAddress'] = mb_substr($address->streetAddress2, 0, 50);
         }
 
         return $result;

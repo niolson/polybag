@@ -67,8 +67,9 @@ class Pack extends Page
 
             foreach ($this->shipment->shipmentItems as $shipmentItem) {
                 $packingItem = $shipmentItem->toArray();
+                $packingItem['sku'] = $shipmentItem->product?->sku;
                 $packingItem['barcode'] = $shipmentItem->product?->barcode;
-                $packingItem['description'] = $shipmentItem->product?->description;
+                $packingItem['name'] = $shipmentItem->product?->name;
                 $packingItem['packed'] = 0;
                 $packingItem['transparency_codes'] = [];
                 $this->packingItems[] = $packingItem;

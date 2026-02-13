@@ -60,18 +60,17 @@
 
                 const len = trimmed.length;
 
-                if (len >= 1 && len <= 3) {
+                const isBoxCode = !!this.boxSizes[trimmed];
+                const isProduct = this.packingItems.some(item => item.barcode === trimmed || item.sku === trimmed);
+                const hasDimensions = this.height && this.width && this.length;
+
+                if (isBoxCode && isProduct) {
+                    // Collision: prefer box code if dimensions aren't set, product if they are
+                    hasDimensions ? this.scanProduct(trimmed) : this.scanBox(trimmed);
+                } else if (isBoxCode) {
                     this.scanBox(trimmed);
-                }
-                else if (len >= 6 && len <= 14) {
+                } else {
                     this.scanProduct(trimmed);
-                }
-                else {
-                    new FilamentNotification()
-                        .title('Input not recognized')
-                        .body(`'${trimmed}' is not a valid box code or product barcode`)
-                        .danger()
-                        .send();
                 }
 
                 this.input = '';
@@ -120,7 +119,7 @@
             },
 
             scanProduct(barcode) {
-                const idx = this.packingItems.findIndex(item => item.barcode === barcode);
+                const idx = this.packingItems.findIndex(item => item.barcode === barcode || item.sku === barcode);
                 if (idx === -1) {
                     new FilamentNotification()
                         .title('Item not found')
@@ -416,7 +415,7 @@
         </form>
 
     @if($shipment)
-    <x-filament::section class="mt-6 col-span-full">
+    <x-filament::section class="mt-6 col-span-full" :has-content-el="false">
         <x-slot name="heading">
             Shipment: {{ $shipment->shipment_reference }}
         </x-slot>
@@ -430,8 +429,9 @@
                     <tr class="bg-gray-50 dark:bg-white/5">
                         <th class="px-3 py-3.5 text-center text-sm font-semibold text-gray-950 dark:text-white">Qty</th>
                         <th class="px-3 py-3.5 text-center text-sm font-semibold text-gray-950 dark:text-white">Packed</th>
+                        <th class="px-3 py-3.5 text-left text-sm font-semibold text-gray-950 dark:text-white">SKU</th>
                         <th class="px-3 py-3.5 text-left text-sm font-semibold text-gray-950 dark:text-white">Barcode</th>
-                        <th class="px-3 py-3.5 text-left text-sm font-semibold text-gray-950 dark:text-white">Description</th>
+                        <th class="px-3 py-3.5 text-left text-sm font-semibold text-gray-950 dark:text-white">Name</th>
                         @if($transparencyEnabled)
                         <th class="px-3 py-3.5 text-center text-sm font-semibold text-gray-950 dark:text-white">Transparency</th>
                         @endif
@@ -443,8 +443,9 @@
                         <tr>
                             <td class="px-3 py-4 text-center text-sm text-gray-950 dark:text-white" x-text="packingItem.quantity"></td>
                             <td class="px-3 py-4 text-center text-sm text-gray-950 dark:text-white" x-text="packingItem.packed"></td>
+                            <td class="px-3 py-4 text-sm text-gray-950 dark:text-white" x-text="packingItem.sku"></td>
                             <td class="px-3 py-4 text-sm text-gray-950 dark:text-white" x-text="packingItem.barcode"></td>
-                            <td class="px-3 py-4 text-sm text-gray-950 dark:text-white" x-text="packingItem.description"></td>
+                            <td class="px-3 py-4 text-sm text-gray-950 dark:text-white max-w-xs truncate" x-text="packingItem.name" x-bind:title="packingItem.name"></td>
                             @if($transparencyEnabled)
                             <td class="px-3 py-4 text-center">
                                 <template x-if="packingItem.transparency">
