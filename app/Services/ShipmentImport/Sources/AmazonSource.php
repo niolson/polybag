@@ -226,11 +226,13 @@ class AmazonSource implements ExportDestinationInterface, ImportSourceInterface
         $items = $order['orderItems'] ?? [];
 
         // Sum line item values for unfulfilled items using proceeds breakdowns
+        $sandbox = (bool) SettingsService::get('sandbox_mode', false);
         $totalValue = 0;
         foreach ($items as $item) {
             $qtyOrdered = (int) ($item['quantityOrdered'] ?? 0);
-            $qtyFulfilled = (int) ($item['fulfillment']['quantityFulfilled'] ?? 0);
-            $qty = max(0, $qtyOrdered - $qtyFulfilled);
+            $qty = $sandbox
+                ? $qtyOrdered
+                : max(0, $qtyOrdered - (int) ($item['fulfillment']['quantityFulfilled'] ?? 0));
 
             $itemTotal = $this->sumItemProceeds($item);
             $unitPrice = $qtyOrdered > 0 ? $itemTotal / $qtyOrdered : 0;
@@ -269,8 +271,10 @@ class AmazonSource implements ExportDestinationInterface, ImportSourceInterface
     private function mapOrderItemToShipmentItem(array $item): array
     {
         $qtyOrdered = (int) ($item['quantityOrdered'] ?? 0);
-        $qtyFulfilled = (int) ($item['fulfillment']['quantityFulfilled'] ?? 0);
-        $qtyRemaining = max(0, $qtyOrdered - $qtyFulfilled);
+        $sandbox = (bool) SettingsService::get('sandbox_mode', false);
+        $qtyRemaining = $sandbox
+            ? $qtyOrdered
+            : max(0, $qtyOrdered - (int) ($item['fulfillment']['quantityFulfilled'] ?? 0));
 
         $itemTotal = $this->sumItemProceeds($item);
         $unitPrice = $qtyOrdered > 0 ? $itemTotal / $qtyOrdered : 0;

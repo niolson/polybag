@@ -8,6 +8,7 @@ use App\Models\Shipment;
 use App\Services\ShipmentImport\PackageExportService;
 use App\Services\ShipmentImport\ShipmentImportService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
+use App\Services\SettingsService;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
@@ -296,6 +297,58 @@ it('validates amazon configuration requires credentials', function (): void {
 
     expect(fn () => $source->validateConfiguration())
         ->toThrow(InvalidArgumentException::class, 'client ID');
+});
+
+it('imports sandbox order with full quantities even when already fulfilled', function (): void {
+    $channel = Channel::factory()->create(['name' => 'Amazon', 'channel_reference' => 'Amazon']);
+
+    SettingsService::set('sandbox_mode', true);
+
+    // Sandbox order where items are already fulfilled
+    $order = sampleAmazonOrder();
+    $order['orderItems'] = [
+        [
+            'product' => [
+                'sellerSku' => 'SKU-100',
+                'title' => 'Fulfilled Item',
+            ],
+            'quantityOrdered' => 3,
+            'fulfillment' => ['quantityFulfilled' => 3],
+            'proceeds' => [
+                'breakdowns' => [
+                    [
+                        'type' => 'ITEM',
+                        'subtotal' => ['amount' => '30.00', 'currencyCode' => 'USD'],
+                    ],
+                ],
+            ],
+        ],
+    ];
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([$order]),
+    ]);
+
+    $source = new AmazonSource([
+        'driver' => AmazonSource::class,
+        'enabled' => true,
+        'channel_name' => 'Amazon',
+        'shipping_method' => null,
+        'lookback_days' => 30,
+        'export' => ['enabled' => false, 'field_mapping' => []],
+    ]);
+
+    $result = ShipmentImportService::forSource($source)->import();
+
+    expect($result->shipmentsCreated)->toBe(1);
+
+    $shipment = Shipment::where('shipment_reference', '111-2222222-3333333')->first();
+    // In sandbox mode, full quantityOrdered (3) is used, not 0
+    expect((float) $shipment->value)->toBe(30.0);
+
+    $lineItem = $shipment->shipmentItems->first();
+    expect($lineItem->quantity)->toBe(3);
+    expect((float) $lineItem->value)->toBe(10.0);
 });
 
 it('calculates item unit prices correctly from proceeds breakdowns', function (): void {
