@@ -81,7 +81,7 @@
         }
 
         // Print label via QZ Tray
-        async function printLabel(base64Data, orientation = 'portrait') {
+        async function printLabel(base64Data, orientation = 'portrait', format = 'pdf') {
             const printer = getLabelPrinter();
 
             if (!printer) {
@@ -106,10 +106,9 @@
                     scaleContent: true
                 });
 
-                // For landscape PDFs, rotate content 90 degrees to fit
                 const data = [{
                     type: 'pixel',
-                    format: 'pdf',
+                    format: format === 'image' ? 'image' : 'pdf',
                     flavor: 'base64',
                     data: base64Data,
                     options: orientation === 'landscape' ? { rotation: 90 } : {}
@@ -165,7 +164,7 @@
         // Listen for print events from Livewire
         document.addEventListener('livewire:init', () => {
             Livewire.on('print-label', (event) => {
-                printLabel(event.label, event.orientation || 'portrait');
+                printLabel(event.label, event.orientation || 'portrait', event.format || 'pdf');
             });
 
             Livewire.on('print-report', (event) => {

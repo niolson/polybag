@@ -198,7 +198,7 @@ class PackageResource extends Resource
                     ->color('gray')
                     ->visible(fn (Package $record) => $record->shipped && $record->label_data)
                     ->action(function (Package $record, $livewire): void {
-                        $livewire->dispatch('print-label', label: $record->label_data, orientation: $record->label_orientation ?? 'portrait');
+                        $livewire->dispatch('print-label', label: $record->label_data, orientation: $record->label_orientation ?? 'portrait', format: $record->label_format ?? 'pdf');
                     }),
                 Actions\Action::make('void')
                     ->label('Void Label')

@@ -6,11 +6,11 @@ use App\Http\Integrations\Concerns\HasCachedAuthentication;
 use App\Services\SettingsService;
 use Saloon\Helpers\OAuth2\OAuthConfig;
 use Saloon\Http\Connector;
-use Saloon\Traits\OAuth2\ClientCredentialsGrant;
+use Saloon\Traits\OAuth2\ClientCredentialsBasicAuthGrant;
 
 class UpsConnector extends Connector
 {
-    use ClientCredentialsGrant;
+    use ClientCredentialsBasicAuthGrant;
     use HasCachedAuthentication;
 
     /**

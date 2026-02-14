@@ -249,7 +249,7 @@ class Ship extends Page implements HasForms
             }
 
             if ($response->labelData && ! SettingsService::get('suppress_printing', false)) {
-                $this->printLabel($response->labelData, $response->labelOrientation ?? 'portrait');
+                $this->printLabel($response->labelData, $response->labelOrientation ?? 'portrait', $response->labelFormat ?? 'pdf');
             } elseif ($response->labelData) {
                 $this->notifyInfo('Label printing suppressed (sandbox mode)');
             }
@@ -289,8 +289,8 @@ class Ship extends Page implements HasForms
         }
     }
 
-    private function printLabel(string $base64Label, string $orientation = 'portrait'): void
+    private function printLabel(string $base64Label, string $orientation = 'portrait', string $format = 'pdf'): void
     {
-        $this->dispatch('print-label', label: $base64Label, orientation: $orientation);
+        $this->dispatch('print-label', label: $base64Label, orientation: $orientation, format: $format);
     }
 }

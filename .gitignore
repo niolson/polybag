@@ -1,7 +1,7 @@
 *.log
 .DS_Store
 ARCHITECTURE.md
-roadmap.md
+ROADMAP.md
 .env
 .env.backup
 .env.production
