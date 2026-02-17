@@ -7,11 +7,20 @@ use App\Services\SettingsService;
 use Saloon\Helpers\OAuth2\OAuthConfig;
 use Saloon\Http\Connector;
 use Saloon\Traits\OAuth2\ClientCredentialsBasicAuthGrant;
+use Saloon\Traits\Plugins\HasTimeout;
 
 class UpsConnector extends Connector
 {
     use ClientCredentialsBasicAuthGrant;
     use HasCachedAuthentication;
+    use HasTimeout;
+
+    protected int $connectTimeout = 5;
+
+    public function getRequestTimeout(): float
+    {
+        return (float) SettingsService::get('carrier_api_timeout', 15);
+    }
 
     /**
      * Number of retry attempts for failed requests.

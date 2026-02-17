@@ -4,6 +4,7 @@ namespace App\Services\Carriers;
 
 use App\Contracts\CarrierAdapterInterface;
 use App\DataTransferObjects\Shipping\CancelResponse;
+use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
@@ -17,6 +18,7 @@ use App\Http\Integrations\USPS\Requests\ShippingOptions;
 use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Package;
 use Illuminate\Support\Collection;
+use Saloon\Http\Response;
 
 class UspsAdapter implements CarrierAdapterInterface
 {
@@ -27,12 +29,97 @@ class UspsAdapter implements CarrierAdapterInterface
 
     public function getRates(RateRequest $request, array $serviceCodes): Collection
     {
-        $connector = USPSConnector::getUspsConnector();
+        $prepared = $this->prepareRateRequest($request, $serviceCodes);
 
-        if (empty($request->packages)) {
+        if (! $prepared) {
             return collect();
         }
 
+        $connector = USPSConnector::getUspsConnector();
+        $apiRequest = $this->buildRateApiRequest($request);
+        $response = $connector->send($apiRequest);
+
+        return $this->parseRateResponse($response, $request, $serviceCodes);
+    }
+
+    public function prepareRateRequest(RateRequest $request, array $serviceCodes): ?PreparedRateRequest
+    {
+        if (empty($request->packages)) {
+            return null;
+        }
+
+        $connector = USPSConnector::getUspsConnector();
+        $apiRequest = $this->buildRateApiRequest($request);
+        $pendingRequest = $connector->createPendingRequest($apiRequest);
+
+        return new PreparedRateRequest(
+            pendingRequest: $pendingRequest,
+            carrierName: 'USPS',
+        );
+    }
+
+    public function parseRateResponse(Response $response, RateRequest $request, array $serviceCodes): Collection
+    {
+        if (! $response->successful()) {
+            logger()->error('USPS API Error', [
+                'status' => $response->status(),
+                'body' => $response->json(),
+            ]);
+
+            return collect();
+        }
+
+        $pricingOptions = $response->json('pricingOptions', []);
+
+        if (empty($pricingOptions) || ! is_array($pricingOptions)) {
+            logger()->warning('USPS API returned empty or invalid pricingOptions', [
+                'status' => $response->status(),
+                'body' => $response->json(),
+            ]);
+
+            return collect();
+        }
+
+        $package = $request->packages[0];
+        $results = collect();
+
+        foreach ($pricingOptions[0]['shippingOptions'] ?? [] as $shippingOption) {
+            foreach ($shippingOption['rateOptions'] ?? [] as $rateOption) {
+                $rate = $rateOption['rates'][0] ?? null;
+
+                if (! $rate) {
+                    continue;
+                }
+
+                if (! $this->isValidRate($rate, $serviceCodes, $package->boxType)) {
+                    continue;
+                }
+
+                $results->push(new RateResponse(
+                    carrier: 'USPS',
+                    serviceCode: $rate['mailClass'],
+                    serviceName: $rate['description'] ?? $rate['mailClass'],
+                    price: (float) ($rateOption['totalBasePrice'] ?? 0),
+                    deliveryCommitment: $rateOption['commitment']['name'] ?? null,
+                    deliveryDate: $rateOption['commitment']['scheduleDeliveryDate'] ?? null,
+                    metadata: [
+                        'mailClass' => $rate['mailClass'],
+                        'processingCategory' => $rate['processingCategory'],
+                        'rateIndicator' => $rate['rateIndicator'],
+                        'destinationEntryFacilityType' => $rate['destinationEntryFacilityType'],
+                    ],
+                ));
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * Build the USPS rate API request.
+     */
+    private function buildRateApiRequest(RateRequest $request): ShippingOptions
+    {
         $package = $request->packages[0];
         $isInternational = $request->destinationCountry !== 'US';
 
@@ -67,60 +154,7 @@ class UspsAdapter implements CarrierAdapterInterface
         $apiRequest = new ShippingOptions;
         $apiRequest->body()->set($body);
 
-        $response = $connector->send($apiRequest);
-
-        if (! $response->successful()) {
-            logger()->error('USPS API Error', [
-                'status' => $response->status(),
-                'body' => $response->json(),
-            ]);
-
-            return collect();
-        }
-
-        $pricingOptions = $response->json('pricingOptions', []);
-
-        if (empty($pricingOptions) || ! is_array($pricingOptions)) {
-            logger()->warning('USPS API returned empty or invalid pricingOptions', [
-                'status' => $response->status(),
-                'body' => $response->json(),
-            ]);
-
-            return collect();
-        }
-
-        $results = collect();
-
-        foreach ($pricingOptions[0]['shippingOptions'] ?? [] as $shippingOption) {
-            foreach ($shippingOption['rateOptions'] ?? [] as $rateOption) {
-                $rate = $rateOption['rates'][0] ?? null;
-
-                if (! $rate) {
-                    continue;
-                }
-
-                if (! $this->isValidRate($rate, $serviceCodes, $package->boxType)) {
-                    continue;
-                }
-
-                $results->push(new RateResponse(
-                    carrier: 'USPS',
-                    serviceCode: $rate['mailClass'],
-                    serviceName: $rate['description'] ?? $rate['mailClass'],
-                    price: (float) ($rateOption['totalBasePrice'] ?? 0),
-                    deliveryCommitment: $rateOption['commitment']['name'] ?? null,
-                    deliveryDate: $rateOption['commitment']['scheduleDeliveryDate'] ?? null,
-                    metadata: [
-                        'mailClass' => $rate['mailClass'],
-                        'processingCategory' => $rate['processingCategory'],
-                        'rateIndicator' => $rate['rateIndicator'],
-                        'destinationEntryFacilityType' => $rate['destinationEntryFacilityType'],
-                    ],
-                ));
-            }
-        }
-
-        return $results;
+        return $apiRequest;
     }
 
     public function createShipment(ShipRequest $request): ShipResponse

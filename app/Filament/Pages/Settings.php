@@ -59,6 +59,7 @@ class Settings extends Page
             'from_address_phone' => SettingsService::get('from_address.phone', ''),
             'packing_validation_enabled' => SettingsService::get('packing_validation_enabled', true),
             'transparency_enabled' => SettingsService::get('transparency_enabled', true),
+            'carrier_api_timeout' => SettingsService::get('carrier_api_timeout', 15),
             'sandbox_mode' => SettingsService::get('sandbox_mode', false),
             'suppress_printing' => SettingsService::get('suppress_printing', false),
         ]);
@@ -134,6 +135,20 @@ class Settings extends Page
                         ])
                         ->columns(1),
 
+                    Section::make('Carrier API')
+                        ->description('Settings for carrier API requests')
+                        ->schema([
+                            TextInput::make('carrier_api_timeout')
+                                ->label('Request Timeout (seconds)')
+                                ->helperText('Maximum time to wait for a response from carrier APIs (USPS, FedEx, UPS). Default is 15 seconds.')
+                                ->numeric()
+                                ->minValue(5)
+                                ->maxValue(60)
+                                ->default(15)
+                                ->suffix('seconds'),
+                        ])
+                        ->columns(1),
+
                     Section::make('Testing')
                         ->description('Sandbox and testing settings')
                         ->schema([
@@ -185,6 +200,7 @@ class Settings extends Page
             'from_address.phone' => $data['from_address_phone'] ?? '',
             'packing_validation_enabled' => $data['packing_validation_enabled'] ?? true,
             'transparency_enabled' => $data['transparency_enabled'] ?? true,
+            'carrier_api_timeout' => (int) ($data['carrier_api_timeout'] ?? 15),
             'sandbox_mode' => $sandboxMode,
             'suppress_printing' => $suppressPrinting,
         ];

@@ -9,11 +9,20 @@ use Illuminate\Support\Facades\Cache;
 use Saloon\Helpers\OAuth2\OAuthConfig;
 use Saloon\Http\Connector;
 use Saloon\Traits\OAuth2\ClientCredentialsGrant;
+use Saloon\Traits\Plugins\HasTimeout;
 
 class USPSConnector extends Connector
 {
     use ClientCredentialsGrant;
     use HasCachedAuthentication;
+    use HasTimeout;
+
+    protected int $connectTimeout = 5;
+
+    public function getRequestTimeout(): float
+    {
+        return (float) SettingsService::get('carrier_api_timeout', 15);
+    }
 
     /**
      * Number of retry attempts for failed requests.

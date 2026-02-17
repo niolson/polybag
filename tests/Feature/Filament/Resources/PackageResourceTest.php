@@ -57,6 +57,16 @@ it('voids a label and clears shipping fields', function (): void {
             return collect();
         }
 
+        public function prepareRateRequest(\App\DataTransferObjects\Shipping\RateRequest $request, array $serviceCodes): ?\App\DataTransferObjects\Shipping\PreparedRateRequest
+        {
+            return null;
+        }
+
+        public function parseRateResponse(\Saloon\Http\Response $response, \App\DataTransferObjects\Shipping\RateRequest $request, array $serviceCodes): \Illuminate\Support\Collection
+        {
+            return collect();
+        }
+
         public function createShipment(\App\DataTransferObjects\Shipping\ShipRequest $request): \App\DataTransferObjects\Shipping\ShipResponse
         {
             return \App\DataTransferObjects\Shipping\ShipResponse::failure('Not implemented');

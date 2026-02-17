@@ -5,6 +5,7 @@ namespace App\Services\Carriers;
 use App\Contracts\CarrierAdapterInterface;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
+use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
@@ -15,6 +16,7 @@ use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Http\Integrations\Fedex\Requests\Rates;
 use App\Models\Package;
 use Illuminate\Support\Collection;
+use Saloon\Http\Response;
 
 class FedexAdapter implements CarrierAdapterInterface
 {
@@ -47,59 +49,45 @@ class FedexAdapter implements CarrierAdapterInterface
             return $this->getMockInternationalRates($request, $internationalCodes);
         }
 
-        $connector = FedexConnector::getFedexConnector();
+        $prepared = $this->prepareRateRequest($request, $serviceCodes);
 
-        if (empty($request->packages)) {
+        if (! $prepared) {
             return collect();
         }
 
-        $package = $request->packages[0];
-
-        $apiRequest = new Rates;
-        $apiRequest->body()->set([
-            'accountNumber' => [
-                'value' => config('services.fedex.account_number'),
-            ],
-            'rateRequestControlParameters' => [
-                'returnTransitTimes' => true,
-            ],
-            'requestedShipment' => [
-                'shipper' => [
-                    'address' => [
-                        'postalCode' => $request->originPostalCode,
-                        'countryCode' => 'US',
-                    ],
-                ],
-                'recipient' => [
-                    'address' => [
-                        // 'city' => $request->destinationCity,
-                        // 'stateOrProvinceCode' => $request->destinationState,
-                        'postalCode' => $request->destinationPostalCode,
-                        'countryCode' => $request->destinationCountry,
-                    ],
-                ],
-                'pickupType' => 'USE_SCHEDULED_PICKUP',
-                'rateRequestType' => ['ACCOUNT'],
-                'requestedPackageLineItems' => [
-                    [
-                        'weight' => [
-                            'units' => 'LB',
-                            'value' => $package->weight,
-                        ],
-                    ],
-                ],
-            ],
-        ]);
-
-        logger()->debug('FedEx API Request', [
-            'body' => $apiRequest->body(),
-        ]);
-
+        $connector = FedexConnector::getFedexConnector();
+        $apiRequest = $this->buildRateApiRequest($request);
         $response = $connector->send($apiRequest);
 
+        return $this->parseRateResponse($response, $request, $serviceCodes);
+    }
+
+    public function prepareRateRequest(RateRequest $request, array $serviceCodes): ?PreparedRateRequest
+    {
+        // Sandbox international mock rates don't need an API call
+        $internationalCodes = array_intersect($serviceCodes, self::INTERNATIONAL_SERVICE_CODES);
+        if ($this->isSandbox() && $this->isInternational($request) && ! empty($internationalCodes)) {
+            return null;
+        }
+
+        if (empty($request->packages)) {
+            return null;
+        }
+
+        $connector = FedexConnector::getFedexConnector();
+        $apiRequest = $this->buildRateApiRequest($request);
+        $pendingRequest = $connector->createPendingRequest($apiRequest);
+
+        return new PreparedRateRequest(
+            pendingRequest: $pendingRequest,
+            carrierName: 'FedEx',
+        );
+    }
+
+    public function parseRateResponse(Response $response, RateRequest $request, array $serviceCodes): Collection
+    {
         if (! $response->successful()) {
             $errors = $response->json('errors', []);
-            $errorMessage = ! empty($errors) ? ($errors[0]['message'] ?? 'Unknown FedEx error') : 'FedEx API error';
             logger()->error('FedEx API Error', [
                 'status' => $response->status(),
                 'errors' => $errors,
@@ -154,6 +142,54 @@ class FedexAdapter implements CarrierAdapterInterface
         }
 
         return $results;
+    }
+
+    /**
+     * Build the FedEx rate API request.
+     */
+    private function buildRateApiRequest(RateRequest $request): Rates
+    {
+        $package = $request->packages[0];
+
+        $apiRequest = new Rates;
+        $apiRequest->body()->set([
+            'accountNumber' => [
+                'value' => config('services.fedex.account_number'),
+            ],
+            'rateRequestControlParameters' => [
+                'returnTransitTimes' => true,
+            ],
+            'requestedShipment' => [
+                'shipper' => [
+                    'address' => [
+                        'postalCode' => $request->originPostalCode,
+                        'countryCode' => 'US',
+                    ],
+                ],
+                'recipient' => [
+                    'address' => [
+                        'postalCode' => $request->destinationPostalCode,
+                        'countryCode' => $request->destinationCountry,
+                    ],
+                ],
+                'pickupType' => 'USE_SCHEDULED_PICKUP',
+                'rateRequestType' => ['ACCOUNT'],
+                'requestedPackageLineItems' => [
+                    [
+                        'weight' => [
+                            'units' => 'LB',
+                            'value' => $package->weight,
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        logger()->debug('FedEx API Request', [
+            'body' => $apiRequest->body(),
+        ]);
+
+        return $apiRequest;
     }
 
     public function createShipment(ShipRequest $request): ShipResponse

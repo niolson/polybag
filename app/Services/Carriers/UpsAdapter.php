@@ -5,6 +5,7 @@ namespace App\Services\Carriers;
 use App\Contracts\CarrierAdapterInterface;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
+use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
@@ -15,6 +16,7 @@ use App\Http\Integrations\Ups\Requests\VoidShipment;
 use App\Http\Integrations\Ups\UpsConnector;
 use App\Models\Package;
 use Illuminate\Support\Collection;
+use Saloon\Http\Response;
 
 class UpsAdapter implements CarrierAdapterInterface
 {
@@ -43,143 +45,173 @@ class UpsAdapter implements CarrierAdapterInterface
     public function getRates(RateRequest $request, array $serviceCodes): Collection
     {
         try {
-            $connector = UpsConnector::getAuthenticatedConnector();
+            $prepared = $this->prepareRateRequest($request, $serviceCodes);
 
-            if (empty($request->packages)) {
+            if (! $prepared) {
                 return collect();
             }
 
-            $package = $request->packages[0];
-
-            $apiRequest = new Rate;
-            $apiRequest->body()->set([
-                'RateRequest' => [
-                    'Request' => [
-                        'SubVersion' => '2403',
-                        'TransactionReference' => [
-                            'CustomerContext' => 'Rating',
-                        ],
-                    ],
-                    'Shipment' => [
-                        'Shipper' => [
-                            'Address' => [
-                                'PostalCode' => $request->originPostalCode,
-                                'CountryCode' => 'US',
-                            ],
-                        ],
-                        'ShipTo' => [
-                            'Address' => array_filter([
-                                'City' => $request->destinationCity,
-                                'StateProvinceCode' => $request->destinationStateOrProvince,
-                                'PostalCode' => $request->destinationPostalCode,
-                                'CountryCode' => $request->destinationCountry,
-                                'ResidentialAddressIndicator' => $request->residential ? '' : null,
-                            ], fn ($v) => $v !== null),
-                        ],
-                        'ShipFrom' => [
-                            'Address' => [
-                                'PostalCode' => $request->originPostalCode,
-                                'CountryCode' => 'US',
-                            ],
-                        ],
-                        'Package' => [
-                            'PackagingType' => [
-                                'Code' => '02',
-                                'Description' => 'Customer Supplied Package',
-                            ],
-                            'PackageWeight' => [
-                                'UnitOfMeasurement' => [
-                                    'Code' => 'LBS',
-                                ],
-                                'Weight' => (string) $package->weight,
-                            ],
-                        ],
-                    ],
-                ],
-            ]);
-
-            logger()->debug('UPS Rate API Request', [
-                'body' => $apiRequest->body(),
-            ]);
-
+            $connector = UpsConnector::getAuthenticatedConnector();
+            $apiRequest = $this->buildRateApiRequest($request);
             $response = $connector->send($apiRequest);
 
-            if (! $response->successful()) {
-                logger()->error('UPS Rate API Error', [
-                    'status' => $response->status(),
-                    'body' => $response->json(),
-                ]);
-
-                return collect();
-            }
-
-            $ratedShipments = $response->json('RateResponse.RatedShipment', []);
-
-            if (! is_array($ratedShipments)) {
-                logger()->warning('UPS Rate API returned invalid RatedShipment', [
-                    'body' => $response->json(),
-                ]);
-
-                return collect();
-            }
-
-            // Normalize to array of shipments (single result may not be wrapped)
-            if (isset($ratedShipments['Service'])) {
-                $ratedShipments = [$ratedShipments];
-            }
-
-            $results = collect();
-
-            foreach ($ratedShipments as $shipment) {
-                $serviceCode = $shipment['Service']['Code'] ?? null;
-
-                if (! $serviceCode) {
-                    continue;
-                }
-
-                if (! empty($serviceCodes) && ! in_array($serviceCode, $serviceCodes)) {
-                    continue;
-                }
-
-                $totalCharges = (float) ($shipment['TotalCharges']['MonetaryValue'] ?? 0);
-                $serviceName = self::SERVICE_NAMES[$serviceCode] ?? ('UPS Service '.$serviceCode);
-
-                // Extract transit/delivery info from TimeInTransit if available
-                $transitDays = $shipment['TimeInTransit']['ServiceSummary']['EstimatedArrival']['BusinessDaysInTransit'] ?? null;
-                $deliveryDate = $shipment['TimeInTransit']['ServiceSummary']['EstimatedArrival']['Arrival']['Date'] ?? null;
-                $deliveryTime = $shipment['TimeInTransit']['ServiceSummary']['EstimatedArrival']['Arrival']['Time'] ?? null;
-
-                // Also check GuaranteedDelivery
-                if (! $transitDays) {
-                    $transitDays = $shipment['GuaranteedDelivery']['BusinessDaysInTransit'] ?? null;
-                }
-
-                $transitTime = $transitDays ? $transitDays.' business day'.($transitDays != 1 ? 's' : '') : null;
-
-                // Format delivery date if available (UPS returns YYYYMMDD)
-                if ($deliveryDate && strlen($deliveryDate) === 8) {
-                    $deliveryDate = substr($deliveryDate, 0, 4).'-'.substr($deliveryDate, 4, 2).'-'.substr($deliveryDate, 6, 2);
-                }
-
-                $results->push(new RateResponse(
-                    carrier: 'UPS',
-                    serviceCode: $serviceCode,
-                    serviceName: $serviceName,
-                    price: $totalCharges,
-                    deliveryDate: $deliveryDate,
-                    transitTime: $transitTime,
-                    metadata: [
-                        'serviceCode' => $serviceCode,
-                    ],
-                ));
-            }
-
-            return $results;
+            return $this->parseRateResponse($response, $request, $serviceCodes);
         } catch (\Exception $e) {
             logger()->error('UPS getRates error', ['error' => $e->getMessage()]);
 
             return collect();
         }
+    }
+
+    public function prepareRateRequest(RateRequest $request, array $serviceCodes): ?PreparedRateRequest
+    {
+        if (empty($request->packages)) {
+            return null;
+        }
+
+        $connector = UpsConnector::getAuthenticatedConnector();
+        $apiRequest = $this->buildRateApiRequest($request);
+        $pendingRequest = $connector->createPendingRequest($apiRequest);
+
+        return new PreparedRateRequest(
+            pendingRequest: $pendingRequest,
+            carrierName: 'UPS',
+        );
+    }
+
+    public function parseRateResponse(Response $response, RateRequest $request, array $serviceCodes): Collection
+    {
+        if (! $response->successful()) {
+            logger()->error('UPS Rate API Error', [
+                'status' => $response->status(),
+                'body' => $response->json(),
+            ]);
+
+            return collect();
+        }
+
+        $ratedShipments = $response->json('RateResponse.RatedShipment', []);
+
+        if (! is_array($ratedShipments)) {
+            logger()->warning('UPS Rate API returned invalid RatedShipment', [
+                'body' => $response->json(),
+            ]);
+
+            return collect();
+        }
+
+        // Normalize to array of shipments (single result may not be wrapped)
+        if (isset($ratedShipments['Service'])) {
+            $ratedShipments = [$ratedShipments];
+        }
+
+        $results = collect();
+
+        foreach ($ratedShipments as $shipment) {
+            $serviceCode = $shipment['Service']['Code'] ?? null;
+
+            if (! $serviceCode) {
+                continue;
+            }
+
+            if (! empty($serviceCodes) && ! in_array($serviceCode, $serviceCodes)) {
+                continue;
+            }
+
+            $totalCharges = (float) ($shipment['TotalCharges']['MonetaryValue'] ?? 0);
+            $serviceName = self::SERVICE_NAMES[$serviceCode] ?? ('UPS Service '.$serviceCode);
+
+            // Extract transit/delivery info from TimeInTransit if available
+            $transitDays = $shipment['TimeInTransit']['ServiceSummary']['EstimatedArrival']['BusinessDaysInTransit'] ?? null;
+            $deliveryDate = $shipment['TimeInTransit']['ServiceSummary']['EstimatedArrival']['Arrival']['Date'] ?? null;
+
+            // Also check GuaranteedDelivery
+            if (! $transitDays) {
+                $transitDays = $shipment['GuaranteedDelivery']['BusinessDaysInTransit'] ?? null;
+            }
+
+            $transitTime = $transitDays ? $transitDays.' business day'.($transitDays != 1 ? 's' : '') : null;
+
+            // Format delivery date if available (UPS returns YYYYMMDD)
+            if ($deliveryDate && strlen($deliveryDate) === 8) {
+                $deliveryDate = substr($deliveryDate, 0, 4).'-'.substr($deliveryDate, 4, 2).'-'.substr($deliveryDate, 6, 2);
+            }
+
+            $results->push(new RateResponse(
+                carrier: 'UPS',
+                serviceCode: $serviceCode,
+                serviceName: $serviceName,
+                price: $totalCharges,
+                deliveryDate: $deliveryDate,
+                transitTime: $transitTime,
+                metadata: [
+                    'serviceCode' => $serviceCode,
+                ],
+            ));
+        }
+
+        return $results;
+    }
+
+    /**
+     * Build the UPS rate API request.
+     */
+    private function buildRateApiRequest(RateRequest $request): Rate
+    {
+        $package = $request->packages[0];
+
+        $apiRequest = new Rate;
+        $apiRequest->body()->set([
+            'RateRequest' => [
+                'Request' => [
+                    'SubVersion' => '2403',
+                    'TransactionReference' => [
+                        'CustomerContext' => 'Rating',
+                    ],
+                ],
+                'Shipment' => [
+                    'Shipper' => [
+                        'Address' => [
+                            'PostalCode' => $request->originPostalCode,
+                            'CountryCode' => 'US',
+                        ],
+                    ],
+                    'ShipTo' => [
+                        'Address' => array_filter([
+                            'City' => $request->destinationCity,
+                            'StateProvinceCode' => $request->destinationStateOrProvince,
+                            'PostalCode' => $request->destinationPostalCode,
+                            'CountryCode' => $request->destinationCountry,
+                            'ResidentialAddressIndicator' => $request->residential ? '' : null,
+                        ], fn ($v) => $v !== null),
+                    ],
+                    'ShipFrom' => [
+                        'Address' => [
+                            'PostalCode' => $request->originPostalCode,
+                            'CountryCode' => 'US',
+                        ],
+                    ],
+                    'Package' => [
+                        'PackagingType' => [
+                            'Code' => '02',
+                            'Description' => 'Customer Supplied Package',
+                        ],
+                        'PackageWeight' => [
+                            'UnitOfMeasurement' => [
+                                'Code' => 'LBS',
+                            ],
+                            'Weight' => (string) $package->weight,
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        logger()->debug('UPS Rate API Request', [
+            'body' => $apiRequest->body(),
+        ]);
+
+        return $apiRequest;
     }
 
     public function createShipment(ShipRequest $request): ShipResponse

@@ -3,12 +3,14 @@
 namespace App\Contracts;
 
 use App\DataTransferObjects\Shipping\CancelResponse;
+use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Models\Package;
 use Illuminate\Support\Collection;
+use Saloon\Http\Response;
 
 interface CarrierAdapterInterface
 {
@@ -18,12 +20,30 @@ interface CarrierAdapterInterface
     public function getCarrierName(): string;
 
     /**
-     * Get shipping rates for the given request.
+     * Get shipping rates for the given request (synchronous).
      *
      * @param  array<string>  $serviceCodes  Filter to these service codes only
      * @return Collection<int, RateResponse>
      */
     public function getRates(RateRequest $request, array $serviceCodes): Collection;
+
+    /**
+     * Prepare a rate API request for async sending.
+     *
+     * Returns a PreparedRateRequest containing a PendingRequest ready to send,
+     * or null if no API call is needed (e.g., mock rates, not configured).
+     *
+     * @param  array<string>  $serviceCodes
+     */
+    public function prepareRateRequest(RateRequest $request, array $serviceCodes): ?PreparedRateRequest;
+
+    /**
+     * Parse a rate API response into rate options.
+     *
+     * @param  array<string>  $serviceCodes
+     * @return Collection<int, RateResponse>
+     */
+    public function parseRateResponse(Response $response, RateRequest $request, array $serviceCodes): Collection;
 
     /**
      * Create a shipment and return the result with tracking/label info.
