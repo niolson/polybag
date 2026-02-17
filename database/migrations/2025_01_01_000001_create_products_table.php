@@ -16,8 +16,8 @@ return new class extends Migration
             $table->string('description')->nullable();
             $table->decimal('weight', 8, 2)->nullable();
             $table->boolean('active')->default(true);
-            $table->string('hs_code')->nullable(); // Harmonized System Code
-            $table->string('country_of_origin')->nullable(); // ISO Alpha-2 country code
+            $table->string('hs_tariff_number')->nullable();
+            $table->string('country_of_origin')->nullable();
             $table->timestamps();
         });
     }

@@ -189,7 +189,7 @@ class Pack extends Page
 
             $this->resetForNextShipment();
 
-        } catch (\Saloon\Exceptions\Request\Statuses\RequestTimeoutException $e) {
+        } catch (\Saloon\Exceptions\Request\Statuses\RequestTimeOutException $e) {
             if ($package?->exists && ! $package->shipped) {
                 $package->packageItems()->delete();
                 $package->delete();

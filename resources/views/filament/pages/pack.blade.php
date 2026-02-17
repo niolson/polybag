@@ -271,7 +271,6 @@
                 });
             }
         }"
-        @print-label.window="window.printLabel($event.detail.label, $event.detail.orientation, $event.detail.format)"
         @focus-scan-input.window="$nextTick(() => { input = ''; $refs.scanInput.focus(); })"
         @keydown.f12.window.prevent="shipPackage()"
     >

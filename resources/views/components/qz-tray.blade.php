@@ -80,6 +80,37 @@
             }
         }
 
+        // Rotate a base64 image 90° clockwise onto a fixed 4x6 canvas (600 DPI)
+        function rotateImage90(base64Data) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    // Rotate to natural portrait dimensions
+                    const rot = document.createElement('canvas');
+                    rot.width = img.height;
+                    rot.height = img.width;
+                    const rotCtx = rot.getContext('2d');
+                    rotCtx.translate(rot.width / 2, rot.height / 2);
+                    rotCtx.rotate(Math.PI / 2);
+                    rotCtx.drawImage(img, -img.width / 2, -img.height / 2);
+
+                    // Stretch onto 4x6 canvas with small top/left margins
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 2400;  // 4in at 600 DPI
+                    canvas.height = 3600; // 6in at 600 DPI
+                    const ctx = canvas.getContext('2d');
+                    ctx.imageSmoothingEnabled = false;
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, 2400, 3600);
+                    const mt = 20; // ~0.03in top margin
+                    const ml = 10; // ~0.02in left margin
+                    ctx.drawImage(rot, ml, mt, 2400 - ml, 3600 - mt);
+                    resolve(canvas.toDataURL('image/png').split(',')[1]);
+                };
+                img.src = 'data:image/gif;base64,' + base64Data;
+            });
+        }
+
         // Print label via QZ Tray
         async function printLabel(base64Data, orientation = 'portrait', format = 'pdf') {
             const printer = getLabelPrinter();
@@ -97,8 +128,15 @@
 
                 showStatus('Printing label...', 'info');
 
+                // Rotate landscape images (e.g. UPS GIF) to portrait
+                let printData = base64Data;
+                if (format === 'image' && orientation === 'landscape') {
+                    printData = await rotateImage90(base64Data);
+                    format = 'image';
+                    orientation = 'portrait';
+                }
+
                 // Label is always 4x6 on thermal printer
-                // Add small margins to account for printer centering drift
                 const config = qz.configs.create(printer, {
                     size: { width: 4, height: 6 },
                     units: 'in',
@@ -110,7 +148,7 @@
                     type: 'pixel',
                     format: format === 'image' ? 'image' : 'pdf',
                     flavor: 'base64',
-                    data: base64Data,
+                    data: printData,
                     options: orientation === 'landscape' ? { rotation: 90 } : {}
                 }];
 
@@ -163,8 +201,11 @@
 
         // Listen for print events from Livewire
         document.addEventListener('livewire:init', () => {
-            Livewire.on('print-label', (event) => {
-                printLabel(event.label, event.orientation || 'portrait', event.format || 'pdf');
+            Livewire.on('print-label', async (event) => {
+                await printLabel(event.label, event.orientation || 'portrait', event.format || 'pdf');
+                if (event.redirectTo) {
+                    window.location.href = event.redirectTo;
+                }
             });
 
             Livewire.on('print-report', (event) => {

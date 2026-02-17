@@ -324,10 +324,6 @@ class UpsAdapter implements CarrierAdapterInterface
                 return ShipResponse::failure('UPS response missing label data');
             }
 
-            // UPS returns a landscape GIF - convert to a 4x6 portrait PDF
-            // so it prints identically to USPS/FedEx labels
-            $labelData = $this->convertGifLabelToPdf($labelData);
-
             $totalCharge = (float) ($shipmentResults['ShipmentCharges']['TotalCharges']['MonetaryValue']
                 ?? $request->selectedRate->price);
 
@@ -337,6 +333,8 @@ class UpsAdapter implements CarrierAdapterInterface
                 carrier: 'UPS',
                 service: $request->selectedRate->serviceName,
                 labelData: $labelData,
+                labelOrientation: 'landscape',
+                labelFormat: 'image',
             );
         } catch (\Exception $e) {
             logger()->error('UPS createShipment error', ['error' => $e->getMessage()]);
@@ -412,7 +410,7 @@ class UpsAdapter implements CarrierAdapterInterface
     {
         $products = [];
 
-        foreach ($request->customsItems as $index => $item) {
+        foreach ($request->customsItems as $item) {
             $totalValue = round($item->unitValue * $item->quantity, 2);
 
             $product = [
@@ -447,37 +445,5 @@ class UpsAdapter implements CarrierAdapterInterface
             'CurrencyCode' => 'USD',
             'Product' => $products,
         ];
-    }
-
-    /**
-     * Convert a base64-encoded landscape GIF label to a 4x6 portrait PDF.
-     *
-     * UPS returns labels as landscape GIF images which don't print reliably
-     * via QZ Tray's pixel rendering. Converting to a 4x6 PDF ensures
-     * identical printing behavior to USPS/FedEx labels.
-     */
-    private function convertGifLabelToPdf(string $base64Gif): string
-    {
-        $image = imagecreatefromstring(base64_decode($base64Gif));
-        $rotated = imagerotate($image, 90, 0);
-        imagedestroy($image);
-
-        // Save rotated image as temporary JPEG for FPDF
-        $tmpFile = tempnam(sys_get_temp_dir(), 'ups_label_') . '.jpg';
-        imagejpeg($rotated, $tmpFile, 95);
-        imagedestroy($rotated);
-
-        try {
-            // 4x6 inch page, landscape GIF rotated to portrait
-            $pdf = new \FPDF('P', 'in', [4, 6]);
-            $pdf->SetMargins(0, 0, 0);
-            $pdf->SetAutoPageBreak(false);
-            $pdf->AddPage();
-            $pdf->Image($tmpFile, 0, 0, 4, 6);
-
-            return base64_encode($pdf->Output('S'));
-        } finally {
-            @unlink($tmpFile);
-        }
     }
 }

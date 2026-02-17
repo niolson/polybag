@@ -13,6 +13,7 @@ return new class extends Migration
             $table->foreignId('carrier_id')->constrained()->cascadeOnDelete();
             $table->string('service_code');
             $table->string('name');
+            $table->boolean('active')->default(true);
             $table->timestamps();
         });
     }

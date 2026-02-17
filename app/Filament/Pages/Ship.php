@@ -249,16 +249,22 @@ class Ship extends Page implements HasForms
             }
 
             if ($response->labelData && ! SettingsService::get('suppress_printing', false)) {
-                $this->printLabel($response->labelData, $response->labelOrientation ?? 'portrait', $response->labelFormat ?? 'pdf');
+                $this->dispatch('print-label',
+                    label: $response->labelData,
+                    orientation: $response->labelOrientation ?? 'portrait',
+                    format: $response->labelFormat ?? 'pdf',
+                    redirectTo: '/pack',
+                );
             } elseif ($response->labelData) {
                 $this->notifyInfo('Label printing suppressed (sandbox mode)');
+                $this->redirect('/pack');
+            } else {
+                $this->redirect('/pack');
             }
 
             $this->notifySuccess('Package Shipped', "Tracking: {$response->trackingNumber}");
 
-            $this->redirect('/pack');
-
-        } catch (\Saloon\Exceptions\Request\Statuses\RequestTimeoutException $e) {
+        } catch (\Saloon\Exceptions\Request\Statuses\RequestTimeOutException $e) {
             logger()->error('Carrier API timeout', [
                 'carrier' => $selectedRate->carrier,
                 'package_id' => $this->package->id,
@@ -287,10 +293,5 @@ class Ship extends Page implements HasForms
             ]);
             $this->notifyError('Shipping Error', 'An unexpected error occurred. Please try again.');
         }
-    }
-
-    private function printLabel(string $base64Label, string $orientation = 'portrait', string $format = 'pdf'): void
-    {
-        $this->dispatch('print-label', label: $base64Label, orientation: $orientation, format: $format);
     }
 }

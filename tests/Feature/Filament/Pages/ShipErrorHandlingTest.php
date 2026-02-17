@@ -138,7 +138,7 @@ it('ship handles carrier timeout exception', function (): void {
     $package = createShippablePackageForErrorTest();
 
     registerThrowingAdapterForErrorTest(
-        new \Saloon\Exceptions\Request\Statuses\RequestTimeoutException(
+        new \Saloon\Exceptions\Request\Statuses\RequestTimeOutException(
             Mockery::mock(\Saloon\Http\Response::class),
             'Request timed out'
         )
