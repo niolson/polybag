@@ -8,10 +8,34 @@ use App\Http\Integrations\USPS\Requests\ScanForm;
 use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Manifest;
 use App\Models\Package;
+use App\Services\Carriers\CarrierRegistry;
 use Illuminate\Support\Collection;
+use Saloon\Exceptions\Request\RequestException;
 
 class ManifestService
 {
+    /**
+     * Get unmanifested package counts per carrier with manifest support info.
+     *
+     * @return Collection<int, array{carrier: string, count: int, supports_manifest: bool}>
+     */
+    public static function getUnmanifestedSummary(): Collection
+    {
+        return Package::query()
+            ->selectRaw('carrier, count(*) as count')
+            ->where('manifested', false)
+            ->where('shipped', true)
+            ->whereNotNull('tracking_number')
+            ->groupBy('carrier')
+            ->get()
+            ->map(fn ($row) => [
+                'carrier' => $row->carrier,
+                'count' => (int) $row->count,
+                'supports_manifest' => CarrierRegistry::has($row->carrier)
+                    && CarrierRegistry::get($row->carrier)->supportsManifest(),
+            ]);
+    }
+
     /**
      * Get unmanifested shipped packages grouped by carrier.
      *
@@ -20,7 +44,7 @@ class ManifestService
     public static function getUnmanifestedPackages(): Collection
     {
         return Package::query()
-            ->whereNull('manifest_id')
+            ->where('manifested', false)
             ->where('shipped', true)
             ->whereNotNull('tracking_number')
             ->with('shipment')
@@ -44,58 +68,154 @@ class ManifestService
     {
         try {
             $fromAddress = AddressData::fromConfig();
-            $trackingNumbers = $packages->pluck('tracking_number')->values()->all();
-
-            $request = new ScanForm;
-            $request->body()->set([
-                'form' => '5630',
-                'imageType' => 'PDF',
-                'labelType' => '8.5x11LABEL',
-                'mailingDate' => now()->format('Y-m-d'),
-                'entryFacilityZIPCode' => $fromAddress->postalCode,
-                'destinationEntryFacilityType' => 'NONE',
-                'shipment' => [
-                    'trackingNumbers' => $trackingNumbers,
-                ],
-                'fromAddress' => array_filter([
-                    'firstName' => $fromAddress->firstName,
-                    'lastName' => $fromAddress->lastName,
-                    'streetAddress' => $fromAddress->streetAddress,
-                    'secondaryAddress' => $fromAddress->streetAddress2,
-                    'city' => $fromAddress->city,
-                    'state' => $fromAddress->stateOrProvince,
-                    'ZIPCode' => $fromAddress->postalCode,
-                ]),
-            ]);
-
             $connector = USPSConnector::getAuthenticatedConnector();
-            $response = $connector->send($request);
-            $response->parseBody();
 
-            $manifestNumber = $response->metadata['manifestNumber'] ?? '';
-            $image = $response->image;
+            $remainingPackages = $packages;
+            $totalMarkedExternally = 0;
 
-            $manifest = Manifest::create([
-                'carrier' => 'USPS',
-                'manifest_number' => $manifestNumber,
-                'image' => $image,
-                'manifest_date' => now()->toDateString(),
-                'package_count' => $packages->count(),
-            ]);
+            // Retry loop: if USPS reports some packages as already manifested,
+            // mark those and retry with the rest.
+            for ($attempt = 0; $attempt < 3; $attempt++) {
+                try {
+                    $response = self::sendScanFormRequest($connector, $remainingPackages, $fromAddress);
+                } catch (RequestException $e) {
+                    // Saloon's retry mechanism throws after exhausting retries on 4xx.
+                    // Extract the response to check for already-manifested errors.
+                    $errorResponse = $e->getResponse();
+                    $alreadyManifested = self::extractAlreadyManifestedBarcodes(
+                        $errorResponse->json('error.errors', [])
+                    );
 
-            Package::whereIn('id', $packages->pluck('id'))
-                ->update(['manifest_id' => $manifest->id]);
+                    if (empty($alreadyManifested)) {
+                        throw $e;
+                    }
 
-            return ManifestResponse::success(
-                manifestNumber: $manifestNumber,
-                carrier: 'USPS',
-                image: $image,
-            );
+                    $marked = Package::query()
+                        ->whereIn('tracking_number', $alreadyManifested)
+                        ->where('manifested', false)
+                        ->update(['manifested' => true]);
+                    $totalMarkedExternally += $marked;
+
+                    logger()->warning('USPS SCAN Form: marked packages as already manifested', [
+                        'tracking_numbers' => $alreadyManifested,
+                        'count' => $marked,
+                    ]);
+
+                    $remainingPackages = $remainingPackages->reject(
+                        fn ($p) => in_array($p->tracking_number, $alreadyManifested)
+                    )->values();
+
+                    if ($remainingPackages->isEmpty()) {
+                        return ManifestResponse::failure(
+                            "All {$totalMarkedExternally} packages were already manifested by USPS and have been cleared."
+                        );
+                    }
+
+                    continue; // Retry with remaining packages
+                }
+
+                $response->parseBody();
+
+                $manifestNumber = $response->metadata['manifestNumber'] ?? '';
+                $image = $response->image;
+
+                $manifest = Manifest::create([
+                    'carrier' => 'USPS',
+                    'manifest_number' => $manifestNumber,
+                    'image' => $image,
+                    'manifest_date' => now()->toDateString(),
+                    'package_count' => $remainingPackages->count(),
+                ]);
+
+                Package::whereIn('id', $remainingPackages->pluck('id'))
+                    ->update(['manifest_id' => $manifest->id, 'manifested' => true]);
+
+                return ManifestResponse::success(
+                    manifestNumber: $manifestNumber,
+                    carrier: 'USPS',
+                    image: $image,
+                );
+            }
+
+            return ManifestResponse::failure('USPS SCAN Form failed after multiple retries.');
         } catch (\Exception $e) {
             logger()->error('USPS Scan Form Error', ['error' => $e->getMessage()]);
 
             return ManifestResponse::failure($e->getMessage());
         }
+    }
+
+    /**
+     * Send a SCAN Form request for the given packages.
+     */
+    private static function sendScanFormRequest(
+        \Saloon\Http\Connector $connector,
+        Collection $packages,
+        AddressData $fromAddress,
+    ): \Saloon\Http\Response {
+        $trackingNumbers = $packages->pluck('tracking_number')->values()->all();
+
+        $request = new ScanForm;
+        $request->body()->set([
+            'form' => '5630',
+            'imageType' => 'PDF',
+            'labelType' => '8.5x11LABEL',
+            'mailingDate' => now()->format('Y-m-d'),
+            'overwriteMailingDate' => true,
+            'entryFacilityZIPCode' => $fromAddress->postalCode,
+            'destinationEntryFacilityType' => 'NONE',
+            'shipment' => [
+                'trackingNumbers' => $trackingNumbers,
+            ],
+            'fromAddress' => array_filter([
+                'firstName' => $fromAddress->firstName,
+                'lastName' => $fromAddress->lastName,
+                'streetAddress' => $fromAddress->streetAddress,
+                'secondaryAddress' => $fromAddress->streetAddress2,
+                'city' => $fromAddress->city,
+                'state' => $fromAddress->stateOrProvince,
+                'ZIPCode' => $fromAddress->postalCode,
+            ]),
+        ]);
+
+        return $connector->send($request);
+    }
+
+    /**
+     * Extract tracking numbers from USPS "already manifested" error responses.
+     *
+     * @param  array<int, array<string, mixed>>  $errors
+     * @return array<int, string>
+     */
+    private static function extractAlreadyManifestedBarcodes(array $errors): array
+    {
+        $barcodes = [];
+
+        foreach ($errors as $error) {
+            if (($error['code'] ?? '') !== '160398') {
+                continue;
+            }
+
+            $detail = $error['detail'] ?? '';
+            if (preg_match('/barcode (\S+) has manifested/', $detail, $matches)) {
+                $barcodes[] = $matches[1];
+            }
+        }
+
+        return $barcodes;
+    }
+
+    /**
+     * Mark all unmanifested packages for a carrier as manifested without linking to a manifest record.
+     */
+    public static function markAsManifested(string $carrier): int
+    {
+        return Package::query()
+            ->where('carrier', $carrier)
+            ->where('manifested', false)
+            ->where('shipped', true)
+            ->whereNotNull('tracking_number')
+            ->update(['manifested' => true]);
     }
 
     private static function createFedexManifest(): ManifestResponse

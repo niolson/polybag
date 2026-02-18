@@ -20,8 +20,8 @@ class EndOfDay extends Page
 
     protected string $view = 'filament.pages.end-of-day';
 
-    /** @var array<string, array<int, array<string, mixed>>> */
-    public array $unmanifestedByCarrier = [];
+    /** @var array<int, array{carrier: string, count: int, supports_manifest: bool}> */
+    public array $carrierSummary = [];
 
     /** @var array<int, array<string, mixed>> */
     public array $todaysManifests = [];
@@ -38,15 +38,7 @@ class EndOfDay extends Page
 
     public function loadData(): void
     {
-        $this->unmanifestedByCarrier = ManifestService::getUnmanifestedPackages()
-            ->map(fn ($packages) => $packages->map(fn ($package) => [
-                'id' => $package->id,
-                'tracking_number' => $package->tracking_number,
-                'service' => $package->service,
-                'order_ref' => $package->shipment?->shipment_reference,
-                'shipped_at' => $package->shipped_at?->format('g:i A'),
-            ])->values()->all())
-            ->all();
+        $this->carrierSummary = ManifestService::getUnmanifestedSummary()->all();
 
         $this->todaysManifests = Manifest::query()
             ->whereDate('manifest_date', today())
@@ -86,6 +78,21 @@ class EndOfDay extends Page
         }
 
         $this->notifySuccess('Manifest Created', "Manifest {$response->manifestNumber} created for {$carrier}.");
+
+        $this->loadData();
+    }
+
+    public function markAsManifested(string $carrier): void
+    {
+        $count = ManifestService::markAsManifested($carrier);
+
+        if ($count === 0) {
+            $this->notifyWarning('No Packages', "No unmanifested packages found for {$carrier}.");
+
+            return;
+        }
+
+        $this->notifySuccess('Marked as Manifested', "{$count} {$carrier} ".str('package')->plural($count).' marked as manifested.');
 
         $this->loadData();
     }

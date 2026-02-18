@@ -35,6 +35,7 @@ class Package extends Model
         'shipped_by_user_id',
         'exported',
         'manifest_id',
+        'manifested',
     ];
 
     protected $casts = [
@@ -47,6 +48,7 @@ class Package extends Model
         'shipped' => 'boolean',
         'shipped_at' => 'datetime',
         'exported' => 'boolean',
+        'manifested' => 'boolean',
     ];
 
     /**

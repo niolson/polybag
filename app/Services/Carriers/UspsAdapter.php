@@ -413,6 +413,11 @@ class UspsAdapter implements CarrierAdapterInterface
         return false;
     }
 
+    public function supportsManifest(): bool
+    {
+        return true;
+    }
+
     /**
      * Rate indicators valid for all package types.
      */

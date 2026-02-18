@@ -86,6 +86,11 @@ it('voids a label and clears shipping fields', function (): void {
         {
             return false;
         }
+
+        public function supportsManifest(): bool
+        {
+            return true;
+        }
     });
 
     CarrierRegistry::register('USPS', $testAdapterClass);

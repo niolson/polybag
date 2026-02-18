@@ -111,6 +111,7 @@ class PackageFactory extends Factory
     {
         return $this->shipped()->state(fn () => [
             'manifest_id' => \App\Models\Manifest::factory(),
+            'manifested' => true,
         ]);
     }
 }

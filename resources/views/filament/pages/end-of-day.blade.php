@@ -6,7 +6,7 @@
         <x-filament::section>
             <x-slot name="heading">Unmanifested Packages</x-slot>
 
-            @if(empty($unmanifestedByCarrier))
+            @if(empty($carrierSummary))
                 <div class="text-center py-8">
                     <x-filament::icon
                         icon="heroicon-o-check-circle"
@@ -15,49 +15,44 @@
                     <p class="mt-2 text-gray-500 dark:text-gray-400">All packages have been manifested.</p>
                 </div>
             @else
-                <div class="space-y-6">
-                    @foreach($unmanifestedByCarrier as $carrier => $packages)
-                        <div>
-                            <div class="flex items-center justify-between mb-3">
-                                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
-                                    {{ $carrier }}
-                                    <span class="text-sm font-normal text-gray-500 dark:text-gray-400">
-                                        ({{ count($packages) }} {{ Str::plural('package', count($packages)) }})
-                                    </span>
-                                </h3>
-                                <x-filament::button
-                                    wire:click="generateManifest('{{ $carrier }}')"
-                                    icon="heroicon-o-document-arrow-down"
-                                    size="sm"
-                                >
-                                    Generate Manifest
-                                </x-filament::button>
-                            </div>
-
-                            <div class="overflow-x-auto">
-                                <table class="w-full text-sm text-left">
-                                    <thead class="text-xs text-gray-500 uppercase bg-gray-50 dark:bg-white/5 dark:text-gray-400">
-                                        <tr>
-                                            <th class="px-4 py-2">Tracking Number</th>
-                                            <th class="px-4 py-2">Service</th>
-                                            <th class="px-4 py-2">Order Ref</th>
-                                            <th class="px-4 py-2">Shipped</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-                                        @foreach($packages as $package)
-                                            <tr>
-                                                <td class="px-4 py-2 font-mono text-xs">{{ $package['tracking_number'] }}</td>
-                                                <td class="px-4 py-2">{{ $package['service'] }}</td>
-                                                <td class="px-4 py-2">{{ $package['order_ref'] }}</td>
-                                                <td class="px-4 py-2">{{ $package['shipped_at'] }}</td>
-                                            </tr>
-                                        @endforeach
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    @endforeach
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left">
+                        <thead class="text-xs text-gray-500 uppercase bg-gray-50 dark:bg-white/5 dark:text-gray-400">
+                            <tr>
+                                <th class="px-4 py-2">Carrier</th>
+                                <th class="px-4 py-2">Unmanifested Packages</th>
+                                <th class="px-4 py-2"></th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                            @foreach($carrierSummary as $summary)
+                                <tr>
+                                    <td class="px-4 py-2 font-medium">{{ $summary['carrier'] }}</td>
+                                    <td class="px-4 py-2">{{ $summary['count'] }}</td>
+                                    <td class="px-4 py-2 text-right">
+                                        @if($summary['supports_manifest'])
+                                            <x-filament::button
+                                                wire:click="generateManifest('{{ $summary['carrier'] }}')"
+                                                icon="heroicon-o-document-arrow-down"
+                                                size="sm"
+                                            >
+                                                Generate Manifest
+                                            </x-filament::button>
+                                        @endif
+                                        <x-filament::button
+                                            wire:click="markAsManifested('{{ $summary['carrier'] }}')"
+                                            wire:confirm="Mark all {{ $summary['count'] }} {{ $summary['carrier'] }} packages as manifested?"
+                                            icon="heroicon-o-check"
+                                            size="sm"
+                                            color="gray"
+                                        >
+                                            Mark as Manifested
+                                        </x-filament::button>
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
                 </div>
             @endif
         </x-filament::section>

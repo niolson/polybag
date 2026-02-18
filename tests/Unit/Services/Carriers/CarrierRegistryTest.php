@@ -103,6 +103,11 @@ it('allows registering custom adapters', function (): void {
         {
             return false;
         }
+
+        public function supportsManifest(): bool
+        {
+            return false;
+        }
     };
 
     CarrierRegistry::register('CustomCarrier', $mockAdapter::class);

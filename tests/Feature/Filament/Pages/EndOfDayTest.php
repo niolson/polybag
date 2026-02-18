@@ -11,13 +11,21 @@ beforeEach(function (): void {
     $this->actingAs(User::factory()->admin()->create());
 });
 
-it('loads unmanifested packages grouped by carrier', function (): void {
+it('loads unmanifested package summary by carrier', function (): void {
     Package::factory()->shipped()->create(['carrier' => 'USPS', 'tracking_number' => '9400111']);
     Package::factory()->shipped()->create(['carrier' => 'FedEx', 'tracking_number' => '7890001']);
 
     Livewire::test(EndOfDay::class)
-        ->assertSet('unmanifestedByCarrier.USPS', fn ($value) => count($value) === 1)
-        ->assertSet('unmanifestedByCarrier.FedEx', fn ($value) => count($value) === 1);
+        ->assertSet('carrierSummary', function ($value) {
+            $byCarrier = collect($value)->keyBy('carrier');
+
+            return $byCarrier->has('USPS')
+                && $byCarrier['USPS']['count'] === 1
+                && $byCarrier['USPS']['supports_manifest'] === true
+                && $byCarrier->has('FedEx')
+                && $byCarrier['FedEx']['count'] === 1
+                && $byCarrier['FedEx']['supports_manifest'] === false;
+        });
 });
 
 it('shows empty state when all packages are manifested', function (): void {
@@ -26,10 +34,11 @@ it('shows empty state when all packages are manifested', function (): void {
         'carrier' => 'USPS',
         'tracking_number' => '9400111',
         'manifest_id' => $manifest->id,
+        'manifested' => true,
     ]);
 
     Livewire::test(EndOfDay::class)
-        ->assertSet('unmanifestedByCarrier', [])
+        ->assertSet('carrierSummary', [])
         ->assertSee('All packages have been manifested.');
 });
 
@@ -73,6 +82,18 @@ it('shows error when reprinting manifest without image', function (): void {
     Livewire::test(EndOfDay::class)
         ->call('reprintManifest', $manifest->id)
         ->assertNotified();
+});
+
+it('marks packages as manifested without a manifest record', function (): void {
+    $package = Package::factory()->shipped()->create(['carrier' => 'FedEx', 'tracking_number' => '7890001']);
+
+    Livewire::test(EndOfDay::class)
+        ->call('markAsManifested', 'FedEx')
+        ->assertNotified();
+
+    $package->refresh();
+    expect($package->manifested)->toBeTrue()
+        ->and($package->manifest_id)->toBeNull();
 });
 
 it('denies access to users with User role', function (): void {

@@ -412,6 +412,11 @@ class UpsAdapter implements CarrierAdapterInterface
         return true;
     }
 
+    public function supportsManifest(): bool
+    {
+        return false;
+    }
+
     /**
      * Build UPS address structure from AddressData DTO.
      *

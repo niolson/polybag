@@ -64,4 +64,9 @@ interface CarrierAdapterInterface
      * Check if this carrier supports multi-package shipments.
      */
     public function supportsMultiPackage(): bool;
+
+    /**
+     * Check if this carrier supports end-of-day manifests (scan forms).
+     */
+    public function supportsManifest(): bool;
 }

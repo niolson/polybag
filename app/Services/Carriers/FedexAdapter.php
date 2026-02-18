@@ -351,6 +351,11 @@ class FedexAdapter implements CarrierAdapterInterface
         return true;
     }
 
+    public function supportsManifest(): bool
+    {
+        return false;
+    }
+
     /**
      * Build FedEx contact/address structure from AddressData DTO.
      *
