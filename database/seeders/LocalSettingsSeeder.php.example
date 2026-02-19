@@ -1,0 +1,64 @@
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\Setting;
+use Illuminate\Database\Seeder;
+
+/**
+ * Local settings seeder — NOT committed to version control.
+ *
+ * Copy this file to LocalSettingsSeeder.php and fill in your values.
+ * Run with: php artisan db:seed --class=LocalSettingsSeeder
+ * Or it runs automatically after SettingsSeeder during migrate:fresh --seed.
+ */
+class LocalSettingsSeeder extends Seeder
+{
+    public function run(): void
+    {
+        $settings = [
+            // From Address
+            'from_address.first_name' => 'Shipping',
+            'from_address.last_name' => 'Center',
+            'from_address.company' => '',
+            'from_address.street' => '',
+            'from_address.street2' => '',
+            'from_address.city' => '',
+            'from_address.state_or_province' => '',
+            'from_address.postal_code' => '',
+            'from_address.phone' => '',
+
+            // USPS
+            'usps.client_id' => '',
+            'usps.client_secret' => '',
+            'usps.crid' => '',
+            'usps.mid' => '',
+
+            // FedEx
+            'fedex.api_key' => '',
+            'fedex.api_secret' => '',
+            'fedex.account_number' => '',
+
+            // UPS
+            'ups.client_id' => '',
+            'ups.client_secret' => '',
+            'ups.account_number' => '',
+
+            // Shopify
+            'shopify.shop_domain' => '',
+            'shopify.client_id' => '',
+            'shopify.client_secret' => '',
+            'shopify.api_version' => '2025-01',
+
+            // Amazon
+            'amazon.client_id' => '',
+            'amazon.client_secret' => '',
+            'amazon.refresh_token' => '',
+            'amazon.marketplace_id' => 'ATVPDKIKX0DER',
+        ];
+
+        foreach ($settings as $key => $value) {
+            Setting::where('key', $key)->update(['value' => $value]);
+        }
+    }
+}

@@ -41,19 +41,19 @@ class AmazonSource implements ExportDestinationInterface, ImportSourceInterface
 
     public function validateConfiguration(): void
     {
-        if (empty(config('services.amazon.client_id'))) {
+        if (empty(SettingsService::get('amazon.client_id', config('services.amazon.client_id')))) {
             throw new InvalidArgumentException('Amazon SP-API client ID is not configured (AMAZON_SP_API_CLIENT_ID).');
         }
 
-        if (empty(config('services.amazon.client_secret'))) {
+        if (empty(SettingsService::get('amazon.client_secret', config('services.amazon.client_secret')))) {
             throw new InvalidArgumentException('Amazon SP-API client secret is not configured (AMAZON_SP_API_CLIENT_SECRET).');
         }
 
-        if (empty(config('services.amazon.refresh_token'))) {
+        if (empty(SettingsService::get('amazon.refresh_token', config('services.amazon.refresh_token')))) {
             throw new InvalidArgumentException('Amazon SP-API refresh token is not configured (AMAZON_SP_API_REFRESH_TOKEN).');
         }
 
-        if (empty(config('services.amazon.marketplace_id'))) {
+        if (empty(SettingsService::get('amazon.marketplace_id', config('services.amazon.marketplace_id')))) {
             throw new InvalidArgumentException('Amazon SP-API marketplace ID is not configured (AMAZON_SP_API_MARKETPLACE_ID).');
         }
 
@@ -68,7 +68,7 @@ class AmazonSource implements ExportDestinationInterface, ImportSourceInterface
         $allOrders = [];
         $paginationToken = null;
         $sandbox = (bool) SettingsService::get('sandbox_mode', false);
-        $marketplaceId = config('services.amazon.marketplace_id', 'ATVPDKIKX0DER');
+        $marketplaceId = SettingsService::get('amazon.marketplace_id', config('services.amazon.marketplace_id', 'ATVPDKIKX0DER'));
         $lookbackDays = $this->config['lookback_days'] ?? 30;
         $lastUpdatedAfter = now()->subDays($lookbackDays)->toIso8601String();
 
@@ -187,7 +187,7 @@ class AmazonSource implements ExportDestinationInterface, ImportSourceInterface
         } else {
             $orderId = $amazonOrderId;
             $body = [
-                'marketplaceId' => config('services.amazon.marketplace_id', 'ATVPDKIKX0DER'),
+                'marketplaceId' => SettingsService::get('amazon.marketplace_id', config('services.amazon.marketplace_id', 'ATVPDKIKX0DER')),
                 'packageDetail' => [
                     'packageReferenceId' => '1',
                     'carrierCode' => $carrierCode,
@@ -215,7 +215,9 @@ class AmazonSource implements ExportDestinationInterface, ImportSourceInterface
 
     public function validateExportConfiguration(): void
     {
-        if (empty(config('services.amazon.client_id')) || empty(config('services.amazon.client_secret')) || empty(config('services.amazon.refresh_token'))) {
+        if (empty(SettingsService::get('amazon.client_id', config('services.amazon.client_id')))
+            || empty(SettingsService::get('amazon.client_secret', config('services.amazon.client_secret')))
+            || empty(SettingsService::get('amazon.refresh_token', config('services.amazon.refresh_token')))) {
             throw new InvalidArgumentException('Amazon SP-API credentials are not configured.');
         }
     }

@@ -2,6 +2,7 @@
 
 namespace App\Http\Integrations\Shopify;
 
+use App\Services\SettingsService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
@@ -27,10 +28,10 @@ class ShopifyConnector extends Connector
     public static function fromConfig(): self
     {
         return new self(
-            shopDomain: config('services.shopify.shop_domain') ?? '',
-            clientId: config('services.shopify.client_id') ?? '',
-            clientSecret: config('services.shopify.client_secret') ?? '',
-            apiVersion: config('services.shopify.api_version') ?? '2025-01',
+            shopDomain: SettingsService::get('shopify.shop_domain', config('services.shopify.shop_domain') ?? ''),
+            clientId: SettingsService::get('shopify.client_id', config('services.shopify.client_id') ?? ''),
+            clientSecret: SettingsService::get('shopify.client_secret', config('services.shopify.client_secret') ?? ''),
+            apiVersion: SettingsService::get('shopify.api_version', config('services.shopify.api_version') ?? '2025-01'),
         );
     }
 

@@ -15,6 +15,7 @@ use App\Http\Integrations\Ups\Requests\Rate;
 use App\Http\Integrations\Ups\Requests\VoidShipment;
 use App\Http\Integrations\Ups\UpsConnector;
 use App\Models\Package;
+use App\Services\SettingsService;
 use Illuminate\Support\Collection;
 use Saloon\Http\Response;
 
@@ -225,7 +226,7 @@ class UpsAdapter implements CarrierAdapterInterface
                 'Description' => 'Shipment',
                 'Shipper' => [
                     'Name' => trim($request->fromAddress->company ?: $request->fromAddress->firstName.' '.$request->fromAddress->lastName),
-                    'ShipperNumber' => config('services.ups.account_number'),
+                    'ShipperNumber' => SettingsService::get('ups.account_number', config('services.ups.account_number')),
                     'Address' => $this->buildAddress($request->fromAddress),
                 ],
                 'ShipTo' => [
@@ -241,7 +242,7 @@ class UpsAdapter implements CarrierAdapterInterface
                         [
                             'Type' => '01',
                             'BillShipper' => [
-                                'AccountNumber' => config('services.ups.account_number'),
+                                'AccountNumber' => SettingsService::get('ups.account_number', config('services.ups.account_number')),
                             ],
                         ],
                     ],
@@ -402,9 +403,9 @@ class UpsAdapter implements CarrierAdapterInterface
 
     public function isConfigured(): bool
     {
-        return ! empty(config('services.ups.client_id'))
-            && ! empty(config('services.ups.client_secret'))
-            && ! empty(config('services.ups.account_number'));
+        return ! empty(SettingsService::get('ups.client_id', config('services.ups.client_id')))
+            && ! empty(SettingsService::get('ups.client_secret', config('services.ups.client_secret')))
+            && ! empty(SettingsService::get('ups.account_number', config('services.ups.account_number')));
     }
 
     public function supportsMultiPackage(): bool

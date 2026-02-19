@@ -13,19 +13,19 @@ class ChannelSeeder extends Seeder
     {
         //
 
-        \App\Models\Channel::factory()->create([
+        \App\Models\Channel::create([
             'name' => 'Test Channel',
             'channel_reference' => 'TEST',
             'active' => true,
         ]);
 
-        \App\Models\Channel::factory()->create([
+        \App\Models\Channel::create([
             'name' => 'Amazon US',
             'channel_reference' => 'AMAZON_US',
             'active' => true,
         ]);
 
-        \App\Models\Channel::factory()->create([
+        \App\Models\Channel::create([
             'name' => 'Shopify Store',
             'channel_reference' => 'SHOPIFY',
             'active' => true,

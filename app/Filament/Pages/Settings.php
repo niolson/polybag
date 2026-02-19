@@ -44,6 +44,40 @@ class Settings extends Page
      */
     public ?array $data = [];
 
+    /**
+     * Encrypted credential fields and their setting keys.
+     *
+     * @var array<string, string>
+     */
+    private const ENCRYPTED_FIELDS = [
+        'usps_client_id' => 'usps.client_id',
+        'usps_client_secret' => 'usps.client_secret',
+        'fedex_api_key' => 'fedex.api_key',
+        'fedex_api_secret' => 'fedex.api_secret',
+        'ups_client_id' => 'ups.client_id',
+        'ups_client_secret' => 'ups.client_secret',
+        'shopify_client_id' => 'shopify.client_id',
+        'shopify_client_secret' => 'shopify.client_secret',
+        'amazon_client_id' => 'amazon.client_id',
+        'amazon_client_secret' => 'amazon.client_secret',
+        'amazon_refresh_token' => 'amazon.refresh_token',
+    ];
+
+    /**
+     * Non-encrypted credential fields and their setting keys.
+     *
+     * @var array<string, string>
+     */
+    private const CREDENTIAL_FIELDS = [
+        'usps_crid' => 'usps.crid',
+        'usps_mid' => 'usps.mid',
+        'fedex_account_number' => 'fedex.account_number',
+        'ups_account_number' => 'ups.account_number',
+        'shopify_shop_domain' => 'shopify.shop_domain',
+        'shopify_api_version' => 'shopify.api_version',
+        'amazon_marketplace_id' => 'amazon.marketplace_id',
+    ];
+
     public function mount(): void
     {
         $this->form->fill([
@@ -62,7 +96,28 @@ class Settings extends Page
             'carrier_api_timeout' => SettingsService::get('carrier_api_timeout', 15),
             'sandbox_mode' => SettingsService::get('sandbox_mode', false),
             'suppress_printing' => SettingsService::get('suppress_printing', false),
+
+            // Non-encrypted credential fields get their current values
+            'usps_crid' => SettingsService::get('usps.crid', config('services.usps.crid', '')),
+            'usps_mid' => SettingsService::get('usps.mid', config('services.usps.mid', '')),
+            'fedex_account_number' => SettingsService::get('fedex.account_number', config('services.fedex.account_number', '')),
+            'ups_account_number' => SettingsService::get('ups.account_number', config('services.ups.account_number', '')),
+            'shopify_shop_domain' => SettingsService::get('shopify.shop_domain', config('services.shopify.shop_domain', '')),
+            'shopify_api_version' => SettingsService::get('shopify.api_version', config('services.shopify.api_version', '2025-01')),
+            'amazon_marketplace_id' => SettingsService::get('amazon.marketplace_id', config('services.amazon.marketplace_id', 'ATVPDKIKX0DER')),
+
+            // Encrypted fields are left empty — placeholder shows status
         ]);
+    }
+
+    /**
+     * Get the placeholder for an encrypted credential field.
+     */
+    private function getCredentialPlaceholder(string $settingKey, string $configKey): string
+    {
+        $value = SettingsService::get($settingKey) ?? config($configKey);
+
+        return ! empty($value) ? 'Configured (leave empty to keep)' : 'Not configured';
     }
 
     public function form(Schema $schema): Schema
@@ -149,6 +204,109 @@ class Settings extends Page
                         ])
                         ->columns(1),
 
+                    Section::make('USPS Credentials')
+                        ->description('API credentials for USPS shipping services')
+                        ->schema([
+                            TextInput::make('usps_client_id')
+                                ->label('Client ID')
+                                ->password()
+                                ->placeholder(fn () => $this->getCredentialPlaceholder('usps.client_id', 'services.usps.client_id')),
+                            TextInput::make('usps_client_secret')
+                                ->label('Client Secret')
+                                ->password()
+                                ->placeholder(fn () => $this->getCredentialPlaceholder('usps.client_secret', 'services.usps.client_secret')),
+                            TextInput::make('usps_crid')
+                                ->label('CRID')
+                                ->maxLength(50),
+                            TextInput::make('usps_mid')
+                                ->label('MID')
+                                ->maxLength(50),
+                        ])
+                        ->columns(2)
+                        ->collapsed(),
+
+                    Section::make('FedEx Credentials')
+                        ->description('API credentials for FedEx shipping services')
+                        ->schema([
+                            TextInput::make('fedex_api_key')
+                                ->label('API Key')
+                                ->password()
+                                ->placeholder(fn () => $this->getCredentialPlaceholder('fedex.api_key', 'services.fedex.api_key')),
+                            TextInput::make('fedex_api_secret')
+                                ->label('API Secret')
+                                ->password()
+                                ->placeholder(fn () => $this->getCredentialPlaceholder('fedex.api_secret', 'services.fedex.api_secret')),
+                            TextInput::make('fedex_account_number')
+                                ->label('Account Number')
+                                ->maxLength(50),
+                        ])
+                        ->columns(2)
+                        ->collapsed(),
+
+                    Section::make('UPS Credentials')
+                        ->description('API credentials for UPS shipping services')
+                        ->schema([
+                            TextInput::make('ups_client_id')
+                                ->label('Client ID')
+                                ->password()
+                                ->placeholder(fn () => $this->getCredentialPlaceholder('ups.client_id', 'services.ups.client_id')),
+                            TextInput::make('ups_client_secret')
+                                ->label('Client Secret')
+                                ->password()
+                                ->placeholder(fn () => $this->getCredentialPlaceholder('ups.client_secret', 'services.ups.client_secret')),
+                            TextInput::make('ups_account_number')
+                                ->label('Account Number')
+                                ->maxLength(50),
+                        ])
+                        ->columns(2)
+                        ->collapsed(),
+
+                    Section::make('Shopify Integration')
+                        ->description('Credentials for importing orders from Shopify')
+                        ->schema([
+                            TextInput::make('shopify_shop_domain')
+                                ->label('Shop Domain')
+                                ->placeholder('mystore.myshopify.com')
+                                ->maxLength(255),
+                            TextInput::make('shopify_api_version')
+                                ->label('API Version')
+                                ->placeholder('2025-01')
+                                ->maxLength(20),
+                            TextInput::make('shopify_client_id')
+                                ->label('Client ID')
+                                ->password()
+                                ->placeholder(fn () => $this->getCredentialPlaceholder('shopify.client_id', 'services.shopify.client_id')),
+                            TextInput::make('shopify_client_secret')
+                                ->label('Client Secret')
+                                ->password()
+                                ->placeholder(fn () => $this->getCredentialPlaceholder('shopify.client_secret', 'services.shopify.client_secret')),
+                        ])
+                        ->columns(2)
+                        ->collapsed(),
+
+                    Section::make('Amazon Integration')
+                        ->description('Credentials for importing orders from Amazon SP-API')
+                        ->schema([
+                            TextInput::make('amazon_client_id')
+                                ->label('Client ID')
+                                ->password()
+                                ->placeholder(fn () => $this->getCredentialPlaceholder('amazon.client_id', 'services.amazon.client_id')),
+                            TextInput::make('amazon_client_secret')
+                                ->label('Client Secret')
+                                ->password()
+                                ->placeholder(fn () => $this->getCredentialPlaceholder('amazon.client_secret', 'services.amazon.client_secret')),
+                            TextInput::make('amazon_refresh_token')
+                                ->label('Refresh Token')
+                                ->password()
+                                ->placeholder(fn () => $this->getCredentialPlaceholder('amazon.refresh_token', 'services.amazon.refresh_token')),
+                            TextInput::make('amazon_marketplace_id')
+                                ->label('Marketplace ID')
+                                ->placeholder('ATVPDKIKX0DER')
+                                ->maxLength(50),
+                        ])
+                        ->columns(2)
+                        ->collapsed(),
+
                     Section::make('Testing')
                         ->description('Sandbox and testing settings')
                         ->schema([
@@ -205,7 +363,7 @@ class Settings extends Page
             'suppress_printing' => $suppressPrinting,
         ];
 
-        // Update each setting
+        // Update each standard setting
         foreach ($settings as $key => $value) {
             $setting = Setting::find($key);
 
@@ -213,8 +371,7 @@ class Settings extends Page
                 $setting->value = $value;
                 $setting->save();
             } else {
-                // Create if doesn't exist
-                $type = is_bool($value) ? 'boolean' : 'string';
+                $type = is_bool($value) ? 'boolean' : (is_int($value) ? 'integer' : 'string');
                 $group = str_contains($key, '.') ? explode('.', $key)[0] : 'general';
 
                 Setting::create([
@@ -226,15 +383,37 @@ class Settings extends Page
             }
         }
 
+        $credentialsChanged = false;
+
+        // Save encrypted credential fields (skip empty to preserve existing values)
+        foreach (self::ENCRYPTED_FIELDS as $formField => $settingKey) {
+            $value = $data[$formField] ?? '';
+            if ($value === '' || $value === null) {
+                continue;
+            }
+
+            $group = explode('.', $settingKey)[0];
+            SettingsService::set($settingKey, $value, 'string', encrypted: true, group: $group);
+            $credentialsChanged = true;
+        }
+
+        // Save non-encrypted credential fields
+        foreach (self::CREDENTIAL_FIELDS as $formField => $settingKey) {
+            $value = $data[$formField] ?? '';
+            $group = explode('.', $settingKey)[0];
+            SettingsService::set($settingKey, $value, 'string', group: $group);
+        }
+
         SettingsService::clearCache();
 
-        // Clear cached OAuth tokens when sandbox mode changes so stale tokens aren't reused
-        if ($sandboxMode !== $previousSandboxMode) {
+        // Clear cached OAuth tokens when sandbox mode or credentials change
+        if ($sandboxMode !== $previousSandboxMode || $credentialsChanged) {
             Cache::forget('usps_authenticator');
             Cache::forget('usps_payment_authorization_token');
             Cache::forget('fedex_authenticator');
             Cache::forget('ups_authenticator');
             Cache::forget('amazon_sp_api_access_token');
+            Cache::forget('shopify_access_token');
         }
 
         Notification::make()

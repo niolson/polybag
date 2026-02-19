@@ -17,24 +17,24 @@ class DatabaseSeeder extends Seeder
     {
         // User::factory(10)->create();
 
-        \App\Models\User::factory()->create([
+        User::create([
             'name' => 'Admin',
             'username' => 'admin',
-            'password' => 'admin',  // Auto-hashed by User model cast
+            'password' => 'admin',
             'role' => 'admin',
         ]);
 
-        \App\Models\User::factory()->create([
+        User::create([
             'name' => 'Manager',
             'username' => 'manager',
-            'password' => 'manager',  // Auto-hashed by User model cast
+            'password' => 'manager',
             'role' => 'manager',
         ]);
 
-        \App\Models\User::factory()->create([
+        User::create([
             'name' => 'Test User',
             'username' => 'user',
-            'password' => 'user',  // Auto-hashed by User model cast
+            'password' => 'user',
             'role' => 'user',
         ]);
 
@@ -46,5 +46,9 @@ class DatabaseSeeder extends Seeder
             ShippingMethodSeeder::class,
             ShipmentSeeder::class,
         ]);
+
+        if (class_exists(\Database\Seeders\LocalSettingsSeeder::class)) {
+            $this->call(LocalSettingsSeeder::class);
+        }
     }
 }

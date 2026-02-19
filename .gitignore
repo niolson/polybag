@@ -34,3 +34,4 @@ Thumbs.db
 *.sqlite-journal
 .mcp.json
 /storage/app/private/*.pem
+database/seeders/LocalSettingsSeeder.php

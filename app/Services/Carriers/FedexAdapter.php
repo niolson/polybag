@@ -15,6 +15,7 @@ use App\Http\Integrations\Fedex\Requests\CancelShipment as CancelShipmentRequest
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Http\Integrations\Fedex\Requests\Rates;
 use App\Models\Package;
+use App\Services\SettingsService;
 use Illuminate\Support\Collection;
 use Saloon\Http\Response;
 
@@ -154,7 +155,7 @@ class FedexAdapter implements CarrierAdapterInterface
         $apiRequest = new Rates;
         $apiRequest->body()->set([
             'accountNumber' => [
-                'value' => config('services.fedex.account_number'),
+                'value' => SettingsService::get('fedex.account_number', config('services.fedex.account_number')),
             ],
             'rateRequestControlParameters' => [
                 'returnTransitTimes' => true,
@@ -210,7 +211,7 @@ class FedexAdapter implements CarrierAdapterInterface
                     'payor' => [
                         'responsibleParty' => [
                             'accountNumber' => [
-                                'value' => config('services.fedex.account_number'),
+                                'value' => SettingsService::get('fedex.account_number', config('services.fedex.account_number')),
                             ],
                         ],
                     ],
@@ -245,7 +246,7 @@ class FedexAdapter implements CarrierAdapterInterface
             $apiRequest->body()->set([
                 'labelResponseOptions' => 'LABEL',
                 'accountNumber' => [
-                    'value' => config('services.fedex.account_number'),
+                    'value' => SettingsService::get('fedex.account_number', config('services.fedex.account_number')),
                 ],
                 'requestedShipment' => $requestedShipment,
             ]);
@@ -322,7 +323,7 @@ class FedexAdapter implements CarrierAdapterInterface
             $apiRequest = new CancelShipmentRequest;
             $apiRequest->body()->set([
                 'accountNumber' => [
-                    'value' => config('services.fedex.account_number'),
+                    'value' => SettingsService::get('fedex.account_number', config('services.fedex.account_number')),
                 ],
                 'trackingNumber' => $trackingNumber,
             ]);
@@ -341,9 +342,9 @@ class FedexAdapter implements CarrierAdapterInterface
 
     public function isConfigured(): bool
     {
-        return ! empty(config('services.fedex.api_key'))
-            && ! empty(config('services.fedex.api_secret'))
-            && ! empty(config('services.fedex.account_number'));
+        return ! empty(SettingsService::get('fedex.api_key', config('services.fedex.api_key')))
+            && ! empty(SettingsService::get('fedex.api_secret', config('services.fedex.api_secret')))
+            && ! empty(SettingsService::get('fedex.account_number', config('services.fedex.account_number')));
     }
 
     public function supportsMultiPackage(): bool
@@ -438,7 +439,7 @@ class FedexAdapter implements CarrierAdapterInterface
                             'countryCode' => 'US',
                         ],
                         'accountNumber' => [
-                            'value' => config('services.fedex.account_number'),
+                            'value' => SettingsService::get('fedex.account_number', config('services.fedex.account_number')),
                         ],
                     ],
                 ],
@@ -452,9 +453,7 @@ class FedexAdapter implements CarrierAdapterInterface
      */
     private function isSandbox(): bool
     {
-        $baseUrl = config('services.fedex.base_url', '');
-
-        return str_contains($baseUrl, 'sandbox');
+        return (bool) SettingsService::get('sandbox_mode', false);
     }
 
     /**

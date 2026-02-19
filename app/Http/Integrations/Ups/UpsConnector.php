@@ -49,8 +49,8 @@ class UpsConnector extends Connector
     protected function defaultOauthConfig(): OAuthConfig
     {
         return OAuthConfig::make()
-            ->setClientId(config('services.ups.client_id'))
-            ->setClientSecret(config('services.ups.client_secret'))
+            ->setClientId(SettingsService::get('ups.client_id', config('services.ups.client_id')))
+            ->setClientSecret(SettingsService::get('ups.client_secret', config('services.ups.client_secret')))
             ->setTokenEndpoint('/security/v1/oauth/token');
     }
 

@@ -31,9 +31,9 @@ class AmazonSpApiConnector extends Connector
         return new self(
             baseUrl: config('services.amazon.base_url') ?? 'https://sellingpartnerapi-na.amazon.com',
             sandboxUrl: config('services.amazon.sandbox_url') ?? 'https://sandbox.sellingpartnerapi-na.amazon.com',
-            clientId: config('services.amazon.client_id') ?? '',
-            clientSecret: config('services.amazon.client_secret') ?? '',
-            refreshToken: config('services.amazon.refresh_token') ?? '',
+            clientId: SettingsService::get('amazon.client_id', config('services.amazon.client_id') ?? ''),
+            clientSecret: SettingsService::get('amazon.client_secret', config('services.amazon.client_secret') ?? ''),
+            refreshToken: SettingsService::get('amazon.refresh_token', config('services.amazon.refresh_token') ?? ''),
         );
     }
 

@@ -17,6 +17,7 @@ use App\Http\Integrations\USPS\Requests\Label;
 use App\Http\Integrations\USPS\Requests\ShippingOptions;
 use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Package;
+use App\Services\SettingsService;
 use Illuminate\Support\Collection;
 use Saloon\Http\Response;
 
@@ -129,7 +130,7 @@ class UspsAdapter implements CarrierAdapterInterface
                     'priceType' => 'CONTRACT',
                     'paymentAccount' => [
                         'accountType' => 'EPS',
-                        'accountNumber' => config('services.usps.crid'),
+                        'accountNumber' => SettingsService::get('usps.crid', config('services.usps.crid')),
                     ],
                 ],
             ],
@@ -403,9 +404,9 @@ class UspsAdapter implements CarrierAdapterInterface
 
     public function isConfigured(): bool
     {
-        return ! empty(config('services.usps.client_id'))
-            && ! empty(config('services.usps.client_secret'))
-            && ! empty(config('services.usps.crid'));
+        return ! empty(SettingsService::get('usps.client_id', config('services.usps.client_id')))
+            && ! empty(SettingsService::get('usps.client_secret', config('services.usps.client_secret')))
+            && ! empty(SettingsService::get('usps.crid', config('services.usps.crid')));
     }
 
     public function supportsMultiPackage(): bool
