@@ -63,6 +63,8 @@ class Ship extends Page implements HasForms
 
         $this->package = Package::with(['packageItems.product', 'packageItems.shipmentItem', 'shipment.shippingMethod', 'boxSize'])->findOrFail($package_id);
 
+        $this->authorize('ship', $this->package);
+
         if ($this->package->shipped) {
             $this->notifyWarning('Already Shipped', 'This package has already been shipped.');
             $this->redirect('/pack');

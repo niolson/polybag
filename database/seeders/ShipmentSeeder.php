@@ -512,11 +512,18 @@ class ShipmentSeeder extends Seeder
             $items = $shipmentData['items'] ?? [];
             unset($shipmentData['items'], $shipmentData['notes']);
 
-            $shipment = Shipment::create([
-                ...$shipmentData,
-                'shipping_method_id' => $shippingMethod?->id,
-                'channel_id' => $channel->id,
-            ]);
+            $shipment = Shipment::firstOrCreate(
+                ['shipment_reference' => $shipmentData['shipment_reference']],
+                [
+                    ...$shipmentData,
+                    'shipping_method_id' => $shippingMethod?->id,
+                    'channel_id' => $channel->id,
+                ],
+            );
+
+            if (! $shipment->wasRecentlyCreated) {
+                continue;
+            }
 
             foreach ($items as $item) {
                 $sku = 'SKU-'.strtoupper(substr(md5($item['description']), 0, 8));

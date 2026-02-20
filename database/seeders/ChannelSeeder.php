@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\Channel;
 use Illuminate\Database\Seeder;
 
 class ChannelSeeder extends Seeder
@@ -11,25 +12,19 @@ class ChannelSeeder extends Seeder
      */
     public function run(): void
     {
-        //
+        Channel::firstOrCreate(
+            ['channel_reference' => 'TEST'],
+            ['name' => 'Test Channel', 'active' => true],
+        );
 
-        \App\Models\Channel::create([
-            'name' => 'Test Channel',
-            'channel_reference' => 'TEST',
-            'active' => true,
-        ]);
+        Channel::firstOrCreate(
+            ['channel_reference' => 'AMAZON_US'],
+            ['name' => 'Amazon US', 'active' => true],
+        );
 
-        \App\Models\Channel::create([
-            'name' => 'Amazon US',
-            'channel_reference' => 'AMAZON_US',
-            'active' => true,
-        ]);
-
-        \App\Models\Channel::create([
-            'name' => 'Shopify Store',
-            'channel_reference' => 'SHOPIFY',
-            'active' => true,
-        ]);
-
+        Channel::firstOrCreate(
+            ['channel_reference' => 'SHOPIFY'],
+            ['name' => 'Shopify Store', 'active' => true],
+        );
     }
 }

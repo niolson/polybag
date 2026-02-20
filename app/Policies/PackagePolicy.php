@@ -32,4 +32,9 @@ class PackagePolicy
     {
         return $user->role->isAtLeast(Role::Admin);
     }
+
+    public function ship(User $user, Package $package): bool
+    {
+        return $user->role->isAtLeast(Role::User);
+    }
 }

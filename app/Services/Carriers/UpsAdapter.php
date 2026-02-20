@@ -106,6 +106,12 @@ class UpsAdapter implements CarrierAdapterInterface
             $ratedShipments = [$ratedShipments];
         }
 
+        $returnedServiceCodes = array_map(fn ($s) => $s['Service']['Code'] ?? 'unknown', $ratedShipments);
+        logger()->debug('UPS rate response filtering', [
+            'returned_services' => $returnedServiceCodes,
+            'requested_codes' => $serviceCodes,
+        ]);
+
         $results = collect();
 
         foreach ($ratedShipments as $shipment) {

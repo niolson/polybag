@@ -15,14 +15,15 @@ class ShippingMethodSeeder extends Seeder
     public function run(): void
     {
         // Standard Ground - USPS Ground Advantage, FedEx Home Delivery
-        $standardGround = ShippingMethod::create([
-            'name' => 'Standard Ground',
-            'commitment_days' => 5,
-            'saturday_delivery' => false,
-            'active' => true,
-        ]);
-        ShippingMethodAlias::create(['reference' => '1', 'shipping_method_id' => $standardGround->id]);
-        $standardGround->carrierServices()->attach(
+        $standardGround = ShippingMethod::firstOrCreate(
+            ['name' => 'Standard Ground'],
+            ['commitment_days' => 5, 'saturday_delivery' => false, 'active' => true],
+        );
+        ShippingMethodAlias::firstOrCreate(
+            ['reference' => '1'],
+            ['shipping_method_id' => $standardGround->id],
+        );
+        $standardGround->carrierServices()->syncWithoutDetaching(
             CarrierService::whereIn('service_code', [
                 'USPS_GROUND_ADVANTAGE',
                 'GROUND_HOME_DELIVERY',
@@ -30,14 +31,15 @@ class ShippingMethodSeeder extends Seeder
         );
 
         // 2 Day - Priority Mail, FedEx 2Day
-        $twoDay = ShippingMethod::create([
-            'name' => '2 Day',
-            'commitment_days' => 2,
-            'saturday_delivery' => false,
-            'active' => true,
-        ]);
-        ShippingMethodAlias::create(['reference' => '2', 'shipping_method_id' => $twoDay->id]);
-        $twoDay->carrierServices()->attach(
+        $twoDay = ShippingMethod::firstOrCreate(
+            ['name' => '2 Day'],
+            ['commitment_days' => 2, 'saturday_delivery' => false, 'active' => true],
+        );
+        ShippingMethodAlias::firstOrCreate(
+            ['reference' => '2'],
+            ['shipping_method_id' => $twoDay->id],
+        );
+        $twoDay->carrierServices()->syncWithoutDetaching(
             CarrierService::whereIn('service_code', [
                 'PRIORITY_MAIL',
                 'FEDEX_2_DAY',
@@ -46,14 +48,15 @@ class ShippingMethodSeeder extends Seeder
         );
 
         // International Economy - USPS Priority Mail International, FedEx International Economy
-        $internationalEconomy = ShippingMethod::create([
-            'name' => 'International Economy',
-            'commitment_days' => 5,
-            'saturday_delivery' => false,
-            'active' => true,
-        ]);
-        ShippingMethodAlias::create(['reference' => '3', 'shipping_method_id' => $internationalEconomy->id]);
-        $internationalEconomy->carrierServices()->attach(
+        $internationalEconomy = ShippingMethod::firstOrCreate(
+            ['name' => 'International Economy'],
+            ['commitment_days' => 5, 'saturday_delivery' => false, 'active' => true],
+        );
+        ShippingMethodAlias::firstOrCreate(
+            ['reference' => '3'],
+            ['shipping_method_id' => $internationalEconomy->id],
+        );
+        $internationalEconomy->carrierServices()->syncWithoutDetaching(
             CarrierService::whereIn('service_code', [
                 'PRIORITY_MAIL_INTERNATIONAL',
                 'FEDEX_INTERNATIONAL_ECONOMY',
@@ -61,14 +64,15 @@ class ShippingMethodSeeder extends Seeder
         );
 
         // Overnight - Priority Mail Express, FedEx Priority/Standard Overnight
-        $overnight = ShippingMethod::create([
-            'name' => 'Overnight',
-            'commitment_days' => 1,
-            'saturday_delivery' => false,
-            'active' => true,
-        ]);
-        ShippingMethodAlias::create(['reference' => '4', 'shipping_method_id' => $overnight->id]);
-        $overnight->carrierServices()->attach(
+        $overnight = ShippingMethod::firstOrCreate(
+            ['name' => 'Overnight'],
+            ['commitment_days' => 1, 'saturday_delivery' => false, 'active' => true],
+        );
+        ShippingMethodAlias::firstOrCreate(
+            ['reference' => '4'],
+            ['shipping_method_id' => $overnight->id],
+        );
+        $overnight->carrierServices()->syncWithoutDetaching(
             CarrierService::whereIn('service_code', [
                 'PRIORITY_MAIL_EXPRESS',
                 'PRIORITY_OVERNIGHT',

@@ -30,17 +30,26 @@ trait HasCachedAuthentication
 
         $cacheKey = static::getAuthenticatorCacheKey();
 
-        $authenticator = Cache::get($cacheKey, function () use ($connector, $cacheKey) {
-            $authenticator = $connector->getAccessToken();
+        $authenticator = Cache::get($cacheKey);
 
-            Cache::put(
-                $cacheKey,
-                $authenticator,
-                $authenticator->getExpiresAt()->sub(DateInterval::createFromDateString('10 minutes'))
-            );
+        if (! $authenticator) {
+            $authenticator = Cache::lock($cacheKey.':lock', 10)->block(5, function () use ($connector, $cacheKey) {
+                $cached = Cache::get($cacheKey);
+                if ($cached) {
+                    return $cached;
+                }
 
-            return $authenticator;
-        });
+                $authenticator = $connector->getAccessToken();
+
+                Cache::put(
+                    $cacheKey,
+                    $authenticator,
+                    $authenticator->getExpiresAt()->sub(DateInterval::createFromDateString('10 minutes'))
+                );
+
+                return $authenticator;
+            });
+        }
 
         $connector->authenticate($authenticator);
 

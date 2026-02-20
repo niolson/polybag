@@ -109,6 +109,12 @@ class FedexAdapter implements CarrierAdapterInterface
             return collect();
         }
 
+        $returnedServiceTypes = array_map(fn ($d) => $d['serviceType'] ?? 'unknown', $rateReplyDetails);
+        logger()->debug('FedEx rate response filtering', [
+            'returned_services' => $returnedServiceTypes,
+            'requested_codes' => $serviceCodes,
+        ]);
+
         $results = collect();
 
         foreach ($rateReplyDetails as $detail) {

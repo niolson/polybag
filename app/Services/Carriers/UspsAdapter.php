@@ -83,9 +83,11 @@ class UspsAdapter implements CarrierAdapterInterface
 
         $package = $request->packages[0];
         $results = collect();
+        $totalApiRates = 0;
 
         foreach ($pricingOptions[0]['shippingOptions'] ?? [] as $shippingOption) {
             foreach ($shippingOption['rateOptions'] ?? [] as $rateOption) {
+                $totalApiRates++;
                 $rate = $rateOption['rates'][0] ?? null;
 
                 if (! $rate) {
@@ -112,6 +114,12 @@ class UspsAdapter implements CarrierAdapterInterface
                 ));
             }
         }
+
+        logger()->debug('USPS rate response filtering', [
+            'total_api_rates' => $totalApiRates,
+            'matched_rates' => $results->count(),
+            'requested_codes' => $serviceCodes,
+        ]);
 
         return $results;
     }

@@ -12,20 +12,21 @@ class CarrierSeeder extends Seeder
      */
     public function run(): void
     {
-        $usps = Carrier::create([
-            'name' => 'USPS',
-        ]);
-        $usps->carrierServices()->createMany([
+        $usps = Carrier::firstOrCreate(['name' => 'USPS']);
+        foreach ([
             ['name' => 'Ground Advantage', 'service_code' => 'USPS_GROUND_ADVANTAGE'],
             ['name' => 'Priority Mail', 'service_code' => 'PRIORITY_MAIL'],
             ['name' => 'Priority Mail Express', 'service_code' => 'PRIORITY_MAIL_EXPRESS'],
             ['name' => 'Priority Mail International', 'service_code' => 'PRIORITY_MAIL_INTERNATIONAL'],
-        ]);
+        ] as $service) {
+            $usps->carrierServices()->firstOrCreate(
+                ['service_code' => $service['service_code']],
+                ['name' => $service['name']],
+            );
+        }
 
-        $fedex = Carrier::create([
-            'name' => 'FedEx',
-        ]);
-        $fedex->carrierServices()->createMany([
+        $fedex = Carrier::firstOrCreate(['name' => 'FedEx']);
+        foreach ([
             ['name' => 'FedEx Ground Home Delivery', 'service_code' => 'GROUND_HOME_DELIVERY'],
             ['name' => 'FedEx Ground', 'service_code' => 'FEDEX_GROUND'],
             ['name' => 'FedEx Ground Economy', 'service_code' => 'SMART_POST'],
@@ -36,12 +37,15 @@ class CarrierSeeder extends Seeder
             ['name' => 'FedEx 2Day', 'service_code' => 'FEDEX_2_DAY'],
             ['name' => 'FedEx 2Day AM', 'service_code' => 'FEDEX_2_DAY_AM'],
             ['name' => 'FedEx Express Saver', 'service_code' => 'FEDEX_EXPRESS_SAVER'],
-        ]);
+        ] as $service) {
+            $fedex->carrierServices()->firstOrCreate(
+                ['service_code' => $service['service_code']],
+                ['name' => $service['name']],
+            );
+        }
 
-        $ups = Carrier::create([
-            'name' => 'UPS',
-        ]);
-        $ups->carrierServices()->createMany([
+        $ups = Carrier::firstOrCreate(['name' => 'UPS']);
+        foreach ([
             ['name' => 'UPS Ground', 'service_code' => '03'],
             ['name' => 'UPS 3 Day Select', 'service_code' => '12'],
             ['name' => 'UPS 2nd Day Air', 'service_code' => '02'],
@@ -51,6 +55,11 @@ class CarrierSeeder extends Seeder
             ['name' => 'UPS Worldwide Express', 'service_code' => '07'],
             ['name' => 'UPS Worldwide Expedited', 'service_code' => '08'],
             ['name' => 'UPS Standard', 'service_code' => '11'],
-        ]);
+        ] as $service) {
+            $ups->carrierServices()->firstOrCreate(
+                ['service_code' => $service['service_code']],
+                ['name' => $service['name']],
+            );
+        }
     }
 }
