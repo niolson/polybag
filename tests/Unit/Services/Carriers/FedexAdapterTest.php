@@ -12,11 +12,6 @@ use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
 
 beforeEach(function (): void {
-    config([
-        'services.fedex.api_key' => 'test_api_key',
-        'services.fedex.api_secret' => 'test_api_secret',
-        'services.fedex.account_number' => 'test_account',
-    ]);
     $this->adapter = new FedexAdapter;
 });
 
