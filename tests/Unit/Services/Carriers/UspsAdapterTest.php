@@ -14,6 +14,12 @@ use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
 
 beforeEach(function (): void {
+    config([
+        'services.usps.client_id' => 'test_client_id',
+        'services.usps.client_secret' => 'test_client_secret',
+        'services.usps.crid' => 'test_crid',
+        'services.usps.mid' => 'test_mid',
+    ]);
     $this->adapter = new UspsAdapter;
 });
 
