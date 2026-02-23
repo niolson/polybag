@@ -160,20 +160,7 @@ class Pack extends Page
             $package->markShipped($response, auth()->id());
 
             // Export package data to configured external systems
-            try {
-                $exportResult = app(PackageExportService::class)->exportPackage($package);
-                if ($exportResult->hasErrors()) {
-                    logger()->warning('Package export partial failure', [
-                        'package_id' => $package->id,
-                        'errors' => $exportResult->errors,
-                    ]);
-                }
-            } catch (\Exception $e) {
-                logger()->error('Package export failed', [
-                    'package_id' => $package->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+            app(PackageExportService::class)->tryExportPackage($package);
 
             // Store last shipped package for reprint/cancel commands
             Session::put('last_shipped_package_id', $package->id);

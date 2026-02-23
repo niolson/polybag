@@ -26,6 +26,7 @@ FROM php:8.4-fpm AS app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
     libzip-dev \
     libpng-dev \
     libicu-dev \
