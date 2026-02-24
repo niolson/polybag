@@ -13,6 +13,7 @@ readonly class ShipResponse
         public ?string $labelData = null,
         public ?string $labelOrientation = null,
         public ?string $labelFormat = 'pdf',
+        public ?int $labelDpi = null,
         public ?string $errorMessage = null,
     ) {}
 
@@ -24,6 +25,7 @@ readonly class ShipResponse
         ?string $labelData = null,
         string $labelOrientation = 'portrait',
         string $labelFormat = 'pdf',
+        ?int $labelDpi = null,
     ): self {
         return new self(
             success: true,
@@ -34,6 +36,7 @@ readonly class ShipResponse
             labelData: $labelData,
             labelOrientation: $labelOrientation,
             labelFormat: $labelFormat,
+            labelDpi: $labelDpi,
         );
     }
 

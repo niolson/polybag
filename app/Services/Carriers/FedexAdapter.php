@@ -222,11 +222,12 @@ class FedexAdapter implements CarrierAdapterInterface
                         ],
                     ],
                 ],
-                'labelSpecification' => [
+                'labelSpecification' => array_filter([
                     'labelFormatType' => 'COMMON2D',
-                    'imageType' => 'PDF',
+                    'imageType' => $request->labelFormat === 'zpl' ? 'ZPLII' : 'PDF',
                     'labelStockType' => 'STOCK_4X6',
-                ],
+                    'resolution' => $request->labelFormat === 'zpl' ? ($request->labelDpi === 300 ? 300 : 200) : null,
+                ], fn ($v) => $v !== null),
                 'requestedPackageLineItems' => [
                     [
                         'weight' => [
@@ -313,6 +314,8 @@ class FedexAdapter implements CarrierAdapterInterface
                 carrier: 'FedEx',
                 service: $request->selectedRate->serviceName,
                 labelData: $labelData,
+                labelFormat: $request->labelFormat,
+                labelDpi: $request->labelDpi,
             );
         } catch (\Exception $e) {
             logger()->error('FedEx createShipment error', ['error' => $e->getMessage()]);

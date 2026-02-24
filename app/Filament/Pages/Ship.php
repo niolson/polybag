@@ -51,6 +51,10 @@ class Ship extends Page implements HasForms
 
     public bool $allRatesLate = false;
 
+    public string $labelFormat = 'pdf';
+
+    public ?int $labelDpi = null;
+
     public ?array $data = [];
 
     public function mount($package_id = null): void
@@ -223,7 +227,7 @@ class Ship extends Page implements HasForms
         try {
             $adapter = CarrierRegistry::get($selectedRate->carrier);
 
-            $shipRequest = ShipRequest::fromPackageAndRate($this->package, $selectedRate);
+            $shipRequest = ShipRequest::fromPackageAndRate($this->package, $selectedRate, $this->labelFormat, $this->labelDpi);
             $response = $adapter->createShipment($shipRequest);
 
             if (! $response->success) {
@@ -242,6 +246,7 @@ class Ship extends Page implements HasForms
                     label: $response->labelData,
                     orientation: $response->labelOrientation ?? 'portrait',
                     format: $response->labelFormat ?? 'pdf',
+                    dpi: $response->labelDpi,
                     redirectTo: '/pack',
                 );
             } elseif ($response->labelData) {

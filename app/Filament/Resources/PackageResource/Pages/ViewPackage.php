@@ -33,7 +33,7 @@ class ViewPackage extends ViewRecord
                 ->color('primary')
                 ->visible(fn () => $this->record->shipped && $this->record->label_data)
                 ->action(function (): void {
-                    $this->dispatch('print-label', label: $this->record->label_data, orientation: $this->record->label_orientation ?? 'portrait', format: $this->record->label_format ?? 'pdf');
+                    $this->dispatch('print-label', label: $this->record->label_data, orientation: $this->record->label_orientation ?? 'portrait', format: $this->record->label_format ?? 'pdf', dpi: $this->record->label_dpi);
 
                     Notification::make()
                         ->title('Label sent to printer')

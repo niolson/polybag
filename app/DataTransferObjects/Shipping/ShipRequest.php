@@ -15,10 +15,16 @@ readonly class ShipRequest
         public PackageData $packageData,
         public RateResponse $selectedRate,
         public array $customsItems = [],
+        public string $labelFormat = 'pdf',
+        public ?int $labelDpi = null,
     ) {}
 
-    public static function fromPackageAndRate(Package $package, RateResponse $rate): self
-    {
+    public static function fromPackageAndRate(
+        Package $package,
+        RateResponse $rate,
+        string $labelFormat = 'pdf',
+        ?int $labelDpi = null,
+    ): self {
         $customsItems = [];
 
         // Load package items with relationships if not already loaded
@@ -34,6 +40,8 @@ readonly class ShipRequest
             packageData: PackageData::fromPackage($package),
             selectedRate: $rate,
             customsItems: $customsItems,
+            labelFormat: $labelFormat,
+            labelDpi: $labelDpi,
         );
     }
 }

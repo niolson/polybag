@@ -2,7 +2,13 @@
     <x-qz-tray />
 
     @if($package)
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div
+            x-init="
+                $wire.set('labelFormat', localStorage.getItem('labelFormat') || 'pdf');
+                $wire.set('labelDpi', parseInt(localStorage.getItem('labelDpi') || '203') || null);
+            "
+            class="grid grid-cols-1 lg:grid-cols-2 gap-6"
+        >
             <!-- Package Info -->
             <div class="space-y-6">
                 <x-filament::section>

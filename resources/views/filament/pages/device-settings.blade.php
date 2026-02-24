@@ -36,6 +36,34 @@
             </x-filament::input.wrapper>
         </x-filament::fieldset>
 
+        <x-filament::fieldset
+            style="margin-top: 16px;">
+            <x-slot name="label">
+                Label Format
+            </x-slot>
+
+            <x-filament::input.wrapper>
+                <x-filament::input.select id="label-format">
+                    <option value="pdf">PDF (pixel)</option>
+                    <option value="zpl">ZPL (thermal/raw)</option>
+                </x-filament::input.select>
+            </x-filament::input.wrapper>
+        </x-filament::fieldset>
+        <x-filament::fieldset
+            id="label-dpi-fieldset"
+            style="margin-top: 16px;">
+            <x-slot name="label">
+                Label DPI
+            </x-slot>
+
+            <x-filament::input.wrapper>
+                <x-filament::input.select id="label-dpi">
+                    <option value="203">203 DPI</option>
+                    <option value="300">300 DPI</option>
+                </x-filament::input.select>
+            </x-filament::input.wrapper>
+        </x-filament::fieldset>
+
         <x-filament::button
             style="margin-top: 16px;"
             type="button"
@@ -134,6 +162,9 @@
             const labelPrinterSelect = document.getElementById('label-printer');
             const reportPrinterSelect = document.getElementById('report-printer');
             const refreshPrintersBtn = document.getElementById('refresh-printers');
+            const labelFormatSelect = document.getElementById('label-format');
+            const labelDpiSelect = document.getElementById('label-dpi');
+            const labelDpiFieldset = document.getElementById('label-dpi-fieldset');
             const pairScaleBtn = document.getElementById('pair-scale');
             const saveSettingsBtn = document.getElementById('save-settings');
             const scaleVendorInput = document.getElementById('scale-vendor-id');
@@ -151,9 +182,14 @@
                 const scaleVendorId = localStorage.getItem('scaleVendorId') || '';
                 const scaleProductId = localStorage.getItem('scaleProductId') || '';
                 const scaleName = localStorage.getItem('scaleName') || '';
+                const labelFormat = localStorage.getItem('labelFormat') || 'pdf';
+                const labelDpi = localStorage.getItem('labelDpi') || '203';
 
                 scaleVendorInput.value = scaleVendorId;
                 scaleProductInput.value = scaleProductId;
+                labelFormatSelect.value = labelFormat;
+                labelDpiSelect.value = labelDpi;
+                updateDpiVisibility();
 
                 if (scaleName) {
                     scaleNameText.textContent = scaleName;
@@ -163,10 +199,17 @@
                 return { labelPrinter, reportPrinter };
             }
 
+            // Show/hide DPI selector based on label format
+            function updateDpiVisibility() {
+                labelDpiFieldset.style.display = labelFormatSelect.value === 'zpl' ? '' : 'none';
+            }
+
             // Save settings to localStorage
             function saveSettings() {
                 localStorage.setItem('labelPrinter', labelPrinterSelect.value);
                 localStorage.setItem('reportPrinter', reportPrinterSelect.value);
+                localStorage.setItem('labelFormat', labelFormatSelect.value);
+                localStorage.setItem('labelDpi', labelDpiSelect.value);
                 localStorage.setItem('scaleVendorId', scaleVendorInput.value);
                 localStorage.setItem('scaleProductId', scaleProductInput.value);
 
@@ -501,6 +544,7 @@
 
             // Event listeners
             refreshPrintersBtn.addEventListener('click', refreshPrinters);
+            labelFormatSelect.addEventListener('change', updateDpiVisibility);
             pairScaleBtn.addEventListener('click', detectScale);
             disconnectScaleBtn.addEventListener('click', disconnectScale);
             saveSettingsBtn.addEventListener('click', saveSettings);

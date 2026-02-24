@@ -11,6 +11,8 @@
             scaleDevice: null,
             hasWebHID: 'hid' in navigator,
             autoShipEnabled: false,
+            labelFormat: localStorage.getItem('labelFormat') || 'pdf',
+            labelDpi: parseInt(localStorage.getItem('labelDpi') || '203') || null,
             packingItems: @js($packingItems),
             transparencyEnabled: @js($transparencyEnabled),
             boxSizes: @js($boxSizes),
@@ -214,7 +216,9 @@
                         this.height,
                         this.width,
                         this.length,
-                        this.autoShipEnabled
+                        this.autoShipEnabled,
+                        this.labelFormat,
+                        this.labelDpi
                     );
                 } finally {
                     this.isShipping = false;

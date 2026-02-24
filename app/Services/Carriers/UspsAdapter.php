@@ -191,6 +191,14 @@ class UspsAdapter implements CarrierAdapterInterface
 
             $metadata = $request->selectedRate->metadata;
 
+            $imageInfo = [
+                'receiptOption' => 'NONE',
+            ];
+
+            if ($request->labelFormat === 'zpl') {
+                $imageInfo['imageType'] = $request->labelDpi === 300 ? 'ZPL300DPI' : 'ZPL203DPI';
+            }
+
             $apiRequest->body()->set([
                 'toAddress' => $toAddress,
                 'fromAddress' => $fromAddress,
@@ -208,9 +216,7 @@ class UspsAdapter implements CarrierAdapterInterface
                     'extraServices' => [],
                     'destinationEntryFacilityType' => 'NONE',
                 ],
-                'imageInfo' => [
-                    'receiptOption' => 'NONE',
-                ],
+                'imageInfo' => $imageInfo,
             ]);
 
             $response = $connector->send($apiRequest);
@@ -251,6 +257,8 @@ class UspsAdapter implements CarrierAdapterInterface
                 carrier: 'USPS',
                 service: $request->selectedRate->serviceName,
                 labelData: $response->label,
+                labelFormat: $request->labelFormat,
+                labelDpi: $request->labelDpi,
             );
         } catch (\Exception $e) {
             logger()->error('USPS createDomesticShipment error', ['error' => $e->getMessage()]);
@@ -275,6 +283,14 @@ class UspsAdapter implements CarrierAdapterInterface
 
             $metadata = $request->selectedRate->metadata;
 
+            $imageInfo = [
+                'receiptOption' => 'NONE',
+            ];
+
+            if ($request->labelFormat === 'zpl') {
+                $imageInfo['imageType'] = $request->labelDpi === 300 ? 'ZPL300DPI' : 'ZPL203DPI';
+            }
+
             $apiRequest->body()->set([
                 'toAddress' => $toAddress,
                 'fromAddress' => $fromAddress,
@@ -293,9 +309,7 @@ class UspsAdapter implements CarrierAdapterInterface
                     'destinationEntryFacilityType' => $metadata['destinationEntryFacilityType'] ?? 'INTERNATIONAL_SERVICE_CENTER',
                 ],
                 'customsForm' => $this->buildCustomsForm($request),
-                'imageInfo' => [
-                    'receiptOption' => 'NONE',
-                ],
+                'imageInfo' => $imageInfo,
             ]);
 
             $response = $connector->send($apiRequest);
@@ -342,6 +356,8 @@ class UspsAdapter implements CarrierAdapterInterface
                 service: $request->selectedRate->serviceName,
                 labelData: $response->label,
                 labelOrientation: 'landscape',
+                labelFormat: $request->labelFormat,
+                labelDpi: $request->labelDpi,
             );
         } catch (\Exception $e) {
             logger()->error('USPS createInternationalShipment error', ['error' => $e->getMessage()]);

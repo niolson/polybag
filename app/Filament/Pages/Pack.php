@@ -80,7 +80,11 @@ class Pack extends Page
     /**
      * Ship the current package. Called from Alpine with all client-side state.
      */
-    public function ship(array $packingItems, ?int $boxSizeId, string $weight, string $height, string $width, string $length, bool $autoShip): void
+    public string $labelFormat = 'pdf';
+
+    public ?int $labelDpi = null;
+
+    public function ship(array $packingItems, ?int $boxSizeId, string $weight, string $height, string $width, string $length, bool $autoShip, string $labelFormat = 'pdf', ?int $labelDpi = null): void
     {
         $this->packingItems = $packingItems;
         $this->boxSizeId = $boxSizeId;
@@ -88,6 +92,8 @@ class Pack extends Page
         $this->height = $height;
         $this->width = $width;
         $this->length = $length;
+        $this->labelFormat = $labelFormat;
+        $this->labelDpi = $labelDpi;
 
         if ($autoShip && ! auth()->user()->role->isAtLeast(Role::Admin)) {
             $autoShip = false;
@@ -146,7 +152,7 @@ class Pack extends Page
             $package->load(['packageItems.product', 'packageItems.shipmentItem', 'shipment']);
 
             $adapter = CarrierRegistry::get($selectedRate->carrier);
-            $shipRequest = ShipRequest::fromPackageAndRate($package, $selectedRate);
+            $shipRequest = ShipRequest::fromPackageAndRate($package, $selectedRate, $this->labelFormat, $this->labelDpi);
             $response = $adapter->createShipment($shipRequest);
 
             if (! $response->success) {
@@ -166,7 +172,7 @@ class Pack extends Page
             Session::put('last_shipped_package_id', $package->id);
 
             if ($response->labelData) {
-                $this->dispatch('print-label', label: $response->labelData, orientation: $response->labelOrientation ?? 'portrait', format: $response->labelFormat ?? 'pdf');
+                $this->dispatch('print-label', label: $response->labelData, orientation: $response->labelOrientation ?? 'portrait', format: $response->labelFormat ?? 'pdf', dpi: $response->labelDpi);
             }
 
             $this->notifySuccess(
@@ -422,7 +428,7 @@ class Pack extends Page
             return;
         }
 
-        $this->dispatch('print-label', label: $package->label_data, orientation: $package->label_orientation ?? 'portrait', format: $package->label_format ?? 'pdf');
+        $this->dispatch('print-label', label: $package->label_data, orientation: $package->label_orientation ?? 'portrait', format: $package->label_format ?? 'pdf', dpi: $package->label_dpi);
         $this->notifySuccess('Label Reprinted', "Reprinted label for tracking: {$package->tracking_number}");
     }
 

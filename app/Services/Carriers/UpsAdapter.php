@@ -298,7 +298,7 @@ class UpsAdapter implements CarrierAdapterInterface
                     'Shipment' => $shipment,
                     'LabelSpecification' => [
                         'LabelImageFormat' => [
-                            'Code' => 'GIF',
+                            'Code' => $request->labelFormat === 'zpl' ? 'ZPL' : 'GIF',
                         ],
                         'LabelStockSize' => [
                             'Height' => '6',
@@ -363,8 +363,17 @@ class UpsAdapter implements CarrierAdapterInterface
                 return ShipResponse::failure('UPS response missing label data');
             }
 
+            // UPS ZPL is always 203 DPI; scale to 300 DPI if requested
+            if ($request->labelFormat === 'zpl' && $request->labelDpi === 300) {
+                $decoded = base64_decode($labelData);
+                $decoded = preg_replace('/\^XA/', '^XA^JMA', $decoded, 1);
+                $labelData = base64_encode($decoded);
+            }
+
             $totalCharge = (float) ($shipmentResults['ShipmentCharges']['TotalCharges']['MonetaryValue']
                 ?? $request->selectedRate->price);
+
+            $isZpl = $request->labelFormat === 'zpl';
 
             return ShipResponse::success(
                 trackingNumber: $trackingNumber,
@@ -372,8 +381,9 @@ class UpsAdapter implements CarrierAdapterInterface
                 carrier: 'UPS',
                 service: $request->selectedRate->serviceName,
                 labelData: $labelData,
-                labelOrientation: 'landscape',
-                labelFormat: 'image',
+                labelOrientation: $isZpl ? 'portrait' : 'landscape',
+                labelFormat: $isZpl ? 'zpl' : 'image',
+                labelDpi: $request->labelDpi,
             );
         } catch (\Exception $e) {
             logger()->error('UPS createShipment error', ['error' => $e->getMessage()]);

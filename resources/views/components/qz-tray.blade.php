@@ -112,12 +112,28 @@
         }
 
         // Print label via QZ Tray
-        async function printLabel(base64Data, orientation = 'portrait', format = 'pdf') {
+        async function printLabel(base64Data, orientation = 'portrait', format = 'pdf', dpi = null) {
             const printer = getLabelPrinter();
 
             if (!printer) {
                 showStatus('No label printer configured. Go to Device Settings.', 'error');
                 return;
+            }
+
+            // Block reprinting ZPL labels when printer isn't configured for raw ZPL
+            // PDF/image labels can always print via the pixel path on any printer
+            if (format === 'zpl') {
+                const configFormat = localStorage.getItem('labelFormat') || 'pdf';
+                const configDpi = parseInt(localStorage.getItem('labelDpi') || '203');
+
+                if (configFormat !== 'zpl') {
+                    showStatus('This label is ZPL but your printer is configured for PDF. Go to Device Settings to change.', 'error');
+                    return;
+                }
+                if (dpi && dpi !== configDpi) {
+                    showStatus(`This label was generated for ${dpi} DPI but your printer is configured for ${configDpi} DPI. Go to Device Settings to change.`, 'error');
+                    return;
+                }
             }
 
             try {
@@ -128,6 +144,16 @@
 
                 showStatus('Printing label...', 'info');
 
+                // ZPL: send as raw data directly to the printer
+                if (format === 'zpl') {
+                    const config = qz.configs.create(printer);
+                    const data = [atob(base64Data)];
+                    await qz.print(config, data);
+                    statusBanner.classList.add('hidden');
+                    return;
+                }
+
+                // Pixel path (PDF/image)
                 // Rotate landscape images (e.g. UPS GIF) to portrait
                 let printData = base64Data;
                 if (format === 'image' && orientation === 'landscape') {
@@ -202,7 +228,7 @@
         // Listen for print events from Livewire
         document.addEventListener('livewire:init', () => {
             Livewire.on('print-label', async (event) => {
-                await printLabel(event.label, event.orientation || 'portrait', event.format || 'pdf');
+                await printLabel(event.label, event.orientation || 'portrait', event.format || 'pdf', event.dpi || null);
                 if (event.redirectTo) {
                     window.location.href = event.redirectTo;
                 }
