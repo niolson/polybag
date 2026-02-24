@@ -535,17 +535,13 @@ class UspsAdapter implements CarrierAdapterInterface
     private function buildDomesticAddress(\App\DataTransferObjects\Shipping\AddressData $address): array
     {
         $result = [
-            'firstName' => mb_substr($address->firstName, 0, 30),
-            'lastName' => mb_substr($address->lastName, 0, 30),
             'streetAddress' => mb_substr($address->streetAddress, 0, 50),
             'city' => mb_substr($address->city, 0, 28),
             'state' => $address->stateOrProvince,
             'ZIPCode' => substr($address->postalCode, 0, 5),
         ];
 
-        if ($address->company) {
-            $result['firm'] = mb_substr($address->company, 0, 38);
-        }
+        $this->addNameFields($result, $address);
 
         if ($address->streetAddress2) {
             $result['secondaryAddress'] = mb_substr($address->streetAddress2, 0, 50);
@@ -562,13 +558,13 @@ class UspsAdapter implements CarrierAdapterInterface
     private function buildInternationalAddress(\App\DataTransferObjects\Shipping\AddressData $address): array
     {
         $result = [
-            'firstName' => mb_substr($address->firstName, 0, 30),
-            'lastName' => mb_substr($address->lastName, 0, 30),
             'streetAddress' => mb_substr($address->streetAddress, 0, 50),
             'city' => mb_substr($address->city, 0, 30),
             'country' => $address->country,
             'countryISOAlpha2Code' => $address->country,
         ];
+
+        $this->addNameFields($result, $address);
 
         if ($address->stateOrProvince) {
             $result['province'] = mb_substr($address->stateOrProvince, 0, 30);
@@ -578,14 +574,41 @@ class UspsAdapter implements CarrierAdapterInterface
             $result['postalCode'] = mb_substr($address->postalCode, 0, 12);
         }
 
-        if ($address->company) {
-            $result['firm'] = mb_substr($address->company, 0, 38);
-        }
-
         if ($address->streetAddress2) {
             $result['secondaryAddress'] = mb_substr($address->streetAddress2, 0, 50);
         }
 
         return $result;
+    }
+
+    /**
+     * Add name fields to a USPS address array.
+     * USPS requires (firstName + lastName) or firm. When only one name is
+     * provided, use it as the firm name instead.
+     *
+     * TODO: Evaluate whether using a placeholder (e.g. ".") in the missing
+     * firstName/lastName field would produce better label output than using
+     * the firm field as a fallback. The firm approach works but may display
+     * differently on the printed label.
+     *
+     * @param  array<string, string>  $result
+     */
+    private function addNameFields(array &$result, \App\DataTransferObjects\Shipping\AddressData $address): void
+    {
+        $hasFirst = (bool) $address->firstName;
+        $hasLast = (bool) $address->lastName;
+
+        if ($hasFirst && $hasLast) {
+            $result['firstName'] = mb_substr($address->firstName, 0, 30);
+            $result['lastName'] = mb_substr($address->lastName, 0, 30);
+        } elseif ($hasFirst || $hasLast) {
+            // Only one name — use firm field so USPS doesn't reject it
+            $name = $hasFirst ? $address->firstName : $address->lastName;
+            $result['firm'] = mb_substr($name, 0, 38);
+        }
+
+        if ($address->company) {
+            $result['firm'] = mb_substr($address->company, 0, 38);
+        }
     }
 }
