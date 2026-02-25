@@ -2,7 +2,6 @@
 
 namespace App\Filament\Pages;
 
-use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\Role;
 use App\Events\PackageCreated;
 use App\Filament\Concerns\NotifiesUser;
@@ -10,9 +9,8 @@ use App\Models\BoxSize;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\CacheService;
-use App\Services\Carriers\CarrierRegistry;
+use App\Services\LabelGenerationService;
 use App\Services\SettingsService;
-use App\Services\ShippingRateService;
 use BackedEnum;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\DB;
@@ -137,44 +135,28 @@ class Pack extends Page
         try {
             $package = $this->createPackage();
 
-            $rates = ShippingRateService::getShippingRates($package->id);
+            $result = LabelGenerationService::generateLabel($package, $this->labelFormat, $this->labelDpi);
 
-            if ($rates->isEmpty()) {
+            if (! $result->success) {
                 $package->packageItems()->delete();
                 $package->delete();
-                $this->notifyError('No Rates', 'No shipping rates available for this package.');
+                $this->notifyError('Shipping Error', $result->errorMessage);
 
                 return;
             }
 
-            $selectedRate = $rates->sortBy->price->first();
-
-            $package->load(['packageItems.product', 'packageItems.shipmentItem', 'shipment']);
-
-            $adapter = CarrierRegistry::get($selectedRate->carrier);
-            $shipRequest = ShipRequest::fromPackageAndRate($package, $selectedRate, $this->labelFormat, $this->labelDpi);
-            $response = $adapter->createShipment($shipRequest);
-
-            if (! $response->success) {
-                $package->packageItems()->delete();
-                $package->delete();
-                $this->notifyError('Shipping Error', $response->errorMessage ?? 'Failed to create shipment.');
-
-                return;
-            }
-
-            $package->markShipped($response, auth()->id());
+            $package->markShipped($result->response, auth()->id());
 
             // Store last shipped package for reprint/cancel commands
             Session::put('last_shipped_package_id', $package->id);
 
-            if ($response->labelData) {
-                $this->dispatch('print-label', label: $response->labelData, orientation: $response->labelOrientation ?? 'portrait', format: $response->labelFormat ?? 'pdf', dpi: $response->labelDpi);
+            if ($result->response->labelData) {
+                $this->dispatch('print-label', label: $result->response->labelData, orientation: $result->response->labelOrientation ?? 'portrait', format: $result->response->labelFormat ?? 'pdf', dpi: $result->response->labelDpi);
             }
 
             $this->notifySuccess(
                 'Auto Shipped',
-                "Tracking: {$response->trackingNumber} via {$response->carrier} ({$selectedRate->serviceName}) - \$".number_format($response->cost, 2)
+                "Tracking: {$result->response->trackingNumber} via {$result->response->carrier} ({$result->selectedRate->serviceName}) - \$".number_format($result->response->cost, 2)
             );
 
             $this->resetForNextShipment();

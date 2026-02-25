@@ -8,10 +8,10 @@ use App\Enums\Role;
 use App\Filament\Concerns\NotifiesUser;
 use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
+use App\Services\RuleEvaluator;
 use App\Services\SettingsService;
 use App\Services\ShippingRateService;
 use BackedEnum;
-use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Concerns\InteractsWithForms;
@@ -76,8 +76,28 @@ class Ship extends Page implements HasForms
         }
 
         $rates = ShippingRateService::getShippingRates($this->package->id);
-        $this->rateOptions = $rates->map->toArray()->all();
+
+        // Apply shipping rules (exclude services, etc.)
+        $ruleResult = RuleEvaluator::evaluate($this->package->shipment);
+        if ($ruleResult->shouldFilterRates()) {
+            $rates = $rates->reject(
+                fn (RateResponse $rate) => in_array($rate->serviceCode, $ruleResult->excludedServiceCodes)
+            );
+        }
+
+        $this->rateOptions = $rates->values()->map->toArray()->all();
         $this->updateFormData();
+
+        // If a rule pre-selects a rate, auto-select the matching service in the form
+        if ($ruleResult->hasPreSelectedRate()) {
+            $preSelected = $ruleResult->preSelectedRate;
+            foreach ($this->rateOptions as $key => $rateArray) {
+                if ($rateArray['carrier'] === $preSelected->carrier && $rateArray['serviceCode'] === $preSelected->serviceCode) {
+                    $this->form->fill(['rateOptions' => $key]);
+                    break;
+                }
+            }
+        }
     }
 
     protected function getHeaderActions(): array
@@ -114,7 +134,7 @@ class Ship extends Page implements HasForms
 
     public function updateFormData(): void
     {
-        $deadline = $this->getDeliverByDate();
+        $deadline = $this->package?->shipment->getDeliverByDate();
         $this->deliverByDate = $deadline?->format('D, M j');
 
         $formRateOptionLabels = [];
@@ -181,38 +201,6 @@ class Ship extends Page implements HasForms
 
             $this->form->fill(['rateOptions' => $defaultKey]);
         }
-    }
-
-    private function getDeliverByDate(): ?Carbon
-    {
-        if (! $this->package) {
-            return null;
-        }
-
-        $shipment = $this->package->shipment;
-
-        // 1. Explicit deliver_by date on the shipment
-        if ($shipment->deliver_by) {
-            return $shipment->deliver_by;
-        }
-
-        // 2. Calculated from ShippingMethod.commitment_days
-        $commitmentDays = $shipment->shippingMethod?->commitment_days;
-        if ($commitmentDays) {
-            $date = Carbon::today();
-            $added = 0;
-            while ($added < $commitmentDays) {
-                $date->addDay();
-                if (! $date->isWeekend()) {
-                    $added++;
-                }
-            }
-
-            return $date;
-        }
-
-        // 3. No deadline
-        return null;
     }
 
     public function ship(): void

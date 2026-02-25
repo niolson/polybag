@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\Deliverability;
 use App\Services\AddressValidationService;
 use App\Services\SettingsService;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -118,6 +119,37 @@ class Shipment extends Model
     public function validateAddress(): void
     {
         app(AddressValidationService::class)->validate($this);
+    }
+
+    /**
+     * Calculate the deliver-by deadline for this shipment.
+     *
+     * Priority: explicit deliver_by date > calculated from commitment_days > null.
+     */
+    public function getDeliverByDate(): ?Carbon
+    {
+        // 1. Explicit deliver_by date on the shipment
+        if ($this->deliver_by) {
+            return $this->deliver_by;
+        }
+
+        // 2. Calculated from ShippingMethod.commitment_days
+        $commitmentDays = $this->shippingMethod?->commitment_days;
+        if ($commitmentDays) {
+            $date = Carbon::today();
+            $added = 0;
+            while ($added < $commitmentDays) {
+                $date->addDay();
+                if (! $date->isWeekend()) {
+                    $added++;
+                }
+            }
+
+            return $date;
+        }
+
+        // 3. No deadline
+        return null;
     }
 
     public function shipmentItems(): HasMany

@@ -89,10 +89,32 @@ class CarrierRegistry
     }
 
     /**
+     * Register an adapter instance directly (useful for testing).
+     */
+    public static function registerInstance(string $carrierName, CarrierAdapterInterface $adapter): void
+    {
+        self::$adapters[$carrierName] = get_class($adapter);
+        self::$instances[$carrierName] = $adapter;
+    }
+
+    /**
      * Clear cached instances (useful for testing).
      */
     public static function clearInstances(): void
     {
+        self::$instances = [];
+    }
+
+    /**
+     * Reset to default adapters (useful for testing).
+     */
+    public static function reset(): void
+    {
+        self::$adapters = [
+            'USPS' => UspsAdapter::class,
+            'FedEx' => FedexAdapter::class,
+            'UPS' => UpsAdapter::class,
+        ];
         self::$instances = [];
     }
 }
