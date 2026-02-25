@@ -210,6 +210,9 @@ class UpsAdapter implements CarrierAdapterInterface
                             'Weight' => (string) $package->weight,
                         ],
                     ],
+                    'DeliveryTimeInformation' => [
+                        'PackageBillType' => '03',
+                    ],
                 ],
             ],
         ]);

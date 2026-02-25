@@ -15,6 +15,6 @@ class Rate extends Request implements HasBody
 
     public function resolveEndpoint(): string
     {
-        return '/api/rating/v2403/Shop';
+        return '/api/rating/v2403/Shoptimeintransit';
     }
 }
