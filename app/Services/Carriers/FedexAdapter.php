@@ -366,6 +366,11 @@ class FedexAdapter implements CarrierAdapterInterface
         return false;
     }
 
+    public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
+    {
+        return $rate;
+    }
+
     /**
      * Build FedEx contact/address structure from AddressData DTO.
      *

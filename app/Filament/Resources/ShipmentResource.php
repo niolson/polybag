@@ -7,11 +7,14 @@ use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\ShipmentResource\Pages;
 use App\Filament\Resources\ShipmentResource\RelationManagers\PackagesRelationManager;
 use App\Filament\Resources\ShipmentResource\RelationManagers\ShipmentItemsRelationManager;
+use App\Models\BoxSize;
 use App\Models\Shipment;
+use App\Services\BatchLabelService;
 use BackedEnum;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Infolists\Components\TextEntry;
+use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationGroup;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components;
@@ -22,6 +25,7 @@ use Filament\Tables;
 use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 
 class ShipmentResource extends Resource
@@ -262,6 +266,60 @@ class ShipmentResource extends Resource
                 Actions\EditAction::make(),
             ])
             ->groupedBulkActions([
+                Actions\BulkAction::make('batch-ship')
+                    ->label('Batch Ship')
+                    ->icon('heroicon-o-paper-airplane')
+                    ->visible(fn () => auth()->user()->role->isAtLeast(Role::Admin))
+                    ->schema([
+                        Forms\Components\Select::make('box_size_id')
+                            ->label('Box Size')
+                            ->options(BoxSize::query()->pluck('label', 'id'))
+                            ->required()
+                            ->searchable(),
+                        Forms\Components\Hidden::make('label_format')
+                            ->default('pdf'),
+                        Forms\Components\Hidden::make('label_dpi'),
+                        Components\View::make('filament.components.batch-ship-local-storage'),
+                    ])
+                    ->modalHeading('Batch Ship')
+                    ->modalDescription('Generate labels for all selected shipments using the same box size. Ineligible shipments will be skipped.')
+                    ->modalSubmitActionLabel('Generate Labels')
+                    ->action(function (Collection $records, array $data) {
+                        $service = new BatchLabelService;
+
+                        $validation = $service->validateShipmentsForBatch($records);
+
+                        if ($validation->allIneligible()) {
+                            Notification::make()
+                                ->title('No eligible shipments')
+                                ->body('None of the selected shipments are eligible for batch shipping.')
+                                ->danger()
+                                ->send();
+
+                            return;
+                        }
+
+                        if ($validation->hasIneligible()) {
+                            $skippedCount = $validation->ineligible->count();
+                            Notification::make()
+                                ->title("{$skippedCount} shipment(s) skipped")
+                                ->body($validation->ineligible->map(fn ($item) => "{$item['shipment']->shipment_reference}: {$item['reason']}")->join("\n"))
+                                ->warning()
+                                ->persistent()
+                                ->send();
+                        }
+
+                        $batch = $service->createBatch(
+                            $validation->eligible,
+                            BoxSize::findOrFail($data['box_size_id']),
+                            auth()->user(),
+                            $data['label_format'] ?: 'pdf',
+                            $data['label_dpi'] ? (int) $data['label_dpi'] : null,
+                        );
+
+                        redirect("/batch-ship/{$batch->id}");
+                    })
+                    ->deselectRecordsAfterCompletion(),
                 Actions\DeleteBulkAction::make()
                     ->visible(fn () => auth()->user()->role->isAtLeast(Role::Manager)),
             ]);

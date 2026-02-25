@@ -443,6 +443,18 @@ class UspsAdapter implements CarrierAdapterInterface
         return true;
     }
 
+    public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
+    {
+        $rateRequest = RateRequest::fromPackage($package);
+        $rates = $this->getRates($rateRequest, [$rate->serviceCode]);
+
+        if ($rates->isEmpty()) {
+            return $rate;
+        }
+
+        return $rates->sortBy('price')->first();
+    }
+
     /**
      * Rate indicators valid for all package types.
      */

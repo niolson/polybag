@@ -91,6 +91,11 @@ it('voids a label and clears shipping fields', function (): void {
         {
             return true;
         }
+
+        public function resolvePreSelectedRate(\App\DataTransferObjects\Shipping\RateResponse $rate, \App\Models\Package $package): \App\DataTransferObjects\Shipping\RateResponse
+        {
+            return $rate;
+        }
     });
 
     CarrierRegistry::register('USPS', $testAdapterClass);

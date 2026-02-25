@@ -437,6 +437,11 @@ class UpsAdapter implements CarrierAdapterInterface
         return false;
     }
 
+    public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
+    {
+        return $rate;
+    }
+
     /**
      * Build UPS address structure from AddressData DTO.
      *

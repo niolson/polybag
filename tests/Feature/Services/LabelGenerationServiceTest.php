@@ -60,6 +60,7 @@ it('applies rule pre-selection and skips rate shopping', function (): void {
     );
 
     $mockAdapter = Mockery::mock(CarrierAdapterInterface::class);
+    $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
     $mockAdapter->shouldReceive('createShipment')->once()->andReturn($mockResponse);
 
     CarrierRegistry::registerInstance('MockCarrier', $mockAdapter);
@@ -92,6 +93,7 @@ it('returns failure when carrier returns unsuccessful response', function (): vo
     ]);
 
     $mockAdapter = Mockery::mock(CarrierAdapterInterface::class);
+    $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
     $mockAdapter->shouldReceive('createShipment')->once()->andReturn(
         ShipResponse::failure('Address validation failed')
     );
@@ -124,6 +126,7 @@ it('passes label format and DPI to ship request', function (): void {
     ]);
 
     $mockAdapter = Mockery::mock(CarrierAdapterInterface::class);
+    $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
     $mockAdapter->shouldReceive('createShipment')
         ->once()
         ->withArgs(function ($shipRequest) {

@@ -69,4 +69,13 @@ interface CarrierAdapterInterface
      * Check if this carrier supports end-of-day manifests (scan forms).
      */
     public function supportsManifest(): bool;
+
+    /**
+     * Resolve a rule-pre-selected rate into a fully-qualified rate with metadata.
+     *
+     * For carriers like USPS where one service code maps to many rate variants
+     * (cubic tiers, single-piece, etc.), this fetches rates and picks the cheapest
+     * matching variant. Other carriers return the rate as-is.
+     */
+    public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse;
 }

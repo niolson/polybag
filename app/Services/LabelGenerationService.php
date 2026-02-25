@@ -28,7 +28,8 @@ class LabelGenerationService
         $ruleResult = RuleEvaluator::evaluate($package->shipment);
 
         if ($ruleResult->hasPreSelectedRate()) {
-            $selectedRate = $ruleResult->preSelectedRate;
+            $adapter = CarrierRegistry::get($ruleResult->preSelectedRate->carrier);
+            $selectedRate = $adapter->resolvePreSelectedRate($ruleResult->preSelectedRate, $package);
         } else {
             $rates = ShippingRateService::getShippingRates($package->id);
 

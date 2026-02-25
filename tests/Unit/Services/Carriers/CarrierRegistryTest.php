@@ -108,6 +108,11 @@ it('allows registering custom adapters', function (): void {
         {
             return false;
         }
+
+        public function resolvePreSelectedRate(\App\DataTransferObjects\Shipping\RateResponse $rate, \App\Models\Package $package): \App\DataTransferObjects\Shipping\RateResponse
+        {
+            return $rate;
+        }
     };
 
     CarrierRegistry::register('CustomCarrier', $mockAdapter::class);

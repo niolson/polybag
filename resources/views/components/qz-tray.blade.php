@@ -237,6 +237,32 @@
             Livewire.on('print-report', (event) => {
                 printReport(event.data);
             });
+
+            Livewire.on('print-batch-labels', async (event) => {
+                const labels = event.labels || [];
+                if (labels.length === 0) return;
+
+                showStatus(`Printing 0/${labels.length} labels...`, 'info');
+
+                let printed = 0;
+                let failed = 0;
+
+                for (const item of labels) {
+                    try {
+                        await printLabel(item.label, item.orientation || 'portrait', item.format || 'pdf', item.dpi || null);
+                        printed++;
+                    } catch (error) {
+                        console.error('Batch print error:', error);
+                        failed++;
+                    }
+                    showStatus(`Printed ${printed}/${labels.length} labels...${failed > 0 ? ` (${failed} failed)` : ''}`, 'info');
+                }
+
+                const msg = failed > 0
+                    ? `Printed ${printed}/${labels.length} labels (${failed} failed)`
+                    : `Printed all ${printed} labels`;
+                showStatus(msg, failed > 0 ? 'warning' : 'success');
+            });
         });
 
         // Initialize on page load
