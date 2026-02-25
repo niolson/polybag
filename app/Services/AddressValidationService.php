@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\Deliverability;
+use App\Events\AddressValidationFailed;
 use App\Http\Integrations\USPS\Requests\Address;
 use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Shipment;
@@ -102,6 +103,8 @@ class AddressValidationService
         $shipment->deliverability = Deliverability::No;
         $shipment->validation_message = 'Unexpected USPS response format';
         $shipment->save();
+
+        AddressValidationFailed::dispatch($shipment, 'Unexpected USPS response format');
     }
 
     protected function handleError(Shipment $shipment, string $message): void
@@ -109,6 +112,8 @@ class AddressValidationService
         $shipment->deliverability = Deliverability::No;
         $shipment->validation_message = $message;
         $shipment->save();
+
+        AddressValidationFailed::dispatch($shipment, $message);
     }
 
     /**
@@ -140,16 +145,22 @@ class AddressValidationService
                 // Multiple addresses found, no default exists
                 $shipment->deliverability = Deliverability::No;
                 $shipment->validation_message = $text;
+                $validationFailed = $text;
                 break;
 
             default:
                 // Unknown correction code
                 $shipment->deliverability = Deliverability::No;
                 $shipment->validation_message = "Unknown correction code: {$code}";
+                $validationFailed = "Unknown correction code: {$code}";
                 break;
         }
 
         $shipment->save();
+
+        if (isset($validationFailed)) {
+            AddressValidationFailed::dispatch($shipment, $validationFailed);
+        }
     }
 
     /**

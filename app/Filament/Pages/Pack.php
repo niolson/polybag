@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\Role;
+use App\Events\PackageCreated;
 use App\Filament\Concerns\NotifiesUser;
 use App\Models\BoxSize;
 use App\Models\Package;
@@ -11,7 +12,6 @@ use App\Models\Shipment;
 use App\Services\CacheService;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\SettingsService;
-use App\Services\ShipmentImport\PackageExportService;
 use App\Services\ShippingRateService;
 use BackedEnum;
 use Filament\Pages\Page;
@@ -165,9 +165,6 @@ class Pack extends Page
 
             $package->markShipped($response, auth()->id());
 
-            // Export package data to configured external systems
-            app(PackageExportService::class)->tryExportPackage($package);
-
             // Store last shipped package for reprint/cancel commands
             Session::put('last_shipped_package_id', $package->id);
 
@@ -213,6 +210,10 @@ class Pack extends Page
     /**
      * Create a package from the current packing state.
      * Cleans up any previous in-progress package from this user's session before creating.
+     *
+     * TODO: Review this orphan cleanup process. Deleting packages silently can be
+     * surprising. Consider reusing/updating the existing package instead of
+     * delete-and-recreate, or requiring explicit user confirmation before deleting.
      */
     private function createPackage(): Package
     {
@@ -225,8 +226,17 @@ class Pack extends Page
                     ->first();
 
                 if ($orphan) {
+                    logger()->warning('Orphan package cleanup', [
+                        'deleted_package_id' => $orphan->id,
+                        'shipment_id' => $orphan->shipment_id,
+                        'new_shipment_id' => $this->shipment->id,
+                        'user_id' => auth()->id(),
+                    ]);
+                    $orphanId = $orphan->id;
                     $orphan->packageItems()->delete();
                     $orphan->delete();
+
+                    $this->notifyWarning('Package Replaced', "Unshipped package #{$orphanId} was deleted and replaced.");
                 }
 
                 Session::forget('in_progress_package_id');
@@ -251,6 +261,8 @@ class Pack extends Page
                 ];
             }
             $package->packageItems()->createMany($packageItems);
+
+            PackageCreated::dispatch($package, $this->shipment);
 
             return $package;
         });

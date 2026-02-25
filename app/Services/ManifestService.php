@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\ManifestResponse;
+use App\Events\ManifestCreated as ManifestCreatedEvent;
 use App\Http\Integrations\USPS\Requests\ScanForm;
 use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Manifest;
@@ -129,6 +130,8 @@ class ManifestService
 
                 Package::whereIn('id', $remainingPackages->pluck('id'))
                     ->update(['manifest_id' => $manifest->id, 'manifested' => true]);
+
+                ManifestCreatedEvent::dispatch($manifest, $remainingPackages->count());
 
                 return ManifestResponse::success(
                     manifestNumber: $manifestNumber,

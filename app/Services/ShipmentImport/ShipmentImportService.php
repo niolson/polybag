@@ -3,6 +3,9 @@
 namespace App\Services\ShipmentImport;
 
 use App\Contracts\ImportSourceInterface;
+use App\Events\ImportCompleted;
+use App\Events\ShipmentImported;
+use App\Events\ShipmentUpdated;
 use App\Models\Channel;
 use App\Models\ChannelAlias;
 use App\Models\Product;
@@ -83,6 +86,8 @@ class ShipmentImportService
         $duration = microtime(true) - $startTime;
 
         $this->log('info', 'Import completed', array_merge($this->stats, ['duration' => $duration]));
+
+        ImportCompleted::dispatch($this->stats, $this->source->getSourceName());
 
         return new ImportResult(
             shipmentsCreated: $this->stats['shipments_created'],
@@ -166,6 +171,12 @@ class ShipmentImportService
             return;
         }
 
+        // Track which references already exist for event dispatching
+        $references = array_column($preparedRows, 'shipment_reference');
+        $existingRefs = Shipment::whereIn('shipment_reference', $references)
+            ->pluck('shipment_reference')
+            ->all();
+
         // Phase 2: Split into mapped (channel resolved) and unmapped (channel unknown)
         $mappedRows = array_filter($preparedRows, fn ($row) => $row['channel_id'] !== null);
         $unmappedRows = array_filter($preparedRows, fn ($row) => $row['channel_id'] === null);
@@ -225,6 +236,15 @@ class ShipmentImportService
             }
 
             $this->importShipmentItems($shipmentId, $reference);
+
+            $shipment = Shipment::find($shipmentId);
+            if ($shipment) {
+                if (in_array($reference, $existingRefs, true)) {
+                    ShipmentUpdated::dispatch($shipment);
+                } else {
+                    ShipmentImported::dispatch($shipment);
+                }
+            }
 
             try {
                 $this->source->markExported($reference);

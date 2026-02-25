@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Events\PackageCancelled;
+use App\Events\PackageShipped;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -125,6 +127,8 @@ class Package extends Model
 
         $this->load('shipment.shipmentItems');
         $this->shipment->updateShippedStatus();
+
+        PackageShipped::dispatch($this, $this->shipment);
     }
 
     /**
@@ -164,5 +168,7 @@ class Package extends Model
 
         $this->load('shipment.shipmentItems');
         $this->shipment->updateShippedStatus();
+
+        PackageCancelled::dispatch($this, $this->shipment);
     }
 }

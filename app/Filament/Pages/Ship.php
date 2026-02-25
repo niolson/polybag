@@ -9,7 +9,6 @@ use App\Filament\Concerns\NotifiesUser;
 use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\SettingsService;
-use App\Services\ShipmentImport\PackageExportService;
 use App\Services\ShippingRateService;
 use BackedEnum;
 use Carbon\Carbon;
@@ -237,9 +236,6 @@ class Ship extends Page implements HasForms
             }
 
             $this->package->markShipped($response, auth()->id());
-
-            // Export package data to configured external systems
-            app(PackageExportService::class)->tryExportPackage($this->package);
 
             if ($response->labelData && ! SettingsService::get('suppress_printing', false)) {
                 $this->dispatch('print-label',
