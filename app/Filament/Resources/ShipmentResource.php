@@ -259,6 +259,66 @@ class ShipmentResource extends Resource
 
                         return $indicators;
                     }),
+                Tables\Filters\Filter::make('deliver_by')
+                    ->form([
+                        Forms\Components\DatePicker::make('deliver_by_from')
+                            ->label('Deliver By From'),
+                        Forms\Components\DatePicker::make('deliver_by_until')
+                            ->label('Deliver By Until'),
+                    ])
+                    ->query(function ($query, array $data) {
+                        return $query
+                            ->when($data['deliver_by_from'], fn ($query, $date) => $query->whereDate('deliver_by', '>=', $date))
+                            ->when($data['deliver_by_until'], fn ($query, $date) => $query->whereDate('deliver_by', '<=', $date));
+                    })
+                    ->indicateUsing(function (array $data): array {
+                        $indicators = [];
+                        if ($data['deliver_by_from'] ?? null) {
+                            $indicators['deliver_by_from'] = 'Deliver by from '.$data['deliver_by_from'];
+                        }
+                        if ($data['deliver_by_until'] ?? null) {
+                            $indicators['deliver_by_until'] = 'Deliver by until '.$data['deliver_by_until'];
+                        }
+
+                        return $indicators;
+                    }),
+                Tables\Filters\SelectFilter::make('destination_state')
+                    ->label('Destination State')
+                    ->options(fn () => \App\Models\Shipment::query()
+                        ->whereNotNull('validated_state_or_province')
+                        ->distinct()
+                        ->orderBy('validated_state_or_province')
+                        ->pluck('validated_state_or_province', 'validated_state_or_province')
+                        ->toArray())
+                    ->query(fn ($query, array $data) => $data['value']
+                        ? $query->where('validated_state_or_province', $data['value'])
+                        : $query)
+                    ->searchable(),
+                Tables\Filters\Filter::make('value_range')
+                    ->form([
+                        Forms\Components\TextInput::make('value_from')
+                            ->label('Min Value ($)')
+                            ->numeric(),
+                        Forms\Components\TextInput::make('value_to')
+                            ->label('Max Value ($)')
+                            ->numeric(),
+                    ])
+                    ->query(function ($query, array $data) {
+                        return $query
+                            ->when($data['value_from'], fn ($query, $val) => $query->where('value', '>=', $val))
+                            ->when($data['value_to'], fn ($query, $val) => $query->where('value', '<=', $val));
+                    })
+                    ->indicateUsing(function (array $data): array {
+                        $indicators = [];
+                        if ($data['value_from'] ?? null) {
+                            $indicators['value_from'] = 'Value ≥ $'.$data['value_from'];
+                        }
+                        if ($data['value_to'] ?? null) {
+                            $indicators['value_to'] = 'Value ≤ $'.$data['value_to'];
+                        }
+
+                        return $indicators;
+                    }),
             ], layout: FiltersLayout::AboveContentCollapsible)
             ->defaultSort('created_at', 'desc')
             ->recordActions([

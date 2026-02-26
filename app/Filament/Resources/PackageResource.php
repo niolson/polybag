@@ -16,6 +16,7 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Components;
 use Filament\Schemas\Schema;
 use Filament\Tables;
+use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -189,7 +190,73 @@ class PackageResource extends Resource
                     ->label('Exported')
                     ->trueLabel('Exported')
                     ->falseLabel('Not Exported'),
-            ])
+                Tables\Filters\SelectFilter::make('service')
+                    ->options(fn () => \App\Models\Package::query()
+                        ->whereNotNull('service')
+                        ->distinct()
+                        ->orderBy('service')
+                        ->pluck('service', 'service')
+                        ->toArray())
+                    ->searchable(),
+                Tables\Filters\TernaryFilter::make('manifested')
+                    ->label('Manifested')
+                    ->trueLabel('Manifested')
+                    ->falseLabel('Not Manifested'),
+                Tables\Filters\SelectFilter::make('label_format')
+                    ->label('Label Format')
+                    ->options([
+                        'pdf' => 'PDF',
+                        'zpl' => 'ZPL',
+                    ]),
+                Tables\Filters\Filter::make('shipped_at')
+                    ->form([
+                        \Filament\Forms\Components\DatePicker::make('shipped_from')
+                            ->label('Shipped From'),
+                        \Filament\Forms\Components\DatePicker::make('shipped_until')
+                            ->label('Shipped Until'),
+                    ])
+                    ->query(function ($query, array $data) {
+                        return $query
+                            ->when($data['shipped_from'], fn ($query, $date) => $query->whereDate('shipped_at', '>=', $date))
+                            ->when($data['shipped_until'], fn ($query, $date) => $query->whereDate('shipped_at', '<=', $date));
+                    })
+                    ->indicateUsing(function (array $data): array {
+                        $indicators = [];
+                        if ($data['shipped_from'] ?? null) {
+                            $indicators['shipped_from'] = 'Shipped from '.$data['shipped_from'];
+                        }
+                        if ($data['shipped_until'] ?? null) {
+                            $indicators['shipped_until'] = 'Shipped until '.$data['shipped_until'];
+                        }
+
+                        return $indicators;
+                    }),
+                Tables\Filters\Filter::make('cost_range')
+                    ->form([
+                        \Filament\Forms\Components\TextInput::make('cost_from')
+                            ->label('Min Cost ($)')
+                            ->numeric(),
+                        \Filament\Forms\Components\TextInput::make('cost_to')
+                            ->label('Max Cost ($)')
+                            ->numeric(),
+                    ])
+                    ->query(function ($query, array $data) {
+                        return $query
+                            ->when($data['cost_from'], fn ($query, $val) => $query->where('cost', '>=', $val))
+                            ->when($data['cost_to'], fn ($query, $val) => $query->where('cost', '<=', $val));
+                    })
+                    ->indicateUsing(function (array $data): array {
+                        $indicators = [];
+                        if ($data['cost_from'] ?? null) {
+                            $indicators['cost_from'] = 'Cost ≥ $'.$data['cost_from'];
+                        }
+                        if ($data['cost_to'] ?? null) {
+                            $indicators['cost_to'] = 'Cost ≤ $'.$data['cost_to'];
+                        }
+
+                        return $indicators;
+                    }),
+            ], layout: FiltersLayout::AboveContentCollapsible)
             ->recordActions([
                 Actions\ViewAction::make(),
                 Actions\Action::make('reprint')
