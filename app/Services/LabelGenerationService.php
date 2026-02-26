@@ -25,7 +25,7 @@ class LabelGenerationService
     ): LabelResult {
         $package->loadMissing(['packageItems.product', 'packageItems.shipmentItem', 'shipment.shippingMethod']);
 
-        $ruleResult = RuleEvaluator::evaluate($package->shipment);
+        $ruleResult = RuleEvaluator::evaluate($package->shipment, $package);
 
         if ($ruleResult->hasPreSelectedRate()) {
             $adapter = CarrierRegistry::get($ruleResult->preSelectedRate->carrier);

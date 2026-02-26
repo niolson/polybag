@@ -5,6 +5,7 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\ShippingMethodResource\Pages;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\AliasesRelationManager;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\CarrierServicesRelationManager;
+use App\Filament\Resources\ShippingMethodResource\RelationManagers\ShippingRulesRelationManager;
 use App\Models\ShippingMethod;
 use BackedEnum;
 use Filament\Actions;
@@ -71,6 +72,7 @@ class ShippingMethodResource extends Resource
         return [
             CarrierServicesRelationManager::class,
             AliasesRelationManager::class,
+            ShippingRulesRelationManager::class,
         ];
     }
 

@@ -33,6 +33,11 @@ class ShippingMethod extends Model
         return $this->hasMany(ShippingMethodAlias::class);
     }
 
+    public function shippingRules(): HasMany
+    {
+        return $this->hasMany(ShippingRule::class);
+    }
+
     public function carrierServices(): BelongsToMany
     {
         return $this->belongsToMany(CarrierService::class);

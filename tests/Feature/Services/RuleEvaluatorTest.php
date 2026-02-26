@@ -3,7 +3,11 @@
 use App\Enums\ShippingRuleAction;
 use App\Models\Carrier;
 use App\Models\CarrierService;
+use App\Models\Channel;
+use App\Models\Package;
+use App\Models\Product;
 use App\Models\Shipment;
+use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
 use App\Models\ShippingRule;
 use App\Services\RuleEvaluator;
@@ -156,4 +160,449 @@ it('collects exclude codes before UseService stops evaluation', function (): voi
 
     expect($result->hasPreSelectedRate())->toBeTrue()
         ->and($result->excludedServiceCodes)->toBe(['FEDEX_GROUND']);
+});
+
+// --- Condition evaluation tests ---
+
+it('matches rule with weight condition when package weight satisfies operator', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create();
+    $package = Package::factory()->create(['shipment_id' => $shipment->id, 'weight' => 20]);
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'weight', 'data' => ['operator' => '>=', 'value' => 16]],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment, $package);
+
+    expect($result->hasPreSelectedRate())->toBeTrue();
+});
+
+it('skips rule with weight condition when weight does not match', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create();
+    $package = Package::factory()->create(['shipment_id' => $shipment->id, 'weight' => 10]);
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'weight', 'data' => ['operator' => '>=', 'value' => 16]],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment, $package);
+
+    expect($result->hasPreSelectedRate())->toBeFalse();
+});
+
+it('matches weight between condition', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create();
+    $package = Package::factory()->create(['shipment_id' => $shipment->id, 'weight' => 12]);
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'weight', 'data' => ['operator' => 'between', 'value' => 8, 'max_value' => 16]],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment, $package);
+
+    expect($result->hasPreSelectedRate())->toBeTrue();
+});
+
+it('matches destination_zone condition for continental US', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create([
+        'state_or_province' => 'NY',
+        'country' => 'US',
+    ]);
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'destination_zone', 'data' => ['zone' => 'continental_us']],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeTrue();
+});
+
+it('skips destination_zone condition for non-continental shipment when rule requires continental', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create([
+        'state_or_province' => 'HI',
+        'country' => 'US',
+    ]);
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'destination_zone', 'data' => ['zone' => 'continental_us']],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeFalse();
+});
+
+it('matches destination_zone condition for non-continental US (AK)', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create([
+        'state_or_province' => 'AK',
+        'country' => 'US',
+    ]);
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'destination_zone', 'data' => ['zone' => 'non_continental_us']],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeTrue();
+});
+
+it('matches destination_zone condition for international', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->international()->create();
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'destination_zone', 'data' => ['zone' => 'international']],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeTrue();
+});
+
+it('matches destination_state in condition', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create([
+        'state_or_province' => 'CA',
+        'country' => 'US',
+    ]);
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'destination_state', 'data' => ['operator' => 'in', 'states' => ['CA', 'NY', 'TX']]],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeTrue();
+});
+
+it('skips destination_state not_in condition when state is excluded', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create([
+        'state_or_province' => 'CA',
+        'country' => 'US',
+    ]);
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'destination_state', 'data' => ['operator' => 'not_in', 'states' => ['CA', 'NY']]],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeFalse();
+});
+
+it('matches order_value condition', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create(['value' => 150.00]);
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'order_value', 'data' => ['operator' => '>=', 'value' => 100]],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeTrue();
+});
+
+it('matches item_count condition', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create();
+    ShipmentItem::factory()->count(3)->create([
+        'shipment_id' => $shipment->id,
+        'quantity' => 2,
+    ]);
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'item_count', 'data' => ['operator' => '>=', 'value' => 5]],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment);
+
+    // 3 items x 2 qty = 6, >= 5
+    expect($result->hasPreSelectedRate())->toBeTrue();
+});
+
+it('matches channel condition', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $channel = Channel::factory()->create();
+    $shipment = Shipment::factory()->create(['channel_id' => $channel->id]);
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'channel', 'data' => ['operator' => 'is', 'channel_id' => $channel->id]],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeTrue();
+});
+
+it('skips channel is_not condition when channel matches', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $channel = Channel::factory()->create();
+    $shipment = Shipment::factory()->create(['channel_id' => $channel->id]);
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'channel', 'data' => ['operator' => 'is_not', 'channel_id' => $channel->id]],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeFalse();
+});
+
+it('matches residential condition', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->residential()->create();
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'residential', 'data' => ['is_residential' => true]],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeTrue();
+});
+
+it('skips residential condition when shipment is commercial', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->commercial()->create();
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'residential', 'data' => ['is_residential' => true]],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeFalse();
+});
+
+it('requires all conditions to match (AND logic)', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create([
+        'state_or_province' => 'NY',
+        'country' => 'US',
+        'value' => 200.00,
+    ]);
+    $package = Package::factory()->create(['shipment_id' => $shipment->id, 'weight' => 20]);
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'weight', 'data' => ['operator' => '>=', 'value' => 16]],
+            ['type' => 'destination_zone', 'data' => ['zone' => 'continental_us']],
+            ['type' => 'order_value', 'data' => ['operator' => '>=', 'value' => 100]],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment, $package);
+
+    expect($result->hasPreSelectedRate())->toBeTrue();
+});
+
+it('skips rule when one of multiple conditions fails', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create([
+        'state_or_province' => 'HI', // Non-continental
+        'country' => 'US',
+        'value' => 200.00,
+    ]);
+    $package = Package::factory()->create(['shipment_id' => $shipment->id, 'weight' => 20]);
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'weight', 'data' => ['operator' => '>=', 'value' => 16]],
+            ['type' => 'destination_zone', 'data' => ['zone' => 'continental_us']], // Fails
+            ['type' => 'order_value', 'data' => ['operator' => '>=', 'value' => 100]],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment, $package);
+
+    expect($result->hasPreSelectedRate())->toBeFalse();
+});
+
+it('matches rule with null conditions (backward compatible)', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create();
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => null,
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeTrue();
+});
+
+it('matches rule with empty conditions array (backward compatible)', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create();
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeTrue();
+});
+
+it('uses calculated weight from items when no package provided', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create();
+
+    $product = Product::factory()->create(['weight' => 5.0]);
+    ShipmentItem::factory()->create([
+        'shipment_id' => $shipment->id,
+        'product_id' => $product->id,
+        'quantity' => 4,
+    ]);
+
+    // Total calculated weight = 4 * 5 = 20 lbs
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'weight', 'data' => ['operator' => '>=', 'value' => 16]],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeTrue();
+});
+
+it('uses validated address fields when available for destination conditions', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create([
+        'state_or_province' => 'XX', // Invalid original
+        'country' => 'US',
+        'validated_state_or_province' => 'NY', // Corrected by validation
+    ]);
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'destination_zone', 'data' => ['zone' => 'continental_us']],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeTrue();
+});
+
+it('passes unknown condition types (forward compatibility)', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create();
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'future_condition_type', 'data' => ['foo' => 'bar']],
+        ],
+    ]);
+
+    $result = RuleEvaluator::evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeTrue();
 });
