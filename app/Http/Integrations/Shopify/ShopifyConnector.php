@@ -28,10 +28,10 @@ class ShopifyConnector extends Connector
     public static function fromConfig(): self
     {
         return new self(
-            shopDomain: SettingsService::get('shopify.shop_domain', config('services.shopify.shop_domain') ?? ''),
-            clientId: SettingsService::get('shopify.client_id', config('services.shopify.client_id') ?? ''),
-            clientSecret: SettingsService::get('shopify.client_secret', config('services.shopify.client_secret') ?? ''),
-            apiVersion: SettingsService::get('shopify.api_version', config('services.shopify.api_version') ?? '2025-01'),
+            shopDomain: app(SettingsService::class)->get('shopify.shop_domain', config('services.shopify.shop_domain') ?? ''),
+            clientId: app(SettingsService::class)->get('shopify.client_id', config('services.shopify.client_id') ?? ''),
+            clientSecret: app(SettingsService::class)->get('shopify.client_secret', config('services.shopify.client_secret') ?? ''),
+            apiVersion: app(SettingsService::class)->get('shopify.api_version', config('services.shopify.api_version') ?? '2025-01'),
         );
     }
 

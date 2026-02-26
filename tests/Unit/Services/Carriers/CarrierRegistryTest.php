@@ -7,11 +7,11 @@ use App\Services\Carriers\UpsAdapter;
 use App\Services\Carriers\UspsAdapter;
 
 beforeEach(function (): void {
-    CarrierRegistry::clearInstances();
+    app(CarrierRegistry::class)->clearInstances();
 });
 
 it('returns USPS adapter for USPS carrier', function (): void {
-    $adapter = CarrierRegistry::get('USPS');
+    $adapter = app(CarrierRegistry::class)->get('USPS');
 
     expect($adapter)->toBeInstanceOf(UspsAdapter::class)
         ->and($adapter)->toBeInstanceOf(CarrierAdapterInterface::class)
@@ -19,7 +19,7 @@ it('returns USPS adapter for USPS carrier', function (): void {
 });
 
 it('returns FedEx adapter for FedEx carrier', function (): void {
-    $adapter = CarrierRegistry::get('FedEx');
+    $adapter = app(CarrierRegistry::class)->get('FedEx');
 
     expect($adapter)->toBeInstanceOf(FedexAdapter::class)
         ->and($adapter)->toBeInstanceOf(CarrierAdapterInterface::class)
@@ -27,7 +27,7 @@ it('returns FedEx adapter for FedEx carrier', function (): void {
 });
 
 it('returns UPS adapter for UPS carrier', function (): void {
-    $adapter = CarrierRegistry::get('UPS');
+    $adapter = app(CarrierRegistry::class)->get('UPS');
 
     expect($adapter)->toBeInstanceOf(UpsAdapter::class)
         ->and($adapter)->toBeInstanceOf(CarrierAdapterInterface::class)
@@ -35,18 +35,18 @@ it('returns UPS adapter for UPS carrier', function (): void {
 });
 
 it('throws exception for unknown carrier', function (): void {
-    CarrierRegistry::get('UnknownCarrier');
+    app(CarrierRegistry::class)->get('UnknownCarrier');
 })->throws(InvalidArgumentException::class, 'Unknown carrier: UnknownCarrier');
 
 it('checks if carrier exists', function (): void {
-    expect(CarrierRegistry::has('USPS'))->toBeTrue()
-        ->and(CarrierRegistry::has('FedEx'))->toBeTrue()
-        ->and(CarrierRegistry::has('UPS'))->toBeTrue()
-        ->and(CarrierRegistry::has('DHL'))->toBeFalse();
+    expect(app(CarrierRegistry::class)->has('USPS'))->toBeTrue()
+        ->and(app(CarrierRegistry::class)->has('FedEx'))->toBeTrue()
+        ->and(app(CarrierRegistry::class)->has('UPS'))->toBeTrue()
+        ->and(app(CarrierRegistry::class)->has('DHL'))->toBeFalse();
 });
 
 it('returns all registered carrier names', function (): void {
-    $names = CarrierRegistry::getCarrierNames();
+    $names = app(CarrierRegistry::class)->getCarrierNames();
 
     expect($names)->toBeArray()
         ->and($names)->toContain('USPS')
@@ -55,8 +55,8 @@ it('returns all registered carrier names', function (): void {
 });
 
 it('caches adapter instances', function (): void {
-    $adapter1 = CarrierRegistry::get('USPS');
-    $adapter2 = CarrierRegistry::get('USPS');
+    $adapter1 = app(CarrierRegistry::class)->get('USPS');
+    $adapter2 = app(CarrierRegistry::class)->get('USPS');
 
     expect($adapter1)->toBe($adapter2);
 });
@@ -115,10 +115,10 @@ it('allows registering custom adapters', function (): void {
         }
     };
 
-    CarrierRegistry::register('CustomCarrier', $mockAdapter::class);
+    app(CarrierRegistry::class)->register('CustomCarrier', $mockAdapter::class);
 
-    expect(CarrierRegistry::has('CustomCarrier'))->toBeTrue();
+    expect(app(CarrierRegistry::class)->has('CustomCarrier'))->toBeTrue();
 
-    $adapter = CarrierRegistry::get('CustomCarrier');
+    $adapter = app(CarrierRegistry::class)->get('CustomCarrier');
     expect($adapter->getCarrierName())->toBe('CustomCarrier');
 });

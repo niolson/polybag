@@ -38,7 +38,7 @@ class EndOfDay extends Page
 
     public function loadData(): void
     {
-        $this->carrierSummary = ManifestService::getUnmanifestedSummary()->all();
+        $this->carrierSummary = app(ManifestService::class)->getUnmanifestedSummary()->all();
 
         $this->todaysManifests = Manifest::query()
             ->whereDate('manifest_date', today())
@@ -57,7 +57,7 @@ class EndOfDay extends Page
 
     public function generateManifest(string $carrier): void
     {
-        $packages = ManifestService::getUnmanifestedPackages()->get($carrier);
+        $packages = app(ManifestService::class)->getUnmanifestedPackages()->get($carrier);
 
         if (! $packages || $packages->isEmpty()) {
             $this->notifyWarning('No Packages', "No unmanifested packages found for {$carrier}.");
@@ -65,7 +65,7 @@ class EndOfDay extends Page
             return;
         }
 
-        $response = ManifestService::createManifest($carrier, $packages);
+        $response = app(ManifestService::class)->createManifest($carrier, $packages);
 
         if (! $response->success) {
             $this->notifyError('Manifest Error', $response->errorMessage ?? 'Failed to create manifest.');
@@ -73,7 +73,7 @@ class EndOfDay extends Page
             return;
         }
 
-        if ($response->image && ! SettingsService::get('suppress_printing', false)) {
+        if ($response->image && ! app(SettingsService::class)->get('suppress_printing', false)) {
             $this->dispatch('print-report', data: $response->image);
         }
 
@@ -84,7 +84,7 @@ class EndOfDay extends Page
 
     public function markAsManifested(string $carrier): void
     {
-        $count = ManifestService::markAsManifested($carrier);
+        $count = app(ManifestService::class)->markAsManifested($carrier);
 
         if ($count === 0) {
             $this->notifyWarning('No Packages', "No unmanifested packages found for {$carrier}.");

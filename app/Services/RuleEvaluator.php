@@ -12,7 +12,7 @@ use App\Models\ShippingRule;
 
 class RuleEvaluator
 {
-    public static function evaluate(Shipment $shipment, ?Package $package = null): RuleEvaluationResult
+    public function evaluate(Shipment $shipment, ?Package $package = null): RuleEvaluationResult
     {
         $rules = ShippingRule::query()
             ->active()
@@ -26,7 +26,7 @@ class RuleEvaluator
         $excludedServiceCodes = [];
 
         foreach ($rules as $rule) {
-            if (! self::conditionsMatch($rule->conditions, $shipment, $package)) {
+            if (! $this->conditionsMatch($rule->conditions, $shipment, $package)) {
                 continue;
             }
 
@@ -58,14 +58,14 @@ class RuleEvaluator
         );
     }
 
-    private static function conditionsMatch(?array $conditions, Shipment $shipment, ?Package $package): bool
+    private function conditionsMatch(?array $conditions, Shipment $shipment, ?Package $package): bool
     {
         if (empty($conditions)) {
             return true;
         }
 
         foreach ($conditions as $condition) {
-            if (! self::evaluateCondition($condition, $shipment, $package)) {
+            if (! $this->evaluateCondition($condition, $shipment, $package)) {
                 return false;
             }
         }
@@ -73,24 +73,24 @@ class RuleEvaluator
         return true;
     }
 
-    private static function evaluateCondition(array $condition, Shipment $shipment, ?Package $package): bool
+    private function evaluateCondition(array $condition, Shipment $shipment, ?Package $package): bool
     {
         $type = $condition['type'] ?? null;
         $data = $condition['data'] ?? [];
 
         return match ($type) {
-            'weight' => self::evaluateWeight($data, $shipment, $package),
-            'order_value' => self::evaluateOrderValue($data, $shipment),
-            'item_count' => self::evaluateItemCount($data, $shipment),
-            'destination_zone' => self::evaluateDestinationZone($data, $shipment),
-            'destination_state' => self::evaluateDestinationState($data, $shipment),
-            'channel' => self::evaluateChannel($data, $shipment),
-            'residential' => self::evaluateResidential($data, $shipment),
+            'weight' => $this->evaluateWeight($data, $shipment, $package),
+            'order_value' => $this->evaluateOrderValue($data, $shipment),
+            'item_count' => $this->evaluateItemCount($data, $shipment),
+            'destination_zone' => $this->evaluateDestinationZone($data, $shipment),
+            'destination_state' => $this->evaluateDestinationState($data, $shipment),
+            'channel' => $this->evaluateChannel($data, $shipment),
+            'residential' => $this->evaluateResidential($data, $shipment),
             default => true, // Unknown condition types pass (forward compat)
         };
     }
 
-    private static function evaluateWeight(array $data, Shipment $shipment, ?Package $package): bool
+    private function evaluateWeight(array $data, Shipment $shipment, ?Package $package): bool
     {
         if ($package) {
             $weight = (float) $package->weight;
@@ -99,23 +99,23 @@ class RuleEvaluator
             $weight = $shipment->shipmentItems->sum(fn ($i) => $i->quantity * ($i->product->weight ?? 0));
         }
 
-        return self::compareNumeric($data, $weight);
+        return $this->compareNumeric($data, $weight);
     }
 
-    private static function evaluateOrderValue(array $data, Shipment $shipment): bool
+    private function evaluateOrderValue(array $data, Shipment $shipment): bool
     {
-        return self::compareNumeric($data, (float) $shipment->value);
+        return $this->compareNumeric($data, (float) $shipment->value);
     }
 
-    private static function evaluateItemCount(array $data, Shipment $shipment): bool
+    private function evaluateItemCount(array $data, Shipment $shipment): bool
     {
         $shipment->loadMissing('shipmentItems');
         $count = $shipment->shipmentItems->sum('quantity');
 
-        return self::compareNumeric($data, $count);
+        return $this->compareNumeric($data, $count);
     }
 
-    private static function evaluateDestinationZone(array $data, Shipment $shipment): bool
+    private function evaluateDestinationZone(array $data, Shipment $shipment): bool
     {
         $zone = DestinationZone::tryFrom($data['zone'] ?? '');
 
@@ -126,7 +126,7 @@ class RuleEvaluator
         return DestinationZone::matchesShipment($zone, $shipment);
     }
 
-    private static function evaluateDestinationState(array $data, Shipment $shipment): bool
+    private function evaluateDestinationState(array $data, Shipment $shipment): bool
     {
         $operator = $data['operator'] ?? 'in';
         $states = $data['states'] ?? [];
@@ -144,7 +144,7 @@ class RuleEvaluator
         };
     }
 
-    private static function evaluateChannel(array $data, Shipment $shipment): bool
+    private function evaluateChannel(array $data, Shipment $shipment): bool
     {
         $operator = $data['operator'] ?? 'is';
         $channelId = $data['channel_id'] ?? null;
@@ -160,7 +160,7 @@ class RuleEvaluator
         };
     }
 
-    private static function evaluateResidential(array $data, Shipment $shipment): bool
+    private function evaluateResidential(array $data, Shipment $shipment): bool
     {
         $isResidential = $data['is_residential'] ?? null;
 
@@ -173,7 +173,7 @@ class RuleEvaluator
         return (bool) $shipmentResidential === (bool) $isResidential;
     }
 
-    private static function compareNumeric(array $data, float|int $actual): bool
+    private function compareNumeric(array $data, float|int $actual): bool
     {
         $operator = $data['operator'] ?? '>=';
         $value = (float) ($data['value'] ?? 0);

@@ -18,20 +18,20 @@ class LabelGenerationService
      * Does NOT call markShipped() — the caller handles that,
      * since cleanup behavior differs between autoShip, batch, etc.
      */
-    public static function generateLabel(
+    public function generateLabel(
         Package $package,
         string $labelFormat = 'pdf',
         ?int $labelDpi = null,
     ): LabelResult {
         $package->loadMissing(['packageItems.product', 'packageItems.shipmentItem', 'shipment.shippingMethod']);
 
-        $ruleResult = RuleEvaluator::evaluate($package->shipment, $package);
+        $ruleResult = app(RuleEvaluator::class)->evaluate($package->shipment, $package);
 
         if ($ruleResult->hasPreSelectedRate()) {
-            $adapter = CarrierRegistry::get($ruleResult->preSelectedRate->carrier);
+            $adapter = app(CarrierRegistry::class)->get($ruleResult->preSelectedRate->carrier);
             $selectedRate = $adapter->resolvePreSelectedRate($ruleResult->preSelectedRate, $package);
         } else {
-            $rates = ShippingRateService::getShippingRates($package->id);
+            $rates = app(ShippingRateService::class)->getShippingRates($package->id);
 
             if ($ruleResult->shouldFilterRates()) {
                 $rates = $rates->reject(
@@ -44,12 +44,12 @@ class LabelGenerationService
             }
 
             $deadline = $package->shipment->getDeliverByDate();
-            $selectedRate = self::selectBestRate($rates, $deadline);
+            $selectedRate = $this->selectBestRate($rates, $deadline);
 
-            RateQuoteLogger::markSelected($package->id, $selectedRate);
+            app(RateQuoteLogger::class)->markSelected($package->id, $selectedRate);
         }
 
-        $adapter = CarrierRegistry::get($selectedRate->carrier);
+        $adapter = app(CarrierRegistry::class)->get($selectedRate->carrier);
         $shipRequest = ShipRequest::fromPackageAndRate($package, $selectedRate, $labelFormat, $labelDpi);
         $response = $adapter->createShipment($shipRequest);
 
@@ -66,7 +66,7 @@ class LabelGenerationService
      *
      * @param  Collection<int, RateResponse>  $rates
      */
-    private static function selectBestRate(Collection $rates, ?Carbon $deadline): RateResponse
+    private function selectBestRate(Collection $rates, ?Carbon $deadline): RateResponse
     {
         if (! $deadline) {
             return $rates->sortBy('price')->first();

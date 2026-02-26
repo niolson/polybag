@@ -93,7 +93,7 @@ class Shipment extends Model
             return;
         }
 
-        if (! SettingsService::get('packing_validation_enabled', true)) {
+        if (! app(SettingsService::class)->get('packing_validation_enabled', true)) {
             $this->update(['shipped' => true]);
 
             return;

@@ -49,7 +49,7 @@ class ViewPackage extends ViewRecord
                 ->modalDescription('This will cancel the label with the carrier. The package will be kept with its dimensions so it can be re-shipped.')
                 ->visible(fn () => $this->record->shipped && $this->record->tracking_number && $this->record->carrier)
                 ->action(function (): void {
-                    $adapter = CarrierRegistry::get($this->record->carrier);
+                    $adapter = app(CarrierRegistry::class)->get($this->record->carrier);
                     $response = $adapter->cancelShipment($this->record->tracking_number, $this->record);
 
                     if ($response->success) {

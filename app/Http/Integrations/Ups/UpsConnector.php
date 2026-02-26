@@ -19,7 +19,7 @@ class UpsConnector extends Connector
 
     public function getRequestTimeout(): float
     {
-        return (float) SettingsService::get('carrier_api_timeout', 15);
+        return (float) app(SettingsService::class)->get('carrier_api_timeout', 15);
     }
 
     /**
@@ -39,7 +39,7 @@ class UpsConnector extends Connector
 
     public function resolveBaseUrl(): string
     {
-        if (SettingsService::get('sandbox_mode', false)) {
+        if (app(SettingsService::class)->get('sandbox_mode', false)) {
             return config('services.ups.sandbox_url', 'https://wwwcie.ups.com');
         }
 
@@ -49,8 +49,8 @@ class UpsConnector extends Connector
     protected function defaultOauthConfig(): OAuthConfig
     {
         return OAuthConfig::make()
-            ->setClientId(SettingsService::get('ups.client_id', config('services.ups.client_id')))
-            ->setClientSecret(SettingsService::get('ups.client_secret', config('services.ups.client_secret')))
+            ->setClientId(app(SettingsService::class)->get('ups.client_id', config('services.ups.client_id')))
+            ->setClientSecret(app(SettingsService::class)->get('ups.client_secret', config('services.ups.client_secret')))
             ->setTokenEndpoint('/security/v1/oauth/token');
     }
 

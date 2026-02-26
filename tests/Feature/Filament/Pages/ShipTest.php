@@ -59,13 +59,7 @@ function registerMockAdapter(ShipResponse $response): void
     $adapter->shouldReceive('getRates')->andReturn(collect());
     $adapter->shouldReceive('createShipment')->andReturn($response);
 
-    CarrierRegistry::register('USPS', get_class($adapter));
-    CarrierRegistry::clearInstances();
-
-    // Re-register using the mock instance directly
-    $reflection = new ReflectionProperty(CarrierRegistry::class, 'instances');
-    $reflection->setAccessible(true);
-    $reflection->setValue(null, ['USPS' => $adapter]);
+    app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 }
 
 it('auto-selects the cheapest shipping rate', function (): void {
@@ -159,7 +153,7 @@ it('dispatches print-label event when suppress_printing is off', function (): vo
 it('does not dispatch print-label event when suppress_printing is on', function (): void {
     Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
     Setting::create(['key' => 'suppress_printing', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
-    SettingsService::clearCache();
+    app(SettingsService::class)->clearCache();
 
     $package = createShippablePackage();
 

@@ -63,7 +63,7 @@ it('dispatches ManifestCreated after successful USPS manifest creation', functio
         ->where('manifested', false)
         ->get();
 
-    $result = ManifestService::createManifest('USPS', $packages);
+    $result = app(ManifestService::class)->createManifest('USPS', $packages);
 
     expect($result->success)->toBeTrue();
 

@@ -53,10 +53,10 @@ class Pack extends Page
 
     public function mount($shipment_id = null): void
     {
-        $this->transparencyEnabled = (bool) SettingsService::get('transparency_enabled', true);
+        $this->transparencyEnabled = (bool) app(SettingsService::class)->get('transparency_enabled', true);
 
         // Load box sizes for client-side lookup (cached)
-        $this->boxSizes = CacheService::getBoxSizesForPacking();
+        $this->boxSizes = app(CacheService::class)->getBoxSizesForPacking();
 
         if ($shipment_id) {
             $this->shipment = Shipment::where('shipment_reference', $shipment_id)
@@ -135,7 +135,7 @@ class Pack extends Page
         try {
             $package = $this->createPackage();
 
-            $result = LabelGenerationService::generateLabel($package, $this->labelFormat, $this->labelDpi);
+            $result = app(LabelGenerationService::class)->generateLabel($package, $this->labelFormat, $this->labelDpi);
 
             if (! $result->success) {
                 $package->packageItems()->delete();
@@ -359,7 +359,7 @@ class Pack extends Page
         }
 
         // If packing validation is disabled, only check weight/dimensions
-        if (! SettingsService::get('packing_validation_enabled', true)) {
+        if (! app(SettingsService::class)->get('packing_validation_enabled', true)) {
             return $this->hasValidDimensions();
         }
 
@@ -461,7 +461,7 @@ class Pack extends Page
         }
 
         try {
-            $adapter = CarrierRegistry::get($package->carrier);
+            $adapter = app(CarrierRegistry::class)->get($package->carrier);
             $response = $adapter->cancelShipment($package->tracking_number, $package);
 
             if ($response->success) {

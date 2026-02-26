@@ -302,7 +302,7 @@ it('validates amazon configuration requires credentials', function (): void {
 it('imports sandbox order with full quantities even when already fulfilled', function (): void {
     $channel = Channel::factory()->create(['name' => 'Amazon', 'channel_reference' => 'Amazon']);
 
-    SettingsService::set('sandbox_mode', true);
+    app(SettingsService::class)->set('sandbox_mode', true);
 
     // Sandbox order where items are already fulfilled
     $order = sampleAmazonOrder();

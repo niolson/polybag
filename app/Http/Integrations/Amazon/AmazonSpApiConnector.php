@@ -31,15 +31,15 @@ class AmazonSpApiConnector extends Connector
         return new self(
             baseUrl: config('services.amazon.base_url') ?? 'https://sellingpartnerapi-na.amazon.com',
             sandboxUrl: config('services.amazon.sandbox_url') ?? 'https://sandbox.sellingpartnerapi-na.amazon.com',
-            clientId: SettingsService::get('amazon.client_id', config('services.amazon.client_id') ?? ''),
-            clientSecret: SettingsService::get('amazon.client_secret', config('services.amazon.client_secret') ?? ''),
-            refreshToken: SettingsService::get('amazon.refresh_token', config('services.amazon.refresh_token') ?? ''),
+            clientId: app(SettingsService::class)->get('amazon.client_id', config('services.amazon.client_id') ?? ''),
+            clientSecret: app(SettingsService::class)->get('amazon.client_secret', config('services.amazon.client_secret') ?? ''),
+            refreshToken: app(SettingsService::class)->get('amazon.refresh_token', config('services.amazon.refresh_token') ?? ''),
         );
     }
 
     public function resolveBaseUrl(): string
     {
-        $sandbox = SettingsService::get('sandbox_mode', false);
+        $sandbox = app(SettingsService::class)->get('sandbox_mode', false);
 
         return $sandbox ? $this->sandboxUrl : $this->baseUrl;
     }

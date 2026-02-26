@@ -76,10 +76,10 @@ class Ship extends Page implements HasForms
             return;
         }
 
-        $rates = ShippingRateService::getShippingRates($this->package->id);
+        $rates = app(ShippingRateService::class)->getShippingRates($this->package->id);
 
         // Apply shipping rules (exclude services, etc.)
-        $ruleResult = RuleEvaluator::evaluate($this->package->shipment);
+        $ruleResult = app(RuleEvaluator::class)->evaluate($this->package->shipment);
         if ($ruleResult->shouldFilterRates()) {
             $rates = $rates->reject(
                 fn (RateResponse $rate) => in_array($rate->serviceCode, $ruleResult->excludedServiceCodes)
@@ -212,10 +212,10 @@ class Ship extends Page implements HasForms
 
         $selectedRate = RateResponse::fromArray($rate);
 
-        RateQuoteLogger::markSelected($this->package->id, $selectedRate);
+        app(RateQuoteLogger::class)->markSelected($this->package->id, $selectedRate);
 
         try {
-            $adapter = CarrierRegistry::get($selectedRate->carrier);
+            $adapter = app(CarrierRegistry::class)->get($selectedRate->carrier);
 
             $shipRequest = ShipRequest::fromPackageAndRate($this->package, $selectedRate, $this->labelFormat, $this->labelDpi);
             $response = $adapter->createShipment($shipRequest);
@@ -228,7 +228,7 @@ class Ship extends Page implements HasForms
 
             $this->package->markShipped($response, auth()->id());
 
-            if ($response->labelData && ! SettingsService::get('suppress_printing', false)) {
+            if ($response->labelData && ! app(SettingsService::class)->get('suppress_printing', false)) {
                 $this->dispatch('print-label',
                     label: $response->labelData,
                     orientation: $response->labelOrientation ?? 'portrait',

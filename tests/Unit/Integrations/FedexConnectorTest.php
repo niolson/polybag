@@ -11,7 +11,7 @@ it('resolves production base URL by default', function (): void {
         'services.fedex.base_url' => 'https://apis.fedex.com',
         'services.fedex.sandbox_url' => 'https://apis-sandbox.fedex.com',
     ]);
-    \App\Services\SettingsService::clearCache();
+    app(\App\Services\SettingsService::class)->clearCache();
 
     $connector = new FedexConnector;
 
@@ -24,7 +24,7 @@ it('resolves sandbox base URL when sandbox_mode is enabled', function (): void {
         'services.fedex.sandbox_url' => 'https://apis-sandbox.fedex.com',
     ]);
     \App\Models\Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
-    \App\Services\SettingsService::clearCache();
+    app(\App\Services\SettingsService::class)->clearCache();
 
     $connector = new FedexConnector;
 

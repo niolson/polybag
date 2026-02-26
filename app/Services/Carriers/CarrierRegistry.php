@@ -10,42 +10,47 @@ class CarrierRegistry
     /**
      * @var array<string, class-string<CarrierAdapterInterface>>
      */
-    protected static array $adapters = [
-        'USPS' => UspsAdapter::class,
-        'FedEx' => FedexAdapter::class,
-        'UPS' => UpsAdapter::class,
-    ];
+    protected array $adapters;
 
     /**
      * @var array<string, CarrierAdapterInterface>
      */
-    protected static array $instances = [];
+    protected array $instances = [];
+
+    public function __construct()
+    {
+        $this->adapters = [
+            'USPS' => UspsAdapter::class,
+            'FedEx' => FedexAdapter::class,
+            'UPS' => UpsAdapter::class,
+        ];
+    }
 
     /**
      * Get an adapter instance for the given carrier name.
      *
      * @throws InvalidArgumentException
      */
-    public static function get(string $carrierName): CarrierAdapterInterface
+    public function get(string $carrierName): CarrierAdapterInterface
     {
-        if (! self::has($carrierName)) {
+        if (! $this->has($carrierName)) {
             throw new InvalidArgumentException("Unknown carrier: {$carrierName}");
         }
 
-        if (! isset(self::$instances[$carrierName])) {
-            $adapterClass = self::$adapters[$carrierName];
-            self::$instances[$carrierName] = new $adapterClass;
+        if (! isset($this->instances[$carrierName])) {
+            $adapterClass = $this->adapters[$carrierName];
+            $this->instances[$carrierName] = new $adapterClass;
         }
 
-        return self::$instances[$carrierName];
+        return $this->instances[$carrierName];
     }
 
     /**
      * Check if an adapter exists for the given carrier name.
      */
-    public static function has(string $carrierName): bool
+    public function has(string $carrierName): bool
     {
-        return isset(self::$adapters[$carrierName]);
+        return isset($this->adapters[$carrierName]);
     }
 
     /**
@@ -53,10 +58,10 @@ class CarrierRegistry
      *
      * @param  class-string<CarrierAdapterInterface>  $adapterClass
      */
-    public static function register(string $carrierName, string $adapterClass): void
+    public function register(string $carrierName, string $adapterClass): void
     {
-        self::$adapters[$carrierName] = $adapterClass;
-        unset(self::$instances[$carrierName]);
+        $this->adapters[$carrierName] = $adapterClass;
+        unset($this->instances[$carrierName]);
     }
 
     /**
@@ -64,9 +69,9 @@ class CarrierRegistry
      *
      * @return array<string>
      */
-    public static function getCarrierNames(): array
+    public function getCarrierNames(): array
     {
-        return array_keys(self::$adapters);
+        return array_keys($this->adapters);
     }
 
     /**
@@ -74,12 +79,12 @@ class CarrierRegistry
      *
      * @return array<string, CarrierAdapterInterface>
      */
-    public static function getConfiguredAdapters(): array
+    public function getConfiguredAdapters(): array
     {
         $configured = [];
 
-        foreach (self::$adapters as $name => $class) {
-            $adapter = self::get($name);
+        foreach ($this->adapters as $name => $class) {
+            $adapter = $this->get($name);
             if ($adapter->isConfigured()) {
                 $configured[$name] = $adapter;
             }
@@ -91,30 +96,30 @@ class CarrierRegistry
     /**
      * Register an adapter instance directly (useful for testing).
      */
-    public static function registerInstance(string $carrierName, CarrierAdapterInterface $adapter): void
+    public function registerInstance(string $carrierName, CarrierAdapterInterface $adapter): void
     {
-        self::$adapters[$carrierName] = get_class($adapter);
-        self::$instances[$carrierName] = $adapter;
+        $this->adapters[$carrierName] = get_class($adapter);
+        $this->instances[$carrierName] = $adapter;
     }
 
     /**
      * Clear cached instances (useful for testing).
      */
-    public static function clearInstances(): void
+    public function clearInstances(): void
     {
-        self::$instances = [];
+        $this->instances = [];
     }
 
     /**
      * Reset to default adapters (useful for testing).
      */
-    public static function reset(): void
+    public function reset(): void
     {
-        self::$adapters = [
+        $this->adapters = [
             'USPS' => UspsAdapter::class,
             'FedEx' => FedexAdapter::class,
             'UPS' => UpsAdapter::class,
         ];
-        self::$instances = [];
+        $this->instances = [];
     }
 }

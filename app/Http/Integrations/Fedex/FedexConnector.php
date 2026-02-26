@@ -19,7 +19,7 @@ class FedexConnector extends Connector
 
     public function getRequestTimeout(): float
     {
-        return (float) SettingsService::get('carrier_api_timeout', 15);
+        return (float) app(SettingsService::class)->get('carrier_api_timeout', 15);
     }
 
     /**
@@ -39,7 +39,7 @@ class FedexConnector extends Connector
 
     public function resolveBaseUrl(): string
     {
-        if (SettingsService::get('sandbox_mode', false)) {
+        if (app(SettingsService::class)->get('sandbox_mode', false)) {
             return config('services.fedex.sandbox_url', 'https://apis-sandbox.fedex.com');
         }
 
@@ -49,8 +49,8 @@ class FedexConnector extends Connector
     protected function defaultOauthConfig(): OAuthConfig
     {
         return OAuthConfig::make()
-            ->setClientId(SettingsService::get('fedex.api_key', config('services.fedex.api_key')))
-            ->setClientSecret(SettingsService::get('fedex.api_secret', config('services.fedex.api_secret')))
+            ->setClientId(app(SettingsService::class)->get('fedex.api_key', config('services.fedex.api_key')))
+            ->setClientSecret(app(SettingsService::class)->get('fedex.api_secret', config('services.fedex.api_secret')))
             ->setTokenEndpoint('/oauth/token');
     }
 

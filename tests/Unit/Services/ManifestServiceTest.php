@@ -12,7 +12,7 @@ it('returns unmanifested packages grouped by carrier', function (): void {
     Package::factory()->shipped()->create(['carrier' => 'USPS', 'tracking_number' => '9400222']);
     Package::factory()->shipped()->create(['carrier' => 'FedEx', 'tracking_number' => '7890001']);
 
-    $grouped = ManifestService::getUnmanifestedPackages();
+    $grouped = app(ManifestService::class)->getUnmanifestedPackages();
 
     expect($grouped)->toHaveKey('USPS')
         ->and($grouped)->toHaveKey('FedEx')
@@ -33,7 +33,7 @@ it('excludes already manifested packages', function (): void {
         'tracking_number' => '9400222',
     ]);
 
-    $grouped = ManifestService::getUnmanifestedPackages();
+    $grouped = app(ManifestService::class)->getUnmanifestedPackages();
 
     expect($grouped['USPS'])->toHaveCount(1);
 });
@@ -45,7 +45,7 @@ it('excludes unshipped packages', function (): void {
         'shipped' => false,
     ]);
 
-    $grouped = ManifestService::getUnmanifestedPackages();
+    $grouped = app(ManifestService::class)->getUnmanifestedPackages();
 
     expect($grouped)->toBeEmpty();
 });
@@ -58,7 +58,7 @@ it('excludes packages without tracking numbers', function (): void {
         'shipped_at' => now(),
     ]);
 
-    $grouped = ManifestService::getUnmanifestedPackages();
+    $grouped = app(ManifestService::class)->getUnmanifestedPackages();
 
     expect($grouped)->toBeEmpty();
 });
@@ -66,7 +66,7 @@ it('excludes packages without tracking numbers', function (): void {
 it('returns failure for unsupported carrier', function (): void {
     $packages = collect([Package::factory()->shipped()->create(['carrier' => 'DHL'])]);
 
-    $result = ManifestService::createManifest('DHL', $packages);
+    $result = app(ManifestService::class)->createManifest('DHL', $packages);
 
     expect($result->success)->toBeFalse()
         ->and($result->errorMessage)->toContain('Unsupported carrier');
@@ -75,7 +75,7 @@ it('returns failure for unsupported carrier', function (): void {
 it('returns failure for FedEx manifest stub', function (): void {
     $packages = collect([Package::factory()->shipped()->create(['carrier' => 'FedEx'])]);
 
-    $result = ManifestService::createManifest('FedEx', $packages);
+    $result = app(ManifestService::class)->createManifest('FedEx', $packages);
 
     expect($result->success)->toBeFalse()
         ->and($result->errorMessage)->toContain('not yet implemented');

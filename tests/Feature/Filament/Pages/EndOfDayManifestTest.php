@@ -84,7 +84,7 @@ it('generateManifest shows warning when no packages for carrier', function (): v
 
 it('generateManifest suppresses printing when suppress_printing setting is true', function (): void {
     Setting::create(['key' => 'suppress_printing', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
-    SettingsService::clearCache();
+    app(SettingsService::class)->clearCache();
 
     Package::factory()->shipped()->create([
         'carrier' => 'USPS',

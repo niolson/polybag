@@ -21,7 +21,7 @@ class USPSConnector extends Connector
 
     public function getRequestTimeout(): float
     {
-        return (float) SettingsService::get('carrier_api_timeout', 15);
+        return (float) app(SettingsService::class)->get('carrier_api_timeout', 15);
     }
 
     /**
@@ -41,7 +41,7 @@ class USPSConnector extends Connector
 
     public function resolveBaseUrl(): string
     {
-        if (SettingsService::get('sandbox_mode', false)) {
+        if (app(SettingsService::class)->get('sandbox_mode', false)) {
             return config('services.usps.sandbox_url', 'https://apis-tem.usps.com');
         }
 
@@ -51,8 +51,8 @@ class USPSConnector extends Connector
     protected function defaultOauthConfig(): OAuthConfig
     {
         return OAuthConfig::make()
-            ->setClientId(SettingsService::get('usps.client_id', config('services.usps.client_id')))
-            ->setClientSecret(SettingsService::get('usps.client_secret', config('services.usps.client_secret')))
+            ->setClientId(app(SettingsService::class)->get('usps.client_id', config('services.usps.client_id')))
+            ->setClientSecret(app(SettingsService::class)->get('usps.client_secret', config('services.usps.client_secret')))
             ->setDefaultScopes(['addresses', 'domestic-prices', 'international-prices', 'payments', 'labels', 'international-labels', 'shipments', 'scan-forms'])
             ->setTokenEndpoint('/oauth2/v3/token');
     }
@@ -78,17 +78,17 @@ class USPSConnector extends Connector
                 'roles' => [
                     [
                         'roleName' => 'PAYER',
-                        'CRID' => SettingsService::get('usps.crid', config('services.usps.crid')),
-                        'MID' => SettingsService::get('usps.mid', config('services.usps.mid')),
-                        'manifestMID' => SettingsService::get('usps.mid', config('services.usps.mid')),
+                        'CRID' => app(SettingsService::class)->get('usps.crid', config('services.usps.crid')),
+                        'MID' => app(SettingsService::class)->get('usps.mid', config('services.usps.mid')),
+                        'manifestMID' => app(SettingsService::class)->get('usps.mid', config('services.usps.mid')),
                         'accountType' => 'EPS',
-                        'accountNumber' => SettingsService::get('usps.crid', config('services.usps.crid')),
+                        'accountNumber' => app(SettingsService::class)->get('usps.crid', config('services.usps.crid')),
                     ],
                     [
                         'roleName' => 'LABEL_OWNER',
-                        'CRID' => SettingsService::get('usps.crid', config('services.usps.crid')),
-                        'MID' => SettingsService::get('usps.mid', config('services.usps.mid')),
-                        'manifestMID' => SettingsService::get('usps.mid', config('services.usps.mid')),
+                        'CRID' => app(SettingsService::class)->get('usps.crid', config('services.usps.crid')),
+                        'MID' => app(SettingsService::class)->get('usps.mid', config('services.usps.mid')),
+                        'manifestMID' => app(SettingsService::class)->get('usps.mid', config('services.usps.mid')),
                     ],
                 ],
             ]);

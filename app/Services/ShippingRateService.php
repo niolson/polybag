@@ -21,7 +21,7 @@ class ShippingRateService
      *
      * @throws NoActiveCarrierServicesException
      */
-    public static function getShippingRates(int $packageId): Collection
+    public function getShippingRates(int $packageId): Collection
     {
         $package = Package::with(['packageItems', 'shipment.shippingMethod'])
             ->findOrFail($packageId);
@@ -34,7 +34,7 @@ class ShippingRateService
         $carrierTasks = [];
 
         if ($shippingMethod) {
-            $activeCarrierServices = self::getActiveCarrierServices($shippingMethod);
+            $activeCarrierServices = $this->getActiveCarrierServices($shippingMethod);
 
             if ($activeCarrierServices->isEmpty()) {
                 throw new NoActiveCarrierServicesException($shippingMethod->name);
@@ -59,15 +59,15 @@ class ShippingRateService
                 'package_id' => $packageId,
             ]);
 
-            foreach (CarrierRegistry::getConfiguredAdapters() as $name => $adapter) {
+            foreach (app(CarrierRegistry::class)->getConfiguredAdapters() as $name => $adapter) {
                 $carrierTasks[] = ['name' => $name, 'serviceCodes' => []];
             }
         }
 
-        $rateOptions = self::fetchRatesConcurrently($carrierTasks, $rateRequest);
+        $rateOptions = $this->fetchRatesConcurrently($carrierTasks, $rateRequest);
 
         try {
-            RateQuoteLogger::logRates($packageId, $rateOptions);
+            app(RateQuoteLogger::class)->logRates($packageId, $rateOptions);
         } catch (\Exception $e) {
             logger()->warning('Failed to log rate quotes', [
                 'package_id' => $packageId,
@@ -84,11 +84,13 @@ class ShippingRateService
      * @param  array<int, array{name: string, serviceCodes: array<string>}>  $carrierTasks
      * @return Collection<int, \App\DataTransferObjects\Shipping\RateResponse>
      */
-    private static function fetchRatesConcurrently(array $carrierTasks, RateRequest $rateRequest): Collection
+    private function fetchRatesConcurrently(array $carrierTasks, RateRequest $rateRequest): Collection
     {
         $rateOptions = collect();
         $preparedRequests = [];
         $taskMeta = [];
+
+        $registry = app(CarrierRegistry::class);
 
         // Phase 1: Prepare all requests (authenticate connectors, build request bodies)
         foreach ($carrierTasks as $task) {
@@ -96,13 +98,13 @@ class ShippingRateService
             $serviceCodes = $task['serviceCodes'];
 
             try {
-                if (! CarrierRegistry::has($carrierName)) {
+                if (! $registry->has($carrierName)) {
                     logger()->warning("ShippingRateService: Unknown carrier {$carrierName}");
 
                     continue;
                 }
 
-                $adapter = CarrierRegistry::get($carrierName);
+                $adapter = $registry->get($carrierName);
 
                 if (! $adapter->isConfigured()) {
                     logger()->warning("ShippingRateService: {$carrierName} is not configured");
@@ -195,7 +197,7 @@ class ShippingRateService
      *
      * @return Collection<int, CarrierService>
      */
-    private static function getActiveCarrierServices(\App\Models\ShippingMethod $shippingMethod): Collection
+    private function getActiveCarrierServices(\App\Models\ShippingMethod $shippingMethod): Collection
     {
         return $shippingMethod->carrierServices()
             ->active()

@@ -79,15 +79,15 @@ class ShopifySource implements ExportDestinationInterface, ImportSourceInterface
 
     public function validateConfiguration(): void
     {
-        if (empty(SettingsService::get('shopify.shop_domain', config('services.shopify.shop_domain')))) {
+        if (empty(app(SettingsService::class)->get('shopify.shop_domain', config('services.shopify.shop_domain')))) {
             throw new InvalidArgumentException('Shopify shop domain is not configured (SHOPIFY_SHOP_DOMAIN).');
         }
 
-        if (empty(SettingsService::get('shopify.client_id', config('services.shopify.client_id')))) {
+        if (empty(app(SettingsService::class)->get('shopify.client_id', config('services.shopify.client_id')))) {
             throw new InvalidArgumentException('Shopify client ID is not configured (SHOPIFY_CLIENT_ID).');
         }
 
-        if (empty(SettingsService::get('shopify.client_secret', config('services.shopify.client_secret')))) {
+        if (empty(app(SettingsService::class)->get('shopify.client_secret', config('services.shopify.client_secret')))) {
             throw new InvalidArgumentException('Shopify client secret is not configured (SHOPIFY_CLIENT_SECRET).');
         }
 
@@ -217,9 +217,9 @@ class ShopifySource implements ExportDestinationInterface, ImportSourceInterface
 
     public function validateExportConfiguration(): void
     {
-        if (empty(SettingsService::get('shopify.shop_domain', config('services.shopify.shop_domain')))
-            || empty(SettingsService::get('shopify.client_id', config('services.shopify.client_id')))
-            || empty(SettingsService::get('shopify.client_secret', config('services.shopify.client_secret')))) {
+        if (empty(app(SettingsService::class)->get('shopify.shop_domain', config('services.shopify.shop_domain')))
+            || empty(app(SettingsService::class)->get('shopify.client_id', config('services.shopify.client_id')))
+            || empty(app(SettingsService::class)->get('shopify.client_secret', config('services.shopify.client_secret')))) {
             throw new InvalidArgumentException('Shopify credentials are not configured.');
         }
     }

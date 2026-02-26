@@ -56,7 +56,7 @@ it('does not mark shipment as shipped when items are only partially packed', fun
 });
 
 it('marks shipment as shipped with any shipped package when packing validation is off', function (): void {
-    SettingsService::set('packing_validation_enabled', false);
+    app(SettingsService::class)->set('packing_validation_enabled', false);
 
     $shipment = Shipment::factory()->create();
 

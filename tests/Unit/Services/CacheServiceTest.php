@@ -7,18 +7,18 @@ use App\Services\CacheService;
 use Illuminate\Support\Facades\Cache;
 
 beforeEach(function (): void {
-    CacheService::clearAll();
+    app(CacheService::class)->clearAll();
 });
 
 it('caches box sizes', function (): void {
     BoxSize::factory()->count(3)->create();
 
     // First call should hit the database
-    $boxSizes1 = CacheService::getBoxSizes();
+    $boxSizes1 = app(CacheService::class)->getBoxSizes();
     expect($boxSizes1)->toHaveCount(3);
 
     // Second call should use cache
-    $boxSizes2 = CacheService::getBoxSizes();
+    $boxSizes2 = app(CacheService::class)->getBoxSizes();
     expect($boxSizes2)->toHaveCount(3);
 
     // Verify cache was used
@@ -33,7 +33,7 @@ it('returns box sizes formatted for packing', function (): void {
         'length' => 6,
     ]);
 
-    $formatted = CacheService::getBoxSizesForPacking();
+    $formatted = app(CacheService::class)->getBoxSizesForPacking();
 
     expect($formatted)->toHaveKey('BOX-A')
         ->and($formatted['BOX-A'])->toHaveKeys(['id', 'code', 'height', 'width', 'length'])
@@ -53,7 +53,7 @@ it('caches active carrier services', function (): void {
         'active' => false,
     ]);
 
-    $services = CacheService::getActiveCarrierServices();
+    $services = app(CacheService::class)->getActiveCarrierServices();
 
     // Only active services should be returned
     expect($services)->toHaveCount(2);
@@ -67,7 +67,7 @@ it('groups active carrier services by carrier', function (): void {
     CarrierService::factory()->count(2)->create(['carrier_id' => $usps->id, 'active' => true]);
     CarrierService::factory()->create(['carrier_id' => $fedex->id, 'active' => true]);
 
-    $grouped = CacheService::getActiveCarrierServicesByCarrier();
+    $grouped = app(CacheService::class)->getActiveCarrierServicesByCarrier();
 
     expect($grouped)->toHaveKeys(['USPS', 'FedEx'])
         ->and($grouped['USPS'])->toHaveCount(2)
@@ -76,11 +76,11 @@ it('groups active carrier services by carrier', function (): void {
 
 it('clears box sizes cache', function (): void {
     BoxSize::factory()->create();
-    CacheService::getBoxSizes();
+    app(CacheService::class)->getBoxSizes();
 
     expect(Cache::has('box_sizes_all'))->toBeTrue();
 
-    CacheService::clearBoxSizesCache();
+    app(CacheService::class)->clearBoxSizesCache();
 
     expect(Cache::has('box_sizes_all'))->toBeFalse();
 });
@@ -88,11 +88,11 @@ it('clears box sizes cache', function (): void {
 it('clears carrier services cache', function (): void {
     $carrier = Carrier::factory()->create(['active' => true]);
     CarrierService::factory()->create(['carrier_id' => $carrier->id, 'active' => true]);
-    CacheService::getActiveCarrierServices();
+    app(CacheService::class)->getActiveCarrierServices();
 
     expect(Cache::has('carrier_services_active'))->toBeTrue();
 
-    CacheService::clearCarrierServicesCache();
+    app(CacheService::class)->clearCarrierServicesCache();
 
     expect(Cache::has('carrier_services_active'))->toBeFalse();
 });
@@ -102,13 +102,13 @@ it('clears all caches', function (): void {
     $carrier = Carrier::factory()->create(['active' => true]);
     CarrierService::factory()->create(['carrier_id' => $carrier->id, 'active' => true]);
 
-    CacheService::getBoxSizes();
-    CacheService::getActiveCarrierServices();
+    app(CacheService::class)->getBoxSizes();
+    app(CacheService::class)->getActiveCarrierServices();
 
     expect(Cache::has('box_sizes_all'))->toBeTrue();
     expect(Cache::has('carrier_services_active'))->toBeTrue();
 
-    CacheService::clearAll();
+    app(CacheService::class)->clearAll();
 
     expect(Cache::has('box_sizes_all'))->toBeFalse();
     expect(Cache::has('carrier_services_active'))->toBeFalse();
@@ -121,7 +121,7 @@ it('excludes services with inactive carriers', function (): void {
     CarrierService::factory()->create(['carrier_id' => $activeCarrier->id, 'active' => true]);
     CarrierService::factory()->create(['carrier_id' => $inactiveCarrier->id, 'active' => true]);
 
-    $services = CacheService::getActiveCarrierServices();
+    $services = app(CacheService::class)->getActiveCarrierServices();
 
     // Only services from active carriers should be returned
     expect($services)->toHaveCount(1);

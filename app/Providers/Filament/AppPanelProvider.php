@@ -44,7 +44,7 @@ class AppPanelProvider extends PanelProvider
             ->widgets([])
             ->renderHook(
                 PanelsRenderHook::TOPBAR_LOGO_AFTER,
-                fn (): string => SettingsService::get('sandbox_mode', false)
+                fn (): string => app(SettingsService::class)->get('sandbox_mode', false)
                     ? '<span class="text-sm font-medium text-amber-500 dark:text-amber-400">(sandbox mode)</span>'
                     : '',
             )

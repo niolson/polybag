@@ -98,8 +98,8 @@ it('voids a label and clears shipping fields', function (): void {
         }
     });
 
-    CarrierRegistry::register('USPS', $testAdapterClass);
-    CarrierRegistry::clearInstances();
+    app(CarrierRegistry::class)->register('USPS', $testAdapterClass);
+    app(CarrierRegistry::class)->clearInstances();
 
     Livewire::test(ListPackages::class)
         ->callAction(TestAction::make('void')->table($package))

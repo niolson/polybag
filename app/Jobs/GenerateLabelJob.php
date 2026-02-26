@@ -40,7 +40,7 @@ class GenerateLabelJob implements ShouldQueue
         $item->update(['status' => LabelBatchItemStatus::Processing]);
 
         try {
-            $result = LabelGenerationService::generateLabel(
+            $result = app(LabelGenerationService::class)->generateLabel(
                 $item->package,
                 $this->labelFormat,
                 $this->labelDpi,

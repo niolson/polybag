@@ -15,8 +15,8 @@ class Carrier extends Model
     protected static function booted(): void
     {
         // Clear carrier services cache when carrier changes (affects active services)
-        static::saved(fn () => CacheService::clearCarrierServicesCache());
-        static::deleted(fn () => CacheService::clearCarrierServicesCache());
+        static::saved(fn () => app(CacheService::class)->clearCarrierServicesCache());
+        static::deleted(fn () => app(CacheService::class)->clearCarrierServicesCache());
     }
 
     protected $fillable = [

@@ -12,12 +12,17 @@ class PrintBoxSizeBarcodes extends Page
 
     protected static bool $shouldRegisterNavigation = false;
 
+    public static function canAccess(): bool
+    {
+        return auth()->check();
+    }
+
     protected string $view = 'filament.pages.print-box-size-barcodes';
 
     public Collection $boxSizes;
 
     public function mount(): void
     {
-        $this->boxSizes = CacheService::getBoxSizes();
+        $this->boxSizes = app(CacheService::class)->getBoxSizes();
     }
 }

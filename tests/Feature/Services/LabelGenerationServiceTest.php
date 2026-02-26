@@ -13,11 +13,11 @@ use App\Services\Carriers\CarrierRegistry;
 use App\Services\LabelGenerationService;
 
 beforeEach(function (): void {
-    CarrierRegistry::reset();
+    app(CarrierRegistry::class)->reset();
 });
 
 afterEach(function (): void {
-    CarrierRegistry::reset();
+    app(CarrierRegistry::class)->reset();
 });
 
 it('returns failure when no rates available', function (): void {
@@ -28,7 +28,7 @@ it('returns failure when no rates available', function (): void {
 
     // No carrier services attached to the method = NoActiveCarrierServicesException
     // which should bubble up as a failure
-    expect(fn () => LabelGenerationService::generateLabel($package))
+    expect(fn () => app(LabelGenerationService::class)->generateLabel($package))
         ->toThrow(\App\Exceptions\NoActiveCarrierServicesException::class);
 });
 
@@ -63,9 +63,9 @@ it('applies rule pre-selection and skips rate shopping', function (): void {
     $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
     $mockAdapter->shouldReceive('createShipment')->once()->andReturn($mockResponse);
 
-    CarrierRegistry::registerInstance('MockCarrier', $mockAdapter);
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $mockAdapter);
 
-    $result = LabelGenerationService::generateLabel($package);
+    $result = app(LabelGenerationService::class)->generateLabel($package);
 
     expect($result->success)->toBeTrue()
         ->and($result->response->trackingNumber)->toBe('RULE123')
@@ -98,9 +98,9 @@ it('returns failure when carrier returns unsuccessful response', function (): vo
         ShipResponse::failure('Address validation failed')
     );
 
-    CarrierRegistry::registerInstance('MockCarrier', $mockAdapter);
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $mockAdapter);
 
-    $result = LabelGenerationService::generateLabel($package);
+    $result = app(LabelGenerationService::class)->generateLabel($package);
 
     expect($result->success)->toBeFalse()
         ->and($result->errorMessage)->toBe('Address validation failed');
@@ -141,9 +141,9 @@ it('passes label format and DPI to ship request', function (): void {
             labelDpi: 203,
         ));
 
-    CarrierRegistry::registerInstance('MockCarrier', $mockAdapter);
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $mockAdapter);
 
-    $result = LabelGenerationService::generateLabel($package, 'zpl', 203);
+    $result = app(LabelGenerationService::class)->generateLabel($package, 'zpl', 203);
 
     expect($result->success)->toBeTrue()
         ->and($result->response->labelFormat)->toBe('zpl');

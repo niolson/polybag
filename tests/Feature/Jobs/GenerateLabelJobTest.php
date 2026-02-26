@@ -19,11 +19,11 @@ use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
 
 beforeEach(function (): void {
-    CarrierRegistry::reset();
+    app(CarrierRegistry::class)->reset();
 });
 
 afterEach(function (): void {
-    CarrierRegistry::reset();
+    app(CarrierRegistry::class)->reset();
 });
 
 function createBatchContext(): array
@@ -84,7 +84,7 @@ it('updates batch item on successful label generation', function (): void {
     $mockAdapter = Mockery::mock(CarrierAdapterInterface::class);
     $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
     $mockAdapter->shouldReceive('createShipment')->once()->andReturn($mockResponse);
-    CarrierRegistry::registerInstance('MockCarrier', $mockAdapter);
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $mockAdapter);
 
     $job = new GenerateLabelJob($ctx['item']->id, 'pdf', null);
     $job->handle();
@@ -111,7 +111,7 @@ it('handles label generation failure', function (): void {
     $mockAdapter->shouldReceive('createShipment')->once()->andReturn(
         ShipResponse::failure('Address validation failed')
     );
-    CarrierRegistry::registerInstance('MockCarrier', $mockAdapter);
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $mockAdapter);
 
     $job = new GenerateLabelJob($ctx['item']->id, 'pdf', null);
     $job->handle();
@@ -134,7 +134,7 @@ it('handles exceptions during label generation', function (): void {
     $mockAdapter = Mockery::mock(CarrierAdapterInterface::class);
     $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
     $mockAdapter->shouldReceive('createShipment')->once()->andThrow(new RuntimeException('Carrier API timeout'));
-    CarrierRegistry::registerInstance('MockCarrier', $mockAdapter);
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $mockAdapter);
 
     $job = new GenerateLabelJob($ctx['item']->id, 'pdf', null);
     $job->handle();

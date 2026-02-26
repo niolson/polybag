@@ -70,7 +70,7 @@ it('fetches USPS rates for a package', function (): void {
             'length' => 10,
         ]);
 
-    $rates = ShippingRateService::getShippingRates($package->id);
+    $rates = app(ShippingRateService::class)->getShippingRates($package->id);
 
     expect($rates)->toBeInstanceOf(Collection::class)
         ->and($rates)->toHaveCount(1)
@@ -122,7 +122,7 @@ it('fetches FedEx rates for a package', function (): void {
             'length' => 12,
         ]);
 
-    $rates = ShippingRateService::getShippingRates($package->id);
+    $rates = app(ShippingRateService::class)->getShippingRates($package->id);
 
     expect($rates)->toBeInstanceOf(Collection::class)
         ->and($rates)->toHaveCount(1)
@@ -193,7 +193,7 @@ it('fetches rates from multiple carriers', function (): void {
         ->for($shipment)
         ->create();
 
-    $rates = ShippingRateService::getShippingRates($package->id);
+    $rates = app(ShippingRateService::class)->getShippingRates($package->id);
 
     expect($rates)->toBeInstanceOf(Collection::class)
         ->and($rates)->toHaveCount(2);
@@ -216,7 +216,7 @@ it('throws exception when no carrier services configured', function (): void {
         ->for($shipment)
         ->create();
 
-    expect(fn () => ShippingRateService::getShippingRates($package->id))
+    expect(fn () => app(ShippingRateService::class)->getShippingRates($package->id))
         ->toThrow(NoActiveCarrierServicesException::class, "No active carrier services available for shipping method 'No Services Method'");
 });
 
@@ -301,7 +301,7 @@ it('filters out non-applicable USPS rate options', function (): void {
         ->for($shipment)
         ->create();
 
-    $rates = ShippingRateService::getShippingRates($package->id);
+    $rates = app(ShippingRateService::class)->getShippingRates($package->id);
 
     expect($rates)->toHaveCount(1)
         ->and($rates[0]->price)->toBe(8.50);
@@ -372,7 +372,7 @@ it('falls back to all configured carriers when shipment has no shipping method',
             'length' => 10,
         ]);
 
-    $rates = ShippingRateService::getShippingRates($package->id);
+    $rates = app(ShippingRateService::class)->getShippingRates($package->id);
 
     expect($rates)->toBeInstanceOf(Collection::class)
         ->and($rates)->not->toBeEmpty();
@@ -419,7 +419,7 @@ it('only returns rates for configured service codes', function (): void {
         ->for($shipment)
         ->create();
 
-    $rates = ShippingRateService::getShippingRates($package->id);
+    $rates = app(ShippingRateService::class)->getShippingRates($package->id);
 
     expect($rates)->toHaveCount(1)
         ->and($rates[0]->metadata['serviceType'])->toBe('FEDEX_GROUND')
@@ -479,7 +479,7 @@ it('excludes inactive carrier services from rate shopping', function (): void {
         ->for($shipment)
         ->create();
 
-    $rates = ShippingRateService::getShippingRates($package->id);
+    $rates = app(ShippingRateService::class)->getShippingRates($package->id);
 
     // Only the active service should be queried
     expect($rates)->toHaveCount(1)
@@ -528,7 +528,7 @@ it('excludes carrier services with inactive carriers from rate shopping', functi
         ->for($shipment)
         ->create();
 
-    $rates = ShippingRateService::getShippingRates($package->id);
+    $rates = app(ShippingRateService::class)->getShippingRates($package->id);
 
     // Only FedEx should be queried (USPS carrier is inactive)
     expect($rates)->toHaveCount(1)
@@ -556,7 +556,7 @@ it('throws exception when no active carrier services are available', function ()
         ->for($shipment)
         ->create();
 
-    expect(fn () => ShippingRateService::getShippingRates($package->id))
+    expect(fn () => app(ShippingRateService::class)->getShippingRates($package->id))
         ->toThrow(NoActiveCarrierServicesException::class, "No active carrier services available for shipping method 'Test Method'");
 });
 
@@ -587,6 +587,6 @@ it('throws exception when all carriers are inactive', function (): void {
         ->for($shipment)
         ->create();
 
-    expect(fn () => ShippingRateService::getShippingRates($package->id))
+    expect(fn () => app(ShippingRateService::class)->getShippingRates($package->id))
         ->toThrow(NoActiveCarrierServicesException::class);
 });

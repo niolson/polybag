@@ -235,7 +235,7 @@ class UpsAdapter implements CarrierAdapterInterface
                 'Description' => 'Shipment',
                 'Shipper' => [
                     'Name' => trim($request->fromAddress->company ?: $request->fromAddress->firstName.' '.$request->fromAddress->lastName),
-                    'ShipperNumber' => SettingsService::get('ups.account_number', config('services.ups.account_number')),
+                    'ShipperNumber' => app(SettingsService::class)->get('ups.account_number', config('services.ups.account_number')),
                     'Address' => $this->buildAddress($request->fromAddress),
                 ],
                 'ShipTo' => [
@@ -251,7 +251,7 @@ class UpsAdapter implements CarrierAdapterInterface
                         [
                             'Type' => '01',
                             'BillShipper' => [
-                                'AccountNumber' => SettingsService::get('ups.account_number', config('services.ups.account_number')),
+                                'AccountNumber' => app(SettingsService::class)->get('ups.account_number', config('services.ups.account_number')),
                             ],
                         ],
                     ],
@@ -422,9 +422,9 @@ class UpsAdapter implements CarrierAdapterInterface
 
     public function isConfigured(): bool
     {
-        return ! empty(SettingsService::get('ups.client_id', config('services.ups.client_id')))
-            && ! empty(SettingsService::get('ups.client_secret', config('services.ups.client_secret')))
-            && ! empty(SettingsService::get('ups.account_number', config('services.ups.account_number')));
+        return ! empty(app(SettingsService::class)->get('ups.client_id', config('services.ups.client_id')))
+            && ! empty(app(SettingsService::class)->get('ups.client_secret', config('services.ups.client_secret')))
+            && ! empty(app(SettingsService::class)->get('ups.account_number', config('services.ups.account_number')));
     }
 
     public function supportsMultiPackage(): bool

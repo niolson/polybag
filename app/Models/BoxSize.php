@@ -15,8 +15,8 @@ class BoxSize extends Model
 
     protected static function booted(): void
     {
-        static::saved(fn () => CacheService::clearBoxSizesCache());
-        static::deleted(fn () => CacheService::clearBoxSizesCache());
+        static::saved(fn () => app(CacheService::class)->clearBoxSizesCache());
+        static::deleted(fn () => app(CacheService::class)->clearBoxSizesCache());
     }
 
     protected $fillable = [

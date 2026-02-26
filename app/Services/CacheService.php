@@ -25,7 +25,7 @@ class CacheService
      *
      * @return Collection<int, BoxSize>
      */
-    public static function getBoxSizes(): Collection
+    public function getBoxSizes(): Collection
     {
         return Cache::remember(self::BOX_SIZES_KEY, self::BOX_SIZES_TTL, function () {
             return BoxSize::orderBy('label')->get();
@@ -37,9 +37,9 @@ class CacheService
      *
      * @return array<string, array<string, mixed>>
      */
-    public static function getBoxSizesForPacking(): array
+    public function getBoxSizesForPacking(): array
     {
-        return self::getBoxSizes()
+        return $this->getBoxSizes()
             ->map(fn (BoxSize $box) => [
                 'id' => $box->id,
                 'code' => $box->code,
@@ -56,7 +56,7 @@ class CacheService
      *
      * @return Collection<int, CarrierService>
      */
-    public static function getActiveCarrierServices(): Collection
+    public function getActiveCarrierServices(): Collection
     {
         return Cache::remember(self::ACTIVE_CARRIER_SERVICES_KEY, self::CARRIER_SERVICES_TTL, function () {
             return CarrierService::active()
@@ -72,16 +72,16 @@ class CacheService
      *
      * @return Collection<string, Collection<int, CarrierService>>
      */
-    public static function getActiveCarrierServicesByCarrier(): Collection
+    public function getActiveCarrierServicesByCarrier(): Collection
     {
-        return self::getActiveCarrierServices()
+        return $this->getActiveCarrierServices()
             ->groupBy(fn (CarrierService $service) => $service->carrier->name);
     }
 
     /**
      * Clear box sizes cache.
      */
-    public static function clearBoxSizesCache(): void
+    public function clearBoxSizesCache(): void
     {
         Cache::forget(self::BOX_SIZES_KEY);
     }
@@ -89,7 +89,7 @@ class CacheService
     /**
      * Clear carrier services cache.
      */
-    public static function clearCarrierServicesCache(): void
+    public function clearCarrierServicesCache(): void
     {
         Cache::forget(self::ACTIVE_CARRIER_SERVICES_KEY);
     }
@@ -97,9 +97,9 @@ class CacheService
     /**
      * Clear all configuration caches.
      */
-    public static function clearAll(): void
+    public function clearAll(): void
     {
-        self::clearBoxSizesCache();
-        self::clearCarrierServicesCache();
+        $this->clearBoxSizesCache();
+        $this->clearCarrierServicesCache();
     }
 }

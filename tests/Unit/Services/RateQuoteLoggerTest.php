@@ -16,7 +16,7 @@ it('logs rate quotes for a package', function () {
         new RateResponse('FedEx', 'GROUND', 'FedEx Ground', 12.00, transitTime: '5-7 days'),
     ]);
 
-    RateQuoteLogger::logRates($package->id, $rates);
+    app(RateQuoteLogger::class)->logRates($package->id, $rates);
 
     expect(RateQuote::where('package_id', $package->id)->count())->toBe(2);
 
@@ -36,10 +36,10 @@ it('marks selected rate quote', function () {
         new RateResponse('FedEx', 'GROUND', 'FedEx Ground', 12.00),
     ]);
 
-    RateQuoteLogger::logRates($package->id, $rates);
+    app(RateQuoteLogger::class)->logRates($package->id, $rates);
 
     $selectedRate = new RateResponse('USPS', 'PRIORITY', 'Priority Mail', 8.50);
-    RateQuoteLogger::markSelected($package->id, $selectedRate);
+    app(RateQuoteLogger::class)->markSelected($package->id, $selectedRate);
 
     $uspsQuote = RateQuote::where('package_id', $package->id)->where('carrier', 'USPS')->first();
     $fedexQuote = RateQuote::where('package_id', $package->id)->where('carrier', 'FedEx')->first();
@@ -51,7 +51,7 @@ it('marks selected rate quote', function () {
 it('handles empty rate collection', function () {
     $package = Package::factory()->create();
 
-    RateQuoteLogger::logRates($package->id, collect());
+    app(RateQuoteLogger::class)->logRates($package->id, collect());
 
     expect(RateQuote::where('package_id', $package->id)->count())->toBe(0);
 });
@@ -63,11 +63,11 @@ it('handles duplicate markSelected calls', function () {
         new RateResponse('USPS', 'PRIORITY', 'Priority Mail', 8.50),
     ]);
 
-    RateQuoteLogger::logRates($package->id, $rates);
+    app(RateQuoteLogger::class)->logRates($package->id, $rates);
 
     $selectedRate = new RateResponse('USPS', 'PRIORITY', 'Priority Mail', 8.50);
-    RateQuoteLogger::markSelected($package->id, $selectedRate);
-    RateQuoteLogger::markSelected($package->id, $selectedRate);
+    app(RateQuoteLogger::class)->markSelected($package->id, $selectedRate);
+    app(RateQuoteLogger::class)->markSelected($package->id, $selectedRate);
 
     expect(RateQuote::where('package_id', $package->id)->where('selected', true)->count())->toBe(1);
 });

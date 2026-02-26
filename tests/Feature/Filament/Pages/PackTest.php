@@ -230,7 +230,7 @@ it('allows shipping when packing validation is disabled', function (): void {
         'type' => 'boolean',
         'group' => 'general',
     ]);
-    SettingsService::clearCache();
+    app(SettingsService::class)->clearCache();
 
     $boxSize = BoxSize::factory()->create();
     $product = Product::factory()->create(['barcode' => '1234567890123']);

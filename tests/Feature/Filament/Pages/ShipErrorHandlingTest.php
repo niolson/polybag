@@ -58,12 +58,7 @@ function registerMockAdapterForErrorTest(ShipResponse $response): void
     $adapter->shouldReceive('getRates')->andReturn(collect());
     $adapter->shouldReceive('createShipment')->andReturn($response);
 
-    CarrierRegistry::register('USPS', get_class($adapter));
-    CarrierRegistry::clearInstances();
-
-    $reflection = new ReflectionProperty(CarrierRegistry::class, 'instances');
-    $reflection->setAccessible(true);
-    $reflection->setValue(null, ['USPS' => $adapter]);
+    app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 }
 
 function registerThrowingAdapterForErrorTest(\Throwable $exception): void
@@ -74,12 +69,7 @@ function registerThrowingAdapterForErrorTest(\Throwable $exception): void
     $adapter->shouldReceive('getRates')->andReturn(collect());
     $adapter->shouldReceive('createShipment')->andThrow($exception);
 
-    CarrierRegistry::register('USPS', get_class($adapter));
-    CarrierRegistry::clearInstances();
-
-    $reflection = new ReflectionProperty(CarrierRegistry::class, 'instances');
-    $reflection->setAccessible(true);
-    $reflection->setValue(null, ['USPS' => $adapter]);
+    app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 }
 
 function setUpShipComponentWithRate(Package $package): \Livewire\Features\SupportTesting\Testable

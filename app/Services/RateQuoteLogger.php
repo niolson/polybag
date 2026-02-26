@@ -13,7 +13,7 @@ class RateQuoteLogger
      *
      * @param  Collection<int, RateResponse>  $rates
      */
-    public static function logRates(int $packageId, Collection $rates): void
+    public function logRates(int $packageId, Collection $rates): void
     {
         if ($rates->isEmpty()) {
             return;
@@ -39,7 +39,7 @@ class RateQuoteLogger
     /**
      * Mark the selected rate quote for a package.
      */
-    public static function markSelected(int $packageId, RateResponse $selectedRate): void
+    public function markSelected(int $packageId, RateResponse $selectedRate): void
     {
         RateQuote::where('package_id', $packageId)
             ->where('carrier', $selectedRate->carrier)

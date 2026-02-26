@@ -153,7 +153,7 @@ it('resolves production base URL by default', function (): void {
         'services.usps.base_url' => 'https://apis.usps.com',
         'services.usps.sandbox_url' => 'https://apis-tem.usps.com',
     ]);
-    \App\Services\SettingsService::clearCache();
+    app(\App\Services\SettingsService::class)->clearCache();
 
     $connector = new USPSConnector;
 
@@ -166,7 +166,7 @@ it('resolves sandbox base URL when sandbox_mode is enabled', function (): void {
         'services.usps.sandbox_url' => 'https://apis-tem.usps.com',
     ]);
     \App\Models\Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
-    \App\Services\SettingsService::clearCache();
+    app(\App\Services\SettingsService::class)->clearCache();
 
     $connector = new USPSConnector;
 

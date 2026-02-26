@@ -15,7 +15,7 @@ use App\Services\RuleEvaluator;
 it('returns empty result when no rules exist', function (): void {
     $shipment = Shipment::factory()->create();
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeFalse()
         ->and($result->shouldFilterRates())->toBeFalse()
@@ -34,7 +34,7 @@ it('returns pre-selected rate for UseService rule', function (): void {
         'carrier_service_id' => $service->id,
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeTrue()
         ->and($result->preSelectedRate->carrier)->toBe('USPS')
@@ -53,7 +53,7 @@ it('returns excluded service codes for ExcludeService rule', function (): void {
         'carrier_service_id' => $service->id,
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeFalse()
         ->and($result->shouldFilterRates())->toBeTrue()
@@ -80,7 +80,7 @@ it('evaluates rules in priority order', function (): void {
         'priority' => 10,
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     // First UseService match wins
     expect($result->preSelectedRate->serviceCode)->toBe('03');
@@ -96,7 +96,7 @@ it('skips disabled rules', function (): void {
         'carrier_service_id' => $service->id,
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeFalse();
 });
@@ -115,7 +115,7 @@ it('scopes rules to specific shipping method', function (): void {
         'carrier_service_id' => $service->id,
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeFalse();
 });
@@ -131,7 +131,7 @@ it('matches global rules with null shipping_method_id', function (): void {
         'carrier_service_id' => $service->id,
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeTrue()
         ->and($result->preSelectedRate->serviceCode)->toBe('PRIORITY_MAIL');
@@ -156,7 +156,7 @@ it('collects exclude codes before UseService stops evaluation', function (): voi
         'priority' => 10,
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeTrue()
         ->and($result->excludedServiceCodes)->toBe(['FEDEX_GROUND']);
@@ -178,7 +178,7 @@ it('matches rule with weight condition when package weight satisfies operator', 
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment, $package);
+    $result = app(RuleEvaluator::class)->evaluate($shipment, $package);
 
     expect($result->hasPreSelectedRate())->toBeTrue();
 });
@@ -197,7 +197,7 @@ it('skips rule with weight condition when weight does not match', function (): v
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment, $package);
+    $result = app(RuleEvaluator::class)->evaluate($shipment, $package);
 
     expect($result->hasPreSelectedRate())->toBeFalse();
 });
@@ -216,7 +216,7 @@ it('matches weight between condition', function (): void {
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment, $package);
+    $result = app(RuleEvaluator::class)->evaluate($shipment, $package);
 
     expect($result->hasPreSelectedRate())->toBeTrue();
 });
@@ -237,7 +237,7 @@ it('matches destination_zone condition for continental US', function (): void {
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeTrue();
 });
@@ -258,7 +258,7 @@ it('skips destination_zone condition for non-continental shipment when rule requ
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeFalse();
 });
@@ -279,7 +279,7 @@ it('matches destination_zone condition for non-continental US (AK)', function ()
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeTrue();
 });
@@ -297,7 +297,7 @@ it('matches destination_zone condition for international', function (): void {
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeTrue();
 });
@@ -318,7 +318,7 @@ it('matches destination_state in condition', function (): void {
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeTrue();
 });
@@ -339,7 +339,7 @@ it('skips destination_state not_in condition when state is excluded', function (
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeFalse();
 });
@@ -357,7 +357,7 @@ it('matches order_value condition', function (): void {
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeTrue();
 });
@@ -379,7 +379,7 @@ it('matches item_count condition', function (): void {
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     // 3 items x 2 qty = 6, >= 5
     expect($result->hasPreSelectedRate())->toBeTrue();
@@ -399,7 +399,7 @@ it('matches channel condition', function (): void {
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeTrue();
 });
@@ -418,7 +418,7 @@ it('skips channel is_not condition when channel matches', function (): void {
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeFalse();
 });
@@ -436,7 +436,7 @@ it('matches residential condition', function (): void {
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeTrue();
 });
@@ -454,7 +454,7 @@ it('skips residential condition when shipment is commercial', function (): void 
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeFalse();
 });
@@ -479,7 +479,7 @@ it('requires all conditions to match (AND logic)', function (): void {
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment, $package);
+    $result = app(RuleEvaluator::class)->evaluate($shipment, $package);
 
     expect($result->hasPreSelectedRate())->toBeTrue();
 });
@@ -504,7 +504,7 @@ it('skips rule when one of multiple conditions fails', function (): void {
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment, $package);
+    $result = app(RuleEvaluator::class)->evaluate($shipment, $package);
 
     expect($result->hasPreSelectedRate())->toBeFalse();
 });
@@ -520,7 +520,7 @@ it('matches rule with null conditions (backward compatible)', function (): void 
         'conditions' => null,
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeTrue();
 });
@@ -536,7 +536,7 @@ it('matches rule with empty conditions array (backward compatible)', function ()
         'conditions' => [],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeTrue();
 });
@@ -562,7 +562,7 @@ it('uses calculated weight from items when no package provided', function (): vo
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeTrue();
 });
@@ -584,7 +584,7 @@ it('uses validated address fields when available for destination conditions', fu
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeTrue();
 });
@@ -602,7 +602,7 @@ it('passes unknown condition types (forward compatibility)', function (): void {
         ],
     ]);
 
-    $result = RuleEvaluator::evaluate($shipment);
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     expect($result->hasPreSelectedRate())->toBeTrue();
 });

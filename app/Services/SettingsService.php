@@ -14,9 +14,9 @@ class SettingsService
     /**
      * Get a setting value by key.
      */
-    public static function get(string $key, mixed $default = null): mixed
+    public function get(string $key, mixed $default = null): mixed
     {
-        $settings = self::getAllCached();
+        $settings = $this->getAllCached();
 
         return $settings[$key] ?? $default;
     }
@@ -24,7 +24,7 @@ class SettingsService
     /**
      * Set a setting value.
      */
-    public static function set(string $key, mixed $value, ?string $type = null, bool $encrypted = false, ?string $group = null): void
+    public function set(string $key, mixed $value, ?string $type = null, bool $encrypted = false, ?string $group = null): void
     {
         $setting = Setting::find($key);
 
@@ -46,7 +46,7 @@ class SettingsService
             ]);
         }
 
-        self::clearCache();
+        $this->clearCache();
     }
 
     /**
@@ -54,7 +54,7 @@ class SettingsService
      *
      * @param  array<string, mixed>  $settings
      */
-    public static function setMany(array $settings): void
+    public function setMany(array $settings): void
     {
         foreach ($settings as $key => $value) {
             $setting = Setting::find($key);
@@ -65,7 +65,7 @@ class SettingsService
             }
         }
 
-        self::clearCache();
+        $this->clearCache();
     }
 
     /**
@@ -73,10 +73,10 @@ class SettingsService
      *
      * @return array<string, mixed>
      */
-    public static function getGroup(string $group): array
+    public function getGroup(string $group): array
     {
-        $groupMap = self::getGroupMapCached();
-        $settings = self::getAllCached();
+        $groupMap = $this->getGroupMapCached();
+        $settings = $this->getAllCached();
 
         return collect($groupMap)
             ->filter(fn ($settingGroup) => $settingGroup === $group)
@@ -88,7 +88,7 @@ class SettingsService
     /**
      * Clear the settings cache.
      */
-    public static function clearCache(): void
+    public function clearCache(): void
     {
         Cache::forget(self::CACHE_KEY);
         Cache::forget(self::CACHE_KEY.'_groups');
@@ -99,7 +99,7 @@ class SettingsService
      *
      * @return array<string, mixed>
      */
-    private static function getAllCached(): array
+    private function getAllCached(): array
     {
         return Cache::remember(self::CACHE_KEY, self::CACHE_TTL, function () {
             return Setting::all()
@@ -113,7 +113,7 @@ class SettingsService
      *
      * @return array<string, string|null>
      */
-    private static function getGroupMapCached(): array
+    private function getGroupMapCached(): array
     {
         return Cache::remember(self::CACHE_KEY.'_groups', self::CACHE_TTL, function () {
             return Setting::pluck('group', 'key')

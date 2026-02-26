@@ -25,7 +25,7 @@ readonly class RateRequest
         $shipment = $package->shipment;
 
         return new self(
-            originPostalCode: SettingsService::get('from_address.postal_code', config('shipping.origin_postal_code', '98072')),
+            originPostalCode: app(SettingsService::class)->get('from_address.postal_code', config('shipping.origin_postal_code', '98072')),
             destinationPostalCode: $shipment->validated_postal_code ?? $shipment->postal_code,
             destinationCountry: $shipment->validated_country ?? $shipment->country ?? 'US',
             destinationCity: $shipment->validated_city ?? $shipment->city,

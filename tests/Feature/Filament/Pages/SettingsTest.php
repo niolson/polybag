@@ -13,13 +13,13 @@ beforeEach(function (): void {
 
 it('shows sandbox mode indicator in topbar when sandbox mode is enabled', function (): void {
     Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
-    SettingsService::clearCache();
+    app(SettingsService::class)->clearCache();
 
     $this->get('/')->assertSeeText('(sandbox mode)');
 });
 
 it('does not show sandbox mode indicator when sandbox mode is disabled', function (): void {
-    SettingsService::clearCache();
+    app(SettingsService::class)->clearCache();
 
     $this->get('/')->assertDontSeeText('(sandbox mode)');
 });
@@ -27,7 +27,7 @@ it('does not show sandbox mode indicator when sandbox mode is disabled', functio
 it('mounts sandbox_mode and suppress_printing from settings', function (): void {
     Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
     Setting::create(['key' => 'suppress_printing', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
-    SettingsService::clearCache();
+    app(SettingsService::class)->clearCache();
 
     Livewire::test(Settings::class)
         ->assertSet('data.sandbox_mode', true)
@@ -48,8 +48,8 @@ it('saves sandbox_mode setting', function (): void {
         ->call('save')
         ->assertNotified();
 
-    SettingsService::clearCache();
-    expect(SettingsService::get('sandbox_mode'))->toBeTrue();
+    app(SettingsService::class)->clearCache();
+    expect(app(SettingsService::class)->get('sandbox_mode'))->toBeTrue();
 });
 
 it('saves suppress_printing setting when sandbox_mode is on', function (): void {
@@ -67,14 +67,14 @@ it('saves suppress_printing setting when sandbox_mode is on', function (): void 
         ->call('save')
         ->assertNotified();
 
-    SettingsService::clearCache();
-    expect(SettingsService::get('suppress_printing'))->toBeTrue();
+    app(SettingsService::class)->clearCache();
+    expect(app(SettingsService::class)->get('suppress_printing'))->toBeTrue();
 });
 
 it('forces suppress_printing to false when sandbox_mode is turned off', function (): void {
     Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
     Setting::create(['key' => 'suppress_printing', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
-    SettingsService::clearCache();
+    app(SettingsService::class)->clearCache();
 
     Livewire::test(Settings::class)
         ->fillForm([
@@ -89,8 +89,8 @@ it('forces suppress_printing to false when sandbox_mode is turned off', function
         ->call('save')
         ->assertNotified();
 
-    SettingsService::clearCache();
-    expect(SettingsService::get('suppress_printing'))->toBeFalse();
+    app(SettingsService::class)->clearCache();
+    expect(app(SettingsService::class)->get('suppress_printing'))->toBeFalse();
 });
 
 it('clears API auth caches when sandbox_mode changes', function (): void {
@@ -118,7 +118,7 @@ it('clears API auth caches when sandbox_mode changes', function (): void {
 
 it('does not clear API auth caches when sandbox_mode does not change', function (): void {
     Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
-    SettingsService::clearCache();
+    app(SettingsService::class)->clearCache();
 
     Cache::put('usps_authenticator', 'test-token', 3600);
     Cache::put('fedex_authenticator', 'test-fedex-token', 3600);

@@ -30,7 +30,7 @@ class ShipmentItemsRelationManager extends RelationManager
                     ->numeric()
                     ->prefix('$'),
                 Forms\Components\Toggle::make('transparency')
-                    ->visible(fn (): bool => (bool) SettingsService::get('transparency_enabled', true)),
+                    ->visible(fn (): bool => (bool) app(SettingsService::class)->get('transparency_enabled', true)),
             ]);
     }
 
@@ -48,7 +48,7 @@ class ShipmentItemsRelationManager extends RelationManager
                     ->money('USD'),
                 Tables\Columns\IconColumn::make('transparency')
                     ->boolean()
-                    ->visible(fn (): bool => (bool) SettingsService::get('transparency_enabled', true)),
+                    ->visible(fn (): bool => (bool) app(SettingsService::class)->get('transparency_enabled', true)),
             ])
             ->filters([
                 //

@@ -11,6 +11,7 @@ use App\Models\Manifest;
 use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Saloon\Exceptions\Request\RequestException;
 
 class ManifestService
@@ -20,8 +21,10 @@ class ManifestService
      *
      * @return Collection<int, array{carrier: string, count: int, supports_manifest: bool}>
      */
-    public static function getUnmanifestedSummary(): Collection
+    public function getUnmanifestedSummary(): Collection
     {
+        $registry = app(CarrierRegistry::class);
+
         return Package::query()
             ->selectRaw('carrier, count(*) as count')
             ->where('manifested', false)
@@ -32,8 +35,8 @@ class ManifestService
             ->map(fn ($row) => [
                 'carrier' => $row->carrier,
                 'count' => (int) $row->count,
-                'supports_manifest' => CarrierRegistry::has($row->carrier)
-                    && CarrierRegistry::get($row->carrier)->supportsManifest(),
+                'supports_manifest' => $registry->has($row->carrier)
+                    && $registry->get($row->carrier)->supportsManifest(),
             ]);
     }
 
@@ -42,7 +45,7 @@ class ManifestService
      *
      * @return Collection<string, Collection<int, Package>>
      */
-    public static function getUnmanifestedPackages(): Collection
+    public function getUnmanifestedPackages(): Collection
     {
         return Package::query()
             ->where('manifested', false)
@@ -56,16 +59,16 @@ class ManifestService
     /**
      * Create a manifest for the given carrier and packages.
      */
-    public static function createManifest(string $carrier, Collection $packages): ManifestResponse
+    public function createManifest(string $carrier, Collection $packages): ManifestResponse
     {
         return match ($carrier) {
-            'USPS' => self::createUspsManifest($packages),
-            'FedEx' => self::createFedexManifest(),
+            'USPS' => $this->createUspsManifest($packages),
+            'FedEx' => $this->createFedexManifest(),
             default => ManifestResponse::failure("Unsupported carrier: {$carrier}"),
         };
     }
 
-    private static function createUspsManifest(Collection $packages): ManifestResponse
+    private function createUspsManifest(Collection $packages): ManifestResponse
     {
         try {
             $fromAddress = AddressData::fromConfig();
@@ -78,12 +81,12 @@ class ManifestService
             // mark those and retry with the rest.
             for ($attempt = 0; $attempt < 3; $attempt++) {
                 try {
-                    $response = self::sendScanFormRequest($connector, $remainingPackages, $fromAddress);
+                    $response = $this->sendScanFormRequest($connector, $remainingPackages, $fromAddress);
                 } catch (RequestException $e) {
                     // Saloon's retry mechanism throws after exhausting retries on 4xx.
                     // Extract the response to check for already-manifested errors.
                     $errorResponse = $e->getResponse();
-                    $alreadyManifested = self::extractAlreadyManifestedBarcodes(
+                    $alreadyManifested = $this->extractAlreadyManifestedBarcodes(
                         $errorResponse->json('error.errors', [])
                     );
 
@@ -120,16 +123,20 @@ class ManifestService
                 $manifestNumber = $response->metadata['manifestNumber'] ?? '';
                 $image = $response->image;
 
-                $manifest = Manifest::create([
-                    'carrier' => 'USPS',
-                    'manifest_number' => $manifestNumber,
-                    'image' => $image,
-                    'manifest_date' => now()->toDateString(),
-                    'package_count' => $remainingPackages->count(),
-                ]);
+                $manifest = DB::transaction(function () use ($manifestNumber, $image, $remainingPackages) {
+                    $manifest = Manifest::create([
+                        'carrier' => 'USPS',
+                        'manifest_number' => $manifestNumber,
+                        'image' => $image,
+                        'manifest_date' => now()->toDateString(),
+                        'package_count' => $remainingPackages->count(),
+                    ]);
 
-                Package::whereIn('id', $remainingPackages->pluck('id'))
-                    ->update(['manifest_id' => $manifest->id, 'manifested' => true]);
+                    Package::whereIn('id', $remainingPackages->pluck('id'))
+                        ->update(['manifest_id' => $manifest->id, 'manifested' => true]);
+
+                    return $manifest;
+                });
 
                 ManifestCreatedEvent::dispatch($manifest, $remainingPackages->count());
 
@@ -151,7 +158,7 @@ class ManifestService
     /**
      * Send a SCAN Form request for the given packages.
      */
-    private static function sendScanFormRequest(
+    private function sendScanFormRequest(
         \Saloon\Http\Connector $connector,
         Collection $packages,
         AddressData $fromAddress,
@@ -190,7 +197,7 @@ class ManifestService
      * @param  array<int, array<string, mixed>>  $errors
      * @return array<int, string>
      */
-    private static function extractAlreadyManifestedBarcodes(array $errors): array
+    private function extractAlreadyManifestedBarcodes(array $errors): array
     {
         $barcodes = [];
 
@@ -211,7 +218,7 @@ class ManifestService
     /**
      * Mark all unmanifested packages for a carrier as manifested without linking to a manifest record.
      */
-    public static function markAsManifested(string $carrier): int
+    public function markAsManifested(string $carrier): int
     {
         return Package::query()
             ->where('carrier', $carrier)
@@ -221,7 +228,7 @@ class ManifestService
             ->update(['manifested' => true]);
     }
 
-    private static function createFedexManifest(): ManifestResponse
+    private function createFedexManifest(): ManifestResponse
     {
         return ManifestResponse::failure('FedEx end-of-day manifest is not yet implemented.');
     }

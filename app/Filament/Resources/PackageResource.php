@@ -141,6 +141,7 @@ class PackageResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->modifyQueryUsing(fn (Builder $query) => $query->with('shipment'))
             ->searchable()
             ->searchUsing(function (Builder $query, string $search): void {
                 $ids = Package::search($search)->keys()->all();
@@ -277,7 +278,7 @@ class PackageResource extends Resource
                     ->visible(fn (Package $record) => $record->shipped && $record->tracking_number && $record->carrier)
                     ->action(function (Package $record): void {
                         try {
-                            $adapter = CarrierRegistry::get($record->carrier);
+                            $adapter = app(CarrierRegistry::class)->get($record->carrier);
                             $response = $adapter->cancelShipment($record->tracking_number, $record);
 
                             if ($response->success) {

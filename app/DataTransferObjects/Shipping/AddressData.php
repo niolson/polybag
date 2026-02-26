@@ -43,16 +43,16 @@ readonly class AddressData
     public static function fromConfig(): self
     {
         return new self(
-            firstName: SettingsService::get('from_address.first_name', config('shipping.from_address.first_name', 'Shipping')),
-            lastName: SettingsService::get('from_address.last_name', config('shipping.from_address.last_name', 'Center')),
-            streetAddress: SettingsService::get('from_address.street', config('shipping.from_address.street', '')),
-            streetAddress2: SettingsService::get('from_address.street2', config('shipping.from_address.street2')),
-            city: SettingsService::get('from_address.city', config('shipping.from_address.city', '')),
-            stateOrProvince: SettingsService::get('from_address.state_or_province', config('shipping.from_address.state', '')),
-            postalCode: SettingsService::get('from_address.postal_code', config('shipping.origin_postal_code', '98072')),
+            firstName: app(SettingsService::class)->get('from_address.first_name', config('shipping.from_address.first_name', 'Shipping')),
+            lastName: app(SettingsService::class)->get('from_address.last_name', config('shipping.from_address.last_name', 'Center')),
+            streetAddress: app(SettingsService::class)->get('from_address.street', config('shipping.from_address.street', '')),
+            streetAddress2: app(SettingsService::class)->get('from_address.street2', config('shipping.from_address.street2')),
+            city: app(SettingsService::class)->get('from_address.city', config('shipping.from_address.city', '')),
+            stateOrProvince: app(SettingsService::class)->get('from_address.state_or_province', config('shipping.from_address.state', '')),
+            postalCode: app(SettingsService::class)->get('from_address.postal_code', config('shipping.origin_postal_code', '98072')),
             country: 'US',
-            company: SettingsService::get('from_address.company', config('shipping.from_address.company')),
-            phone: SettingsService::get('from_address.phone', config('shipping.from_address.phone')),
+            company: app(SettingsService::class)->get('from_address.company', config('shipping.from_address.company')),
+            phone: app(SettingsService::class)->get('from_address.phone', config('shipping.from_address.phone')),
         );
     }
 }

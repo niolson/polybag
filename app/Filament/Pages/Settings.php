@@ -81,30 +81,30 @@ class Settings extends Page
     public function mount(): void
     {
         $this->form->fill([
-            'company_name' => SettingsService::get('company_name', ''),
-            'from_address_first_name' => SettingsService::get('from_address.first_name', ''),
-            'from_address_last_name' => SettingsService::get('from_address.last_name', ''),
-            'from_address_company' => SettingsService::get('from_address.company', ''),
-            'from_address_street' => SettingsService::get('from_address.street', ''),
-            'from_address_street2' => SettingsService::get('from_address.street2', ''),
-            'from_address_city' => SettingsService::get('from_address.city', ''),
-            'from_address_state_or_province' => SettingsService::get('from_address.state_or_province', ''),
-            'from_address_postal_code' => SettingsService::get('from_address.postal_code', ''),
-            'from_address_phone' => SettingsService::get('from_address.phone', ''),
-            'packing_validation_enabled' => SettingsService::get('packing_validation_enabled', true),
-            'transparency_enabled' => SettingsService::get('transparency_enabled', true),
-            'carrier_api_timeout' => SettingsService::get('carrier_api_timeout', 15),
-            'sandbox_mode' => SettingsService::get('sandbox_mode', false),
-            'suppress_printing' => SettingsService::get('suppress_printing', false),
+            'company_name' => app(SettingsService::class)->get('company_name', ''),
+            'from_address_first_name' => app(SettingsService::class)->get('from_address.first_name', ''),
+            'from_address_last_name' => app(SettingsService::class)->get('from_address.last_name', ''),
+            'from_address_company' => app(SettingsService::class)->get('from_address.company', ''),
+            'from_address_street' => app(SettingsService::class)->get('from_address.street', ''),
+            'from_address_street2' => app(SettingsService::class)->get('from_address.street2', ''),
+            'from_address_city' => app(SettingsService::class)->get('from_address.city', ''),
+            'from_address_state_or_province' => app(SettingsService::class)->get('from_address.state_or_province', ''),
+            'from_address_postal_code' => app(SettingsService::class)->get('from_address.postal_code', ''),
+            'from_address_phone' => app(SettingsService::class)->get('from_address.phone', ''),
+            'packing_validation_enabled' => app(SettingsService::class)->get('packing_validation_enabled', true),
+            'transparency_enabled' => app(SettingsService::class)->get('transparency_enabled', true),
+            'carrier_api_timeout' => app(SettingsService::class)->get('carrier_api_timeout', 15),
+            'sandbox_mode' => app(SettingsService::class)->get('sandbox_mode', false),
+            'suppress_printing' => app(SettingsService::class)->get('suppress_printing', false),
 
             // Non-encrypted credential fields get their current values
-            'usps_crid' => SettingsService::get('usps.crid', config('services.usps.crid', '')),
-            'usps_mid' => SettingsService::get('usps.mid', config('services.usps.mid', '')),
-            'fedex_account_number' => SettingsService::get('fedex.account_number', config('services.fedex.account_number', '')),
-            'ups_account_number' => SettingsService::get('ups.account_number', config('services.ups.account_number', '')),
-            'shopify_shop_domain' => SettingsService::get('shopify.shop_domain', config('services.shopify.shop_domain', '')),
-            'shopify_api_version' => SettingsService::get('shopify.api_version', config('services.shopify.api_version', '2025-01')),
-            'amazon_marketplace_id' => SettingsService::get('amazon.marketplace_id', config('services.amazon.marketplace_id', 'ATVPDKIKX0DER')),
+            'usps_crid' => app(SettingsService::class)->get('usps.crid', config('services.usps.crid', '')),
+            'usps_mid' => app(SettingsService::class)->get('usps.mid', config('services.usps.mid', '')),
+            'fedex_account_number' => app(SettingsService::class)->get('fedex.account_number', config('services.fedex.account_number', '')),
+            'ups_account_number' => app(SettingsService::class)->get('ups.account_number', config('services.ups.account_number', '')),
+            'shopify_shop_domain' => app(SettingsService::class)->get('shopify.shop_domain', config('services.shopify.shop_domain', '')),
+            'shopify_api_version' => app(SettingsService::class)->get('shopify.api_version', config('services.shopify.api_version', '2025-01')),
+            'amazon_marketplace_id' => app(SettingsService::class)->get('amazon.marketplace_id', config('services.amazon.marketplace_id', 'ATVPDKIKX0DER')),
 
             // Encrypted fields are left empty — placeholder shows status
         ]);
@@ -115,7 +115,7 @@ class Settings extends Page
      */
     private function getCredentialPlaceholder(string $settingKey, string $configKey): string
     {
-        $value = SettingsService::get($settingKey) ?? config($configKey);
+        $value = app(SettingsService::class)->get($settingKey) ?? config($configKey);
 
         return ! empty($value) ? 'Configured (leave empty to keep)' : 'Not configured';
     }
@@ -342,7 +342,7 @@ class Settings extends Page
 
         $sandboxMode = (bool) ($data['sandbox_mode'] ?? false);
         $suppressPrinting = $sandboxMode ? (bool) ($data['suppress_printing'] ?? false) : false;
-        $previousSandboxMode = (bool) SettingsService::get('sandbox_mode', false);
+        $previousSandboxMode = (bool) app(SettingsService::class)->get('sandbox_mode', false);
 
         // Map form fields to setting keys
         $settings = [
@@ -393,7 +393,7 @@ class Settings extends Page
             }
 
             $group = explode('.', $settingKey)[0];
-            SettingsService::set($settingKey, $value, 'string', encrypted: true, group: $group);
+            app(SettingsService::class)->set($settingKey, $value, 'string', encrypted: true, group: $group);
             $credentialsChanged = true;
         }
 
@@ -401,10 +401,10 @@ class Settings extends Page
         foreach (self::CREDENTIAL_FIELDS as $formField => $settingKey) {
             $value = $data[$formField] ?? '';
             $group = explode('.', $settingKey)[0];
-            SettingsService::set($settingKey, $value, 'string', group: $group);
+            app(SettingsService::class)->set($settingKey, $value, 'string', group: $group);
         }
 
-        SettingsService::clearCache();
+        app(SettingsService::class)->clearCache();
 
         // Clear cached OAuth tokens when sandbox mode or credentials change
         if ($sandboxMode !== $previousSandboxMode || $credentialsChanged) {

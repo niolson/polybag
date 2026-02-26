@@ -42,7 +42,7 @@ class PackageItemsRelationManager extends RelationManager
                 Tables\Columns\TextColumn::make('transparency_codes')
                     ->label('Transparency Codes')
                     ->badge()
-                    ->visible(fn (): bool => (bool) SettingsService::get('transparency_enabled', true)),
+                    ->visible(fn (): bool => (bool) app(SettingsService::class)->get('transparency_enabled', true)),
             ])
             ->filters([
                 //

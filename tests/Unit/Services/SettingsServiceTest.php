@@ -7,17 +7,17 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 uses(RefreshDatabase::class);
 
 beforeEach(function (): void {
-    SettingsService::clearCache();
+    app(SettingsService::class)->clearCache();
 });
 
 it('returns default value when setting does not exist', function (): void {
-    $result = SettingsService::get('nonexistent_key', 'default_value');
+    $result = app(SettingsService::class)->get('nonexistent_key', 'default_value');
 
     expect($result)->toBe('default_value');
 });
 
 it('returns null when setting does not exist and no default provided', function (): void {
-    $result = SettingsService::get('nonexistent_key');
+    $result = app(SettingsService::class)->get('nonexistent_key');
 
     expect($result)->toBeNull();
 });
@@ -29,7 +29,7 @@ it('retrieves string setting values', function (): void {
         'type' => 'string',
     ]);
 
-    $result = SettingsService::get('test_string');
+    $result = app(SettingsService::class)->get('test_string');
 
     expect($result)->toBe('hello world');
 });
@@ -47,8 +47,8 @@ it('retrieves boolean setting values', function (): void {
         'type' => 'boolean',
     ]);
 
-    expect(SettingsService::get('test_bool_true'))->toBeTrue()
-        ->and(SettingsService::get('test_bool_false'))->toBeFalse();
+    expect(app(SettingsService::class)->get('test_bool_true'))->toBeTrue()
+        ->and(app(SettingsService::class)->get('test_bool_false'))->toBeFalse();
 });
 
 it('retrieves integer setting values', function (): void {
@@ -58,7 +58,7 @@ it('retrieves integer setting values', function (): void {
         'type' => 'integer',
     ]);
 
-    $result = SettingsService::get('test_integer');
+    $result = app(SettingsService::class)->get('test_integer');
 
     expect($result)->toBe(42)
         ->and($result)->toBeInt();
@@ -71,7 +71,7 @@ it('retrieves json setting values', function (): void {
         'type' => 'json',
     ]);
 
-    $result = SettingsService::get('test_json');
+    $result = app(SettingsService::class)->get('test_json');
 
     expect($result)->toBeArray()
         ->and($result['foo'])->toBe('bar')
@@ -79,7 +79,7 @@ it('retrieves json setting values', function (): void {
 });
 
 it('creates a new setting with set method', function (): void {
-    SettingsService::set('new_setting', 'new_value', 'string', false, 'test_group');
+    app(SettingsService::class)->set('new_setting', 'new_value', 'string', false, 'test_group');
 
     $setting = Setting::find('new_setting');
 
@@ -96,7 +96,7 @@ it('updates an existing setting with set method', function (): void {
         'type' => 'string',
     ]);
 
-    SettingsService::set('existing_setting', 'updated');
+    app(SettingsService::class)->set('existing_setting', 'updated');
 
     $setting = Setting::find('existing_setting');
 
@@ -107,7 +107,7 @@ it('updates multiple settings with setMany', function (): void {
     Setting::create(['key' => 'setting_1', 'value' => 'a', 'type' => 'string']);
     Setting::create(['key' => 'setting_2', 'value' => 'b', 'type' => 'string']);
 
-    SettingsService::setMany([
+    app(SettingsService::class)->setMany([
         'setting_1' => 'updated_a',
         'setting_2' => 'updated_b',
     ]);
@@ -124,13 +124,13 @@ it('caches settings and returns cached values', function (): void {
     ]);
 
     // First call should cache
-    $result1 = SettingsService::get('cached_setting');
+    $result1 = app(SettingsService::class)->get('cached_setting');
 
     // Delete directly from DB (bypassing service)
     Setting::where('key', 'cached_setting')->delete();
 
     // Should still return cached value
-    $result2 = SettingsService::get('cached_setting');
+    $result2 = app(SettingsService::class)->get('cached_setting');
 
     expect($result1)->toBe('cached_value')
         ->and($result2)->toBe('cached_value');
@@ -144,16 +144,16 @@ it('clears cache when clearCache is called', function (): void {
     ]);
 
     // Cache the setting
-    SettingsService::get('cached_setting');
+    app(SettingsService::class)->get('cached_setting');
 
     // Update directly in DB
     Setting::where('key', 'cached_setting')->update(['value' => 'updated']);
 
     // Clear cache
-    SettingsService::clearCache();
+    app(SettingsService::class)->clearCache();
 
     // Should now return updated value
-    $result = SettingsService::get('cached_setting');
+    $result = app(SettingsService::class)->get('cached_setting');
 
     expect($result)->toBe('updated');
 });
