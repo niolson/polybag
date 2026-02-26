@@ -10,6 +10,11 @@ class PrintCommandBarcodes extends Page
 
     protected static bool $shouldRegisterNavigation = false;
 
+    public static function canAccess(): bool
+    {
+        return auth()->check();
+    }
+
     protected string $view = 'filament.pages.print-command-barcodes';
 
     public array $commands = [];

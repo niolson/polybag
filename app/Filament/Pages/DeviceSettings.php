@@ -10,6 +10,11 @@ class DeviceSettings extends Page
 {
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-cog-6-tooth';
 
+    public static function canAccess(): bool
+    {
+        return auth()->check();
+    }
+
     protected static ?string $navigationLabel = 'Device Settings';
 
     protected static UnitEnum|string|null $navigationGroup = 'Settings';
