@@ -8,6 +8,7 @@ use App\Enums\Role;
 use App\Filament\Concerns\NotifiesUser;
 use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
+use App\Services\RateQuoteLogger;
 use App\Services\RuleEvaluator;
 use App\Services\SettingsService;
 use App\Services\ShippingRateService;
@@ -210,6 +211,8 @@ class Ship extends Page implements HasForms
         $rate = $this->rateOptions[$selectedOptionKey];
 
         $selectedRate = RateResponse::fromArray($rate);
+
+        RateQuoteLogger::markSelected($this->package->id, $selectedRate);
 
         try {
             $adapter = CarrierRegistry::get($selectedRate->carrier);

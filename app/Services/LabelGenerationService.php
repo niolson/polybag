@@ -45,6 +45,8 @@ class LabelGenerationService
 
             $deadline = $package->shipment->getDeliverByDate();
             $selectedRate = self::selectBestRate($rates, $deadline);
+
+            RateQuoteLogger::markSelected($package->id, $selectedRate);
         }
 
         $adapter = CarrierRegistry::get($selectedRate->carrier);

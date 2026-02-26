@@ -64,7 +64,18 @@ class ShippingRateService
             }
         }
 
-        return self::fetchRatesConcurrently($carrierTasks, $rateRequest);
+        $rateOptions = self::fetchRatesConcurrently($carrierTasks, $rateRequest);
+
+        try {
+            RateQuoteLogger::logRates($packageId, $rateOptions);
+        } catch (\Exception $e) {
+            logger()->warning('Failed to log rate quotes', [
+                'package_id' => $packageId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return $rateOptions;
     }
 
     /**

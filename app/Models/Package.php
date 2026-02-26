@@ -85,6 +85,11 @@ class Package extends Model
         return $this->belongsTo(Manifest::class);
     }
 
+    public function rateQuotes(): HasMany
+    {
+        return $this->hasMany(RateQuote::class);
+    }
+
     public function shippedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'shipped_by_user_id');
