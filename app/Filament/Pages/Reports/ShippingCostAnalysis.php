@@ -9,6 +9,7 @@ use Filament\Pages\Page;
 use Filament\Tables;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Enums\PaginationMode;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
 use UnitEnum;
@@ -42,6 +43,7 @@ class ShippingCostAnalysis extends Page implements HasTable
                     ->with('shipment')
             )
             ->defaultSort('shipped_at', 'desc')
+            ->paginationMode(PaginationMode::Simple)
             ->columns([
                 Tables\Columns\TextColumn::make('shipped_at')
                     ->label('Date')
@@ -76,9 +78,9 @@ class ShippingCostAnalysis extends Page implements HasTable
                             ->when($data['until'], fn ($q, $date) => $q->where('shipped_at', '<=', $date));
                     }),
                 Tables\Filters\SelectFilter::make('carrier')
-                    ->options(fn () => Package::query()->where('shipped', true)->whereNotNull('carrier')->distinct()->pluck('carrier', 'carrier')->toArray()),
+                    ->options(fn () => Package::query()->where('shipped', true)->where('shipped_at', '>=', now()->subDays(90))->whereNotNull('carrier')->distinct()->pluck('carrier', 'carrier')->toArray()),
                 Tables\Filters\SelectFilter::make('service')
-                    ->options(fn () => Package::query()->where('shipped', true)->whereNotNull('service')->distinct()->pluck('service', 'service')->toArray()),
+                    ->options(fn () => Package::query()->where('shipped', true)->where('shipped_at', '>=', now()->subDays(90))->whereNotNull('service')->distinct()->pluck('service', 'service')->toArray()),
             ]);
     }
 

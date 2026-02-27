@@ -54,22 +54,20 @@ class PackingValidationReport extends Page implements HasTable
 
     private function weightMismatchTable(Table $table): Table
     {
-        // Use a subquery to find mismatched package IDs, then query packages
-        // normally so Filament's table pagination works with MySQL strict mode.
-        $mismatchedIds = DB::table('packages')
-            ->where('packages.shipped', true)
-            ->whereNotNull('packages.weight')
-            ->where('packages.weight', '>', 0)
-            ->join('package_items', 'packages.id', '=', 'package_items.package_id')
-            ->join('products', 'package_items.product_id', '=', 'products.id')
-            ->select('packages.id')
-            ->groupBy('packages.id', 'packages.weight')
-            ->havingRaw('ABS(packages.weight - SUM(products.weight * package_items.quantity)) / (CASE WHEN packages.weight > 0.01 THEN packages.weight ELSE 0.01 END) > 0.10');
-
+        // JOIN package_items/products directly so the Filament date filter
+        // on shipped_at applies BEFORE the expensive aggregation. The old
+        // whereIn($mismatchedIds) approach scanned ALL packages first.
         return $table
             ->query(
                 Package::query()
-                    ->whereIn('id', $mismatchedIds)
+                    ->where('packages.shipped', true)
+                    ->whereNotNull('packages.weight')
+                    ->where('packages.weight', '>', 0)
+                    ->join('package_items', 'packages.id', '=', 'package_items.package_id')
+                    ->join('products', 'package_items.product_id', '=', 'products.id')
+                    ->select('packages.*')
+                    ->groupBy('packages.id')
+                    ->havingRaw('ABS(packages.weight - SUM(products.weight * package_items.quantity)) / (CASE WHEN packages.weight > 0.01 THEN packages.weight ELSE 0.01 END) > 0.10')
                     ->with('shipment')
             )
             ->defaultSort('shipped_at', 'desc')

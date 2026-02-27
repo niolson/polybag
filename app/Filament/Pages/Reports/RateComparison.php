@@ -33,42 +33,27 @@ class RateComparison extends Page implements HasTable
         return auth()->user()?->role->isAtLeast(Role::Manager) ?? false;
     }
 
-    /**
-     * Pre-aggregated rate quote stats subquery. Scans rate_quotes once,
-     * groups by package_id, and filters to packages with 2+ quotes
-     * including a selected one. Uses covering index on MySQL.
-     */
-    private function rateQuoteStats(): \Illuminate\Database\Query\Builder
-    {
-        return DB::table('rate_quotes')
-            ->select([
-                'package_id',
-                DB::raw('COUNT(*) as quote_count'),
-                DB::raw('MAX(CASE WHEN selected = 1 THEN quoted_price END) as selected_price'),
-                DB::raw('MAX(CASE WHEN selected = 1 THEN carrier END) as selected_carrier'),
-                DB::raw('MIN(quoted_price) as cheapest_price'),
-            ])
-            ->groupBy('package_id')
-            ->havingRaw('quote_count >= 2 AND MAX(CASE WHEN selected = 1 THEN 1 END) = 1');
-    }
-
     public function table(Table $table): Table
     {
+        // JOIN rate_quotes directly (not as a derived table) so the date
+        // filter on packages.shipped_at applies BEFORE the aggregation.
+        // MySQL uses the (shipped, shipped_at) composite index to narrow
+        // packages first, then aggregates only their rate_quotes.
         return $table
             ->query(
                 Package::query()
                     ->where('packages.shipped', true)
-                    ->joinSub($this->rateQuoteStats(), 'rq_stats', 'rq_stats.package_id', '=', 'packages.id')
+                    ->join('rate_quotes as rq_all', 'rq_all.package_id', '=', 'packages.id')
                     ->select([
                         'packages.*',
-                        'rq_stats.selected_price',
-                        'rq_stats.selected_carrier',
-                        'rq_stats.cheapest_price',
-                        'rq_stats.quote_count as rate_quotes_count',
-                        // Correlated subquery for cheapest carrier — only evaluated
-                        // for the paginated rows, not the full dataset.
+                        DB::raw('MAX(CASE WHEN rq_all.selected = 1 THEN rq_all.quoted_price END) as selected_price'),
+                        DB::raw('MAX(CASE WHEN rq_all.selected = 1 THEN rq_all.carrier END) as selected_carrier'),
+                        DB::raw('MIN(rq_all.quoted_price) as cheapest_price'),
+                        DB::raw('COUNT(rq_all.id) as rate_quotes_count'),
                         DB::raw('(SELECT rq.carrier FROM rate_quotes rq WHERE rq.package_id = packages.id ORDER BY rq.quoted_price ASC LIMIT 1) as cheapest_carrier'),
                     ])
+                    ->groupBy('packages.id')
+                    ->havingRaw('COUNT(rq_all.id) >= 2 AND MAX(CASE WHEN rq_all.selected = 1 THEN 1 END) = 1')
                     ->with('shipment')
             )
             ->defaultSort('shipped_at', 'desc')
@@ -116,7 +101,7 @@ class RateComparison extends Page implements HasTable
                             ->when($data['until'], fn ($q, $date) => $q->where('shipped_at', '<=', $date));
                     }),
                 Tables\Filters\SelectFilter::make('carrier')
-                    ->options(fn () => Package::query()->where('shipped', true)->whereNotNull('carrier')->distinct()->pluck('carrier', 'carrier')->toArray())
+                    ->options(fn () => Package::query()->where('shipped', true)->where('shipped_at', '>=', now()->subDays(90))->whereNotNull('carrier')->distinct()->pluck('carrier', 'carrier')->toArray())
                     ->query(fn ($query, array $data) => $data['value'] ? $query->where('packages.carrier', $data['value']) : $query),
             ]);
     }
@@ -130,11 +115,13 @@ class RateComparison extends Page implements HasTable
     {
         $baseQuery = Package::query()
             ->where('packages.shipped', true)
-            ->joinSub($this->rateQuoteStats(), 'rq_stats', 'rq_stats.package_id', '=', 'packages.id')
+            ->join('rate_quotes as rq_all', 'rq_all.package_id', '=', 'packages.id')
             ->select([
-                'rq_stats.selected_price',
-                'rq_stats.cheapest_price',
-            ]);
+                DB::raw('MAX(CASE WHEN rq_all.selected = 1 THEN rq_all.quoted_price END) as selected_price'),
+                DB::raw('MIN(rq_all.quoted_price) as cheapest_price'),
+            ])
+            ->groupBy('packages.id')
+            ->havingRaw('COUNT(rq_all.id) >= 2 AND MAX(CASE WHEN rq_all.selected = 1 THEN 1 END) = 1');
 
         // Apply active table filters (date range, carrier)
         $baseQuery = $this->applyFiltersToTableQuery($baseQuery)->reorder();
