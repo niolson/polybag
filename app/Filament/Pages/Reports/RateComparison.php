@@ -36,7 +36,7 @@ class RateComparison extends Page implements HasTable
     /**
      * Pre-aggregated rate quote stats subquery. Scans rate_quotes once,
      * groups by package_id, and filters to packages with 2+ quotes
-     * including a selected one. Uses covering index.
+     * including a selected one. Uses covering index on MySQL.
      */
     private function rateQuoteStats(): \Illuminate\Database\Query\Builder
     {
@@ -47,7 +47,6 @@ class RateComparison extends Page implements HasTable
                 DB::raw('MAX(CASE WHEN selected = 1 THEN quoted_price END) as selected_price'),
                 DB::raw('MAX(CASE WHEN selected = 1 THEN carrier END) as selected_carrier'),
                 DB::raw('MIN(quoted_price) as cheapest_price'),
-                DB::raw("SUBSTRING_INDEX(GROUP_CONCAT(carrier ORDER BY quoted_price ASC), ',', 1) as cheapest_carrier"),
             ])
             ->groupBy('package_id')
             ->havingRaw('quote_count >= 2 AND MAX(CASE WHEN selected = 1 THEN 1 END) = 1');
@@ -65,8 +64,10 @@ class RateComparison extends Page implements HasTable
                         'rq_stats.selected_price',
                         'rq_stats.selected_carrier',
                         'rq_stats.cheapest_price',
-                        'rq_stats.cheapest_carrier',
                         'rq_stats.quote_count as rate_quotes_count',
+                        // Correlated subquery for cheapest carrier — only evaluated
+                        // for the paginated rows, not the full dataset.
+                        DB::raw('(SELECT rq.carrier FROM rate_quotes rq WHERE rq.package_id = packages.id ORDER BY rq.quoted_price ASC LIMIT 1) as cheapest_carrier'),
                     ])
                     ->with('shipment')
             )
@@ -137,7 +138,7 @@ class RateComparison extends Page implements HasTable
         $baseQuery = $this->applyFiltersToTableQuery($baseQuery)->reorder();
 
         return (float) DB::query()
-            ->selectRaw('COALESCE(SUM(GREATEST(0, COALESCE(sub.selected_price, 0) - COALESCE(sub.cheapest_price, 0))), 0) as total_savings')
+            ->selectRaw('COALESCE(SUM(CASE WHEN sub.selected_price > sub.cheapest_price THEN sub.selected_price - sub.cheapest_price ELSE 0 END), 0) as total_savings')
             ->fromSub($baseQuery, 'sub')
             ->value('total_savings');
     }
