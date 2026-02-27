@@ -22,6 +22,7 @@ class ExceptionsWidget extends BaseWidget
         $undeliverable = Shipment::query()
             ->where('shipped', false)
             ->where('deliverability', Deliverability::No)
+            ->where('created_at', '>=', now()->subDays(90))
             ->count();
 
         $failedBatchItems = LabelBatchItem::query()
@@ -31,6 +32,7 @@ class ExceptionsWidget extends BaseWidget
 
         $unmappedReferences = Shipment::query()
             ->where('shipped', false)
+            ->where('created_at', '>=', now()->subDays(90))
             ->whereNotNull('shipping_method_reference')
             ->whereNull('shipping_method_id')
             ->distinct('shipping_method_reference')
@@ -38,14 +40,14 @@ class ExceptionsWidget extends BaseWidget
 
         return [
             Stat::make('Undeliverable Shipments', $undeliverable)
-                ->description('Pending with deliverability "No"')
+                ->description('Last 90 days, deliverability "No"')
                 ->color($undeliverable > 0 ? 'danger' : 'success')
                 ->url(ShipmentResource::getUrl('index')),
             Stat::make('Failed Batch Items', $failedBatchItems)
                 ->description('Last 7 days')
                 ->color($failedBatchItems > 0 ? 'danger' : 'success'),
             Stat::make('Unmapped Shipping References', $unmappedReferences)
-                ->description('Need mapping to shipping methods')
+                ->description('Last 90 days, need mapping')
                 ->color($unmappedReferences > 0 ? 'warning' : 'success')
                 ->url(UnmappedShippingReferences::getUrl()),
         ];

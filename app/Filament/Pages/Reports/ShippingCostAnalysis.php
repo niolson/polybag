@@ -64,10 +64,12 @@ class ShippingCostAnalysis extends Page implements HasTable
                 Tables\Filters\Filter::make('date_range')
                     ->form([
                         \Filament\Forms\Components\DatePicker::make('from')
-                            ->label('From'),
+                            ->label('From')
+                            ->default(now()->subDays(30)->format('Y-m-d')),
                         \Filament\Forms\Components\DatePicker::make('until')
                             ->label('Until'),
                     ])
+                    ->default()
                     ->query(function ($query, array $data) {
                         return $query
                             ->when($data['from'], fn ($q, $date) => $q->where('shipped_at', '>=', $date))

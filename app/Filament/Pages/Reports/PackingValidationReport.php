@@ -106,9 +106,11 @@ class PackingValidationReport extends Page implements HasTable
             ->filters([
                 Tables\Filters\Filter::make('date_range')
                     ->form([
-                        \Filament\Forms\Components\DatePicker::make('from'),
+                        \Filament\Forms\Components\DatePicker::make('from')
+                            ->default(now()->subDays(7)->format('Y-m-d')),
                         \Filament\Forms\Components\DatePicker::make('until'),
                     ])
+                    ->default()
                     ->query(function ($query, array $data) {
                         return $query
                             ->when($data['from'], fn ($q, $date) => $q->where('shipped_at', '>=', $date))
@@ -144,9 +146,11 @@ class PackingValidationReport extends Page implements HasTable
             ->filters([
                 Tables\Filters\Filter::make('date_range')
                     ->form([
-                        \Filament\Forms\Components\DatePicker::make('from'),
+                        \Filament\Forms\Components\DatePicker::make('from')
+                            ->default(now()->subDays(7)->format('Y-m-d')),
                         \Filament\Forms\Components\DatePicker::make('until'),
                     ])
+                    ->default()
                     ->query(function ($query, array $data) {
                         return $query
                             ->when($data['from'], fn ($q, $date) => $q->where('created_at', '>=', $date))
@@ -197,9 +201,11 @@ class PackingValidationReport extends Page implements HasTable
             ->filters([
                 Tables\Filters\Filter::make('date_range')
                     ->form([
-                        \Filament\Forms\Components\DatePicker::make('from'),
+                        \Filament\Forms\Components\DatePicker::make('from')
+                            ->default(now()->subDays(7)->format('Y-m-d')),
                         \Filament\Forms\Components\DatePicker::make('until'),
                     ])
+                    ->default()
                     ->query(function ($query, array $data) {
                         return $query
                             ->when($data['from'], fn ($q, $date) => $q->where('packages.shipped_at', '>=', $date))
@@ -228,10 +234,13 @@ class PackingValidationReport extends Page implements HasTable
 
     public function getWeightMismatchCount(): int
     {
+        $sevenDaysAgo = now()->subDays(7);
+
         return DB::table(
             DB::raw('('.
                 Package::query()
                     ->where('packages.shipped', true)
+                    ->where('packages.shipped_at', '>=', $sevenDaysAgo)
                     ->whereNotNull('packages.weight')
                     ->where('packages.weight', '>', 0)
                     ->join('package_items', 'packages.id', '=', 'package_items.package_id')
@@ -246,13 +255,16 @@ class PackingValidationReport extends Page implements HasTable
 
     public function getBatchFailureCount(): int
     {
-        return LabelBatchItem::where('status', LabelBatchItemStatus::Failed)->count();
+        return LabelBatchItem::where('status', LabelBatchItemStatus::Failed)
+            ->where('created_at', '>=', now()->subDays(7))
+            ->count();
     }
 
     public function getValidationIssueCount(): int
     {
         return Package::query()
             ->where('packages.shipped', true)
+            ->where('packages.shipped_at', '>=', now()->subDays(7))
             ->join('shipments', 'packages.shipment_id', '=', 'shipments.id')
             ->where('shipments.deliverability', '!=', Deliverability::Yes)
             ->count();

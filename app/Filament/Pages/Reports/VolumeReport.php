@@ -106,9 +106,11 @@ class VolumeReport extends Page implements HasTable
             ->filters([
                 Tables\Filters\Filter::make('date_range')
                     ->form([
-                        \Filament\Forms\Components\DatePicker::make('from'),
+                        \Filament\Forms\Components\DatePicker::make('from')
+                            ->default(now()->subDays(30)->format('Y-m-d')),
                         \Filament\Forms\Components\DatePicker::make('until'),
                     ])
+                    ->default()
                     ->query(function ($query, array $data) {
                         $col = $this->groupBy === 'channel' || $this->groupBy === 'shipping_method'
                             ? 'packages.shipped_at'

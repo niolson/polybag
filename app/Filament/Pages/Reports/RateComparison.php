@@ -105,9 +105,11 @@ class RateComparison extends Page implements HasTable
             ->filters([
                 Tables\Filters\Filter::make('date_range')
                     ->form([
-                        \Filament\Forms\Components\DatePicker::make('from'),
+                        \Filament\Forms\Components\DatePicker::make('from')
+                            ->default(now()->subDays(30)->format('Y-m-d')),
                         \Filament\Forms\Components\DatePicker::make('until'),
                     ])
+                    ->default()
                     ->query(function ($query, array $data) {
                         return $query
                             ->when($data['from'], fn ($q, $date) => $q->where('shipped_at', '>=', $date))
