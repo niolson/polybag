@@ -10,8 +10,8 @@ use Filament\Tables;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 use UnitEnum;
 
 class RateComparison extends Page implements HasTable
@@ -33,20 +33,42 @@ class RateComparison extends Page implements HasTable
         return auth()->user()?->role->isAtLeast(Role::Manager) ?? false;
     }
 
+    /**
+     * Pre-aggregated rate quote stats subquery. Scans rate_quotes once,
+     * groups by package_id, and filters to packages with 2+ quotes
+     * including a selected one. Uses covering index.
+     */
+    private function rateQuoteStats(): \Illuminate\Database\Query\Builder
+    {
+        return DB::table('rate_quotes')
+            ->select([
+                'package_id',
+                DB::raw('COUNT(*) as quote_count'),
+                DB::raw('MAX(CASE WHEN selected = 1 THEN quoted_price END) as selected_price'),
+                DB::raw('MAX(CASE WHEN selected = 1 THEN carrier END) as selected_carrier'),
+                DB::raw('MIN(quoted_price) as cheapest_price'),
+                DB::raw("SUBSTRING_INDEX(GROUP_CONCAT(carrier ORDER BY quoted_price ASC), ',', 1) as cheapest_carrier"),
+            ])
+            ->groupBy('package_id')
+            ->havingRaw('quote_count >= 2 AND MAX(CASE WHEN selected = 1 THEN 1 END) = 1');
+    }
+
     public function table(Table $table): Table
     {
         return $table
             ->query(
                 Package::query()
-                    ->where('shipped', true)
-                    ->whereHas('rateQuotes', function (Builder $q) {
-                        $q->where('selected', true);
-                    })
-                    ->where(function (Builder $q) {
-                        $q->whereRaw('(select count(*) from rate_quotes where rate_quotes.package_id = packages.id) >= 2');
-                    })
-                    ->withCount('rateQuotes')
-                    ->with(['shipment', 'rateQuotes'])
+                    ->where('packages.shipped', true)
+                    ->joinSub($this->rateQuoteStats(), 'rq_stats', 'rq_stats.package_id', '=', 'packages.id')
+                    ->select([
+                        'packages.*',
+                        'rq_stats.selected_price',
+                        'rq_stats.selected_carrier',
+                        'rq_stats.cheapest_price',
+                        'rq_stats.cheapest_carrier',
+                        'rq_stats.quote_count as rate_quotes_count',
+                    ])
+                    ->with('shipment')
             )
             ->defaultSort('shipped_at', 'desc')
             ->columns([
@@ -59,42 +81,22 @@ class RateComparison extends Page implements HasTable
                     ->sortable(),
                 Tables\Columns\TextColumn::make('selected_rate')
                     ->label('Selected Rate')
-                    ->state(function (Package $record) {
-                        $selected = $record->rateQuotes->firstWhere('selected', true);
-
-                        return $selected ? "{$selected->carrier} — \${$selected->quoted_price}" : '—';
-                    }),
+                    ->state(fn (Package $record) => $record->selected_carrier
+                        ? "{$record->selected_carrier} — \${$record->selected_price}"
+                        : '—'),
                 Tables\Columns\TextColumn::make('cheapest_rate')
                     ->label('Cheapest Rate')
-                    ->state(function (Package $record) {
-                        $cheapest = $record->rateQuotes->sortBy('quoted_price')->first();
-
-                        return $cheapest ? "{$cheapest->carrier} — \${$cheapest->quoted_price}" : '—';
-                    }),
+                    ->state(fn (Package $record) => $record->cheapest_carrier
+                        ? "{$record->cheapest_carrier} — \${$record->cheapest_price}"
+                        : '—'),
                 Tables\Columns\TextColumn::make('savings')
                     ->label('Potential Savings')
                     ->state(function (Package $record) {
-                        $selected = $record->rateQuotes->firstWhere('selected', true);
-                        $cheapest = $record->rateQuotes->sortBy('quoted_price')->first();
+                        $savings = max(0, (float) $record->selected_price - (float) $record->cheapest_price);
 
-                        if (! $selected || ! $cheapest) {
-                            return '$0.00';
-                        }
-
-                        $savings = (float) $selected->quoted_price - (float) $cheapest->quoted_price;
-
-                        return '$'.number_format(max(0, $savings), 2);
+                        return '$'.number_format($savings, 2);
                     })
-                    ->color(function (Package $record) {
-                        $selected = $record->rateQuotes->firstWhere('selected', true);
-                        $cheapest = $record->rateQuotes->sortBy('quoted_price')->first();
-
-                        if (! $selected || ! $cheapest) {
-                            return null;
-                        }
-
-                        return (float) $selected->quoted_price > (float) $cheapest->quoted_price ? 'warning' : 'success';
-                    }),
+                    ->color(fn (Package $record) => (float) $record->selected_price > (float) $record->cheapest_price ? 'warning' : 'success'),
                 Tables\Columns\TextColumn::make('rate_quotes_count')
                     ->label('Quotes')
                     ->sortable(),
@@ -112,7 +114,7 @@ class RateComparison extends Page implements HasTable
                     }),
                 Tables\Filters\SelectFilter::make('carrier')
                     ->options(fn () => Package::query()->where('shipped', true)->whereNotNull('carrier')->distinct()->pluck('carrier', 'carrier')->toArray())
-                    ->query(fn ($query, array $data) => $data['value'] ? $query->where('carrier', $data['value']) : $query),
+                    ->query(fn ($query, array $data) => $data['value'] ? $query->where('packages.carrier', $data['value']) : $query),
             ]);
     }
 
@@ -123,19 +125,20 @@ class RateComparison extends Page implements HasTable
 
     public function getTotalPotentialSavings(): float
     {
-        $packages = $this->getFilteredTableQuery()
-            ->with('rateQuotes')
-            ->get();
+        $baseQuery = Package::query()
+            ->where('packages.shipped', true)
+            ->joinSub($this->rateQuoteStats(), 'rq_stats', 'rq_stats.package_id', '=', 'packages.id')
+            ->select([
+                'rq_stats.selected_price',
+                'rq_stats.cheapest_price',
+            ]);
 
-        return $packages->sum(function (Package $package) {
-            $selected = $package->rateQuotes->firstWhere('selected', true);
-            $cheapest = $package->rateQuotes->sortBy('quoted_price')->first();
+        // Apply active table filters (date range, carrier)
+        $baseQuery = $this->applyFiltersToTableQuery($baseQuery)->reorder();
 
-            if (! $selected || ! $cheapest) {
-                return 0;
-            }
-
-            return max(0, (float) $selected->quoted_price - (float) $cheapest->quoted_price);
-        });
+        return (float) DB::query()
+            ->selectRaw('COALESCE(SUM(GREATEST(0, COALESCE(sub.selected_price, 0) - COALESCE(sub.cheapest_price, 0))), 0) as total_savings')
+            ->fromSub($baseQuery, 'sub')
+            ->value('total_savings');
     }
 }

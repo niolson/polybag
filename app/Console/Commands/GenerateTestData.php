@@ -319,7 +319,7 @@ class GenerateTestData extends Command
                 'email' => null,
                 'value' => $value,
                 'checked' => true,
-                'deliverability' => 'Yes',
+                'deliverability' => 'yes',
                 'validation_message' => null,
                 'validated_address1' => null,
                 'validated_city' => null,
