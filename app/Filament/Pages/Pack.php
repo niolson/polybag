@@ -59,9 +59,8 @@ class Pack extends Page
         $this->boxSizes = app(CacheService::class)->getBoxSizesForPacking();
 
         if ($shipment_id) {
-            $this->shipment = Shipment::where('shipment_reference', $shipment_id)
-                ->with('shipmentItems.product')
-                ->firstOrFail();
+            $this->shipment = Shipment::with('shipmentItems.product')
+                ->findOrFail($shipment_id);
 
             foreach ($this->shipment->shipmentItems as $shipmentItem) {
                 $packingItem = $shipmentItem->toArray();
@@ -297,7 +296,7 @@ class Pack extends Page
             return;
         }
 
-        $this->redirect('/pack/'.rawurlencode($reference));
+        $this->redirect('/pack/'.$shipment->id);
     }
 
     /**
