@@ -68,91 +68,140 @@ class ManifestService
         };
     }
 
+    /**
+     * USPS limits SCAN Forms to 10,000 tracking numbers per request.
+     */
+    private const USPS_MANIFEST_CHUNK_SIZE = 10_000;
+
     private function createUspsManifest(Collection $packages): ManifestResponse
     {
         try {
             $fromAddress = AddressData::fromConfig();
             $connector = USPSConnector::getAuthenticatedConnector();
 
-            $remainingPackages = $packages;
-            $totalMarkedExternally = 0;
+            $chunks = $packages->chunk(self::USPS_MANIFEST_CHUNK_SIZE);
+            $manifestNumbers = [];
+            $lastImage = null;
+            $totalManifested = 0;
 
-            // Retry loop: if USPS reports some packages as already manifested,
-            // mark those and retry with the rest.
-            for ($attempt = 0; $attempt < 3; $attempt++) {
-                try {
-                    $response = $this->sendScanFormRequest($connector, $remainingPackages, $fromAddress);
-                } catch (RequestException $e) {
-                    // Saloon's retry mechanism throws after exhausting retries on 4xx.
-                    // Extract the response to check for already-manifested errors.
-                    $errorResponse = $e->getResponse();
-                    $alreadyManifested = $this->extractAlreadyManifestedBarcodes(
-                        $errorResponse->json('error.errors', [])
-                    );
+            foreach ($chunks as $chunkIndex => $chunk) {
+                $result = $this->createUspsScanForm($connector, $chunk->values(), $fromAddress);
 
-                    if (empty($alreadyManifested)) {
-                        throw $e;
-                    }
-
-                    $marked = Package::query()
-                        ->whereIn('tracking_number', $alreadyManifested)
-                        ->where('manifested', false)
-                        ->update(['manifested' => true]);
-                    $totalMarkedExternally += $marked;
-
-                    logger()->warning('USPS SCAN Form: marked packages as already manifested', [
-                        'tracking_numbers' => $alreadyManifested,
-                        'count' => $marked,
-                    ]);
-
-                    $remainingPackages = $remainingPackages->reject(
-                        fn ($p) => in_array($p->tracking_number, $alreadyManifested)
-                    )->values();
-
-                    if ($remainingPackages->isEmpty()) {
+                if (! $result['success']) {
+                    // If some chunks succeeded, report partial success
+                    if ($totalManifested > 0) {
                         return ManifestResponse::failure(
-                            "All {$totalMarkedExternally} packages were already manifested by USPS and have been cleared."
+                            "Partial manifest: {$totalManifested} packages manifested across "
+                            .count($manifestNumbers).' form(s), but batch '.($chunkIndex + 1)
+                            ." failed: {$result['error']}"
                         );
                     }
 
-                    continue; // Retry with remaining packages
+                    return ManifestResponse::failure($result['error']);
                 }
 
-                $response->parseBody();
-
-                $manifestNumber = $response->metadata['manifestNumber'] ?? '';
-                $image = $response->image;
-
-                $manifest = DB::transaction(function () use ($manifestNumber, $image, $remainingPackages) {
-                    $manifest = Manifest::create([
-                        'carrier' => 'USPS',
-                        'manifest_number' => $manifestNumber,
-                        'image' => $image,
-                        'manifest_date' => now()->toDateString(),
-                        'package_count' => $remainingPackages->count(),
-                    ]);
-
-                    Package::whereIn('id', $remainingPackages->pluck('id'))
-                        ->update(['manifest_id' => $manifest->id, 'manifested' => true]);
-
-                    return $manifest;
-                });
-
-                ManifestCreatedEvent::dispatch($manifest, $remainingPackages->count());
-
-                return ManifestResponse::success(
-                    manifestNumber: $manifestNumber,
-                    carrier: 'USPS',
-                    image: $image,
-                );
+                $manifestNumbers[] = $result['manifestNumber'];
+                $lastImage = $result['image'];
+                $totalManifested += $result['packageCount'];
             }
 
-            return ManifestResponse::failure('USPS SCAN Form failed after multiple retries.');
+            $combinedNumber = implode(', ', $manifestNumbers);
+
+            return ManifestResponse::success(
+                manifestNumber: $combinedNumber,
+                carrier: 'USPS',
+                image: $lastImage,
+            );
         } catch (\Exception $e) {
             logger()->error('USPS Scan Form Error', ['error' => $e->getMessage()]);
 
             return ManifestResponse::failure($e->getMessage());
         }
+    }
+
+    /**
+     * Send a single USPS SCAN Form request for one chunk of packages,
+     * with retry logic for already-manifested errors.
+     *
+     * @return array{success: bool, manifestNumber?: string, image?: string, packageCount?: int, error?: string}
+     */
+    private function createUspsScanForm(
+        \Saloon\Http\Connector $connector,
+        Collection $packages,
+        AddressData $fromAddress,
+    ): array {
+        $remainingPackages = $packages;
+        $totalMarkedExternally = 0;
+
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            try {
+                $response = $this->sendScanFormRequest($connector, $remainingPackages, $fromAddress);
+            } catch (RequestException $e) {
+                $errorResponse = $e->getResponse();
+                $alreadyManifested = $this->extractAlreadyManifestedBarcodes(
+                    $errorResponse->json('error.errors', [])
+                );
+
+                if (empty($alreadyManifested)) {
+                    throw $e;
+                }
+
+                $marked = Package::query()
+                    ->whereIn('tracking_number', $alreadyManifested)
+                    ->where('manifested', false)
+                    ->update(['manifested' => true]);
+                $totalMarkedExternally += $marked;
+
+                logger()->warning('USPS SCAN Form: marked packages as already manifested', [
+                    'tracking_numbers' => $alreadyManifested,
+                    'count' => $marked,
+                ]);
+
+                $remainingPackages = $remainingPackages->reject(
+                    fn ($p) => in_array($p->tracking_number, $alreadyManifested)
+                )->values();
+
+                if ($remainingPackages->isEmpty()) {
+                    return [
+                        'success' => false,
+                        'error' => "All {$totalMarkedExternally} packages were already manifested by USPS and have been cleared.",
+                    ];
+                }
+
+                continue;
+            }
+
+            $response->parseBody();
+
+            $manifestNumber = $response->metadata['manifestNumber'] ?? '';
+            $image = $response->image;
+
+            $manifest = DB::transaction(function () use ($manifestNumber, $image, $remainingPackages) {
+                $manifest = Manifest::create([
+                    'carrier' => 'USPS',
+                    'manifest_number' => $manifestNumber,
+                    'image' => $image,
+                    'manifest_date' => now()->toDateString(),
+                    'package_count' => $remainingPackages->count(),
+                ]);
+
+                Package::whereIn('id', $remainingPackages->pluck('id'))
+                    ->update(['manifest_id' => $manifest->id, 'manifested' => true]);
+
+                return $manifest;
+            });
+
+            ManifestCreatedEvent::dispatch($manifest, $remainingPackages->count());
+
+            return [
+                'success' => true,
+                'manifestNumber' => $manifestNumber,
+                'image' => $image,
+                'packageCount' => $remainingPackages->count(),
+            ];
+        }
+
+        return ['success' => false, 'error' => 'USPS SCAN Form failed after multiple retries.'];
     }
 
     /**
