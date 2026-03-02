@@ -28,7 +28,7 @@ it('loads box sizes into the component', function (): void {
 
     $shipment = Shipment::factory()->create();
 
-    Livewire::test(Pack::class, ['shipment_id' => $shipment->shipment_reference])
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->assertSet('boxSizes.A1.id', $boxSize->id)
         ->assertSet('boxSizes.A1.code', 'A1')
         ->assertSet('boxSizes.A1.height', '10.00')
@@ -50,7 +50,7 @@ it('loads shipment with packing items', function (): void {
         'transparency' => false,
     ]);
 
-    Livewire::test(Pack::class, ['shipment_id' => $shipment->shipment_reference])
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->assertSet('shipment.id', $shipment->id)
         ->assertCount('packingItems', 1)
         ->assertSet('packingItems.0.id', $shipmentItem->id)
@@ -71,7 +71,7 @@ it('navigates to shipment by reference', function (): void {
 
     Livewire::test(Pack::class)
         ->call('navigateToShipment', $shipment->shipment_reference)
-        ->assertRedirect("/pack/{$shipment->shipment_reference}");
+        ->assertRedirect("/pack/{$shipment->id}");
 });
 
 it('shows error notification for invalid shipment reference', function (): void {
@@ -120,7 +120,7 @@ it('ships a package via manual ship', function (): void {
         'transparency_codes' => [],
     ]];
 
-    Livewire::test(Pack::class, ['shipment_id' => $shipment->shipment_reference])
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->call('ship', $packingItems, $boxSize->id, '1.5', '10', '8', '6', false)
         ->assertRedirect();
 
@@ -157,7 +157,7 @@ it('rejects ship when dimensions are missing', function (): void {
         'transparency_codes' => [],
     ]];
 
-    Livewire::test(Pack::class, ['shipment_id' => $shipment->shipment_reference])
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->call('ship', $packingItems, null, '1.5', '10', '8', '', false)
         ->assertNotified();
 
@@ -185,7 +185,7 @@ it('rejects ship when items not fully packed', function (): void {
         'transparency_codes' => [],
     ]];
 
-    Livewire::test(Pack::class, ['shipment_id' => $shipment->shipment_reference])
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->call('ship', $packingItems, null, '1.5', '10', '8', '6', false)
         ->assertNotified();
 
@@ -215,7 +215,7 @@ it('ships with transparency codes', function (): void {
         'transparency_codes' => [$transparencyCode],
     ]];
 
-    Livewire::test(Pack::class, ['shipment_id' => $shipment->shipment_reference])
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->call('ship', $packingItems, $boxSize->id, '1.5', '10', '8', '6', false)
         ->assertRedirect();
 
@@ -254,7 +254,7 @@ it('allows shipping when packing validation is disabled', function (): void {
         'transparency_codes' => [],
     ]];
 
-    Livewire::test(Pack::class, ['shipment_id' => $shipment->shipment_reference])
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->call('ship', $packingItems, $boxSize->id, '1.5', '10', '8', '6', false)
         ->assertRedirect();
 
@@ -302,7 +302,7 @@ it('cleans up existing unshipped packages before creating a new one', function (
         'transparency_codes' => [],
     ]];
 
-    Livewire::test(Pack::class, ['shipment_id' => $shipment->shipment_reference])
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->call('ship', $packingItems, $boxSize->id, '2.0', '10', '8', '6', false)
         ->assertRedirect();
 
@@ -339,7 +339,7 @@ it('preserves shipped packages when creating a new one', function (): void {
         'transparency_codes' => [],
     ]];
 
-    Livewire::test(Pack::class, ['shipment_id' => $shipment->shipment_reference])
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->call('ship', $packingItems, $boxSize->id, '2.0', '10', '8', '6', false)
         ->assertRedirect();
 
@@ -374,7 +374,7 @@ it('downgrades auto-ship to manual ship for non-admin users', function (): void 
     ]];
 
     // Pass autoShip=true as a non-admin — should be downgraded to manual ship (redirect)
-    Livewire::test(Pack::class, ['shipment_id' => $shipment->shipment_reference])
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->call('ship', $packingItems, $boxSize->id, '1.5', '10', '8', '6', true)
         ->assertRedirect();
 
@@ -423,7 +423,7 @@ it('deletes orphaned package items when cleaning up unshipped packages', functio
         'transparency_codes' => [],
     ]];
 
-    Livewire::test(Pack::class, ['shipment_id' => $shipment->shipment_reference])
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->call('ship', $packingItems, $boxSize->id, '2.0', '10', '8', '6', false)
         ->assertRedirect();
 

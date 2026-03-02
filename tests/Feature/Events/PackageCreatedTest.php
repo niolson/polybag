@@ -38,7 +38,7 @@ it('dispatches PackageCreated when a package is created via Pack page', function
         'transparency_codes' => [],
     ]];
 
-    Livewire::test(Pack::class, ['shipment_id' => $shipment->shipment_reference])
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->call('ship', $packingItems, $boxSize->id, '1.5', '10', '8', '6', false)
         ->assertRedirect();
 
