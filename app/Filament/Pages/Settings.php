@@ -93,6 +93,7 @@ class Settings extends Page
             'from_address_phone' => app(SettingsService::class)->get('from_address.phone', ''),
             'packing_validation_enabled' => app(SettingsService::class)->get('packing_validation_enabled', true),
             'transparency_enabled' => app(SettingsService::class)->get('transparency_enabled', true),
+            'batch_shipping_enabled' => app(SettingsService::class)->get('batch_shipping_enabled', true),
             'carrier_api_timeout' => app(SettingsService::class)->get('carrier_api_timeout', 15),
             'sandbox_mode' => app(SettingsService::class)->get('sandbox_mode', false),
             'suppress_printing' => app(SettingsService::class)->get('suppress_printing', false),
@@ -186,6 +187,10 @@ class Settings extends Page
                             Toggle::make('transparency_enabled')
                                 ->label('Transparency Program')
                                 ->helperText('When enabled, shipment items requiring transparency codes will prompt for code scanning during packing.')
+                                ->default(true),
+                            Toggle::make('batch_shipping_enabled')
+                                ->label('Batch Shipping')
+                                ->helperText('When enabled, admins can select multiple shipments and generate labels in bulk.')
                                 ->default(true),
                         ])
                         ->columns(1),
@@ -358,6 +363,7 @@ class Settings extends Page
             'from_address.phone' => $data['from_address_phone'] ?? '',
             'packing_validation_enabled' => $data['packing_validation_enabled'] ?? true,
             'transparency_enabled' => $data['transparency_enabled'] ?? true,
+            'batch_shipping_enabled' => $data['batch_shipping_enabled'] ?? true,
             'carrier_api_timeout' => (int) ($data['carrier_api_timeout'] ?? 15),
             'sandbox_mode' => $sandboxMode,
             'suppress_printing' => $suppressPrinting,

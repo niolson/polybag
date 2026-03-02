@@ -7,6 +7,7 @@ use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Resources\LabelBatchResource;
 use Filament\Actions\Action;
 use Filament\Resources\Pages\ViewRecord;
+use Illuminate\Support\Facades\Bus;
 
 class ViewLabelBatch extends ViewRecord
 {
@@ -15,6 +16,21 @@ class ViewLabelBatch extends ViewRecord
     protected static string $resource = LabelBatchResource::class;
 
     protected string $view = 'filament.resources.label-batch-resource.pages.view-label-batch';
+
+    public function getProgressPercent(): int
+    {
+        if ($this->record->bus_batch_id) {
+            $busBatch = Bus::findBatch($this->record->bus_batch_id);
+
+            return $busBatch ? $busBatch->progress() : 0;
+        }
+
+        $processed = $this->record->successful_shipments + $this->record->failed_shipments;
+
+        return $this->record->total_shipments > 0
+            ? (int) round(($processed / $this->record->total_shipments) * 100)
+            : 0;
+    }
 
     protected function getHeaderActions(): array
     {

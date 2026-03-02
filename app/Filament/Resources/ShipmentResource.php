@@ -10,6 +10,7 @@ use App\Filament\Resources\ShipmentResource\RelationManagers\ShipmentItemsRelati
 use App\Models\BoxSize;
 use App\Models\Shipment;
 use App\Services\BatchLabelService;
+use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Actions;
 use Filament\Forms;
@@ -135,7 +136,7 @@ class ShipmentResource extends Resource
                                     ->live(onBlur: true)
                                     ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
                                 Forms\Components\TextInput::make('state_or_province')
-                                    ->label('State/Province')
+                                    ->label('State or Province')
                                     ->maxLength(255)
                                     ->live(onBlur: true)
                                     ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
@@ -170,7 +171,7 @@ class ShipmentResource extends Resource
                                     ->label('City')
                                     ->content(fn (Shipment $record) => $record->validated_city),
                                 Forms\Components\Placeholder::make('validated_state_or_province_display')
-                                    ->label('State/Province')
+                                    ->label('State or Province')
                                     ->content(fn (Shipment $record) => $record->validated_state_or_province),
                                 Forms\Components\Placeholder::make('validated_postal_code_display')
                                     ->label('Postal Code')
@@ -329,7 +330,7 @@ class ShipmentResource extends Resource
                 Actions\BulkAction::make('batch-ship')
                     ->label('Batch Ship')
                     ->icon('heroicon-o-paper-airplane')
-                    ->visible(fn () => auth()->user()->role->isAtLeast(Role::Admin))
+                    ->visible(fn () => auth()->user()->role->isAtLeast(Role::Admin) && app(SettingsService::class)->get('batch_shipping_enabled', true))
                     ->schema([
                         Forms\Components\Select::make('box_size_id')
                             ->label('Box Size')
@@ -472,7 +473,7 @@ class ShipmentResource extends Resource
                                         ? $record->validated_city
                                         : $record->city),
                                 TextEntry::make('effective_state_or_province')
-                                    ->label('State/Province')
+                                    ->label('State or Province')
                                     ->state(fn (Shipment $record): ?string => $record->checked && filled($record->validated_address1)
                                         ? $record->validated_state_or_province
                                         : $record->state_or_province),
