@@ -377,7 +377,7 @@ class ShipmentResource extends Resource
                             $data['label_dpi'] ? (int) $data['label_dpi'] : null,
                         );
 
-                        redirect("/batch-ship/{$batch->id}");
+                        redirect(LabelBatchResource::getUrl('view', ['record' => $batch]));
                     })
                     ->deselectRecordsAfterCompletion(),
                 Actions\DeleteBulkAction::make()
