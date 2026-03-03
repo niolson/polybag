@@ -12,6 +12,15 @@ class SettingsService
     private const CACHE_TTL = 3600; // 1 hour
 
     /**
+     * Request-scoped in-memory cache to avoid repeated database
+     * cache lookups within the same request (the cache driver is
+     * database, so every Cache::remember() is a DB query).
+     */
+    private static ?array $resolved = null;
+
+    private static ?array $resolvedGroups = null;
+
+    /**
      * Get a setting value by key.
      */
     public function get(string $key, mixed $default = null): mixed
@@ -92,6 +101,8 @@ class SettingsService
     {
         Cache::forget(self::CACHE_KEY);
         Cache::forget(self::CACHE_KEY.'_groups');
+        static::$resolved = null;
+        static::$resolvedGroups = null;
     }
 
     /**
@@ -101,7 +112,11 @@ class SettingsService
      */
     private function getAllCached(): array
     {
-        return Cache::remember(self::CACHE_KEY, self::CACHE_TTL, function () {
+        if (static::$resolved !== null) {
+            return static::$resolved;
+        }
+
+        return static::$resolved = Cache::remember(self::CACHE_KEY, self::CACHE_TTL, function () {
             return Setting::all()
                 ->pluck('value', 'key')
                 ->all();
@@ -115,7 +130,11 @@ class SettingsService
      */
     private function getGroupMapCached(): array
     {
-        return Cache::remember(self::CACHE_KEY.'_groups', self::CACHE_TTL, function () {
+        if (static::$resolvedGroups !== null) {
+            return static::$resolvedGroups;
+        }
+
+        return static::$resolvedGroups = Cache::remember(self::CACHE_KEY.'_groups', self::CACHE_TTL, function () {
             return Setting::pluck('group', 'key')
                 ->all();
         });
