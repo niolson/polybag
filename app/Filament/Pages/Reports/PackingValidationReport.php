@@ -14,7 +14,6 @@ use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\DB;
 use UnitEnum;
 
 class PackingValidationReport extends Page implements HasTable
@@ -54,20 +53,13 @@ class PackingValidationReport extends Page implements HasTable
 
     private function weightMismatchTable(Table $table): Table
     {
-        // JOIN package_items/products directly so the Filament date filter
-        // on shipped_at applies BEFORE the expensive aggregation. The old
-        // whereIn($mismatchedIds) approach scanned ALL packages first.
+        // Uses the pre-computed weight_mismatch flag (set at pack time,
+        // backfilled via packages:backfill-weight-mismatch). No JOINs needed.
         return $table
             ->query(
                 Package::query()
-                    ->where('packages.shipped', true)
-                    ->whereNotNull('packages.weight')
-                    ->where('packages.weight', '>', 0)
-                    ->join('package_items', 'packages.id', '=', 'package_items.package_id')
-                    ->join('products', 'package_items.product_id', '=', 'products.id')
-                    ->select('packages.*')
-                    ->groupBy('packages.id')
-                    ->havingRaw('ABS(packages.weight - SUM(products.weight * package_items.quantity)) / (CASE WHEN packages.weight > 0.01 THEN packages.weight ELSE 0.01 END) > 0.10')
+                    ->where('shipped', true)
+                    ->where('weight_mismatch', true)
                     ->with('shipment')
             )
             ->defaultSort('shipped_at', 'desc')
@@ -232,23 +224,11 @@ class PackingValidationReport extends Page implements HasTable
 
     public function getWeightMismatchCount(): int
     {
-        $sevenDaysAgo = now()->subDays(7);
-
-        return DB::table(
-            DB::raw('('.
-                Package::query()
-                    ->where('packages.shipped', true)
-                    ->where('packages.shipped_at', '>=', $sevenDaysAgo)
-                    ->whereNotNull('packages.weight')
-                    ->where('packages.weight', '>', 0)
-                    ->join('package_items', 'packages.id', '=', 'package_items.package_id')
-                    ->join('products', 'package_items.product_id', '=', 'products.id')
-                    ->select('packages.id')
-                    ->groupBy('packages.id', 'packages.weight')
-                    ->havingRaw('ABS(packages.weight - SUM(products.weight * package_items.quantity)) / (CASE WHEN packages.weight > 0.01 THEN packages.weight ELSE 0.01 END) > 0.10')
-                    ->toRawSql()
-            .') as mismatches')
-        )->count();
+        return Package::query()
+            ->where('shipped', true)
+            ->where('weight_mismatch', true)
+            ->where('shipped_at', '>=', now()->subDays(7))
+            ->count();
     }
 
     public function getBatchFailureCount(): int

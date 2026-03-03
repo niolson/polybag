@@ -1,11 +1,13 @@
 <?php
 
 use App\Filament\Widgets\ShippedShipmentsChart;
-use App\Models\Shipment;
+use App\Models\DailyShippingStat;
 use App\Models\User;
+use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
+    Cache::flush();
     $this->actingAs(User::factory()->create());
 });
 
@@ -39,21 +41,20 @@ it('has correct filter options', function (): void {
 });
 
 it('counts shipped shipments for the last week', function (): void {
-    // Create shipments shipped in the last week
-    Shipment::factory()->count(3)->create([
-        'shipped' => true,
-        'updated_at' => now()->subDays(2),
+    // Summary stats within the last week
+    DailyShippingStat::create([
+        'date' => now()->subDays(2)->toDateString(),
+        'package_count' => 3,
+        'total_cost' => 0,
+        'total_weight' => 0,
     ]);
 
-    // Create shipments shipped before the last week (should not be counted)
-    Shipment::factory()->count(2)->create([
-        'shipped' => true,
-        'updated_at' => now()->subDays(10),
-    ]);
-
-    // Create unshipped shipments (should not be counted)
-    Shipment::factory()->count(4)->create([
-        'shipped' => false,
+    // Summary stats before the last week (should not be counted)
+    DailyShippingStat::create([
+        'date' => now()->subDays(10)->toDateString(),
+        'package_count' => 2,
+        'total_cost' => 0,
+        'total_weight' => 0,
     ]);
 
     $widget = new ShippedShipmentsChart;
@@ -68,21 +69,27 @@ it('counts shipped shipments for the last week', function (): void {
 });
 
 it('counts shipped shipments for the last month', function (): void {
-    // Create shipments shipped in the last month
-    Shipment::factory()->count(5)->create([
-        'shipped' => true,
-        'updated_at' => now()->subDays(15),
+    // Summary stats within the last month
+    DailyShippingStat::create([
+        'date' => now()->subDays(15)->toDateString(),
+        'package_count' => 5,
+        'total_cost' => 0,
+        'total_weight' => 0,
     ]);
 
-    Shipment::factory()->count(3)->create([
-        'shipped' => true,
-        'updated_at' => now()->subDays(3),
+    DailyShippingStat::create([
+        'date' => now()->subDays(3)->toDateString(),
+        'package_count' => 3,
+        'total_cost' => 0,
+        'total_weight' => 0,
     ]);
 
-    // Create shipments shipped before the last month (should not be counted)
-    Shipment::factory()->count(2)->create([
-        'shipped' => true,
-        'updated_at' => now()->subDays(35),
+    // Summary stats before the last month (should not be counted)
+    DailyShippingStat::create([
+        'date' => now()->subDays(35)->toDateString(),
+        'package_count' => 2,
+        'total_cost' => 0,
+        'total_weight' => 0,
     ]);
 
     $widget = new ShippedShipmentsChart;

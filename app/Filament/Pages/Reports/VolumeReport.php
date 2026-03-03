@@ -3,7 +3,7 @@
 namespace App\Filament\Pages\Reports;
 
 use App\Enums\Role;
-use App\Models\Package;
+use App\Models\DailyShippingStat;
 use BackedEnum;
 use Filament\Pages\Page;
 use Filament\Tables;
@@ -43,38 +43,34 @@ class VolumeReport extends Page implements HasTable
     public function table(Table $table): Table
     {
         $query = match ($this->groupBy) {
-            'shipping_method' => Package::query()
-                ->join('shipments', 'packages.shipment_id', '=', 'shipments.id')
-                ->leftJoin('shipping_methods', 'shipments.shipping_method_id', '=', 'shipping_methods.id')
-                ->where('packages.shipped', true)
+            'shipping_method' => DailyShippingStat::query()
+                ->leftJoin('shipping_methods', 'daily_shipping_stats.shipping_method_id', '=', 'shipping_methods.id')
                 ->select([
                     DB::raw('COALESCE(shipping_methods.name, "Unmapped") as group_name'),
-                    DB::raw('COUNT(*) as package_count'),
-                    DB::raw('SUM(packages.cost) as total_cost'),
-                    DB::raw('AVG(packages.cost) as avg_cost'),
-                    DB::raw('MIN(packages.id) as id'),
+                    DB::raw('SUM(daily_shipping_stats.package_count) as package_count'),
+                    DB::raw('SUM(daily_shipping_stats.total_cost) as total_cost'),
+                    DB::raw('CASE WHEN SUM(daily_shipping_stats.package_count) > 0 THEN SUM(daily_shipping_stats.total_cost) / SUM(daily_shipping_stats.package_count) ELSE 0 END as avg_cost'),
+                    DB::raw('MIN(daily_shipping_stats.id) as id'),
                 ])
                 ->groupBy('group_name'),
-            'period' => Package::query()
-                ->where('shipped', true)
+            'period' => DailyShippingStat::query()
                 ->select([
                     DB::raw($this->periodGroupExpression()),
-                    DB::raw('COUNT(*) as package_count'),
-                    DB::raw('SUM(cost) as total_cost'),
-                    DB::raw('AVG(cost) as avg_cost'),
+                    DB::raw('SUM(package_count) as package_count'),
+                    DB::raw('SUM(total_cost) as total_cost'),
+                    DB::raw('CASE WHEN SUM(package_count) > 0 THEN SUM(total_cost) / SUM(package_count) ELSE 0 END as avg_cost'),
                     DB::raw('MIN(id) as id'),
                 ])
-                ->groupBy('group_name'),
-            default => Package::query()
-                ->join('shipments', 'packages.shipment_id', '=', 'shipments.id')
-                ->leftJoin('channels', 'shipments.channel_id', '=', 'channels.id')
-                ->where('packages.shipped', true)
+                ->groupBy('group_name')
+                ->orderByDesc('group_name'),
+            default => DailyShippingStat::query()
+                ->leftJoin('channels', 'daily_shipping_stats.channel_id', '=', 'channels.id')
                 ->select([
                     DB::raw('COALESCE(channels.name, "Unknown") as group_name'),
-                    DB::raw('COUNT(*) as package_count'),
-                    DB::raw('SUM(packages.cost) as total_cost'),
-                    DB::raw('AVG(packages.cost) as avg_cost'),
-                    DB::raw('MIN(packages.id) as id'),
+                    DB::raw('SUM(daily_shipping_stats.package_count) as package_count'),
+                    DB::raw('SUM(daily_shipping_stats.total_cost) as total_cost'),
+                    DB::raw('CASE WHEN SUM(daily_shipping_stats.package_count) > 0 THEN SUM(daily_shipping_stats.total_cost) / SUM(daily_shipping_stats.package_count) ELSE 0 END as avg_cost'),
+                    DB::raw('MIN(daily_shipping_stats.id) as id'),
                 ])
                 ->groupBy('group_name'),
         };
@@ -113,8 +109,8 @@ class VolumeReport extends Page implements HasTable
                     ->default()
                     ->query(function ($query, array $data) {
                         $col = $this->groupBy === 'channel' || $this->groupBy === 'shipping_method'
-                            ? 'packages.shipped_at'
-                            : 'shipped_at';
+                            ? 'daily_shipping_stats.date'
+                            : 'date';
 
                         return $query
                             ->when($data['from'], fn ($q, $date) => $q->where($col, '>=', $date))
@@ -125,7 +121,7 @@ class VolumeReport extends Page implements HasTable
 
     public function resolveTableRecord(?string $key): ?Model
     {
-        return Package::find($key);
+        return DailyShippingStat::find($key);
     }
 
     private function periodGroupExpression(): string
@@ -133,8 +129,8 @@ class VolumeReport extends Page implements HasTable
         $driver = DB::getDriverName();
 
         return match ($driver) {
-            'sqlite' => 'strftime("%Y-%m", shipped_at) as group_name',
-            default => 'DATE_FORMAT(shipped_at, "%Y-%m") as group_name',
+            'sqlite' => 'strftime("%Y-%m", date) as group_name',
+            default => 'DATE_FORMAT(date, "%Y-%m") as group_name',
         };
     }
 }

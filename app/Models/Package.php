@@ -33,6 +33,7 @@ class Package extends Model
         'width',
         'length',
         'cost',
+        'weight_mismatch',
         'shipped',
         'shipped_at',
         'shipped_by_user_id',
@@ -48,6 +49,7 @@ class Package extends Model
         'width' => 'decimal:2',
         'length' => 'decimal:2',
         'cost' => 'decimal:2',
+        'weight_mismatch' => 'boolean',
         'shipped' => 'boolean',
         'shipped_at' => 'datetime',
         'exported' => 'boolean',
@@ -93,6 +95,28 @@ class Package extends Model
     public function shippedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'shipped_by_user_id');
+    }
+
+    /**
+     * Compute whether there's a weight mismatch (>10% discrepancy)
+     * between the actual package weight and the expected weight
+     * based on the packed products.
+     */
+    public function computeWeightMismatch(): bool
+    {
+        $this->loadMissing('packageItems.product');
+
+        $expectedWeight = (float) $this->packageItems->sum(
+            fn ($item) => ($item->product?->weight ?? 0) * $item->quantity
+        );
+
+        $actualWeight = (float) $this->weight;
+
+        if ($actualWeight <= 0 || $expectedWeight <= 0) {
+            return false;
+        }
+
+        return abs($actualWeight - $expectedWeight) / max($actualWeight, 0.01) > 0.10;
     }
 
     /**

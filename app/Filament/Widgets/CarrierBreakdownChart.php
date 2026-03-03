@@ -2,8 +2,9 @@
 
 namespace App\Filament\Widgets;
 
-use App\Models\Package;
+use App\Models\DailyShippingStat;
 use Filament\Widgets\ChartWidget;
+use Illuminate\Support\Facades\Cache;
 
 class CarrierBreakdownChart extends ChartWidget
 {
@@ -15,6 +16,8 @@ class CarrierBreakdownChart extends ChartWidget
 
     public ?string $filter = 'week';
 
+    protected ?string $pollingInterval = '60s';
+
     protected function getFilters(): ?array
     {
         return [
@@ -25,16 +28,19 @@ class CarrierBreakdownChart extends ChartWidget
 
     protected function getData(): array
     {
-        $query = Package::query()->where('shipped', true)->whereNotNull('carrier');
+        return Cache::remember("widget:carrier_breakdown:{$this->filter}", 60, fn () => $this->buildData());
+    }
 
-        if ($this->filter === 'month') {
-            $query->where('shipped_at', '>=', now()->startOfMonth());
-        } else {
-            $query->where('shipped_at', '>=', now()->startOfWeek());
-        }
+    private function buildData(): array
+    {
+        $startDate = $this->filter === 'month'
+            ? now()->startOfMonth()->toDateString()
+            : now()->startOfWeek()->toDateString();
 
-        $breakdown = $query
-            ->selectRaw('carrier, COUNT(*) as count')
+        $breakdown = DailyShippingStat::query()
+            ->whereNotNull('carrier')
+            ->where('date', '>=', $startDate)
+            ->selectRaw('carrier, SUM(package_count) as count')
             ->groupBy('carrier')
             ->orderByDesc('count')
             ->pluck('count', 'carrier')

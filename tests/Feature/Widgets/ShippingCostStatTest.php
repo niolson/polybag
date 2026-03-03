@@ -1,16 +1,26 @@
 <?php
 
 use App\Filament\Widgets\StatsOverview;
-use App\Models\Package;
+use App\Models\DailyShippingStat;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
+beforeEach(function () {
+    Cache::flush();
+});
+
 it('shows shipping cost this week', function () {
-    Package::factory()->shipped()->create(['shipped_at' => now(), 'cost' => 10.50]);
-    Package::factory()->shipped()->create(['shipped_at' => now(), 'cost' => 15.25]);
+    // Summary stats for this week with costs matching the expected total
+    DailyShippingStat::create([
+        'date' => today()->toDateString(),
+        'package_count' => 2,
+        'total_cost' => 25.75,
+        'total_weight' => 0,
+    ]);
 
     $user = User::factory()->create();
 

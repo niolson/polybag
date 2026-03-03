@@ -2,8 +2,9 @@
 
 namespace App\Filament\Widgets;
 
-use App\Models\Shipment;
+use App\Models\DailyShippingStat;
 use Filament\Widgets\ChartWidget;
+use Illuminate\Support\Facades\Cache;
 
 class ShippedShipmentsChart extends ChartWidget
 {
@@ -15,6 +16,8 @@ class ShippedShipmentsChart extends ChartWidget
 
     public ?string $filter = 'week';
 
+    protected ?string $pollingInterval = '60s';
+
     protected function getFilters(): ?array
     {
         return [
@@ -25,40 +28,41 @@ class ShippedShipmentsChart extends ChartWidget
 
     protected function getData(): array
     {
-        $days = $this->filter === 'month' ? 30 : 7;
-        $startDate = now()->subDays($days - 1)->startOfDay();
+        return Cache::remember("widget:shipped_chart:{$this->filter}", 60, function () {
+            $days = $this->filter === 'month' ? 30 : 7;
+            $startDate = now()->subDays($days - 1)->startOfDay();
 
-        $shipments = Shipment::query()
-            ->where('shipped', true)
-            ->where('updated_at', '>=', $startDate)
-            ->selectRaw('DATE(updated_at) as date, COUNT(*) as count')
-            ->groupBy('date')
-            ->orderBy('date')
-            ->pluck('count', 'date')
-            ->toArray();
+            $shipments = DailyShippingStat::query()
+                ->where('date', '>=', $startDate->toDateString())
+                ->selectRaw('date, SUM(package_count) as count')
+                ->groupBy('date')
+                ->orderBy('date')
+                ->pluck('count', 'date')
+                ->toArray();
 
-        $labels = [];
-        $data = [];
+            $labels = [];
+            $data = [];
 
-        for ($i = 0; $i < $days; $i++) {
-            $date = $startDate->copy()->addDays($i);
-            $dateKey = $date->format('Y-m-d');
-            $labels[] = $date->format('M j');
-            $data[] = $shipments[$dateKey] ?? 0;
-        }
+            for ($i = 0; $i < $days; $i++) {
+                $date = $startDate->copy()->addDays($i);
+                $dateKey = $date->format('Y-m-d');
+                $labels[] = $date->format('M j');
+                $data[] = $shipments[$dateKey] ?? 0;
+            }
 
-        return [
-            'datasets' => [
-                [
-                    'label' => 'Shipments',
-                    'data' => $data,
-                    'backgroundColor' => 'rgba(251, 191, 36, 0.5)',
-                    'borderColor' => 'rgb(251, 191, 36)',
-                    'borderWidth' => 1,
+            return [
+                'datasets' => [
+                    [
+                        'label' => 'Shipments',
+                        'data' => $data,
+                        'backgroundColor' => 'rgba(251, 191, 36, 0.5)',
+                        'borderColor' => 'rgb(251, 191, 36)',
+                        'borderWidth' => 1,
+                    ],
                 ],
-            ],
-            'labels' => $labels,
-        ];
+                'labels' => $labels,
+            ];
+        });
     }
 
     protected function getType(): string

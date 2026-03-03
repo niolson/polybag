@@ -2,8 +2,9 @@
 
 namespace App\Filament\Widgets;
 
-use App\Models\Package;
+use App\Models\DailyShippingStat;
 use Filament\Widgets\ChartWidget;
+use Illuminate\Support\Facades\Cache;
 
 class CostPerPackageTrend extends ChartWidget
 {
@@ -13,15 +14,21 @@ class CostPerPackageTrend extends ChartWidget
 
     protected int|string|array $columnSpan = 1;
 
+    protected ?string $pollingInterval = '60s';
+
     protected function getData(): array
+    {
+        return Cache::remember('widget:cost_trend', 60, fn () => $this->buildData());
+    }
+
+    private function buildData(): array
     {
         $startDate = now()->subDays(29)->startOfDay();
 
-        $dailyAvg = Package::query()
-            ->where('shipped', true)
-            ->where('shipped_at', '>=', $startDate)
-            ->whereNotNull('cost')
-            ->selectRaw('DATE(shipped_at) as date, AVG(cost) as avg_cost')
+        $dailyAvg = DailyShippingStat::query()
+            ->where('date', '>=', $startDate->toDateString())
+            ->where('package_count', '>', 0)
+            ->selectRaw('date, SUM(total_cost) / SUM(package_count) as avg_cost')
             ->groupBy('date')
             ->orderBy('date')
             ->pluck('avg_cost', 'date')

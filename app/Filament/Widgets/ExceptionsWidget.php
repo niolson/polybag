@@ -10,6 +10,7 @@ use App\Models\LabelBatchItem;
 use App\Models\Shipment;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
+use Illuminate\Support\Facades\Cache;
 
 class ExceptionsWidget extends BaseWidget
 {
@@ -17,7 +18,14 @@ class ExceptionsWidget extends BaseWidget
 
     protected int|string|array $columnSpan = 'full';
 
+    protected ?string $pollingInterval = '300s';
+
     protected function getStats(): array
+    {
+        return Cache::remember('widget:exceptions', 300, fn () => $this->buildStats());
+    }
+
+    private function buildStats(): array
     {
         $undeliverable = Shipment::query()
             ->where('shipped', false)

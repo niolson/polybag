@@ -243,6 +243,8 @@ class Pack extends Page
             }
             $package->packageItems()->createMany($packageItems);
 
+            $package->update(['weight_mismatch' => $package->computeWeightMismatch()]);
+
             PackageCreated::dispatch($package, $this->shipment);
 
             return $package;

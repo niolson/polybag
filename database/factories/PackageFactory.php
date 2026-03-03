@@ -27,6 +27,7 @@ class PackageFactory extends Factory
             'width' => fake()->randomFloat(2, 2, 20),
             'length' => fake()->randomFloat(2, 2, 20),
             'cost' => null,
+            'weight_mismatch' => false,
             'shipped' => false,
             'shipped_at' => null,
             'exported' => false,
