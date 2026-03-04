@@ -4,7 +4,14 @@ const authFile = 'e2e/.auth/user.json';
 
 setup('verify fake carriers enabled', async ({ request }) => {
   const response = await request.get('/api/health');
-  const body = await response.json();
+  const text = await response.text();
+
+  let body: any;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new Error(`/api/health returned non-JSON: ${text.substring(0, 200)}`);
+  }
 
   expect(body.fake_carriers, 'FAKE_CARRIERS must be true in .env to run e2e tests').toBe(true);
 });
