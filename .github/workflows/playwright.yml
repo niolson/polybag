@@ -35,9 +35,6 @@ jobs:
           extensions: mbstring, pdo, pdo_mysql
           coverage: none
 
-      - name: Install Composer dependencies
-        run: composer install --no-interaction --prefer-dist --optimize-autoloader
-
       - name: Create .env
         run: |
           cp .env.example .env
@@ -48,10 +45,17 @@ jobs:
           sed -i 's|^QUEUE_CONNECTION=.*|QUEUE_CONNECTION=sync|' .env
           sed -i 's|^CACHE_STORE=.*|CACHE_STORE=file|' .env
           sed -i 's|^FAKE_CARRIERS=.*|FAKE_CARRIERS=true|' .env
+          grep -E '^(CACHE_STORE|SESSION_DRIVER|QUEUE_CONNECTION)' .env
+
+      - name: Install Composer dependencies
+        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+        env:
+          COMPOSER_ALLOW_SUPERUSER: 1
 
       - name: Generate app key & migrate
         run: |
           php artisan key:generate
+          php artisan config:clear
           php artisan migrate:fresh --seed --force
 
       - name: Setup Node.js
@@ -78,21 +82,8 @@ jobs:
 
       - name: Verify server
         run: |
-          echo "=== Testing /up ==="
-          curl -sv http://127.0.0.1:8765/up 2>&1 | head -30
+          curl -sf http://127.0.0.1:8765/api/health
           echo ""
-          echo "=== Testing /api/health ==="
-          curl -sv http://127.0.0.1:8765/api/health 2>&1 | head -30
-          echo ""
-          echo "=== Route resolution test ==="
-          php artisan tinker --execute="
-            \$request = Illuminate\Http\Request::create('/api/health', 'GET');
-            \$route = app('router')->getRoutes()->match(\$request);
-            echo 'Matched: ' . \$route->uri() . ' -> ' . \$route->getActionName();
-          "
-          echo ""
-          echo "=== All routes (first 15) ==="
-          php artisan route:list | head -15
 
       - name: Run Playwright tests
         run: npx playwright test
