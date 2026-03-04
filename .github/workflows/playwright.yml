@@ -78,8 +78,21 @@ jobs:
 
       - name: Verify server
         run: |
-          curl -s http://127.0.0.1:8765/api/health | head -20
-          php artisan route:list --path=api
+          echo "=== Testing /up ==="
+          curl -sv http://127.0.0.1:8765/up 2>&1 | head -30
+          echo ""
+          echo "=== Testing /api/health ==="
+          curl -sv http://127.0.0.1:8765/api/health 2>&1 | head -30
+          echo ""
+          echo "=== Route resolution test ==="
+          php artisan tinker --execute="
+            \$request = Illuminate\Http\Request::create('/api/health', 'GET');
+            \$route = app('router')->getRoutes()->match(\$request);
+            echo 'Matched: ' . \$route->uri() . ' -> ' . \$route->getActionName();
+          "
+          echo ""
+          echo "=== All routes (first 15) ==="
+          php artisan route:list | head -15
 
       - name: Run Playwright tests
         run: npx playwright test
