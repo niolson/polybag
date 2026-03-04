@@ -44,6 +44,7 @@ jobs:
           sed -i 's|^SESSION_DRIVER=.*|SESSION_DRIVER=database|' .env
           sed -i 's|^QUEUE_CONNECTION=.*|QUEUE_CONNECTION=sync|' .env
           sed -i 's|^CACHE_STORE=.*|CACHE_STORE=file|' .env
+          sed -i 's|^APP_MAINTENANCE_DRIVER=.*|APP_MAINTENANCE_DRIVER=file|' .env
           sed -i 's|^FAKE_CARRIERS=.*|FAKE_CARRIERS=true|' .env
           grep -E '^(CACHE_STORE|SESSION_DRIVER|QUEUE_CONNECTION)' .env
 
