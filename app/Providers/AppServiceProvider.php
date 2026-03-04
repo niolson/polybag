@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Services\AddressValidationService;
+use App\Services\Validation\UspsAddressValidator;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -19,6 +21,12 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(\App\Services\ShippingRateService::class);
         $this->app->singleton(\App\Services\LabelGenerationService::class);
         $this->app->singleton(\App\Services\ManifestService::class);
+
+        $this->app->singleton(AddressValidationService::class, function () {
+            return new AddressValidationService([
+                new UspsAddressValidator,
+            ]);
+        });
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\DataTransferObjects\Shipping;
 
+use App\Models\Location;
 use App\Models\Shipment;
 use App\Services\SettingsService;
 
@@ -40,8 +41,31 @@ readonly class AddressData
         );
     }
 
+    public static function fromLocation(Location $location): self
+    {
+        return new self(
+            firstName: $location->first_name,
+            lastName: $location->last_name,
+            streetAddress: $location->address1,
+            streetAddress2: $location->address2,
+            city: $location->city,
+            stateOrProvince: $location->state_or_province,
+            postalCode: $location->postal_code,
+            country: $location->country,
+            company: $location->company,
+            phone: $location->phone,
+        );
+    }
+
     public static function fromConfig(): self
     {
+        $location = Location::getDefault();
+
+        if ($location) {
+            return self::fromLocation($location);
+        }
+
+        // Fallback to settings for installs that haven't migrated yet
         return new self(
             firstName: app(SettingsService::class)->get('from_address.first_name', config('shipping.from_address.first_name', 'Shipping')),
             lastName: app(SettingsService::class)->get('from_address.last_name', config('shipping.from_address.last_name', 'Center')),

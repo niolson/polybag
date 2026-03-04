@@ -19,6 +19,7 @@ class Package extends Model
 
     protected $fillable = [
         'shipment_id',
+        'location_id',
         'box_size_id',
         'tracking_number',
         'carrier',
@@ -75,6 +76,11 @@ class Package extends Model
     public function shipment(): BelongsTo
     {
         return $this->belongsTo(Shipment::class);
+    }
+
+    public function location(): BelongsTo
+    {
+        return $this->belongsTo(Location::class);
     }
 
     public function boxSize(): BelongsTo

@@ -34,8 +34,13 @@ readonly class ShipRequest
             $customsItems[] = CustomsItem::fromPackageItem($packageItem);
         }
 
+        $package->loadMissing('location');
+        $fromAddress = $package->location
+            ? AddressData::fromLocation($package->location)
+            : AddressData::fromConfig();
+
         return new self(
-            fromAddress: AddressData::fromConfig(),
+            fromAddress: $fromAddress,
             toAddress: AddressData::fromShipment($package->shipment),
             packageData: PackageData::fromPackage($package),
             selectedRate: $rate,

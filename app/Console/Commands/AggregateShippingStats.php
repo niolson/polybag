@@ -35,7 +35,7 @@ class AggregateShippingStats extends Command
         InvalidateDashboardCache::invalidateAll();
 
         // Refresh histograms on the full nightly rebuild (not --today)
-        if (! $this->option('today') && DB::getDriverName() === 'mysql') {
+        if (! $this->option('today') && DB::getDriverName() === 'mysql' && ! str_contains(DB::getPdo()->getAttribute(\PDO::ATTR_SERVER_VERSION), 'MariaDB')) {
             DB::statement('ANALYZE TABLE packages UPDATE HISTOGRAM ON shipped');
             DB::statement('ANALYZE TABLE shipments UPDATE HISTOGRAM ON shipped');
             $this->info('Updated column histograms.');
@@ -86,15 +86,16 @@ class AggregateShippingStats extends Command
         }
 
         // MySQL: efficient INSERT...SELECT
-        return DB::affectingStatement("
+        return DB::affectingStatement('
             INSERT INTO daily_shipping_stats
-                (date, carrier, service, channel_id, shipping_method_id, package_count, total_cost, total_weight, created_at, updated_at)
+                (date, carrier, service, channel_id, shipping_method_id, location_id, package_count, total_cost, total_weight, created_at, updated_at)
             SELECT
                 p.shipped_date,
                 p.carrier,
                 p.service,
                 s.channel_id,
                 s.shipping_method_id,
+                p.location_id,
                 COUNT(*),
                 COALESCE(SUM(p.cost), 0),
                 COALESCE(SUM(p.weight), 0),
@@ -104,8 +105,8 @@ class AggregateShippingStats extends Command
             JOIN shipments s ON p.shipment_id = s.id
             WHERE p.shipped = 1
               AND p.shipped_date BETWEEN ? AND ?
-            GROUP BY p.shipped_date, p.carrier, p.service, s.channel_id, s.shipping_method_id
-        ", [$from->toDateString(), $to->toDateString()]);
+            GROUP BY p.shipped_date, p.carrier, p.service, s.channel_id, s.shipping_method_id, p.location_id
+        ', [$from->toDateString(), $to->toDateString()]);
     }
 
     /**
@@ -117,9 +118,9 @@ class AggregateShippingStats extends Command
             ->join('shipments as s', 'p.shipment_id', '=', 's.id')
             ->where('p.shipped', true)
             ->whereBetween('p.shipped_date', [$from->toDateString(), $to->toDateString()])
-            ->selectRaw('p.shipped_date as date, p.carrier, p.service, s.channel_id, s.shipping_method_id')
+            ->selectRaw('p.shipped_date as date, p.carrier, p.service, s.channel_id, s.shipping_method_id, p.location_id')
             ->selectRaw('COUNT(*) as package_count, COALESCE(SUM(p.cost), 0) as total_cost, COALESCE(SUM(p.weight), 0) as total_weight')
-            ->groupBy('p.shipped_date', 'p.carrier', 'p.service', 's.channel_id', 's.shipping_method_id')
+            ->groupBy('p.shipped_date', 'p.carrier', 'p.service', 's.channel_id', 's.shipping_method_id', 'p.location_id')
             ->get();
 
         $now = now();
@@ -129,6 +130,7 @@ class AggregateShippingStats extends Command
             'service' => $row->service,
             'channel_id' => $row->channel_id,
             'shipping_method_id' => $row->shipping_method_id,
+            'location_id' => $row->location_id,
             'package_count' => $row->package_count,
             'total_cost' => $row->total_cost,
             'total_weight' => $row->total_weight,

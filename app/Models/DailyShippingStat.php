@@ -15,6 +15,7 @@ class DailyShippingStat extends Model
         'service',
         'channel_id',
         'shipping_method_id',
+        'location_id',
         'package_count',
         'total_cost',
         'total_weight',
@@ -47,5 +48,10 @@ class DailyShippingStat extends Model
     public function shippingMethod(): BelongsTo
     {
         return $this->belongsTo(ShippingMethod::class);
+    }
+
+    public function location(): BelongsTo
+    {
+        return $this->belongsTo(Location::class);
     }
 }
