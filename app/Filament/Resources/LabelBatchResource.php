@@ -20,7 +20,7 @@ class LabelBatchResource extends Resource
 {
     protected static ?string $model = LabelBatch::class;
 
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-rectangle-stack';
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-queue-list';
 
     protected static ?string $navigationLabel = 'Batch Shipments';
 

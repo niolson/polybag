@@ -22,7 +22,7 @@ class UnmappedChannelReferences extends Page implements HasTable
 {
     use InteractsWithTable;
 
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-question-mark-circle';
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-link';
 
     protected static ?string $navigationLabel = 'Map Channel References';
 

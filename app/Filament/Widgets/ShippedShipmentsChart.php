@@ -10,6 +10,8 @@ class ShippedShipmentsChart extends ChartWidget
 {
     protected ?string $heading = 'Shipped Shipments';
 
+    protected ?string $description = 'Total packages shipped per day';
+
     protected static ?int $sort = -3;
 
     protected int|string|array $columnSpan = 1;
@@ -55,9 +57,10 @@ class ShippedShipmentsChart extends ChartWidget
                     [
                         'label' => 'Shipments',
                         'data' => $data,
-                        'backgroundColor' => 'rgba(251, 191, 36, 0.5)',
-                        'borderColor' => 'rgb(251, 191, 36)',
-                        'borderWidth' => 1,
+                        'backgroundColor' => 'rgba(79, 106, 245, 0.65)',
+                        'borderColor' => 'rgb(79, 106, 245)',
+                        'borderWidth' => 0,
+                        'borderRadius' => 6,
                     ],
                 ],
                 'labels' => $labels,

@@ -14,7 +14,7 @@ class EndOfDay extends Page
 {
     use NotifiesUser;
 
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-clipboard-document-check';
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-sun';
 
     protected static ?string $navigationLabel = 'End of Day';
 

@@ -68,9 +68,12 @@
                 <x-slot name="heading">Recent Updates</x-slot>
 
                 @if(empty($recentUpdates))
-                    <div class="text-center py-8 text-gray-500 dark:text-gray-400">
-                        <x-heroicon-o-scale class="w-12 h-12 mx-auto mb-2 opacity-50" />
-                        <p>No recent weight updates.</p>
+                    <div class="text-center py-8">
+                        <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
+                            <x-heroicon-o-scale class="w-7 h-7 text-gray-400" />
+                        </div>
+                        <h4 class="text-sm font-semibold text-gray-900 dark:text-white">No Recent Updates</h4>
+                        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Weight updates will appear here.</p>
                     </div>
                 @else
                     <ul class="divide-y divide-gray-200 dark:divide-gray-700">

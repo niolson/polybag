@@ -193,15 +193,26 @@ class ShipmentResource extends Resource
                 static::applyGlobalSearchAttributeConstraints($query, $search);
             })
             ->columns([
-                Tables\Columns\TextColumn::make('shipment_reference'),
+                Tables\Columns\TextColumn::make('shipment_reference')
+                    ->fontFamily('mono')
+                    ->size('sm')
+                    ->copyable()
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('channel.name')
                     ->label('Channel')
                     ->icon(fn (Shipment $record): ?string => $record->channel?->icon)
                     ->iconPosition(IconPosition::Before)
                     ->placeholder('—'),
-                Tables\Columns\TextColumn::make('first_name'),
-                Tables\Columns\TextColumn::make('last_name'),
-                Tables\Columns\TextColumn::make('company'),
+                Tables\Columns\TextColumn::make('full_name')
+                    ->label('Name')
+                    ->state(fn (Shipment $record): string => trim("{$record->first_name} {$record->last_name}"))
+                    ->searchable(query: fn ($query, string $search) => $query
+                        ->where('first_name', 'like', "%{$search}%")
+                        ->orWhere('last_name', 'like', "%{$search}%"))
+                    ->weight(FontWeight::Medium),
+                Tables\Columns\TextColumn::make('company')
+                    ->placeholder('—')
+                    ->toggleable(),
                 Tables\Columns\TextColumn::make('shippingMethod.name')
                     ->label('Shipping Method'),
                 Tables\Columns\TextColumn::make('deliver_by')

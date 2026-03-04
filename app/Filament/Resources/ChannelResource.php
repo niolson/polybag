@@ -17,7 +17,7 @@ class ChannelResource extends Resource
 {
     protected static ?string $model = Channel::class;
 
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-signal';
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-globe-alt';
 
     protected static \UnitEnum|string|null $navigationGroup = 'Settings';
 

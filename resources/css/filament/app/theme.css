@@ -2,3 +2,155 @@
 
 @source '../../../../app/Filament/**/*';
 @source '../../../../resources/views/filament/**/*';
+
+@layer utilities {
+    /* Stat card hover lift */
+    .fi-wi-stats-overview-stat {
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .fi-wi-stats-overview-stat:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+    }
+
+    /* Chart widget cards */
+    .fi-wi-chart {
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03);
+    }
+
+    /* Sidebar subtle background */
+    .fi-sidebar {
+        background: linear-gradient(180deg, rgb(248 250 252) 0%, rgb(241 245 249) 100%);
+        border-right: 1px solid rgb(226 232 240);
+    }
+
+    .dark .fi-sidebar {
+        background: linear-gradient(180deg, rgb(15 23 42) 0%, rgb(15 23 42) 100%);
+        border-right-color: rgb(30 41 59);
+    }
+
+    .fi-sidebar-nav-item-button {
+        border-radius: 0.5rem;
+        transition: all 0.15s ease;
+    }
+
+    /* Table row hover */
+    .fi-ta-row:hover td {
+        background-color: rgb(248 250 252);
+    }
+
+    .dark .fi-ta-row:hover td {
+        background-color: rgb(30 41 59);
+    }
+
+    /* Topbar refinement */
+    .fi-topbar {
+        border-bottom: 1px solid rgb(226 232 240);
+        backdrop-filter: blur(8px);
+    }
+
+    .dark .fi-topbar {
+        border-bottom-color: rgb(30 41 59);
+    }
+
+    /* Page heading weight */
+    .fi-header-heading {
+        letter-spacing: -0.025em;
+    }
+
+    /* Button refinement */
+    .fi-btn {
+        transition: all 0.15s ease;
+    }
+
+    .fi-btn:active {
+        transform: scale(0.98);
+    }
+
+    /* Section headings */
+    .fi-section-header-heading {
+        letter-spacing: -0.01em;
+    }
+
+    /* Badge polish */
+    .fi-badge {
+        font-weight: 500;
+    }
+
+    /* Input focus ring */
+    .fi-input:focus {
+        box-shadow: 0 0 0 1px var(--primary-500);
+    }
+
+    /* Card sections */
+    .fi-section {
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    }
+
+    /* Pagination buttons */
+    .fi-pagination-items button {
+        transition: all 0.1s ease;
+    }
+
+    /* Breadcrumb refinement */
+    .fi-breadcrumbs {
+        font-size: 0.8125rem;
+    }
+
+    /* Filter dropdown */
+    .fi-ta-filters-dropdown {
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+    }
+
+    /* Navigation group labels */
+    .fi-sidebar-group-label {
+        text-transform: uppercase;
+        font-size: 0.6875rem;
+        letter-spacing: 0.05em;
+        font-weight: 600;
+    }
+
+    /* Table header refinement */
+    .fi-ta-header-cell {
+        font-weight: 600;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: rgb(100 116 139);
+    }
+
+    .dark .fi-ta-header-cell {
+        color: rgb(148 163 184);
+    }
+
+    /* Alternating table row tint */
+    .fi-ta-row:nth-child(even) td {
+        background-color: rgb(248 250 252);
+    }
+
+    .dark .fi-ta-row:nth-child(even) td {
+        background-color: rgba(255, 255, 255, 0.02);
+    }
+
+    /* Modal refinement */
+    .fi-modal-window {
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15);
+    }
+
+    /* Active sidebar item highlight */
+    .fi-sidebar-nav-item-button[data-active] {
+        font-weight: 600;
+    }
+
+    /* Fieldset labels */
+    .fi-fieldset-label {
+        font-size: 0.8125rem;
+        font-weight: 500;
+    }
+
+    /* Notification toast shadow */
+    .fi-notification {
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+    }
+}

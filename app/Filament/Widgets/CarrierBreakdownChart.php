@@ -10,6 +10,8 @@ class CarrierBreakdownChart extends ChartWidget
 {
     protected ?string $heading = 'Carrier Breakdown';
 
+    protected ?string $description = 'Package distribution by carrier';
+
     protected static ?int $sort = -1;
 
     protected int|string|array $columnSpan = 1;
@@ -47,11 +49,11 @@ class CarrierBreakdownChart extends ChartWidget
             ->toArray();
 
         $colors = [
-            'rgba(251, 191, 36, 0.8)',  // amber
-            'rgba(59, 130, 246, 0.8)',   // blue
-            'rgba(34, 197, 94, 0.8)',    // green
-            'rgba(168, 85, 247, 0.8)',   // purple
-            'rgba(239, 68, 68, 0.8)',    // red
+            'rgba(79, 106, 245, 0.85)',  // blue-purple
+            'rgba(14, 165, 233, 0.85)',  // sky
+            'rgba(16, 185, 129, 0.85)',  // emerald
+            'rgba(168, 85, 247, 0.85)',  // purple
+            'rgba(244, 63, 94, 0.85)',   // rose
         ];
 
         return [

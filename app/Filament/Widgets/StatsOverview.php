@@ -22,18 +22,22 @@ class StatsOverview extends BaseWidget
             $costStat = $this->buildCostStat($thisWeekStart);
 
             return [
-                Stat::make('Pending Shipments', Shipment::query()->where('shipped', false)->count())
+                Stat::make('Pending Shipments', number_format(Shipment::query()->where('shipped', false)->count()))
                     ->description('Awaiting shipment')
+                    ->descriptionIcon('heroicon-m-clock')
                     ->color('warning'),
-                Stat::make('Shipped Today', (int) DailyShippingStat::where('date', today()->toDateString())->sum('package_count'))
+                Stat::make('Shipped Today', number_format((int) DailyShippingStat::where('date', today()->toDateString())->sum('package_count')))
                     ->description('Packages shipped today')
+                    ->descriptionIcon('heroicon-m-check-circle')
                     ->color('success'),
-                Stat::make('Shipped This Week', (int) DailyShippingStat::where('date', '>=', $thisWeekStart->toDateString())->sum('package_count'))
+                Stat::make('Shipped This Week', number_format((int) DailyShippingStat::where('date', '>=', $thisWeekStart->toDateString())->sum('package_count')))
                     ->description('Packages this week')
-                    ->color('info'),
-                Stat::make('Shipped This Month', (int) DailyShippingStat::where('date', '>=', now()->startOfMonth()->toDateString())->sum('package_count'))
+                    ->descriptionIcon('heroicon-m-calendar')
+                    ->color('primary'),
+                Stat::make('Shipped This Month', number_format((int) DailyShippingStat::where('date', '>=', now()->startOfMonth()->toDateString())->sum('package_count')))
                     ->description('Packages this month')
-                    ->color('info'),
+                    ->descriptionIcon('heroicon-m-calendar-days')
+                    ->color('primary'),
                 $costStat,
             ];
         });

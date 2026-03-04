@@ -35,3 +35,11 @@ Thumbs.db
 .mcp.json
 /storage/app/private/*.pem
 database/seeders/LocalSettingsSeeder.php
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/

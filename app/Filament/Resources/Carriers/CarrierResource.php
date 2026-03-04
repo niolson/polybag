@@ -11,14 +11,13 @@ use App\Models\Carrier;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
-use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 
 class CarrierResource extends Resource
 {
     protected static ?string $model = Carrier::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-building-office';
 
     protected static \UnitEnum|string|null $navigationGroup = 'Settings';
 

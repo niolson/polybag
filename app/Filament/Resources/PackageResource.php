@@ -158,11 +158,20 @@ class PackageResource extends Resource
                 Tables\Columns\TextColumn::make('id')
                     ->sortable(),
                 Tables\Columns\TextColumn::make('shipment.shipment_reference')
+                    ->label('Shipment')
+                    ->fontFamily('mono')
+                    ->size('sm')
                     ->sortable(),
-                Tables\Columns\TextColumn::make('tracking_number'),
-                Tables\Columns\TextColumn::make('shipping_method'),
+                Tables\Columns\TextColumn::make('tracking_number')
+                    ->fontFamily('mono')
+                    ->size('sm')
+                    ->copyable()
+                    ->placeholder('—'),
+                Tables\Columns\TextColumn::make('shipping_method')
+                    ->placeholder('—'),
                 Tables\Columns\TextColumn::make('weight')
                     ->numeric()
+                    ->suffix(' lbs')
                     ->sortable(),
                 Tables\Columns\TextColumn::make('cost')
                     ->money('USD')

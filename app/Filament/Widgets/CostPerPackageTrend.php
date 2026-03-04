@@ -8,11 +8,13 @@ use Illuminate\Support\Facades\Cache;
 
 class CostPerPackageTrend extends ChartWidget
 {
-    protected ?string $heading = 'Avg Cost Per Package (30 Days)';
+    protected ?string $heading = 'Avg Cost Per Package';
+
+    protected ?string $description = 'Daily average over the last 30 days';
 
     protected static ?int $sort = 0;
 
-    protected int|string|array $columnSpan = 1;
+    protected int|string|array $columnSpan = 'full';
 
     protected ?string $pollingInterval = '60s';
 
@@ -49,10 +51,13 @@ class CostPerPackageTrend extends ChartWidget
                 [
                     'label' => 'Avg Cost',
                     'data' => $data,
-                    'borderColor' => 'rgb(251, 191, 36)',
-                    'backgroundColor' => 'rgba(251, 191, 36, 0.1)',
+                    'borderColor' => 'rgb(16, 185, 129)',
+                    'backgroundColor' => 'rgba(16, 185, 129, 0.08)',
                     'fill' => true,
-                    'tension' => 0.3,
+                    'tension' => 0.4,
+                    'pointBackgroundColor' => 'rgb(16, 185, 129)',
+                    'pointRadius' => 3,
+                    'pointHoverRadius' => 5,
                     'spanGaps' => true,
                 ],
             ],

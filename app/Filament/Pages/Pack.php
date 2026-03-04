@@ -20,7 +20,7 @@ class Pack extends Page
 {
     use NotifiesUser;
 
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-archive-box';
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-archive-box-arrow-down';
 
     protected string $view = 'filament.pages.pack';
 

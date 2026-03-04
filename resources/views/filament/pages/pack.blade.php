@@ -498,15 +498,17 @@
         </div>
     </x-filament::section>
     @else
-    <div class="flex items-center justify-center p-12">
-        <div class="text-center">
-            <x-filament::icon
-                icon="heroicon-o-archive-box"
-                class="h-12 w-12 text-gray-400 mx-auto mb-4"
-            />
-            <h3 class="text-lg font-medium text-gray-900 dark:text-white">No Shipment Selected</h3>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                Scan a shipment reference to begin packing.
+    <div class="flex items-center justify-center p-16">
+        <div class="text-center max-w-sm">
+            <div class="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-primary-50 dark:bg-primary-950">
+                <x-filament::icon
+                    icon="heroicon-o-archive-box-arrow-down"
+                    class="h-8 w-8 text-primary-500"
+                />
+            </div>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-white">No Shipment Selected</h3>
+            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                Scan a shipment reference in the field above to begin packing.
             </p>
         </div>
     </div>

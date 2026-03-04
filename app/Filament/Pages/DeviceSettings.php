@@ -8,7 +8,7 @@ use UnitEnum;
 
 class DeviceSettings extends Page
 {
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-cog-6-tooth';
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-computer-desktop';
 
     public static function canAccess(): bool
     {

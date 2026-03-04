@@ -49,13 +49,16 @@ class ExceptionsWidget extends BaseWidget
         return [
             Stat::make('Undeliverable Shipments', $undeliverable)
                 ->description('Last 90 days, deliverability "No"')
+                ->descriptionIcon('heroicon-m-x-circle')
                 ->color($undeliverable > 0 ? 'danger' : 'success')
                 ->url(ShipmentResource::getUrl('index')),
             Stat::make('Failed Batch Items', $failedBatchItems)
                 ->description('Last 7 days')
+                ->descriptionIcon('heroicon-m-exclamation-triangle')
                 ->color($failedBatchItems > 0 ? 'danger' : 'success'),
             Stat::make('Unmapped Shipping References', $unmappedReferences)
                 ->description('Last 90 days, need mapping')
+                ->descriptionIcon('heroicon-m-link')
                 ->color($unmappedReferences > 0 ? 'warning' : 'success')
                 ->url(UnmappedShippingReferences::getUrl()),
         ];

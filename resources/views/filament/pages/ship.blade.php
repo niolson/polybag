@@ -103,10 +103,12 @@
             </div>
         </div>
     @else
-        <div class="text-center py-12">
-            <x-filament::icon icon="heroicon-o-cube" class="w-16 h-16 mx-auto text-gray-400" />
-            <h3 class="mt-4 text-lg font-medium text-gray-900 dark:text-white">No Package Selected</h3>
-            <p class="mt-2 text-gray-500 dark:text-gray-400">Select a package from the packing page to ship.</p>
+        <div class="text-center py-16">
+            <div class="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-primary-50 dark:bg-primary-950">
+                <x-filament::icon icon="heroicon-o-cube" class="w-8 h-8 text-primary-500" />
+            </div>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-white">No Package Selected</h3>
+            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Select a package from the packing page to ship.</p>
             <x-filament::button
                 href="/pack"
                 tag="a"

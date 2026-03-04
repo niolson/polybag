@@ -1,9 +1,9 @@
 <x-filament-panels::page>
     <!-- QZ Tray Status -->
-    <div id="qz-status" class="mb-6 p-4 rounded-lg bg-gray-100 dark:bg-gray-800">
-        <div class="flex items-center gap-2">
-            <div id="qz-indicator" class="w-3 h-3 rounded-full bg-gray-400"></div>
-            <span id="qz-status-text" class="text-sm">Checking QZ Tray connection...</span>
+    <div id="qz-status" class="mb-6 px-4 py-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+        <div class="flex items-center gap-3">
+            <div id="qz-indicator" class="w-2.5 h-2.5 rounded-full bg-gray-400 ring-4 ring-gray-400/20"></div>
+            <span id="qz-status-text" class="text-sm font-medium text-gray-600 dark:text-gray-300">Checking QZ Tray connection...</span>
         </div>
     </div>
 
@@ -113,12 +113,12 @@
                 Detected: <span id="scale-name-text"></span>
             </div>
 
-            <div id="scale-reading" class="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg hidden">
-                <div class="text-sm text-gray-500 dark:text-gray-400 mb-1">Current Reading</div>
-                <div class="text-3xl font-mono font-bold text-gray-950 dark:text-white">
-                    <span id="scale-weight">0.00</span> <span class="text-lg">lbs</span>
+            <div id="scale-reading" class="p-5 bg-gray-50 dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 hidden">
+                <div class="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">Current Reading</div>
+                <div class="text-4xl font-mono font-bold text-gray-950 dark:text-white tabular-nums">
+                    <span id="scale-weight">0.00</span> <span class="text-lg font-medium text-gray-400">lbs</span>
                 </div>
-                <div id="scale-status" class="text-xs text-gray-500 dark:text-gray-400 mt-1">Waiting for stable reading...</div>
+                <div id="scale-status" class="text-xs text-gray-500 dark:text-gray-400 mt-2">Waiting for stable reading...</div>
             </div>
 
             <div class="flex gap-2">
@@ -226,8 +226,9 @@
 
             // Update QZ Tray status indicator
             function updateQzStatus(connected, message) {
-                qzIndicator.classList.remove('bg-gray-400', 'bg-green-500', 'bg-red-500');
+                qzIndicator.classList.remove('bg-gray-400', 'bg-green-500', 'bg-red-500', 'ring-gray-400/20', 'ring-green-500/20', 'ring-red-500/20');
                 qzIndicator.classList.add(connected ? 'bg-green-500' : 'bg-red-500');
+                qzIndicator.classList.add(connected ? 'ring-green-500/20' : 'ring-red-500/20');
                 qzStatusText.textContent = message;
             }
 
