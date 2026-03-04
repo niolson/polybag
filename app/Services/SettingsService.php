@@ -15,10 +15,14 @@ class SettingsService
      * Request-scoped in-memory cache to avoid repeated database
      * cache lookups within the same request (the cache driver is
      * database, so every Cache::remember() is a DB query).
+     *
+     * Instance properties (not static) so they reset naturally per
+     * request. Register this service as a singleton in the container
+     * to share within a single request.
      */
-    private static ?array $resolved = null;
+    private ?array $resolved = null;
 
-    private static ?array $resolvedGroups = null;
+    private ?array $resolvedGroups = null;
 
     /**
      * Get a setting value by key.
@@ -101,8 +105,8 @@ class SettingsService
     {
         Cache::forget(self::CACHE_KEY);
         Cache::forget(self::CACHE_KEY.'_groups');
-        static::$resolved = null;
-        static::$resolvedGroups = null;
+        $this->resolved = null;
+        $this->resolvedGroups = null;
     }
 
     /**
@@ -112,11 +116,11 @@ class SettingsService
      */
     private function getAllCached(): array
     {
-        if (static::$resolved !== null) {
-            return static::$resolved;
+        if ($this->resolved !== null) {
+            return $this->resolved;
         }
 
-        return static::$resolved = Cache::remember(self::CACHE_KEY, self::CACHE_TTL, function () {
+        return $this->resolved = Cache::remember(self::CACHE_KEY, self::CACHE_TTL, function () {
             return Setting::all()
                 ->pluck('value', 'key')
                 ->all();
@@ -130,11 +134,11 @@ class SettingsService
      */
     private function getGroupMapCached(): array
     {
-        if (static::$resolvedGroups !== null) {
-            return static::$resolvedGroups;
+        if ($this->resolvedGroups !== null) {
+            return $this->resolvedGroups;
         }
 
-        return static::$resolvedGroups = Cache::remember(self::CACHE_KEY.'_groups', self::CACHE_TTL, function () {
+        return $this->resolvedGroups = Cache::remember(self::CACHE_KEY.'_groups', self::CACHE_TTL, function () {
             return Setting::pluck('group', 'key')
                 ->all();
         });
