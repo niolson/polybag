@@ -118,6 +118,8 @@ return [
     |
     */
 
+    'fake_carriers' => (bool) env('FAKE_CARRIERS', false),
+
     'maintenance' => [
         'driver' => env('APP_MAINTENANCE_DRIVER', 'file'),
         'store' => env('APP_MAINTENANCE_STORE', 'database'),

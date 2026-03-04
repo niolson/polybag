@@ -3,6 +3,9 @@
 namespace App\Providers;
 
 use App\Services\AddressValidationService;
+use App\Services\Carriers\CarrierRegistry;
+use App\Services\Carriers\FakeCarrierAdapter;
+use App\Services\Validation\FakeAddressValidator;
 use App\Services\Validation\UspsAddressValidator;
 use Illuminate\Support\ServiceProvider;
 
@@ -23,9 +26,11 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(\App\Services\ManifestService::class);
 
         $this->app->singleton(AddressValidationService::class, function () {
-            return new AddressValidationService([
-                new UspsAddressValidator,
-            ]);
+            $validators = config('app.fake_carriers')
+                ? [new FakeAddressValidator]
+                : [new UspsAddressValidator];
+
+            return new AddressValidationService($validators);
         });
     }
 
@@ -34,6 +39,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        if (config('app.fake_carriers')) {
+            $registry = app(CarrierRegistry::class);
+
+            foreach (['USPS', 'FedEx', 'UPS'] as $carrier) {
+                $registry->registerInstance($carrier, new FakeCarrierAdapter($carrier));
+            }
+        }
     }
 }
