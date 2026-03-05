@@ -8,8 +8,8 @@
 
     <div
         x-data="{
-            scaleDevice: null,
-            hasWebHID: 'hid' in navigator,
+            scaleConnected: false,
+            scaleStable: true,
             autoShipEnabled: false,
             labelFormat: localStorage.getItem('labelFormat') || 'pdf',
             labelDpi: parseInt(localStorage.getItem('labelDpi') || '203') || null,
@@ -39,7 +39,12 @@
                     localStorage.setItem('autoShipEnabled', value.toString());
                 });
 
-                this.autoConnectScale();
+                // Auto-connect scale: WebHID can connect immediately, QZ Tray must wait
+                if (ScaleUtils.backend === 'webhid') {
+                    this.autoConnectScale();
+                } else {
+                    document.addEventListener('qz-tray:connected', () => this.autoConnectScale());
+                }
             },
 
             handleScan() {
@@ -225,54 +230,24 @@
                 }
             },
 
-            async connectScale() {
-                try {
-                    const filters = ScaleUtils.getScaleFilters();
-                    const devices = await navigator.hid.requestDevice({ filters });
-
-                    if (devices.length > 0) {
-                        this.scaleDevice = devices[0];
-                        await this.scaleDevice.open();
-                        this.setupScaleListener(this.scaleDevice);
-                    }
-                } catch (error) {
-                    console.error('Failed to connect scale:', error);
-                }
-            },
-
             async autoConnectScale() {
-                if (!this.hasWebHID) return;
+                const deviceInfo = ScaleUtils.getScaleDeviceInfo();
+                if (!deviceInfo) return;
+
                 try {
-                    const devices = await navigator.hid.getDevices();
-                    const { vendorId, productId } = ScaleUtils.getScaleIds();
-                    const matchedDevice = devices.find(device => {
-                        if (vendorId && productId) {
-                            return device.vendorId === vendorId && device.productId === productId;
-                        }
-                        return true;
-                    });
-
-                    if (matchedDevice) {
-                        this.scaleDevice = matchedDevice;
-                        await this.scaleDevice.open();
-                        this.setupScaleListener(this.scaleDevice);
-                    }
-                } catch (error) {
-                    console.error('Failed to auto-connect scale:', error);
-                }
-            },
-
-            setupScaleListener(device) {
-                device.addEventListener('inputreport', (event) => {
-                    const result = ScaleUtils.parseScaleData(event.data);
-                    if (result !== null && result.isStable) {
+                    await ScaleUtils.claimScale();
+                    await ScaleUtils.startScaleStream((result) => {
+                        this.scaleStable = result.isStable;
                         const formatted = result.weight.toFixed(2);
                         if (formatted !== this.lastScaleWeight) {
                             this.lastScaleWeight = formatted;
                             this.weight = formatted;
                         }
-                    }
-                });
+                    });
+                    this.scaleConnected = true;
+                } catch (error) {
+                    console.error('Failed to auto-connect scale:', error);
+                }
             }
         }"
         @focus-scan-input.window="$nextTick(() => { input = ''; $refs.scanInput.focus(); })"
@@ -354,8 +329,11 @@
                     <div>
                         <label class="fi-fo-field-wrp-label text-sm font-medium text-gray-950 dark:text-white">
                             Weight (lbs)
-                            <span x-show="!scaleDevice" x-cloak class="text-xs font-normal text-gray-500 dark:text-gray-400">
+                            <span x-show="!scaleConnected" x-cloak class="text-xs font-normal text-gray-500 dark:text-gray-400">
                                 (No scale connected)
+                            </span>
+                            <span x-show="scaleConnected && !scaleStable" x-cloak class="text-xs font-normal text-warning-500">
+                                In motion...
                             </span>
                         </label>
                         <x-filament::input.wrapper>
@@ -364,6 +342,7 @@
                                 step="0.01"
                                 x-model="weight"
                                 x-bind:disabled="isShipping"
+                                x-bind:style="scaleConnected && !scaleStable ? 'color: var(--warning-500)' : ''"
                             />
                         </x-filament::input.wrapper>
                     </div>

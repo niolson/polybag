@@ -56,6 +56,8 @@
                     await qz.websocket.connect();
                 }
 
+                document.dispatchEvent(new CustomEvent('qz-tray:connected'));
+
                 const printer = getLabelPrinter();
                 if (!printer) {
                     // Always warn if no printer configured

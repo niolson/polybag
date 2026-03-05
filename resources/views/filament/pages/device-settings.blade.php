@@ -69,7 +69,6 @@
             type="button"
             id="refresh-printers"
             color="gray"
-            disabled
         >
             Refresh Printers
         </x-filament::button>
@@ -79,9 +78,44 @@
     <!-- Scale Section -->
     <x-filament::section>
         <x-slot name="heading">Scale</x-slot>
-        <x-slot name="description">Configure USB scale for weighing packages. Click "Pair Scale" and select your scale from the browser prompt.</x-slot>
+        <x-slot name="description">Configure USB scale for weighing packages.</x-slot>
 
         <div class="space-y-4">
+            <x-filament::fieldset>
+                <x-slot name="label">Scale Backend</x-slot>
+
+                <x-filament::input.wrapper>
+                    <x-filament::input.select id="scale-backend-select">
+                        <option value="auto">Auto (recommended)</option>
+                        <option value="webhid">WebHID (Chrome/Edge only)</option>
+                        <option value="qztray">QZ Tray (all browsers)</option>
+                    </x-filament::input.select>
+                </x-filament::input.wrapper>
+
+                <p id="scale-backend-info" class="mt-1 text-xs text-gray-500 dark:text-gray-400"></p>
+            </x-filament::fieldset>
+
+            <!-- WebHID pairing UI -->
+            <div id="webhid-pairing" style="display: none">
+                <x-filament::fieldset>
+                    <x-slot name="label">Scale Device</x-slot>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">Click "Pair Scale" to select your USB scale from the browser device picker.</p>
+                </x-filament::fieldset>
+            </div>
+
+            <!-- QZ Tray pairing UI -->
+            <div id="qztray-pairing" style="display: none">
+                <x-filament::fieldset>
+                    <x-slot name="label">Scale Device</x-slot>
+
+                    <x-filament::input.wrapper>
+                        <x-filament::input.select id="scale-device-select">
+                            <option value="">-- Click "Detect Scales" to find devices --</option>
+                        </x-filament::input.select>
+                    </x-filament::input.wrapper>
+                </x-filament::fieldset>
+            </div>
+
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label for="scale-vendor-id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -109,10 +143,6 @@
                 </div>
             </div>
 
-            <div id="scale-name" class="text-sm text-gray-600 dark:text-gray-400 hidden">
-                Detected: <span id="scale-name-text"></span>
-            </div>
-
             <div id="scale-reading" class="p-5 bg-gray-50 dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 hidden">
                 <div class="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">Current Reading</div>
                 <div class="text-4xl font-mono font-bold text-gray-950 dark:text-white tabular-nums">
@@ -122,12 +152,24 @@
             </div>
 
             <div class="flex gap-2">
+                <!-- WebHID: Pair Scale button -->
                 <x-filament::button
                     type="button"
-                    id="pair-scale"
+                    id="pair-scale-webhid"
                     color="gray"
+                    style="display: none"
                 >
                     Pair Scale
+                </x-filament::button>
+
+                <!-- QZ Tray: Detect Scales button -->
+                <x-filament::button
+                    type="button"
+                    id="detect-scales"
+                    color="gray"
+                    style="display: none"
+                >
+                    Detect Scales
                 </x-filament::button>
 
                 <x-filament::button
@@ -165,15 +207,20 @@
             const labelFormatSelect = document.getElementById('label-format');
             const labelDpiSelect = document.getElementById('label-dpi');
             const labelDpiFieldset = document.getElementById('label-dpi-fieldset');
-            const pairScaleBtn = document.getElementById('pair-scale');
+            const detectScalesBtn = document.getElementById('detect-scales');
+            const scaleDeviceSelect = document.getElementById('scale-device-select');
             const saveSettingsBtn = document.getElementById('save-settings');
             const scaleVendorInput = document.getElementById('scale-vendor-id');
             const scaleProductInput = document.getElementById('scale-product-id');
-            const scaleNameDiv = document.getElementById('scale-name');
-            const scaleNameText = document.getElementById('scale-name-text');
             const qzIndicator = document.getElementById('qz-indicator');
             const qzStatusText = document.getElementById('qz-status-text');
             const saveStatus = document.getElementById('save-status');
+
+            const scaleBackendSelect = document.getElementById('scale-backend-select');
+            const scaleBackendInfo = document.getElementById('scale-backend-info');
+            const webhidPairing = document.getElementById('webhid-pairing');
+            const qztrayPairing = document.getElementById('qztray-pairing');
+            const pairScaleWebhidBtn = document.getElementById('pair-scale-webhid');
 
             // Load saved settings from localStorage
             function loadSettings() {
@@ -181,20 +228,17 @@
                 const reportPrinter = localStorage.getItem('reportPrinter') || '';
                 const scaleVendorId = localStorage.getItem('scaleVendorId') || '';
                 const scaleProductId = localStorage.getItem('scaleProductId') || '';
-                const scaleName = localStorage.getItem('scaleName') || '';
                 const labelFormat = localStorage.getItem('labelFormat') || 'pdf';
                 const labelDpi = localStorage.getItem('labelDpi') || '203';
+                const scaleBackend = localStorage.getItem('scaleBackend') || 'auto';
 
                 scaleVendorInput.value = scaleVendorId;
                 scaleProductInput.value = scaleProductId;
                 labelFormatSelect.value = labelFormat;
                 labelDpiSelect.value = labelDpi;
+                scaleBackendSelect.value = scaleBackend;
                 updateDpiVisibility();
-
-                if (scaleName) {
-                    scaleNameText.textContent = scaleName;
-                    scaleNameDiv.classList.remove('hidden');
-                }
+                updateScaleBackendUI();
 
                 return { labelPrinter, reportPrinter };
             }
@@ -202,6 +246,73 @@
             // Show/hide DPI selector based on label format
             function updateDpiVisibility() {
                 labelDpiFieldset.style.display = labelFormatSelect.value === 'zpl' ? '' : 'none';
+            }
+
+            // Show/hide scale pairing UI based on resolved backend
+            function updateScaleBackendUI() {
+                // Re-init ScaleUtils backend based on current selection
+                const setting = scaleBackendSelect.value;
+                localStorage.setItem('scaleBackend', setting);
+                ScaleUtils.initBackend();
+                const resolved = ScaleUtils.backend;
+
+                // Show backend info
+                const labels = { webhid: 'WebHID (low latency)', qztray: 'QZ Tray (cross-browser)', none: 'No backend available' };
+                scaleBackendInfo.textContent = `Active: ${labels[resolved] || resolved}`;
+
+                // Toggle pairing UIs
+                const isWebHid = resolved === 'webhid';
+                const isQzTray = resolved === 'qztray';
+
+                webhidPairing.style.display = isWebHid ? '' : 'none';
+                pairScaleWebhidBtn.style.display = isWebHid ? '' : 'none';
+                qztrayPairing.style.display = isQzTray ? '' : 'none';
+                detectScalesBtn.style.display = isQzTray ? '' : 'none';
+            }
+
+            // WebHID pairing via browser device picker
+            async function pairScaleWebhid() {
+                try {
+                    pairScaleWebhidBtn.setAttribute('aria-disabled', 'true');
+                    pairScaleWebhidBtn.classList.add('fi-disabled');
+
+                    const [device] = await navigator.hid.requestDevice({
+                        filters: [] // show all HID devices
+                    });
+
+                    if (!device) return;
+
+                    // Convert integer IDs to hex strings for storage compatibility
+                    const vendorId = '0x' + device.vendorId.toString(16).padStart(4, '0');
+                    const productId = '0x' + device.productId.toString(16).padStart(4, '0');
+
+                    scaleVendorInput.value = vendorId;
+                    scaleProductInput.value = productId;
+                    localStorage.setItem('scaleVendorId', vendorId);
+                    localStorage.setItem('scaleProductId', productId);
+
+                    new FilamentNotification()
+                        .title('Scale Paired')
+                        .body(`${device.productName || 'HID Device'} (${vendorId}:${productId})`)
+                        .success()
+                        .send();
+
+                    // Auto-connect to show live reading
+                    await connectScale();
+
+                } catch (error) {
+                    if (error.name !== 'NotAllowedError') {
+                        console.error('WebHID pairing failed:', error);
+                        new FilamentNotification()
+                            .title('Pairing Failed')
+                            .body(error.message || 'Could not pair scale.')
+                            .danger()
+                            .send();
+                    }
+                } finally {
+                    pairScaleWebhidBtn.removeAttribute('aria-disabled');
+                    pairScaleWebhidBtn.classList.remove('fi-disabled');
+                }
             }
 
             // Save settings to localStorage
@@ -212,6 +323,7 @@
                 localStorage.setItem('labelDpi', labelDpiSelect.value);
                 localStorage.setItem('scaleVendorId', scaleVendorInput.value);
                 localStorage.setItem('scaleProductId', scaleProductInput.value);
+                localStorage.setItem('scaleBackend', scaleBackendSelect.value);
 
                 saveStatus.textContent = 'Settings saved!';
                 saveStatus.classList.remove('hidden');
@@ -251,7 +363,7 @@
                     select.removeAttribute('disabled');
                 });
 
-                refreshPrintersBtn.removeAttribute('disabled');
+                refreshPrintersBtn.removeAttribute('aria-disabled');
                 refreshPrintersBtn.classList.remove('fi-disabled');
             }
 
@@ -275,6 +387,7 @@
                     }
 
                     updateQzStatus(true, 'Connected to QZ Tray');
+                    document.dispatchEvent(new CustomEvent('qz-tray:connected'));
 
                     // Get available printers
                     const printers = await qz.printers.find();
@@ -298,7 +411,7 @@
             // Refresh printers list
             async function refreshPrinters() {
                 try {
-                    refreshPrintersBtn.setAttribute('disabled', 'disabled');
+                    refreshPrintersBtn.setAttribute('aria-disabled', 'true');
                     refreshPrintersBtn.classList.add('fi-disabled');
                     refreshPrintersBtn.textContent = 'Refreshing...';
 
@@ -325,48 +438,14 @@
                         .danger()
                         .send();
                 } finally {
-                    refreshPrintersBtn.removeAttribute('disabled');
+                    refreshPrintersBtn.removeAttribute('aria-disabled');
                     refreshPrintersBtn.classList.remove('fi-disabled');
                     refreshPrintersBtn.textContent = 'Refresh Printers';
                 }
             }
 
-            // Detect USB scale via WebHID
-            async function detectScale() {
-                try {
-                    const devices = await navigator.hid.requestDevice({ filters: [] });
-                    if (devices.length > 0) {
-                        const device = devices[0];
-                        const vendorId = '0x' + device.vendorId.toString(16).padStart(4, '0');
-                        const productId = '0x' + device.productId.toString(16).padStart(4, '0');
-
-                        scaleVendorInput.value = vendorId;
-                        scaleProductInput.value = productId;
-                        scaleNameText.textContent = device.productName || 'Unknown Scale';
-                        scaleNameDiv.classList.remove('hidden');
-
-                        localStorage.setItem('scaleName', device.productName || 'Unknown Scale');
-
-                        new FilamentNotification()
-                            .title('Scale Detected')
-                            .body(`${device.productName} (Vendor: ${vendorId}, Product: ${productId})`)
-                            .success()
-                            .send();
-
-                        autoConnectScale();
-                    }
-                } catch (error) {
-                    console.error('Failed to detect scale:', error);
-                    new FilamentNotification()
-                        .title('Scale Detection Failed')
-                        .body('Could not detect scale. Make sure your scale is connected.')
-                        .danger()
-                        .send();
-                }
-            }
-
-            // Scale connection and reading
-            let scaleDevice = null;
+            // Detect USB scales via QZ Tray HID
+            let scaleStreamActive = false;
             const scaleReadingDiv = document.getElementById('scale-reading');
             const scaleWeightSpan = document.getElementById('scale-weight');
             const scaleStatusDiv = document.getElementById('scale-status');
@@ -381,58 +460,110 @@
                 }
             }
 
-            async function connectToScale() {
-                const vendorId = scaleVendorInput.value;
-                const productId = scaleProductInput.value;
+            async function detectScales() {
+                try {
+                    detectScalesBtn.setAttribute('aria-disabled', 'true');
+                    detectScalesBtn.classList.add('fi-disabled');
+                    detectScalesBtn.textContent = 'Scanning...';
 
-                if (!vendorId || !productId) {
+                    const devices = await qz.hid.listDevices();
+
+                    scaleDeviceSelect.innerHTML = '<option value="">-- Select a scale --</option>';
+
+                    if (devices.length === 0) {
+                        scaleDeviceSelect.innerHTML = '<option value="">No HID devices found</option>';
+                        new FilamentNotification()
+                            .title('No Devices Found')
+                            .body('No USB HID devices detected. Make sure your scale is connected.')
+                            .warning()
+                            .send();
+                        return;
+                    }
+
+                    const savedVendorId = scaleVendorInput.value;
+                    const savedProductId = scaleProductInput.value;
+
+                    // Deduplicate by vendor:product (devices can appear multiple times for different usage pages)
+                    const seen = new Set();
+                    const uniqueDevices = devices.filter(device => {
+                        const key = device.vendorId + ':' + device.productId;
+                        if (seen.has(key)) return false;
+                        seen.add(key);
+                        return true;
+                    });
+
+                    uniqueDevices.forEach(device => {
+                        const option = document.createElement('option');
+                        const vendorId = device.vendorId;
+                        const productId = device.productId;
+                        option.value = vendorId + ':' + productId;
+                        option.textContent = (device.product || 'Unknown Device') + ' (' + vendorId + ':' + productId + ')';
+
+                        if (vendorId === savedVendorId && productId === savedProductId) {
+                            option.selected = true;
+                        }
+
+                        scaleDeviceSelect.appendChild(option);
+                    });
+
                     new FilamentNotification()
-                        .title('No Scale Configured')
-                        .body('Please detect a scale first.')
-                        .warning()
+                        .title('Devices Found')
+                        .body(`Found ${uniqueDevices.length} HID device(s). Select your scale from the dropdown.`)
+                        .success()
                         .send();
+
+                } catch (error) {
+                    console.error('Failed to detect scales:', error);
+                    new FilamentNotification()
+                        .title('Detection Failed')
+                        .body('Could not scan for HID devices. Make sure QZ Tray is running.')
+                        .danger()
+                        .send();
+                } finally {
+                    detectScalesBtn.removeAttribute('aria-disabled');
+                    detectScalesBtn.classList.remove('fi-disabled');
+                    detectScalesBtn.textContent = 'Detect Scales';
+                }
+            }
+
+            // When a scale is selected from the dropdown, update the vendor/product ID fields
+            scaleDeviceSelect.addEventListener('change', async function() {
+                const value = this.value;
+                if (!value) {
+                    scaleVendorInput.value = '';
+                    scaleProductInput.value = '';
                     return;
                 }
 
+                const [vendorId, productId] = value.split(':');
+                scaleVendorInput.value = vendorId;
+                scaleProductInput.value = productId;
+
+                // Save immediately so ScaleUtils can find the device
+                localStorage.setItem('scaleVendorId', vendorId);
+                localStorage.setItem('scaleProductId', productId);
+
+                // Auto-connect to show live reading
+                await connectScale();
+            });
+
+            async function connectScale() {
+                const vendorId = scaleVendorInput.value;
+                const productId = scaleProductInput.value;
+
+                if (!vendorId || !productId) return;
+
                 try {
-                    // Get previously authorized devices
-                    const devices = await navigator.hid.getDevices();
-                    const vid = vendorId.startsWith('0x') ? parseInt(vendorId, 16) : parseInt(vendorId);
-                    const pid = productId.startsWith('0x') ? parseInt(productId, 16) : parseInt(productId);
-
-                    let device = devices.find(d => d.vendorId === vid && d.productId === pid);
-
-                    // If not found in authorized devices, request permission
-                    if (!device) {
-                        const requestedDevices = await navigator.hid.requestDevice({
-                            filters: [{ vendorId: vid, productId: pid }]
-                        });
-                        if (requestedDevices.length > 0) {
-                            device = requestedDevices[0];
-                        }
-                    }
-
-                    if (!device) {
-                        throw new Error('Scale not found');
-                    }
-
-                    if (!device.opened) {
-                        await device.open();
-                    }
-
-                    scaleDevice = device;
-
-                    device.addEventListener('inputreport', (event) => {
-                        const result = ScaleUtils.parseScaleData(event.data);
-                        updateScaleDisplay(result);
-                    });
+                    await ScaleUtils.claimScale();
+                    await ScaleUtils.startScaleStream(updateScaleDisplay);
+                    scaleStreamActive = true;
 
                     scaleReadingDiv.classList.remove('hidden');
                     disconnectScaleBtn.style.display = '';
 
                     new FilamentNotification()
                         .title('Scale Connected')
-                        .body(`Reading from ${device.productName || 'scale'}`)
+                        .body('Reading live weight data from scale.')
                         .success()
                         .send();
 
@@ -447,23 +578,21 @@
             }
 
             async function disconnectScale() {
-                if (scaleDevice) {
+                if (scaleStreamActive) {
                     try {
-                        await scaleDevice.close();
-                        await scaleDevice.forget();
+                        await ScaleUtils.stopScaleStream();
                     } catch (e) {
                         console.error('Error disconnecting scale:', e);
                     }
-                    scaleDevice = null;
+                    scaleStreamActive = false;
                 }
 
                 // Clear saved scale settings
                 localStorage.removeItem('scaleVendorId');
                 localStorage.removeItem('scaleProductId');
-                localStorage.removeItem('scaleName');
                 scaleVendorInput.value = '';
                 scaleProductInput.value = '';
-                scaleNameDiv.classList.add('hidden');
+                scaleDeviceSelect.value = '';
 
                 scaleReadingDiv.classList.add('hidden');
                 disconnectScaleBtn.style.display = 'none';
@@ -472,72 +601,18 @@
 
                 new FilamentNotification()
                     .title('Scale Disconnected')
-                    .body('Scale has been unpaired from this browser.')
+                    .body('Scale has been unpaired from this workstation.')
                     .success()
                     .send();
             }
 
-            // Auto-connect to scale if configured
+            // Auto-connect to scale if configured (after QZ Tray is ready)
             async function autoConnectScale() {
-                if (!('hid' in navigator)) {
-                    return;
-                }
+                const { vendorId, productId } = ScaleUtils.getScaleIds();
+                if (!vendorId || !productId) return;
 
                 try {
-                    const devices = await navigator.hid.getDevices();
-
-                    if (devices.length === 0) {
-                        return;
-                    }
-
-                    const { vendorId: vid, productId: pid } = ScaleUtils.getScaleIds();
-                    let device = null;
-
-                    if (vid && pid) {
-                        device = devices.find(d => d.vendorId === vid && d.productId === pid);
-
-                        if (!device) {
-                            // Saved scale not found, clear stale localStorage
-                            localStorage.removeItem('scaleVendorId');
-                            localStorage.removeItem('scaleProductId');
-                            localStorage.removeItem('scaleName');
-                        }
-                    }
-
-                    // If no saved device or saved device not found, use first authorized device
-                    if (!device && devices.length > 0) {
-                        device = devices[0];
-                        const newVendorId = '0x' + device.vendorId.toString(16).padStart(4, '0');
-                        const newProductId = '0x' + device.productId.toString(16).padStart(4, '0');
-
-                        // Update localStorage and UI
-                        localStorage.setItem('scaleVendorId', newVendorId);
-                        localStorage.setItem('scaleProductId', newProductId);
-                        localStorage.setItem('scaleName', device.productName || 'Unknown Scale');
-
-                        scaleVendorInput.value = newVendorId;
-                        scaleProductInput.value = newProductId;
-                        scaleNameText.textContent = device.productName || 'Unknown Scale';
-                        scaleNameDiv.classList.remove('hidden');
-                    }
-
-                    if (!device) {
-                        return;
-                    }
-
-                    if (!device.opened) {
-                        await device.open();
-                    }
-
-                    scaleDevice = device;
-
-                    device.addEventListener('inputreport', (event) => {
-                        const result = ScaleUtils.parseScaleData(event.data);
-                        updateScaleDisplay(result);
-                    });
-
-                    scaleReadingDiv.classList.remove('hidden');
-                    disconnectScaleBtn.style.display = '';
+                    await connectScale();
                 } catch (error) {
                     console.error('Failed to auto-connect scale:', error);
                 }
@@ -546,13 +621,23 @@
             // Event listeners
             refreshPrintersBtn.addEventListener('click', refreshPrinters);
             labelFormatSelect.addEventListener('change', updateDpiVisibility);
-            pairScaleBtn.addEventListener('click', detectScale);
+            detectScalesBtn.addEventListener('click', detectScales);
             disconnectScaleBtn.addEventListener('click', disconnectScale);
             saveSettingsBtn.addEventListener('click', saveSettings);
+            scaleBackendSelect.addEventListener('change', updateScaleBackendUI);
+            pairScaleWebhidBtn.addEventListener('click', pairScaleWebhid);
+
+            // Auto-connect scale based on backend
+            if (ScaleUtils.backend === 'webhid') {
+                autoConnectScale();
+            } else {
+                document.addEventListener('qz-tray:connected', function() {
+                    autoConnectScale();
+                });
+            }
 
             // Initialize
             initQZTray();
-            autoConnectScale();
         });
     </script>
 </x-filament-panels::page>

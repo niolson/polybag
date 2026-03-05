@@ -103,57 +103,46 @@
     </div>
 
     <x-filament-actions::modals />
+    <x-qz-tray />
     <x-scale-script />
 
     @script
     <script>
-        let scaleDevice = null;
-
         Alpine.data('scaleData', () => ({
             scaleConnected: false,
         }));
 
-        function handleScaleInput(event) {
-            const result = ScaleUtils.parseScaleData(event.data);
-            if (result !== null && result.isStable && result.weight > 0) {
-                $wire.data.weight = result.weight.toFixed(2);
-            }
-        }
-
         async function connectScale() {
             try {
-                const devices = await navigator.hid.requestDevice({
-                    filters: ScaleUtils.getScaleFilters()
-                });
-
-                if (devices.length > 0) {
-                    scaleDevice = devices[0];
-                    await scaleDevice.open();
-                    Alpine.store('scaleConnected', true);
-                    scaleDevice.addEventListener('inputreport', handleScaleInput);
+                const deviceInfo = ScaleUtils.getScaleDeviceInfo();
+                if (!deviceInfo) {
+                    console.warn('No scale configured in Device Settings.');
+                    return;
                 }
+
+                await ScaleUtils.claimScale();
+                await ScaleUtils.startScaleStream((result) => {
+                    if (result.isStable && result.weight > 0) {
+                        $wire.data.weight = result.weight.toFixed(2);
+                    }
+                });
+                Alpine.store('scaleConnected', true);
             } catch (error) {
                 console.error('Failed to connect to scale:', error);
             }
         }
 
-        // Auto-connect to previously paired scale
-        if (navigator.hid) {
-            navigator.hid.getDevices().then(devices => {
-                const { vendorId, productId } = ScaleUtils.getScaleIds();
-                const matchedDevice = devices.find(device => {
-                    if (vendorId && productId) {
-                        return device.vendorId === vendorId && device.productId === productId;
-                    }
-                    return true;
-                });
-
-                if (matchedDevice) {
-                    scaleDevice = matchedDevice;
-                    scaleDevice.open().then(() => {
-                        Alpine.store('scaleConnected', true);
-                        scaleDevice.addEventListener('inputreport', handleScaleInput);
-                    });
+        // Auto-connect scale: WebHID can connect immediately, QZ Tray must wait
+        if (ScaleUtils.backend === 'webhid') {
+            const deviceInfo = ScaleUtils.getScaleDeviceInfo();
+            if (deviceInfo) {
+                connectScale();
+            }
+        } else {
+            document.addEventListener('qz-tray:connected', () => {
+                const deviceInfo = ScaleUtils.getScaleDeviceInfo();
+                if (deviceInfo) {
+                    connectScale();
                 }
             });
         }
