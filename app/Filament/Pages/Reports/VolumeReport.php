@@ -9,6 +9,7 @@ use Filament\Pages\Page;
 use Filament\Tables;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -53,7 +54,7 @@ class VolumeReport extends Page implements HasTable
                     DB::raw('MIN(daily_shipping_stats.id) as id'),
                 ])
                 ->groupBy('group_name'),
-            'period' => DailyShippingStat::query()
+            'day', 'week', 'month' => DailyShippingStat::query()
                 ->select([
                     DB::raw($this->periodGroupExpression()),
                     DB::raw('SUM(package_count) as package_count'),
@@ -75,6 +76,12 @@ class VolumeReport extends Page implements HasTable
                 ->groupBy('group_name'),
         };
 
+        $defaultFrom = match ($this->groupBy) {
+            'month' => now()->subYear()->format('Y-m-d'),
+            'week' => now()->subDays(90)->format('Y-m-d'),
+            default => now()->subDays(30)->format('Y-m-d'),
+        };
+
         return $table
             ->query($query)
             ->defaultSort('package_count', 'desc')
@@ -83,7 +90,7 @@ class VolumeReport extends Page implements HasTable
                 Tables\Columns\TextColumn::make('group_name')
                     ->label(match ($this->groupBy) {
                         'shipping_method' => 'Shipping Method',
-                        'period' => 'Period',
+                        'day', 'week', 'month' => 'Period',
                         default => 'Channel',
                     })
                     ->sortable(),
@@ -103,12 +110,13 @@ class VolumeReport extends Page implements HasTable
                 Tables\Filters\Filter::make('date_range')
                     ->form([
                         \Filament\Forms\Components\DatePicker::make('from')
-                            ->default(now()->subDays(30)->format('Y-m-d')),
+                            ->default($defaultFrom),
                         \Filament\Forms\Components\DatePicker::make('until'),
                     ])
+                    ->columns(2)
                     ->default()
                     ->query(function ($query, array $data) {
-                        $col = $this->groupBy === 'channel' || $this->groupBy === 'shipping_method'
+                        $col = in_array($this->groupBy, ['channel', 'shipping_method'])
                             ? 'daily_shipping_stats.date'
                             : 'date';
 
@@ -116,7 +124,9 @@ class VolumeReport extends Page implements HasTable
                             ->when($data['from'], fn ($q, $date) => $q->where($col, '>=', $date))
                             ->when($data['until'], fn ($q, $date) => $q->where($col, '<=', $date));
                     }),
-            ]);
+            ], layout: FiltersLayout::AboveContent)
+            ->deferFilters(false)
+            ->filtersFormColumns(2);
     }
 
     public function resolveTableRecord(?string $key): ?Model
@@ -128,9 +138,19 @@ class VolumeReport extends Page implements HasTable
     {
         $driver = DB::getDriverName();
 
-        return match ($driver) {
-            'sqlite' => 'strftime("%Y-%m", date) as group_name',
-            default => 'DATE_FORMAT(date, "%Y-%m") as group_name',
+        return match ($this->groupBy) {
+            'day' => match ($driver) {
+                'sqlite' => 'strftime("%Y-%m-%d", date) as group_name',
+                default => 'DATE(date) as group_name',
+            },
+            'week' => match ($driver) {
+                'sqlite' => 'strftime("%Y-W%W", date) as group_name',
+                default => 'CONCAT(YEAR(date), "-W", LPAD(WEEK(date, 3), 2, "0")) as group_name',
+            },
+            default => match ($driver) {
+                'sqlite' => 'strftime("%Y-%m", date) as group_name',
+                default => 'DATE_FORMAT(date, "%Y-%m") as group_name',
+            },
         };
     }
 }

@@ -9,6 +9,7 @@ use Filament\Pages\Page;
 use Filament\Tables;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -45,14 +46,17 @@ class RateComparison extends Page implements HasTable
                     ->where('packages.shipped', true)
                     ->join('rate_quotes as rq_all', 'rq_all.package_id', '=', 'packages.id')
                     ->select([
-                        'packages.*',
+                        'packages.id',
+                        'packages.shipment_id',
+                        'packages.shipped_at',
+                        'packages.carrier',
                         DB::raw('MAX(CASE WHEN rq_all.selected = 1 THEN rq_all.quoted_price END) as selected_price'),
                         DB::raw('MAX(CASE WHEN rq_all.selected = 1 THEN rq_all.carrier END) as selected_carrier'),
                         DB::raw('MIN(rq_all.quoted_price) as cheapest_price'),
                         DB::raw('COUNT(rq_all.id) as rate_quotes_count'),
                         DB::raw('(SELECT rq.carrier FROM rate_quotes rq WHERE rq.package_id = packages.id ORDER BY rq.quoted_price ASC LIMIT 1) as cheapest_carrier'),
                     ])
-                    ->groupBy('packages.id')
+                    ->groupBy('packages.id', 'packages.shipment_id', 'packages.shipped_at', 'packages.carrier')
                     ->havingRaw('COUNT(rq_all.id) >= 2 AND MAX(CASE WHEN rq_all.selected = 1 THEN 1 END) = 1')
                     ->with('shipment')
             )
@@ -94,6 +98,8 @@ class RateComparison extends Page implements HasTable
                             ->default(now()->subDays(30)->format('Y-m-d')),
                         \Filament\Forms\Components\DatePicker::make('until'),
                     ])
+                    ->columns(2)
+                    ->columnSpan(2)
                     ->default()
                     ->query(function ($query, array $data) {
                         return $query
@@ -103,7 +109,9 @@ class RateComparison extends Page implements HasTable
                 Tables\Filters\SelectFilter::make('carrier')
                     ->options(fn () => Package::query()->where('shipped', true)->where('shipped_at', '>=', now()->subDays(90))->whereNotNull('carrier')->distinct()->pluck('carrier', 'carrier')->toArray())
                     ->query(fn ($query, array $data) => $data['value'] ? $query->where('packages.carrier', $data['value']) : $query),
-            ]);
+            ], layout: FiltersLayout::AboveContent)
+            ->deferFilters(false)
+            ->filtersFormColumns(3);
     }
 
     public function resolveTableRecord(?string $key): ?Model

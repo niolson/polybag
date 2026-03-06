@@ -12,6 +12,7 @@ use Filament\Pages\Page;
 use Filament\Tables;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
 use UnitEnum;
@@ -100,13 +101,16 @@ class PackingValidationReport extends Page implements HasTable
                             ->default(now()->subDays(7)->format('Y-m-d')),
                         \Filament\Forms\Components\DatePicker::make('until'),
                     ])
+                    ->columns(2)
                     ->default()
                     ->query(function ($query, array $data) {
                         return $query
                             ->when($data['from'], fn ($q, $date) => $q->where('shipped_at', '>=', $date))
                             ->when($data['until'], fn ($q, $date) => $q->where('shipped_at', '<=', $date));
                     }),
-            ]);
+            ], layout: FiltersLayout::AboveContent)
+            ->deferFilters(false)
+            ->filtersFormColumns(2);
     }
 
     private function batchFailuresTable(Table $table): Table
@@ -140,13 +144,16 @@ class PackingValidationReport extends Page implements HasTable
                             ->default(now()->subDays(7)->format('Y-m-d')),
                         \Filament\Forms\Components\DatePicker::make('until'),
                     ])
+                    ->columns(2)
                     ->default()
                     ->query(function ($query, array $data) {
                         return $query
                             ->when($data['from'], fn ($q, $date) => $q->where('created_at', '>=', $date))
                             ->when($data['until'], fn ($q, $date) => $q->where('created_at', '<=', $date));
                     }),
-            ]);
+            ], layout: FiltersLayout::AboveContent)
+            ->deferFilters(false)
+            ->filtersFormColumns(2);
     }
 
     private function validationIssuesTable(Table $table): Table
@@ -195,13 +202,16 @@ class PackingValidationReport extends Page implements HasTable
                             ->default(now()->subDays(7)->format('Y-m-d')),
                         \Filament\Forms\Components\DatePicker::make('until'),
                     ])
+                    ->columns(2)
                     ->default()
                     ->query(function ($query, array $data) {
                         return $query
                             ->when($data['from'], fn ($q, $date) => $q->where('packages.shipped_at', '>=', $date))
                             ->when($data['until'], fn ($q, $date) => $q->where('packages.shipped_at', '<=', $date));
                     }),
-            ]);
+            ], layout: FiltersLayout::AboveContent)
+            ->deferFilters(false)
+            ->filtersFormColumns(2);
     }
 
     private function calculateExpectedWeight(Package $record): float

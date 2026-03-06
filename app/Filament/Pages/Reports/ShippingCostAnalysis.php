@@ -9,6 +9,7 @@ use Filament\Pages\Page;
 use Filament\Tables;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Enums\PaginationMode;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
@@ -71,6 +72,8 @@ class ShippingCostAnalysis extends Page implements HasTable
                         \Filament\Forms\Components\DatePicker::make('until')
                             ->label('Until'),
                     ])
+                    ->columns(2)
+                    ->columnSpan(2)
                     ->default()
                     ->query(function ($query, array $data) {
                         return $query
@@ -81,7 +84,9 @@ class ShippingCostAnalysis extends Page implements HasTable
                     ->options(fn () => Package::query()->where('shipped', true)->where('shipped_date', '>=', now()->subDays(90)->toDateString())->whereNotNull('carrier')->distinct()->pluck('carrier', 'carrier')->toArray()),
                 Tables\Filters\SelectFilter::make('service')
                     ->options(fn () => Package::query()->where('shipped', true)->where('shipped_date', '>=', now()->subDays(90)->toDateString())->whereNotNull('service')->distinct()->pluck('service', 'service')->toArray()),
-            ]);
+            ], layout: FiltersLayout::AboveContent)
+            ->deferFilters(false)
+            ->filtersFormColumns(4);
     }
 
     public function resolveTableRecord(?string $key): ?Model
