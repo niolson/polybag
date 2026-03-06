@@ -198,7 +198,6 @@ class ShipmentResource extends Resource
                 Tables\Columns\TextColumn::make('shipment_reference')
                     ->fontFamily('mono')
                     ->size('sm')
-                    ->copyable()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('channel.name')
                     ->label('Channel')
@@ -358,7 +357,7 @@ class ShipmentResource extends Resource
                 Actions\ViewAction::make(),
                 Actions\EditAction::make(),
             ])
-            ->groupedBulkActions([
+            ->toolbarActions([
                 Actions\BulkAction::make('batch-ship')
                     ->label('Batch Ship')
                     ->icon('heroicon-o-paper-airplane')
@@ -426,7 +425,10 @@ class ShipmentResource extends Resource
                     ->inlineLabel()
                     ->schema([
                         TextEntry::make('shipment_reference')
-                            ->weight(FontWeight::Bold),
+                            ->weight(FontWeight::Bold)
+                            ->copyable()
+                            ->icon('heroicon-o-clipboard')
+                            ->iconPosition('after'),
                         TextEntry::make('channel.name')
                             ->label('Channel')
                             ->icon(fn (Shipment $record): ?string => $record->channel?->icon)
