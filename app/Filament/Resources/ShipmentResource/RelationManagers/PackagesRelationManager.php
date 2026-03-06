@@ -3,8 +3,10 @@
 namespace App\Filament\Resources\ShipmentResource\RelationManagers;
 
 use App\Enums\PackageStatus;
+use App\Filament\Resources\PackageResource;
 use Filament\Actions;
 use Filament\Forms;
+use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables;
@@ -55,6 +57,7 @@ class PackagesRelationManager extends RelationManager
                 Tables\Columns\IconColumn::make('exported')
                     ->boolean(),
             ])
+            ->recordUrl(fn ($record) => PackageResource::getUrl('view', ['record' => $record]))
             ->filters([
                 //
             ])
@@ -63,7 +66,18 @@ class PackagesRelationManager extends RelationManager
             ])
             ->recordActions([
                 Actions\EditAction::make(),
-                Actions\DeleteAction::make(),
+                Actions\DeleteAction::make()
+                    ->before(function (Actions\DeleteAction $action, $record) {
+                        if ($record->status === PackageStatus::Shipped) {
+                            Notification::make()
+                                ->title('Cannot delete package')
+                                ->body('This package has been shipped. Void the label first before deleting.')
+                                ->danger()
+                                ->send();
+
+                            $action->cancel();
+                        }
+                    }),
             ])
             ->groupedBulkActions([
                 Actions\DeleteBulkAction::make(),

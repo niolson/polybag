@@ -76,6 +76,10 @@ class ShipmentResource extends Resource
                         Forms\Components\TextInput::make('shipment_reference')
                             ->required()
                             ->maxLength(255),
+                        Forms\Components\Select::make('status')
+                            ->options(ShipmentStatus::class)
+                            ->disabled(fn () => ! auth()->user()?->role->isAtLeast(Role::Manager))
+                            ->visibleOn('edit'),
                         Forms\Components\Select::make('channel_id')
                             ->relationship('channel', 'name')
                             ->required(),
@@ -429,6 +433,8 @@ class ShipmentResource extends Resource
                             ->copyable()
                             ->icon('heroicon-o-clipboard')
                             ->iconPosition('after'),
+                        TextEntry::make('status')
+                            ->badge(),
                         TextEntry::make('channel.name')
                             ->label('Channel')
                             ->icon(fn (Shipment $record): ?string => $record->channel?->icon)

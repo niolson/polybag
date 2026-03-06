@@ -72,7 +72,8 @@ class PackageResource extends Resource
                         Forms\Components\Select::make('shipment_id')
                             ->relationship('shipment', 'shipment_reference')
                             ->searchable()
-                            ->required(),
+                            ->required()
+                            ->disabled(fn (string $operation) => $operation === 'edit'),
                         Forms\Components\TextInput::make('tracking_number')
                             ->maxLength(255),
                         Forms\Components\TextInput::make('shipping_method')

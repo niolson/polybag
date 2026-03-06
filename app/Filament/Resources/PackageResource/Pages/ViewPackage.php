@@ -4,6 +4,7 @@ namespace App\Filament\Resources\PackageResource\Pages;
 
 use App\Enums\PackageStatus;
 use App\Filament\Resources\PackageResource;
+use App\Filament\Resources\ShipmentResource;
 use App\Services\Carriers\CarrierRegistry;
 use Filament\Actions\Action;
 use Filament\Infolists\Components\TextEntry;
@@ -76,7 +77,8 @@ class ViewPackage extends ViewRecord
                         TextEntry::make('id')
                             ->label('Package ID'),
                         TextEntry::make('shipment.shipment_reference')
-                            ->label('Shipment Reference'),
+                            ->label('Shipment Reference')
+                            ->url(fn ($record) => ShipmentResource::getUrl('view', ['record' => $record->shipment_id])),
                         TextEntry::make('tracking_number')
                             ->icon('heroicon-o-clipboard')
                             ->iconPosition('after')
