@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\ShipmentStatus;
 use App\Filament\Widgets\StatsOverview;
 use App\Models\Package;
 use App\Models\Shipment;
@@ -10,8 +11,8 @@ use Livewire\Livewire;
 uses(RefreshDatabase::class);
 
 it('shows pending shipments count', function () {
-    Shipment::factory()->count(3)->create(['shipped' => false]);
-    Shipment::factory()->count(2)->create(['shipped' => true]);
+    Shipment::factory()->count(3)->create(['status' => ShipmentStatus::Open]);
+    Shipment::factory()->count(2)->create(['status' => ShipmentStatus::Shipped]);
 
     $user = User::factory()->create();
 

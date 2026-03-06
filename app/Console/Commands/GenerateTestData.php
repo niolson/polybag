@@ -331,7 +331,7 @@ class GenerateTestData extends Command
                 'shipping_method_reference' => null,
                 'channel_id' => $channelId,
                 'channel_reference' => null,
-                'shipped' => $status === 'shipped',
+                'status' => $status === 'shipped' ? 'shipped' : 'open',
                 'metadata' => null,
                 'deliver_by' => null,
                 'created_at' => $createdAtStr,
@@ -446,7 +446,7 @@ class GenerateTestData extends Command
                     'width' => round(mt_rand(200, 2000) / 100, 2),
                     'length' => round(mt_rand(200, 2000) / 100, 2),
                     'cost' => $pkgShipped ? round(mt_rand((int) ($service['costMin'] * 100), (int) ($service['costMax'] * 100)) / 100, 2) : null,
-                    'shipped' => $pkgShipped,
+                    'status' => $pkgShipped ? 'shipped' : 'unshipped',
                     'shipped_at' => $shippedAt,
                     'shipped_by_user_id' => $pkgShipped ? $this->userIds[array_rand($this->userIds)] : null,
                     'exported' => $pkgShipped && mt_rand(1, 2) === 1,
@@ -459,7 +459,7 @@ class GenerateTestData extends Command
                 $packageMeta[] = [
                     'shipmentIdx' => $idx,
                     'pkgIdx' => $p,
-                    'shipped' => $pkgShipped,
+                    'isShipped' => $pkgShipped,
                     'carrier' => $carrier,
                     'service' => $service,
                     'createdAt' => $meta['createdAt'],
@@ -530,7 +530,7 @@ class GenerateTestData extends Command
         $rateQuoteRows = [];
 
         foreach ($packageMeta as $pkgMetaIdx => $pm) {
-            if (! $pm['shipped']) {
+            if (! $pm['isShipped']) {
                 continue;
             }
 

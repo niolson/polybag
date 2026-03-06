@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Enums\Deliverability;
+use App\Enums\PackageStatus;
+use App\Enums\ShipmentStatus;
 use App\Services\AddressValidationService;
 use App\Services\SettingsService;
 use Carbon\Carbon;
@@ -48,7 +50,7 @@ class Shipment extends Model
         'shipping_method_id',
         'channel_reference',
         'channel_id',
-        'shipped',
+        'status',
         'deliver_by',
         'metadata',
     ];
@@ -59,7 +61,7 @@ class Shipment extends Model
         'validated_residential' => 'boolean',
         'value' => 'decimal:2',
         'deliverability' => Deliverability::class,
-        'shipped' => 'boolean',
+        'status' => ShipmentStatus::class,
         'deliver_by' => 'date',
         'metadata' => 'array',
     ];
@@ -81,25 +83,30 @@ class Shipment extends Model
     }
 
     /**
-     * Recalculate and persist the shipped flag based on package status.
+     * Recalculate and persist the status based on package status.
      */
     public function updateShippedStatus(): void
     {
-        $hasShippedPackage = $this->packages()->where('shipped', true)->exists();
+        // Don't change status of voided shipments
+        if ($this->status === ShipmentStatus::Void) {
+            return;
+        }
+
+        $hasShippedPackage = $this->packages()->where('status', PackageStatus::Shipped)->exists();
 
         if (! $hasShippedPackage) {
-            $this->update(['shipped' => false]);
+            $this->update(['status' => ShipmentStatus::Open]);
 
             return;
         }
 
         if (! app(SettingsService::class)->get('packing_validation_enabled', true)) {
-            $this->update(['shipped' => true]);
+            $this->update(['status' => ShipmentStatus::Shipped]);
 
             return;
         }
 
-        $shippedPackageIds = $this->packages()->where('shipped', true)->pluck('id');
+        $shippedPackageIds = $this->packages()->where('status', PackageStatus::Shipped)->pluck('id');
 
         $packedQuantities = PackageItem::whereIn('package_id', $shippedPackageIds)
             ->selectRaw('shipment_item_id, SUM(quantity) as total_packed')
@@ -110,7 +117,7 @@ class Shipment extends Model
             return ($packedQuantities[$item->id] ?? 0) >= $item->quantity;
         });
 
-        $this->update(['shipped' => $allItemsShipped]);
+        $this->update(['status' => $allItemsShipped ? ShipmentStatus::Shipped : ShipmentStatus::Open]);
     }
 
     /**

@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\Deliverability;
+use App\Enums\ShipmentStatus;
 use App\Models\Shipment;
 
 it('creates a basic shipment', function (): void {
@@ -13,7 +14,7 @@ it('creates a basic shipment', function (): void {
         ->and($shipment->state_or_province)->not->toBeNull()
         ->and($shipment->postal_code)->not->toBeNull()
         ->and($shipment->country)->toBe('US')
-        ->and($shipment->shipped)->toBeFalsy(); // shipped defaults to null/false
+        ->and($shipment->status)->toBe(ShipmentStatus::Open);
 });
 
 it('creates a validated shipment', function (): void {
@@ -44,7 +45,7 @@ it('creates a maybe deliverable shipment', function (): void {
 it('creates a shipped shipment', function (): void {
     $shipment = Shipment::factory()->shipped()->create();
 
-    expect($shipment->shipped)->toBeTrue();
+    expect($shipment->status)->toBe(ShipmentStatus::Shipped);
 });
 
 it('creates an international shipment', function (): void {
@@ -85,5 +86,5 @@ it('can chain multiple states', function (): void {
     expect($shipment->checked)->toBeTrue()
         ->and($shipment->deliverability)->toBe(Deliverability::Yes)
         ->and($shipment->residential)->toBeTrue()
-        ->and($shipment->shipped)->toBeTrue();
+        ->and($shipment->status)->toBe(ShipmentStatus::Shipped);
 });

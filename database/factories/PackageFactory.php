@@ -28,7 +28,7 @@ class PackageFactory extends Factory
             'length' => fake()->randomFloat(2, 2, 20),
             'cost' => null,
             'weight_mismatch' => false,
-            'shipped' => false,
+            'status' => 'unshipped',
             'shipped_at' => null,
             'exported' => false,
         ];
@@ -43,7 +43,7 @@ class PackageFactory extends Factory
             'cost' => fake()->randomFloat(2, 5, 50),
             'label_data' => base64_encode('mock-label-pdf'),
             'label_orientation' => 'portrait',
-            'shipped' => true,
+            'status' => 'shipped',
             'shipped_at' => now(),
             'shipped_by_user_id' => User::factory(),
         ]);

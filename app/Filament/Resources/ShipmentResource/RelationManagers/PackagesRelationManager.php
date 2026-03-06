@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ShipmentResource\RelationManagers;
 
+use App\Enums\PackageStatus;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Resources\RelationManagers\RelationManager;
@@ -32,8 +33,8 @@ class PackagesRelationManager extends RelationManager
                 Forms\Components\TextInput::make('cost')
                     ->numeric()
                     ->prefix('$'),
-                Forms\Components\Toggle::make('shipped')
-                    ->default(false),
+                Forms\Components\Select::make('status')
+                    ->options(PackageStatus::class),
                 Forms\Components\Toggle::make('exported')
                     ->default(false),
             ]);
@@ -49,8 +50,8 @@ class PackagesRelationManager extends RelationManager
                 Tables\Columns\TextColumn::make('weight'),
                 Tables\Columns\TextColumn::make('cost')
                     ->money('USD'),
-                Tables\Columns\IconColumn::make('shipped')
-                    ->boolean(),
+                Tables\Columns\TextColumn::make('status')
+                    ->badge(),
                 Tables\Columns\IconColumn::make('exported')
                     ->boolean(),
             ])

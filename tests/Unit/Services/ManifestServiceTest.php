@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\PackageStatus;
 use App\Models\Manifest;
 use App\Models\Package;
 use App\Services\ManifestService;
@@ -42,7 +43,7 @@ it('excludes unshipped packages', function (): void {
     Package::factory()->create([
         'carrier' => 'USPS',
         'tracking_number' => '9400111',
-        'shipped' => false,
+        'status' => PackageStatus::Unshipped,
     ]);
 
     $grouped = app(ManifestService::class)->getUnmanifestedPackages();
@@ -54,7 +55,7 @@ it('excludes packages without tracking numbers', function (): void {
     Package::factory()->create([
         'carrier' => 'USPS',
         'tracking_number' => null,
-        'shipped' => true,
+        'status' => PackageStatus::Shipped,
         'shipped_at' => now(),
     ]);
 

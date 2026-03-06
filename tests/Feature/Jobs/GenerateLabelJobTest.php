@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\PackageStatus;
 use App\Contracts\CarrierAdapterInterface;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\LabelBatchItemStatus;
@@ -98,7 +99,7 @@ it('updates batch item on successful label generation', function (): void {
         ->and($ctx['item']->carrier)->toBe('MockCarrier')
         ->and($ctx['item']->service)->toBe('Test Service')
         ->and((float) $ctx['item']->cost)->toBe(7.50)
-        ->and($ctx['package']->shipped)->toBeTrue()
+        ->and($ctx['package']->status)->toBe(PackageStatus::Shipped)
         ->and($ctx['batch']->successful_shipments)->toBe(1)
         ->and((float) $ctx['batch']->total_cost)->toBe(7.50);
 });

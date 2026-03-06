@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
 use App\Filament\Resources\PackageResource\Pages\ViewPackage;
@@ -25,7 +26,7 @@ it('shows void action for shipped packages', function (): void {
 it('hides void action for unshipped packages', function (): void {
     $shipment = Shipment::factory()->create();
     $package = Package::factory()->for($shipment)->create([
-        'shipped' => false,
+        'status' => PackageStatus::Unshipped,
         'tracking_number' => null,
         'carrier' => null,
     ]);
@@ -113,7 +114,7 @@ it('voids a label and clears shipping fields', function (): void {
         ->and($package->cost)->toBeNull()
         ->and($package->label_data)->toBeNull()
         ->and($package->label_orientation)->toBeNull()
-        ->and($package->shipped)->toBeFalse()
+        ->and($package->status)->toBe(PackageStatus::Unshipped)
         ->and($package->shipped_at)->toBeNull()
         ->and($package->shipped_by_user_id)->toBeNull()
         ->and($package->weight)->not->toBeNull()
@@ -133,7 +134,7 @@ it('shows void action on view page for shipped packages', function (): void {
 it('hides void action on view page for unshipped packages', function (): void {
     $shipment = Shipment::factory()->create();
     $package = Package::factory()->for($shipment)->create([
-        'shipped' => false,
+        'status' => PackageStatus::Unshipped,
         'tracking_number' => null,
         'carrier' => null,
     ]);

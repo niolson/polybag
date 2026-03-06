@@ -1,5 +1,7 @@
 <?php
 
+use App\Enums\PackageStatus;
+use App\Enums\ShipmentStatus;
 use App\Models\Package;
 use App\Models\PackageItem;
 use App\Models\Product;
@@ -16,7 +18,7 @@ it('marks shipment as shipped when all items are packed in shipped packages', fu
         'quantity' => 2,
     ]);
 
-    $package = Package::factory()->for($shipment)->create(['shipped' => true]);
+    $package = Package::factory()->for($shipment)->create(['status' => PackageStatus::Shipped]);
 
     PackageItem::factory()->create([
         'package_id' => $package->id,
@@ -28,7 +30,7 @@ it('marks shipment as shipped when all items are packed in shipped packages', fu
     $shipment->load('shipmentItems');
     $shipment->updateShippedStatus();
 
-    expect($shipment->fresh()->shipped)->toBeTrue();
+    expect($shipment->fresh()->status)->toBe(ShipmentStatus::Shipped);
 });
 
 it('does not mark shipment as shipped when items are only partially packed', function (): void {
@@ -40,7 +42,7 @@ it('does not mark shipment as shipped when items are only partially packed', fun
         'quantity' => 3,
     ]);
 
-    $package = Package::factory()->for($shipment)->create(['shipped' => true]);
+    $package = Package::factory()->for($shipment)->create(['status' => PackageStatus::Shipped]);
 
     PackageItem::factory()->create([
         'package_id' => $package->id,
@@ -52,7 +54,7 @@ it('does not mark shipment as shipped when items are only partially packed', fun
     $shipment->load('shipmentItems');
     $shipment->updateShippedStatus();
 
-    expect($shipment->fresh()->shipped)->toBeFalse();
+    expect($shipment->fresh()->status)->toBe(ShipmentStatus::Open);
 });
 
 it('marks shipment as shipped with any shipped package when packing validation is off', function (): void {
@@ -62,12 +64,12 @@ it('marks shipment as shipped with any shipped package when packing validation i
 
     ShipmentItem::factory()->for($shipment)->create(['quantity' => 5]);
 
-    Package::factory()->for($shipment)->create(['shipped' => true]);
+    Package::factory()->for($shipment)->create(['status' => PackageStatus::Shipped]);
 
     $shipment->load('shipmentItems');
     $shipment->updateShippedStatus();
 
-    expect($shipment->fresh()->shipped)->toBeTrue();
+    expect($shipment->fresh()->status)->toBe(ShipmentStatus::Shipped);
 });
 
 it('reverts shipped status when package shipping is cleared', function (): void {
@@ -79,7 +81,7 @@ it('reverts shipped status when package shipping is cleared', function (): void 
         'quantity' => 1,
     ]);
 
-    $package = Package::factory()->for($shipment)->create(['shipped' => true]);
+    $package = Package::factory()->for($shipment)->create(['status' => PackageStatus::Shipped]);
 
     PackageItem::factory()->create([
         'package_id' => $package->id,
@@ -91,9 +93,9 @@ it('reverts shipped status when package shipping is cleared', function (): void 
     $shipment->load('shipmentItems');
     $shipment->updateShippedStatus();
 
-    expect($shipment->fresh()->shipped)->toBeTrue();
+    expect($shipment->fresh()->status)->toBe(ShipmentStatus::Shipped);
 
     $package->clearShipping();
 
-    expect($shipment->fresh()->shipped)->toBeFalse();
+    expect($shipment->fresh()->status)->toBe(ShipmentStatus::Open);
 });

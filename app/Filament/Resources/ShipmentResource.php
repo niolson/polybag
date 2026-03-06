@@ -3,6 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Enums\Role;
+use App\Enums\ShipmentStatus;
 use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\ShipmentResource\Pages;
 use App\Filament\Resources\ShipmentResource\RelationManagers\PackagesRelationManager;
@@ -19,6 +20,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationGroup;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\FontWeight;
 use Filament\Support\Enums\IconPosition;
@@ -225,18 +227,16 @@ class ShipmentResource extends Resource
                     ->label('Deliverable')
                     ->badge()
                     ->placeholder('Not checked'),
-                Tables\Columns\IconColumn::make('shipped')
-                    ->boolean(),
+                Tables\Columns\TextColumn::make('status')
+                    ->badge(),
                 Tables\Columns\TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                Tables\Filters\TernaryFilter::make('shipped')
-                    ->label('Shipped')
-                    ->trueLabel('Shipped')
-                    ->falseLabel('Not Shipped'),
+                Tables\Filters\SelectFilter::make('status')
+                    ->options(ShipmentStatus::class),
                 Tables\Filters\SelectFilter::make('deliverability')
                     ->options(\App\Enums\Deliverability::class)
                     ->label('Deliverability'),
@@ -255,6 +255,7 @@ class ShipmentResource extends Resource
                         Forms\Components\DatePicker::make('created_until')
                             ->label('Created Until'),
                     ])
+                    ->columns(2)
                     ->query(function ($query, array $data) {
                         return $query
                             ->when($data['created_from'], fn ($query, $date) => $query->whereDate('created_at', '>=', $date))
@@ -278,6 +279,7 @@ class ShipmentResource extends Resource
                         Forms\Components\DatePicker::make('deliver_by_until')
                             ->label('Deliver By Until'),
                     ])
+                    ->columns(2)
                     ->query(function ($query, array $data) {
                         return $query
                             ->when($data['deliver_by_from'], fn ($query, $date) => $query->whereDate('deliver_by', '>=', $date))
@@ -315,6 +317,7 @@ class ShipmentResource extends Resource
                             ->label('Max Value ($)')
                             ->numeric(),
                     ])
+                    ->columns(2)
                     ->query(function ($query, array $data) {
                         return $query
                             ->when($data['value_from'], fn ($query, $val) => $query->where('value', '>=', $val))
@@ -331,7 +334,25 @@ class ShipmentResource extends Resource
 
                         return $indicators;
                     }),
-            ], layout: FiltersLayout::AboveContentCollapsible)
+            ], layout: FiltersLayout::AboveContent)
+            ->deferFilters(false)
+            ->filtersFormColumns(4)
+            ->filtersFormSchema(fn (array $filters): array => [
+                $filters['status'],
+                $filters['deliverability'],
+                $filters['channel'],
+                $filters['shipping_method'],
+                Section::make('More Filters')
+                    ->schema([
+                        $filters['created_at'],
+                        $filters['deliver_by'],
+                        $filters['destination_state'],
+                        $filters['value_range'],
+                    ])
+                    ->columns(4)
+                    ->collapsed()
+                    ->columnSpanFull(),
+            ])
             ->defaultSort('created_at', 'desc')
             ->recordActions([
                 Actions\ViewAction::make(),
@@ -392,8 +413,6 @@ class ShipmentResource extends Resource
                         redirect(LabelBatchResource::getUrl('view', ['record' => $batch]));
                     })
                     ->deselectRecordsAfterCompletion(),
-                Actions\DeleteBulkAction::make()
-                    ->visible(fn () => auth()->user()->role->isAtLeast(Role::Manager)),
             ]);
     }
 

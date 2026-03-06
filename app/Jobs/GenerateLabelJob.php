@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Enums\LabelBatchItemStatus;
+use App\Enums\PackageStatus;
 use App\Models\LabelBatchItem;
 use App\Services\LabelGenerationService;
 use Illuminate\Bus\Batchable;
@@ -70,7 +71,7 @@ class GenerateLabelJob implements ShouldQueue
     private function handleFailure(LabelBatchItem $item, string $errorMessage): void
     {
         // Clean up the unshipped package
-        if ($item->package && ! $item->package->shipped) {
+        if ($item->package && $item->package->status !== PackageStatus::Shipped) {
             $item->package->packageItems()->delete();
             $item->package->delete();
             $item->update(['package_id' => null]);

@@ -97,9 +97,7 @@ class LocationResource extends Resource
             ->recordActions([
                 Actions\EditAction::make(),
             ])
-            ->groupedBulkActions([
-                Actions\DeleteBulkAction::make(),
-            ]);
+;
     }
 
     public static function getPages(): array

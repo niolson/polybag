@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages\Reports;
 
+use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Models\Package;
 use App\Models\User;
@@ -79,7 +80,7 @@ class UserShipmentsReport extends Page implements HasTable
     private function allUsersTable(Table $table): Table
     {
         $query = Package::query()
-            ->where('shipped', true)
+            ->where('packages.status', PackageStatus::Shipped->value)
             ->whereNotNull('shipped_by_user_id')
             ->join('users', 'packages.shipped_by_user_id', '=', 'users.id')
             ->select([
@@ -129,7 +130,7 @@ class UserShipmentsReport extends Page implements HasTable
         };
 
         $query = Package::query()
-            ->where('shipped', true)
+            ->where('status', PackageStatus::Shipped)
             ->where('shipped_by_user_id', $this->userId)
             ->select([
                 DB::raw($groupExpr),

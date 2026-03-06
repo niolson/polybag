@@ -2,6 +2,7 @@
 
 namespace App\Filament\Widgets;
 
+use App\Enums\ShipmentStatus;
 use App\Models\DailyShippingStat;
 use App\Models\Shipment;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
@@ -22,7 +23,7 @@ class StatsOverview extends BaseWidget
             $costStat = $this->buildCostStat($thisWeekStart);
 
             return [
-                Stat::make('Pending Shipments', number_format(Shipment::query()->where('shipped', false)->count()))
+                Stat::make('Pending Shipments', number_format(Shipment::query()->where('status', ShipmentStatus::Open)->count()))
                     ->description('Awaiting shipment')
                     ->descriptionIcon('heroicon-m-clock')
                     ->color('warning'),

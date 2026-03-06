@@ -36,8 +36,8 @@ class AggregateShippingStats extends Command
 
         // Refresh histograms on the full nightly rebuild (not --today)
         if (! $this->option('today') && DB::getDriverName() === 'mysql' && ! str_contains(DB::getPdo()->getAttribute(\PDO::ATTR_SERVER_VERSION), 'MariaDB')) {
-            DB::statement('ANALYZE TABLE packages UPDATE HISTOGRAM ON shipped');
-            DB::statement('ANALYZE TABLE shipments UPDATE HISTOGRAM ON shipped');
+            DB::statement('ANALYZE TABLE packages UPDATE HISTOGRAM ON status');
+            DB::statement('ANALYZE TABLE shipments UPDATE HISTOGRAM ON status');
             $this->info('Updated column histograms.');
         }
 
@@ -103,7 +103,7 @@ class AggregateShippingStats extends Command
                 NOW()
             FROM packages p
             JOIN shipments s ON p.shipment_id = s.id
-            WHERE p.shipped = 1
+            WHERE p.status = 'shipped'
               AND p.shipped_date BETWEEN ? AND ?
             GROUP BY p.shipped_date, p.carrier, p.service, s.channel_id, s.shipping_method_id, p.location_id
         ', [$from->toDateString(), $to->toDateString()]);
@@ -116,7 +116,7 @@ class AggregateShippingStats extends Command
     {
         $rows = DB::table('packages as p')
             ->join('shipments as s', 'p.shipment_id', '=', 's.id')
-            ->where('p.shipped', true)
+            ->where('p.status', 'shipped')
             ->whereBetween('p.shipped_date', [$from->toDateString(), $to->toDateString()])
             ->selectRaw('p.shipped_date as date, p.carrier, p.service, s.channel_id, s.shipping_method_id, p.location_id')
             ->selectRaw('COUNT(*) as package_count, COALESCE(SUM(p.cost), 0) as total_cost, COALESCE(SUM(p.weight), 0) as total_weight')

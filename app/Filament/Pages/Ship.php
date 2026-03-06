@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
+use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Concerns\NotifiesUser;
 use App\Models\Package;
@@ -69,7 +70,7 @@ class Ship extends Page implements HasForms
 
         $this->authorize('ship', $this->package);
 
-        if ($this->package->shipped) {
+        if ($this->package->status === PackageStatus::Shipped) {
             $this->notifyWarning('Already Shipped', 'This package has already been shipped.');
             $this->redirect('/pack');
 

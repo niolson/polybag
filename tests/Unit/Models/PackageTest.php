@@ -1,6 +1,8 @@
 <?php
 
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\PackageStatus;
+use App\Enums\ShipmentStatus;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\User;
@@ -27,9 +29,9 @@ it('marks a package as shipped from ShipResponse', function (): void {
         ->and($package->service)->toBe('USPS_GROUND_ADVANTAGE')
         ->and($package->label_data)->toBe(base64_encode('PDF content'))
         ->and($package->label_orientation)->toBe('portrait')
-        ->and($package->shipped)->toBeTrue()
+        ->and($package->status)->toBe(PackageStatus::Shipped)
         ->and($package->shipped_at)->not->toBeNull()
-        ->and($package->shipment->fresh()->shipped)->toBeTrue();
+        ->and($package->shipment->fresh()->status)->toBe(ShipmentStatus::Shipped);
 });
 
 it('clears all shipping fields', function (): void {
@@ -45,10 +47,10 @@ it('clears all shipping fields', function (): void {
         ->and($package->cost)->toBeNull()
         ->and($package->label_data)->toBeNull()
         ->and($package->label_orientation)->toBeNull()
-        ->and($package->shipped)->toBeFalse()
+        ->and($package->status)->toBe(PackageStatus::Unshipped)
         ->and($package->shipped_at)->toBeNull()
         ->and($package->shipped_by_user_id)->toBeNull()
-        ->and($package->shipment->fresh()->shipped)->toBeFalse();
+        ->and($package->shipment->fresh()->status)->toBe(ShipmentStatus::Open);
 });
 
 it('sets shipped_by_user_id when provided', function (): void {

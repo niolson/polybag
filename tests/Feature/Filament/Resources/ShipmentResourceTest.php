@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\Role;
+use App\Enums\ShipmentStatus;
 use App\Filament\Resources\ShipmentResource\Pages\ListShipments;
 use App\Models\Shipment;
 use App\Models\User;
@@ -10,25 +11,25 @@ beforeEach(function (): void {
     $this->actingAs(User::factory()->create(['role' => Role::Admin]));
 });
 
-it('displays shipped column in shipment table', function (): void {
+it('displays status column in shipment table', function (): void {
     $shipped = Shipment::factory()->shipped()->create();
-    $notShipped = Shipment::factory()->create(['shipped' => false]);
+    $notShipped = Shipment::factory()->create(['status' => ShipmentStatus::Open]);
 
     Livewire::test(ListShipments::class)
         ->assertCanSeeTableRecords([$shipped, $notShipped]);
 });
 
-it('filters shipments by shipped status', function (): void {
+it('filters shipments by status', function (): void {
     $shipped = Shipment::factory()->shipped()->create();
-    $notShipped = Shipment::factory()->create(['shipped' => false]);
+    $notShipped = Shipment::factory()->create(['status' => ShipmentStatus::Open]);
 
     Livewire::test(ListShipments::class)
-        ->filterTable('shipped', true)
+        ->filterTable('status', ShipmentStatus::Shipped->value)
         ->assertCanSeeTableRecords([$shipped])
         ->assertCanNotSeeTableRecords([$notShipped]);
 
     Livewire::test(ListShipments::class)
-        ->filterTable('shipped', false)
+        ->filterTable('status', ShipmentStatus::Open->value)
         ->assertCanSeeTableRecords([$notShipped])
         ->assertCanNotSeeTableRecords([$shipped]);
 });

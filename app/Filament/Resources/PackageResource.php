@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\PackageResource\Pages;
@@ -101,7 +102,8 @@ class PackageResource extends Resource
                         Forms\Components\TextInput::make('cost')
                             ->numeric()
                             ->prefix('$'),
-                        Forms\Components\Toggle::make('shipped'),
+                        Forms\Components\Select::make('status')
+                            ->options(PackageStatus::class),
                         Forms\Components\Toggle::make('exported'),
                     ]),
 
@@ -176,8 +178,8 @@ class PackageResource extends Resource
                 Tables\Columns\TextColumn::make('cost')
                     ->money('USD')
                     ->sortable(),
-                Tables\Columns\IconColumn::make('shipped')
-                    ->boolean(),
+                Tables\Columns\TextColumn::make('status')
+                    ->badge(),
                 Tables\Columns\IconColumn::make('exported')
                     ->boolean(),
                 Tables\Columns\TextColumn::make('created_at')
@@ -186,10 +188,8 @@ class PackageResource extends Resource
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                Tables\Filters\TernaryFilter::make('shipped')
-                    ->label('Shipped')
-                    ->trueLabel('Shipped')
-                    ->falseLabel('Not Shipped'),
+                Tables\Filters\SelectFilter::make('status')
+                    ->options(PackageStatus::class),
                 Tables\Filters\SelectFilter::make('carrier')
                     ->options([
                         'USPS' => 'USPS',
@@ -273,7 +273,7 @@ class PackageResource extends Resource
                     ->label('Reprint')
                     ->icon('heroicon-o-printer')
                     ->color('gray')
-                    ->visible(fn (Package $record) => $record->shipped && $record->label_data)
+                    ->visible(fn (Package $record) => $record->status === PackageStatus::Shipped && $record->label_data)
                     ->action(function (Package $record, $livewire): void {
                         $livewire->dispatch('print-label', label: $record->label_data, orientation: $record->label_orientation ?? 'portrait', format: $record->label_format ?? 'pdf', dpi: $record->label_dpi);
                     }),
@@ -284,7 +284,7 @@ class PackageResource extends Resource
                     ->requiresConfirmation()
                     ->modalHeading('Void Label')
                     ->modalDescription('This will cancel the label with the carrier. The package will be kept with its dimensions so it can be re-shipped.')
-                    ->visible(fn (Package $record) => $record->shipped && $record->tracking_number && $record->carrier)
+                    ->visible(fn (Package $record) => $record->status === PackageStatus::Shipped && $record->tracking_number && $record->carrier)
                     ->action(function (Package $record): void {
                         try {
                             $adapter = app(CarrierRegistry::class)->get($record->carrier);
@@ -304,10 +304,7 @@ class PackageResource extends Resource
                     }),
                 Actions\EditAction::make(),
             ])
-            ->groupedBulkActions([
-                Actions\DeleteBulkAction::make()
-                    ->visible(fn () => auth()->user()->role->isAtLeast(Role::Manager)),
-            ]);
+;
     }
 
     public static function getRelations(): array

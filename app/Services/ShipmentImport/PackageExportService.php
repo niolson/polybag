@@ -3,6 +3,7 @@
 namespace App\Services\ShipmentImport;
 
 use App\Contracts\ExportDestinationInterface;
+use App\Enums\PackageStatus;
 use App\Models\Package;
 use Illuminate\Support\Facades\Log;
 
@@ -93,7 +94,7 @@ class PackageExportService
      */
     public function exportUnexported(): array
     {
-        $packages = Package::where('shipped', true)
+        $packages = Package::where('status', PackageStatus::Shipped)
             ->where('exported', false)
             ->with('shipment.channel')
             ->get();

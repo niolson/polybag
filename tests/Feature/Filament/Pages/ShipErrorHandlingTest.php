@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\PackageStatus;
 use App\Contracts\CarrierAdapterInterface;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Filament\Pages\Ship;
@@ -46,7 +47,7 @@ function createShippablePackageForErrorTest(): Package
         'height' => 10,
         'width' => 8,
         'length' => 6,
-        'shipped' => false,
+        'status' => PackageStatus::Unshipped,
     ]);
 }
 
@@ -107,7 +108,7 @@ it('ship shows error on carrier API failure response', function (): void {
         ->assertNotDispatched('print-label');
 
     // Package should not be marked as shipped
-    expect($package->fresh()->shipped)->toBeFalse();
+    expect($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 
 it('ship handles general exception gracefully', function (): void {
@@ -121,7 +122,7 @@ it('ship handles general exception gracefully', function (): void {
         ->assertNotified()
         ->assertNotDispatched('print-label');
 
-    expect($package->fresh()->shipped)->toBeFalse();
+    expect($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 
 it('ship handles carrier timeout exception', function (): void {
@@ -140,7 +141,7 @@ it('ship handles carrier timeout exception', function (): void {
         ->assertNotified()
         ->assertNotDispatched('print-label');
 
-    expect($package->fresh()->shipped)->toBeFalse();
+    expect($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 
 it('ship handles runtime exception for optimistic locking', function (): void {

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages\Reports;
 
+use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Models\Package;
 use BackedEnum;
@@ -39,7 +40,7 @@ class ShippingCostAnalysis extends Page implements HasTable
         return $table
             ->query(
                 Package::query()
-                    ->where('shipped', true)
+                    ->where('status', PackageStatus::Shipped)
                     ->whereNotNull('cost')
                     ->with('shipment')
             )
@@ -81,9 +82,9 @@ class ShippingCostAnalysis extends Page implements HasTable
                             ->when($data['until'], fn ($q, $date) => $q->where('shipped_at', '<=', $date));
                     }),
                 Tables\Filters\SelectFilter::make('carrier')
-                    ->options(fn () => Package::query()->where('shipped', true)->where('shipped_date', '>=', now()->subDays(90)->toDateString())->whereNotNull('carrier')->distinct()->pluck('carrier', 'carrier')->toArray()),
+                    ->options(fn () => Package::query()->where('status', PackageStatus::Shipped)->where('shipped_date', '>=', now()->subDays(90)->toDateString())->whereNotNull('carrier')->distinct()->pluck('carrier', 'carrier')->toArray()),
                 Tables\Filters\SelectFilter::make('service')
-                    ->options(fn () => Package::query()->where('shipped', true)->where('shipped_date', '>=', now()->subDays(90)->toDateString())->whereNotNull('service')->distinct()->pluck('service', 'service')->toArray()),
+                    ->options(fn () => Package::query()->where('status', PackageStatus::Shipped)->where('shipped_date', '>=', now()->subDays(90)->toDateString())->whereNotNull('service')->distinct()->pluck('service', 'service')->toArray()),
             ], layout: FiltersLayout::AboveContent)
             ->deferFilters(false)
             ->filtersFormColumns(4);

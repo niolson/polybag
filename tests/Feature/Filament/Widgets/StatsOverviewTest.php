@@ -1,5 +1,7 @@
 <?php
 
+use App\Enums\PackageStatus;
+use App\Enums\ShipmentStatus;
 use App\Filament\Widgets\StatsOverview;
 use App\Models\DailyShippingStat;
 use App\Models\Package;
@@ -14,8 +16,8 @@ beforeEach(function (): void {
 });
 
 it('displays pending shipments count', function (): void {
-    Shipment::factory()->count(3)->create(['shipped' => false]);
-    Shipment::factory()->count(2)->create(['shipped' => true]);
+    Shipment::factory()->count(3)->create(['status' => ShipmentStatus::Open]);
+    Shipment::factory()->count(2)->create(['status' => ShipmentStatus::Shipped]);
 
     Livewire::test(StatsOverview::class)
         ->assertSee('Pending Shipments')
@@ -45,7 +47,7 @@ it('displays packages shipped today count', function (): void {
 });
 
 it('shows zero when no pending shipments', function (): void {
-    Shipment::factory()->count(2)->create(['shipped' => true]);
+    Shipment::factory()->count(2)->create(['status' => ShipmentStatus::Shipped]);
 
     Livewire::test(StatsOverview::class)
         ->assertSee('Pending Shipments')
@@ -54,7 +56,7 @@ it('shows zero when no pending shipments', function (): void {
 
 it('shows zero when no packages shipped today', function (): void {
     Package::factory()->count(3)->create([
-        'shipped' => true,
+        'status' => PackageStatus::Shipped,
         'shipped_at' => now()->subDay(),
     ]);
 

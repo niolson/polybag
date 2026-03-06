@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Saloon\Http\Auth\AccessTokenAuthenticator;
 use Saloon\Http\Faking\MockResponse;
+use App\Enums\PackageStatus;
 use Saloon\Laravel\Facades\Saloon;
 
 it('dispatches ManifestCreated after successful USPS manifest creation', function (): void {
@@ -59,7 +60,7 @@ it('dispatches ManifestCreated after successful USPS manifest creation', functio
     ]);
 
     $packages = Package::where('carrier', 'USPS')
-        ->where('shipped', true)
+        ->where('status', PackageStatus::Shipped)
         ->where('manifested', false)
         ->get();
 

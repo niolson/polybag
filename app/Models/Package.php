@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\PackageStatus;
 use App\Events\PackageCancelled;
 use App\Events\PackageShipped;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -35,7 +36,7 @@ class Package extends Model
         'length',
         'cost',
         'weight_mismatch',
-        'shipped',
+        'status',
         'shipped_at',
         'shipped_by_user_id',
         'exported',
@@ -51,7 +52,7 @@ class Package extends Model
         'length' => 'decimal:2',
         'cost' => 'decimal:2',
         'weight_mismatch' => 'boolean',
-        'shipped' => 'boolean',
+        'status' => PackageStatus::class,
         'shipped_at' => 'datetime',
         'exported' => 'boolean',
         'manifested' => 'boolean',
@@ -136,7 +137,7 @@ class Package extends Model
             // Optimistic locking - ensure package hasn't been shipped already
             $updated = DB::table('packages')
                 ->where('id', $this->id)
-                ->where('shipped', false)
+                ->where('status', PackageStatus::Unshipped->value)
                 ->update([
                     'tracking_number' => $response->trackingNumber,
                     'cost' => $response->cost,
@@ -146,7 +147,7 @@ class Package extends Model
                     'label_orientation' => $response->labelOrientation ?? 'portrait',
                     'label_format' => $response->labelFormat ?? 'pdf',
                     'label_dpi' => $response->labelDpi,
-                    'shipped' => true,
+                    'status' => PackageStatus::Shipped->value,
                     'shipped_at' => now(),
                     'shipped_by_user_id' => $shippedByUserId,
                     'updated_at' => now(),
@@ -177,7 +178,7 @@ class Package extends Model
             // Optimistic locking - ensure package is still shipped
             $updated = DB::table('packages')
                 ->where('id', $this->id)
-                ->where('shipped', true)
+                ->where('status', PackageStatus::Shipped->value)
                 ->update([
                     'tracking_number' => null,
                     'carrier' => null,
@@ -187,7 +188,7 @@ class Package extends Model
                     'label_orientation' => null,
                     'label_format' => 'pdf',
                     'label_dpi' => null,
-                    'shipped' => false,
+                    'status' => PackageStatus::Unshipped->value,
                     'shipped_at' => null,
                     'shipped_by_user_id' => null,
                     'updated_at' => now(),

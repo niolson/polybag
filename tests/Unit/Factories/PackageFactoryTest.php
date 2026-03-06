@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\PackageStatus;
 use App\Models\BoxSize;
 use App\Models\Manifest;
 use App\Models\Package;
@@ -12,14 +13,14 @@ it('creates a basic package', function (): void {
         ->and($package->height)->not->toBeNull()
         ->and($package->width)->not->toBeNull()
         ->and($package->length)->not->toBeNull()
-        ->and($package->shipped)->toBeFalse()
+        ->and($package->status)->toBe(PackageStatus::Unshipped)
         ->and($package->tracking_number)->toBeNull();
 });
 
 it('creates a shipped package', function (): void {
     $package = Package::factory()->shipped()->create();
 
-    expect($package->shipped)->toBeTrue()
+    expect($package->status)->toBe(PackageStatus::Shipped)
         ->and($package->tracking_number)->not->toBeNull()
         ->and($package->carrier)->toBeIn(['USPS', 'FedEx'])
         ->and($package->service)->toBe('Ground')
@@ -32,7 +33,7 @@ it('creates a shipped package', function (): void {
 it('creates a package with label but not shipped', function (): void {
     $package = Package::factory()->withLabel()->create();
 
-    expect($package->shipped)->toBeFalse()
+    expect($package->status)->toBe(PackageStatus::Unshipped)
         ->and($package->label_data)->not->toBeNull()
         ->and($package->label_orientation)->toBe('portrait');
 });
@@ -40,7 +41,7 @@ it('creates a package with label but not shipped', function (): void {
 it('creates a USPS shipped package', function (): void {
     $package = Package::factory()->usps()->create();
 
-    expect($package->shipped)->toBeTrue()
+    expect($package->status)->toBe(PackageStatus::Shipped)
         ->and($package->carrier)->toBe('USPS')
         ->and($package->service)->toBe('Priority Mail')
         ->and($package->tracking_number)->toStartWith('94');
@@ -49,7 +50,7 @@ it('creates a USPS shipped package', function (): void {
 it('creates a FedEx shipped package', function (): void {
     $package = Package::factory()->fedex()->create();
 
-    expect($package->shipped)->toBeTrue()
+    expect($package->status)->toBe(PackageStatus::Shipped)
         ->and($package->carrier)->toBe('FedEx')
         ->and($package->service)->toBe('FedEx Ground')
         ->and($package->tracking_number)->toHaveLength(12);
@@ -65,14 +66,14 @@ it('creates a package with box size', function (): void {
 it('creates an exported package', function (): void {
     $package = Package::factory()->exported()->create();
 
-    expect($package->shipped)->toBeTrue()
+    expect($package->status)->toBe(PackageStatus::Shipped)
         ->and($package->exported)->toBeTrue();
 });
 
 it('creates a manifested package', function (): void {
     $package = Package::factory()->manifested()->create();
 
-    expect($package->shipped)->toBeTrue()
+    expect($package->status)->toBe(PackageStatus::Shipped)
         ->and($package->manifest_id)->not->toBeNull()
         ->and($package->manifest)->toBeInstanceOf(Manifest::class);
 });
@@ -84,6 +85,6 @@ it('can chain multiple states', function (): void {
         ->create(['exported' => true]);
 
     expect($package->box_size_id)->not->toBeNull()
-        ->and($package->shipped)->toBeTrue()
+        ->and($package->status)->toBe(PackageStatus::Shipped)
         ->and($package->exported)->toBeTrue();
 });

@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\PackageStatus;
 use App\Models\Package;
 use Illuminate\Console\Command;
 
@@ -14,7 +15,7 @@ class BackfillWeightMismatch extends Command
     public function handle(): int
     {
         $query = Package::query()
-            ->where('shipped', true)
+            ->where('status', PackageStatus::Shipped)
             ->whereNotNull('weight')
             ->where('weight', '>', 0);
 

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages\Reports;
 
+use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Models\Package;
 use BackedEnum;
@@ -38,12 +39,12 @@ class RateComparison extends Page implements HasTable
     {
         // JOIN rate_quotes directly (not as a derived table) so the date
         // filter on packages.shipped_at applies BEFORE the aggregation.
-        // MySQL uses the (shipped, shipped_at) composite index to narrow
+        // MySQL uses the (status, shipped_at) composite index to narrow
         // packages first, then aggregates only their rate_quotes.
         return $table
             ->query(
                 Package::query()
-                    ->where('packages.shipped', true)
+                    ->where('packages.status', PackageStatus::Shipped->value)
                     ->join('rate_quotes as rq_all', 'rq_all.package_id', '=', 'packages.id')
                     ->select([
                         'packages.id',
@@ -107,7 +108,7 @@ class RateComparison extends Page implements HasTable
                             ->when($data['until'], fn ($q, $date) => $q->where('shipped_at', '<=', $date));
                     }),
                 Tables\Filters\SelectFilter::make('carrier')
-                    ->options(fn () => Package::query()->where('shipped', true)->where('shipped_at', '>=', now()->subDays(90))->whereNotNull('carrier')->distinct()->pluck('carrier', 'carrier')->toArray())
+                    ->options(fn () => Package::query()->where('status', PackageStatus::Shipped)->where('shipped_at', '>=', now()->subDays(90))->whereNotNull('carrier')->distinct()->pluck('carrier', 'carrier')->toArray())
                     ->query(fn ($query, array $data) => $data['value'] ? $query->where('packages.carrier', $data['value']) : $query),
             ], layout: FiltersLayout::AboveContent)
             ->deferFilters(false)
@@ -122,7 +123,7 @@ class RateComparison extends Page implements HasTable
     public function getTotalPotentialSavings(): float
     {
         $baseQuery = Package::query()
-            ->where('packages.shipped', true)
+            ->where('packages.status', PackageStatus::Shipped->value)
             ->join('rate_quotes as rq_all', 'rq_all.package_id', '=', 'packages.id')
             ->select([
                 DB::raw('MAX(CASE WHEN rq_all.selected = 1 THEN rq_all.quoted_price END) as selected_price'),

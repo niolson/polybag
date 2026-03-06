@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\PackageStatus;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\LabelBatchStatus;
 use App\Models\BoxSize;
@@ -54,7 +55,7 @@ it('marks shipments with missing address fields as ineligible', function (): voi
 it('marks shipments with existing unshipped packages as ineligible', function (): void {
     $shipment = Shipment::factory()->create();
     ShipmentItem::factory()->create(['shipment_id' => $shipment->id]);
-    Package::factory()->for($shipment)->create(['shipped' => false]);
+    Package::factory()->for($shipment)->create(['status' => PackageStatus::Unshipped]);
 
     $result = $this->service->validateShipmentsForBatch(collect([$shipment]));
 

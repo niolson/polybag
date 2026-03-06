@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Events\PackageCreated;
 use App\Filament\Concerns\NotifiesUser;
@@ -161,14 +162,14 @@ class Pack extends Page
             $this->resetForNextShipment();
 
         } catch (\Saloon\Exceptions\Request\Statuses\RequestTimeOutException $e) {
-            if ($package?->exists && ! $package->shipped) {
+            if ($package?->exists && $package->status !== PackageStatus::Shipped) {
                 $package->packageItems()->delete();
                 $package->delete();
             }
             logger()->error('AutoShip timeout', ['package_id' => $package?->id]);
             $this->notifyError('Carrier Timeout', 'The carrier API is not responding. Please try again in a few moments.');
         } catch (\Saloon\Exceptions\Request\RequestException $e) {
-            if ($package?->exists && ! $package->shipped) {
+            if ($package?->exists && $package->status !== PackageStatus::Shipped) {
                 $package->packageItems()->delete();
                 $package->delete();
             }
@@ -179,7 +180,7 @@ class Pack extends Page
             logger()->warning('AutoShip race condition', ['package_id' => $package?->id, 'error' => $e->getMessage()]);
             $this->notifyError('Package State Changed', $e->getMessage());
         } catch (\Exception $e) {
-            if ($package?->exists && ! $package->shipped) {
+            if ($package?->exists && $package->status !== PackageStatus::Shipped) {
                 $package->packageItems()->delete();
                 $package->delete();
             }
@@ -203,7 +204,7 @@ class Pack extends Page
 
             if ($previousPackageId) {
                 $orphan = Package::where('id', $previousPackageId)
-                    ->where('shipped', false)
+                    ->where('status', PackageStatus::Unshipped)
                     ->first();
 
                 if ($orphan) {
@@ -410,7 +411,7 @@ class Pack extends Page
 
         $package = Package::find($packageId);
 
-        if (! $package || ! $package->shipped || ! $package->label_data) {
+        if (! $package || $package->status !== PackageStatus::Shipped || ! $package->label_data) {
             $this->notifyError('Label Not Available', 'The label for the last shipped package is not available.');
 
             return;
@@ -442,7 +443,7 @@ class Pack extends Page
 
         $package = Package::with('shipment')->find($packageId);
 
-        if (! $package || ! $package->shipped) {
+        if (! $package || $package->status !== PackageStatus::Shipped) {
             $this->notifyError('Package Not Found', 'The last shipped package could not be found.');
 
             return;

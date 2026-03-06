@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Contracts\ExportDestinationInterface;
+use App\Enums\PackageStatus;
 use App\Models\Package;
 use App\Services\ShipmentImport\PackageExportService;
 use Illuminate\Console\Command;
@@ -127,7 +128,7 @@ class ExportPackagesCommand extends Command
     {
         $this->info('Running in dry-run mode (no changes will be made)...');
 
-        $packages = Package::where('shipped', true)
+        $packages = Package::where('status', PackageStatus::Shipped)
             ->where('exported', false)
             ->with('shipment.channel')
             ->get();

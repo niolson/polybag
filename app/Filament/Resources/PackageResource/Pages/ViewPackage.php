@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\PackageResource\Pages;
 
+use App\Enums\PackageStatus;
 use App\Filament\Resources\PackageResource;
 use App\Services\Carriers\CarrierRegistry;
 use Filament\Actions\Action;
@@ -26,12 +27,12 @@ class ViewPackage extends ViewRecord
                 ->icon('heroicon-o-paper-airplane')
                 ->color('primary')
                 ->url(fn () => '/ship/'.$this->record->id)
-                ->disabled(fn () => $this->record->shipped),
+                ->disabled(fn () => $this->record->status === PackageStatus::Shipped),
             Action::make('reprint')
                 ->label('Reprint Label')
                 ->icon('heroicon-o-printer')
                 ->color('primary')
-                ->visible(fn () => $this->record->shipped && $this->record->label_data)
+                ->visible(fn () => $this->record->status === PackageStatus::Shipped && $this->record->label_data)
                 ->action(function (): void {
                     $this->dispatch('print-label', label: $this->record->label_data, orientation: $this->record->label_orientation ?? 'portrait', format: $this->record->label_format ?? 'pdf', dpi: $this->record->label_dpi);
 
@@ -47,7 +48,7 @@ class ViewPackage extends ViewRecord
                 ->requiresConfirmation()
                 ->modalHeading('Void Label')
                 ->modalDescription('This will cancel the label with the carrier. The package will be kept with its dimensions so it can be re-shipped.')
-                ->visible(fn () => $this->record->shipped && $this->record->tracking_number && $this->record->carrier)
+                ->visible(fn () => $this->record->status === PackageStatus::Shipped && $this->record->tracking_number && $this->record->carrier)
                 ->action(function (): void {
                     $adapter = app(CarrierRegistry::class)->get($this->record->carrier);
                     $response = $adapter->cancelShipment($this->record->tracking_number, $this->record);
@@ -94,10 +95,8 @@ class ViewPackage extends ViewRecord
                             TextEntry::make('weight')
                                 ->suffix(' lbs'),
                         ]),
-                        TextEntry::make('shipped')
-                            ->badge()
-                            ->formatStateUsing(fn ($state) => $state ? 'Shipped' : 'Not Shipped')
-                            ->color(fn ($state) => $state ? 'success' : 'warning'),
+                        TextEntry::make('status')
+                            ->badge(),
                         TextEntry::make('shipped_at')
                             ->dateTime(),
                         TextEntry::make('shippedBy.name')

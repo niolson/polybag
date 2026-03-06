@@ -34,6 +34,7 @@ class ShipmentFactory extends Factory
             'shipping_method_id' => ShippingMethod::factory(),
             'channel_reference' => null,
             'channel_id' => Channel::factory(),
+            'status' => 'open',
         ];
     }
 
@@ -72,7 +73,7 @@ class ShipmentFactory extends Factory
     public function shipped(): static
     {
         return $this->state(fn () => [
-            'shipped' => true,
+            'status' => 'shipped',
         ]);
     }
 

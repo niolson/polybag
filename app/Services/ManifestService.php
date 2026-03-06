@@ -8,6 +8,7 @@ use App\Events\ManifestCreated as ManifestCreatedEvent;
 use App\Http\Integrations\USPS\Requests\ScanForm;
 use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Manifest;
+use App\Enums\PackageStatus;
 use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
 use Illuminate\Support\Collection;
@@ -28,7 +29,7 @@ class ManifestService
         return Package::query()
             ->selectRaw('carrier, count(*) as count')
             ->where('manifested', false)
-            ->where('shipped', true)
+            ->where('status', PackageStatus::Shipped)
             ->whereNotNull('tracking_number')
             ->groupBy('carrier')
             ->get()
@@ -49,7 +50,7 @@ class ManifestService
     {
         return Package::query()
             ->where('manifested', false)
-            ->where('shipped', true)
+            ->where('status', PackageStatus::Shipped)
             ->whereNotNull('tracking_number')
             ->with('shipment')
             ->get()
@@ -272,7 +273,7 @@ class ManifestService
         return Package::query()
             ->where('carrier', $carrier)
             ->where('manifested', false)
-            ->where('shipped', true)
+            ->where('status', PackageStatus::Shipped)
             ->whereNotNull('tracking_number')
             ->update(['manifested' => true]);
     }

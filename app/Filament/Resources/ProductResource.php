@@ -122,10 +122,7 @@ class ProductResource extends Resource
             ->recordActions([
                 Actions\EditAction::make(),
             ])
-            ->groupedBulkActions([
-                Actions\DeleteBulkAction::make()
-                    ->visible(fn () => auth()->user()->role->isAtLeast(Role::Manager)),
-            ]);
+;
     }
 
     public static function getRelations(): array

@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Pages\Pack;
 use App\Models\BoxSize;
@@ -280,7 +281,7 @@ it('cleans up existing unshipped packages before creating a new one', function (
         'height' => 5,
         'width' => 5,
         'length' => 5,
-        'shipped' => false,
+        'status' => PackageStatus::Unshipped,
     ]);
     $orphan->packageItems()->create([
         'shipment_item_id' => $shipmentItem->id,
@@ -346,7 +347,7 @@ it('preserves shipped packages when creating a new one', function (): void {
     // Both packages should exist: the shipped one and the new one
     expect(Package::where('shipment_id', $shipment->id)->count())->toBe(2)
         ->and(Package::find($shipped->id))->not->toBeNull()
-        ->and(Package::find($shipped->id)->shipped)->toBeTrue();
+        ->and(Package::find($shipped->id)->status)->toBe(PackageStatus::Shipped);
 });
 
 it('downgrades auto-ship to manual ship for non-admin users', function (): void {
@@ -380,7 +381,7 @@ it('downgrades auto-ship to manual ship for non-admin users', function (): void 
 
     $package = Package::where('shipment_id', $shipment->id)->first();
     expect($package)->not->toBeNull()
-        ->and($package->shipped)->toBeFalse();
+        ->and($package->status)->toBe(PackageStatus::Unshipped);
 });
 
 it('deletes orphaned package items when cleaning up unshipped packages', function (): void {
@@ -401,7 +402,7 @@ it('deletes orphaned package items when cleaning up unshipped packages', functio
         'height' => 5,
         'width' => 5,
         'length' => 5,
-        'shipped' => false,
+        'status' => PackageStatus::Unshipped,
     ]);
     $orphanItem = $orphan->packageItems()->create([
         'shipment_item_id' => $shipmentItem->id,

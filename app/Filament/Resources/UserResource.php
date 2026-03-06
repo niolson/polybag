@@ -64,10 +64,7 @@ class UserResource extends Resource
             ->recordActions([
                 Actions\EditAction::make(),
             ])
-            ->groupedBulkActions([
-                Actions\DeleteBulkAction::make()
-                    ->visible(fn () => auth()->user()->role->isAtLeast(Role::Admin)),
-            ]);
+;
     }
 
     public static function getRelations(): array

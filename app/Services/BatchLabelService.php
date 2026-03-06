@@ -5,6 +5,8 @@ namespace App\Services;
 use App\DataTransferObjects\BatchValidationResult;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\LabelBatchStatus;
+use App\Enums\PackageStatus;
+use App\Enums\ShipmentStatus;
 use App\Jobs\GenerateLabelJob;
 use App\Models\BoxSize;
 use App\Models\LabelBatch;
@@ -44,7 +46,7 @@ class BatchLabelService
 
     private function getIneligibilityReason(Shipment $shipment): ?string
     {
-        if ($shipment->shipped) {
+        if ($shipment->status === ShipmentStatus::Shipped) {
             return 'Already shipped';
         }
 
@@ -56,7 +58,7 @@ class BatchLabelService
             return 'Missing address fields';
         }
 
-        if ($shipment->packages->where('shipped', false)->isNotEmpty()) {
+        if ($shipment->packages->where('status', PackageStatus::Unshipped)->isNotEmpty()) {
             return 'Has existing unshipped packages';
         }
 

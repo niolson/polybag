@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\Deliverability;
+use App\Enums\ShipmentStatus;
 use App\Enums\LabelBatchItemStatus;
 use App\Filament\Widgets\ExceptionsWidget;
 use App\Models\LabelBatchItem;
@@ -13,11 +14,11 @@ uses(RefreshDatabase::class);
 
 it('shows undeliverable shipments count', function () {
     Shipment::factory()->count(2)->create([
-        'shipped' => false,
+        'status' => ShipmentStatus::Open,
         'deliverability' => Deliverability::No,
     ]);
     Shipment::factory()->create([
-        'shipped' => false,
+        'status' => ShipmentStatus::Open,
         'deliverability' => Deliverability::Yes,
     ]);
 
@@ -50,7 +51,7 @@ it('shows failed batch items count', function () {
 
 it('shows unmapped shipping references count', function () {
     Shipment::factory()->count(2)->create([
-        'shipped' => false,
+        'status' => ShipmentStatus::Open,
         'shipping_method_reference' => 'UNKNOWN_METHOD',
         'shipping_method_id' => null,
     ]);

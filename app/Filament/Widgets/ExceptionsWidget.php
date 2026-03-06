@@ -3,6 +3,7 @@
 namespace App\Filament\Widgets;
 
 use App\Enums\Deliverability;
+use App\Enums\ShipmentStatus;
 use App\Enums\LabelBatchItemStatus;
 use App\Filament\Pages\UnmappedShippingReferences;
 use App\Filament\Resources\ShipmentResource;
@@ -28,7 +29,7 @@ class ExceptionsWidget extends BaseWidget
     private function buildStats(): array
     {
         $undeliverable = Shipment::query()
-            ->where('shipped', false)
+            ->where('status', ShipmentStatus::Open)
             ->where('deliverability', Deliverability::No)
             ->where('created_at', '>=', now()->subDays(90))
             ->count();
@@ -39,7 +40,7 @@ class ExceptionsWidget extends BaseWidget
             ->count();
 
         $unmappedReferences = Shipment::query()
-            ->where('shipped', false)
+            ->where('status', ShipmentStatus::Open)
             ->where('created_at', '>=', now()->subDays(90))
             ->whereNotNull('shipping_method_reference')
             ->whereNull('shipping_method_id')

@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\PackageStatus;
 use App\Contracts\CarrierAdapterInterface;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Filament\Pages\Ship;
@@ -47,7 +48,7 @@ function createShippablePackage(): Package
         'height' => 10,
         'width' => 8,
         'length' => 6,
-        'shipped' => false,
+        'status' => PackageStatus::Unshipped,
     ]);
 }
 
