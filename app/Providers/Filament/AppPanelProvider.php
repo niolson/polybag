@@ -32,16 +32,17 @@ class AppPanelProvider extends PanelProvider
             ->path('/')
             ->viteTheme('resources/css/filament/app/theme.css')
             ->login(Login::class)
-            ->font('Inter')
+            ->font('DM Sans')
             ->defaultThemeMode(ThemeMode::Light)
             ->colors([
-                'primary' => '#4f6af5',
+                'primary' => '#0d9488',
                 'gray' => Color::Slate,
                 'info' => Color::Sky,
                 'success' => Color::Emerald,
                 'warning' => Color::Amber,
                 'danger' => Color::Rose,
             ])
+            ->sidebarWidth('16rem')
             ->maxContentWidth(Width::ScreenTwoExtraLarge)
             ->sidebarCollapsibleOnDesktop()
             ->globalSearchKeyBindings(['command+k', 'ctrl+k'])

@@ -4,38 +4,161 @@
 @source '../../../../resources/views/filament/**/*';
 
 @layer utilities {
-    /* Stat card hover lift */
-    .fi-wi-stats-overview-stat {
-        transition: transform 0.15s ease, box-shadow 0.15s ease;
-    }
-
-    .fi-wi-stats-overview-stat:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
-    }
-
-    /* Chart widget cards */
-    .fi-wi-chart {
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03);
-    }
-
-    /* Sidebar subtle background */
+    /* ═══════════════════════════════════════════
+       SIDEBAR — Light mode
+       ═══════════════════════════════════════════ */
     .fi-sidebar {
         background: linear-gradient(180deg, rgb(248 250 252) 0%, rgb(241 245 249) 100%);
         border-right: 1px solid rgb(226 232 240);
     }
 
     .dark .fi-sidebar {
-        background: linear-gradient(180deg, rgb(15 23 42) 0%, rgb(15 23 42) 100%);
-        border-right-color: rgb(30 41 59);
+        background: #0f1219;
+        border-right-color: rgba(255, 255, 255, 0.06);
     }
 
+    /* Sidebar nav items */
     .fi-sidebar-nav-item-button {
-        border-radius: 0.5rem;
+        border-radius: 0.375rem;
         transition: all 0.15s ease;
     }
 
-    /* Table row hover */
+    .fi-sidebar-nav-item-button:hover {
+        background: rgba(13, 148, 136, 0.06);
+    }
+
+    .fi-sidebar-nav-item-button[data-active] {
+        background: rgba(13, 148, 136, 0.1);
+        color: #0d9488;
+        font-weight: 600;
+    }
+
+    .fi-sidebar-nav-item-button[data-active]:hover {
+        background: rgba(13, 148, 136, 0.14);
+    }
+
+    /* Sidebar nav item icons — active state teal */
+    .fi-sidebar-nav-item-button[data-active] .fi-sidebar-nav-item-icon {
+        color: #0d9488;
+    }
+
+    /* Dark mode sidebar nav */
+    .dark .fi-sidebar-nav-item-button {
+        color: rgba(255, 255, 255, 0.55);
+    }
+
+    .dark .fi-sidebar-nav-item-button:hover {
+        background: rgba(255, 255, 255, 0.06);
+        color: rgba(255, 255, 255, 0.9);
+    }
+
+    .dark .fi-sidebar-nav-item-button[data-active] {
+        background: rgba(13, 148, 136, 0.15);
+        color: #5eead4;
+    }
+
+    .dark .fi-sidebar-nav-item-button[data-active]:hover {
+        background: rgba(13, 148, 136, 0.2);
+    }
+
+    .dark .fi-sidebar-nav-item-icon {
+        color: rgba(255, 255, 255, 0.35);
+    }
+
+    .dark .fi-sidebar-nav-item-button:hover .fi-sidebar-nav-item-icon {
+        color: rgba(255, 255, 255, 0.7);
+    }
+
+    .dark .fi-sidebar-nav-item-button[data-active] .fi-sidebar-nav-item-icon {
+        color: #5eead4;
+    }
+
+    /* Sidebar group labels */
+    .fi-sidebar-group-label {
+        text-transform: uppercase;
+        font-size: 0.625rem;
+        letter-spacing: 0.08em;
+        font-weight: 700;
+        color: rgb(100 116 139);
+    }
+
+    .dark .fi-sidebar-group-label {
+        color: rgba(255, 255, 255, 0.25);
+    }
+
+    /* ═══════════════════════════════════════════
+       TOPBAR — Clean, minimal
+       ═══════════════════════════════════════════ */
+    .fi-topbar {
+        border-bottom: 1px solid rgb(226 232 240);
+        backdrop-filter: blur(12px);
+        background: rgba(255, 255, 255, 0.85);
+    }
+
+    .dark .fi-topbar {
+        border-bottom-color: rgb(30 41 59);
+        background: rgba(15, 23, 42, 0.85);
+    }
+
+    /* Topbar brand text — dark mode only */
+    .dark .fi-topbar nav > div:first-child {
+        color: white;
+    }
+
+    /* ═══════════════════════════════════════════
+       TYPOGRAPHY
+       ═══════════════════════════════════════════ */
+    .fi-header-heading {
+        letter-spacing: -0.03em;
+        font-weight: 700;
+    }
+
+    .fi-section-header-heading {
+        letter-spacing: -0.015em;
+        font-weight: 600;
+    }
+
+    /* ═══════════════════════════════════════════
+       STAT CARDS — Subtle lift on hover
+       ═══════════════════════════════════════════ */
+    .fi-wi-stats-overview-stat {
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        border: 1px solid rgb(226 232 240);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    }
+
+    .fi-wi-stats-overview-stat:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+    }
+
+    .dark .fi-wi-stats-overview-stat {
+        border-color: rgb(30 41 59);
+    }
+
+    /* ═══════════════════════════════════════════
+       TABLES — Clean, high contrast headers
+       ═══════════════════════════════════════════ */
+    .fi-ta-header-cell {
+        font-weight: 700;
+        font-size: 0.6875rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: rgb(71 85 105);
+        background: rgb(248 250 252);
+        border-bottom: 2px solid rgb(226 232 240);
+    }
+
+    .dark .fi-ta-header-cell {
+        color: rgb(148 163 184);
+        background: rgb(15 23 42);
+        border-bottom-color: rgb(30 41 59);
+    }
+
+    .fi-ta-row {
+        transition: background-color 0.1s ease;
+    }
+
     .fi-ta-row:hover td {
         background-color: rgb(248 250 252);
     }
@@ -44,113 +167,189 @@
         background-color: rgb(30 41 59);
     }
 
-    /* Topbar refinement */
-    .fi-topbar {
-        border-bottom: 1px solid rgb(226 232 240);
-        backdrop-filter: blur(8px);
+    /* Subtle alternating rows */
+    .fi-ta-row:nth-child(even) td {
+        background-color: rgba(248, 250, 252, 0.5);
     }
 
-    .dark .fi-topbar {
-        border-bottom-color: rgb(30 41 59);
+    .dark .fi-ta-row:nth-child(even) td {
+        background-color: rgba(255, 255, 255, 0.015);
     }
 
-    /* Page heading weight */
-    .fi-header-heading {
-        letter-spacing: -0.025em;
+    /* ═══════════════════════════════════════════
+       CARDS & SECTIONS
+       ═══════════════════════════════════════════ */
+    .fi-section {
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+        border: 1px solid rgb(226 232 240);
     }
 
-    /* Button refinement */
+    .dark .fi-section {
+        border-color: rgb(30 41 59);
+    }
+
+    .fi-wi-chart {
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+        border: 1px solid rgb(226 232 240);
+    }
+
+    .dark .fi-wi-chart {
+        border-color: rgb(30 41 59);
+    }
+
+    /* ═══════════════════════════════════════════
+       BUTTONS — Crisp interactions
+       ═══════════════════════════════════════════ */
     .fi-btn {
         transition: all 0.15s ease;
-    }
-
-    .fi-btn:active {
-        transform: scale(0.98);
-    }
-
-    /* Section headings */
-    .fi-section-header-heading {
+        font-weight: 600;
         letter-spacing: -0.01em;
     }
 
-    /* Badge polish */
+    .fi-btn:active {
+        transform: scale(0.97);
+    }
+
+    /* ═══════════════════════════════════════════
+       BADGES — Tighter, more refined
+       ═══════════════════════════════════════════ */
     .fi-badge {
-        font-weight: 500;
+        font-weight: 600;
+        font-size: 0.6875rem;
+        letter-spacing: 0.01em;
     }
 
-    /* Input focus ring */
-    .fi-input:focus {
-        box-shadow: 0 0 0 1px var(--primary-500);
+    /* ═══════════════════════════════════════════
+       INPUTS — Clean focus states
+       ═══════════════════════════════════════════ */
+    .fi-input:focus-within {
+        box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.15);
+        border-color: var(--primary-500);
     }
 
-    /* Card sections */
-    .fi-section {
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-    }
+    /* ═══════════════════════════════════════════
+       MISC REFINEMENTS
+       ═══════════════════════════════════════════ */
 
-    /* Pagination buttons */
-    .fi-pagination-items button {
-        transition: all 0.1s ease;
-    }
-
-    /* Breadcrumb refinement */
+    /* Breadcrumbs */
     .fi-breadcrumbs {
         font-size: 0.8125rem;
     }
 
+    /* Pagination */
+    .fi-pagination-items button {
+        transition: all 0.1s ease;
+    }
+
+    /* Modal */
+    .fi-modal-window {
+        box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.2);
+    }
+
+    /* Notification toast */
+    .fi-notification {
+        box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.12);
+    }
+
     /* Filter dropdown */
     .fi-ta-filters-dropdown {
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
-    }
-
-    /* Navigation group labels */
-    .fi-sidebar-group-label {
-        text-transform: uppercase;
-        font-size: 0.6875rem;
-        letter-spacing: 0.05em;
-        font-weight: 600;
-    }
-
-    /* Table header refinement */
-    .fi-ta-header-cell {
-        font-weight: 600;
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: rgb(100 116 139);
-    }
-
-    .dark .fi-ta-header-cell {
-        color: rgb(148 163 184);
-    }
-
-    /* Alternating table row tint */
-    .fi-ta-row:nth-child(even) td {
-        background-color: rgb(248 250 252);
-    }
-
-    .dark .fi-ta-row:nth-child(even) td {
-        background-color: rgba(255, 255, 255, 0.02);
-    }
-
-    /* Modal refinement */
-    .fi-modal-window {
-        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15);
-    }
-
-    /* Active sidebar item highlight */
-    .fi-sidebar-nav-item-button[data-active] {
-        font-weight: 600;
+        box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.12);
     }
 
     /* Fieldset labels */
     .fi-fieldset-label {
         font-size: 0.8125rem;
-        font-weight: 500;
+        font-weight: 600;
     }
 
-    /* Notification toast shadow */
-    .fi-notification {
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+    /* ═══════════════════════════════════════════
+       GLOBAL SEARCH
+       ═══════════════════════════════════════════ */
+    .fi-global-search-field {
+        transition: all 0.2s ease;
     }
+
+    /* ═══════════════════════════════════════════
+       SIDEBAR GROUP COLLAPSE BUTTON
+       ═══════════════════════════════════════════ */
+    .dark .fi-sidebar-group-button {
+        color: rgba(255, 255, 255, 0.25);
+    }
+
+    .dark .fi-sidebar-group-button:hover {
+        color: rgba(255, 255, 255, 0.5);
+    }
+
+    /* ═══════════════════════════════════════════
+       CONTENT AREA — Subtle background
+       ═══════════════════════════════════════════ */
+    .fi-main {
+        background: rgb(249 250 251);
+    }
+
+    .dark .fi-main {
+        background: rgb(15 23 42);
+    }
+}
+
+/* ═══════════════════════════════════════════════
+   LOGIN PAGE — Outside @layer for higher specificity
+   ═══════════════════════════════════════════════ */
+body.fi-body:has(.fi-simple-layout) {
+    background: #1a1f2e !important;
+}
+
+.fi-simple-layout {
+    background: #1a1f2e !important;
+    min-height: 100vh;
+    position: relative;
+}
+
+.fi-simple-main-ctn {
+    background: transparent !important;
+}
+
+/* The actual login card */
+.fi-simple-main {
+    background: white;
+    border-radius: 0.75rem;
+    box-shadow: 0 20px 60px -15px rgba(0, 0, 0, 0.3);
+}
+
+.fi-simple-header {
+    color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.fi-simple-header-heading {
+    color: rgba(255, 255, 255, 0.65) !important;
+}
+
+.fi-simple-layout::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background-size: 48px 48px;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.fi-simple-layout::after {
+    content: '';
+    position: fixed;
+    top: 25%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 600px;
+    height: 400px;
+    background: radial-gradient(ellipse, rgba(13, 148, 136, 0.15) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.fi-simple-layout > * {
+    position: relative;
+    z-index: 1;
 }
