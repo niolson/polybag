@@ -20,6 +20,7 @@ use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
 use Filament\Pages\Page;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\Session;
 
 class Ship extends Page implements HasForms
 {
@@ -58,10 +59,14 @@ class Ship extends Page implements HasForms
 
     public ?array $data = [];
 
+    public string $returnUrl = '/pack';
+
     public function mount($package_id = null): void
     {
+        $this->returnUrl = Session::pull('ship_return_url', '/pack');
+
         if (! $package_id) {
-            $this->redirect('/pack');
+            $this->redirect($this->returnUrl);
 
             return;
         }
@@ -72,7 +77,7 @@ class Ship extends Page implements HasForms
 
         if ($this->package->status === PackageStatus::Shipped) {
             $this->notifyWarning('Already Shipped', 'This package has already been shipped.');
-            $this->redirect('/pack');
+            $this->redirect($this->returnUrl);
 
             return;
         }
@@ -114,8 +119,8 @@ class Ship extends Page implements HasForms
                 ->icon('heroicon-o-printer')
                 ->keybindings(['f12'])
                 ->disabled(fn () => empty($this->rateOptions)),
-            Action::make('Back to Pack')
-                ->action(fn () => $this->redirect('/pack'))
+            Action::make('Back')
+                ->action(fn () => $this->redirect($this->returnUrl))
                 ->icon('heroicon-o-arrow-left')
                 ->color('gray'),
         ];
@@ -235,13 +240,13 @@ class Ship extends Page implements HasForms
                     orientation: $response->labelOrientation ?? 'portrait',
                     format: $response->labelFormat ?? 'pdf',
                     dpi: $response->labelDpi,
-                    redirectTo: '/pack',
+                    redirectTo: $this->returnUrl,
                 );
             } elseif ($response->labelData) {
                 $this->notifyInfo('Label printing suppressed (sandbox mode)');
-                $this->redirect('/pack');
+                $this->redirect($this->returnUrl);
             } else {
-                $this->redirect('/pack');
+                $this->redirect($this->returnUrl);
             }
 
             $this->notifySuccess('Package Shipped', "Tracking: {$response->trackingNumber}");

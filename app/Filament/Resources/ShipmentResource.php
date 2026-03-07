@@ -74,7 +74,6 @@ class ShipmentResource extends Resource
                     ->inlineLabel()
                     ->schema([
                         Forms\Components\TextInput::make('shipment_reference')
-                            ->required()
                             ->maxLength(255),
                         Forms\Components\Select::make('status')
                             ->options(ShipmentStatus::class)

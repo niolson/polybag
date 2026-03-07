@@ -110,11 +110,11 @@
             <h3 class="text-lg font-semibold text-gray-900 dark:text-white">No Package Selected</h3>
             <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Select a package from the packing page to ship.</p>
             <x-filament::button
-                href="/pack"
+                href="{{ $returnUrl }}"
                 tag="a"
                 class="mt-4"
             >
-                Go to Packing
+                Go Back
             </x-filament::button>
         </div>
     @endif
