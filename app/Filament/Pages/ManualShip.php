@@ -36,7 +36,8 @@ class ManualShip extends Page
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->role->isAtLeast(Role::User) ?? false;
+        return (auth()->user()?->role->isAtLeast(Role::User) ?? false)
+            && app(\App\Services\SettingsService::class)->get('manual_shipping_enabled', true);
     }
 
     // Address fields
