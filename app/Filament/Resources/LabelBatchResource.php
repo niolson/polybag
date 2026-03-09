@@ -22,13 +22,15 @@ class LabelBatchResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-queue-list';
 
-    protected static ?string $navigationLabel = 'Batch Shipments';
+    protected static ?string $navigationLabel = 'Label Batches';
 
-    protected static ?string $modelLabel = 'Batch Shipment';
+    protected static ?string $modelLabel = 'Label Batch';
 
-    protected static ?string $pluralModelLabel = 'Batch Shipments';
+    protected static ?string $pluralModelLabel = 'Label Batches';
 
     protected static ?string $slug = 'batch-shipments';
+
+    protected static \UnitEnum|string|null $navigationGroup = 'Manage';
 
     protected static ?int $navigationSort = 3;
 

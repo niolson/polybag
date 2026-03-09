@@ -17,6 +17,7 @@ use BackedEnum;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Session;
+use UnitEnum;
 
 class ManualShip extends Page
 {
@@ -25,6 +26,8 @@ class ManualShip extends Page
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-pencil-square';
 
     protected static ?string $navigationLabel = 'Manual Ship';
+
+    protected static UnitEnum|string|null $navigationGroup = 'Ship';
 
     protected static ?int $navigationSort = 2;
 

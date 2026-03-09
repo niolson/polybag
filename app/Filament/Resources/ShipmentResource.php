@@ -21,6 +21,7 @@ use Filament\Resources\RelationManagers\RelationGroup;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\FontWeight;
 use Filament\Support\Enums\IconPosition;
@@ -30,6 +31,7 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Cache;
 
 class ShipmentResource extends Resource
 {
@@ -39,7 +41,20 @@ class ShipmentResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-truck';
 
+    protected static \UnitEnum|string|null $navigationGroup = 'Manage';
+
+    protected static ?int $navigationSort = 1;
+
     protected static ?string $recordTitleAttribute = 'shipment_reference';
+
+    public static function getNavigationBadge(): ?string
+    {
+        $count = Cache::remember('shipments_open_count', 60, function () {
+            return Shipment::where('status', ShipmentStatus::Open)->count();
+        });
+
+        return $count > 0 ? number_format($count) : null;
+    }
 
     protected static int $globalSearchResultsLimit = 10;
 

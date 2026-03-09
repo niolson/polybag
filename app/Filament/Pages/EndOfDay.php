@@ -18,6 +18,10 @@ class EndOfDay extends Page
 
     protected static ?string $navigationLabel = 'End of Day';
 
+    protected static \UnitEnum|string|null $navigationGroup = 'Ship';
+
+    protected static ?int $navigationSort = 3;
+
     protected string $view = 'filament.pages.end-of-day';
 
     /** @var array<int, array{carrier: string, count: int, supports_manifest: bool}> */

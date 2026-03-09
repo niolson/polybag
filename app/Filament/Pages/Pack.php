@@ -16,6 +16,7 @@ use BackedEnum;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Session;
+use UnitEnum;
 
 class Pack extends Page
 {
@@ -23,11 +24,17 @@ class Pack extends Page
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-archive-box-arrow-down';
 
+    protected static ?string $navigationLabel = 'Scan & Pack';
+
+    protected static UnitEnum|string|null $navigationGroup = 'Ship';
+
+    protected static ?int $navigationSort = 1;
+
     protected string $view = 'filament.pages.pack';
 
     protected static ?string $slug = 'pack/{shipment_id?}';
 
-    protected ?string $heading = 'Pack';
+    protected ?string $heading = 'Scan & Pack';
 
     public static function canAccess(): bool
     {
