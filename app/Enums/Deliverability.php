@@ -11,6 +11,7 @@ use Illuminate\Contracts\Support\Htmlable;
 
 enum Deliverability: string implements HasColor, HasIcon, HasLabel
 {
+    case NotChecked = 'not_checked';
     case No = 'no';
     case Maybe = 'maybe';
     case Yes = 'yes';
@@ -18,6 +19,7 @@ enum Deliverability: string implements HasColor, HasIcon, HasLabel
     public function getLabel(): string|Htmlable|null
     {
         return match ($this) {
+            self::NotChecked => 'Not Checked',
             self::No => 'No',
             self::Maybe => 'Maybe',
             self::Yes => 'Yes',
@@ -27,6 +29,7 @@ enum Deliverability: string implements HasColor, HasIcon, HasLabel
     public function getColor(): string|array|null
     {
         return match ($this) {
+            self::NotChecked => 'gray',
             self::No => 'danger',
             self::Maybe => 'warning',
             self::Yes => 'success',
@@ -36,6 +39,7 @@ enum Deliverability: string implements HasColor, HasIcon, HasLabel
     public function getIcon(): string|BackedEnum|Htmlable|null
     {
         return match ($this) {
+            self::NotChecked => Heroicon::QuestionMarkCircle,
             self::No => Heroicon::XCircle,
             self::Maybe => Heroicon::ExclamationTriangle,
             self::Yes => Heroicon::CheckCircle,

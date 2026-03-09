@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ShipmentResource\Pages;
 
+use App\Enums\Deliverability;
 use App\Filament\Resources\ShipmentResource;
 use Filament\Actions;
 use Filament\Notifications\Notification;
@@ -22,11 +23,19 @@ class ViewShipment extends ViewRecord
                     $this->record->validateAddress();
                     $this->record->refresh();
 
-                    Notification::make()
-                        ->title('Address validated')
-                        ->body($this->record->validation_message ?? 'Validation complete')
-                        ->success()
-                        ->send();
+                    if ($this->record->deliverability === Deliverability::NotChecked) {
+                        Notification::make()
+                            ->title('Address not checked')
+                            ->body('No address validator available for this country.')
+                            ->info()
+                            ->send();
+                    } else {
+                        Notification::make()
+                            ->title('Address validated')
+                            ->body($this->record->validation_message ?? 'Validation complete')
+                            ->success()
+                            ->send();
+                    }
                 }),
             Actions\Action::make('pack')
                 ->label('Pack')

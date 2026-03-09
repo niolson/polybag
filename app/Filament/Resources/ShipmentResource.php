@@ -10,6 +10,7 @@ use App\Filament\Resources\ShipmentResource\RelationManagers\PackagesRelationMan
 use App\Filament\Resources\ShipmentResource\RelationManagers\ShipmentItemsRelationManager;
 use App\Models\BoxSize;
 use App\Models\Shipment;
+use App\Jobs\ValidateAddressJob;
 use App\Services\BatchLabelService;
 use App\Services\SettingsService;
 use BackedEnum;
@@ -213,6 +214,9 @@ class ShipmentResource extends Resource
                 static::applyGlobalSearchAttributeConstraints($query, $search);
             })
             ->columns([
+                Tables\Columns\TextColumn::make('id')
+                    ->label('ID')
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('shipment_reference')
                     ->fontFamily('mono')
                     ->size('sm')
@@ -242,8 +246,7 @@ class ShipmentResource extends Resource
                     ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('deliverability')
                     ->label('Deliverable')
-                    ->badge()
-                    ->placeholder('Not checked'),
+                    ->badge(),
                 Tables\Columns\TextColumn::make('status')
                     ->badge(),
                 Tables\Columns\TextColumn::make('created_at')
@@ -313,18 +316,6 @@ class ShipmentResource extends Resource
 
                         return $indicators;
                     }),
-                Tables\Filters\SelectFilter::make('destination_state')
-                    ->label('Destination State')
-                    ->options(fn () => \App\Models\Shipment::query()
-                        ->whereNotNull('validated_state_or_province')
-                        ->distinct()
-                        ->orderBy('validated_state_or_province')
-                        ->pluck('validated_state_or_province', 'validated_state_or_province')
-                        ->toArray())
-                    ->query(fn ($query, array $data) => $data['value']
-                        ? $query->where('validated_state_or_province', $data['value'])
-                        : $query)
-                    ->searchable(),
                 Tables\Filters\Filter::make('value_range')
                     ->form([
                         Forms\Components\TextInput::make('value_from')
@@ -363,18 +354,15 @@ class ShipmentResource extends Resource
                     ->schema([
                         $filters['created_at'],
                         $filters['deliver_by'],
-                        $filters['destination_state'],
                         $filters['value_range'],
                     ])
                     ->columns(4)
                     ->collapsed()
+                    ->compact()
                     ->columnSpanFull(),
             ])
             ->defaultSort('created_at', 'desc')
-            ->recordActions([
-                Actions\ViewAction::make(),
-                Actions\EditAction::make(),
-            ])
+            ->recordActions([])
             ->toolbarActions([
                 Actions\BulkAction::make('batch-ship')
                     ->label('Batch Ship')
@@ -428,6 +416,25 @@ class ShipmentResource extends Resource
                         );
 
                         redirect(LabelBatchResource::getUrl('view', ['record' => $batch]));
+                    })
+                    ->deselectRecordsAfterCompletion(),
+                Actions\BulkAction::make('validate-addresses')
+                    ->label('Validate Addresses')
+                    ->icon('heroicon-o-check-badge')
+                    ->requiresConfirmation()
+                    ->modalHeading('Validate Addresses')
+                    ->modalDescription('Queue address validation for all selected shipments. Already-validated shipments will be re-checked.')
+                    ->modalSubmitActionLabel('Validate')
+                    ->action(function (Collection $records): void {
+                        foreach ($records as $shipment) {
+                            ValidateAddressJob::dispatch($shipment->id);
+                        }
+
+                        $count = $records->count();
+                        Notification::make()
+                            ->success()
+                            ->title("Queued {$count} " . str('shipment')->plural($count) . ' for address validation')
+                            ->send();
                     })
                     ->deselectRecordsAfterCompletion(),
             ]);

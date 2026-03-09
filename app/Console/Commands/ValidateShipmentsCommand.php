@@ -57,7 +57,7 @@ class ValidateShipmentsCommand extends Command
                     $this->warn("  Skipped {$shipment->shipment_reference}: API unavailable");
                 } else {
                     $results['success']++;
-                    $status = $shipment->deliverability?->value ?? 'unknown';
+                    $status = $shipment->deliverability->value;
                     $results['statuses'][$status] = ($results['statuses'][$status] ?? 0) + 1;
                 }
             } catch (\Exception $e) {

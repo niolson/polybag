@@ -30,7 +30,7 @@ class ShipmentFactory extends Factory
             'email' => fake()->optional()->email(),
             'value' => fake()->randomFloat(2, 10, 500),
             'checked' => false,
-            'deliverability' => null,
+            'deliverability' => Deliverability::NotChecked,
             'shipping_method_id' => ShippingMethod::factory(),
             'channel_reference' => null,
             'channel_id' => Channel::factory(),

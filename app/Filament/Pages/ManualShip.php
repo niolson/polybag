@@ -253,7 +253,7 @@ class ManualShip extends Page
                 app(AddressValidationService::class)->validate($shipment);
                 $shipment->refresh();
 
-                if ($shipment->deliverability && $shipment->deliverability !== \App\Enums\Deliverability::Yes) {
+                if (! in_array($shipment->deliverability, [\App\Enums\Deliverability::Yes, \App\Enums\Deliverability::NotChecked], true)) {
                     $this->notifyWarning('Address Warning', $shipment->validation_message ?? 'Address may not be deliverable.');
                 }
             } catch (\Exception $e) {

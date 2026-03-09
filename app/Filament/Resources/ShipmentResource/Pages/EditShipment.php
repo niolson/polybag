@@ -15,21 +15,6 @@ class EditShipment extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
-            Actions\Action::make('validateAddress')
-                ->label('Validate Address')
-                ->icon('heroicon-o-shield-check')
-                ->color('success')
-                ->action(function (): void {
-                    $this->record->validateAddress();
-                    $this->record->refresh();
-                    $this->fillForm();
-
-                    Notification::make()
-                        ->title('Address validated')
-                        ->body($this->record->validation_message ?? 'Validation complete')
-                        ->success()
-                        ->send();
-                }),
             Actions\ViewAction::make(),
             Actions\DeleteAction::make()
                 ->before(function (Actions\DeleteAction $action) {
