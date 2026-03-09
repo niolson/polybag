@@ -123,17 +123,11 @@
        ═══════════════════════════════════════════ */
     .fi-wi-stats-overview-stat {
         transition: transform 0.2s ease, box-shadow 0.2s ease;
-        border: 1px solid rgb(226 232 240);
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
     }
 
     .fi-wi-stats-overview-stat:hover {
         transform: translateY(-2px);
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
-    }
-
-    .dark .fi-wi-stats-overview-stat {
-        border-color: rgb(30 41 59);
     }
 
     /* ═══════════════════════════════════════════
@@ -179,22 +173,12 @@
     /* ═══════════════════════════════════════════
        CARDS & SECTIONS
        ═══════════════════════════════════════════ */
-    .fi-section {
+    .fi-section:not(.fi-section-not-contained) {
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-        border: 1px solid rgb(226 232 240);
-    }
-
-    .dark .fi-section {
-        border-color: rgb(30 41 59);
     }
 
     .fi-wi-chart {
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-        border: 1px solid rgb(226 232 240);
-    }
-
-    .dark .fi-wi-chart {
-        border-color: rgb(30 41 59);
+        box-shadow: none;
     }
 
     /* ═══════════════════════════════════════════
