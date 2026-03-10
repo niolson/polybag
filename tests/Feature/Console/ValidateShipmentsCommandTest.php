@@ -45,7 +45,7 @@ it('reports skipped shipments on server error', function (): void {
 
     $shipment->refresh();
     expect($shipment->checked)->toBeFalse()
-        ->and($shipment->deliverability)->toBeNull();
+        ->and($shipment->deliverability)->toBe(\App\Enums\Deliverability::NotChecked);
 });
 
 it('shows nothing to do when all shipments are checked', function (): void {

@@ -18,7 +18,7 @@ it('skips non-US addresses', function (): void {
     $this->service->validate($shipment);
 
     $shipment->refresh();
-    expect($shipment->deliverability)->toBeNull()
+    expect($shipment->deliverability)->toBe(Deliverability::NotChecked)
         ->and($shipment->validation_message)->toBeNull()
         ->and($shipment->checked)->toBeFalse();
 });
@@ -252,7 +252,7 @@ it('leaves shipment unchecked on server error', function (): void {
     $this->service->validate($shipment);
 
     $shipment->refresh();
-    expect($shipment->deliverability)->toBeNull()
+    expect($shipment->deliverability)->toBe(Deliverability::NotChecked)
         ->and($shipment->validation_message)->toBeNull()
         ->and($shipment->checked)->toBeFalse();
 });
