@@ -20,8 +20,8 @@ test.describe('Shipping flow', () => {
     await expect(page.getByText('[USPS] Ground Advantage')).toBeVisible();
     await expect(page.getByText('$8.50')).toBeVisible();
 
-    // Click the Ship action button and wait for success
-    await page.getByRole('button', { name: 'Ship' }).first().click();
+    // Click the header Ship action button (not the sidebar "Ship" group toggle)
+    await page.locator('main').getByRole('button', { name: 'Ship' }).click();
 
     // After shipping, verify success via notification or redirect to pack page
     await expect(async () => {
