@@ -424,7 +424,7 @@ class GenerateTestData extends Command
                 // For partial: first package shipped, rest unshipped
                 $pkgShipped = $isShipped || ($isPartial && $p === 0);
                 $shippedAt = $pkgShipped
-                    ? $meta['createdAt']->copy()->addHours(mt_rand(1, 48))->format('Y-m-d H:i:s')
+                    ? $meta['createdAt']->copy()->addHours(mt_rand(1, 48))->utc()->format('Y-m-d H:i:s')
                     : null;
 
                 $carrier = $meta['carrier'];
