@@ -2,14 +2,7 @@
 
 return [
 
-    'sets' => [
-
-        'channel' => [
-            'path' => 'resources/svg/channel-icons',
-            'prefix' => 'channel',
-        ],
-
-    ],
+    'sets' => [],
 
     'class' => '',
 

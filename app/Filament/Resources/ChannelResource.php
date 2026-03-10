@@ -33,14 +33,21 @@ class ChannelResource extends Resource
                     ->maxLength(255)
                     ->unique(ignoreRecord: true),
                 Forms\Components\Select::make('icon')
-                    ->options([
-                        'channel-amazon' => 'Amazon',
-                        'channel-walmart' => 'Walmart',
-                        'channel-tiktok' => 'TikTok',
-                        'channel-target' => 'Target',
-                        'channel-shopify' => 'Shopify',
-                        'channel-manual' => 'Manual',
-                    ])
+                    ->options(fn () => collect([
+                        'heroicon-o-shopping-bag' => 'Shopping Bag',
+                        'heroicon-o-shopping-cart' => 'Shopping Cart',
+                        'heroicon-o-building-storefront' => 'Storefront',
+                        'heroicon-o-globe-alt' => 'Globe',
+                        'heroicon-o-device-phone-mobile' => 'Mobile',
+                        'heroicon-o-pencil-square' => 'Manual',
+                        'heroicon-o-inbox-stack' => 'Inbox',
+                        'heroicon-o-truck' => 'Truck',
+                    ])->mapWithKeys(fn (string $label, string $icon) => [
+                        $icon => '<span class="flex items-center gap-2">'
+                            .svg($icon, 'w-5 h-5')->toHtml()
+                            ."<span>{$label}</span></span>",
+                    ])->all())
+                    ->allowHtml()
                     ->nullable()
                     ->searchable(),
                 Forms\Components\Toggle::make('active')
