@@ -103,7 +103,7 @@ class AggregateShippingStats extends Command
                 NOW()
             FROM packages p
             JOIN shipments s ON p.shipment_id = s.id
-            WHERE p.status = 'shipped'
+            WHERE p.status = "shipped"
               AND p.shipped_date BETWEEN ? AND ?
             GROUP BY p.shipped_date, p.carrier, p.service, s.channel_id, s.shipping_method_id, p.location_id
         ', [$from->toDateString(), $to->toDateString()]);
