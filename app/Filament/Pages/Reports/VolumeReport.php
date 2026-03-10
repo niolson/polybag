@@ -3,8 +3,10 @@
 namespace App\Filament\Pages\Reports;
 
 use App\Enums\Role;
+use App\Filament\Resources\ShipmentResource;
 use App\Models\DailyShippingStat;
 use BackedEnum;
+use Carbon\Carbon;
 use Filament\Pages\Page;
 use Filament\Tables;
 use Filament\Tables\Concerns\InteractsWithTable;
@@ -48,12 +50,13 @@ class VolumeReport extends Page implements HasTable
                 ->leftJoin('shipping_methods', 'daily_shipping_stats.shipping_method_id', '=', 'shipping_methods.id')
                 ->select([
                     DB::raw('COALESCE(shipping_methods.name, "Unmapped") as group_name'),
+                    DB::raw('daily_shipping_stats.shipping_method_id as group_id'),
                     DB::raw('SUM(daily_shipping_stats.package_count) as package_count'),
                     DB::raw('SUM(daily_shipping_stats.total_cost) as total_cost'),
                     DB::raw('CASE WHEN SUM(daily_shipping_stats.package_count) > 0 THEN SUM(daily_shipping_stats.total_cost) / SUM(daily_shipping_stats.package_count) ELSE 0 END as avg_cost'),
                     DB::raw('MIN(daily_shipping_stats.id) as id'),
                 ])
-                ->groupBy('group_name'),
+                ->groupBy('group_name', 'group_id'),
             'day', 'week', 'month' => DailyShippingStat::query()
                 ->select([
                     DB::raw($this->periodGroupExpression()),
@@ -68,12 +71,13 @@ class VolumeReport extends Page implements HasTable
                 ->leftJoin('channels', 'daily_shipping_stats.channel_id', '=', 'channels.id')
                 ->select([
                     DB::raw('COALESCE(channels.name, "Unknown") as group_name'),
+                    DB::raw('daily_shipping_stats.channel_id as group_id'),
                     DB::raw('SUM(daily_shipping_stats.package_count) as package_count'),
                     DB::raw('SUM(daily_shipping_stats.total_cost) as total_cost'),
                     DB::raw('CASE WHEN SUM(daily_shipping_stats.package_count) > 0 THEN SUM(daily_shipping_stats.total_cost) / SUM(daily_shipping_stats.package_count) ELSE 0 END as avg_cost'),
                     DB::raw('MIN(daily_shipping_stats.id) as id'),
                 ])
-                ->groupBy('group_name'),
+                ->groupBy('group_name', 'group_id'),
         };
 
         $defaultFrom = match ($this->groupBy) {
@@ -93,7 +97,8 @@ class VolumeReport extends Page implements HasTable
                         'day', 'week', 'month' => 'Period',
                         default => 'Channel',
                     })
-                    ->sortable(),
+                    ->sortable()
+                    ->url(fn (Model $record): ?string => $this->buildDrillDownUrl($record)),
                 Tables\Columns\TextColumn::make('package_count')
                     ->label('Packages')
                     ->sortable(),
@@ -132,6 +137,62 @@ class VolumeReport extends Page implements HasTable
     public function resolveTableRecord(?string $key): ?Model
     {
         return DailyShippingStat::find($key);
+    }
+
+    private function buildDrillDownUrl(Model $record): ?string
+    {
+        $filters = [];
+
+        match ($this->groupBy) {
+            'channel' => $filters['channel'] = ['value' => $record->group_id],
+            'shipping_method' => $filters['shipping_method'] = ['value' => $record->group_id],
+            'day' => $filters['created_at'] = [
+                'created_from' => $record->group_name,
+                'created_until' => $record->group_name,
+            ],
+            'week' => $filters['created_at'] = $this->weekDateRange($record->group_name),
+            'month' => $filters['created_at'] = $this->monthDateRange($record->group_name),
+        };
+
+        if (empty($filters)) {
+            return null;
+        }
+
+        return ShipmentResource::getUrl('index', [
+            'filters' => $filters,
+        ]);
+    }
+
+    /**
+     * Parse "YYYY-W##" into a created_from/created_until range.
+     *
+     * @return array{created_from: string, created_until: string}
+     */
+    private function weekDateRange(string $groupName): array
+    {
+        // Format: "2026-W10"
+        [$year, $week] = explode('-W', $groupName);
+        $start = Carbon::now()->setISODate((int) $year, (int) $week)->startOfWeek();
+
+        return [
+            'created_from' => $start->format('Y-m-d'),
+            'created_until' => $start->copy()->endOfWeek()->format('Y-m-d'),
+        ];
+    }
+
+    /**
+     * Parse "YYYY-MM" into a created_from/created_until range.
+     *
+     * @return array{created_from: string, created_until: string}
+     */
+    private function monthDateRange(string $groupName): array
+    {
+        $start = Carbon::createFromFormat('Y-m', $groupName)->startOfMonth();
+
+        return [
+            'created_from' => $start->format('Y-m-d'),
+            'created_until' => $start->copy()->endOfMonth()->format('Y-m-d'),
+        ];
     }
 
     private function periodGroupExpression(): string
