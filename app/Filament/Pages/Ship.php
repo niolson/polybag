@@ -234,6 +234,8 @@ class Ship extends Page implements HasForms
 
             $this->package->markShipped($response, auth()->id());
 
+            $this->notifySuccess('Package Shipped', "Tracking: {$response->trackingNumber}");
+
             if ($response->labelData && ! app(SettingsService::class)->get('suppress_printing', false)) {
                 $this->dispatch('print-label',
                     label: $response->labelData,
@@ -248,8 +250,6 @@ class Ship extends Page implements HasForms
             } else {
                 $this->redirect($this->returnUrl);
             }
-
-            $this->notifySuccess('Package Shipped', "Tracking: {$response->trackingNumber}");
 
         } catch (\Saloon\Exceptions\Request\Statuses\RequestTimeOutException $e) {
             logger()->error('Carrier API timeout', [
