@@ -58,6 +58,17 @@ class UspsAddressValidator implements AddressValidationInterface
             }
 
             return json_decode($response->body(), true) ?? [];
+        } catch (\Saloon\Exceptions\Request\ClientException $e) {
+            $body = json_decode($e->getResponse()->body(), true);
+            $message = $body['error']['message'] ?? $e->getMessage();
+
+            logger()->debug('USPS Address Validation client error', [
+                'status' => $e->getResponse()->status(),
+                'message' => $message,
+                'shipment_id' => $shipment->id,
+            ]);
+
+            return ['error' => ['message' => $message]];
         } catch (\Saloon\Exceptions\Request\RequestException $e) {
             logger()->warning('USPS Address Validation request failed', [
                 'error' => $e->getMessage(),
