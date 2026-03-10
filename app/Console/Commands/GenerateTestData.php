@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Shipment;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -78,6 +79,9 @@ class GenerateTestData extends Command
             return $this->cleanup();
         }
 
+        // Use UTC for this session to avoid DST gap rejections in MySQL
+        DB::statement("SET time_zone = '+00:00'");
+
         $count = (int) $this->option('count');
         $chunkSize = (int) $this->option('chunk');
 
@@ -102,6 +106,11 @@ class GenerateTestData extends Command
         $chunks = (int) ceil($count / $chunkSize);
         $startTime = microtime(true);
 
+        // Find the highest existing TD- reference to avoid collisions
+        $maxRef = Shipment::where('shipment_reference', 'like', 'TD-%')
+            ->max('shipment_reference');
+        $startOffset = $maxRef ? (int) str_replace('TD-', '', $maxRef) : 0;
+
         $bar = $this->output->createProgressBar($chunks);
         $bar->setFormat(' %current%/%max% chunks [%bar%] %percent:3s%% — %message%');
         $bar->setMessage('Starting...');
@@ -109,7 +118,7 @@ class GenerateTestData extends Command
 
         for ($chunk = 0; $chunk < $chunks; $chunk++) {
             $batchCount = min($chunkSize, $count - ($chunk * $chunkSize));
-            $stats = $this->generateChunk($batchCount, $chunk * $chunkSize);
+            $stats = $this->generateChunk($batchCount, $startOffset + ($chunk * $chunkSize));
 
             $totalPackages += $stats['packages'];
             $totalItems += $stats['items'];
@@ -271,7 +280,7 @@ class GenerateTestData extends Command
 
     private function generateChunk(int $batchCount, int $offset): array
     {
-        $now = now();
+        $now = now()->utc();
         $sixMonthsAgo = $now->copy()->subMonths(6);
 
         // --- Build shipment rows ---
@@ -424,7 +433,7 @@ class GenerateTestData extends Command
                 // For partial: first package shipped, rest unshipped
                 $pkgShipped = $isShipped || ($isPartial && $p === 0);
                 $shippedAt = $pkgShipped
-                    ? $meta['createdAt']->copy()->addHours(mt_rand(1, 48))->utc()->format('Y-m-d H:i:s')
+                    ? $meta['createdAt']->copy()->addHours(mt_rand(1, 48))->format('Y-m-d H:i:s')
                     : null;
 
                 $carrier = $meta['carrier'];
