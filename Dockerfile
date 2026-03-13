@@ -64,9 +64,9 @@ RUN composer dump-autoload --optimize
 RUN chown -R www-data:www-data storage bootstrap/cache \
     && chmod -R 775 storage bootstrap/cache
 
-# Cache config, routes, and views
-RUN php artisan config:cache \
-    && php artisan route:cache \
+# Cache routes and views (config is cached at runtime via entrypoint
+# so it picks up .env values from the mounted file)
+RUN php artisan route:cache \
     && php artisan view:cache
 
 # Copy entrypoint
