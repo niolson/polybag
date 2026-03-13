@@ -1,4 +1,4 @@
-# Filament Shipping
+# PolyBag
 
 Streamlined, barcode-driven shipping workstation for packing and labeling shipments. Operators scan barcodes to select boxes, verify item contents, and validate packed quantities before purchasing postage and printing labels — all from a single browser tab connected to a local scale and label printer.
 
@@ -95,7 +95,7 @@ Each workstation configures its own hardware through the **Device Settings** pag
 ```bash
 # Clone the repo
 git clone <repo-url>
-cd filament-shipping
+cd polybag
 
 # Install dependencies, generate key, migrate, and build assets
 composer run setup
