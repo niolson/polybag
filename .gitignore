@@ -34,6 +34,7 @@ Thumbs.db
 *.sqlite-journal
 .mcp.json
 /storage/app/private/*.pem
+/public/qz-certificate.pem
 database/seeders/LocalSettingsSeeder.php
 
 # Playwright
