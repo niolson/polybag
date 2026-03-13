@@ -46,6 +46,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /var/www/html
 
+# Ensure PHP-FPM listens on all interfaces (not just localhost)
+RUN printf '[www]\nlisten = 0.0.0.0:9000\n' > /usr/local/etc/php-fpm.d/zz-docker.conf
+
 # Copy application source
 COPY . .
 
