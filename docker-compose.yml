@@ -16,6 +16,9 @@ services:
       redis:
         condition: service_healthy
         required: false
+    networks:
+      - default
+      - shared
     healthcheck:
       test: ["CMD-SHELL", "php artisan --version > /dev/null 2>&1"]
       interval: 30s
@@ -91,6 +94,9 @@ services:
       redis:
         condition: service_healthy
         required: false
+    networks:
+      - default
+      - shared
 
 volumes:
   mysql-data:
@@ -98,4 +104,6 @@ volumes:
 
 networks:
   proxy:
+    external: true
+  shared:
     external: true

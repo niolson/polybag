@@ -14,7 +14,7 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
     networks:
-      - proxy
+      - shared
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -29,7 +29,7 @@ services:
     volumes:
       - redis-data:/data
     networks:
-      - proxy
+      - shared
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a $REDIS_PASSWORD ping | grep PONG"]
       interval: 10s
@@ -41,5 +41,5 @@ volumes:
   redis-data:
 
 networks:
-  proxy:
+  shared:
     external: true
