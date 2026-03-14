@@ -10,7 +10,9 @@ services:
       DB_HOST: mysql
       REDIS_HOST: redis
     volumes:
+      - ./.env:/var/www/html/.env
       - ./storage/app/private:/var/www/html/storage/app/private:ro
+      - ./public/qz-certificate.pem:/var/www/html/public/qz-certificate.pem:ro
     depends_on:
       mysql:
         condition: service_healthy
@@ -29,8 +31,9 @@ services:
       dockerfile: Dockerfile
       target: nginx
     restart: unless-stopped
-    ports:
-      - "80:80"
+    networks:
+      - default
+      - proxy
     depends_on:
       app:
         condition: service_healthy
@@ -78,6 +81,8 @@ services:
     environment:
       DB_HOST: mysql
       REDIS_HOST: redis
+    volumes:
+      - ./.env:/var/www/html/.env
     entrypoint: ["php", "artisan", "queue:work", "--tries=3"]
     depends_on:
       mysql:
@@ -88,3 +93,7 @@ services:
 volumes:
   mysql-data:
   redis-data:
+
+networks:
+  proxy:
+    external: true
