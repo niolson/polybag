@@ -31,6 +31,8 @@ services:
       dockerfile: Dockerfile
       target: nginx
     restart: unless-stopped
+    volumes:
+      - ./public/qz-certificate.pem:/var/www/html/public/qz-certificate.pem:ro
     networks:
       - default
       - proxy
