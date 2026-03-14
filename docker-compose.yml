@@ -11,7 +11,7 @@ services:
       REDIS_HOST: redis
     volumes:
       - ./.env:/var/www/html/.env
-      - ./storage/app/private:/var/www/html/storage/app/private:ro
+      - ./storage/app/private/qz-private-key.pem:/var/www/html/storage/app/private/qz-private-key.pem:ro
       - ./public/qz-certificate.pem:/var/www/html/public/qz-certificate.pem:ro
     depends_on:
       mysql:

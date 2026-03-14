@@ -74,11 +74,11 @@ sed -i "s|^CACHE_STORE=.*|CACHE_STORE=redis|" .env
 # --- QZ Tray Certificate ---
 
 if [ -f "${SHARED_QZ_DIR}/qz-private-key.pem" ] && [ -f "${SHARED_QZ_DIR}/qz-certificate.pem" ]; then
-    info "Symlinking shared QZ Tray certificate..."
+    info "Copying shared QZ Tray certificate..."
     mkdir -p storage/app/private
-    ln -sf "${SHARED_QZ_DIR}/qz-private-key.pem" storage/app/private/qz-private-key.pem
-    ln -sf "${SHARED_QZ_DIR}/qz-certificate.pem" public/qz-certificate.pem
-    ok "QZ Tray certificate linked."
+    cp "${SHARED_QZ_DIR}/qz-private-key.pem" storage/app/private/qz-private-key.pem
+    cp "${SHARED_QZ_DIR}/qz-certificate.pem" public/qz-certificate.pem
+    ok "QZ Tray certificate copied."
 else
     info "No shared QZ Tray certificate found at ${SHARED_QZ_DIR}."
     info "Generate one after setup: docker compose exec -it app php artisan app:generate-qz-cert"
