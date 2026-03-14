@@ -67,10 +67,9 @@ RUN composer dump-autoload --optimize
 RUN chown -R www-data:www-data storage bootstrap/cache \
     && chmod -R 775 storage bootstrap/cache
 
-# Cache routes and views (config is cached at runtime via entrypoint
-# so it picks up .env values from the mounted file)
-RUN php artisan route:cache \
-    && php artisan view:cache
+# Pre-cache views only (config and routes are cached at runtime via
+# entrypoint so they pick up .env values and produce consistent hashes)
+RUN php artisan view:cache
 
 # Copy entrypoint
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh

@@ -17,8 +17,6 @@ if [ $count -ge 30 ]; then
 fi
 
 php artisan migrate --force
-php artisan config:cache
-php artisan route:cache
-php artisan view:cache
+php artisan optimize
 
 exec php-fpm
