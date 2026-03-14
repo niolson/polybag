@@ -16,7 +16,7 @@ error() { echo -e "\033[1;31m[ERROR]\033[0m $*" >&2; }
 ok()    { echo -e "\033[1;32m[OK]\033[0m    $*"; }
 
 generate_password() {
-    openssl rand -base64 24 | tr -d '/+=' | head -c 32
+    openssl rand -hex 16
 }
 
 cd "$PROJECT_DIR"
