@@ -139,6 +139,19 @@ docker compose --profile standalone \
     exec app php artisan app:generate-qz-cert --no-interaction
 ok "QZ Tray certificate generated."
 
+# --- Rebuild config cache with new key and restart ---
+
+info "Rebuilding config cache..."
+docker compose --profile standalone \
+    -f docker-compose.yml \
+    -f docker-compose.onprem.yml \
+    exec app php artisan config:cache
+docker compose --profile standalone \
+    -f docker-compose.yml \
+    -f docker-compose.onprem.yml \
+    restart app
+ok "App restarted with config cached."
+
 # --- Summary ---
 
 APP_URL_DISPLAY=$(grep '^APP_URL=' .env | cut -d= -f2-)

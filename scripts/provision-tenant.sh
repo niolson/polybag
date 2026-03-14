@@ -240,8 +240,12 @@ ok "Containers running."
 info "Generating application key..."
 if [ "$MODE" = "standalone" ]; then
     docker compose --profile standalone exec app php artisan key:generate --force
+    docker compose --profile standalone exec app php artisan config:cache
+    docker compose --profile standalone restart app
 else
     docker compose exec app php artisan key:generate --force
+    docker compose exec app php artisan config:cache
+    docker compose restart app
 fi
 ok "App key generated."
 
