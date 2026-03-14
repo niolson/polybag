@@ -92,7 +92,7 @@ php artisan pint         # Format PHP code with Laravel Pint
 ## Architecture
 
 ### Service Providers
-- `AppPanelProvider` (Filament) - Main UI panel at `/app` with auth required, amber theme
+- `AppPanelProvider` (Filament) - Main UI panel at `/` with auth required, teal primary theme
 
 ### UI (Filament)
 - Auto-discovers resources from `app/Filament/Resources/`

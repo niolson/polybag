@@ -1,0 +1,9 @@
+# On-premise override — publishes nginx ports directly (no Caddy)
+#
+# Usage:
+#   docker compose --profile standalone -f docker-compose.yml -f docker-compose.onprem.yml up -d
+
+services:
+  nginx:
+    ports:
+      - "${APP_PORT:-80}:80"

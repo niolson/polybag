@@ -43,8 +43,26 @@ class GenerateQzCert extends Command
             return self::FAILURE;
         }
 
-        $csr = openssl_csr_new(['commonName' => $domain], $key);
-        $cert = openssl_csr_sign($csr, null, $key, 3650);
+        $isIp = filter_var($domain, FILTER_VALIDATE_IP) !== false;
+        $san = $isIp ? "IP:{$domain}" : "DNS:{$domain}";
+
+        $opensslConfig = tmpfile();
+        $opensslConfigPath = stream_get_meta_data($opensslConfig)['uri'];
+        fwrite($opensslConfig, implode("\n", [
+            '[req]',
+            'distinguished_name = req_distinguished_name',
+            'req_extensions = v3_req',
+            '[req_distinguished_name]',
+            '[v3_req]',
+            "subjectAltName = {$san}",
+        ]));
+
+        $csr = openssl_csr_new(
+            ['commonName' => $domain],
+            $key,
+            ['config' => $opensslConfigPath, 'req_extensions' => 'v3_req'],
+        );
+        $cert = openssl_csr_sign($csr, null, $key, 3650, ['config' => $opensslConfigPath, 'x509_extensions' => 'v3_req']);
 
         openssl_pkey_export($key, $privateKeyPem);
         openssl_x509_export($cert, $certPem);

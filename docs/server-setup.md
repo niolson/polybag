@@ -5,9 +5,20 @@ One-time setup for a VPS that will host PolyBag tenant instances.
 ## Requirements
 
 - Ubuntu 24.04 LTS (recommended)
-- 4 CPU / 8 GB RAM minimum (scales ~10-20 tenants per server)
+- 2 GB RAM minimum (shared infra), 4+ GB recommended for multiple tenants
 - SSH access as root
 - A domain with wildcard DNS pointing to the server (e.g. `*.polybag.app` -> server IP)
+
+## Resource Estimates
+
+| Component | RAM |
+|---|---|
+| Shared MySQL | ~300 MB |
+| Shared Redis | ~16 MB (256 MB max) |
+| Each tenant (app + nginx + queue) | ~120 MB |
+| Caddy | ~30 MB |
+
+With shared infra on a 2 GB server, you can comfortably run 8-10 tenants.
 
 ## 1. System Updates
 
@@ -97,13 +108,43 @@ Start Caddy:
 cd /opt/caddy && docker compose up -d
 ```
 
-## 6. Create Tenants Directory
+## 6. Shared Infrastructure Setup
+
+Shared MySQL + Redis serve all tenants from a single instance, reducing memory usage significantly.
+
+```bash
+mkdir -p /opt/shared
+cp <repo>/infra/docker-compose.yml /opt/shared/docker-compose.yml
+cp <repo>/infra/.env.example /opt/shared/.env
+```
+
+Edit `/opt/shared/.env` and set strong passwords:
+
+```bash
+cd /opt/shared
+nano .env   # set MYSQL_ROOT_PASSWORD and REDIS_PASSWORD
+```
+
+Start shared infrastructure:
+
+```bash
+cd /opt/shared && docker compose up -d
+```
+
+Verify:
+
+```bash
+docker exec shared-mysql mysqladmin ping -h localhost
+docker exec shared-redis redis-cli -a <password> ping
+```
+
+## 7. Create Tenants Directory
 
 ```bash
 mkdir -p /opt/tenants
 ```
 
-## 7. Generate Wildcard QZ Tray Certificate (Optional)
+## 8. Generate Wildcard QZ Tray Certificate (Optional)
 
 For `*.polybag.app` tenants, a shared QZ Tray signing certificate avoids generating one per tenant:
 
@@ -115,14 +156,49 @@ openssl req -x509 -new -key /opt/shared/qz/qz-private-key.pem \
   -subj "/CN=*.polybag.app"
 ```
 
-The provisioning script symlinks these into each tenant. On-premise installs generate their own cert via `php artisan app:generate-qz-cert`.
+## 9. Provision Tenants
 
-## 8. Provision Tenants
+### Shared mode (default)
 
-Use the provisioning script to add tenants:
+Uses the shared MySQL + Redis from step 6:
 
 ```bash
-scripts/provision-tenant.sh acme
+cd /opt/tenants
+/opt/tenants/<any-tenant>/scripts/provision-tenant.sh acme
+# or explicitly:
+scripts/provision-tenant.sh --mode shared acme
+```
+
+The script will:
+- Create a dedicated database (`polybag_acme`) and user in shared-mysql
+- Set Redis prefix (`acme-`) for key isolation
+- Mount QZ certs from `/opt/shared/qz/`
+
+### Standalone mode
+
+Per-tenant MySQL + Redis containers (higher memory, full isolation):
+
+```bash
+scripts/provision-tenant.sh --mode standalone acme
 ```
 
 See `scripts/provision-tenant.sh` for details.
+
+## On-Premise Installation
+
+For single-tenant on-premise deployments (no Caddy, direct port access):
+
+```bash
+git clone https://github.com/niolson/polybag.git
+cd polybag
+./scripts/install-onprem.sh
+```
+
+The installer will:
+1. Prompt for domain/IP
+2. Generate database and Redis passwords
+3. Build and start containers in standalone mode
+4. Generate app key and QZ Tray certificate
+5. Print instructions for creating the first admin user
+
+On-prem uses `docker-compose.onprem.yml` to publish nginx ports directly (no reverse proxy needed).
