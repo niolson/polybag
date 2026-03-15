@@ -45,18 +45,32 @@ if [ -f .env ]; then
 else
     SKIP_ENV=false
 
-    read -rp "Enter your domain or IP address (e.g. polybag.example.com or 192.168.1.100): " APP_HOST
+    read -rp "Enter your domain or IP address (e.g. polybag.example.com or 192.168.1.100:8080): " APP_HOST
 
     if [ -z "$APP_HOST" ]; then
         error "Domain/IP is required."
         exit 1
     fi
 
+    # Extract port if provided (e.g. 192.168.1.100:8080)
+    if [[ "$APP_HOST" == *:* ]]; then
+        APP_PORT="${APP_HOST##*:}"
+        APP_HOST="${APP_HOST%%:*}"
+    fi
+
     # Determine protocol — IPs get http, domains get https
     if [[ "$APP_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        APP_URL="http://${APP_HOST}"
+        if [ -n "${APP_PORT:-}" ] && [ "$APP_PORT" != "80" ]; then
+            APP_URL="http://${APP_HOST}:${APP_PORT}"
+        else
+            APP_URL="http://${APP_HOST}"
+        fi
     else
-        APP_URL="https://${APP_HOST}"
+        if [ -n "${APP_PORT:-}" ] && [ "$APP_PORT" != "443" ]; then
+            APP_URL="https://${APP_HOST}:${APP_PORT}"
+        else
+            APP_URL="https://${APP_HOST}"
+        fi
     fi
 fi
 
@@ -78,6 +92,11 @@ if [ "$SKIP_ENV" = false ]; then
     sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=${DB_PASSWORD}|" .env
     sed -i "s|^REDIS_HOST=.*|REDIS_HOST=redis|" .env
     sed -i "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=${REDIS_PASSWORD}|" .env
+
+    # Set custom port if specified
+    if [ -n "${APP_PORT:-}" ] && [ "$APP_PORT" != "80" ]; then
+        sed -i "s|^# APP_PORT=.*|APP_PORT=${APP_PORT}|" .env
+    fi
 
     ok ".env created."
 fi
