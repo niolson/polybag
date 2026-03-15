@@ -167,7 +167,7 @@ openssl genrsa -out storage/app/private/qz-private-key.pem 2048 2>/dev/null
 openssl req -x509 -new -key storage/app/private/qz-private-key.pem \
     -out public/qz-certificate.pem -days 3650 \
     -subj "/CN=${QZ_DOMAIN}" 2>/dev/null
-chmod 600 storage/app/private/qz-private-key.pem
+chmod 644 storage/app/private/qz-private-key.pem
 ok "QZ Tray certificate generated for ${QZ_DOMAIN}."
 
 # --- Restart to pick up new key ---
