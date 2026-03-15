@@ -128,35 +128,31 @@ fi
 ok "Containers running."
 
 # --- Generate app key ---
+# Write key to .env on the host (avoids container bind-mount write permission issues)
 
 info "Generating application key..."
-docker compose --profile standalone \
-    -f docker-compose.yml \
-    -f docker-compose.onprem.yml \
-    exec app php artisan key:generate --force
+APP_KEY="base64:$(openssl rand -base64 32)"
+sed -i "s|^APP_KEY=.*|APP_KEY=${APP_KEY}|" .env
 ok "App key generated."
 
 # --- Generate QZ Tray certificate ---
 
 info "Generating QZ Tray certificate..."
+QZ_DOMAIN=$(grep '^APP_URL=' .env | sed 's|^APP_URL=https\?://||' | sed 's|:.*||')
 docker compose --profile standalone \
     -f docker-compose.yml \
     -f docker-compose.onprem.yml \
-    exec app php artisan app:generate-qz-cert --no-interaction
+    exec app php artisan app:generate-qz-cert "$QZ_DOMAIN" --force
 ok "QZ Tray certificate generated."
 
-# --- Rebuild config cache with new key and restart ---
+# --- Restart to pick up new key ---
 
-info "Rebuilding config cache..."
+info "Restarting app with new key..."
 docker compose --profile standalone \
     -f docker-compose.yml \
     -f docker-compose.onprem.yml \
-    exec app php artisan config:cache
-docker compose --profile standalone \
-    -f docker-compose.yml \
-    -f docker-compose.onprem.yml \
-    restart app
-ok "App restarted with config cached."
+    up -d --force-recreate app queue
+ok "App restarted."
 
 # --- Summary ---
 

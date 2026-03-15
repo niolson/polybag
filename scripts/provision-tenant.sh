@@ -243,14 +243,14 @@ ok "Containers running."
 # --- Generate App Key ---
 
 info "Generating application key..."
+APP_KEY="base64:$(openssl rand -base64 32)"
+sed -i "s|^APP_KEY=.*|APP_KEY=${APP_KEY}|" .env
+
+# Restart to pick up new key (entrypoint runs optimize)
 if [ "$MODE" = "standalone" ]; then
-    docker compose --profile standalone exec app php artisan key:generate --force
-    docker compose --profile standalone exec app php artisan config:cache
-    docker compose --profile standalone restart app
+    docker compose --profile standalone up -d --force-recreate app queue
 else
-    docker compose exec app php artisan key:generate --force
-    docker compose exec app php artisan config:cache
-    docker compose restart app
+    docker compose up -d --force-recreate app queue
 fi
 ok "App key generated."
 

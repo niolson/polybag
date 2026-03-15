@@ -9,13 +9,13 @@ use function Laravel\Prompts\text;
 
 class GenerateQzCert extends Command
 {
-    protected $signature = 'app:generate-qz-cert';
+    protected $signature = 'app:generate-qz-cert {domain? : Domain or IP for certificate CN} {--force : Overwrite existing certificate without prompting}';
 
     protected $description = 'Generate a QZ Tray signing certificate and private key';
 
     public function handle(): int
     {
-        $domain = text(
+        $domain = $this->argument('domain') ?? text(
             label: 'Domain (used as certificate CN)',
             placeholder: 'e.g. shipping.example.com',
             required: true,
@@ -25,7 +25,7 @@ class GenerateQzCert extends Command
         $publicCertPath = public_path('qz-certificate.pem');
 
         if (file_exists($privateKeyPath) || file_exists($publicCertPath)) {
-            if (! confirm('Existing QZ Tray certificate files found. Overwrite?', default: false)) {
+            if (! $this->option('force') && ! confirm('Existing QZ Tray certificate files found. Overwrite?', default: false)) {
                 $this->info('Aborted.');
 
                 return self::SUCCESS;
