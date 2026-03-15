@@ -17,23 +17,20 @@ class DatabaseSeeder extends Seeder
     {
         // User::factory(10)->create();
 
-        User::create([
+        User::firstOrCreate(['username' => 'admin'], [
             'name' => 'Admin',
-            'username' => 'admin',
             'password' => 'admin',
             'role' => 'admin',
         ]);
 
-        User::create([
+        User::firstOrCreate(['username' => 'manager'], [
             'name' => 'Manager',
-            'username' => 'manager',
             'password' => 'manager',
             'role' => 'manager',
         ]);
 
-        User::create([
+        User::firstOrCreate(['username' => 'user'], [
             'name' => 'Test User',
-            'username' => 'user',
             'password' => 'user',
             'role' => 'user',
         ]);
