@@ -87,7 +87,13 @@ fi
 if ! docker network inspect proxy &>/dev/null; then
     info "Creating Docker network 'proxy'..."
     docker network create proxy
-    ok "Network created."
+    ok "Network 'proxy' created."
+fi
+
+if ! docker network inspect shared &>/dev/null; then
+    info "Creating Docker network 'shared'..."
+    docker network create shared
+    ok "Network 'shared' created."
 fi
 
 # --- Build & Start ---

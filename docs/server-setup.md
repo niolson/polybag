@@ -49,10 +49,11 @@ curl -fsSL https://get.docker.com | sh
 docker compose version  # verify
 ```
 
-## 4. Create Shared Docker Network
+## 4. Create Docker Networks
 
 ```bash
-docker network create proxy
+docker network create proxy   # Caddy <-> nginx routing
+docker network create shared  # Tenant app <-> shared MySQL/Redis
 ```
 
 ## 5. Set Up Caddy (Reverse Proxy)

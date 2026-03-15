@@ -80,6 +80,11 @@ if ! docker network inspect proxy &>/dev/null; then
     exit 1
 fi
 
+if ! docker network inspect shared &>/dev/null; then
+    error "Docker network 'shared' does not exist. Run: docker network create shared"
+    exit 1
+fi
+
 # --- Mode-specific validation ---
 
 if [ "$MODE" = "shared" ]; then
