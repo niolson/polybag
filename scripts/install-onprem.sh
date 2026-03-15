@@ -98,6 +98,11 @@ fi
 
 # --- Build & Start ---
 
+# Create placeholder QZ cert files so Docker doesn't mount them as directories
+mkdir -p storage/app/private
+touch storage/app/private/qz-private-key.pem
+touch public/qz-certificate.pem
+
 info "Building and starting containers (standalone mode)..."
 docker compose --profile standalone \
     -f docker-compose.yml \
@@ -139,11 +144,12 @@ ok "App key generated."
 
 info "Generating QZ Tray certificate..."
 QZ_DOMAIN=$(grep '^APP_URL=' .env | sed 's|^APP_URL=https\?://||' | sed 's|:.*||')
-docker compose --profile standalone \
-    -f docker-compose.yml \
-    -f docker-compose.onprem.yml \
-    exec app php artisan app:generate-qz-cert "$QZ_DOMAIN" --force
-ok "QZ Tray certificate generated."
+openssl genrsa -out storage/app/private/qz-private-key.pem 2048 2>/dev/null
+openssl req -x509 -new -key storage/app/private/qz-private-key.pem \
+    -out public/qz-certificate.pem -days 3650 \
+    -subj "/CN=${QZ_DOMAIN}" 2>/dev/null
+chmod 600 storage/app/private/qz-private-key.pem
+ok "QZ Tray certificate generated for ${QZ_DOMAIN}."
 
 # --- Restart to pick up new key ---
 
