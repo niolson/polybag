@@ -58,6 +58,10 @@ class AppServiceProvider extends ServiceProvider
                     $status['status'] = 'degraded';
                 }
 
+                if (config('app.fake_carriers')) {
+                    $status['fake_carriers'] = true;
+                }
+
                 return response()->json($status, $status['status'] === 'ok' ? 200 : 503);
             });
 
