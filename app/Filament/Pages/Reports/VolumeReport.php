@@ -40,6 +40,10 @@ class VolumeReport extends Page implements HasTable
 
     public function updatedGroupBy(): void
     {
+        if (! in_array($this->groupBy, ['channel', 'shipping_method', 'day', 'week', 'month'])) {
+            $this->groupBy = 'channel';
+        }
+
         $this->resetTable();
     }
 

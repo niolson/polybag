@@ -18,6 +18,7 @@ class User extends Authenticatable implements FilamentUser
         'username',
         'password',
         'role',
+        'active',
     ];
 
     protected $hidden = [
@@ -30,11 +31,12 @@ class User extends Authenticatable implements FilamentUser
         return [
             'password' => 'hashed',
             'role' => Role::class,
+            'active' => 'boolean',
         ];
     }
 
     public function canAccessPanel(Panel $panel): bool
     {
-        return true;
+        return $this->active;
     }
 }

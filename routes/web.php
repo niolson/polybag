@@ -11,15 +11,15 @@ Route::get('/up', function () {
     try {
         DB::connection()->getPdo();
         $checks['db'] = 'ok';
-    } catch (\Throwable $e) {
-        $checks['db'] = 'failed: '.$e->getMessage();
+    } catch (\Throwable) {
+        $checks['db'] = 'failed';
     }
 
     try {
         Redis::ping();
         $checks['redis'] = 'ok';
-    } catch (\Throwable $e) {
-        $checks['redis'] = 'failed: '.$e->getMessage();
+    } catch (\Throwable) {
+        $checks['redis'] = 'failed';
     }
 
     $healthy = $checks['db'] === 'ok' && $checks['redis'] === 'ok';

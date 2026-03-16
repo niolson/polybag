@@ -58,6 +58,10 @@ class UserShipmentsReport extends Page implements HasTable
 
     public function updatedPeriod(): void
     {
+        if (! in_array($this->period, ['day', 'week', 'month'])) {
+            $this->period = 'day';
+        }
+
         if ($this->userId) {
             $this->resetTable();
         }

@@ -41,6 +41,8 @@ class UserResource extends Resource
                 Forms\Components\Select::make('role')
                     ->options(Role::class)
                     ->required(),
+                Forms\Components\Toggle::make('active')
+                    ->default(true),
             ]);
     }
 
@@ -53,6 +55,8 @@ class UserResource extends Resource
                 Tables\Columns\TextColumn::make('username')
                     ->searchable(),
                 Tables\Columns\TextColumn::make('role'),
+                Tables\Columns\IconColumn::make('active')
+                    ->boolean(),
                 Tables\Columns\TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()
