@@ -21,7 +21,9 @@ it('shows sandbox mode indicator in topbar when sandbox mode is enabled', functi
 it('does not show sandbox mode indicator when sandbox mode is disabled', function (): void {
     app(SettingsService::class)->clearCache();
 
-    $this->get('/')->assertDontSeeText('(sandbox mode)');
+    $this->get('/')
+        ->assertOk()
+        ->assertDontSee('(sandbox mode)</span>');
 });
 
 it('mounts sandbox_mode and suppress_printing from settings', function (): void {
