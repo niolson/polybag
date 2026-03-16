@@ -161,68 +161,31 @@ class ManualShip extends Page
 
     private function autoShip(): void
     {
-        $package = null;
+        $package = $this->createShipmentAndPackage();
+        $shipment = $package->shipment;
 
-        try {
-            $package = $this->createShipmentAndPackage();
+        $result = app(LabelGenerationService::class)->autoShip(
+            package: $package,
+            labelFormat: $this->labelFormat,
+            labelDpi: $this->labelDpi,
+            userId: auth()->id(),
+            onCleanup: fn () => $shipment->delete(),
+        );
 
-            $result = app(LabelGenerationService::class)->generateLabel($package, $this->labelFormat, $this->labelDpi);
+        if (! $result->success) {
+            $this->notifyError($result->errorTitle, $result->errorMessage);
 
-            if (! $result->success) {
-                $package->packageItems()->delete();
-                $package->delete();
-                $package->shipment->delete();
-                $this->notifyError('Shipping Error', $result->errorMessage);
-
-                return;
-            }
-
-            $package->markShipped($result->response, auth()->id());
-
-            Session::put('last_shipped_package_id', $package->id);
-
-            if ($result->response->labelData) {
-                $this->dispatch('print-label', label: $result->response->labelData, orientation: $result->response->labelOrientation ?? 'portrait', format: $result->response->labelFormat ?? 'pdf', dpi: $result->response->labelDpi);
-            }
-
-            $this->notifySuccess(
-                'Shipped',
-                "Tracking: {$result->response->trackingNumber} via {$result->response->carrier} ({$result->selectedRate->serviceName}) - \$".number_format($result->response->cost, 2)
-            );
-
-            $this->resetForm();
-
-        } catch (\Saloon\Exceptions\Request\Statuses\RequestTimeOutException $e) {
-            if ($package?->exists && $package->status !== PackageStatus::Shipped) {
-                $shipment = $package->shipment;
-                $package->packageItems()->delete();
-                $package->delete();
-                $shipment->delete();
-            }
-            logger()->error('ManualShip timeout', ['package_id' => $package?->id]);
-            $this->notifyError('Carrier Timeout', 'The carrier API is not responding. Please try again in a few moments.');
-        } catch (\Saloon\Exceptions\Request\RequestException $e) {
-            if ($package?->exists && $package->status !== PackageStatus::Shipped) {
-                $shipment = $package->shipment;
-                $package->packageItems()->delete();
-                $package->delete();
-                $shipment->delete();
-            }
-            logger()->error('ManualShip carrier error', ['package_id' => $package?->id, 'error' => $e->getMessage()]);
-            $this->notifyError('Carrier Error', 'Unable to connect to the carrier. Please try again.');
-        } catch (\RuntimeException $e) {
-            logger()->warning('ManualShip race condition', ['package_id' => $package?->id, 'error' => $e->getMessage()]);
-            $this->notifyError('Package State Changed', $e->getMessage());
-        } catch (\Exception $e) {
-            if ($package?->exists && $package->status !== PackageStatus::Shipped) {
-                $shipment = $package->shipment;
-                $package->packageItems()->delete();
-                $package->delete();
-                $shipment->delete();
-            }
-            logger()->error('ManualShip error', ['error' => $e->getMessage()]);
-            $this->notifyError('Error', 'An unexpected error occurred. Please try again.');
+            return;
         }
+
+        Session::put('last_shipped_package_id', $package->id);
+
+        if ($result->response->labelData) {
+            $this->dispatch('print-label', label: $result->response->labelData, orientation: $result->response->labelOrientation ?? 'portrait', format: $result->response->labelFormat ?? 'pdf', dpi: $result->response->labelDpi);
+        }
+
+        $this->notifySuccess('Shipped', $result->summaryMessage());
+        $this->resetForm();
     }
 
     private function createShipmentAndPackage(): Package
@@ -368,6 +331,14 @@ class ManualShip extends Page
 
         if (! $package || $package->status !== PackageStatus::Shipped || ! $package->label_data) {
             $this->notifyError('Label Not Available', 'The label for the last shipped package is not available.');
+
+            return;
+        }
+
+        // Verify the current user shipped this package or has elevated permissions
+        $user = auth()->user();
+        if (! $user->role->isAtLeast(Role::Manager) && $package->shipped_by_user_id !== $user->id) {
+            $this->notifyError('Access Denied', 'You can only reprint labels for packages you shipped.');
 
             return;
         }

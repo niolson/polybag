@@ -2,12 +2,15 @@
 
 namespace App\Services;
 
+use App\DataTransferObjects\Shipping\AutoShipResult;
 use App\DataTransferObjects\Shipping\LabelResult;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
+use App\Enums\PackageStatus;
 use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
 use Carbon\Carbon;
+use Closure;
 use Illuminate\Support\Collection;
 
 class LabelGenerationService
@@ -58,6 +61,81 @@ class LabelGenerationService
         }
 
         return LabelResult::success($response, $selectedRate);
+    }
+
+    /**
+     * Generate a label and mark the package as shipped.
+     *
+     * Handles the full ship-or-rollback lifecycle:
+     * 1. Generate label via carrier API
+     * 2. Mark package shipped on success
+     * 3. Delete package (and call $onCleanup) on failure
+     *
+     * @param  Package  $package  The package to ship
+     * @param  string  $labelFormat  'pdf' or 'zpl'
+     * @param  int|null  $labelDpi  DPI for ZPL labels
+     * @param  int|null  $userId  User ID to record as shipper
+     * @param  Closure|null  $onCleanup  Called after package deletion on failure (e.g. to delete shipment)
+     */
+    public function autoShip(
+        Package $package,
+        string $labelFormat = 'pdf',
+        ?int $labelDpi = null,
+        ?int $userId = null,
+        ?Closure $onCleanup = null,
+    ): AutoShipResult {
+        try {
+            $result = $this->generateLabel($package, $labelFormat, $labelDpi);
+
+            if (! $result->success) {
+                $this->cleanupPackage($package, $onCleanup);
+
+                return AutoShipResult::failed('Shipping Error', $result->errorMessage);
+            }
+
+            $package->markShipped($result->response, $userId);
+
+            return AutoShipResult::shipped($result->response, $result->selectedRate);
+
+        } catch (\Saloon\Exceptions\Request\Statuses\RequestTimeOutException $e) {
+            $this->cleanupPackage($package, $onCleanup);
+            logger()->error('AutoShip timeout', ['package_id' => $package->id]);
+
+            return AutoShipResult::failed('Carrier Timeout', 'The carrier API is not responding. Please try again in a few moments.');
+
+        } catch (\Saloon\Exceptions\Request\RequestException $e) {
+            $this->cleanupPackage($package, $onCleanup);
+            logger()->error('AutoShip carrier error', ['package_id' => $package->id, 'error' => $e->getMessage()]);
+
+            return AutoShipResult::failed('Carrier Error', 'Unable to connect to the carrier. Please try again.');
+
+        } catch (\RuntimeException $e) {
+            // Optimistic locking failure — don't delete, just report
+            logger()->warning('AutoShip race condition', ['package_id' => $package->id, 'error' => $e->getMessage()]);
+
+            return AutoShipResult::failed('Package State Changed', $e->getMessage());
+
+        } catch (\Exception $e) {
+            $this->cleanupPackage($package, $onCleanup);
+            logger()->error('AutoShip error', ['package_id' => $package->id, 'error' => $e->getMessage()]);
+
+            return AutoShipResult::failed('Auto Ship Error', 'An unexpected error occurred. Please try again.');
+        }
+    }
+
+    /**
+     * Delete a package and its items if it hasn't been shipped.
+     * Calls the optional cleanup callback after deletion (e.g. to delete a shipment).
+     */
+    private function cleanupPackage(Package $package, ?Closure $onCleanup): void
+    {
+        if ($package->exists && $package->status !== PackageStatus::Shipped) {
+            $package->packageItems()->delete();
+            $package->delete();
+            if ($onCleanup) {
+                $onCleanup();
+            }
+        }
     }
 
     /**

@@ -137,63 +137,29 @@ class Pack extends Page
      */
     private function autoShip(): void
     {
-        $package = null;
+        $package = $this->createPackage();
 
-        try {
-            $package = $this->createPackage();
+        $result = app(LabelGenerationService::class)->autoShip(
+            package: $package,
+            labelFormat: $this->labelFormat,
+            labelDpi: $this->labelDpi,
+            userId: auth()->id(),
+        );
 
-            $result = app(LabelGenerationService::class)->generateLabel($package, $this->labelFormat, $this->labelDpi);
+        if (! $result->success) {
+            $this->notifyError($result->errorTitle, $result->errorMessage);
 
-            if (! $result->success) {
-                $package->packageItems()->delete();
-                $package->delete();
-                $this->notifyError('Shipping Error', $result->errorMessage);
-
-                return;
-            }
-
-            $package->markShipped($result->response, auth()->id());
-
-            // Store last shipped package for reprint/cancel commands
-            Session::put('last_shipped_package_id', $package->id);
-
-            if ($result->response->labelData) {
-                $this->dispatch('print-label', label: $result->response->labelData, orientation: $result->response->labelOrientation ?? 'portrait', format: $result->response->labelFormat ?? 'pdf', dpi: $result->response->labelDpi);
-            }
-
-            $this->notifySuccess(
-                'Auto Shipped',
-                "Tracking: {$result->response->trackingNumber} via {$result->response->carrier} ({$result->selectedRate->serviceName}) - \$".number_format($result->response->cost, 2)
-            );
-
-            $this->resetForNextShipment();
-
-        } catch (\Saloon\Exceptions\Request\Statuses\RequestTimeOutException $e) {
-            if ($package?->exists && $package->status !== PackageStatus::Shipped) {
-                $package->packageItems()->delete();
-                $package->delete();
-            }
-            logger()->error('AutoShip timeout', ['package_id' => $package?->id]);
-            $this->notifyError('Carrier Timeout', 'The carrier API is not responding. Please try again in a few moments.');
-        } catch (\Saloon\Exceptions\Request\RequestException $e) {
-            if ($package?->exists && $package->status !== PackageStatus::Shipped) {
-                $package->packageItems()->delete();
-                $package->delete();
-            }
-            logger()->error('AutoShip carrier error', ['package_id' => $package?->id, 'error' => $e->getMessage()]);
-            $this->notifyError('Carrier Error', 'Unable to connect to the carrier. Please try again.');
-        } catch (\RuntimeException $e) {
-            // Optimistic locking failure - don't delete, just notify
-            logger()->warning('AutoShip race condition', ['package_id' => $package?->id, 'error' => $e->getMessage()]);
-            $this->notifyError('Package State Changed', $e->getMessage());
-        } catch (\Exception $e) {
-            if ($package?->exists && $package->status !== PackageStatus::Shipped) {
-                $package->packageItems()->delete();
-                $package->delete();
-            }
-            logger()->error('AutoShip error', ['error' => $e->getMessage()]);
-            $this->notifyError('Auto Ship Error', 'An unexpected error occurred. Please try again.');
+            return;
         }
+
+        Session::put('last_shipped_package_id', $package->id);
+
+        if ($result->response->labelData) {
+            $this->dispatch('print-label', label: $result->response->labelData, orientation: $result->response->labelOrientation ?? 'portrait', format: $result->response->labelFormat ?? 'pdf', dpi: $result->response->labelDpi);
+        }
+
+        $this->notifySuccess('Auto Shipped', $result->summaryMessage());
+        $this->resetForNextShipment();
     }
 
     /**
