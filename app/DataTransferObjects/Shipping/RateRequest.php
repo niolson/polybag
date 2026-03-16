@@ -18,6 +18,7 @@ readonly class RateRequest
         public ?string $destinationStateOrProvince = null,
         public ?bool $residential = null,
         public array $packages = [],
+        public bool $saturdayDelivery = false,
     ) {}
 
     public static function fromPackage(Package $package): self
@@ -34,6 +35,8 @@ readonly class RateRequest
             }
         }
 
+        $shippingMethod = $shipment->shippingMethod;
+
         return new self(
             originPostalCode: $origin->postalCode ?? '',
             destinationPostalCode: $shipment->validated_postal_code ?? $shipment->postal_code,
@@ -43,6 +46,7 @@ readonly class RateRequest
             destinationStateOrProvince: $shipment->validated_state_or_province ?? $shipment->state_or_province,
             residential: $shipment->validated_residential ?? $shipment->residential,
             packages: [PackageData::fromPackage($package)],
+            saturdayDelivery: (bool) $shippingMethod?->saturday_delivery,
         );
     }
 }

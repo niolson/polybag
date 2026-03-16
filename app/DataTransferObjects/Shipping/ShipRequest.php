@@ -17,6 +17,7 @@ readonly class ShipRequest
         public array $customsItems = [],
         public string $labelFormat = 'pdf',
         public ?int $labelDpi = null,
+        public bool $saturdayDelivery = false,
     ) {}
 
     public static function fromPackageAndRate(
@@ -39,6 +40,8 @@ readonly class ShipRequest
             ? AddressData::fromLocation($package->location)
             : AddressData::fromConfig();
 
+        $shippingMethod = $package->shipment->shippingMethod;
+
         return new self(
             fromAddress: $fromAddress,
             toAddress: AddressData::fromShipment($package->shipment),
@@ -47,6 +50,7 @@ readonly class ShipRequest
             customsItems: $customsItems,
             labelFormat: $labelFormat,
             labelDpi: $labelDpi,
+            saturdayDelivery: (bool) $shippingMethod?->saturday_delivery,
         );
     }
 }

@@ -189,6 +189,11 @@ class FedexAdapter implements CarrierAdapterInterface
                         ],
                     ],
                 ],
+                ...($request->saturdayDelivery ? [
+                    'shipmentSpecialServices' => [
+                        'specialServiceTypes' => ['SATURDAY_DELIVERY'],
+                    ],
+                ] : []),
             ],
         ]);
 
@@ -249,17 +254,31 @@ class FedexAdapter implements CarrierAdapterInterface
                 $requestedShipment['customsClearanceDetail'] = $this->buildCustomsClearanceDetail($request);
             }
 
-            $apiRequest = new CreateShipment;
-            $apiRequest->body()->set([
-                'labelResponseOptions' => 'LABEL',
-                'accountNumber' => [
-                    'value' => app(SettingsService::class)->get('fedex.account_number', config('services.fedex.account_number')),
-                ],
-                'requestedShipment' => $requestedShipment,
-            ]);
+            // Add Saturday delivery if requested
+            if ($request->saturdayDelivery) {
+                $requestedShipment['shipmentSpecialServices'] = [
+                    'specialServiceTypes' => ['SATURDAY_DELIVERY'],
+                ];
+            }
 
-            $response = $connector->send($apiRequest);
+            $response = $this->sendCreateShipment($connector, $requestedShipment);
             $responseData = $response->json();
+
+            // If Saturday delivery was rejected, retry without it
+            if ($request->saturdayDelivery && ! $response->successful()) {
+                $errors = $responseData['errors'] ?? [];
+                $isSaturdayError = collect($errors)->contains(fn ($e) => str_contains(strtolower($e['message'] ?? ''), 'saturday')
+                    || str_contains($e['code'] ?? '', 'SATURDAY'));
+
+                if ($isSaturdayError) {
+                    logger()->info('FedEx Saturday delivery rejected, retrying without', [
+                        'errors' => $errors,
+                    ]);
+                    unset($requestedShipment['shipmentSpecialServices']);
+                    $response = $this->sendCreateShipment($connector, $requestedShipment);
+                    $responseData = $response->json();
+                }
+            }
 
             if (! $response->successful()) {
                 $errors = $responseData['errors'] ?? [];
@@ -376,6 +395,20 @@ class FedexAdapter implements CarrierAdapterInterface
      *
      * @return array<string, mixed>
      */
+    private function sendCreateShipment($connector, array $requestedShipment): \Saloon\Http\Response
+    {
+        $apiRequest = new CreateShipment;
+        $apiRequest->body()->set([
+            'labelResponseOptions' => 'LABEL',
+            'accountNumber' => [
+                'value' => app(SettingsService::class)->get('fedex.account_number', config('services.fedex.account_number')),
+            ],
+            'requestedShipment' => $requestedShipment,
+        ]);
+
+        return $connector->send($apiRequest);
+    }
+
     private function buildContact(AddressData $address): array
     {
         $streetLines = array_filter([

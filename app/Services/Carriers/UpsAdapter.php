@@ -213,6 +213,11 @@ class UpsAdapter implements CarrierAdapterInterface
                     'DeliveryTimeInformation' => [
                         'PackageBillType' => '03',
                     ],
+                    ...($request->saturdayDelivery ? [
+                        'ShipmentServiceOptions' => [
+                            'SaturdayDeliveryIndicator' => '',
+                        ],
+                    ] : []),
                 ],
             ],
         ]);
@@ -283,40 +288,37 @@ class UpsAdapter implements CarrierAdapterInterface
                 ],
             ];
 
+            // Add Saturday delivery if requested
+            if ($request->saturdayDelivery) {
+                $shipment['ShipmentServiceOptions'] = array_merge(
+                    $shipment['ShipmentServiceOptions'] ?? [],
+                    ['SaturdayDeliveryIndicator' => ''],
+                );
+            }
+
             // Add international forms for non-US destinations
             if ($request->toAddress->country !== 'US' && ! empty($request->customsItems)) {
                 $shipment['InternationalForms'] = $this->buildCustomsDetail($request);
             }
 
-            $apiRequest = new CreateShipment;
-            $apiRequest->body()->set([
-                'ShipmentRequest' => [
-                    'Request' => [
-                        'SubVersion' => '2409',
-                        'RequestOption' => 'nonvalidate',
-                        'TransactionReference' => [
-                            'CustomerContext' => 'Shipping',
-                        ],
-                    ],
-                    'Shipment' => $shipment,
-                    'LabelSpecification' => [
-                        'LabelImageFormat' => [
-                            'Code' => $request->labelFormat === 'zpl' ? 'ZPL' : 'GIF',
-                        ],
-                        'LabelStockSize' => [
-                            'Height' => '6',
-                            'Width' => '4',
-                        ],
-                    ],
-                ],
-            ]);
-
-            logger()->debug('UPS CreateShipment API Request', [
-                'serviceCode' => $serviceCode,
-            ]);
-
-            $response = $connector->send($apiRequest);
+            $response = $this->sendCreateShipment($connector, $shipment, $request, $serviceCode);
             $responseData = $response->json();
+
+            // If Saturday delivery was rejected, retry without it
+            if ($request->saturdayDelivery && ! $response->successful()) {
+                $errorJson = json_encode($responseData);
+                if (str_contains(strtolower($errorJson), 'saturday')) {
+                    logger()->info('UPS Saturday delivery rejected, retrying without', [
+                        'body' => $responseData,
+                    ]);
+                    unset($shipment['ShipmentServiceOptions']['SaturdayDeliveryIndicator']);
+                    if (empty($shipment['ShipmentServiceOptions'])) {
+                        unset($shipment['ShipmentServiceOptions']);
+                    }
+                    $response = $this->sendCreateShipment($connector, $shipment, $request, $serviceCode);
+                    $responseData = $response->json();
+                }
+            }
 
             if (! $response->successful()) {
                 $errorMessage = $responseData['response']['errors'][0]['message']
@@ -447,6 +449,38 @@ class UpsAdapter implements CarrierAdapterInterface
      *
      * @return array<string, mixed>
      */
+    private function sendCreateShipment($connector, array $shipment, ShipRequest $request, string $serviceCode): \Saloon\Http\Response
+    {
+        $apiRequest = new CreateShipment;
+        $apiRequest->body()->set([
+            'ShipmentRequest' => [
+                'Request' => [
+                    'SubVersion' => '2409',
+                    'RequestOption' => 'nonvalidate',
+                    'TransactionReference' => [
+                        'CustomerContext' => 'Shipping',
+                    ],
+                ],
+                'Shipment' => $shipment,
+                'LabelSpecification' => [
+                    'LabelImageFormat' => [
+                        'Code' => $request->labelFormat === 'zpl' ? 'ZPL' : 'GIF',
+                    ],
+                    'LabelStockSize' => [
+                        'Height' => '6',
+                        'Width' => '4',
+                    ],
+                ],
+            ],
+        ]);
+
+        logger()->debug('UPS CreateShipment API Request', [
+            'serviceCode' => $serviceCode,
+        ]);
+
+        return $connector->send($apiRequest);
+    }
+
     private function buildAddress(AddressData $address): array
     {
         $addressLines = array_values(array_filter([
