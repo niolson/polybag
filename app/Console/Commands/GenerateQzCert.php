@@ -32,17 +32,6 @@ class GenerateQzCert extends Command
             }
         }
 
-        $key = openssl_pkey_new([
-            'private_key_bits' => 2048,
-            'private_key_type' => OPENSSL_KEYTYPE_RSA,
-        ]);
-
-        if (! $key) {
-            $this->error('Failed to generate private key.');
-
-            return self::FAILURE;
-        }
-
         $isIp = filter_var($domain, FILTER_VALIDATE_IP) !== false;
         $san = $isIp ? "IP:{$domain}" : "DNS:{$domain}";
 
@@ -57,6 +46,18 @@ class GenerateQzCert extends Command
             "subjectAltName = {$san}",
         ]));
 
+        $key = openssl_pkey_new([
+            'private_key_bits' => 2048,
+            'private_key_type' => OPENSSL_KEYTYPE_RSA,
+            'config' => $opensslConfigPath,
+        ]);
+
+        if (! $key) {
+            $this->error('Failed to generate private key.');
+
+            return self::FAILURE;
+        }
+
         $csr = openssl_csr_new(
             ['commonName' => $domain],
             $key,
@@ -64,7 +65,7 @@ class GenerateQzCert extends Command
         );
         $cert = openssl_csr_sign($csr, null, $key, 3650, ['config' => $opensslConfigPath, 'x509_extensions' => 'v3_req']);
 
-        openssl_pkey_export($key, $privateKeyPem);
+        openssl_pkey_export($key, $privateKeyPem, null, ['config' => $opensslConfigPath]);
         openssl_x509_export($cert, $certPem);
 
         @mkdir(dirname($privateKeyPath), 0775, recursive: true);
