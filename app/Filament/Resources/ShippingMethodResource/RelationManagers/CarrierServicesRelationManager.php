@@ -37,10 +37,7 @@ class CarrierServicesRelationManager extends RelationManager
             ])
             ->headerActions([
                 Actions\AttachAction::make()
-                    ->preloadRecordSelect()
-                    ->recordSelectOptionsQuery(fn ($query) => $query->with('carrier'))
-                    ->recordTitle(fn ($record) => "{$record->carrier->name} — {$record->name}")
-                    ->modalWidth('md'),
+                    ->preloadRecordSelect(),
             ])
             ->recordActions([
                 Actions\DetachAction::make(),
