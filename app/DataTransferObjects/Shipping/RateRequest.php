@@ -46,7 +46,20 @@ readonly class RateRequest
             destinationStateOrProvince: $shipment->validated_state_or_province ?? $shipment->state_or_province,
             residential: $shipment->validated_residential ?? $shipment->residential,
             packages: [PackageData::fromPackage($package)],
-            saturdayDelivery: (bool) $shippingMethod?->saturday_delivery,
+            saturdayDelivery: (bool) $shippingMethod?->saturday_delivery && self::isSaturdayDeliveryApplicable(),
         );
+    }
+
+    /**
+     * Saturday delivery only applies when shipping on Thursday
+     * (package would arrive Saturday). No point requesting it other days.
+     *
+     * NOTE: If we start setting shipDateStamp on rate/ship requests (e.g. to
+     * handle post-pickup scenarios where the effective ship date is tomorrow),
+     * this method will need to check that date instead of today's day of week.
+     */
+    public static function isSaturdayDeliveryApplicable(): bool
+    {
+        return now()->dayOfWeek === 4; // Thursday
     }
 }

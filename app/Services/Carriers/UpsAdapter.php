@@ -213,11 +213,6 @@ class UpsAdapter implements CarrierAdapterInterface
                     'DeliveryTimeInformation' => [
                         'PackageBillType' => '03',
                     ],
-                    ...($request->saturdayDelivery ? [
-                        'ShipmentServiceOptions' => [
-                            'SaturdayDeliveryIndicator' => '',
-                        ],
-                    ] : []),
                 ],
             ],
         ]);

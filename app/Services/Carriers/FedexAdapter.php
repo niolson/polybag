@@ -88,6 +88,24 @@ class FedexAdapter implements CarrierAdapterInterface
     public function parseRateResponse(Response $response, RateRequest $request, array $serviceCodes): Collection
     {
         if (! $response->successful()) {
+            // If Saturday delivery was requested, retry without it
+            if ($request->saturdayDelivery) {
+                $errors = $response->json('errors', []);
+                $isSaturdayError = collect($errors)->contains(
+                    fn ($e) => ($e['code'] ?? '') === 'SERVICE.PACKAGECOMBINATION.INVALID'
+                );
+
+                if ($isSaturdayError) {
+                    logger()->info('FedEx Saturday delivery not available for this destination, retrying without');
+                    $requestWithout = $this->withoutSaturdayDelivery($request);
+                    $connector = FedexConnector::getFedexConnector();
+                    $apiRequest = $this->buildRateApiRequest($requestWithout);
+                    $retryResponse = $connector->send($apiRequest);
+
+                    return $this->parseRateResponse($retryResponse, $requestWithout, $serviceCodes);
+                }
+            }
+
             $errors = $response->json('errors', []);
             logger()->error('FedEx API Error', [
                 'status' => $response->status(),
@@ -267,8 +285,22 @@ class FedexAdapter implements CarrierAdapterInterface
             // If Saturday delivery was rejected, retry without it
             if ($request->saturdayDelivery && ! $response->successful()) {
                 $errors = $responseData['errors'] ?? [];
-                $isSaturdayError = collect($errors)->contains(fn ($e) => str_contains(strtolower($e['message'] ?? ''), 'saturday')
-                    || str_contains($e['code'] ?? '', 'SATURDAY'));
+                $isSaturdayError = collect($errors)->contains(function ($e) {
+                    $code = $e['code'] ?? '';
+                    $message = strtolower($e['message'] ?? '');
+                    // Check error message/code for Saturday references
+                    if (str_contains($message, 'saturday') || str_contains($code, 'SATURDAY')) {
+                        return true;
+                    }
+                    // ORGORDEST.SPECIALSERVICES.NOTALLOWED with SATURDAY_DELIVERY in parameterList
+                    if ($code === 'ORGORDEST.SPECIALSERVICES.NOTALLOWED') {
+                        return collect($e['parameterList'] ?? [])->contains(
+                            fn ($p) => ($p['value'] ?? '') === 'SATURDAY_DELIVERY'
+                        );
+                    }
+
+                    return false;
+                });
 
                 if ($isSaturdayError) {
                     logger()->info('FedEx Saturday delivery rejected, retrying without', [
@@ -395,6 +427,21 @@ class FedexAdapter implements CarrierAdapterInterface
      *
      * @return array<string, mixed>
      */
+    private function withoutSaturdayDelivery(RateRequest $request): RateRequest
+    {
+        return new RateRequest(
+            originPostalCode: $request->originPostalCode,
+            destinationPostalCode: $request->destinationPostalCode,
+            originCountry: $request->originCountry,
+            destinationCountry: $request->destinationCountry,
+            destinationCity: $request->destinationCity,
+            destinationStateOrProvince: $request->destinationStateOrProvince,
+            residential: $request->residential,
+            packages: $request->packages,
+            saturdayDelivery: false,
+        );
+    }
+
     private function sendCreateShipment($connector, array $requestedShipment): \Saloon\Http\Response
     {
         $apiRequest = new CreateShipment;
