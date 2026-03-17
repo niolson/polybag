@@ -50,7 +50,7 @@ readonly class ShipRequest
             customsItems: $customsItems,
             labelFormat: $labelFormat,
             labelDpi: $labelDpi,
-            saturdayDelivery: (bool) $shippingMethod?->saturday_delivery && RateRequest::isSaturdayDeliveryApplicable(),
+            saturdayDelivery: (bool) $shippingMethod?->saturday_delivery,
         );
     }
 }

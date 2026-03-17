@@ -42,7 +42,20 @@ class FedexAdapter implements CarrierAdapterInterface
         'STANDARD_OVERNIGHT',
         'FEDEX_2_DAY_AM',
         'FEDEX_2_DAY',
-        'FEDEX_EXPRESS_SAVER',
+        'EXPRESS_SAVER',
+    ];
+
+    /**
+     * Map FedEx service codes to the day of week when Saturday delivery applies.
+     * dayOfWeek values: 3=Wednesday, 4=Thursday, 5=Friday
+     */
+    private const SATURDAY_DELIVERY_DAY_MAP = [
+        'FIRST_OVERNIGHT' => 5,      // Friday → Saturday (1-day)
+        'PRIORITY_OVERNIGHT' => 5,   // Friday → Saturday (1-day)
+        'STANDARD_OVERNIGHT' => 5,   // Friday → Saturday (1-day)
+        'FEDEX_2_DAY_AM' => 4,       // Thursday → Saturday (2-day)
+        'FEDEX_2_DAY' => 4,          // Thursday → Saturday (2-day)
+        'EXPRESS_SAVER' => 3,        // Wednesday → Saturday (3-day)
     ];
 
     public function getCarrierName(): string
@@ -70,9 +83,10 @@ class FedexAdapter implements CarrierAdapterInterface
         }
 
         $connector = FedexConnector::getFedexConnector();
-        $apiRequest = $this->buildRateApiRequest($request);
+        $apiRequest = $this->buildRateApiRequest($this->adjustRequestForSaturday($request, $serviceCodes));
         $response = $connector->send($apiRequest);
 
+        // Pass original $request so parseRateResponse knows Saturday was requested
         return $this->parseRateResponse($response, $request, $serviceCodes);
     }
 
@@ -89,7 +103,7 @@ class FedexAdapter implements CarrierAdapterInterface
         }
 
         $connector = FedexConnector::getFedexConnector();
-        $apiRequest = $this->buildRateApiRequest($request);
+        $apiRequest = $this->buildRateApiRequest($this->adjustRequestForSaturday($request, $serviceCodes));
         $pendingRequest = $connector->createPendingRequest($apiRequest);
 
         return new PreparedRateRequest(
@@ -129,54 +143,36 @@ class FedexAdapter implements CarrierAdapterInterface
             return collect();
         }
 
-        $rateReplyDetails = $response->json('output.rateReplyDetails', []);
+        $results = $this->extractRateDetails($response, $serviceCodes);
 
-        if (! is_array($rateReplyDetails)) {
-            logger()->warning('FedEx API returned invalid rateReplyDetails', [
-                'status' => $response->status(),
-                'body' => $response->json(),
-            ]);
+        // Mixed Saturday: initial request was sent without Saturday, now send
+        // a follow-up with Saturday for eligible services and merge results
+        if ($request->saturdayDelivery && $this->classifySaturdayEligibility($serviceCodes) === 'mixed') {
+            try {
+                $connector = FedexConnector::getFedexConnector();
+                $saturdayApiRequest = $this->buildRateApiRequest($request);
+                $saturdayResponse = $connector->send($saturdayApiRequest);
 
-            return collect();
-        }
+                if ($saturdayResponse->successful()) {
+                    $saturdayRates = $this->extractRateDetails($saturdayResponse, $serviceCodes);
 
-        $returnedServiceTypes = array_map(fn ($d) => $d['serviceType'] ?? 'unknown', $rateReplyDetails);
-        logger()->debug('FedEx rate response filtering', [
-            'returned_services' => $returnedServiceTypes,
-            'requested_codes' => $serviceCodes,
-        ]);
-
-        $results = collect();
-
-        foreach ($rateReplyDetails as $detail) {
-            if (! empty($serviceCodes) && ! in_array($detail['serviceType'] ?? '', $serviceCodes)) {
-                continue;
+                    if ($saturdayRates->isNotEmpty()) {
+                        $saturdayServiceCodes = $saturdayRates->pluck('serviceCode')->unique()->all();
+                        $results = $results->reject(
+                            fn ($rate) => in_array($rate->serviceCode, $saturdayServiceCodes)
+                                && empty($rate->metadata['isOneRate'])
+                        );
+                        $results = $results->merge($saturdayRates);
+                    }
+                } else {
+                    logger()->warning('FedEx Saturday delivery rate request failed', [
+                        'status' => $saturdayResponse->status(),
+                        'errors' => $saturdayResponse->json('errors', []),
+                    ]);
+                }
+            } catch (\Exception $e) {
+                logger()->warning('FedEx Saturday delivery rate request error', ['error' => $e->getMessage()]);
             }
-
-            $ratedShipmentDetails = $detail['ratedShipmentDetails'][0] ?? null;
-
-            if (! $ratedShipmentDetails) {
-                continue;
-            }
-
-            // transitDays can be a string like 'THREE_DAYS' or an object with minimumTransitTime
-            $transitDays = $detail['commit']['transitDays'] ?? null;
-            $transitTime = is_string($transitDays) ? $transitDays : ($transitDays['minimumTransitTime'] ?? null);
-
-            // Prefer actual date (ISO format) over day-of-week string
-            $deliveryDate = $detail['commit']['dateDetail']['dayFormat'] ?? $detail['commit']['dateDetail']['dayOfWeek'] ?? null;
-
-            $results->push(new RateResponse(
-                carrier: 'FedEx',
-                serviceCode: $detail['serviceType'],
-                serviceName: $detail['serviceName'] ?? $detail['serviceType'],
-                price: (float) ($ratedShipmentDetails['totalNetCharge'] ?? 0),
-                deliveryDate: $deliveryDate,
-                transitTime: $transitTime,
-                metadata: [
-                    'serviceType' => $detail['serviceType'],
-                ],
-            ));
         }
 
         // Fetch One Rate prices if eligible and merge them in
@@ -475,6 +471,112 @@ class FedexAdapter implements CarrierAdapterInterface
             packages: $request->packages,
             saturdayDelivery: false,
         );
+    }
+
+    /**
+     * Extract rate details from a successful FedEx rate response.
+     * Core parsing loop used by parseRateResponse and mixed Saturday handling.
+     */
+    private function extractRateDetails(Response $response, array $serviceCodes): Collection
+    {
+        $rateReplyDetails = $response->json('output.rateReplyDetails', []);
+
+        if (! is_array($rateReplyDetails)) {
+            logger()->warning('FedEx API returned invalid rateReplyDetails', [
+                'status' => $response->status(),
+                'body' => $response->json(),
+            ]);
+
+            return collect();
+        }
+
+        $returnedServiceTypes = array_map(fn ($d) => $d['serviceType'] ?? 'unknown', $rateReplyDetails);
+        logger()->debug('FedEx rate response filtering', [
+            'returned_services' => $returnedServiceTypes,
+            'requested_codes' => $serviceCodes,
+        ]);
+
+        $results = collect();
+
+        foreach ($rateReplyDetails as $detail) {
+            if (! empty($serviceCodes) && ! in_array($detail['serviceType'] ?? '', $serviceCodes)) {
+                continue;
+            }
+
+            $ratedShipmentDetails = $detail['ratedShipmentDetails'][0] ?? null;
+
+            if (! $ratedShipmentDetails) {
+                continue;
+            }
+
+            $transitDays = $detail['commit']['transitDays'] ?? null;
+            $transitTime = is_string($transitDays) ? $transitDays : ($transitDays['minimumTransitTime'] ?? null);
+            $deliveryDate = $detail['commit']['dateDetail']['dayFormat'] ?? $detail['commit']['dateDetail']['dayOfWeek'] ?? null;
+
+            $results->push(new RateResponse(
+                carrier: 'FedEx',
+                serviceCode: $detail['serviceType'],
+                serviceName: $detail['serviceName'] ?? $detail['serviceType'],
+                price: (float) ($ratedShipmentDetails['totalNetCharge'] ?? 0),
+                deliveryDate: $deliveryDate,
+                transitTime: $transitTime,
+                metadata: [
+                    'serviceType' => $detail['serviceType'],
+                ],
+            ));
+        }
+
+        return $results;
+    }
+
+    /**
+     * Classify Saturday delivery eligibility for the requested service codes.
+     * Returns 'all', 'none', or 'mixed' based on today's day of week.
+     */
+    private function classifySaturdayEligibility(array $serviceCodes): string
+    {
+        $today = now()->dayOfWeek;
+
+        // No service filter = FedEx returns all service types = always mixed
+        if (empty($serviceCodes)) {
+            return 'mixed';
+        }
+
+        $eligible = 0;
+        $ineligible = 0;
+
+        foreach ($serviceCodes as $code) {
+            $saturdayDay = self::SATURDAY_DELIVERY_DAY_MAP[$code] ?? null;
+            if ($saturdayDay === $today) {
+                $eligible++;
+            } else {
+                $ineligible++;
+            }
+        }
+
+        if ($ineligible === 0) {
+            return 'all';
+        }
+
+        if ($eligible === 0) {
+            return 'none';
+        }
+
+        return 'mixed';
+    }
+
+    /**
+     * Adjust the rate request for Saturday delivery based on service eligibility.
+     * For 'all' eligible: keep Saturday. For 'none' or 'mixed': strip it
+     * (mixed sends a follow-up Saturday request in parseRateResponse).
+     */
+    private function adjustRequestForSaturday(RateRequest $request, array $serviceCodes): RateRequest
+    {
+        if ($request->saturdayDelivery && $this->classifySaturdayEligibility($serviceCodes) !== 'all') {
+            return $this->withoutSaturdayDelivery($request);
+        }
+
+        return $request;
     }
 
     /**

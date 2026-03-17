@@ -38,6 +38,19 @@ class UpsAdapter implements CarrierAdapterInterface
         '14' => 'UPS Next Day Air Early',
     ];
 
+    /**
+     * Map UPS service codes to the day of week when Saturday delivery applies.
+     * dayOfWeek values: 3=Wednesday, 4=Thursday, 5=Friday
+     * Ground (03) excluded — variable transit times make day mapping impractical.
+     */
+    private const SATURDAY_DELIVERY_DAY_MAP = [
+        '14' => 5,  // Next Day Air Early — Friday → Saturday
+        '01' => 5,  // Next Day Air — Friday → Saturday
+        '13' => 5,  // Next Day Air Saver — Friday → Saturday
+        '02' => 4,  // 2nd Day Air — Thursday → Saturday
+        '12' => 3,  // 3 Day Select — Wednesday → Saturday
+    ];
+
     public function getCarrierName(): string
     {
         return 'UPS';
@@ -53,9 +66,10 @@ class UpsAdapter implements CarrierAdapterInterface
             }
 
             $connector = UpsConnector::getAuthenticatedConnector();
-            $apiRequest = $this->buildRateApiRequest($request);
+            $apiRequest = $this->buildRateApiRequest($this->adjustRequestForSaturday($request, $serviceCodes));
             $response = $connector->send($apiRequest);
 
+            // Pass original $request so parseRateResponse knows Saturday was requested
             return $this->parseRateResponse($response, $request, $serviceCodes);
         } catch (\Exception $e) {
             logger()->error('UPS getRates error', ['error' => $e->getMessage()]);
@@ -71,7 +85,7 @@ class UpsAdapter implements CarrierAdapterInterface
         }
 
         $connector = UpsConnector::getAuthenticatedConnector();
-        $apiRequest = $this->buildRateApiRequest($request);
+        $apiRequest = $this->buildRateApiRequest($this->adjustRequestForSaturday($request, $serviceCodes));
         $pendingRequest = $connector->createPendingRequest($apiRequest);
 
         return new PreparedRateRequest(
@@ -91,6 +105,45 @@ class UpsAdapter implements CarrierAdapterInterface
             return collect();
         }
 
+        $results = $this->extractRateDetails($response, $serviceCodes);
+
+        // Mixed Saturday: initial request was sent without Saturday, now send
+        // a follow-up with Saturday for eligible services and merge results
+        if ($request->saturdayDelivery && $this->classifySaturdayEligibility($serviceCodes) === 'mixed') {
+            try {
+                $connector = UpsConnector::getAuthenticatedConnector();
+                $saturdayApiRequest = $this->buildRateApiRequest($request);
+                $saturdayResponse = $connector->send($saturdayApiRequest);
+
+                if ($saturdayResponse->successful()) {
+                    $saturdayRates = $this->extractRateDetails($saturdayResponse, $serviceCodes);
+
+                    if ($saturdayRates->isNotEmpty()) {
+                        $saturdayServiceCodes = $saturdayRates->pluck('serviceCode')->unique()->all();
+                        $results = $results->reject(
+                            fn ($rate) => in_array($rate->serviceCode, $saturdayServiceCodes)
+                        );
+                        $results = $results->merge($saturdayRates);
+                    }
+                } else {
+                    logger()->warning('UPS Saturday delivery rate request failed', [
+                        'status' => $saturdayResponse->status(),
+                        'errors' => $saturdayResponse->json(),
+                    ]);
+                }
+            } catch (\Exception $e) {
+                logger()->warning('UPS Saturday delivery rate request error', ['error' => $e->getMessage()]);
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * Extract rate details from a successful UPS rate response.
+     */
+    private function extractRateDetails(Response $response, array $serviceCodes): Collection
+    {
         $ratedShipments = $response->json('RateResponse.RatedShipment', []);
 
         if (! is_array($ratedShipments)) {
@@ -213,6 +266,11 @@ class UpsAdapter implements CarrierAdapterInterface
                     'DeliveryTimeInformation' => [
                         'PackageBillType' => '03',
                     ],
+                    ...($request->saturdayDelivery ? [
+                        'ShipmentServiceOptions' => [
+                            'SaturdayDeliveryIndicator' => '',
+                        ],
+                    ] : []),
                 ],
             ],
         ]);
@@ -440,10 +498,67 @@ class UpsAdapter implements CarrierAdapterInterface
     }
 
     /**
-     * Build UPS address structure from AddressData DTO.
-     *
-     * @return array<string, mixed>
+     * Classify Saturday delivery eligibility for the requested service codes.
+     * Returns 'all', 'none', or 'mixed' based on today's day of week.
      */
+    private function classifySaturdayEligibility(array $serviceCodes): string
+    {
+        $today = now()->dayOfWeek;
+
+        if (empty($serviceCodes)) {
+            return 'mixed';
+        }
+
+        $eligible = 0;
+        $ineligible = 0;
+
+        foreach ($serviceCodes as $code) {
+            $saturdayDay = self::SATURDAY_DELIVERY_DAY_MAP[$code] ?? null;
+            if ($saturdayDay === $today) {
+                $eligible++;
+            } else {
+                $ineligible++;
+            }
+        }
+
+        if ($ineligible === 0) {
+            return 'all';
+        }
+
+        if ($eligible === 0) {
+            return 'none';
+        }
+
+        return 'mixed';
+    }
+
+    /**
+     * Adjust the rate request for Saturday delivery based on service eligibility.
+     */
+    private function adjustRequestForSaturday(RateRequest $request, array $serviceCodes): RateRequest
+    {
+        if ($request->saturdayDelivery && $this->classifySaturdayEligibility($serviceCodes) !== 'all') {
+            return $this->withoutSaturdayDelivery($request);
+        }
+
+        return $request;
+    }
+
+    private function withoutSaturdayDelivery(RateRequest $request): RateRequest
+    {
+        return new RateRequest(
+            originPostalCode: $request->originPostalCode,
+            destinationPostalCode: $request->destinationPostalCode,
+            originCountry: $request->originCountry,
+            destinationCountry: $request->destinationCountry,
+            destinationCity: $request->destinationCity,
+            destinationStateOrProvince: $request->destinationStateOrProvince,
+            residential: $request->residential,
+            packages: $request->packages,
+            saturdayDelivery: false,
+        );
+    }
+
     private function sendCreateShipment($connector, array $shipment, ShipRequest $request, string $serviceCode): \Saloon\Http\Response
     {
         $apiRequest = new CreateShipment;
