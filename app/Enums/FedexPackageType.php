@@ -9,6 +9,7 @@ enum FedexPackageType: string implements HasLabel
     case YOUR_PACKAGING = 'YOUR_PACKAGING';
     case FEDEX_ENVELOPE = 'FEDEX_ENVELOPE';
     case FEDEX_BOX = 'FEDEX_BOX';
+    case FEDEX_EXTRA_SMALL_BOX = 'FEDEX_EXTRA_SMALL_BOX';
     case FEDEX_SMALL_BOX = 'FEDEX_SMALL_BOX';
     case FEDEX_MEDIUM_BOX = 'FEDEX_MEDIUM_BOX';
     case FEDEX_LARGE_BOX = 'FEDEX_LARGE_BOX';
@@ -24,6 +25,7 @@ enum FedexPackageType: string implements HasLabel
             self::YOUR_PACKAGING => 'Your Packaging',
             self::FEDEX_ENVELOPE => 'FedEx Envelope',
             self::FEDEX_BOX => 'FedEx Box',
+            self::FEDEX_EXTRA_SMALL_BOX => 'FedEx Extra Small Box',
             self::FEDEX_SMALL_BOX => 'FedEx Small Box',
             self::FEDEX_MEDIUM_BOX => 'FedEx Medium Box',
             self::FEDEX_LARGE_BOX => 'FedEx Large Box',

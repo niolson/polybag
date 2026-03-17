@@ -3,6 +3,7 @@
 namespace App\DataTransferObjects\Shipping;
 
 use App\Enums\BoxSizeType;
+use App\Enums\FedexPackageType;
 use App\Models\Package;
 
 readonly class PackageData
@@ -13,6 +14,7 @@ readonly class PackageData
         public float $width,
         public float $height,
         public ?BoxSizeType $boxType = null,
+        public ?FedexPackageType $fedexPackageType = null,
     ) {}
 
     public static function fromPackage(Package $package): self
@@ -23,6 +25,7 @@ readonly class PackageData
             width: (float) $package->width,
             height: (float) $package->height,
             boxType: $package->boxSize?->type,
+            fedexPackageType: $package->boxSize?->fedex_package_type,
         );
     }
 }

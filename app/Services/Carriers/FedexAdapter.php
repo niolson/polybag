@@ -10,6 +10,7 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\FedexPackageType;
 use App\Http\Integrations\Fedex\FedexConnector;
 use App\Http\Integrations\Fedex\Requests\CancelShipment as CancelShipmentRequest;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
@@ -30,6 +31,18 @@ class FedexAdapter implements CarrierAdapterInterface
         'INTERNATIONAL_FIRST',
         'INTERNATIONAL_PRIORITY',
         'INTERNATIONAL_ECONOMY',
+    ];
+
+    /**
+     * Service codes eligible for FedEx One Rate pricing.
+     */
+    private const ONE_RATE_ELIGIBLE_SERVICES = [
+        'FIRST_OVERNIGHT',
+        'PRIORITY_OVERNIGHT',
+        'STANDARD_OVERNIGHT',
+        'FEDEX_2_DAY_AM',
+        'FEDEX_2_DAY',
+        'FEDEX_EXPRESS_SAVER',
     ];
 
     public function getCarrierName(): string
@@ -166,6 +179,12 @@ class FedexAdapter implements CarrierAdapterInterface
             ));
         }
 
+        // Fetch One Rate prices if eligible and merge them in
+        if ($this->isOneRateEligible($request)) {
+            $oneRateResults = $this->fetchOneRateRates($request, $serviceCodes);
+            $results = $results->merge($oneRateResults);
+        }
+
         return $results;
     }
 
@@ -234,7 +253,9 @@ class FedexAdapter implements CarrierAdapterInterface
                 ],
                 'pickupType' => 'USE_SCHEDULED_PICKUP',
                 'serviceType' => $request->selectedRate->metadata['serviceType'],
-                'packagingType' => 'YOUR_PACKAGING',
+                'packagingType' => ! empty($request->selectedRate->metadata['isOneRate'])
+                    ? $request->selectedRate->metadata['fedexPackageType']
+                    : 'YOUR_PACKAGING',
                 'shippingChargesPayment' => [
                     'paymentType' => 'SENDER',
                     'payor' => [
@@ -272,10 +293,17 @@ class FedexAdapter implements CarrierAdapterInterface
                 $requestedShipment['customsClearanceDetail'] = $this->buildCustomsClearanceDetail($request);
             }
 
-            // Add Saturday delivery if requested
+            // Build special service types
+            $specialServiceTypes = [];
+            if (! empty($request->selectedRate->metadata['isOneRate'])) {
+                $specialServiceTypes[] = 'FEDEX_ONE_RATE';
+            }
             if ($request->saturdayDelivery) {
+                $specialServiceTypes[] = 'SATURDAY_DELIVERY';
+            }
+            if (! empty($specialServiceTypes)) {
                 $requestedShipment['shipmentSpecialServices'] = [
-                    'specialServiceTypes' => ['SATURDAY_DELIVERY'],
+                    'specialServiceTypes' => $specialServiceTypes,
                 ];
             }
 
@@ -306,7 +334,14 @@ class FedexAdapter implements CarrierAdapterInterface
                     logger()->info('FedEx Saturday delivery rejected, retrying without', [
                         'errors' => $errors,
                     ]);
-                    unset($requestedShipment['shipmentSpecialServices']);
+                    // Remove only SATURDAY_DELIVERY, preserve other special services (e.g. FEDEX_ONE_RATE)
+                    $existingTypes = $requestedShipment['shipmentSpecialServices']['specialServiceTypes'] ?? [];
+                    $remainingTypes = array_values(array_filter($existingTypes, fn ($t) => $t !== 'SATURDAY_DELIVERY'));
+                    if (empty($remainingTypes)) {
+                        unset($requestedShipment['shipmentSpecialServices']);
+                    } else {
+                        $requestedShipment['shipmentSpecialServices']['specialServiceTypes'] = $remainingTypes;
+                    }
                     $response = $this->sendCreateShipment($connector, $requestedShipment);
                     $responseData = $response->json();
                 }
@@ -440,6 +475,174 @@ class FedexAdapter implements CarrierAdapterInterface
             packages: $request->packages,
             saturdayDelivery: false,
         );
+    }
+
+    /**
+     * Check if the request is eligible for FedEx One Rate pricing.
+     * Requires: FedEx-branded packaging, domestic US, weight ≤ 50 lbs.
+     */
+    private function isOneRateEligible(RateRequest $request): bool
+    {
+        $package = $request->packages[0] ?? null;
+
+        if (! $package) {
+            return false;
+        }
+
+        $fedexType = $package->fedexPackageType;
+
+        if (! $fedexType || $fedexType === FedexPackageType::YOUR_PACKAGING) {
+            return false;
+        }
+
+        if ($request->destinationCountry !== 'US' || $request->originCountry !== 'US') {
+            return false;
+        }
+
+        if ($package->weight > 50) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Fetch One Rate rates from FedEx API.
+     * Returns empty collection on failure (non-fatal).
+     */
+    private function fetchOneRateRates(RateRequest $request, array $serviceCodes): Collection
+    {
+        try {
+            $connector = FedexConnector::getFedexConnector();
+            $apiRequest = $this->buildOneRateApiRequest($request);
+            $response = $connector->send($apiRequest);
+
+            if (! $response->successful()) {
+                logger()->warning('FedEx One Rate request failed', [
+                    'status' => $response->status(),
+                    'errors' => $response->json('errors', []),
+                ]);
+
+                return collect();
+            }
+
+            return $this->parseOneRateResponse($response, $request, $serviceCodes);
+        } catch (\Exception $e) {
+            logger()->warning('FedEx One Rate request error', ['error' => $e->getMessage()]);
+
+            return collect();
+        }
+    }
+
+    /**
+     * Build the FedEx One Rate API request.
+     */
+    private function buildOneRateApiRequest(RateRequest $request): Rates
+    {
+        $package = $request->packages[0];
+
+        $apiRequest = new Rates;
+        $apiRequest->body()->set([
+            'accountNumber' => [
+                'value' => app(SettingsService::class)->get('fedex.account_number', config('services.fedex.account_number')),
+            ],
+            'rateRequestControlParameters' => [
+                'returnTransitTimes' => true,
+            ],
+            'requestedShipment' => [
+                'shipper' => [
+                    'address' => [
+                        'postalCode' => $request->originPostalCode,
+                        'countryCode' => 'US',
+                    ],
+                ],
+                'recipient' => [
+                    'address' => [
+                        'postalCode' => $request->destinationPostalCode,
+                        'countryCode' => 'US',
+                    ],
+                ],
+                'pickupType' => 'USE_SCHEDULED_PICKUP',
+                'rateRequestType' => ['ACCOUNT'],
+                'packagingType' => $package->fedexPackageType->value,
+                'requestedPackageLineItems' => [
+                    [
+                        'weight' => [
+                            'units' => 'LB',
+                            'value' => $package->weight,
+                        ],
+                    ],
+                ],
+                'shipmentSpecialServices' => [
+                    'specialServiceTypes' => array_filter([
+                        'FEDEX_ONE_RATE',
+                        $request->saturdayDelivery ? 'SATURDAY_DELIVERY' : null,
+                    ]),
+                ],
+            ],
+        ]);
+
+        logger()->debug('FedEx One Rate API Request', [
+            'body' => $apiRequest->body(),
+        ]);
+
+        return $apiRequest;
+    }
+
+    /**
+     * Parse One Rate response, appending " (One Rate)" to service names.
+     */
+    private function parseOneRateResponse(Response $response, RateRequest $request, array $serviceCodes): Collection
+    {
+        $rateReplyDetails = $response->json('output.rateReplyDetails', []);
+
+        if (! is_array($rateReplyDetails)) {
+            return collect();
+        }
+
+        $package = $request->packages[0];
+        $results = collect();
+
+        foreach ($rateReplyDetails as $detail) {
+            $serviceType = $detail['serviceType'] ?? '';
+
+            if (! empty($serviceCodes) && ! in_array($serviceType, $serviceCodes)) {
+                continue;
+            }
+
+            // Only include One Rate eligible services
+            if (! in_array($serviceType, self::ONE_RATE_ELIGIBLE_SERVICES)) {
+                continue;
+            }
+
+            $ratedShipmentDetails = $detail['ratedShipmentDetails'][0] ?? null;
+
+            if (! $ratedShipmentDetails) {
+                continue;
+            }
+
+            $transitDays = $detail['commit']['transitDays'] ?? null;
+            $transitTime = is_string($transitDays) ? $transitDays : ($transitDays['minimumTransitTime'] ?? null);
+            $deliveryDate = $detail['commit']['dateDetail']['dayFormat'] ?? $detail['commit']['dateDetail']['dayOfWeek'] ?? null;
+
+            $serviceName = ($detail['serviceName'] ?? $serviceType).' (One Rate)';
+
+            $results->push(new RateResponse(
+                carrier: 'FedEx',
+                serviceCode: $serviceType,
+                serviceName: $serviceName,
+                price: (float) ($ratedShipmentDetails['totalNetCharge'] ?? 0),
+                deliveryDate: $deliveryDate,
+                transitTime: $transitTime,
+                metadata: [
+                    'serviceType' => $serviceType,
+                    'isOneRate' => true,
+                    'fedexPackageType' => $package->fedexPackageType->value,
+                ],
+            ));
+        }
+
+        return $results;
     }
 
     private function sendCreateShipment($connector, array $requestedShipment): \Saloon\Http\Response
