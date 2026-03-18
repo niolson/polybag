@@ -18,7 +18,9 @@ class ValidateAddressJob implements ShouldQueue
 
     public function __construct(
         public int $shipmentId,
-    ) {}
+    ) {
+        $this->onQueue('low');
+    }
 
     public function handle(AddressValidationService $service): void
     {

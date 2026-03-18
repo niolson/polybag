@@ -86,7 +86,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./.env:/var/www/html/.env
-    entrypoint: ["sh", "-c", "php artisan config:cache && php artisan queue:work --tries=3"]
+    entrypoint: ["sh", "-c", "php artisan config:cache && php artisan queue:work --queue=default,low --tries=3"]
     depends_on:
       mysql:
         condition: service_healthy

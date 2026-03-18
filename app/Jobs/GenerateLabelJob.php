@@ -24,7 +24,9 @@ class GenerateLabelJob implements ShouldQueue
         public int $labelBatchItemId,
         public string $labelFormat,
         public ?int $labelDpi,
-    ) {}
+    ) {
+        $this->onQueue('low');
+    }
 
     public function handle(): void
     {

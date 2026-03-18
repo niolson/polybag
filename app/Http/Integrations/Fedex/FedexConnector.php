@@ -3,6 +3,7 @@
 namespace App\Http\Integrations\Fedex;
 
 use App\Http\Integrations\Concerns\HasCachedAuthentication;
+use App\Http\Integrations\Concerns\RetriesTransientErrors;
 use App\Services\SettingsService;
 use Saloon\Helpers\OAuth2\OAuthConfig;
 use Saloon\Http\Connector;
@@ -14,6 +15,7 @@ class FedexConnector extends Connector
     use ClientCredentialsGrant;
     use HasCachedAuthentication;
     use HasTimeout;
+    use RetriesTransientErrors;
 
     protected int $connectTimeout = 5;
 

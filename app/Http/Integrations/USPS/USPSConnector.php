@@ -3,6 +3,7 @@
 namespace App\Http\Integrations\USPS;
 
 use App\Http\Integrations\Concerns\HasCachedAuthentication;
+use App\Http\Integrations\Concerns\RetriesTransientErrors;
 use App\Http\Integrations\USPS\Requests\PaymentAuthorization;
 use App\Services\SettingsService;
 use Illuminate\Support\Facades\Cache;
@@ -16,6 +17,7 @@ class USPSConnector extends Connector
     use ClientCredentialsGrant;
     use HasCachedAuthentication;
     use HasTimeout;
+    use RetriesTransientErrors;
 
     protected int $connectTimeout = 5;
 
