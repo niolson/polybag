@@ -4,6 +4,7 @@ ARCHITECTURE.md
 ROADMAP.md
 .env
 .env.backup
+.env.*.backup
 .env.production
 .phpactor.json
 .phpunit.result.cache
@@ -18,11 +19,13 @@ ROADMAP.md
 /.claude/settings.local.json
 /auth.json
 nul
+null
 /node_modules
 /public/build
 /public/hot
 /public/storage
 /storage/*.key
+/storage/clockwork
 /storage/pail
 /vendor
 Homestead.json
@@ -38,6 +41,7 @@ Thumbs.db
 database/seeders/LocalSettingsSeeder.php
 
 # Playwright
+.playwright-mcp
 node_modules/
 /test-results/
 /playwright-report/
