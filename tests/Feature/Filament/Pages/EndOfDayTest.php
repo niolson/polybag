@@ -85,7 +85,7 @@ it('does not show inactive carriers', function (): void {
         });
 });
 
-it('displays todays manifests', function (): void {
+it('displays manifests', function (): void {
     Manifest::factory()->create([
         'carrier' => 'USPS',
         'manifest_number' => 'MN999',
@@ -94,16 +94,23 @@ it('displays todays manifests', function (): void {
     ]);
 
     Livewire::test(EndOfDay::class)
-        ->assertSet('todaysManifests', fn ($value) => count($value) === 1 && $value[0]['manifest_number'] === 'MN999');
+        ->assertSee('MN999');
 });
 
-it('excludes manifests from other days', function (): void {
+it('shows manifests from all dates sorted newest first', function (): void {
     Manifest::factory()->create([
+        'manifest_number' => 'MN001',
         'manifest_date' => today()->subDay(),
+        'created_at' => now()->subDay(),
+    ]);
+    Manifest::factory()->create([
+        'manifest_number' => 'MN002',
+        'manifest_date' => today(),
+        'created_at' => now(),
     ]);
 
     Livewire::test(EndOfDay::class)
-        ->assertSet('todaysManifests', []);
+        ->assertSeeInOrder(['MN002', 'MN001']);
 });
 
 it('dispatches print-report event when reprinting manifest with image', function (): void {

@@ -14,10 +14,12 @@ use App\Services\SettingsService;
 use App\Services\ShipDateService;
 use BackedEnum;
 use Filament\Pages\Page;
+use Livewire\WithPagination;
 
 class EndOfDay extends Page
 {
     use NotifiesUser;
+    use WithPagination;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-sun';
 
@@ -29,11 +31,9 @@ class EndOfDay extends Page
 
     protected string $view = 'filament.pages.end-of-day';
 
-    /** @var array<int, array{carrier: string, unmanifested_count: int, supports_manifest: bool, ship_date: string, next_ship_date: string}> */
+    /** @var array<int, array{carrier: string, package_count: int, unmanifested_count: int, supports_manifest: bool, ship_date: string, next_ship_date: string}> */
     public array $carrierSummary = [];
 
-    /** @var array<int, array<string, mixed>> */
-    public array $todaysManifests = [];
 
     public static function canAccess(): bool
     {
@@ -59,8 +59,15 @@ class EndOfDay extends Page
                 $supportsManifest = $registry->has($carrier->name)
                     && $registry->get($carrier->name)->supportsManifest();
 
+                $packageCount = Package::query()
+                    ->where('carrier', $carrier->name)
+                    ->where('status', PackageStatus::Shipped)
+                    ->whereNotNull('tracking_number')
+                    ->whereDate('ship_date', $shipDate)
+                    ->count();
+
                 $unmanifestedCount = 0;
-                if ($supportsManifest) {
+                if ($supportsManifest && $packageCount > 0) {
                     $unmanifestedCount = Package::query()
                         ->where('carrier', $carrier->name)
                         ->where('status', PackageStatus::Shipped)
@@ -72,6 +79,7 @@ class EndOfDay extends Page
 
                 return [
                     'carrier' => $carrier->name,
+                    'package_count' => $packageCount,
                     'unmanifested_count' => $unmanifestedCount,
                     'supports_manifest' => $supportsManifest,
                     'ship_date' => $shipDate->format('M j'),
@@ -80,19 +88,13 @@ class EndOfDay extends Page
             })
             ->all();
 
-        $this->todaysManifests = Manifest::query()
-            ->whereDate('manifest_date', today())
+    }
+
+    public function getManifestsProperty(): \Illuminate\Contracts\Pagination\LengthAwarePaginator
+    {
+        return Manifest::query()
             ->latest()
-            ->get()
-            ->map(fn ($manifest) => [
-                'id' => $manifest->id,
-                'carrier' => $manifest->carrier,
-                'manifest_number' => $manifest->manifest_number,
-                'package_count' => $manifest->package_count,
-                'created_at' => $manifest->created_at->tz(Location::timezone())->format('g:i A'),
-                'has_image' => ! empty($manifest->image),
-            ])
-            ->all();
+            ->paginate(10);
     }
 
     public function endShippingDay(string $carrier): void

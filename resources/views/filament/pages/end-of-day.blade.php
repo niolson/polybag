@@ -27,11 +27,14 @@
                                         <span class="font-medium">{{ $summary['ship_date'] }}</span>
                                     </td>
                                     <td class="px-4 py-3">
-                                        @if($summary['supports_manifest'] && $summary['unmanifested_count'] > 0)
-                                            <span class="inline-flex items-center rounded-full bg-warning-50 dark:bg-warning-950 px-2 py-0.5 text-xs font-medium text-warning-700 dark:text-warning-300">
-                                                {{ $summary['unmanifested_count'] }} unmanifested
-                                            </span>
-                                        @elseif($summary['supports_manifest'])
+                                        @if($summary['package_count'] > 0)
+                                            <span class="font-medium">{{ $summary['package_count'] }}</span>
+                                            @if($summary['supports_manifest'] && $summary['unmanifested_count'] > 0)
+                                                <span class="inline-flex items-center rounded-full bg-warning-50 dark:bg-warning-950 px-2 py-0.5 text-xs font-medium text-warning-700 dark:text-warning-300 ml-2">
+                                                    {{ $summary['unmanifested_count'] }} unmanifested
+                                                </span>
+                                            @endif
+                                        @else
                                             <span class="text-gray-400 dark:text-gray-500">&mdash;</span>
                                         @endif
                                     </td>
@@ -63,11 +66,11 @@
             @endif
         </x-filament::section>
 
-        {{-- Today's Manifests --}}
+        {{-- Manifests --}}
         <x-filament::section>
-            <x-slot name="heading">Today's Manifests</x-slot>
+            <x-slot name="heading">Manifests</x-slot>
 
-            @if(empty($todaysManifests))
+            @if($this->manifests->isEmpty())
                 <div class="text-center py-8">
                     <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800">
                         <x-filament::icon
@@ -75,8 +78,8 @@
                             class="w-7 h-7 text-gray-400"
                         />
                     </div>
-                    <h4 class="text-sm font-semibold text-gray-900 dark:text-white">No Manifests Yet</h4>
-                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">No manifests have been generated today.</p>
+                    <h4 class="text-sm font-semibold text-gray-900 dark:text-white">No Manifests</h4>
+                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">No manifests have been generated yet.</p>
                 </div>
             @else
                 <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
@@ -84,6 +87,7 @@
                         <thead class="text-xs text-gray-500 uppercase tracking-wider bg-gray-50 dark:bg-white/5 dark:text-gray-400">
                             <tr>
                                 <th class="px-4 py-3">Carrier</th>
+                                <th class="px-4 py-3">Date</th>
                                 <th class="px-4 py-3">Manifest Number</th>
                                 <th class="px-4 py-3">Packages</th>
                                 <th class="px-4 py-3">Time</th>
@@ -91,16 +95,17 @@
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-                            @foreach($todaysManifests as $manifest)
+                            @foreach($this->manifests as $manifest)
                                 <tr class="hover:bg-gray-50 dark:hover:bg-white/5 transition-colors">
-                                    <td class="px-4 py-3 font-medium">{{ $manifest['carrier'] }}</td>
-                                    <td class="px-4 py-3 font-mono text-xs">{{ $manifest['manifest_number'] }}</td>
-                                    <td class="px-4 py-3">{{ $manifest['package_count'] }}</td>
-                                    <td class="px-4 py-3 text-gray-500 dark:text-gray-400">{{ $manifest['created_at'] }}</td>
+                                    <td class="px-4 py-3 font-medium">{{ $manifest->carrier }}</td>
+                                    <td class="px-4 py-3">{{ \Carbon\Carbon::parse($manifest->manifest_date)->format('M j') }}</td>
+                                    <td class="px-4 py-3 font-mono text-xs">{{ $manifest->manifest_number }}</td>
+                                    <td class="px-4 py-3">{{ $manifest->package_count }}</td>
+                                    <td class="px-4 py-3 text-gray-500 dark:text-gray-400">{{ $manifest->created_at->tz(\App\Models\Location::timezone())->format('g:i A') }}</td>
                                     <td class="px-4 py-3 text-right">
-                                        @if($manifest['has_image'])
+                                        @if(!empty($manifest->image))
                                             <x-filament::button
-                                                wire:click="reprintManifest({{ $manifest['id'] }})"
+                                                wire:click="reprintManifest({{ $manifest->id }})"
                                                 icon="heroicon-o-printer"
                                                 size="xs"
                                                 color="gray"
@@ -113,6 +118,10 @@
                             @endforeach
                         </tbody>
                     </table>
+                </div>
+
+                <div class="mt-4">
+                    {{ $this->manifests->links() }}
                 </div>
             @endif
         </x-filament::section>
