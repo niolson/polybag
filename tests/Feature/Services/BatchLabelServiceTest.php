@@ -1,8 +1,8 @@
 <?php
 
-use App\Enums\PackageStatus;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\LabelBatchStatus;
+use App\Enums\PackageStatus;
 use App\Models\BoxSize;
 use App\Models\LabelBatch;
 use App\Models\LabelBatchItem;

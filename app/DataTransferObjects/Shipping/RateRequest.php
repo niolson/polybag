@@ -3,6 +3,7 @@
 namespace App\DataTransferObjects\Shipping;
 
 use App\Models\Package;
+use Carbon\CarbonImmutable;
 
 readonly class RateRequest
 {
@@ -19,6 +20,8 @@ readonly class RateRequest
         public ?bool $residential = null,
         public array $packages = [],
         public bool $saturdayDelivery = false,
+        public ?int $locationId = null,
+        public ?CarbonImmutable $shipDate = null,
     ) {}
 
     public static function fromPackage(Package $package): self
@@ -47,6 +50,24 @@ readonly class RateRequest
             residential: $shipment->validated_residential ?? $shipment->residential,
             packages: [PackageData::fromPackage($package)],
             saturdayDelivery: (bool) $shippingMethod?->saturday_delivery,
+            locationId: $package->location_id,
+        );
+    }
+
+    public function withShipDate(CarbonImmutable $date): self
+    {
+        return new self(
+            originPostalCode: $this->originPostalCode,
+            destinationPostalCode: $this->destinationPostalCode,
+            originCountry: $this->originCountry,
+            destinationCountry: $this->destinationCountry,
+            destinationCity: $this->destinationCity,
+            destinationStateOrProvince: $this->destinationStateOrProvince,
+            residential: $this->residential,
+            packages: $this->packages,
+            saturdayDelivery: $this->saturdayDelivery,
+            locationId: $this->locationId,
+            shipDate: $date,
         );
     }
 }

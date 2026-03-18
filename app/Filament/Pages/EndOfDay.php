@@ -6,6 +6,7 @@ use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Concerns\NotifiesUser;
 use App\Models\Carrier;
+use App\Models\Location;
 use App\Models\Manifest;
 use App\Models\Package;
 use App\Services\ManifestService;
@@ -49,27 +50,29 @@ class EndOfDay extends Page
         $shipDateService = app(ShipDateService::class);
         $registry = app(\App\Services\Carriers\CarrierRegistry::class);
 
-        // Count USPS packages shipped today without a manifest
-        $uspsUnmanifested = Package::query()
-            ->where('carrier', 'USPS')
-            ->where('status', PackageStatus::Shipped)
-            ->whereNotNull('tracking_number')
-            ->whereNull('manifest_id')
-            ->whereDate('shipped_at', today())
-            ->count();
-
         $this->carrierSummary = Carrier::active()
             ->orderBy('name')
             ->get()
-            ->map(function ($carrier) use ($shipDateService, $registry, $uspsUnmanifested) {
+            ->map(function ($carrier) use ($shipDateService, $registry) {
                 $shipDate = $shipDateService->getShipDate($carrier->name);
                 $nextShipDate = $shipDateService->getNextPickupDay($carrier->name);
                 $supportsManifest = $registry->has($carrier->name)
                     && $registry->get($carrier->name)->supportsManifest();
 
+                $unmanifestedCount = 0;
+                if ($supportsManifest) {
+                    $unmanifestedCount = Package::query()
+                        ->where('carrier', $carrier->name)
+                        ->where('status', PackageStatus::Shipped)
+                        ->whereNotNull('tracking_number')
+                        ->whereNull('manifest_id')
+                        ->whereDate('ship_date', $shipDate)
+                        ->count();
+                }
+
                 return [
                     'carrier' => $carrier->name,
-                    'unmanifested_count' => $carrier->name === 'USPS' ? $uspsUnmanifested : 0,
+                    'unmanifested_count' => $unmanifestedCount,
                     'supports_manifest' => $supportsManifest,
                     'ship_date' => $shipDate->format('M j'),
                     'next_ship_date' => $nextShipDate->format('M j'),
@@ -86,7 +89,7 @@ class EndOfDay extends Page
                 'carrier' => $manifest->carrier,
                 'manifest_number' => $manifest->manifest_number,
                 'package_count' => $manifest->package_count,
-                'created_at' => $manifest->created_at->format('g:i A'),
+                'created_at' => $manifest->created_at->tz(Location::timezone())->format('g:i A'),
                 'has_image' => ! empty($manifest->image),
             ])
             ->all();
@@ -106,12 +109,14 @@ class EndOfDay extends Page
 
     public function generateManifest(string $carrier): void
     {
+        $shipDate = app(ShipDateService::class)->getShipDate($carrier);
+
         $packages = Package::query()
             ->where('carrier', $carrier)
             ->where('status', PackageStatus::Shipped)
             ->whereNotNull('tracking_number')
             ->whereNull('manifest_id')
-            ->whereDate('shipped_at', today())
+            ->whereDate('ship_date', $shipDate)
             ->get();
 
         if ($packages->isEmpty()) {
@@ -120,7 +125,6 @@ class EndOfDay extends Page
             return;
         }
 
-        $shipDate = app(ShipDateService::class)->getShipDate($carrier);
         $response = app(ManifestService::class)->createManifest($carrier, $packages, $shipDate);
 
         if (! $response->success) {

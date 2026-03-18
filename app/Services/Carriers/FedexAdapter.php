@@ -147,7 +147,7 @@ class FedexAdapter implements CarrierAdapterInterface
 
         // Mixed Saturday: initial request was sent without Saturday, now send
         // a follow-up with Saturday for eligible services and merge results
-        if ($request->saturdayDelivery && $this->classifySaturdayEligibility($serviceCodes) === 'mixed') {
+        if ($request->saturdayDelivery && $this->classifySaturdayEligibility($serviceCodes, $request) === 'mixed') {
             try {
                 $connector = FedexConnector::getFedexConnector();
                 $saturdayApiRequest = $this->buildRateApiRequest($request);
@@ -222,6 +222,9 @@ class FedexAdapter implements CarrierAdapterInterface
                         ],
                     ],
                 ],
+                ...($request->shipDate ? [
+                    'shipDatestamp' => $request->shipDate->format('Y-m-d'),
+                ] : []),
                 ...($request->saturdayDelivery ? [
                     'shipmentSpecialServices' => [
                         'specialServiceTypes' => ['SATURDAY_DELIVERY'],
@@ -247,6 +250,9 @@ class FedexAdapter implements CarrierAdapterInterface
                 'recipients' => [
                     $this->buildContact($request->toAddress),
                 ],
+                ...($request->shipDate ? [
+                    'shipDatestamp' => $request->shipDate->format('Y-m-d'),
+                ] : []),
                 'pickupType' => 'USE_SCHEDULED_PICKUP',
                 'serviceType' => $request->selectedRate->metadata['serviceType'],
                 'packagingType' => ! empty($request->selectedRate->metadata['isOneRate'])
@@ -398,6 +404,7 @@ class FedexAdapter implements CarrierAdapterInterface
                 labelData: $labelData,
                 labelFormat: $request->labelFormat,
                 labelDpi: $request->labelDpi,
+                shipDate: $request->shipDate,
             );
         } catch (\Exception $e) {
             logger()->error('FedEx createShipment error', ['error' => $e->getMessage()]);
@@ -470,6 +477,8 @@ class FedexAdapter implements CarrierAdapterInterface
             residential: $request->residential,
             packages: $request->packages,
             saturdayDelivery: false,
+            locationId: $request->locationId,
+            shipDate: $request->shipDate,
         );
     }
 
@@ -533,9 +542,9 @@ class FedexAdapter implements CarrierAdapterInterface
      * Classify Saturday delivery eligibility for the requested service codes.
      * Returns 'all', 'none', or 'mixed' based on today's day of week.
      */
-    private function classifySaturdayEligibility(array $serviceCodes): string
+    private function classifySaturdayEligibility(array $serviceCodes, ?RateRequest $request = null): string
     {
-        $today = now()->dayOfWeek;
+        $today = ($request?->shipDate ?? now())->dayOfWeek;
 
         // No service filter = FedEx returns all service types = always mixed
         if (empty($serviceCodes)) {
@@ -572,7 +581,7 @@ class FedexAdapter implements CarrierAdapterInterface
      */
     private function adjustRequestForSaturday(RateRequest $request, array $serviceCodes): RateRequest
     {
-        if ($request->saturdayDelivery && $this->classifySaturdayEligibility($serviceCodes) !== 'all') {
+        if ($request->saturdayDelivery && $this->classifySaturdayEligibility($serviceCodes, $request) !== 'all') {
             return $this->withoutSaturdayDelivery($request);
         }
 
@@ -666,6 +675,9 @@ class FedexAdapter implements CarrierAdapterInterface
                 ],
                 'pickupType' => 'USE_SCHEDULED_PICKUP',
                 'rateRequestType' => ['ACCOUNT'],
+                ...($request->shipDate ? [
+                    'shipDatestamp' => $request->shipDate->format('Y-m-d'),
+                ] : []),
                 'packagingType' => $package->fedexPackageType->value,
                 'requestedPackageLineItems' => [
                     [

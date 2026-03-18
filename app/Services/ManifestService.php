@@ -4,13 +4,14 @@ namespace App\Services;
 
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\ManifestResponse;
+use App\Enums\PackageStatus;
 use App\Events\ManifestCreated as ManifestCreatedEvent;
 use App\Http\Integrations\USPS\Requests\ScanForm;
 use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Manifest;
-use App\Enums\PackageStatus;
 use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Saloon\Exceptions\Request\RequestException;
@@ -60,10 +61,10 @@ class ManifestService
     /**
      * Create a manifest for the given carrier and packages.
      */
-    public function createManifest(string $carrier, Collection $packages): ManifestResponse
+    public function createManifest(string $carrier, Collection $packages, ?CarbonImmutable $shipDate = null): ManifestResponse
     {
         return match ($carrier) {
-            'USPS' => $this->createUspsManifest($packages),
+            'USPS' => $this->createUspsManifest($packages, $shipDate),
             'FedEx' => $this->createFedexManifest(),
             default => ManifestResponse::failure("Unsupported carrier: {$carrier}"),
         };
@@ -74,7 +75,7 @@ class ManifestService
      */
     private const USPS_MANIFEST_CHUNK_SIZE = 10_000;
 
-    private function createUspsManifest(Collection $packages): ManifestResponse
+    private function createUspsManifest(Collection $packages, ?CarbonImmutable $shipDate = null): ManifestResponse
     {
         try {
             $fromAddress = AddressData::fromConfig();
@@ -86,7 +87,7 @@ class ManifestService
             $totalManifested = 0;
 
             foreach ($chunks as $chunkIndex => $chunk) {
-                $result = $this->createUspsScanForm($connector, $chunk->values(), $fromAddress);
+                $result = $this->createUspsScanForm($connector, $chunk->values(), $fromAddress, $shipDate);
 
                 if (! $result['success']) {
                     // If some chunks succeeded, report partial success
@@ -130,13 +131,14 @@ class ManifestService
         \Saloon\Http\Connector $connector,
         Collection $packages,
         AddressData $fromAddress,
+        ?CarbonImmutable $shipDate = null,
     ): array {
         $remainingPackages = $packages;
         $totalMarkedExternally = 0;
 
         for ($attempt = 0; $attempt < 3; $attempt++) {
             try {
-                $response = $this->sendScanFormRequest($connector, $remainingPackages, $fromAddress);
+                $response = $this->sendScanFormRequest($connector, $remainingPackages, $fromAddress, $shipDate);
             } catch (RequestException $e) {
                 $errorResponse = $e->getResponse();
                 $alreadyManifested = $this->extractAlreadyManifestedBarcodes(
@@ -212,6 +214,7 @@ class ManifestService
         \Saloon\Http\Connector $connector,
         Collection $packages,
         AddressData $fromAddress,
+        ?CarbonImmutable $shipDate = null,
     ): \Saloon\Http\Response {
         $trackingNumbers = $packages->pluck('tracking_number')->values()->all();
 
@@ -220,7 +223,7 @@ class ManifestService
             'form' => '5630',
             'imageType' => 'PDF',
             'labelType' => '8.5x11LABEL',
-            'mailingDate' => now()->format('Y-m-d'),
+            'mailingDate' => $shipDate?->format('Y-m-d') ?? now()->format('Y-m-d'),
             'overwriteMailingDate' => true,
             'entryFacilityZIPCode' => $fromAddress->postalCode,
             'destinationEntryFacilityType' => 'NONE',

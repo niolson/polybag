@@ -7,6 +7,7 @@ use App\Enums\Role;
 use App\Filament\Resources\LabelBatchResource\Pages;
 use App\Filament\Resources\LabelBatchResource\RelationManagers\LabelBatchItemsRelationManager;
 use App\Models\LabelBatch;
+use App\Models\Location;
 use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Actions;
@@ -70,10 +71,10 @@ class LabelBatchResource extends Resource
                     ->money('USD')
                     ->sortable(),
                 Tables\Columns\TextColumn::make('created_at')
-                    ->dateTime()
+                    ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->sortable(),
                 Tables\Columns\TextColumn::make('completed_at')
-                    ->dateTime()
+                    ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->sortable()
                     ->placeholder('—')
                     ->toggleable(isToggledHiddenByDefault: true),

@@ -3,6 +3,8 @@
 namespace App\DataTransferObjects\Shipping;
 
 use App\Models\Package;
+use App\Services\ShipDateService;
+use Carbon\CarbonImmutable;
 
 readonly class ShipRequest
 {
@@ -18,6 +20,7 @@ readonly class ShipRequest
         public string $labelFormat = 'pdf',
         public ?int $labelDpi = null,
         public bool $saturdayDelivery = false,
+        public ?CarbonImmutable $shipDate = null,
     ) {}
 
     public static function fromPackageAndRate(
@@ -42,6 +45,8 @@ readonly class ShipRequest
 
         $shippingMethod = $package->shipment->shippingMethod;
 
+        $shipDate = app(ShipDateService::class)->getShipDate($rate->carrier, $package->location_id);
+
         return new self(
             fromAddress: $fromAddress,
             toAddress: AddressData::fromShipment($package->shipment),
@@ -51,6 +56,7 @@ readonly class ShipRequest
             labelFormat: $labelFormat,
             labelDpi: $labelDpi,
             saturdayDelivery: (bool) $shippingMethod?->saturday_delivery,
+            shipDate: $shipDate,
         );
     }
 }

@@ -1,8 +1,8 @@
 <?php
 
 use App\Enums\Deliverability;
-use App\Enums\ShipmentStatus;
 use App\Enums\LabelBatchItemStatus;
+use App\Enums\ShipmentStatus;
 use App\Filament\Widgets\ExceptionsWidget;
 use App\Models\LabelBatchItem;
 use App\Models\Shipment;

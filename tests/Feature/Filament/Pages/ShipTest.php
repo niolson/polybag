@@ -1,8 +1,8 @@
 <?php
 
-use App\Enums\PackageStatus;
 use App\Contracts\CarrierAdapterInterface;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\PackageStatus;
 use App\Filament\Pages\Ship;
 use App\Models\BoxSize;
 use App\Models\Carrier;

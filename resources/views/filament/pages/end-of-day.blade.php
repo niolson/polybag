@@ -50,7 +50,7 @@
                                             wire:confirm="End {{ $summary['carrier'] }} shipping day? Ship date will advance from {{ $summary['ship_date'] }} to {{ $summary['next_ship_date'] }}."
                                             icon="heroicon-o-sun"
                                             size="sm"
-                                            color="danger"
+                                            color="info"
                                         >
                                             End Shipping Day
                                         </x-filament::button>

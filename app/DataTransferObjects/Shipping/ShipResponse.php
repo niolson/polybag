@@ -2,6 +2,8 @@
 
 namespace App\DataTransferObjects\Shipping;
 
+use Carbon\CarbonImmutable;
+
 readonly class ShipResponse
 {
     public function __construct(
@@ -14,6 +16,7 @@ readonly class ShipResponse
         public ?string $labelOrientation = null,
         public ?string $labelFormat = 'pdf',
         public ?int $labelDpi = null,
+        public ?CarbonImmutable $shipDate = null,
         public ?string $errorMessage = null,
     ) {}
 
@@ -26,6 +29,7 @@ readonly class ShipResponse
         string $labelOrientation = 'portrait',
         string $labelFormat = 'pdf',
         ?int $labelDpi = null,
+        ?CarbonImmutable $shipDate = null,
     ): self {
         return new self(
             success: true,
@@ -37,6 +41,7 @@ readonly class ShipResponse
             labelOrientation: $labelOrientation,
             labelFormat: $labelFormat,
             labelDpi: $labelDpi,
+            shipDate: $shipDate,
         );
     }
 

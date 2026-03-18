@@ -45,6 +45,14 @@ class Location extends Model
     }
 
     /**
+     * Get the default location's timezone, or fall back to America/New_York.
+     */
+    public static function timezone(): string
+    {
+        return static::getDefault()?->timezone ?? 'America/New_York';
+    }
+
+    /**
      * Clear the default location cache.
      */
     public static function clearDefaultCache(): void

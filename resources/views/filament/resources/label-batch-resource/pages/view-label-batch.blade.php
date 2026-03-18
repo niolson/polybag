@@ -49,7 +49,7 @@
                 <div class="text-sm text-gray-500 dark:text-gray-400">
                     Box: {{ $this->record->boxSize?->label ?? 'Unknown' }}
                     &middot; Started by {{ $this->record->user?->name ?? 'Unknown' }}
-                    &middot; {{ $this->record->created_at->format('M j, Y g:i A') }}
+                    &middot; {{ $this->record->created_at->tz(\App\Models\Location::timezone())->format('M j, Y g:i A') }}
                 </div>
             </div>
         </div>

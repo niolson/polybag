@@ -45,6 +45,7 @@ class PackageFactory extends Factory
             'label_orientation' => 'portrait',
             'status' => 'shipped',
             'shipped_at' => now(),
+            'ship_date' => today(),
             'shipped_by_user_id' => User::factory(),
         ]);
     }

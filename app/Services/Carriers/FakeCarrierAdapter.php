@@ -85,7 +85,7 @@ class FakeCarrierAdapter implements CarrierAdapterInterface
     public function createShipment(ShipRequest $request): ShipResponse
     {
         $prefix = self::TRACKING_PREFIXES[$this->carrierName] ?? 'FAKE';
-        $tracking = $prefix . str_pad((string) random_int(0, 9999999999), 10, '0', STR_PAD_LEFT) . random_int(100, 999);
+        $tracking = $prefix.str_pad((string) random_int(0, 9999999999), 10, '0', STR_PAD_LEFT).random_int(100, 999);
 
         // Minimal valid 1x1 white pixel PDF
         $labelData = base64_encode('%PDF-1.0 1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj 3 0 obj<</Type/Page/MediaBox[0 0 288 432]/Parent 2 0 R>>endobj xref 0 4 trailer<</Size 4/Root 1 0 R>> startxref 0 %%EOF');
@@ -97,6 +97,7 @@ class FakeCarrierAdapter implements CarrierAdapterInterface
             service: $request->selectedRate->serviceName,
             labelData: $labelData,
             labelFormat: $request->labelFormat,
+            shipDate: $request->shipDate,
         );
     }
 

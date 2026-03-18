@@ -149,7 +149,7 @@ class UspsAdapter implements CarrierAdapterInterface
                 'width' => $package->width,
                 'height' => $package->height,
                 'mailClass' => $isInternational ? 'ALL' : 'ALL_OUTBOUND',
-                'mailingDate' => date('Y-m-d'),
+                'mailingDate' => $request->shipDate?->format('Y-m-d') ?? date('Y-m-d'),
             ],
         ];
         if (! $isInternational) {
@@ -212,7 +212,7 @@ class UspsAdapter implements CarrierAdapterInterface
                     'height' => $request->packageData->height,
                     'width' => $request->packageData->width,
                     'processingCategory' => $metadata['processingCategory'],
-                    'mailingDate' => date('Y-m-d'),
+                    'mailingDate' => $request->shipDate?->format('Y-m-d') ?? date('Y-m-d'),
                     'extraServices' => [],
                     'destinationEntryFacilityType' => 'NONE',
                 ],
@@ -259,6 +259,7 @@ class UspsAdapter implements CarrierAdapterInterface
                 labelData: $response->label,
                 labelFormat: $request->labelFormat,
                 labelDpi: $request->labelDpi,
+                shipDate: $request->shipDate,
             );
         } catch (\Exception $e) {
             logger()->error('USPS createDomesticShipment error', ['error' => $e->getMessage()]);
@@ -304,7 +305,7 @@ class UspsAdapter implements CarrierAdapterInterface
                     'height' => $request->packageData->height,
                     'width' => $request->packageData->width,
                     'processingCategory' => $metadata['processingCategory'],
-                    'mailingDate' => date('Y-m-d'),
+                    'mailingDate' => $request->shipDate?->format('Y-m-d') ?? date('Y-m-d'),
                     'extraServices' => [],
                     'destinationEntryFacilityType' => $metadata['destinationEntryFacilityType'] ?? 'INTERNATIONAL_SERVICE_CENTER',
                 ],
@@ -358,6 +359,7 @@ class UspsAdapter implements CarrierAdapterInterface
                 labelOrientation: 'landscape',
                 labelFormat: $request->labelFormat,
                 labelDpi: $request->labelDpi,
+                shipDate: $request->shipDate,
             );
         } catch (\Exception $e) {
             logger()->error('USPS createInternationalShipment error', ['error' => $e->getMessage()]);

@@ -11,6 +11,9 @@ class ShipDateService
 {
     private const DEFAULT_PICKUP_DAYS = [1, 2, 3, 4, 5]; // Mon-Fri
 
+    /** USPS SCAN form cutoff — packages shipped after this hour go on the next day's form. */
+    private const USPS_CUTOFF_HOUR = 20; // 8 PM local time
+
     public function getShipDate(string $carrierName, ?int $locationId = null): CarbonImmutable
     {
         $location = $this->resolveLocation($locationId);
@@ -18,10 +21,16 @@ class ShipDateService
         $pivot = $this->getPivot($carrierName, $locationId);
         $pickupDays = $pivot ? json_decode($pivot->pickup_days, true) : self::DEFAULT_PICKUP_DAYS;
         $lastEndOfDay = $pivot?->last_end_of_day_at ? CarbonImmutable::parse($pivot->last_end_of_day_at) : null;
-        $today = CarbonImmutable::today($tz);
+        $now = CarbonImmutable::now($tz);
+        $today = $now->startOfDay();
 
         // If we already ended the shipping day today (in local time), ship date = next pickup day
         if ($lastEndOfDay && $lastEndOfDay->tz($tz)->isToday()) {
+            return $this->getNextPickupDay($pickupDays, $today);
+        }
+
+        // USPS: after 8 PM local time, advance to next pickup day
+        if ($carrierName === 'USPS' && $now->hour >= self::USPS_CUTOFF_HOUR) {
             return $this->getNextPickupDay($pickupDays, $today);
         }
 

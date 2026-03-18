@@ -5,6 +5,7 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\ChannelResource\Pages;
 use App\Filament\Resources\ChannelResource\RelationManagers\AliasesRelationManager;
 use App\Models\Channel;
+use App\Models\Location;
 use BackedEnum;
 use Filament\Actions;
 use Filament\Forms;
@@ -66,7 +67,7 @@ class ChannelResource extends Resource
                 Tables\Columns\IconColumn::make('active')
                     ->boolean(),
                 Tables\Columns\TextColumn::make('created_at')
-                    ->dateTime()
+                    ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
@@ -75,8 +76,7 @@ class ChannelResource extends Resource
             ])
             ->recordActions([
                 Actions\EditAction::make(),
-            ])
-;
+            ]);
     }
 
     public static function getRelations(): array

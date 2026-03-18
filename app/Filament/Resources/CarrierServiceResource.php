@@ -4,6 +4,7 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\CarrierServiceResource\Pages;
 use App\Models\CarrierService;
+use App\Models\Location;
 use BackedEnum;
 use Filament\Actions;
 use Filament\Forms;
@@ -66,7 +67,7 @@ class CarrierServiceResource extends Resource
                     ->boolean()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('created_at')
-                    ->dateTime()
+                    ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
@@ -75,8 +76,7 @@ class CarrierServiceResource extends Resource
             ])
             ->recordActions([
                 Actions\EditAction::make(),
-            ])
-;
+            ]);
     }
 
     public static function getRelations(): array

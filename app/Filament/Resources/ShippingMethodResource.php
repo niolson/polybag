@@ -6,6 +6,7 @@ use App\Filament\Resources\ShippingMethodResource\Pages;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\AliasesRelationManager;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\CarrierServicesRelationManager;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\ShippingRulesRelationManager;
+use App\Models\Location;
 use App\Models\ShippingMethod;
 use BackedEnum;
 use Filament\Actions;
@@ -52,7 +53,7 @@ class ShippingMethodResource extends Resource
                 Tables\Columns\IconColumn::make('active')
                     ->boolean(),
                 Tables\Columns\TextColumn::make('created_at')
-                    ->dateTime()
+                    ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
@@ -61,8 +62,7 @@ class ShippingMethodResource extends Resource
             ])
             ->recordActions([
                 Actions\EditAction::make(),
-            ])
-;
+            ]);
     }
 
     public static function getRelations(): array

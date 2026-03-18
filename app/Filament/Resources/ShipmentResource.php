@@ -8,9 +8,10 @@ use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\ShipmentResource\Pages;
 use App\Filament\Resources\ShipmentResource\RelationManagers\PackagesRelationManager;
 use App\Filament\Resources\ShipmentResource\RelationManagers\ShipmentItemsRelationManager;
+use App\Models\Location;
+use App\Jobs\ValidateAddressJob;
 use App\Models\BoxSize;
 use App\Models\Shipment;
-use App\Jobs\ValidateAddressJob;
 use App\Services\BatchLabelService;
 use App\Services\SettingsService;
 use BackedEnum;
@@ -22,7 +23,6 @@ use Filament\Resources\RelationManagers\RelationGroup;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components;
 use Filament\Schemas\Components\Section;
-use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\FontWeight;
 use Filament\Support\Enums\IconPosition;
@@ -240,7 +240,7 @@ class ShipmentResource extends Resource
                     ->label('Shipping Method'),
                 Tables\Columns\TextColumn::make('deliver_by')
                     ->label('Deliver By')
-                    ->date()
+                    ->date(timezone: Location::timezone())
                     ->sortable()
                     ->placeholder('—')
                     ->toggleable(isToggledHiddenByDefault: true),
@@ -250,7 +250,7 @@ class ShipmentResource extends Resource
                 Tables\Columns\TextColumn::make('status')
                     ->badge(),
                 Tables\Columns\TextColumn::make('created_at')
-                    ->dateTime()
+                    ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
@@ -433,7 +433,7 @@ class ShipmentResource extends Resource
                         $count = $records->count();
                         Notification::make()
                             ->success()
-                            ->title("Queued {$count} " . str('shipment')->plural($count) . ' for address validation')
+                            ->title("Queued {$count} ".str('shipment')->plural($count).' for address validation')
                             ->send();
                     })
                     ->deselectRecordsAfterCompletion(),
@@ -468,12 +468,12 @@ class ShipmentResource extends Resource
                             ->money('USD'),
                         TextEntry::make('deliver_by')
                             ->label('Deliver By')
-                            ->date()
+                            ->date(timezone: Location::timezone())
                             ->placeholder('—'),
                         TextEntry::make('created_at')
-                            ->dateTime(),
+                            ->dateTime('M j, Y g:i A', timezone: Location::timezone()),
                         TextEntry::make('updated_at')
-                            ->dateTime(),
+                            ->dateTime('M j, Y g:i A', timezone: Location::timezone()),
 
                         // Unmapped warnings
                         TextEntry::make('channel_reference')

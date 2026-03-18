@@ -4,6 +4,7 @@ namespace App\Filament\Resources;
 
 use App\Enums\Role;
 use App\Filament\Resources\UserResource\Pages;
+use App\Models\Location;
 use App\Models\User;
 use BackedEnum;
 use Filament\Actions;
@@ -58,7 +59,7 @@ class UserResource extends Resource
                 Tables\Columns\IconColumn::make('active')
                     ->boolean(),
                 Tables\Columns\TextColumn::make('created_at')
-                    ->dateTime()
+                    ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
@@ -67,8 +68,7 @@ class UserResource extends Resource
             ])
             ->recordActions([
                 Actions\EditAction::make(),
-            ])
-;
+            ]);
     }
 
     public static function getRelations(): array

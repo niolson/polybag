@@ -3,10 +3,10 @@
 namespace App\Filament\Resources;
 
 use App\Enums\PackageStatus;
-use App\Enums\Role;
 use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\PackageResource\Pages;
 use App\Filament\Resources\PackageResource\RelationManagers\PackageItemsRelationManager;
+use App\Models\Location;
 use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
 use BackedEnum;
@@ -188,7 +188,7 @@ class PackageResource extends Resource
                 Tables\Columns\IconColumn::make('exported')
                     ->boolean(),
                 Tables\Columns\TextColumn::make('created_at')
-                    ->dateTime()
+                    ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
@@ -308,8 +308,7 @@ class PackageResource extends Resource
                         }
                     }),
                 Actions\EditAction::make(),
-            ])
-;
+            ]);
     }
 
     public static function getRelations(): array

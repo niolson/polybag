@@ -38,6 +38,7 @@ class Package extends Model
         'weight_mismatch',
         'status',
         'shipped_at',
+        'ship_date',
         'shipped_by_user_id',
         'exported',
         'manifest_id',
@@ -54,6 +55,7 @@ class Package extends Model
         'weight_mismatch' => 'boolean',
         'status' => PackageStatus::class,
         'shipped_at' => 'datetime',
+        'ship_date' => 'date',
         'exported' => 'boolean',
         'manifested' => 'boolean',
     ];
@@ -149,6 +151,7 @@ class Package extends Model
                     'label_dpi' => $response->labelDpi,
                     'status' => PackageStatus::Shipped->value,
                     'shipped_at' => now(),
+                    'ship_date' => $response->shipDate?->format('Y-m-d'),
                     'shipped_by_user_id' => $shippedByUserId,
                     'updated_at' => now(),
                 ]);

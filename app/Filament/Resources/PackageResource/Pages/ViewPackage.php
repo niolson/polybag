@@ -100,7 +100,11 @@ class ViewPackage extends ViewRecord
                         TextEntry::make('status')
                             ->badge(),
                         TextEntry::make('shipped_at')
-                            ->dateTime(),
+                            ->label('Shipped At')
+                            ->dateTime('M j, Y g:i A', timezone: \App\Models\Location::timezone()),
+                        TextEntry::make('ship_date')
+                            ->label('Ship Date')
+                            ->date(timezone: \App\Models\Location::timezone()),
                         TextEntry::make('shippedBy.name')
                             ->label('Shipped By'),
                     ]),

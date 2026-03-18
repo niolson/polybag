@@ -2,9 +2,9 @@
 
 namespace App\Filament\Resources;
 
-use App\Enums\Role;
 use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\ProductResource\Pages;
+use App\Models\Location;
 use App\Models\Product;
 use BackedEnum;
 use Filament\Actions;
@@ -103,7 +103,7 @@ class ProductResource extends Resource
                 Tables\Columns\IconColumn::make('active')
                     ->boolean(),
                 Tables\Columns\TextColumn::make('created_at')
-                    ->dateTime()
+                    ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
@@ -121,8 +121,7 @@ class ProductResource extends Resource
             ])
             ->recordActions([
                 Actions\EditAction::make(),
-            ])
-;
+            ]);
     }
 
     public static function getRelations(): array

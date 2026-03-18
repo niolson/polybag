@@ -1,9 +1,9 @@
 <?php
 
-use App\Enums\PackageStatus;
 use App\Contracts\CarrierAdapterInterface;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\LabelBatchItemStatus;
+use App\Enums\PackageStatus;
 use App\Enums\ShippingRuleAction;
 use App\Jobs\GenerateLabelJob;
 use App\Models\Carrier;

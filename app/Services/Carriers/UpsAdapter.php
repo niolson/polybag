@@ -109,7 +109,7 @@ class UpsAdapter implements CarrierAdapterInterface
 
         // Mixed Saturday: initial request was sent without Saturday, now send
         // a follow-up with Saturday for eligible services and merge results
-        if ($request->saturdayDelivery && $this->classifySaturdayEligibility($serviceCodes) === 'mixed') {
+        if ($request->saturdayDelivery && $this->classifySaturdayEligibility($serviceCodes, $request) === 'mixed') {
             try {
                 $connector = UpsConnector::getAuthenticatedConnector();
                 $saturdayApiRequest = $this->buildRateApiRequest($request);
@@ -263,9 +263,12 @@ class UpsAdapter implements CarrierAdapterInterface
                             'Weight' => (string) $package->weight,
                         ],
                     ],
-                    'DeliveryTimeInformation' => [
+                    'DeliveryTimeInformation' => array_filter([
                         'PackageBillType' => '03',
-                    ],
+                        'Pickup' => $request->shipDate ? [
+                            'Date' => $request->shipDate->format('Ymd'),
+                        ] : null,
+                    ]),
                     ...($request->saturdayDelivery ? [
                         'ShipmentServiceOptions' => [
                             'SaturdayDeliveryIndicator' => '',
@@ -442,6 +445,7 @@ class UpsAdapter implements CarrierAdapterInterface
                 labelOrientation: $isZpl ? 'portrait' : 'landscape',
                 labelFormat: $isZpl ? 'zpl' : 'image',
                 labelDpi: $request->labelDpi,
+                shipDate: $request->shipDate,
             );
         } catch (\Exception $e) {
             logger()->error('UPS createShipment error', ['error' => $e->getMessage()]);
@@ -501,9 +505,9 @@ class UpsAdapter implements CarrierAdapterInterface
      * Classify Saturday delivery eligibility for the requested service codes.
      * Returns 'all', 'none', or 'mixed' based on today's day of week.
      */
-    private function classifySaturdayEligibility(array $serviceCodes): string
+    private function classifySaturdayEligibility(array $serviceCodes, ?RateRequest $request = null): string
     {
-        $today = now()->dayOfWeek;
+        $today = ($request?->shipDate ?? now())->dayOfWeek;
 
         if (empty($serviceCodes)) {
             return 'mixed';
@@ -537,7 +541,7 @@ class UpsAdapter implements CarrierAdapterInterface
      */
     private function adjustRequestForSaturday(RateRequest $request, array $serviceCodes): RateRequest
     {
-        if ($request->saturdayDelivery && $this->classifySaturdayEligibility($serviceCodes) !== 'all') {
+        if ($request->saturdayDelivery && $this->classifySaturdayEligibility($serviceCodes, $request) !== 'all') {
             return $this->withoutSaturdayDelivery($request);
         }
 
@@ -556,6 +560,8 @@ class UpsAdapter implements CarrierAdapterInterface
             residential: $request->residential,
             packages: $request->packages,
             saturdayDelivery: false,
+            locationId: $request->locationId,
+            shipDate: $request->shipDate,
         );
     }
 

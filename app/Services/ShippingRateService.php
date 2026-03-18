@@ -92,6 +92,8 @@ class ShippingRateService
 
         $registry = app(CarrierRegistry::class);
 
+        $shipDateService = app(ShipDateService::class);
+
         // Phase 1: Prepare all requests (authenticate connectors, build request bodies)
         foreach ($carrierTasks as $task) {
             $carrierName = $task['name'];
@@ -112,18 +114,21 @@ class ShippingRateService
                     continue;
                 }
 
-                $prepared = $adapter->prepareRateRequest($rateRequest, $serviceCodes);
+                $shipDate = $shipDateService->getShipDate($carrierName, $rateRequest->locationId);
+                $carrierRateRequest = $rateRequest->withShipDate($shipDate);
+
+                $prepared = $adapter->prepareRateRequest($carrierRateRequest, $serviceCodes);
 
                 if (! $prepared) {
                     // No API call needed — fall back to synchronous getRates (e.g., mock rates)
-                    $rates = $adapter->getRates($rateRequest, $serviceCodes);
+                    $rates = $adapter->getRates($carrierRateRequest, $serviceCodes);
                     $rateOptions->push(...$rates);
 
                     continue;
                 }
 
                 $preparedRequests[$carrierName] = $prepared;
-                $taskMeta[$carrierName] = ['adapter' => $adapter, 'serviceCodes' => $serviceCodes];
+                $taskMeta[$carrierName] = ['adapter' => $adapter, 'serviceCodes' => $serviceCodes, 'rateRequest' => $carrierRateRequest];
             } catch (\Exception $e) {
                 logger()->error("ShippingRateService: {$carrierName} prepare error", [
                     'error' => $e->getMessage(),
@@ -141,7 +146,7 @@ class ShippingRateService
         if (count($preparedRequests) <= 1 || $hasFakeResponses) {
             foreach ($preparedRequests as $carrierName => $prepared) {
                 $meta = $taskMeta[$carrierName];
-                $rates = $meta['adapter']->getRates($rateRequest, $meta['serviceCodes']);
+                $rates = $meta['adapter']->getRates($meta['rateRequest'], $meta['serviceCodes']);
                 $rateOptions->push(...$rates);
             }
 
@@ -167,7 +172,7 @@ class ShippingRateService
                 try {
                     $rates = $meta['adapter']->parseRateResponse(
                         $result['value'],
-                        $rateRequest,
+                        $meta['rateRequest'],
                         $meta['serviceCodes'],
                     );
 
