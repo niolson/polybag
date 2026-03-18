@@ -460,7 +460,6 @@ class GenerateTestData extends Command
                     'shipped_by_user_id' => $pkgShipped ? $this->userIds[array_rand($this->userIds)] : null,
                     'exported' => $pkgShipped && mt_rand(1, 2) === 1,
                     'manifest_id' => null,
-                    'manifested' => false,
                     'created_at' => $meta['createdAt']->format('Y-m-d H:i:s'),
                     'updated_at' => $shippedAt ?? $meta['createdAt']->format('Y-m-d H:i:s'),
                 ];

@@ -59,7 +59,7 @@ it('dispatches ManifestCreated after successful USPS manifest creation', functio
 
     $packages = Package::where('carrier', 'USPS')
         ->where('status', PackageStatus::Shipped)
-        ->where('manifested', false)
+        ->whereNull('manifest_id')
         ->get();
 
     $result = app(ManifestService::class)->createManifest('USPS', $packages);

@@ -4,6 +4,7 @@ namespace App\Filament\Widgets;
 
 use App\Enums\ShipmentStatus;
 use App\Models\DailyShippingStat;
+use App\Models\Location;
 use App\Models\Shipment;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
@@ -18,16 +19,19 @@ class StatsOverview extends BaseWidget
     protected function getStats(): array
     {
         return Cache::remember('widget:stats_overview', 60, function () {
-            $thisWeekStart = now()->startOfWeek();
+            $tz = Location::timezone();
+            $localToday = now($tz)->startOfDay();
+            $thisWeekStart = now($tz)->startOfWeek();
+            $thisMonthStart = now($tz)->startOfMonth();
 
-            $costStat = $this->buildCostStat($thisWeekStart);
+            $costStat = $this->buildCostStat($thisWeekStart, $tz);
 
             return [
                 Stat::make('Pending Shipments', number_format(Shipment::query()->where('status', ShipmentStatus::Open)->count()))
                     ->description('Awaiting shipment')
                     ->descriptionIcon('heroicon-m-clock')
                     ->color('warning'),
-                Stat::make('Shipped Today', number_format((int) DailyShippingStat::where('date', today()->toDateString())->sum('package_count')))
+                Stat::make('Shipped Today', number_format((int) DailyShippingStat::where('date', $localToday->toDateString())->sum('package_count')))
                     ->description('Packages shipped today')
                     ->descriptionIcon('heroicon-m-check-circle')
                     ->color('success'),
@@ -35,7 +39,7 @@ class StatsOverview extends BaseWidget
                     ->description('Packages this week')
                     ->descriptionIcon('heroicon-m-calendar')
                     ->color('primary'),
-                Stat::make('Shipped This Month', number_format((int) DailyShippingStat::where('date', '>=', now()->startOfMonth()->toDateString())->sum('package_count')))
+                Stat::make('Shipped This Month', number_format((int) DailyShippingStat::where('date', '>=', $thisMonthStart->toDateString())->sum('package_count')))
                     ->description('Packages this month')
                     ->descriptionIcon('heroicon-m-calendar-days')
                     ->color('primary'),
@@ -44,10 +48,10 @@ class StatsOverview extends BaseWidget
         });
     }
 
-    private function buildCostStat(\Carbon\Carbon $thisWeekStart): Stat
+    private function buildCostStat(\Carbon\Carbon $thisWeekStart, string $tz): Stat
     {
-        $lastWeekStart = now()->subWeek()->startOfWeek();
-        $lastWeekEnd = now()->subWeek()->endOfWeek();
+        $lastWeekStart = now($tz)->subWeek()->startOfWeek();
+        $lastWeekEnd = now($tz)->subWeek()->endOfWeek();
 
         $thisWeekCost = (float) DailyShippingStat::where('date', '>=', $thisWeekStart->toDateString())
             ->sum('total_cost');

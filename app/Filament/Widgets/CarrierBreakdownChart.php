@@ -3,6 +3,7 @@
 namespace App\Filament\Widgets;
 
 use App\Models\DailyShippingStat;
+use App\Models\Location;
 use Filament\Widgets\ChartWidget;
 use Illuminate\Support\Facades\Cache;
 
@@ -35,9 +36,10 @@ class CarrierBreakdownChart extends ChartWidget
 
     private function buildData(): array
     {
+        $tz = Location::timezone();
         $startDate = $this->filter === 'month'
-            ? now()->startOfMonth()->toDateString()
-            : now()->startOfWeek()->toDateString();
+            ? now($tz)->startOfMonth()->toDateString()
+            : now($tz)->startOfWeek()->toDateString();
 
         $breakdown = DailyShippingStat::query()
             ->whereNotNull('carrier')

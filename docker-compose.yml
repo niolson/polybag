@@ -98,6 +98,26 @@ services:
       - default
       - shared
 
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
+    restart: unless-stopped
+    volumes:
+      - ./.env:/var/www/html/.env
+    entrypoint: ["sh", "-c", "php artisan config:cache && php artisan schedule:work"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+        required: false
+    networks:
+      - default
+      - shared
+
 volumes:
   mysql-data:
   redis-data:

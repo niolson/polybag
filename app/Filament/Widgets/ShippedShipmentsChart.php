@@ -3,6 +3,7 @@
 namespace App\Filament\Widgets;
 
 use App\Models\DailyShippingStat;
+use App\Models\Location;
 use Filament\Widgets\ChartWidget;
 use Illuminate\Support\Facades\Cache;
 
@@ -32,7 +33,7 @@ class ShippedShipmentsChart extends ChartWidget
     {
         return Cache::remember("widget:shipped_chart:{$this->filter}", 60, function () {
             $days = $this->filter === 'month' ? 30 : 7;
-            $startDate = now()->subDays($days - 1)->startOfDay();
+            $startDate = now(Location::timezone())->subDays($days - 1)->startOfDay();
 
             $shipments = DailyShippingStat::query()
                 ->where('date', '>=', $startDate->toDateString())

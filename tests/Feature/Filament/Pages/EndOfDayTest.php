@@ -49,7 +49,6 @@ it('excludes already-manifested USPS packages from count', function (): void {
         'carrier' => 'USPS',
         'tracking_number' => '9400111',
         'manifest_id' => $manifest->id,
-        'manifested' => true,
     ]);
     Package::factory()->shipped()->create(['carrier' => 'USPS', 'tracking_number' => '9400222']);
 

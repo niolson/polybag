@@ -216,7 +216,11 @@ class PackageResource extends Resource
                 Tables\Filters\TernaryFilter::make('manifested')
                     ->label('Manifested')
                     ->trueLabel('Manifested')
-                    ->falseLabel('Not Manifested'),
+                    ->falseLabel('Not Manifested')
+                    ->queries(
+                        true: fn ($query) => $query->whereNotNull('manifest_id'),
+                        false: fn ($query) => $query->whereNull('manifest_id'),
+                    ),
                 Tables\Filters\SelectFilter::make('label_format')
                     ->label('Label Format')
                     ->options([

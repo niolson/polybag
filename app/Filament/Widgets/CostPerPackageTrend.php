@@ -3,6 +3,7 @@
 namespace App\Filament\Widgets;
 
 use App\Models\DailyShippingStat;
+use App\Models\Location;
 use Filament\Widgets\ChartWidget;
 use Illuminate\Support\Facades\Cache;
 
@@ -25,7 +26,7 @@ class CostPerPackageTrend extends ChartWidget
 
     private function buildData(): array
     {
-        $startDate = now()->subDays(29)->startOfDay();
+        $startDate = now(Location::timezone())->subDays(29)->startOfDay();
 
         $dailyAvg = DailyShippingStat::query()
             ->where('date', '>=', $startDate->toDateString())

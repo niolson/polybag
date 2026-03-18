@@ -176,25 +176,22 @@ class UserShipmentsReport extends Page implements HasTable
 
     private function dayGroupExpression(): string
     {
-        return match (DB::getDriverName()) {
-            'sqlite' => 'strftime("%Y-%m-%d", shipped_at) as period_label',
-            default => 'DATE(shipped_at) as period_label',
-        };
+        return 'ship_date as period_label';
     }
 
     private function weekGroupExpression(): string
     {
         return match (DB::getDriverName()) {
-            'sqlite' => 'strftime("%Y-W%W", shipped_at) as period_label',
-            default => 'CONCAT(YEAR(shipped_at), "-W", LPAD(WEEK(shipped_at, 3), 2, "0")) as period_label',
+            'sqlite' => 'strftime("%Y-W%W", ship_date) as period_label',
+            default => 'CONCAT(YEAR(ship_date), "-W", LPAD(WEEK(ship_date, 3), 2, "0")) as period_label',
         };
     }
 
     private function monthGroupExpression(): string
     {
         return match (DB::getDriverName()) {
-            'sqlite' => 'strftime("%Y-%m", shipped_at) as period_label',
-            default => 'DATE_FORMAT(shipped_at, "%Y-%m") as period_label',
+            'sqlite' => 'strftime("%Y-%m", ship_date) as period_label',
+            default => 'DATE_FORMAT(ship_date, "%Y-%m") as period_label',
         };
     }
 

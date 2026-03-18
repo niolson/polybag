@@ -29,7 +29,7 @@ class ManifestService
 
         return Package::query()
             ->selectRaw('carrier, count(*) as count')
-            ->where('manifested', false)
+            ->whereNull('manifest_id')
             ->where('status', PackageStatus::Shipped)
             ->whereNotNull('tracking_number')
             ->groupBy('carrier')
@@ -50,7 +50,7 @@ class ManifestService
     public function getUnmanifestedPackages(): Collection
     {
         return Package::query()
-            ->where('manifested', false)
+            ->whereNull('manifest_id')
             ->where('status', PackageStatus::Shipped)
             ->whereNotNull('tracking_number')
             ->with('shipment')
@@ -149,10 +149,18 @@ class ManifestService
                     throw $e;
                 }
 
+                // Create a placeholder manifest for externally manifested packages
+                $externalManifest = Manifest::create([
+                    'carrier' => 'USPS',
+                    'manifest_number' => 'EXTERNAL-'.now()->format('YmdHis'),
+                    'manifest_date' => now()->toDateString(),
+                    'package_count' => count($alreadyManifested),
+                ]);
+
                 $marked = Package::query()
                     ->whereIn('tracking_number', $alreadyManifested)
-                    ->where('manifested', false)
-                    ->update(['manifested' => true]);
+                    ->whereNull('manifest_id')
+                    ->update(['manifest_id' => $externalManifest->id]);
                 $totalMarkedExternally += $marked;
 
                 logger()->warning('USPS SCAN Form: marked packages as already manifested', [
@@ -189,7 +197,7 @@ class ManifestService
                 ]);
 
                 Package::whereIn('id', $remainingPackages->pluck('id'))
-                    ->update(['manifest_id' => $manifest->id, 'manifested' => true]);
+                    ->update(['manifest_id' => $manifest->id]);
 
                 return $manifest;
             });
@@ -266,19 +274,6 @@ class ManifestService
         }
 
         return $barcodes;
-    }
-
-    /**
-     * Mark all unmanifested packages for a carrier as manifested without linking to a manifest record.
-     */
-    public function markAsManifested(string $carrier): int
-    {
-        return Package::query()
-            ->where('carrier', $carrier)
-            ->where('manifested', false)
-            ->where('status', PackageStatus::Shipped)
-            ->whereNotNull('tracking_number')
-            ->update(['manifested' => true]);
     }
 
     private function createFedexManifest(): ManifestResponse
