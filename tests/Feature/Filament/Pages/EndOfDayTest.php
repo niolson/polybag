@@ -2,6 +2,7 @@
 
 use App\Enums\Role;
 use App\Filament\Pages\EndOfDay;
+use App\Models\Carrier;
 use App\Models\Manifest;
 use App\Models\Package;
 use App\Models\User;
@@ -11,24 +12,38 @@ beforeEach(function (): void {
     $this->actingAs(User::factory()->admin()->create());
 });
 
-it('loads unmanifested package summary by carrier', function (): void {
-    Package::factory()->shipped()->create(['carrier' => 'USPS', 'tracking_number' => '9400111']);
-    Package::factory()->shipped()->create(['carrier' => 'FedEx', 'tracking_number' => '7890001']);
+it('shows all active carriers with ship dates', function (): void {
+    Carrier::factory()->create(['name' => 'USPS', 'active' => true]);
+    Carrier::factory()->create(['name' => 'FedEx', 'active' => true]);
 
     Livewire::test(EndOfDay::class)
         ->assertSet('carrierSummary', function ($value) {
             $byCarrier = collect($value)->keyBy('carrier');
 
             return $byCarrier->has('USPS')
-                && $byCarrier['USPS']['count'] === 1
-                && $byCarrier['USPS']['supports_manifest'] === true
                 && $byCarrier->has('FedEx')
-                && $byCarrier['FedEx']['count'] === 1
-                && $byCarrier['FedEx']['supports_manifest'] === false;
+                && ! empty($byCarrier['USPS']['ship_date'])
+                && ! empty($byCarrier['FedEx']['ship_date']);
         });
 });
 
-it('shows empty state when all packages are manifested', function (): void {
+it('shows unmanifested count for USPS packages shipped today', function (): void {
+    Carrier::factory()->create(['name' => 'USPS', 'active' => true]);
+
+    Package::factory()->shipped()->create(['carrier' => 'USPS', 'tracking_number' => '9400111']);
+    Package::factory()->shipped()->create(['carrier' => 'USPS', 'tracking_number' => '9400222']);
+
+    Livewire::test(EndOfDay::class)
+        ->assertSet('carrierSummary', function ($value) {
+            $usps = collect($value)->firstWhere('carrier', 'USPS');
+
+            return $usps['unmanifested_count'] === 2;
+        });
+});
+
+it('excludes already-manifested USPS packages from count', function (): void {
+    Carrier::factory()->create(['name' => 'USPS', 'active' => true]);
+
     $manifest = Manifest::factory()->create();
     Package::factory()->shipped()->create([
         'carrier' => 'USPS',
@@ -36,10 +51,38 @@ it('shows empty state when all packages are manifested', function (): void {
         'manifest_id' => $manifest->id,
         'manifested' => true,
     ]);
+    Package::factory()->shipped()->create(['carrier' => 'USPS', 'tracking_number' => '9400222']);
 
     Livewire::test(EndOfDay::class)
-        ->assertSet('carrierSummary', [])
-        ->assertSee('All packages have been manifested.');
+        ->assertSet('carrierSummary', function ($value) {
+            $usps = collect($value)->firstWhere('carrier', 'USPS');
+
+            return $usps['unmanifested_count'] === 1;
+        });
+});
+
+it('shows zero unmanifested count for non-USPS carriers', function (): void {
+    Carrier::factory()->create(['name' => 'FedEx', 'active' => true]);
+    Package::factory()->shipped()->create(['carrier' => 'FedEx', 'tracking_number' => '7890001']);
+
+    Livewire::test(EndOfDay::class)
+        ->assertSet('carrierSummary', function ($value) {
+            $fedex = collect($value)->firstWhere('carrier', 'FedEx');
+
+            return $fedex['unmanifested_count'] === 0;
+        });
+});
+
+it('does not show inactive carriers', function (): void {
+    Carrier::factory()->create(['name' => 'USPS', 'active' => true]);
+    Carrier::factory()->create(['name' => 'DHL', 'active' => false]);
+
+    Livewire::test(EndOfDay::class)
+        ->assertSet('carrierSummary', function ($value) {
+            $carriers = collect($value)->pluck('carrier');
+
+            return $carriers->contains('USPS') && ! $carriers->contains('DHL');
+        });
 });
 
 it('displays todays manifests', function (): void {
@@ -84,16 +127,19 @@ it('shows error when reprinting manifest without image', function (): void {
         ->assertNotified();
 });
 
-it('marks packages as manifested without a manifest record', function (): void {
-    $package = Package::factory()->shipped()->create(['carrier' => 'FedEx', 'tracking_number' => '7890001']);
+it('endShippingDay advances the ship date', function (): void {
+    Carrier::factory()->create(['name' => 'FedEx', 'active' => true]);
 
-    Livewire::test(EndOfDay::class)
-        ->call('markAsManifested', 'FedEx')
+    $component = Livewire::test(EndOfDay::class);
+
+    $initialDate = collect($component->get('carrierSummary'))->firstWhere('carrier', 'FedEx')['ship_date'];
+
+    $component->call('endShippingDay', 'FedEx')
         ->assertNotified();
 
-    $package->refresh();
-    expect($package->manifested)->toBeTrue()
-        ->and($package->manifest_id)->toBeNull();
+    $newDate = collect($component->get('carrierSummary'))->firstWhere('carrier', 'FedEx')['ship_date'];
+
+    expect($newDate)->not->toBe($initialDate);
 });
 
 it('denies access to users with User role', function (): void {

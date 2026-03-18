@@ -78,14 +78,28 @@ class ShipDateService
             return;
         }
 
-        DB::table('carrier_location')->updateOrInsert(
-            ['carrier_id' => $carrier->id, 'location_id' => $locationId],
-            [
+        $exists = DB::table('carrier_location')
+            ->where('carrier_id', $carrier->id)
+            ->where('location_id', $locationId)
+            ->exists();
+
+        if ($exists) {
+            DB::table('carrier_location')
+                ->where('carrier_id', $carrier->id)
+                ->where('location_id', $locationId)
+                ->update([
+                    'last_end_of_day_at' => now(),
+                    'updated_at' => now(),
+                ]);
+        } else {
+            DB::table('carrier_location')->insert([
+                'carrier_id' => $carrier->id,
+                'location_id' => $locationId,
                 'last_end_of_day_at' => now(),
+                'created_at' => now(),
                 'updated_at' => now(),
-                'created_at' => DB::raw('COALESCE(created_at, NOW())'),
-            ],
-        );
+            ]);
+        }
     }
 
     public function getPickupDays(string $carrierName, ?int $locationId = null): array

@@ -2,11 +2,15 @@
 
 namespace App\Filament\Pages;
 
+use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Concerns\NotifiesUser;
+use App\Models\Carrier;
 use App\Models\Manifest;
+use App\Models\Package;
 use App\Services\ManifestService;
 use App\Services\SettingsService;
+use App\Services\ShipDateService;
 use BackedEnum;
 use Filament\Pages\Page;
 
@@ -24,7 +28,7 @@ class EndOfDay extends Page
 
     protected string $view = 'filament.pages.end-of-day';
 
-    /** @var array<int, array{carrier: string, count: int, supports_manifest: bool}> */
+    /** @var array<int, array{carrier: string, unmanifested_count: int, supports_manifest: bool, ship_date: string, next_ship_date: string}> */
     public array $carrierSummary = [];
 
     /** @var array<int, array<string, mixed>> */
@@ -42,7 +46,36 @@ class EndOfDay extends Page
 
     public function loadData(): void
     {
-        $this->carrierSummary = app(ManifestService::class)->getUnmanifestedSummary()->all();
+        $shipDateService = app(ShipDateService::class);
+        $registry = app(\App\Services\Carriers\CarrierRegistry::class);
+
+        // Count USPS packages shipped today without a manifest
+        $uspsUnmanifested = Package::query()
+            ->where('carrier', 'USPS')
+            ->where('status', PackageStatus::Shipped)
+            ->whereNotNull('tracking_number')
+            ->whereNull('manifest_id')
+            ->whereDate('shipped_at', today())
+            ->count();
+
+        $this->carrierSummary = Carrier::active()
+            ->orderBy('name')
+            ->get()
+            ->map(function ($carrier) use ($shipDateService, $registry, $uspsUnmanifested) {
+                $shipDate = $shipDateService->getShipDate($carrier->name);
+                $nextShipDate = $shipDateService->getNextPickupDay($carrier->name);
+                $supportsManifest = $registry->has($carrier->name)
+                    && $registry->get($carrier->name)->supportsManifest();
+
+                return [
+                    'carrier' => $carrier->name,
+                    'unmanifested_count' => $carrier->name === 'USPS' ? $uspsUnmanifested : 0,
+                    'supports_manifest' => $supportsManifest,
+                    'ship_date' => $shipDate->format('M j'),
+                    'next_ship_date' => $nextShipDate->format('M j'),
+                ];
+            })
+            ->all();
 
         $this->todaysManifests = Manifest::query()
             ->whereDate('manifest_date', today())
@@ -59,17 +92,36 @@ class EndOfDay extends Page
             ->all();
     }
 
+    public function endShippingDay(string $carrier): void
+    {
+        $shipDateService = app(ShipDateService::class);
+
+        $shipDateService->endShippingDay($carrier);
+
+        $nextDate = $shipDateService->getShipDate($carrier);
+        $this->notifySuccess('Shipping Day Ended', "{$carrier} ship date advanced to {$nextDate->format('M j')}.");
+
+        $this->loadData();
+    }
+
     public function generateManifest(string $carrier): void
     {
-        $packages = app(ManifestService::class)->getUnmanifestedPackages()->get($carrier);
+        $packages = Package::query()
+            ->where('carrier', $carrier)
+            ->where('status', PackageStatus::Shipped)
+            ->whereNotNull('tracking_number')
+            ->whereNull('manifest_id')
+            ->whereDate('shipped_at', today())
+            ->get();
 
-        if (! $packages || $packages->isEmpty()) {
-            $this->notifyWarning('No Packages', "No unmanifested packages found for {$carrier}.");
+        if ($packages->isEmpty()) {
+            $this->notifyWarning('No Packages', "No packages to manifest for {$carrier}.");
 
             return;
         }
 
-        $response = app(ManifestService::class)->createManifest($carrier, $packages);
+        $shipDate = app(ShipDateService::class)->getShipDate($carrier);
+        $response = app(ManifestService::class)->createManifest($carrier, $packages, $shipDate);
 
         if (! $response->success) {
             $this->notifyError('Manifest Error', $response->errorMessage ?? 'Failed to create manifest.');
@@ -82,21 +134,6 @@ class EndOfDay extends Page
         }
 
         $this->notifySuccess('Manifest Created', "Manifest {$response->manifestNumber} created for {$carrier}.");
-
-        $this->loadData();
-    }
-
-    public function markAsManifested(string $carrier): void
-    {
-        $count = app(ManifestService::class)->markAsManifested($carrier);
-
-        if ($count === 0) {
-            $this->notifyWarning('No Packages', "No unmanifested packages found for {$carrier}.");
-
-            return;
-        }
-
-        $this->notifySuccess('Marked as Manifested', "{$count} {$carrier} ".str('package')->plural($count).' marked as manifested.');
 
         $this->loadData();
     }
