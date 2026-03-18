@@ -1,14 +1,15 @@
 <?php
 
+use App\Enums\PackageStatus;
 use App\Events\ManifestCreated;
 use App\Http\Integrations\USPS\Requests\ScanForm;
+use App\Models\Location;
 use App\Models\Package;
 use App\Services\ManifestService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Saloon\Http\Auth\AccessTokenAuthenticator;
 use Saloon\Http\Faking\MockResponse;
-use App\Enums\PackageStatus;
 use Saloon\Laravel\Facades\Saloon;
 
 it('dispatches ManifestCreated after successful USPS manifest creation', function (): void {
@@ -46,17 +47,14 @@ it('dispatches ManifestCreated after successful USPS manifest creation', functio
         ),
     ]);
 
-    // Need from_address config for scan form
-    config([
-        'shipping.from_address' => [
-            'first_name' => 'Test',
-            'last_name' => 'Shipper',
-            'street_address' => '123 Main St',
-            'city' => 'Anytown',
-            'state_or_province' => 'NY',
-            'postal_code' => '10001',
-            'country' => 'US',
-        ],
+    // Need a default location for scan form from-address
+    Location::factory()->default()->create([
+        'first_name' => 'Test',
+        'last_name' => 'Shipper',
+        'address1' => '123 Main St',
+        'city' => 'Anytown',
+        'state_or_province' => 'NY',
+        'postal_code' => '10001',
     ]);
 
     $packages = Package::where('carrier', 'USPS')

@@ -40,12 +40,6 @@ it('saves sandbox_mode setting', function (): void {
     Livewire::test(Settings::class)
         ->fillForm([
             'sandbox_mode' => true,
-            'from_address_first_name' => 'Test',
-            'from_address_last_name' => 'User',
-            'from_address_street' => '123 Main St',
-            'from_address_city' => 'Seattle',
-            'from_address_state_or_province' => 'WA',
-            'from_address_postal_code' => '98072',
         ])
         ->call('save')
         ->assertNotified();
@@ -59,12 +53,6 @@ it('saves suppress_printing setting when sandbox_mode is on', function (): void 
         ->fillForm([
             'sandbox_mode' => true,
             'suppress_printing' => true,
-            'from_address_first_name' => 'Test',
-            'from_address_last_name' => 'User',
-            'from_address_street' => '123 Main St',
-            'from_address_city' => 'Seattle',
-            'from_address_state_or_province' => 'WA',
-            'from_address_postal_code' => '98072',
         ])
         ->call('save')
         ->assertNotified();
@@ -81,12 +69,6 @@ it('forces suppress_printing to false when sandbox_mode is turned off', function
     Livewire::test(Settings::class)
         ->fillForm([
             'sandbox_mode' => false,
-            'from_address_first_name' => 'Test',
-            'from_address_last_name' => 'User',
-            'from_address_street' => '123 Main St',
-            'from_address_city' => 'Seattle',
-            'from_address_state_or_province' => 'WA',
-            'from_address_postal_code' => '98072',
         ])
         ->call('save')
         ->assertNotified();
@@ -103,12 +85,6 @@ it('clears API auth caches when sandbox_mode changes', function (): void {
     Livewire::test(Settings::class)
         ->fillForm([
             'sandbox_mode' => true,
-            'from_address_first_name' => 'Test',
-            'from_address_last_name' => 'User',
-            'from_address_street' => '123 Main St',
-            'from_address_city' => 'Seattle',
-            'from_address_state_or_province' => 'WA',
-            'from_address_postal_code' => '98072',
         ])
         ->call('save')
         ->assertNotified();
@@ -128,12 +104,6 @@ it('does not clear API auth caches when sandbox_mode does not change', function 
     Livewire::test(Settings::class)
         ->fillForm([
             'sandbox_mode' => true,
-            'from_address_first_name' => 'Test',
-            'from_address_last_name' => 'User',
-            'from_address_street' => '123 Main St',
-            'from_address_city' => 'Seattle',
-            'from_address_state_or_province' => 'WA',
-            'from_address_postal_code' => '98072',
         ])
         ->call('save')
         ->assertNotified();

@@ -3,10 +3,12 @@
 namespace App\Filament\Pages;
 
 use App\Enums\Role;
+use App\Models\Location;
 use App\Models\Setting;
 use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -82,15 +84,6 @@ class Settings extends Page
     {
         $this->form->fill([
             'company_name' => app(SettingsService::class)->get('company_name', ''),
-            'from_address_first_name' => app(SettingsService::class)->get('from_address.first_name', ''),
-            'from_address_last_name' => app(SettingsService::class)->get('from_address.last_name', ''),
-            'from_address_company' => app(SettingsService::class)->get('from_address.company', ''),
-            'from_address_street' => app(SettingsService::class)->get('from_address.street', ''),
-            'from_address_street2' => app(SettingsService::class)->get('from_address.street2', ''),
-            'from_address_city' => app(SettingsService::class)->get('from_address.city', ''),
-            'from_address_state_or_province' => app(SettingsService::class)->get('from_address.state_or_province', ''),
-            'from_address_postal_code' => app(SettingsService::class)->get('from_address.postal_code', ''),
-            'from_address_phone' => app(SettingsService::class)->get('from_address.phone', ''),
             'packing_validation_enabled' => app(SettingsService::class)->get('packing_validation_enabled', true),
             'transparency_enabled' => app(SettingsService::class)->get('transparency_enabled', true),
             'batch_shipping_enabled' => app(SettingsService::class)->get('batch_shipping_enabled', true),
@@ -136,47 +129,13 @@ class Settings extends Page
                         ])
                         ->columns(1),
 
-                    Section::make('From Address')
-                        ->description('Return address used on shipping labels')
+                    Section::make('Ship-From Address')
+                        ->description('Managed in Settings > Locations. The default location is used as the return address on labels.')
                         ->schema([
-                            TextInput::make('from_address_first_name')
-                                ->label('First Name')
-                                ->required()
-                                ->maxLength(50),
-                            TextInput::make('from_address_last_name')
-                                ->label('Last Name')
-                                ->required()
-                                ->maxLength(50),
-                            TextInput::make('from_address_company')
-                                ->label('Company')
-                                ->maxLength(100),
-                            TextInput::make('from_address_street')
-                                ->label('Street Address')
-                                ->required()
-                                ->maxLength(100),
-                            TextInput::make('from_address_street2')
-                                ->label('Street Address 2')
-                                ->maxLength(100),
-                            TextInput::make('from_address_city')
-                                ->label('City')
-                                ->required()
-                                ->maxLength(50),
-                            TextInput::make('from_address_state_or_province')
-                                ->label('State/Province')
-                                ->required()
-                                ->maxLength(2)
-                                ->placeholder('WA'),
-                            TextInput::make('from_address_postal_code')
-                                ->label('Postal Code')
-                                ->required()
-                                ->maxLength(10)
-                                ->placeholder('98072'),
-                            TextInput::make('from_address_phone')
-                                ->label('Phone')
-                                ->tel()
-                                ->maxLength(20),
-                        ])
-                        ->columns(2),
+                            Placeholder::make('default_location')
+                                ->label('Default Location')
+                                ->content(fn () => Location::getDefault()?->name ?? 'No default location set'),
+                        ]),
 
                     Section::make('Features')
                         ->description('Enable or disable application features')
@@ -357,15 +316,6 @@ class Settings extends Page
         // Map form fields to setting keys
         $settings = [
             'company_name' => $data['company_name'] ?? '',
-            'from_address.first_name' => $data['from_address_first_name'] ?? '',
-            'from_address.last_name' => $data['from_address_last_name'] ?? '',
-            'from_address.company' => $data['from_address_company'] ?? '',
-            'from_address.street' => $data['from_address_street'] ?? '',
-            'from_address.street2' => $data['from_address_street2'] ?? '',
-            'from_address.city' => $data['from_address_city'] ?? '',
-            'from_address.state_or_province' => $data['from_address_state_or_province'] ?? '',
-            'from_address.postal_code' => $data['from_address_postal_code'] ?? '',
-            'from_address.phone' => $data['from_address_phone'] ?? '',
             'packing_validation_enabled' => $data['packing_validation_enabled'] ?? true,
             'transparency_enabled' => $data['transparency_enabled'] ?? true,
             'batch_shipping_enabled' => $data['batch_shipping_enabled'] ?? true,

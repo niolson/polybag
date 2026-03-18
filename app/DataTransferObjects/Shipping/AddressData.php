@@ -4,7 +4,6 @@ namespace App\DataTransferObjects\Shipping;
 
 use App\Models\Location;
 use App\Models\Shipment;
-use App\Services\SettingsService;
 
 readonly class AddressData
 {
@@ -61,22 +60,10 @@ readonly class AddressData
     {
         $location = Location::getDefault();
 
-        if ($location) {
-            return self::fromLocation($location);
+        if (! $location) {
+            throw new \RuntimeException('No default location configured. Go to Settings > Locations and set a default location.');
         }
 
-        // Fallback to settings for installs that haven't migrated yet
-        return new self(
-            firstName: app(SettingsService::class)->get('from_address.first_name', config('shipping.from_address.first_name', 'Shipping')),
-            lastName: app(SettingsService::class)->get('from_address.last_name', config('shipping.from_address.last_name', 'Center')),
-            streetAddress: app(SettingsService::class)->get('from_address.street', config('shipping.from_address.street', '')),
-            streetAddress2: app(SettingsService::class)->get('from_address.street2', config('shipping.from_address.street2')),
-            city: app(SettingsService::class)->get('from_address.city', config('shipping.from_address.city', '')),
-            stateOrProvince: app(SettingsService::class)->get('from_address.state_or_province', config('shipping.from_address.state', '')),
-            postalCode: app(SettingsService::class)->get('from_address.postal_code', config('shipping.origin_postal_code', '98072')),
-            country: 'US',
-            company: app(SettingsService::class)->get('from_address.company', config('shipping.from_address.company')),
-            phone: app(SettingsService::class)->get('from_address.phone', config('shipping.from_address.phone')),
-        );
+        return self::fromLocation($location);
     }
 }

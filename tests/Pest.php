@@ -45,3 +45,13 @@ function something()
 {
     // ..
 }
+
+/*
+|--------------------------------------------------------------------------
+| Global Setup
+|--------------------------------------------------------------------------
+*/
+
+uses()->beforeEach(function (): void {
+    \App\Models\Location::factory()->default()->create();
+})->in('Feature', 'Unit');
