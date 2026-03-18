@@ -19,7 +19,7 @@ class ShipDateService
         $location = $this->resolveLocation($locationId);
         $tz = $location?->timezone ?? 'America/New_York';
         $pivot = $this->getPivot($carrierName, $locationId);
-        $pickupDays = $pivot ? json_decode($pivot->pickup_days, true) : self::DEFAULT_PICKUP_DAYS;
+        $pickupDays = ($pivot && $pivot->pickup_days) ? json_decode($pivot->pickup_days, true) : self::DEFAULT_PICKUP_DAYS;
         $lastEndOfDay = $pivot?->last_end_of_day_at ? CarbonImmutable::parse($pivot->last_end_of_day_at) : null;
         $now = CarbonImmutable::now($tz);
         $today = $now->startOfDay();
@@ -54,7 +54,7 @@ class ShipDateService
             $tz = $location?->timezone ?? 'America/New_York';
             $afterDate = $after ?? CarbonImmutable::today($tz);
             $pivot = $this->getPivot($carrierName, $locationId);
-            $pickupDays = $pivot ? json_decode($pivot->pickup_days, true) : self::DEFAULT_PICKUP_DAYS;
+            $pickupDays = ($pivot && $pivot->pickup_days) ? json_decode($pivot->pickup_days, true) : self::DEFAULT_PICKUP_DAYS;
         } else {
             $pickupDays = $pickupDaysOrCarrier;
             $afterDate = $afterOrLocationId instanceof CarbonImmutable ? $afterOrLocationId : CarbonImmutable::today();
