@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Cache;
 
@@ -22,6 +23,7 @@ class Location extends Model
         'state_or_province',
         'postal_code',
         'country',
+        'timezone',
         'phone',
         'is_default',
         'active',
@@ -75,5 +77,17 @@ class Location extends Model
     public function packages(): HasMany
     {
         return $this->hasMany(Package::class);
+    }
+
+    public function carriers(): BelongsToMany
+    {
+        return $this->belongsToMany(Carrier::class, 'carrier_location')
+            ->withPivot('pickup_days', 'last_end_of_day_at')
+            ->withTimestamps();
+    }
+
+    public function carrierLocations(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(CarrierLocation::class);
     }
 }

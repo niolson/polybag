@@ -3,6 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\LocationResource\Pages;
+use App\Models\Carrier;
 use App\Models\Location;
 use BackedEnum;
 use Filament\Actions;
@@ -36,6 +37,13 @@ class LocationResource extends Resource
                             ->helperText('Only one location can be the default. Setting this will unset the current default.'),
                         Forms\Components\Toggle::make('active')
                             ->default(true),
+                        Forms\Components\Select::make('timezone')
+                            ->options(fn () => collect(timezone_identifiers_list())
+                                ->filter(fn ($tz) => str_starts_with($tz, 'America/') || str_starts_with($tz, 'Pacific/') || str_starts_with($tz, 'US/'))
+                                ->mapWithKeys(fn ($tz) => [$tz => str_replace('_', ' ', $tz)]))
+                            ->searchable()
+                            ->default('America/New_York')
+                            ->required(),
                     ]),
                 Components\Section::make('Address')
                     ->schema([
@@ -72,6 +80,36 @@ class LocationResource extends Resource
                             ->tel()
                             ->maxLength(20),
                     ])->columns(2),
+                Components\Section::make('Carrier Pickup Schedule')
+                    ->schema([
+                        Forms\Components\Repeater::make('carrierLocations')
+                            ->relationship()
+                            ->schema([
+                                Forms\Components\Select::make('carrier_id')
+                                    ->label('Carrier')
+                                    ->options(fn () => Carrier::active()->pluck('name', 'id'))
+                                    ->required()
+                                    ->disableOptionsWhenSelectedInSiblingRepeaterItems(),
+                                Forms\Components\CheckboxList::make('pickup_days')
+                                    ->label('Pickup Days')
+                                    ->options([
+                                        0 => 'Sunday',
+                                        1 => 'Monday',
+                                        2 => 'Tuesday',
+                                        3 => 'Wednesday',
+                                        4 => 'Thursday',
+                                        5 => 'Friday',
+                                        6 => 'Saturday',
+                                    ])
+                                    ->default([1, 2, 3, 4, 5])
+                                    ->columns(7),
+                            ])
+                            ->defaultItems(0)
+                            ->addActionLabel('Add Carrier')
+                            ->columnSpanFull(),
+                    ])
+                    ->description('Configure which days each carrier picks up from this location. Defaults to weekdays if not set.')
+                    ->collapsible(),
             ]);
     }
 
@@ -85,6 +123,8 @@ class LocationResource extends Resource
                 Tables\Columns\TextColumn::make('state_or_province')
                     ->label('State'),
                 Tables\Columns\TextColumn::make('country'),
+                Tables\Columns\TextColumn::make('timezone')
+                    ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\IconColumn::make('is_default')
                     ->label('Default')
                     ->boolean(),
@@ -96,8 +136,7 @@ class LocationResource extends Resource
             ])
             ->recordActions([
                 Actions\EditAction::make(),
-            ])
-;
+            ]);
     }
 
     public static function getPages(): array

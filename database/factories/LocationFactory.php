@@ -22,6 +22,7 @@ class LocationFactory extends Factory
             'state_or_province' => fake()->stateAbbr(),
             'postal_code' => fake()->postcode(),
             'country' => 'US',
+            'timezone' => 'America/New_York',
             'phone' => fake()->optional()->phoneNumber(),
             'is_default' => false,
             'active' => true,
