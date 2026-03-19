@@ -183,7 +183,7 @@ class ManualShip extends Page
 
         Session::put('last_shipped_package_id', $package->id);
 
-        if ($result->response->labelData) {
+        if ($result->response->labelData && ! app(SettingsService::class)->get('suppress_printing', false)) {
             $this->dispatch('print-label', label: $result->response->labelData, orientation: $result->response->labelOrientation ?? 'portrait', format: $result->response->labelFormat ?? 'pdf', dpi: $result->response->labelDpi);
         }
 

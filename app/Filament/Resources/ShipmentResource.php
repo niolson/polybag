@@ -384,6 +384,16 @@ class ShipmentResource extends Resource
                     ->modalDescription('Generate labels for all selected shipments using the same box size. Ineligible shipments will be skipped.')
                     ->modalSubmitActionLabel('Generate Labels')
                     ->action(function (Collection $records, array $data) {
+                        if ($records->count() > 100) {
+                            Notification::make()
+                                ->title('Too many shipments selected')
+                                ->body('Batch Ship is limited to 100 shipments at a time. You selected '.$records->count().'.')
+                                ->danger()
+                                ->send();
+
+                            return;
+                        }
+
                         $service = new BatchLabelService;
 
                         $validation = $service->validateShipmentsForBatch($records);
@@ -427,6 +437,16 @@ class ShipmentResource extends Resource
                     ->modalDescription('Queue address validation for all selected shipments. Already-validated shipments will be re-checked.')
                     ->modalSubmitActionLabel('Validate')
                     ->action(function (Collection $records): void {
+                        if ($records->count() > 1000) {
+                            Notification::make()
+                                ->title('Too many shipments selected')
+                                ->body('Validate Addresses is limited to 1,000 shipments at a time. You selected '.$records->count().'.')
+                                ->danger()
+                                ->send();
+
+                            return;
+                        }
+
                         foreach ($records as $shipment) {
                             ValidateAddressJob::dispatch($shipment->id);
                         }
@@ -438,7 +458,9 @@ class ShipmentResource extends Resource
                             ->send();
                     })
                     ->deselectRecordsAfterCompletion(),
-            ]);
+            ])
+            ->maxSelectableRecords(1000)
+            ;
     }
 
     public static function infolist(Schema $infolist): Schema
