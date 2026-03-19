@@ -3,11 +3,28 @@
 namespace App\Providers;
 
 use App\Models\BoxSize;
+use App\Models\Carrier;
+use App\Models\CarrierService;
+use App\Models\Location;
 use App\Models\Package;
+use App\Models\Product;
+use App\Models\Setting;
 use App\Models\Shipment;
+use App\Models\ShippingMethod;
+use App\Models\ShippingRule;
+use App\Models\User;
+use App\Observers\AuditableObserver;
+use App\Observers\SettingObserver;
 use App\Services\AddressValidationService;
+use App\Services\CacheService;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\FakeCarrierAdapter;
+use App\Services\LabelGenerationService;
+use App\Services\ManifestService;
+use App\Services\RateQuoteLogger;
+use App\Services\RuleEvaluator;
+use App\Services\SettingsService;
+use App\Services\ShippingRateService;
 use App\Services\Validation\FakeAddressValidator;
 use App\Services\Validation\UspsAddressValidator;
 use Illuminate\Support\Facades\DB;
@@ -21,14 +38,14 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->singleton(\App\Services\SettingsService::class);
-        $this->app->singleton(\App\Services\CacheService::class);
-        $this->app->singleton(\App\Services\RateQuoteLogger::class);
-        $this->app->singleton(\App\Services\RuleEvaluator::class);
-        $this->app->singleton(\App\Services\Carriers\CarrierRegistry::class);
-        $this->app->singleton(\App\Services\ShippingRateService::class);
-        $this->app->singleton(\App\Services\LabelGenerationService::class);
-        $this->app->singleton(\App\Services\ManifestService::class);
+        $this->app->singleton(SettingsService::class);
+        $this->app->singleton(CacheService::class);
+        $this->app->singleton(RateQuoteLogger::class);
+        $this->app->singleton(RuleEvaluator::class);
+        $this->app->singleton(CarrierRegistry::class);
+        $this->app->singleton(ShippingRateService::class);
+        $this->app->singleton(LabelGenerationService::class);
+        $this->app->singleton(ManifestService::class);
 
         $this->app->singleton(AddressValidationService::class, function () {
             $validators = config('app.fake_carriers')
@@ -44,6 +61,18 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        AuditableObserver::observe([
+            User::class,
+            Carrier::class,
+            CarrierService::class,
+            Location::class,
+            BoxSize::class,
+            ShippingMethod::class,
+            ShippingRule::class,
+            Product::class,
+        ]);
+        Setting::observe(SettingObserver::class);
+
         // Register API routes here (before Filament's catch-all at path('/'))
         // so they take priority over the panel's {any} wildcard route.
         Route::prefix('api')->group(function () {

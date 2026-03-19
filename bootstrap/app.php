@@ -21,6 +21,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('stats:aggregate')
             ->dailyAt('00:05')
             ->withoutOverlapping();
+
+        // Purge old audit log entries
+        $schedule->command('audit:purge')
+            ->dailyAt('01:00')
+            ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->trustProxies(at: '*');

@@ -3,12 +3,14 @@
 namespace App\Services;
 
 use App\DataTransferObjects\BatchValidationResult;
+use App\Enums\AuditAction;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\LabelBatchStatus;
 use App\Enums\PackageStatus;
 use App\Enums\ShipmentStatus;
 use App\Jobs\GenerateLabelJob;
 use App\Models\BoxSize;
+use App\Models\AuditLog;
 use App\Models\LabelBatch;
 use App\Models\LabelBatchItem;
 use App\Models\Package;
@@ -160,6 +162,16 @@ class BatchLabelService
                 ->dispatch();
 
             $batch->update(['bus_batch_id' => $busBatch->id]);
+
+            AuditLog::record(
+                AuditAction::BatchStarted,
+                $batch,
+                metadata: [
+                    'total_shipments' => $batch->total_shipments,
+                    'box_size' => $boxSize->label,
+                    'label_format' => $labelFormat,
+                ],
+            );
 
             return $batch;
         });
