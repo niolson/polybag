@@ -15,10 +15,16 @@ class PurgeAuditLogs extends Command
 
     public function handle(SettingsService $settings): int
     {
-        $days = $this->option('days')
-            ?? $settings->get('audit_log_retention_days', 90);
+        $days = (int) ($this->option('days')
+            ?? $settings->get('audit_log_retention_days', 90));
 
-        $cutoff = now()->subDays((int) $days);
+        if ($days === 0) {
+            $this->info('Audit log retention is set to 0 (keep forever). Skipping purge.');
+
+            return self::SUCCESS;
+        }
+
+        $cutoff = now()->subDays($days);
         $total = 0;
 
         $this->info("Purging audit logs older than {$days} days (before {$cutoff->toDateString()})...");

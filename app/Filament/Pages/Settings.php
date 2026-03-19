@@ -89,6 +89,7 @@ class Settings extends Page
             'batch_shipping_enabled' => app(SettingsService::class)->get('batch_shipping_enabled', true),
             'manual_shipping_enabled' => app(SettingsService::class)->get('manual_shipping_enabled', true),
             'carrier_api_timeout' => app(SettingsService::class)->get('carrier_api_timeout', 15),
+            'audit_log_retention_days' => app(SettingsService::class)->get('audit_log_retention_days', 90),
             'sandbox_mode' => app(SettingsService::class)->get('sandbox_mode', false),
             'suppress_printing' => app(SettingsService::class)->get('suppress_printing', false),
 
@@ -170,6 +171,20 @@ class Settings extends Page
                                 ->maxValue(60)
                                 ->default(15)
                                 ->suffix('seconds'),
+                        ])
+                        ->columns(1),
+
+                    Section::make('Data Retention')
+                        ->description('Configure how long data is kept before automatic cleanup')
+                        ->schema([
+                            TextInput::make('audit_log_retention_days')
+                                ->label('Audit Log Retention')
+                                ->helperText('Audit log entries older than this will be automatically purged daily. Set to 0 to disable automatic cleanup.')
+                                ->numeric()
+                                ->minValue(0)
+                                ->maxValue(3650)
+                                ->default(90)
+                                ->suffix('days'),
                         ])
                         ->columns(1),
 
@@ -321,6 +336,7 @@ class Settings extends Page
             'batch_shipping_enabled' => $data['batch_shipping_enabled'] ?? true,
             'manual_shipping_enabled' => $data['manual_shipping_enabled'] ?? true,
             'carrier_api_timeout' => (int) ($data['carrier_api_timeout'] ?? 15),
+            'audit_log_retention_days' => (int) ($data['audit_log_retention_days'] ?? 90),
             'sandbox_mode' => $sandboxMode,
             'suppress_printing' => $suppressPrinting,
         ];
