@@ -54,6 +54,7 @@ class AppPanelProvider extends PanelProvider
             ])
             ->navigationGroups(['Ship', 'Manage', 'Reports', 'Settings'])
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\Filament\Widgets')
+            ->databaseNotifications()
             ->widgets([])
             ->renderHook(
                 PanelsRenderHook::TOPBAR_LOGO_AFTER,

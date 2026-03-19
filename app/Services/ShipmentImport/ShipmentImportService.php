@@ -11,8 +11,11 @@ use App\Models\ChannelAlias;
 use App\Models\Product;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
+use App\Enums\Role;
 use App\Models\ShippingMethod;
 use App\Models\ShippingMethodAlias;
+use App\Models\User;
+use App\Notifications\ImportCompleted as ImportCompletedNotification;
 use App\Services\PhoneParserService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -59,6 +62,10 @@ class ShipmentImportService
         try {
             $this->source->validateConfiguration();
         } catch (\Exception $e) {
+            $this->notifyAdmins(
+                new ImportCompletedNotification([], $this->source->getSourceName(), [$e->getMessage()])
+            );
+
             return new ImportResult(
                 errors: [$e->getMessage()],
                 duration: microtime(true) - $startTime
@@ -88,6 +95,10 @@ class ShipmentImportService
         $this->log('info', 'Import completed', array_merge($this->stats, ['duration' => $duration]));
 
         ImportCompleted::dispatch($this->stats, $this->source->getSourceName());
+
+        $this->notifyAdmins(
+            new ImportCompletedNotification($this->stats, $this->source->getSourceName(), $this->errors)
+        );
 
         return new ImportResult(
             shipmentsCreated: $this->stats['shipments_created'],
@@ -437,6 +448,12 @@ class ShipmentImportService
     {
         $channel = config('shipment-import.logging.channel', 'stack');
         Log::channel($channel)->log($level, $message, $context);
+    }
+
+    private function notifyAdmins(ImportCompletedNotification $notification): void
+    {
+        User::where('role', Role::Admin)->where('active', true)->get()
+            ->each->notify($notification);
     }
 
     /**

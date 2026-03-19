@@ -8,6 +8,12 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // Only needed for MySQL — the create migration already has individual indexes.
+        // SQLite (used in tests) creates indexes with different naming conventions.
+        if (Schema::getConnection()->getDriverName() !== 'mysql') {
+            return;
+        }
+
         Schema::table('audit_logs', function (Blueprint $table) {
             $table->dropIndex(['auditable_type', 'auditable_id']);
             $table->index('auditable_type');
@@ -17,6 +23,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (Schema::getConnection()->getDriverName() !== 'mysql') {
+            return;
+        }
+
         Schema::table('audit_logs', function (Blueprint $table) {
             $table->dropIndex(['auditable_type']);
             $table->dropIndex(['auditable_id']);

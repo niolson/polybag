@@ -17,6 +17,7 @@ use App\Models\Package;
 use App\Models\PackageItem;
 use App\Models\Shipment;
 use App\Models\User;
+use App\Notifications\BatchLabelCompleted;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
@@ -158,6 +159,9 @@ class BatchLabelService
                         'status' => $status,
                         'completed_at' => now(),
                     ]);
+
+                    $user = User::find($batch->user_id);
+                    $user?->notify(new BatchLabelCompleted($batch));
                 })
                 ->dispatch();
 
