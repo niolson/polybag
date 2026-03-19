@@ -7,7 +7,7 @@ use App\Models\ShippingMethodAlias;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
- * @extends \Illuminate\Database\Eloquent\Factories\Factory<\App\Models\ShippingMethodAlias>
+ * @extends Factory<ShippingMethodAlias>
  */
 class ShippingMethodAliasFactory extends Factory
 {

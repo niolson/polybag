@@ -6,9 +6,10 @@ use App\Models\Channel;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\ShipmentImport\PackageExportService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
 
-uses(Illuminate\Foundation\Testing\RefreshDatabase::class);
+uses(RefreshDatabase::class);
 
 function fakeExportSource(bool $exportEnabled = true, ?string $exportError = null): string
 {
@@ -57,7 +58,7 @@ function fakeExportSource(bool $exportEnabled = true, ?string $exportError = nul
         public function exportPackage(array $data): void
         {
             if (self::$staticExportError) {
-                throw new \RuntimeException(self::$staticExportError);
+                throw new RuntimeException(self::$staticExportError);
             }
             self::$exportedData[] = $data;
         }
@@ -65,7 +66,7 @@ function fakeExportSource(bool $exportEnabled = true, ?string $exportError = nul
         public function validateExportConfiguration(): void
         {
             if (! self::$staticExportEnabled) {
-                throw new \InvalidArgumentException('Export is not enabled.');
+                throw new InvalidArgumentException('Export is not enabled.');
             }
         }
     };

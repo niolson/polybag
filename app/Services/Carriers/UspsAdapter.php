@@ -3,6 +3,7 @@
 namespace App\Services\Carriers;
 
 use App\Contracts\CarrierAdapterInterface;
+use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
@@ -546,7 +547,7 @@ class UspsAdapter implements CarrierAdapterInterface
      *
      * @return array<string, string>
      */
-    private function buildDomesticAddress(\App\DataTransferObjects\Shipping\AddressData $address): array
+    private function buildDomesticAddress(AddressData $address): array
     {
         $result = [
             'streetAddress' => mb_substr($address->streetAddress, 0, 50),
@@ -569,7 +570,7 @@ class UspsAdapter implements CarrierAdapterInterface
      *
      * @return array<string, string>
      */
-    private function buildInternationalAddress(\App\DataTransferObjects\Shipping\AddressData $address): array
+    private function buildInternationalAddress(AddressData $address): array
     {
         $result = [
             'streetAddress' => mb_substr($address->streetAddress, 0, 50),
@@ -607,7 +608,7 @@ class UspsAdapter implements CarrierAdapterInterface
      *
      * @param  array<string, string>  $result
      */
-    private function addNameFields(array &$result, \App\DataTransferObjects\Shipping\AddressData $address): void
+    private function addNameFields(array &$result, AddressData $address): void
     {
         $hasFirst = (bool) $address->firstName;
         $hasLast = (bool) $address->lastName;

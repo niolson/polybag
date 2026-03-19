@@ -3,6 +3,8 @@
 use App\Http\Integrations\Fedex\FedexConnector;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Http\Integrations\Fedex\Requests\Rates;
+use App\Models\Setting;
+use App\Services\SettingsService;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
 
@@ -11,7 +13,7 @@ it('resolves production base URL by default', function (): void {
         'services.fedex.base_url' => 'https://apis.fedex.com',
         'services.fedex.sandbox_url' => 'https://apis-sandbox.fedex.com',
     ]);
-    app(\App\Services\SettingsService::class)->clearCache();
+    app(SettingsService::class)->clearCache();
 
     $connector = new FedexConnector;
 
@@ -23,8 +25,8 @@ it('resolves sandbox base URL when sandbox_mode is enabled', function (): void {
         'services.fedex.base_url' => 'https://apis.fedex.com',
         'services.fedex.sandbox_url' => 'https://apis-sandbox.fedex.com',
     ]);
-    \App\Models\Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
-    app(\App\Services\SettingsService::class)->clearCache();
+    Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
+    app(SettingsService::class)->clearCache();
 
     $connector = new FedexConnector;
 

@@ -5,6 +5,10 @@ use App\Http\Integrations\USPS\Requests\Label;
 use App\Http\Integrations\USPS\Requests\PaymentAuthorization;
 use App\Http\Integrations\USPS\Requests\ShippingOptions;
 use App\Http\Integrations\USPS\USPSConnector;
+use App\Models\Setting;
+use App\Services\SettingsService;
+use GuzzleHttp\Psr7\Response;
+use Illuminate\Support\Str;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
 
@@ -86,7 +90,7 @@ it('parses multipart label response correctly', function (): void {
     ]);
 
     // Test the parsing logic directly using reflection to access the methods
-    $psrResponse = new \GuzzleHttp\Psr7\Response(
+    $psrResponse = new Response(
         200,
         ['Content-Type' => "multipart/mixed; boundary={$boundary}"],
         $multipartBody
@@ -94,7 +98,7 @@ it('parses multipart label response correctly', function (): void {
 
     // Extract boundary from Content-Type header
     $contentType = $psrResponse->getHeaderLine('Content-Type');
-    $extractedBoundary = \Illuminate\Support\Str::after($contentType, 'boundary=');
+    $extractedBoundary = Str::after($contentType, 'boundary=');
 
     // Parse the multipart body
     $separator = '--'.$extractedBoundary;
@@ -153,7 +157,7 @@ it('resolves production base URL by default', function (): void {
         'services.usps.base_url' => 'https://apis.usps.com',
         'services.usps.sandbox_url' => 'https://apis-tem.usps.com',
     ]);
-    app(\App\Services\SettingsService::class)->clearCache();
+    app(SettingsService::class)->clearCache();
 
     $connector = new USPSConnector;
 
@@ -165,8 +169,8 @@ it('resolves sandbox base URL when sandbox_mode is enabled', function (): void {
         'services.usps.base_url' => 'https://apis.usps.com',
         'services.usps.sandbox_url' => 'https://apis-tem.usps.com',
     ]);
-    \App\Models\Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
-    app(\App\Services\SettingsService::class)->clearCache();
+    Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
+    app(SettingsService::class)->clearCache();
 
     $connector = new USPSConnector;
 

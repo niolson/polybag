@@ -11,14 +11,14 @@ Route::get('/up', function () {
     try {
         DB::connection()->getPdo();
         $checks['db'] = 'ok';
-    } catch (\Throwable) {
+    } catch (Throwable) {
         $checks['db'] = 'failed';
     }
 
     try {
         Redis::ping();
         $checks['redis'] = 'ok';
-    } catch (\Throwable) {
+    } catch (Throwable) {
         $checks['redis'] = 'failed';
     }
 

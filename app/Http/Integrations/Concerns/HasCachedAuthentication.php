@@ -4,6 +4,7 @@ namespace App\Http\Integrations\Concerns;
 
 use DateInterval;
 use Illuminate\Support\Facades\Cache;
+use Saloon\Http\Connector;
 
 /**
  * Provides cached OAuth2 authentication for Saloon connectors.
@@ -11,7 +12,7 @@ use Illuminate\Support\Facades\Cache;
  * Connectors using this trait must also use the ClientCredentialsGrant trait
  * and implement the abstract methods to define cache configuration.
  *
- * @phpstan-require-extends \Saloon\Http\Connector
+ * @phpstan-require-extends Connector
  */
 trait HasCachedAuthentication
 {

@@ -21,6 +21,8 @@ use Filament\Forms\Contracts\HasForms;
 use Filament\Pages\Page;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Session;
+use Saloon\Exceptions\Request\RequestException;
+use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 
 class Ship extends Page implements HasForms
 {
@@ -251,7 +253,7 @@ class Ship extends Page implements HasForms
                 $this->redirect($this->returnUrl);
             }
 
-        } catch (\Saloon\Exceptions\Request\Statuses\RequestTimeOutException $e) {
+        } catch (RequestTimeOutException $e) {
             logger()->error('Carrier API timeout', [
                 'carrier' => $selectedRate->carrier,
                 'package_id' => $this->package->id,
@@ -260,7 +262,7 @@ class Ship extends Page implements HasForms
                 'Carrier Timeout',
                 "The {$selectedRate->carrier} API is not responding. Please try again in a few moments."
             );
-        } catch (\Saloon\Exceptions\Request\RequestException $e) {
+        } catch (RequestException $e) {
             logger()->error('Carrier API error', [
                 'carrier' => $selectedRate->carrier,
                 'package_id' => $this->package->id,

@@ -2,14 +2,15 @@
 
 namespace App\DataTransferObjects;
 
+use App\Models\Shipment;
 use Illuminate\Support\Collection;
 
 readonly class BatchValidationResult
 {
     public function __construct(
-        /** @var Collection<int, \App\Models\Shipment> */
+        /** @var Collection<int, Shipment> */
         public Collection $eligible,
-        /** @var Collection<int, array{shipment: \App\Models\Shipment, reason: string}> */
+        /** @var Collection<int, array{shipment: Shipment, reason: string}> */
         public Collection $ineligible,
     ) {}
 

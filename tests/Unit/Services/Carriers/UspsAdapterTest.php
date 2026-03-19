@@ -6,10 +6,15 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\BoxSizeType;
+use App\Http\Integrations\USPS\Requests\CancelInternationalLabel;
+use App\Http\Integrations\USPS\Requests\CancelLabel;
 use App\Http\Integrations\USPS\Requests\Label;
 use App\Http\Integrations\USPS\Requests\PaymentAuthorization;
 use App\Http\Integrations\USPS\Requests\ShippingOptions;
+use App\Models\Package;
+use App\Models\Shipment;
 use App\Services\Carriers\UspsAdapter;
+use Saloon\Exceptions\Request\Statuses\InternalServerErrorException;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
 
@@ -207,11 +212,11 @@ it('cancels a domestic label', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         PaymentAuthorization::class => MockResponse::make(['paymentAuthorizationToken' => 'test_payment_token']),
-        \App\Http\Integrations\USPS\Requests\CancelLabel::class => MockResponse::make([], 200),
+        CancelLabel::class => MockResponse::make([], 200),
     ]);
 
-    $shipment = \App\Models\Shipment::factory()->create(['country' => 'US']);
-    $package = \App\Models\Package::factory()->shipped()->for($shipment)->create([
+    $shipment = Shipment::factory()->create(['country' => 'US']);
+    $package = Package::factory()->shipped()->for($shipment)->create([
         'carrier' => 'USPS',
         'tracking_number' => '9400111899223456789012',
     ]);
@@ -221,18 +226,18 @@ it('cancels a domestic label', function (): void {
     expect($response->success)->toBeTrue()
         ->and($response->message)->toBe('Label voided successfully.');
 
-    Saloon::assertSent(\App\Http\Integrations\USPS\Requests\CancelLabel::class);
+    Saloon::assertSent(CancelLabel::class);
 });
 
 it('cancels an international label', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         PaymentAuthorization::class => MockResponse::make(['paymentAuthorizationToken' => 'test_payment_token']),
-        \App\Http\Integrations\USPS\Requests\CancelInternationalLabel::class => MockResponse::make([], 200),
+        CancelInternationalLabel::class => MockResponse::make([], 200),
     ]);
 
-    $shipment = \App\Models\Shipment::factory()->create(['country' => 'CA']);
-    $package = \App\Models\Package::factory()->shipped()->for($shipment)->create([
+    $shipment = Shipment::factory()->create(['country' => 'CA']);
+    $package = Package::factory()->shipped()->for($shipment)->create([
         'carrier' => 'USPS',
         'tracking_number' => 'LZ999999999US',
     ]);
@@ -242,18 +247,18 @@ it('cancels an international label', function (): void {
     expect($response->success)->toBeTrue()
         ->and($response->message)->toBe('Label voided successfully.');
 
-    Saloon::assertSent(\App\Http\Integrations\USPS\Requests\CancelInternationalLabel::class);
+    Saloon::assertSent(CancelInternationalLabel::class);
 });
 
 it('returns failure when cancel API errors', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         PaymentAuthorization::class => MockResponse::make(['paymentAuthorizationToken' => 'test_payment_token']),
-        \App\Http\Integrations\USPS\Requests\CancelLabel::class => MockResponse::make(['error' => 'Not found'], 404),
+        CancelLabel::class => MockResponse::make(['error' => 'Not found'], 404),
     ]);
 
-    $shipment = \App\Models\Shipment::factory()->create(['country' => 'US']);
-    $package = \App\Models\Package::factory()->shipped()->for($shipment)->create([
+    $shipment = Shipment::factory()->create(['country' => 'US']);
+    $package = Package::factory()->shipped()->for($shipment)->create([
         'carrier' => 'USPS',
         'tracking_number' => '9400111899223456789012',
     ]);
@@ -621,7 +626,7 @@ it('handles API server error by throwing exception', function (): void {
 
     // The adapter will throw on 500 errors (retry exhausted)
     expect(fn () => $this->adapter->getRates($request, ['USPS_GROUND_ADVANTAGE']))
-        ->toThrow(\Saloon\Exceptions\Request\Statuses\InternalServerErrorException::class);
+        ->toThrow(InternalServerErrorException::class);
 });
 
 it('handles malformed API response gracefully', function (): void {

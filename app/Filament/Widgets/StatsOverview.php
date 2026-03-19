@@ -6,6 +6,7 @@ use App\Enums\ShipmentStatus;
 use App\Models\DailyShippingStat;
 use App\Models\Location;
 use App\Models\Shipment;
+use Carbon\Carbon;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 use Illuminate\Support\Facades\Cache;
@@ -48,7 +49,7 @@ class StatsOverview extends BaseWidget
         });
     }
 
-    private function buildCostStat(\Carbon\Carbon $thisWeekStart, string $tz): Stat
+    private function buildCostStat(Carbon $thisWeekStart, string $tz): Stat
     {
         $lastWeekStart = now($tz)->subWeek()->startOfWeek();
         $lastWeekEnd = now($tz)->subWeek()->endOfWeek();

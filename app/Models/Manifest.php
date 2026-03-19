@@ -2,13 +2,14 @@
 
 namespace App\Models;
 
+use Database\Factories\ManifestFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Manifest extends Model
 {
-    /** @use HasFactory<\Database\Factories\ManifestFactory> */
+    /** @use HasFactory<ManifestFactory> */
     use HasFactory;
 
     protected $fillable = [

@@ -16,6 +16,7 @@ use BackedEnum;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Session;
+use Saloon\Exceptions\Request\RequestException;
 use UnitEnum;
 
 class Pack extends Page
@@ -449,7 +450,7 @@ class Pack extends Page
         } catch (\RuntimeException $e) {
             // Optimistic locking failure
             $this->notifyError('Package State Changed', $e->getMessage());
-        } catch (\Saloon\Exceptions\Request\RequestException $e) {
+        } catch (RequestException $e) {
             logger()->error('Cancel label carrier error', ['error' => $e->getMessage()]);
             $this->notifyError('Carrier Error', 'Unable to connect to carrier. Please try again.');
         } catch (\Exception $e) {

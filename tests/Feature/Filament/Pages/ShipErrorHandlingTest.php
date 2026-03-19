@@ -14,9 +14,13 @@ use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
+use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
+use Saloon\Http\Response;
 
-uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
+uses(RefreshDatabase::class);
 
 beforeEach(function (): void {
     $this->actingAs(User::factory()->admin()->create());
@@ -62,7 +66,7 @@ function registerMockAdapterForErrorTest(ShipResponse $response): void
     app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 }
 
-function registerThrowingAdapterForErrorTest(\Throwable $exception): void
+function registerThrowingAdapterForErrorTest(Throwable $exception): void
 {
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
     $adapter->shouldReceive('getCarrierName')->andReturn('USPS');
@@ -73,7 +77,7 @@ function registerThrowingAdapterForErrorTest(\Throwable $exception): void
     app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 }
 
-function setUpShipComponentWithRate(Package $package): \Livewire\Features\SupportTesting\Testable
+function setUpShipComponentWithRate(Package $package): Testable
 {
     $component = Livewire::test(Ship::class, ['package_id' => $package->id]);
 
@@ -114,7 +118,7 @@ it('ship shows error on carrier API failure response', function (): void {
 it('ship handles general exception gracefully', function (): void {
     $package = createShippablePackageForErrorTest();
 
-    registerThrowingAdapterForErrorTest(new \Exception('Unexpected error'));
+    registerThrowingAdapterForErrorTest(new Exception('Unexpected error'));
 
     $component = setUpShipComponentWithRate($package);
 
@@ -129,8 +133,8 @@ it('ship handles carrier timeout exception', function (): void {
     $package = createShippablePackageForErrorTest();
 
     registerThrowingAdapterForErrorTest(
-        new \Saloon\Exceptions\Request\Statuses\RequestTimeOutException(
-            Mockery::mock(\Saloon\Http\Response::class),
+        new RequestTimeOutException(
+            Mockery::mock(Response::class),
             'Request timed out'
         )
     );
@@ -147,7 +151,7 @@ it('ship handles carrier timeout exception', function (): void {
 it('ship handles runtime exception for optimistic locking', function (): void {
     $package = createShippablePackageForErrorTest();
 
-    registerThrowingAdapterForErrorTest(new \RuntimeException('Package was modified by another user.'));
+    registerThrowingAdapterForErrorTest(new RuntimeException('Package was modified by another user.'));
 
     $component = setUpShipComponentWithRate($package);
 

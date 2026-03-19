@@ -1,10 +1,19 @@
 <?php
 
 use App\Contracts\CarrierAdapterInterface;
+use App\DataTransferObjects\Shipping\CancelResponse;
+use App\DataTransferObjects\Shipping\PreparedRateRequest;
+use App\DataTransferObjects\Shipping\RateRequest;
+use App\DataTransferObjects\Shipping\RateResponse;
+use App\DataTransferObjects\Shipping\ShipRequest;
+use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\FedexAdapter;
 use App\Services\Carriers\UpsAdapter;
 use App\Services\Carriers\UspsAdapter;
+use Illuminate\Support\Collection;
+use Saloon\Http\Response;
 
 beforeEach(function (): void {
     app(CarrierRegistry::class)->clearInstances();
@@ -69,29 +78,29 @@ it('allows registering custom adapters', function (): void {
             return 'CustomCarrier';
         }
 
-        public function getRates(\App\DataTransferObjects\Shipping\RateRequest $request, array $serviceCodes): \Illuminate\Support\Collection
+        public function getRates(RateRequest $request, array $serviceCodes): Collection
         {
             return collect();
         }
 
-        public function prepareRateRequest(\App\DataTransferObjects\Shipping\RateRequest $request, array $serviceCodes): ?\App\DataTransferObjects\Shipping\PreparedRateRequest
+        public function prepareRateRequest(RateRequest $request, array $serviceCodes): ?PreparedRateRequest
         {
             return null;
         }
 
-        public function parseRateResponse(\Saloon\Http\Response $response, \App\DataTransferObjects\Shipping\RateRequest $request, array $serviceCodes): \Illuminate\Support\Collection
+        public function parseRateResponse(Response $response, RateRequest $request, array $serviceCodes): Collection
         {
             return collect();
         }
 
-        public function createShipment(\App\DataTransferObjects\Shipping\ShipRequest $request): \App\DataTransferObjects\Shipping\ShipResponse
+        public function createShipment(ShipRequest $request): ShipResponse
         {
-            return \App\DataTransferObjects\Shipping\ShipResponse::failure('Not implemented');
+            return ShipResponse::failure('Not implemented');
         }
 
-        public function cancelShipment(string $trackingNumber, \App\Models\Package $package): \App\DataTransferObjects\Shipping\CancelResponse
+        public function cancelShipment(string $trackingNumber, Package $package): CancelResponse
         {
-            return \App\DataTransferObjects\Shipping\CancelResponse::failure('Not implemented');
+            return CancelResponse::failure('Not implemented');
         }
 
         public function isConfigured(): bool
@@ -109,7 +118,7 @@ it('allows registering custom adapters', function (): void {
             return false;
         }
 
-        public function resolvePreSelectedRate(\App\DataTransferObjects\Shipping\RateResponse $rate, \App\Models\Package $package): \App\DataTransferObjects\Shipping\RateResponse
+        public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
         {
             return $rate;
         }

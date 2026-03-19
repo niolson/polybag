@@ -565,7 +565,7 @@ class UpsAdapter implements CarrierAdapterInterface
         );
     }
 
-    private function sendCreateShipment($connector, array $shipment, ShipRequest $request, string $serviceCode): \Saloon\Http\Response
+    private function sendCreateShipment($connector, array $shipment, ShipRequest $request, string $serviceCode): Response
     {
         $apiRequest = new CreateShipment;
         $apiRequest->body()->set([

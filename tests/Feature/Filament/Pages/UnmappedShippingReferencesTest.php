@@ -6,9 +6,10 @@ use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\ShippingMethodAlias;
 use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 
-uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
+uses(RefreshDatabase::class);
 
 beforeEach(function (): void {
     $this->actingAs(User::factory()->create(['role' => Role::Admin]));

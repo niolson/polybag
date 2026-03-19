@@ -6,13 +6,14 @@ use App\Models\Package;
 use App\Models\Setting;
 use App\Models\User;
 use App\Services\SettingsService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
 use Saloon\Http\Auth\AccessTokenAuthenticator;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
 
-uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
+uses(RefreshDatabase::class);
 
 beforeEach(function (): void {
     $this->actingAs(User::factory()->admin()->create());
@@ -37,7 +38,7 @@ function fakeUspsManifestResponse(): void
     // Pre-cache a fake authenticator so no OAuth request is made
     Cache::put('usps_authenticator', new AccessTokenAuthenticator(
         accessToken: 'fake-test-token',
-        expiresAt: new \DateTimeImmutable('+1 hour'),
+        expiresAt: new DateTimeImmutable('+1 hour'),
     ), 3600);
 
     Saloon::fake([

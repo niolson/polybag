@@ -45,7 +45,7 @@ class DatabaseSeeder extends Seeder
             ShipmentSeeder::class,
         ]);
 
-        if (class_exists(\Database\Seeders\LocalSettingsSeeder::class)) {
+        if (class_exists(LocalSettingsSeeder::class)) {
             $this->call(LocalSettingsSeeder::class);
         }
     }

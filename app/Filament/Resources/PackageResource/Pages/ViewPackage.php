@@ -5,6 +5,7 @@ namespace App\Filament\Resources\PackageResource\Pages;
 use App\Enums\PackageStatus;
 use App\Filament\Resources\PackageResource;
 use App\Filament\Resources\ShipmentResource;
+use App\Models\Location;
 use App\Services\Carriers\CarrierRegistry;
 use Filament\Actions\Action;
 use Filament\Infolists\Components\TextEntry;
@@ -101,10 +102,10 @@ class ViewPackage extends ViewRecord
                             ->badge(),
                         TextEntry::make('shipped_at')
                             ->label('Shipped At')
-                            ->dateTime('M j, Y g:i A', timezone: \App\Models\Location::timezone()),
+                            ->dateTime('M j, Y g:i A', timezone: Location::timezone()),
                         TextEntry::make('ship_date')
                             ->label('Ship Date')
-                            ->date(timezone: \App\Models\Location::timezone()),
+                            ->date(timezone: Location::timezone()),
                         TextEntry::make('shippedBy.name')
                             ->label('Shipped By'),
                     ]),

@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\BoxSize;
+use App\Models\Manifest;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\User;
@@ -112,7 +113,7 @@ class PackageFactory extends Factory
     public function manifested(): static
     {
         return $this->shipped()->state(fn () => [
-            'manifest_id' => \App\Models\Manifest::factory(),
+            'manifest_id' => Manifest::factory(),
         ]);
     }
 }

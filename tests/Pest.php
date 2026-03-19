@@ -1,5 +1,9 @@
 <?php
 
+use App\Models\Location;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
 /*
 |--------------------------------------------------------------------------
 | Test Case
@@ -11,8 +15,8 @@
 |
 */
 
-pest()->extend(Tests\TestCase::class)
-    ->use(Illuminate\Foundation\Testing\RefreshDatabase::class)
+pest()->extend(TestCase::class)
+    ->use(RefreshDatabase::class)
     ->in('Feature', 'Unit');
 
 /*
@@ -53,5 +57,5 @@ function something()
 */
 
 uses()->beforeEach(function (): void {
-    \App\Models\Location::factory()->default()->create();
+    Location::factory()->default()->create();
 })->in('Feature', 'Unit');

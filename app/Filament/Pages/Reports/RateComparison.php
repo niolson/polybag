@@ -6,6 +6,7 @@ use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Models\Package;
 use BackedEnum;
+use Filament\Forms\Components\DatePicker;
 use Filament\Pages\Page;
 use Filament\Tables;
 use Filament\Tables\Concerns\InteractsWithTable;
@@ -95,9 +96,9 @@ class RateComparison extends Page implements HasTable
             ->filters([
                 Tables\Filters\Filter::make('date_range')
                     ->form([
-                        \Filament\Forms\Components\DatePicker::make('from')
+                        DatePicker::make('from')
                             ->default(now()->subDays(30)->format('Y-m-d')),
-                        \Filament\Forms\Components\DatePicker::make('until'),
+                        DatePicker::make('until'),
                     ])
                     ->columns(2)
                     ->columnSpan(2)

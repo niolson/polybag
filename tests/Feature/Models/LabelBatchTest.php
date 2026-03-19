@@ -5,6 +5,7 @@ use App\Models\BoxSize;
 use App\Models\LabelBatch;
 use App\Models\LabelBatchItem;
 use App\Models\User;
+use Carbon\Carbon;
 
 it('creates a label batch with factory', function (): void {
     $batch = LabelBatch::factory()->create(['total_shipments' => 5]);
@@ -57,5 +58,5 @@ it('casts status to LabelBatchStatus enum', function (): void {
 it('casts timestamps correctly', function (): void {
     $batch = LabelBatch::factory()->processing()->create();
 
-    expect($batch->started_at)->toBeInstanceOf(\Carbon\Carbon::class);
+    expect($batch->started_at)->toBeInstanceOf(Carbon::class);
 });

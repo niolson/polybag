@@ -3,6 +3,7 @@
 use App\Contracts\CarrierAdapterInterface;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\ShippingRuleAction;
+use App\Exceptions\NoActiveCarrierServicesException;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\Package;
@@ -29,7 +30,7 @@ it('returns failure when no rates available', function (): void {
     // No carrier services attached to the method = NoActiveCarrierServicesException
     // which should bubble up as a failure
     expect(fn () => app(LabelGenerationService::class)->generateLabel($package))
-        ->toThrow(\App\Exceptions\NoActiveCarrierServicesException::class);
+        ->toThrow(NoActiveCarrierServicesException::class);
 });
 
 it('applies rule pre-selection and skips rate shopping', function (): void {

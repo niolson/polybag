@@ -6,14 +6,15 @@ use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Concerns\NotifiesUser;
 use App\Models\Carrier;
-use App\Models\Location;
 use App\Models\Manifest;
 use App\Models\Package;
+use App\Services\Carriers\CarrierRegistry;
 use App\Services\ManifestService;
 use App\Services\SettingsService;
 use App\Services\ShipDateService;
 use BackedEnum;
 use Filament\Pages\Page;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Livewire\WithPagination;
 
 class EndOfDay extends Page
@@ -34,7 +35,6 @@ class EndOfDay extends Page
     /** @var array<int, array{carrier: string, package_count: int, unmanifested_count: int, supports_manifest: bool, ship_date: string, next_ship_date: string}> */
     public array $carrierSummary = [];
 
-
     public static function canAccess(): bool
     {
         return auth()->user()->role->isAtLeast(Role::Manager);
@@ -48,7 +48,7 @@ class EndOfDay extends Page
     public function loadData(): void
     {
         $shipDateService = app(ShipDateService::class);
-        $registry = app(\App\Services\Carriers\CarrierRegistry::class);
+        $registry = app(CarrierRegistry::class);
 
         $this->carrierSummary = Carrier::active()
             ->orderBy('name')
@@ -90,7 +90,7 @@ class EndOfDay extends Page
 
     }
 
-    public function getManifestsProperty(): \Illuminate\Contracts\Pagination\LengthAwarePaginator
+    public function getManifestsProperty(): LengthAwarePaginator
     {
         return Manifest::query()
             ->latest()

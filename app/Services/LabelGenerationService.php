@@ -12,6 +12,8 @@ use App\Services\Carriers\CarrierRegistry;
 use Carbon\Carbon;
 use Closure;
 use Illuminate\Support\Collection;
+use Saloon\Exceptions\Request\RequestException;
+use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 
 class LabelGenerationService
 {
@@ -97,13 +99,13 @@ class LabelGenerationService
 
             return AutoShipResult::shipped($result->response, $result->selectedRate);
 
-        } catch (\Saloon\Exceptions\Request\Statuses\RequestTimeOutException $e) {
+        } catch (RequestTimeOutException $e) {
             $this->cleanupPackage($package, $onCleanup);
             logger()->error('AutoShip timeout', ['package_id' => $package->id]);
 
             return AutoShipResult::failed('Carrier Timeout', 'The carrier API is not responding. Please try again in a few moments.');
 
-        } catch (\Saloon\Exceptions\Request\RequestException $e) {
+        } catch (RequestException $e) {
             $this->cleanupPackage($package, $onCleanup);
             logger()->error('AutoShip carrier error', ['package_id' => $package->id, 'error' => $e->getMessage()]);
 

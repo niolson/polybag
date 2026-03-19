@@ -22,7 +22,7 @@ return new class extends Migration
         foreach ($indexesToDrop as $index) {
             try {
                 Schema::table('packages', fn (Blueprint $table) => $table->dropIndex($index));
-            } catch (\Throwable) {
+            } catch (Throwable) {
                 // Index may not exist
             }
         }

@@ -94,7 +94,7 @@ class Location extends Model
             ->withTimestamps();
     }
 
-    public function carrierLocations(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function carrierLocations(): HasMany
     {
         return $this->hasMany(CarrierLocation::class);
     }

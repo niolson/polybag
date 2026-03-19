@@ -36,7 +36,7 @@ it('dispatches ManifestCreated after successful USPS manifest creation', functio
 
     Cache::put('usps_authenticator', new AccessTokenAuthenticator(
         accessToken: 'fake-test-token',
-        expiresAt: new \DateTimeImmutable('+1 hour'),
+        expiresAt: new DateTimeImmutable('+1 hour'),
     ), 3600);
 
     Saloon::fake([

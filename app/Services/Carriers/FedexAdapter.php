@@ -759,7 +759,7 @@ class FedexAdapter implements CarrierAdapterInterface
         return $results;
     }
 
-    private function sendCreateShipment($connector, array $requestedShipment): \Saloon\Http\Response
+    private function sendCreateShipment($connector, array $requestedShipment): Response
     {
         $apiRequest = new CreateShipment;
         $apiRequest->body()->set([

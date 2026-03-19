@@ -4,9 +4,11 @@ namespace App\Services;
 
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
+use App\DataTransferObjects\Shipping\RateResponse;
 use App\Exceptions\NoActiveCarrierServicesException;
 use App\Models\CarrierService;
 use App\Models\Package;
+use App\Models\ShippingMethod;
 use App\Services\Carriers\CarrierRegistry;
 use GuzzleHttp\Promise\Utils as PromiseUtils;
 use Illuminate\Support\Collection;
@@ -17,7 +19,7 @@ class ShippingRateService
     /**
      * Get shipping rates for a package from all applicable carriers.
      *
-     * @return Collection<int, \App\DataTransferObjects\Shipping\RateResponse>
+     * @return Collection<int, RateResponse>
      *
      * @throws NoActiveCarrierServicesException
      */
@@ -82,7 +84,7 @@ class ShippingRateService
      * Fetch rates from multiple carriers concurrently using a shared Guzzle sender.
      *
      * @param  array<int, array{name: string, serviceCodes: array<string>}>  $carrierTasks
-     * @return Collection<int, \App\DataTransferObjects\Shipping\RateResponse>
+     * @return Collection<int, RateResponse>
      */
     private function fetchRatesConcurrently(array $carrierTasks, RateRequest $rateRequest): Collection
     {
@@ -202,7 +204,7 @@ class ShippingRateService
      *
      * @return Collection<int, CarrierService>
      */
-    private function getActiveCarrierServices(\App\Models\ShippingMethod $shippingMethod): Collection
+    private function getActiveCarrierServices(ShippingMethod $shippingMethod): Collection
     {
         return $shippingMethod->carrierServices()
             ->active()

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Enums\Deliverability;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Events\PackageCreated;
@@ -10,9 +11,11 @@ use App\Models\BoxSize;
 use App\Models\Channel;
 use App\Models\Package;
 use App\Models\Shipment;
+use App\Models\ShippingMethod;
 use App\Services\AddressValidationService;
 use App\Services\CacheService;
 use App\Services\LabelGenerationService;
+use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\DB;
@@ -40,7 +43,7 @@ class ManualShip extends Page
     public static function canAccess(): bool
     {
         return (auth()->user()?->role->isAtLeast(Role::User) ?? false)
-            && app(\App\Services\SettingsService::class)->get('manual_shipping_enabled', true);
+            && app(SettingsService::class)->get('manual_shipping_enabled', true);
     }
 
     // Address fields
@@ -216,7 +219,7 @@ class ManualShip extends Page
                 app(AddressValidationService::class)->validate($shipment);
                 $shipment->refresh();
 
-                if (! in_array($shipment->deliverability, [\App\Enums\Deliverability::Yes, \App\Enums\Deliverability::NotChecked], true)) {
+                if (! in_array($shipment->deliverability, [Deliverability::Yes, Deliverability::NotChecked], true)) {
                     $this->notifyWarning('Address Warning', $shipment->validation_message ?? 'Address may not be deliverable.');
                 }
             } catch (\Exception $e) {
@@ -311,7 +314,7 @@ class ManualShip extends Page
 
     public function getShippingMethodOptions(): array
     {
-        return \App\Models\ShippingMethod::where('active', true)
+        return ShippingMethod::where('active', true)
             ->orderBy('name')
             ->pluck('name', 'id')
             ->toArray();

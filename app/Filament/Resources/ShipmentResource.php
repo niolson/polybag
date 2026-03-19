@@ -2,15 +2,16 @@
 
 namespace App\Filament\Resources;
 
+use App\Enums\Deliverability;
 use App\Enums\Role;
 use App\Enums\ShipmentStatus;
 use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\ShipmentResource\Pages;
 use App\Filament\Resources\ShipmentResource\RelationManagers\PackagesRelationManager;
 use App\Filament\Resources\ShipmentResource\RelationManagers\ShipmentItemsRelationManager;
-use App\Models\Location;
 use App\Jobs\ValidateAddressJob;
 use App\Models\BoxSize;
+use App\Models\Location;
 use App\Models\Shipment;
 use App\Services\BatchLabelService;
 use App\Services\SettingsService;
@@ -86,7 +87,7 @@ class ShipmentResource extends Resource
             ->columns(2)
             ->schema([
                 // Left column — Shipment Details
-                Components\Section::make('Shipment Details')
+                Section::make('Shipment Details')
                     ->inlineLabel()
                     ->schema([
                         Forms\Components\TextInput::make('shipment_reference')
@@ -120,7 +121,7 @@ class ShipmentResource extends Resource
                     ]),
 
                 // Right column — Recipient & Address
-                Components\Section::make('Recipient & Address')
+                Section::make('Recipient & Address')
                     ->inlineLabel()
                     ->schema([
                         Forms\Components\TextInput::make('first_name')
@@ -139,7 +140,7 @@ class ShipmentResource extends Resource
                             ->email()
                             ->maxLength(255),
 
-                        Components\Section::make('Shipping Address')
+                        Section::make('Shipping Address')
                             ->inlineLabel()
                             ->schema([
                                 Forms\Components\TextInput::make('address1')
@@ -178,7 +179,7 @@ class ShipmentResource extends Resource
                         Forms\Components\Hidden::make('checked'),
 
                         // Validated address section (edit only, when validated)
-                        Components\Section::make('Validated Address')
+                        Section::make('Validated Address')
                             ->description('Address returned by USPS validation')
                             ->icon('heroicon-o-check-badge')
                             ->schema([
@@ -258,7 +259,7 @@ class ShipmentResource extends Resource
                 Tables\Filters\SelectFilter::make('status')
                     ->options(ShipmentStatus::class),
                 Tables\Filters\SelectFilter::make('deliverability')
-                    ->options(\App\Enums\Deliverability::class)
+                    ->options(Deliverability::class)
                     ->label('Deliverability'),
                 Tables\Filters\SelectFilter::make('channel')
                     ->relationship('channel', 'name')
@@ -446,7 +447,7 @@ class ShipmentResource extends Resource
             ->columns(2)
             ->schema([
                 // Left column — Shipment Details
-                Components\Section::make('Shipment Details')
+                Section::make('Shipment Details')
                     ->inlineLabel()
                     ->schema([
                         TextEntry::make('shipment_reference')
@@ -492,7 +493,7 @@ class ShipmentResource extends Resource
                     ]),
 
                 // Right column — Recipient & Address
-                Components\Section::make('Recipient & Address')
+                Section::make('Recipient & Address')
                     ->inlineLabel()
                     ->schema([
                         TextEntry::make('first_name'),
@@ -504,7 +505,7 @@ class ShipmentResource extends Resource
                         TextEntry::make('email')
                             ->placeholder('—'),
 
-                        Components\Section::make(fn (Shipment $record): string => $record->checked && filled($record->validated_address1)
+                        Section::make(fn (Shipment $record): string => $record->checked && filled($record->validated_address1)
                             ? 'Shipping Address (Validated)'
                             : 'Shipping Address')
                             ->description(fn (Shipment $record): ?string => $record->checked && filled($record->validated_address1)

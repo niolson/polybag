@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\Deliverability;
 use App\Http\Integrations\USPS\Requests\Address;
 use App\Models\Shipment;
 use Saloon\Http\Faking\MockResponse;
@@ -45,7 +46,7 @@ it('reports skipped shipments on server error', function (): void {
 
     $shipment->refresh();
     expect($shipment->checked)->toBeFalse()
-        ->and($shipment->deliverability)->toBe(\App\Enums\Deliverability::NotChecked);
+        ->and($shipment->deliverability)->toBe(Deliverability::NotChecked);
 });
 
 it('shows nothing to do when all shipments are checked', function (): void {

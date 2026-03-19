@@ -7,9 +7,10 @@ use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\ShippingMethodAlias;
 use App\Services\ShipmentImport\ShipmentImportService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
 
-uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
+uses(RefreshDatabase::class);
 
 function fakeSource(Collection $shipments, Collection $items = new Collection): ImportSourceInterface
 {
@@ -120,7 +121,7 @@ function fakeSourceWithExportFailure(Collection $shipments, Collection $items = 
 
         public function markExported(string $shipmentReference): void
         {
-            throw new \RuntimeException('External database unavailable');
+            throw new RuntimeException('External database unavailable');
         }
     };
 }

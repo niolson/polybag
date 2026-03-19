@@ -7,6 +7,7 @@ use App\Filament\Resources\ShipmentResource;
 use App\Models\DailyShippingStat;
 use BackedEnum;
 use Carbon\Carbon;
+use Filament\Forms\Components\DatePicker;
 use Filament\Pages\Page;
 use Filament\Tables;
 use Filament\Tables\Concerns\InteractsWithTable;
@@ -118,9 +119,9 @@ class VolumeReport extends Page implements HasTable
             ->filters([
                 Tables\Filters\Filter::make('date_range')
                     ->form([
-                        \Filament\Forms\Components\DatePicker::make('from')
+                        DatePicker::make('from')
                             ->default($defaultFrom),
-                        \Filament\Forms\Components\DatePicker::make('until'),
+                        DatePicker::make('until'),
                     ])
                     ->columns(2)
                     ->default()

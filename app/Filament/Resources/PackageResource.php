@@ -12,6 +12,8 @@ use App\Services\Carriers\CarrierRegistry;
 use BackedEnum;
 use Filament\Actions;
 use Filament\Forms;
+use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components;
@@ -21,6 +23,7 @@ use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Saloon\Exceptions\Request\RequestException;
 
 class PackageResource extends Resource
 {
@@ -78,33 +81,33 @@ class PackageResource extends Resource
                             ->searchable()
                             ->required()
                             ->disabled(fn (string $operation) => $operation === 'edit'),
-                        Forms\Components\TextInput::make('tracking_number')
+                        TextInput::make('tracking_number')
                             ->maxLength(255),
-                        Forms\Components\TextInput::make('shipping_method')
+                        TextInput::make('shipping_method')
                             ->maxLength(255),
                         Components\Fieldset::make('Dimensions')->schema([
-                            Forms\Components\TextInput::make('length')
+                            TextInput::make('length')
                                 ->numeric()
                                 ->minValue(0.01)
                                 ->maxValue(999)
                                 ->suffix('in'),
-                            Forms\Components\TextInput::make('width')
+                            TextInput::make('width')
                                 ->numeric()
                                 ->minValue(0.01)
                                 ->maxValue(999)
                                 ->suffix('in'),
-                            Forms\Components\TextInput::make('height')
+                            TextInput::make('height')
                                 ->numeric()
                                 ->minValue(0.01)
                                 ->maxValue(999)
                                 ->suffix('in'),
-                            Forms\Components\TextInput::make('weight')
+                            TextInput::make('weight')
                                 ->numeric()
                                 ->minValue(0.01)
                                 ->maxValue(150)
                                 ->suffix('lbs'),
                         ]),
-                        Forms\Components\TextInput::make('cost')
+                        TextInput::make('cost')
                             ->numeric()
                             ->prefix('$'),
                         Forms\Components\Select::make('status')
@@ -206,7 +209,7 @@ class PackageResource extends Resource
                     ->trueLabel('Exported')
                     ->falseLabel('Not Exported'),
                 Tables\Filters\SelectFilter::make('service')
-                    ->options(fn () => \App\Models\Package::query()
+                    ->options(fn () => Package::query()
                         ->whereNotNull('service')
                         ->distinct()
                         ->orderBy('service')
@@ -229,9 +232,9 @@ class PackageResource extends Resource
                     ]),
                 Tables\Filters\Filter::make('shipped_at')
                     ->form([
-                        \Filament\Forms\Components\DatePicker::make('shipped_from')
+                        DatePicker::make('shipped_from')
                             ->label('Shipped From'),
-                        \Filament\Forms\Components\DatePicker::make('shipped_until')
+                        DatePicker::make('shipped_until')
                             ->label('Shipped Until'),
                     ])
                     ->query(function ($query, array $data) {
@@ -252,10 +255,10 @@ class PackageResource extends Resource
                     }),
                 Tables\Filters\Filter::make('cost_range')
                     ->form([
-                        \Filament\Forms\Components\TextInput::make('cost_from')
+                        TextInput::make('cost_from')
                             ->label('Min Cost ($)')
                             ->numeric(),
-                        \Filament\Forms\Components\TextInput::make('cost_to')
+                        TextInput::make('cost_to')
                             ->label('Max Cost ($)')
                             ->numeric(),
                     ])
@@ -307,7 +310,7 @@ class PackageResource extends Resource
                             }
                         } catch (\RuntimeException $e) {
                             Notification::make()->danger()->title('State Changed')->body($e->getMessage())->send();
-                        } catch (\Saloon\Exceptions\Request\RequestException $e) {
+                        } catch (RequestException $e) {
                             Notification::make()->danger()->title('Carrier Error')->body('Unable to connect to carrier. Please try again.')->send();
                         }
                     }),

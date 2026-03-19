@@ -5,8 +5,11 @@ use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
+use App\Http\Integrations\Fedex\Requests\CancelShipment;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Http\Integrations\Fedex\Requests\Rates;
+use App\Models\Package;
+use App\Models\Shipment;
 use App\Services\Carriers\FedexAdapter;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
@@ -132,13 +135,13 @@ it('filters rates by service codes', function (): void {
 it('cancels a FedEx shipment', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
-        \App\Http\Integrations\Fedex\Requests\CancelShipment::class => MockResponse::make([
+        CancelShipment::class => MockResponse::make([
             'output' => ['cancelledShipment' => true],
         ], 200),
     ]);
 
-    $shipment = \App\Models\Shipment::factory()->create();
-    $package = \App\Models\Package::factory()->shipped()->for($shipment)->create([
+    $shipment = Shipment::factory()->create();
+    $package = Package::factory()->shipped()->for($shipment)->create([
         'carrier' => 'FedEx',
         'tracking_number' => '794644790138',
     ]);
@@ -150,19 +153,19 @@ it('cancels a FedEx shipment', function (): void {
     expect($response->success)->toBeTrue()
         ->and($response->message)->toBe('FedEx shipment cancelled.');
 
-    Saloon::assertSent(\App\Http\Integrations\Fedex\Requests\CancelShipment::class);
+    Saloon::assertSent(CancelShipment::class);
 });
 
 it('returns failure when FedEx cancel errors', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
-        \App\Http\Integrations\Fedex\Requests\CancelShipment::class => MockResponse::make([
+        CancelShipment::class => MockResponse::make([
             'errors' => [['message' => 'Tracking number not found']],
         ], 404),
     ]);
 
-    $shipment = \App\Models\Shipment::factory()->create();
-    $package = \App\Models\Package::factory()->shipped()->for($shipment)->create([
+    $shipment = Shipment::factory()->create();
+    $package = Package::factory()->shipped()->for($shipment)->create([
         'carrier' => 'FedEx',
         'tracking_number' => '000000000000',
     ]);

@@ -1,5 +1,9 @@
 <?php
 
+use App\Services\ShipmentImport\Sources\AmazonSource;
+use App\Services\ShipmentImport\Sources\DatabaseSource;
+use App\Services\ShipmentImport\Sources\ShopifySource;
+
 return [
 
     /*
@@ -27,7 +31,7 @@ return [
         // Security: The import DB user should have only SELECT privileges.
         // If export is enabled, the export DB user needs UPDATE on the target table.
         'database' => [
-            'driver' => \App\Services\ShipmentImport\Sources\DatabaseSource::class,
+            'driver' => DatabaseSource::class,
             'connection' => env('SHIPMENT_IMPORT_DB_CONNECTION', 'import'),
             'enabled' => env('SHIPMENT_IMPORT_DATABASE_ENABLED', true),
 
@@ -104,7 +108,7 @@ return [
         ],
 
         'shopify' => [
-            'driver' => \App\Services\ShipmentImport\Sources\ShopifySource::class,
+            'driver' => ShopifySource::class,
             'enabled' => env('SHIPMENT_IMPORT_SHOPIFY_ENABLED', false),
             'channel_name' => env('SHOPIFY_CHANNEL_NAME', 'Shopify'),
             'shipping_method' => env('SHOPIFY_SHIPPING_METHOD'),
@@ -122,7 +126,7 @@ return [
         ],
 
         'amazon' => [
-            'driver' => \App\Services\ShipmentImport\Sources\AmazonSource::class,
+            'driver' => AmazonSource::class,
             'enabled' => env('SHIPMENT_IMPORT_AMAZON_ENABLED', false),
             'channel_name' => env('AMAZON_CHANNEL_NAME', 'Amazon'),
             'shipping_method' => env('AMAZON_SHIPPING_METHOD'),

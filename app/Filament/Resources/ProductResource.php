@@ -63,6 +63,8 @@ class ProductResource extends Resource
                     ->maxLength(255),
                 Forms\Components\TextInput::make('weight')
                     ->numeric()
+                    ->inputMode('decimal')
+                    ->step(0.01)
                     ->minValue(0)
                     ->maxValue(150)
                     ->suffix('lbs')

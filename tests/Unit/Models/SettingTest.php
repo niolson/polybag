@@ -84,7 +84,7 @@ it('encrypts values when encrypted flag is true', function (): void {
     $setting->save();
 
     // Get raw value from database
-    $rawValue = \DB::table('settings')
+    $rawValue = DB::table('settings')
         ->where('key', 'test_encrypted')
         ->value('value');
 

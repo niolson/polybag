@@ -1,5 +1,12 @@
 <?php
 
+use App\Contracts\CarrierAdapterInterface;
+use App\DataTransferObjects\Shipping\CancelResponse;
+use App\DataTransferObjects\Shipping\PreparedRateRequest;
+use App\DataTransferObjects\Shipping\RateRequest;
+use App\DataTransferObjects\Shipping\RateResponse;
+use App\DataTransferObjects\Shipping\ShipRequest;
+use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
@@ -9,7 +16,9 @@ use App\Models\Shipment;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
 use Filament\Actions\Testing\TestAction;
+use Illuminate\Support\Collection;
 use Livewire\Livewire;
+use Saloon\Http\Response;
 
 beforeEach(function (): void {
     $this->actingAs(User::factory()->create(['role' => Role::Admin]));
@@ -46,36 +55,36 @@ it('voids a label and clears shipping fields', function (): void {
         'label_orientation' => 'portrait',
     ]);
 
-    $testAdapterClass = get_class(new class implements \App\Contracts\CarrierAdapterInterface
+    $testAdapterClass = get_class(new class implements CarrierAdapterInterface
     {
         public function getCarrierName(): string
         {
             return 'USPS';
         }
 
-        public function getRates(\App\DataTransferObjects\Shipping\RateRequest $request, array $serviceCodes): \Illuminate\Support\Collection
+        public function getRates(RateRequest $request, array $serviceCodes): Collection
         {
             return collect();
         }
 
-        public function prepareRateRequest(\App\DataTransferObjects\Shipping\RateRequest $request, array $serviceCodes): ?\App\DataTransferObjects\Shipping\PreparedRateRequest
+        public function prepareRateRequest(RateRequest $request, array $serviceCodes): ?PreparedRateRequest
         {
             return null;
         }
 
-        public function parseRateResponse(\Saloon\Http\Response $response, \App\DataTransferObjects\Shipping\RateRequest $request, array $serviceCodes): \Illuminate\Support\Collection
+        public function parseRateResponse(Response $response, RateRequest $request, array $serviceCodes): Collection
         {
             return collect();
         }
 
-        public function createShipment(\App\DataTransferObjects\Shipping\ShipRequest $request): \App\DataTransferObjects\Shipping\ShipResponse
+        public function createShipment(ShipRequest $request): ShipResponse
         {
-            return \App\DataTransferObjects\Shipping\ShipResponse::failure('Not implemented');
+            return ShipResponse::failure('Not implemented');
         }
 
-        public function cancelShipment(string $trackingNumber, \App\Models\Package $package): \App\DataTransferObjects\Shipping\CancelResponse
+        public function cancelShipment(string $trackingNumber, Package $package): CancelResponse
         {
-            return \App\DataTransferObjects\Shipping\CancelResponse::success('Label voided successfully.');
+            return CancelResponse::success('Label voided successfully.');
         }
 
         public function isConfigured(): bool
@@ -93,7 +102,7 @@ it('voids a label and clears shipping fields', function (): void {
             return true;
         }
 
-        public function resolvePreSelectedRate(\App\DataTransferObjects\Shipping\RateResponse $rate, \App\Models\Package $package): \App\DataTransferObjects\Shipping\RateResponse
+        public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
         {
             return $rate;
         }

@@ -2,9 +2,10 @@
 
 use App\Models\Carrier;
 use App\Models\CarrierService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 
-uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
+uses(RefreshDatabase::class);
 
 it('scopeActive returns only active services', function (): void {
     $carrier = Carrier::factory()->create();

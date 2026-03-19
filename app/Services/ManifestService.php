@@ -15,6 +15,8 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Saloon\Exceptions\Request\RequestException;
+use Saloon\Http\Connector;
+use Saloon\Http\Response;
 
 class ManifestService
 {
@@ -128,7 +130,7 @@ class ManifestService
      * @return array{success: bool, manifestNumber?: string, image?: string, packageCount?: int, error?: string}
      */
     private function createUspsScanForm(
-        \Saloon\Http\Connector $connector,
+        Connector $connector,
         Collection $packages,
         AddressData $fromAddress,
         ?CarbonImmutable $shipDate = null,
@@ -219,11 +221,11 @@ class ManifestService
      * Send a SCAN Form request for the given packages.
      */
     private function sendScanFormRequest(
-        \Saloon\Http\Connector $connector,
+        Connector $connector,
         Collection $packages,
         AddressData $fromAddress,
         ?CarbonImmutable $shipDate = null,
-    ): \Saloon\Http\Response {
+    ): Response {
         $trackingNumbers = $packages->pluck('tracking_number')->values()->all();
 
         $request = new ScanForm;

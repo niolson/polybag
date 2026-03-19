@@ -8,6 +8,8 @@ use App\Events\AddressValidationFailed;
 use App\Http\Integrations\USPS\Requests\Address;
 use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Shipment;
+use Saloon\Exceptions\Request\ClientException;
+use Saloon\Exceptions\Request\RequestException;
 
 class UspsAddressValidator implements AddressValidationInterface
 {
@@ -58,7 +60,7 @@ class UspsAddressValidator implements AddressValidationInterface
             }
 
             return json_decode($response->body(), true) ?? [];
-        } catch (\Saloon\Exceptions\Request\ClientException $e) {
+        } catch (ClientException $e) {
             $body = json_decode($e->getResponse()->body(), true);
             $message = $body['error']['message'] ?? $e->getMessage();
 
@@ -69,7 +71,7 @@ class UspsAddressValidator implements AddressValidationInterface
             ]);
 
             return ['error' => ['message' => $message]];
-        } catch (\Saloon\Exceptions\Request\RequestException $e) {
+        } catch (RequestException $e) {
             logger()->warning('USPS Address Validation request failed', [
                 'error' => $e->getMessage(),
                 'shipment_id' => $shipment->id,
