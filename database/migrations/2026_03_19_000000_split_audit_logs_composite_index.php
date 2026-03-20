@@ -8,9 +8,13 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // Only needed for MySQL — the create migration already has individual indexes.
-        // SQLite (used in tests) creates indexes with different naming conventions.
-        if (Schema::getConnection()->getDriverName() !== 'mysql') {
+        // The create migration was updated to use individual indexes.
+        // This migration only applies to databases that were migrated
+        // before that change (i.e., still have the composite index).
+        $indexes = Schema::getIndexes('audit_logs');
+        $hasComposite = collect($indexes)->contains(fn ($idx) => $idx['columns'] === ['auditable_type', 'auditable_id']);
+
+        if (! $hasComposite) {
             return;
         }
 
@@ -23,7 +27,10 @@ return new class extends Migration
 
     public function down(): void
     {
-        if (Schema::getConnection()->getDriverName() !== 'mysql') {
+        $indexes = Schema::getIndexes('audit_logs');
+        $hasIndividualType = collect($indexes)->contains(fn ($idx) => $idx['columns'] === ['auditable_type']);
+
+        if (! $hasIndividualType) {
             return;
         }
 
