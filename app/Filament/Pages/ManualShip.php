@@ -194,7 +194,7 @@ class ManualShip extends Page
     private function createShipmentAndPackage(): Package
     {
         return DB::transaction(function () {
-            $manualChannel = Channel::where('channel_reference', 'manual')->first();
+            $manualChannel = Channel::where('name', 'Manual')->first();
 
             $shipment = Shipment::create([
                 'shipment_reference' => $this->shipmentReference ?: null,

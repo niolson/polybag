@@ -12,7 +12,6 @@ class Channel extends Model
 
     protected $fillable = [
         'name',
-        'channel_reference',
         'icon',
         'active',
     ];

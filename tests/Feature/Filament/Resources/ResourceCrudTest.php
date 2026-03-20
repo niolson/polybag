@@ -157,14 +157,12 @@ it('can create a Channel', function (): void {
     Livewire::test(CreateChannel::class)
         ->fillForm([
             'name' => 'Test Channel',
-            'channel_reference' => 'test-channel-ref',
         ])
         ->call('create')
         ->assertHasNoFormErrors();
 
     $this->assertDatabaseHas(Channel::class, [
         'name' => 'Test Channel',
-        'channel_reference' => 'test-channel-ref',
     ]);
 });
 

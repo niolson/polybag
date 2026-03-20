@@ -132,7 +132,7 @@ it('imports a shipment with a matching shipping method', function (): void {
         'reference' => 'standard',
         'shipping_method_id' => $method->id,
     ]);
-    $channel = Channel::factory()->create(['channel_reference' => 'web']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
 
     $source = fakeSource(collect([
         [
@@ -162,7 +162,7 @@ it('imports a shipment with a matching shipping method', function (): void {
 });
 
 it('imports a shipment when shipping method reference does not match', function (): void {
-    $channel = Channel::factory()->create(['channel_reference' => 'web']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
 
     $source = fakeSource(collect([
         [
@@ -195,7 +195,7 @@ it('stores the raw shipping method reference even when resolved', function (): v
         'reference' => 'ground',
         'shipping_method_id' => $method->id,
     ]);
-    $channel = Channel::factory()->create(['channel_reference' => 'shop']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'shop', 'channel_id' => $c->id]));
 
     $source = fakeSource(collect([
         [
@@ -224,7 +224,7 @@ it('resolves shipping method via alias', function (): void {
         'reference' => 'Standard Shipping',
         'shipping_method_id' => $method->id,
     ]);
-    $channel = Channel::factory()->create(['channel_reference' => 'web']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
 
     $source = fakeSource(collect([
         [
@@ -252,7 +252,7 @@ it('resolves shipping method via alias', function (): void {
 });
 
 it('returns null when neither alias nor direct match exists', function (): void {
-    $channel = Channel::factory()->create(['channel_reference' => 'web']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
 
     $source = fakeSource(collect([
         [
@@ -277,7 +277,7 @@ it('returns null when neither alias nor direct match exists', function (): void 
 });
 
 it('imports a shipment with no shipping method reference at all', function (): void {
-    $channel = Channel::factory()->create(['channel_reference' => 'web']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
 
     $source = fakeSource(collect([
         [
@@ -303,7 +303,7 @@ it('imports a shipment with no shipping method reference at all', function (): v
 });
 
 it('calls markExported for each successfully imported shipment', function (): void {
-    $channel = Channel::factory()->create(['channel_reference' => 'web']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
 
     $source = fakeSourceWithExportTracking(collect([
         [
@@ -338,7 +338,7 @@ it('calls markExported for each successfully imported shipment', function (): vo
 });
 
 it('continues importing when markExported fails', function (): void {
-    $channel = Channel::factory()->create(['channel_reference' => 'web']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
 
     $source = fakeSourceWithExportFailure(collect([
         [
@@ -366,7 +366,7 @@ it('continues importing when markExported fails', function (): void {
 });
 
 it('imports shipment with phone extension and stores them separately', function (): void {
-    $channel = Channel::factory()->create(['channel_reference' => 'web']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
 
     $source = fakeSource(collect([
         [
@@ -396,7 +396,7 @@ it('imports shipment with phone extension and stores them separately', function 
 });
 
 it('imports shipment with invalid phone number and stores warning', function (): void {
-    $channel = Channel::factory()->create(['channel_reference' => 'web']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
 
     $source = fakeSource(collect([
         [
@@ -426,7 +426,7 @@ it('imports shipment with invalid phone number and stores warning', function ():
 });
 
 it('imports shipment with invalid email and stores warning', function (): void {
-    $channel = Channel::factory()->create(['channel_reference' => 'web']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
 
     $source = fakeSource(collect([
         [
@@ -455,7 +455,7 @@ it('imports shipment with invalid email and stores warning', function (): void {
 });
 
 it('imports shipment with both invalid phone and email', function (): void {
-    $channel = Channel::factory()->create(['channel_reference' => 'web']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
 
     $source = fakeSource(collect([
         [
@@ -487,7 +487,7 @@ it('imports shipment with both invalid phone and email', function (): void {
 });
 
 it('imports shipment with valid phone and email without warnings', function (): void {
-    $channel = Channel::factory()->create(['channel_reference' => 'web']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
 
     $source = fakeSource(collect([
         [
@@ -518,7 +518,7 @@ it('imports shipment with valid phone and email without warnings', function (): 
 });
 
 it('imports shipment with separate phone_extension field from source', function (): void {
-    $channel = Channel::factory()->create(['channel_reference' => 'web']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
 
     $source = fakeSource(collect([
         [
@@ -547,7 +547,7 @@ it('imports shipment with separate phone_extension field from source', function 
 });
 
 it('uses separate phone_extension field over parsed extension', function (): void {
-    $channel = Channel::factory()->create(['channel_reference' => 'web']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
 
     $source = fakeSource(collect([
         [
@@ -658,7 +658,7 @@ it('deduplicates unmapped channel shipments on re-import', function (): void {
 });
 
 it('stores channel_reference even when channel is resolved', function (): void {
-    $channel = Channel::factory()->create(['channel_reference' => 'shop']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'shop', 'channel_id' => $c->id]));
 
     $source = fakeSource(collect([
         [

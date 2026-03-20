@@ -13,23 +13,23 @@ class ChannelSeeder extends Seeder
     public function run(): void
     {
         Channel::firstOrCreate(
-            ['channel_reference' => 'TEST'],
-            ['name' => 'Test Channel', 'active' => true],
+            ['name' => 'Test Channel'],
+            ['active' => true],
         );
 
         Channel::firstOrCreate(
-            ['channel_reference' => 'AMAZON_US'],
-            ['name' => 'Amazon US', 'active' => true, 'icon' => 'heroicon-o-shopping-bag'],
+            ['name' => 'Amazon US'],
+            ['active' => true, 'icon' => 'heroicon-o-shopping-bag'],
         );
 
         Channel::firstOrCreate(
-            ['channel_reference' => 'SHOPIFY'],
-            ['name' => 'Shopify Store', 'active' => true, 'icon' => 'heroicon-o-shopping-cart'],
+            ['name' => 'Shopify Store'],
+            ['active' => true, 'icon' => 'heroicon-o-shopping-cart'],
         );
 
         Channel::firstOrCreate(
-            ['channel_reference' => 'MANUAL'],
-            ['name' => 'Manual Entry', 'active' => true, 'icon' => 'heroicon-o-pencil-square'],
+            ['name' => 'Manual Entry'],
+            ['active' => true, 'icon' => 'heroicon-o-pencil-square'],
         );
     }
 }

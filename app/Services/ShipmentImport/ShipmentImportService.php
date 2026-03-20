@@ -123,11 +123,8 @@ class ShipmentImportService
             $this->channelCache[$alias->reference] = $alias->channel_id;
         });
 
-        // Cache all channels by reference and by ID
+        // Cache all channel IDs for numeric lookups
         Channel::all()->each(function (Channel $channel): void {
-            if ($channel->channel_reference) {
-                $this->channelCache[$channel->channel_reference] = $channel->id;
-            }
             $this->channelCache[(string) $channel->id] = $channel->id;
         });
 

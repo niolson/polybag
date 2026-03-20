@@ -3,6 +3,7 @@
 use App\Http\Integrations\Amazon\Requests\ConfirmShipment;
 use App\Http\Integrations\Amazon\Requests\SearchOrders;
 use App\Models\Channel;
+use App\Models\ChannelAlias;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\SettingsService;
@@ -107,7 +108,7 @@ beforeEach(function (): void {
 });
 
 it('imports amazon orders into shipments table with metadata', function (): void {
-    $channel = Channel::factory()->create(['name' => 'Amazon', 'channel_reference' => 'Amazon']);
+    $channel = tap(Channel::factory()->create(['name' => 'Amazon']), fn ($c) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $c->id]));
 
     Saloon::fake([
         SearchOrders::class => amazonOrdersResponse([sampleAmazonOrder()]),
@@ -254,7 +255,7 @@ it('handles package without amazon metadata gracefully in export', function (): 
 });
 
 it('imports multiple pages of amazon orders', function (): void {
-    $channel = Channel::factory()->create(['name' => 'Amazon', 'channel_reference' => 'Amazon']);
+    $channel = tap(Channel::factory()->create(['name' => 'Amazon']), fn ($c) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $c->id]));
 
     // Sequential mocks: SearchOrders(page1) → SearchOrders(page2)
     // Items are embedded in the order response — no separate fetch needed
@@ -300,7 +301,7 @@ it('validates amazon configuration requires credentials', function (): void {
 });
 
 it('imports sandbox order with full quantities even when already fulfilled', function (): void {
-    $channel = Channel::factory()->create(['name' => 'Amazon', 'channel_reference' => 'Amazon']);
+    $channel = tap(Channel::factory()->create(['name' => 'Amazon']), fn ($c) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $c->id]));
 
     app(SettingsService::class)->set('sandbox_mode', true);
 
@@ -352,7 +353,7 @@ it('imports sandbox order with full quantities even when already fulfilled', fun
 });
 
 it('calculates item unit prices correctly from proceeds breakdowns', function (): void {
-    $channel = Channel::factory()->create(['name' => 'Amazon', 'channel_reference' => 'Amazon']);
+    $channel = tap(Channel::factory()->create(['name' => 'Amazon']), fn ($c) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $c->id]));
 
     $order = sampleAmazonOrder();
     $order['orderItems'] = [

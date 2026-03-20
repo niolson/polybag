@@ -29,10 +29,6 @@ class ChannelResource extends Resource
                 Forms\Components\TextInput::make('name')
                     ->required()
                     ->maxLength(255),
-                Forms\Components\TextInput::make('channel_reference')
-                    ->required()
-                    ->maxLength(255)
-                    ->unique(ignoreRecord: true),
                 Forms\Components\Select::make('icon')
                     ->options(fn () => collect([
                         'heroicon-o-shopping-bag' => 'Shopping Bag',
@@ -61,8 +57,6 @@ class ChannelResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('name')
-                    ->searchable(),
-                Tables\Columns\TextColumn::make('channel_reference')
                     ->searchable(),
                 Tables\Columns\IconColumn::make('active')
                     ->boolean(),

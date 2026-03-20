@@ -17,8 +17,8 @@ class ShipmentSeeder extends Seeder
     {
         // Ensure we have a channel
         $channel = Channel::firstOrCreate(
-            ['channel_reference' => 'TEST'],
-            ['name' => 'Test Channel', 'active' => true]
+            ['name' => 'Test Channel'],
+            ['active' => true]
         );
 
         $shippingMethod = ShippingMethod::first();

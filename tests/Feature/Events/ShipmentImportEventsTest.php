@@ -5,6 +5,7 @@ use App\Events\ImportCompleted;
 use App\Events\ShipmentImported;
 use App\Events\ShipmentUpdated;
 use App\Models\Channel;
+use App\Models\ChannelAlias;
 use App\Models\Shipment;
 use App\Services\ShipmentImport\ShipmentImportService;
 use Illuminate\Support\Collection;
@@ -48,7 +49,7 @@ function importTestSource(Collection $shipments, Collection $items = new Collect
 it('dispatches ShipmentImported for new shipments', function (): void {
     Event::fake([ShipmentImported::class, ShipmentUpdated::class, ImportCompleted::class]);
 
-    $channel = Channel::factory()->create(['channel_reference' => 'web']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
 
     $source = importTestSource(collect([
         [
@@ -76,7 +77,7 @@ it('dispatches ShipmentImported for new shipments', function (): void {
 it('dispatches ShipmentUpdated for existing shipments', function (): void {
     Event::fake([ShipmentImported::class, ShipmentUpdated::class, ImportCompleted::class]);
 
-    $channel = Channel::factory()->create(['channel_reference' => 'web']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
     Shipment::factory()->create([
         'shipment_reference' => 'EXISTING-001',
         'channel_id' => $channel->id,
@@ -108,7 +109,7 @@ it('dispatches ShipmentUpdated for existing shipments', function (): void {
 it('dispatches ImportCompleted after import finishes', function (): void {
     Event::fake([ShipmentImported::class, ImportCompleted::class]);
 
-    $channel = Channel::factory()->create(['channel_reference' => 'web']);
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
 
     $source = importTestSource(collect([
         [

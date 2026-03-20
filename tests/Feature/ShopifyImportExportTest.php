@@ -2,6 +2,7 @@
 
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Models\Channel;
+use App\Models\ChannelAlias;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\ShipmentImport\PackageExportService;
@@ -114,7 +115,7 @@ beforeEach(function (): void {
 });
 
 it('imports shopify orders into shipments table with metadata', function (): void {
-    $channel = Channel::factory()->create(['name' => 'Shopify', 'channel_reference' => 'Shopify']);
+    $channel = tap(Channel::factory()->create(['name' => 'Shopify']), fn ($c) => ChannelAlias::create(['reference' => 'Shopify', 'channel_id' => $c->id]));
 
     Saloon::fake([
         GraphQL::class => shopifyOrdersResponse([sampleOrder()]),
@@ -265,7 +266,7 @@ it('handles package without metadata gracefully in export', function (): void {
 });
 
 it('imports multiple pages of orders', function (): void {
-    $channel = Channel::factory()->create(['name' => 'Shopify', 'channel_reference' => 'Shopify']);
+    $channel = tap(Channel::factory()->create(['name' => 'Shopify']), fn ($c) => ChannelAlias::create(['reference' => 'Shopify', 'channel_id' => $c->id]));
 
     Saloon::fake([
         shopifyOrdersResponse(

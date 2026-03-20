@@ -8,9 +8,8 @@ return new class extends Migration
     public function up(): void
     {
         Channel::firstOrCreate(
-            ['channel_reference' => 'manual'],
+            ['name' => 'Manual'],
             [
-                'name' => 'Manual',
                 'icon' => 'heroicon-o-pencil-square',
                 'active' => true,
             ]
@@ -19,6 +18,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        Channel::where('channel_reference', 'manual')->delete();
+        Channel::where('name', 'Manual')->delete();
     }
 };
