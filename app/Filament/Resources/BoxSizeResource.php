@@ -77,10 +77,6 @@ class BoxSizeResource extends Resource
                     ->schema([
                         Forms\Components\Select::make('fedex_package_type')
                             ->options(FedexPackageType::class),
-                        Forms\Components\CheckboxList::make('carrierServices')
-                            ->relationship(titleAttribute: 'name')
-                            ->bulkToggleable()
-                            ->columns(3),
                     ]),
             ]);
     }

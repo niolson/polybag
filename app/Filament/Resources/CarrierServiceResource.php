@@ -42,10 +42,6 @@ class CarrierServiceResource extends Resource
                 Forms\Components\Toggle::make('active')
                     ->default(true)
                     ->helperText('Disabled services will not be used for rate shopping.'),
-                Forms\Components\CheckboxList::make('boxSizes')
-                    ->relationship(titleAttribute: 'label')
-                    ->bulkToggleable()
-                    ->columns(3),
             ]);
     }
 

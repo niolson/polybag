@@ -38,11 +38,6 @@ class CarrierService extends Model
         return $this->belongsTo(Carrier::class);
     }
 
-    public function boxSizes(): BelongsToMany
-    {
-        return $this->belongsToMany(BoxSize::class);
-    }
-
     public function shippingMethods(): BelongsToMany
     {
         return $this->belongsToMany(ShippingMethod::class);

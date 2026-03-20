@@ -7,8 +7,6 @@ use App\Enums\FedexPackageType;
 use App\Services\CacheService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-
 class BoxSize extends Model
 {
     use HasFactory;
@@ -40,9 +38,4 @@ class BoxSize extends Model
         'type' => BoxSizeType::class,
         'fedex_package_type' => FedexPackageType::class,
     ];
-
-    public function carrierServices(): BelongsToMany
-    {
-        return $this->belongsToMany(CarrierService::class);
-    }
 }
