@@ -3,20 +3,22 @@
 namespace App\Console\Commands;
 
 use App\Models\AuditLog;
+use App\Models\RateQuote;
 use App\Services\SettingsService;
 use Illuminate\Console\Command;
 use Illuminate\Notifications\DatabaseNotification;
 
-class PurgeAuditLogs extends Command
+class PurgeData extends Command
 {
-    protected $signature = 'audit:purge
-        {--days= : Override retention days (default: from settings or 90)}';
+    protected $signature = 'data:purge
+        {--days= : Override retention days for audit logs}';
 
-    protected $description = 'Purge old audit log entries and read notifications';
+    protected $description = 'Purge old audit logs, rate quotes, and read notifications';
 
     public function handle(SettingsService $settings): int
     {
         $this->purgeAuditLogs($settings);
+        $this->purgeRateQuotes($settings);
         $this->purgeNotifications();
 
         return self::SUCCESS;
@@ -28,7 +30,7 @@ class PurgeAuditLogs extends Command
             ?? $settings->get('audit_log_retention_days', 90));
 
         if ($days === 0) {
-            $this->info('Audit log retention is set to 0 (keep forever). Skipping purge.');
+            $this->info('Audit log retention is set to 0 (keep forever). Skipping.');
 
             return;
         }
@@ -36,14 +38,35 @@ class PurgeAuditLogs extends Command
         $cutoff = now()->subDays($days);
         $total = 0;
 
-        $this->info("Purging audit logs older than {$days} days (before {$cutoff->toDateString()})...");
-
         do {
             $deleted = AuditLog::where('created_at', '<', $cutoff)->limit(1000)->delete();
             $total += $deleted;
         } while ($deleted > 0);
 
-        $this->info("Purged {$total} audit log entries.");
+        $this->info("Purged {$total} audit log entries older than {$days} days.");
+    }
+
+    private function purgeRateQuotes(SettingsService $settings): void
+    {
+        $days = (int) $settings->get('rate_quote_retention_days', 60);
+
+        if ($days === 0) {
+            $this->info('Rate quote retention is set to 0 (keep forever). Skipping.');
+
+            return;
+        }
+
+        $cutoff = now()->subDays($days);
+        $total = 0;
+
+        do {
+            $deleted = RateQuote::where('created_at', '<', $cutoff)->limit(1000)->delete();
+            $total += $deleted;
+        } while ($deleted > 0);
+
+        if ($total > 0) {
+            $this->info("Purged {$total} rate quotes older than {$days} days.");
+        }
     }
 
     private function purgeNotifications(): void

@@ -22,9 +22,14 @@ return Application::configure(basePath: dirname(__DIR__))
             ->dailyAt('00:05')
             ->withoutOverlapping();
 
-        // Purge old audit log entries
-        $schedule->command('audit:purge')
+        // Purge old audit logs, rate quotes, and notifications
+        $schedule->command('data:purge')
             ->dailyAt('01:00')
+            ->withoutOverlapping();
+
+        // Archive old shipped shipments (checks if archiving is enabled)
+        $schedule->command('shipments:archive')
+            ->weeklyOn(Schedule::SUNDAY, '02:00')
             ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware): void {

@@ -90,6 +90,9 @@ class Settings extends Page
             'manual_shipping_enabled' => app(SettingsService::class)->get('manual_shipping_enabled', true),
             'carrier_api_timeout' => app(SettingsService::class)->get('carrier_api_timeout', 15),
             'audit_log_retention_days' => app(SettingsService::class)->get('audit_log_retention_days', 90),
+            'rate_quote_retention_days' => app(SettingsService::class)->get('rate_quote_retention_days', 60),
+            'archiving_enabled' => app(SettingsService::class)->get('archiving_enabled', false),
+            'archive_retention_days' => app(SettingsService::class)->get('archive_retention_days', 365),
             'sandbox_mode' => app(SettingsService::class)->get('sandbox_mode', false),
             'suppress_printing' => app(SettingsService::class)->get('suppress_printing', false),
 
@@ -179,14 +182,36 @@ class Settings extends Page
                         ->schema([
                             TextInput::make('audit_log_retention_days')
                                 ->label('Audit Log Retention')
-                                ->helperText('Audit log entries older than this will be automatically purged daily. Set to 0 to disable automatic cleanup.')
+                                ->helperText('Audit log entries older than this will be automatically purged daily. Set to 0 to disable.')
                                 ->numeric()
                                 ->minValue(0)
                                 ->maxValue(3650)
                                 ->default(90)
                                 ->suffix('days'),
+                            TextInput::make('rate_quote_retention_days')
+                                ->label('Rate Quote Retention')
+                                ->helperText('Rate quotes older than this will be automatically purged daily. The selected rate is always preserved on the package. Set to 0 to disable.')
+                                ->numeric()
+                                ->minValue(0)
+                                ->maxValue(3650)
+                                ->default(60)
+                                ->suffix('days'),
+                            Toggle::make('archiving_enabled')
+                                ->label('Shipment Archiving')
+                                ->helperText('When enabled, fully-shipped shipments older than the retention period are exported to CSV and removed from the database weekly. Historical stats are preserved.')
+                                ->default(false)
+                                ->live(),
+                            TextInput::make('archive_retention_days')
+                                ->label('Archive After')
+                                ->helperText('Shipped shipments older than this will be archived. Archives are saved to storage/app/archives/.')
+                                ->numeric()
+                                ->minValue(90)
+                                ->maxValue(3650)
+                                ->default(365)
+                                ->suffix('days')
+                                ->visible(fn (Get $get): bool => (bool) $get('archiving_enabled')),
                         ])
-                        ->columns(1),
+                        ->columns(2),
 
                     Section::make('USPS Credentials')
                         ->description('API credentials for USPS shipping services')
@@ -337,6 +362,9 @@ class Settings extends Page
             'manual_shipping_enabled' => $data['manual_shipping_enabled'] ?? true,
             'carrier_api_timeout' => (int) ($data['carrier_api_timeout'] ?? 15),
             'audit_log_retention_days' => (int) ($data['audit_log_retention_days'] ?? 90),
+            'rate_quote_retention_days' => (int) ($data['rate_quote_retention_days'] ?? 60),
+            'archiving_enabled' => (bool) ($data['archiving_enabled'] ?? false),
+            'archive_retention_days' => (int) ($data['archive_retention_days'] ?? 365),
             'sandbox_mode' => $sandboxMode,
             'suppress_printing' => $suppressPrinting,
         ];
