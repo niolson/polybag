@@ -19,7 +19,7 @@ return new class extends Migration
             $table->unsignedInteger('total_shipments');
             $table->unsignedInteger('successful_shipments')->default(0);
             $table->unsignedInteger('failed_shipments')->default(0);
-            $table->decimal('total_cost', 10, 2)->default(0);
+            $table->decimal('total_cost', 10, 2)->default('0.00');
             $table->timestamp('started_at')->nullable();
             $table->timestamp('completed_at')->nullable();
             $table->timestamps();

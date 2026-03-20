@@ -16,7 +16,6 @@ return new class extends Migration
             $table->date('manifest_date');
             $table->unsignedInteger('package_count');
             $table->timestamps();
-
             $table->index(['carrier', 'manifest_date']);
         });
     }

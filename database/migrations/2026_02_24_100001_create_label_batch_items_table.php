@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('label_batch_items', function (Blueprint $table) {
             $table->id();
             $table->foreignId('label_batch_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('shipment_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('shipment_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignId('package_id')->nullable()->constrained()->nullOnDelete();
             $table->string('status')->default('pending');
             $table->string('tracking_number')->nullable();
@@ -20,6 +20,7 @@ return new class extends Migration
             $table->decimal('cost', 8, 2)->nullable();
             $table->text('error_message')->nullable();
             $table->timestamps();
+            $table->index('status');
         });
     }
 

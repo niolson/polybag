@@ -23,6 +23,7 @@ return new class extends Migration
             $table->index(['package_id', 'selected']);
             $table->index('created_at');
             $table->index('carrier');
+            $table->index(['package_id', 'selected', 'quoted_price', 'carrier'], 'rate_quotes_comparison_covering');
         });
     }
 

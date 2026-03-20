@@ -6,9 +6,6 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('shipping_rules', function (Blueprint $table) {
@@ -21,12 +18,10 @@ return new class extends Migration
             $table->foreignId('carrier_service_id')->constrained()->cascadeOnDelete();
             $table->boolean('enabled')->default(true);
             $table->timestamps();
+            $table->index('priority');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::dropIfExists('shipping_rules');
