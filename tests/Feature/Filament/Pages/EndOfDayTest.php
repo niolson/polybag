@@ -9,6 +9,8 @@ use App\Models\User;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
+    // Freeze time to a Wednesday at 10 AM to avoid USPS 8 PM cutoff and weekend issues
+    $this->travelTo(now()->next('Wednesday')->setTime(10, 0));
     $this->actingAs(User::factory()->admin()->create());
 });
 
