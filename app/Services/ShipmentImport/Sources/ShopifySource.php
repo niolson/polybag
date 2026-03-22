@@ -42,7 +42,7 @@ class ShopifySource implements ExportDestinationInterface, ImportSourceInterface
                   sku name quantity unfulfilledQuantity
                   originalUnitPriceSet { shopMoney { amount } }
                   variant {
-                    barcode
+                    id barcode
                     inventoryItem {
                       measurement { weight { unit value } }
                     }
@@ -154,10 +154,11 @@ class ShopifySource implements ExportDestinationInterface, ImportSourceInterface
         return [];
     }
 
-    public function markExported(string $shipmentReference): void
+    public function markExported(string $shipmentReference): bool
     {
         // No-op: Shopify tracks fulfillment status natively.
         // Orders are excluded from future imports once fulfilled.
+        return false;
     }
 
     public function getDestinationName(): string
@@ -275,25 +276,33 @@ class ShopifySource implements ExportDestinationInterface, ImportSourceInterface
         $variant = $item['variant'] ?? [];
         $weight = $variant['inventoryItem']['measurement']['weight'] ?? null;
 
-        // Convert weight to ounces (our internal unit)
-        $weightOz = null;
+        // Convert weight to pounds (our internal unit)
+        $weightLbs = null;
         if ($weight && $weight['value'] > 0) {
-            $weightOz = match ($weight['unit'] ?? '') {
-                'OUNCES' => $weight['value'],
-                'POUNDS' => $weight['value'] * 16,
-                'GRAMS' => $weight['value'] * 0.03527396,
-                'KILOGRAMS' => $weight['value'] * 35.27396,
+            $weightLbs = match ($weight['unit'] ?? '') {
+                'POUNDS' => $weight['value'],
+                'OUNCES' => $weight['value'] / 16,
+                'GRAMS' => $weight['value'] / 453.59237,
+                'KILOGRAMS' => $weight['value'] * 2.20462,
                 default => $weight['value'],
             };
         }
 
+        // Use SKU if available, otherwise fall back to Shopify variant ID
+        $sku = $item['sku'] ?? null;
+        if (empty($sku) && ! empty($variant['id'])) {
+            // Extract numeric ID from GID (e.g. "gid://shopify/ProductVariant/12345" → "12345")
+            $numericId = preg_replace('/.*\//', '', $variant['id']);
+            $sku = "SHOPIFY-V-{$numericId}";
+        }
+
         return [
-            'sku' => $item['sku'] ?? null,
+            'sku' => $sku,
             'name' => $item['name'] ?? null,
             'quantity' => (int) ($item['unfulfilledQuantity'] ?? 0),
             'value' => $unitPrice,
             'barcode' => $variant['barcode'] ?? null,
-            'weight' => $weightOz,
+            'weight' => $weightLbs,
         ];
     }
 }

@@ -37,6 +37,8 @@ interface ImportSourceInterface
     /**
      * Mark a shipment as exported on the external source.
      * Called after each successful shipment import when enabled.
+     *
+     * @return bool True if the source was actually updated, false if no-op.
      */
-    public function markExported(string $shipmentReference): void;
+    public function markExported(string $shipmentReference): bool;
 }

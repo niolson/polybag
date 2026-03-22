@@ -42,7 +42,7 @@ function importTestSource(Collection $shipments, Collection $items = new Collect
             return [];
         }
 
-        public function markExported(string $shipmentReference): void {}
+        public function markExported(string $shipmentReference): bool { return false; }
     };
 }
 

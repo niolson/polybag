@@ -136,10 +136,11 @@ class AmazonSource implements ExportDestinationInterface, ImportSourceInterface
         return [];
     }
 
-    public function markExported(string $shipmentReference): void
+    public function markExported(string $shipmentReference): bool
     {
         // No-op: Amazon tracks fulfillment status natively.
         // Fulfilled orders won't match the Unshipped filter on next import.
+        return false;
     }
 
     public function getDestinationName(): string

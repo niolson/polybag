@@ -48,7 +48,7 @@ function fakeExportSource(bool $exportEnabled = true, ?string $exportError = nul
             return [];
         }
 
-        public function markExported(string $shipmentReference): void {}
+        public function markExported(string $shipmentReference): bool { return false; }
 
         public function getDestinationName(): string
         {

@@ -43,7 +43,7 @@ function fakeSource(Collection $shipments, Collection $items = new Collection): 
             return [];
         }
 
-        public function markExported(string $shipmentReference): void {}
+        public function markExported(string $shipmentReference): bool { return false; }
     };
 }
 
@@ -81,9 +81,11 @@ function fakeSourceWithExportTracking(Collection $shipments, Collection $items =
             return [];
         }
 
-        public function markExported(string $shipmentReference): void
+        public function markExported(string $shipmentReference): bool
         {
             $this->exportedReferences[] = $shipmentReference;
+
+            return true;
         }
     };
 }
@@ -119,7 +121,7 @@ function fakeSourceWithExportFailure(Collection $shipments, Collection $items = 
             return [];
         }
 
-        public function markExported(string $shipmentReference): void
+        public function markExported(string $shipmentReference): bool
         {
             throw new RuntimeException('External database unavailable');
         }

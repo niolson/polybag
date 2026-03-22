@@ -222,7 +222,7 @@ it('maps line items using unfulfilled quantity', function (): void {
     expect($items[0]['quantity'])->toBe(3);
     expect($items[0]['value'])->toBe(10.0);
     expect($items[0]['barcode'])->toBe('111111111111');
-    expect($items[0]['weight'])->toBe(24.0); // 1.5 lbs * 16 = 24 oz
+    expect($items[0]['weight'])->toBe(1.5); // 1.5 lbs (stored as pounds)
 });
 
 it('returns empty collection for unknown shipment reference', function (): void {
@@ -379,12 +379,13 @@ it('maps FedEx carrier name correctly', function (): void {
     });
 });
 
-it('markExported is a no-op', function (): void {
+it('markExported is a no-op that returns false', function (): void {
     $source = new ShopifySource(shopifyConfig());
 
     // Should not throw or make any API calls
-    $source->markExported('#1001');
+    $result = $source->markExported('#1001');
 
+    expect($result)->toBeFalse();
     Saloon::assertNothingSent();
 });
 

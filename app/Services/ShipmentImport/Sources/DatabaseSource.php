@@ -119,18 +119,20 @@ class DatabaseSource implements ExportDestinationInterface, ImportSourceInterfac
         return $this->config['field_mapping'] ?? [];
     }
 
-    public function markExported(string $shipmentReference): void
+    public function markExported(string $shipmentReference): bool
     {
         $markExported = $this->config['mark_exported'] ?? [];
 
         if (empty($markExported['enabled']) || empty($markExported['query'])) {
-            return;
+            return false;
         }
 
         DB::connection($this->config['connection'])
             ->statement($markExported['query'], [
                 'shipment_reference' => $shipmentReference,
             ]);
+
+        return true;
     }
 
     public function getDestinationName(): string

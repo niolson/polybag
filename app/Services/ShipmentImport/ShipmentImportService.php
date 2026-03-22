@@ -255,8 +255,9 @@ class ShipmentImportService
             }
 
             try {
-                $this->source->markExported($reference);
-                $this->stats['shipments_exported']++;
+                if ($this->source->markExported($reference)) {
+                    $this->stats['shipments_exported']++;
+                }
             } catch (\Exception $e) {
                 $this->errors[] = "Error marking shipment {$reference} as exported: ".$e->getMessage();
 
