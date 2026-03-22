@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Http\Integrations\Shopify\ShopifyOAuthProvider;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
@@ -21,6 +22,8 @@ use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\FakeCarrierAdapter;
 use App\Services\LabelGenerationService;
 use App\Services\ManifestService;
+use App\Services\OAuthProviderRegistry;
+use App\Services\OAuthService;
 use App\Services\RateQuoteLogger;
 use App\Services\RuleEvaluator;
 use App\Services\SettingsService;
@@ -46,6 +49,8 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(ShippingRateService::class);
         $this->app->singleton(LabelGenerationService::class);
         $this->app->singleton(ManifestService::class);
+        $this->app->singleton(OAuthProviderRegistry::class);
+        $this->app->singleton(OAuthService::class);
 
         $this->app->singleton(AddressValidationService::class, function () {
             $validators = config('app.fake_carriers')
@@ -72,6 +77,9 @@ class AppServiceProvider extends ServiceProvider
             Product::class,
         ]);
         Setting::observe(SettingObserver::class);
+
+        // Register OAuth providers
+        app(OAuthProviderRegistry::class)->register(new ShopifyOAuthProvider);
 
         // Register API routes here (before Filament's catch-all at path('/'))
         // so they take priority over the panel's {any} wildcard route.

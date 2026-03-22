@@ -157,7 +157,51 @@ openssl req -x509 -new -key /opt/shared/qz/qz-private-key.pem \
   -subj "/CN=*.polybag.app"
 ```
 
-## 9. Provision Tenants
+## 9. OAuth Callback Proxy (Optional)
+
+A shared OAuth proxy on `connect.<domain>` routes OAuth callbacks to the correct tenant. This avoids registering per-tenant callback URLs with each OAuth provider. Skip this if you don't need OAuth integrations.
+
+### Generate shared secret
+
+```bash
+echo "OAUTH_PROXY_SECRET=$(openssl rand -hex 32)" > /opt/shared/oauth.env
+echo "OAUTH_PROXY_URL=https://connect.polybag.app" >> /opt/shared/oauth.env
+```
+
+> Replace `polybag.app` with your domain suffix. The provisioning script reads this file and appends the values to each tenant's `.env`.
+
+### Deploy the proxy
+
+```bash
+cp -r <repo>/infra/oauth-proxy /opt/oauth-proxy
+grep '^OAUTH_PROXY_SECRET=' /opt/shared/oauth.env > /opt/oauth-proxy/.env
+cd /opt/oauth-proxy && docker compose up -d --build
+```
+
+### Add Caddy route
+
+Append to `/opt/caddy/Caddyfile`:
+
+```
+connect.polybag.app {
+    reverse_proxy oauth-proxy:8080
+}
+```
+
+Reload Caddy:
+
+```bash
+docker compose -f /opt/caddy/docker-compose.yml exec caddy caddy reload --config /etc/caddy/Caddyfile
+```
+
+### Verify
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" "https://connect.polybag.app/oauth/shopify/callback?state=garbage"
+# Should return 400
+```
+
+## 10. Provision Tenants
 
 ### Shared mode (default)
 

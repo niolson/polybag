@@ -1,0 +1,11 @@
+services:
+  oauth-proxy:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true

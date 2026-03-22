@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\OAuthCallbackController;
 use App\Http\Controllers\QzSignController;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redis;
@@ -28,3 +29,7 @@ Route::get('/up', function () {
 });
 
 Route::post('/qz/sign', [QzSignController::class, 'sign'])->name('qz.sign')->middleware(['auth', 'throttle:60,1']);
+
+Route::get('/oauth/{provider}/callback', [OAuthCallbackController::class, 'callback'])
+    ->name('oauth.callback')
+    ->middleware('auth');

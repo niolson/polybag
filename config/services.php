@@ -67,6 +67,11 @@ return [
         'api_version' => env('SHOPIFY_API_VERSION', '2025-01'),
     ],
 
+    'oauth' => [
+        'proxy_url' => env('OAUTH_PROXY_URL'),
+        'proxy_secret' => env('OAUTH_PROXY_SECRET'),
+    ],
+
     'amazon' => [
         'base_url' => env('AMAZON_SP_API_BASE_URL', 'https://sellingpartnerapi-na.amazon.com'),
         'sandbox_url' => env('AMAZON_SP_API_SANDBOX_URL', 'https://sandbox.sellingpartnerapi-na.amazon.com'),

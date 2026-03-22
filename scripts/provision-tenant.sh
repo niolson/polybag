@@ -207,6 +207,27 @@ else
     info "Generate one after setup: docker compose exec -it app php artisan app:generate-qz-cert"
 fi
 
+# --- Shared OAuth Proxy ---
+
+if [ -f "${SHARED_DIR}/oauth.env" ]; then
+    info "Adding shared OAuth proxy configuration..."
+
+    # Set proxy URL and secret
+    OAUTH_SECRET=$(grep '^OAUTH_PROXY_SECRET=' "${SHARED_DIR}/oauth.env" | cut -d= -f2-)
+    [ -n "$OAUTH_SECRET" ] && sed -i "s|^OAUTH_PROXY_SECRET=.*|OAUTH_PROXY_SECRET=${OAUTH_SECRET}|" .env
+    sed -i "s|^OAUTH_PROXY_URL=.*|OAUTH_PROXY_URL=https://connect.${DEFAULT_DOMAIN_SUFFIX}|" .env
+
+    # Set shared OAuth app credentials (sed replaces empty values from .env.example)
+    SHOPIFY_CID=$(grep '^SHOPIFY_CLIENT_ID=' "${SHARED_DIR}/oauth.env" | cut -d= -f2-)
+    SHOPIFY_SEC=$(grep '^SHOPIFY_CLIENT_SECRET=' "${SHARED_DIR}/oauth.env" | cut -d= -f2-)
+    [ -n "$SHOPIFY_CID" ] && sed -i "s|^SHOPIFY_CLIENT_ID=.*|SHOPIFY_CLIENT_ID=${SHOPIFY_CID}|" .env
+    [ -n "$SHOPIFY_SEC" ] && sed -i "s|^SHOPIFY_CLIENT_SECRET=.*|SHOPIFY_CLIENT_SECRET=${SHOPIFY_SEC}|" .env
+
+    ok "OAuth proxy configuration added."
+else
+    info "No shared OAuth config found at ${SHARED_DIR}/oauth.env (skipping)."
+fi
+
 # --- Build & Start ---
 
 info "Building and starting containers (${MODE} mode)..."

@@ -5,8 +5,10 @@ namespace App\Filament\Pages;
 use App\Enums\Role;
 use App\Models\Location;
 use App\Models\Setting;
+use App\Services\OAuthService;
 use App\Services\SettingsService;
 use BackedEnum;
+use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\TextInput;
@@ -19,6 +21,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\HtmlString;
 use UnitEnum;
 
 /**
@@ -82,6 +85,14 @@ class Settings extends Page
 
     public function mount(): void
     {
+        // Show flash notification from OAuth callback redirect
+        if ($notification = session('oauth_notification')) {
+            Notification::make()
+                ->{$notification['status']}()
+                ->title($notification['title'])
+                ->send();
+        }
+
         $this->form->fill([
             'company_name' => app(SettingsService::class)->get('company_name', ''),
             'packing_validation_enabled' => app(SettingsService::class)->get('packing_validation_enabled', true),
@@ -107,6 +118,37 @@ class Settings extends Page
 
             // Encrypted fields are left empty — placeholder shows status
         ]);
+    }
+
+    /**
+     * Build the Shopify credential fields, wrapped in a collapsible section for hosted mode.
+     *
+     * @return array<\Filament\Schemas\Components\Component>
+     */
+    private function shopifyCredentialFields(): array
+    {
+        $fields = [
+            TextInput::make('shopify_client_id')
+                ->label('Client ID')
+                ->password()
+                ->placeholder(fn () => $this->getCredentialPlaceholder('shopify.client_id', 'services.shopify.client_id')),
+            TextInput::make('shopify_client_secret')
+                ->label('Client Secret')
+                ->password()
+                ->placeholder(fn () => $this->getCredentialPlaceholder('shopify.client_secret', 'services.shopify.client_secret')),
+        ];
+
+        if (config('services.oauth.proxy_url')) {
+            return [
+                Section::make('Custom App Credentials')
+                    ->description('Override the shared OAuth credentials with a custom app created in your Shopify admin.')
+                    ->collapsed()
+                    ->schema($fields)
+                    ->columns(2),
+            ];
+        }
+
+        return $fields;
     }
 
     /**
@@ -271,8 +313,29 @@ class Settings extends Page
                         ->collapsed(),
 
                     Section::make('Shopify Integration')
-                        ->description('Credentials for importing orders from Shopify')
+                        ->description(fn () => config('services.oauth.proxy_url')
+                            ? 'Connect your Shopify store via OAuth to import orders and export fulfillments.'
+                            : 'Credentials for importing orders from Shopify. Create a custom app in your Shopify admin to get these credentials.')
                         ->schema([
+                            Placeholder::make('shopify_oauth_status')
+                                ->label('OAuth Status')
+                                ->visible(fn () => (bool) config('services.oauth.proxy_url'))
+                                ->content(function () {
+                                    $oauthService = app(OAuthService::class);
+                                    if ($oauthService->isConnected('shopify')) {
+                                        $connectedAt = app(SettingsService::class)->get('shopify.oauth_connected_at');
+                                        $scopes = app(SettingsService::class)->get('shopify.oauth_scopes');
+                                        $time = $connectedAt ? Carbon::parse($connectedAt)->diffForHumans() : '';
+
+                                        return new HtmlString(
+                                            '<span class="font-medium text-success-600 dark:text-success-400">Connected via OAuth</span>'
+                                            .($time ? " &mdash; {$time}" : '')
+                                            .($scopes ? '<br><span class="text-xs text-gray-500">Scopes: '.$scopes.'</span>' : '')
+                                        );
+                                    }
+
+                                    return new HtmlString('<span class="text-gray-400">Not connected</span>');
+                                }),
                             TextInput::make('shopify_shop_domain')
                                 ->label('Shop Domain')
                                 ->placeholder('mystore.myshopify.com')
@@ -281,14 +344,38 @@ class Settings extends Page
                                 ->label('API Version')
                                 ->placeholder('2025-01')
                                 ->maxLength(20),
-                            TextInput::make('shopify_client_id')
-                                ->label('Client ID')
-                                ->password()
-                                ->placeholder(fn () => $this->getCredentialPlaceholder('shopify.client_id', 'services.shopify.client_id')),
-                            TextInput::make('shopify_client_secret')
-                                ->label('Client Secret')
-                                ->password()
-                                ->placeholder(fn () => $this->getCredentialPlaceholder('shopify.client_secret', 'services.shopify.client_secret')),
+
+                            // Hosted (proxy mode): credentials in a collapsed section
+                            // On-prem (direct mode): credentials shown directly in parent section
+                            ...$this->shopifyCredentialFields(),
+                        ])
+                        ->footerActions([
+                            Action::make('shopify_connect')
+                                ->label(fn () => app(OAuthService::class)->isConnected('shopify') ? 'Reconnect' : 'Connect with OAuth')
+                                ->icon('heroicon-o-link')
+                                ->color(fn () => app(OAuthService::class)->isConnected('shopify') ? 'warning' : 'primary')
+                                ->visible(fn () => (bool) config('services.oauth.proxy_url'))
+                                ->requiresConfirmation()
+                                ->modalHeading(fn () => app(OAuthService::class)->isConnected('shopify') ? 'Reconnect Shopify' : 'Connect Shopify')
+                                ->modalDescription(fn () => app(OAuthService::class)->isConnected('shopify')
+                                    ? 'This will replace the existing OAuth token with a new one. You will be redirected to Shopify to re-authorize.'
+                                    : 'You will be redirected to Shopify to authorize access. Make sure Shop Domain is saved first.')
+                                ->action(function () {
+                                    $url = app(OAuthService::class)->initiateAuthorization('shopify');
+                                    $this->redirect($url, navigate: false);
+                                }),
+                            Action::make('shopify_disconnect')
+                                ->label('Disconnect')
+                                ->icon('heroicon-o-x-mark')
+                                ->color('danger')
+                                ->visible(fn () => config('services.oauth.proxy_url') && app(OAuthService::class)->isConnected('shopify'))
+                                ->requiresConfirmation()
+                                ->modalHeading('Disconnect Shopify OAuth')
+                                ->modalDescription('This will remove the OAuth access token. You can reconnect anytime, or the app will fall back to client credentials if configured.')
+                                ->action(function () {
+                                    app(OAuthService::class)->disconnect('shopify');
+                                    Notification::make()->success()->title('Shopify disconnected.')->send();
+                                }),
                         ])
                         ->columns(2)
                         ->collapsed(),

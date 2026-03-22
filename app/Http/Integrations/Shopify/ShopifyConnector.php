@@ -49,10 +49,22 @@ class ShopifyConnector extends Connector
     }
 
     /**
-     * Get a valid access token, using cached token or requesting a new one.
+     * Get a valid access token, checking OAuth token first then client credentials.
      */
     private function getAccessToken(): string
     {
+        $settings = app(SettingsService::class);
+
+        // If connected via OAuth authorization code flow, use the stored token directly.
+        // Shopify offline tokens are non-expiring, so no cache/refresh needed.
+        if ($settings->get('shopify.auth_mode') === 'authorization_code') {
+            $oauthToken = $settings->get('shopify.oauth_access_token');
+            if ($oauthToken) {
+                return $oauthToken;
+            }
+        }
+
+        // Fall back to client credentials flow
         return Cache::get(self::CACHE_KEY) ?? $this->requestNewToken();
     }
 
