@@ -7,6 +7,7 @@ use App\Enums\FedexPackageType;
 use App\Services\CacheService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+
 class BoxSize extends Model
 {
     use HasFactory;

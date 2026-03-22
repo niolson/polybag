@@ -34,7 +34,7 @@ class ImportCompleted extends Notification
         $body = "{$created} created, {$updated} updated";
         if ($hasErrors) {
             $errorCount = count($this->errors);
-            $body .= " — {$errorCount} " . ($errorCount === 1 ? 'error' : 'errors');
+            $body .= " — {$errorCount} ".($errorCount === 1 ? 'error' : 'errors');
         }
 
         return FilamentNotification::make()

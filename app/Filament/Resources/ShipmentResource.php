@@ -459,8 +459,7 @@ class ShipmentResource extends Resource
                     })
                     ->deselectRecordsAfterCompletion(),
             ])
-            ->maxSelectableRecords(1000)
-            ;
+            ->maxSelectableRecords(1000);
     }
 
     public static function infolist(Schema $infolist): Schema

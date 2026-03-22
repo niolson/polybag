@@ -3,6 +3,7 @@
 namespace App\Services\ShipmentImport;
 
 use App\Contracts\ImportSourceInterface;
+use App\Enums\Role;
 use App\Events\ImportCompleted;
 use App\Events\ShipmentImported;
 use App\Events\ShipmentUpdated;
@@ -11,7 +12,6 @@ use App\Models\ChannelAlias;
 use App\Models\Product;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
-use App\Enums\Role;
 use App\Models\ShippingMethod;
 use App\Models\ShippingMethodAlias;
 use App\Models\User;

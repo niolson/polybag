@@ -6,13 +6,23 @@ use App\Enums\AuditAction;
 use App\Enums\Role;
 use App\Filament\Resources\AuditLogResource\Pages;
 use App\Models\AuditLog;
+use App\Models\BoxSize;
+use App\Models\Carrier;
+use App\Models\CarrierService;
+use App\Models\Channel;
+use App\Models\LabelBatch;
 use App\Models\Location;
+use App\Models\Package;
+use App\Models\Product;
+use App\Models\Shipment;
+use App\Models\ShippingMethod;
+use App\Models\User;
 use BackedEnum;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Infolists\Components\TextEntry;
-use Filament\Schemas\Components\Section;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Enums\FiltersLayout;
@@ -173,17 +183,17 @@ class AuditLogResource extends Resource
         }
 
         $resourceMap = [
-            \App\Models\Package::class => PackageResource::class,
-            \App\Models\Shipment::class => ShipmentResource::class,
-            \App\Models\LabelBatch::class => LabelBatchResource::class,
-            \App\Models\User::class => UserResource::class,
-            \App\Models\BoxSize::class => BoxSizeResource::class,
-            \App\Models\Carrier::class => Carriers\CarrierResource::class,
-            \App\Models\CarrierService::class => CarrierServiceResource::class,
-            \App\Models\Channel::class => ChannelResource::class,
-            \App\Models\Location::class => LocationResource::class,
-            \App\Models\Product::class => ProductResource::class,
-            \App\Models\ShippingMethod::class => ShippingMethodResource::class,
+            Package::class => PackageResource::class,
+            Shipment::class => ShipmentResource::class,
+            LabelBatch::class => LabelBatchResource::class,
+            User::class => UserResource::class,
+            BoxSize::class => BoxSizeResource::class,
+            Carrier::class => Carriers\CarrierResource::class,
+            CarrierService::class => CarrierServiceResource::class,
+            Channel::class => ChannelResource::class,
+            Location::class => LocationResource::class,
+            Product::class => ProductResource::class,
+            ShippingMethod::class => ShippingMethodResource::class,
         ];
 
         $resourceClass = $resourceMap[$record->auditable_type] ?? null;

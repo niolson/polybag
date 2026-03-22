@@ -6,6 +6,7 @@ use App\Enums\PackageStatus;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\SettingsService;
+use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -106,7 +107,7 @@ class ArchiveShipments extends Command
     /**
      * Build the base query for eligible shipments: all packages shipped, most recent shipped_at before cutoff.
      */
-    private function eligibleQuery(\Carbon\Carbon $cutoff): Builder
+    private function eligibleQuery(Carbon $cutoff): Builder
     {
         return Shipment::query()
             ->whereHas('packages')
@@ -116,7 +117,7 @@ class ArchiveShipments extends Command
             });
     }
 
-    private function exportToCsv(\Carbon\Carbon $cutoff, string $date): void
+    private function exportToCsv(Carbon $cutoff, string $date): void
     {
         Storage::makeDirectory('archives');
 
