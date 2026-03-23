@@ -119,5 +119,21 @@
         </div>
     @endif
 
+    <x-filament::modal id="customs-weight-override" width="md">
+        <x-slot name="heading">Customs Weight Mismatch</x-slot>
+        <x-slot name="description">
+            The total item weight exceeds the package scale weight.
+            Would you like to adjust the customs item weights to match the package weight?
+        </x-slot>
+        <x-slot name="footerActions">
+            <x-filament::button wire:click="confirmCustomsWeightOverride">
+                Override & Ship
+            </x-filament::button>
+            <x-filament::button color="gray" x-on:click="$dispatch('close-modal', { id: 'customs-weight-override' })">
+                Cancel
+            </x-filament::button>
+        </x-slot>
+    </x-filament::modal>
+
     <x-filament-actions::modals />
 </x-filament-panels::page>

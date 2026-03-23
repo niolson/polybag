@@ -63,6 +63,8 @@ class Ship extends Page implements HasForms
 
     public string $returnUrl = '/pack';
 
+    public bool $overrideCustomsWeights = false;
+
     public function mount($package_id = null): void
     {
         $this->returnUrl = Session::pull('ship_return_url', '/pack');
@@ -226,6 +228,24 @@ class Ship extends Page implements HasForms
             $adapter = app(CarrierRegistry::class)->get($selectedRate->carrier);
 
             $shipRequest = ShipRequest::fromPackageAndRate($this->package, $selectedRate, $this->labelFormat, $this->labelDpi);
+
+            // Check if customs item weights exceed package weight for international shipments
+            if (! $this->overrideCustomsWeights && $shipRequest->toAddress->country !== 'US' && ! empty($shipRequest->customsItems)) {
+                $totalCustomsWeight = collect($shipRequest->customsItems)->sum(fn ($item) => $item->weight * $item->quantity);
+                $packageWeight = $shipRequest->packageData->weight;
+
+                if ($totalCustomsWeight > $packageWeight) {
+                    $this->dispatch('open-modal', id: 'customs-weight-override');
+
+                    return;
+                }
+            }
+
+            if ($this->overrideCustomsWeights) {
+                $shipRequest = $shipRequest->withScaledCustomsWeights();
+                $this->overrideCustomsWeights = false;
+            }
+
             $response = $adapter->createShipment($shipRequest);
 
             if (! $response->success) {
@@ -282,5 +302,12 @@ class Ship extends Page implements HasForms
             ]);
             $this->notifyError('Shipping Error', 'An unexpected error occurred. Please try again.');
         }
+    }
+
+    public function confirmCustomsWeightOverride(): void
+    {
+        $this->overrideCustomsWeights = true;
+        $this->dispatch('close-modal', id: 'customs-weight-override');
+        $this->ship();
     }
 }

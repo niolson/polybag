@@ -23,6 +23,49 @@ readonly class ShipRequest
         public ?CarbonImmutable $shipDate = null,
     ) {}
 
+    /**
+     * Scale customs item weights proportionally so their total matches the package weight.
+     */
+    public function withScaledCustomsWeights(): self
+    {
+        if (empty($this->customsItems)) {
+            return $this;
+        }
+
+        $totalCustomsWeight = collect($this->customsItems)->sum(fn ($item) => $item->weight * $item->quantity);
+        $packageWeight = $this->packageData->weight;
+
+        if ($totalCustomsWeight <= $packageWeight || $totalCustomsWeight == 0) {
+            return $this;
+        }
+
+        $scale = $packageWeight / $totalCustomsWeight;
+
+        $scaledItems = array_map(
+            fn (CustomsItem $item) => new CustomsItem(
+                description: $item->description,
+                quantity: $item->quantity,
+                unitValue: $item->unitValue,
+                weight: round($item->weight * $scale, 2),
+                hsTariffNumber: $item->hsTariffNumber,
+                countryOfOrigin: $item->countryOfOrigin,
+            ),
+            $this->customsItems,
+        );
+
+        return new self(
+            fromAddress: $this->fromAddress,
+            toAddress: $this->toAddress,
+            packageData: $this->packageData,
+            selectedRate: $this->selectedRate,
+            customsItems: $scaledItems,
+            labelFormat: $this->labelFormat,
+            labelDpi: $this->labelDpi,
+            saturdayDelivery: $this->saturdayDelivery,
+            shipDate: $this->shipDate,
+        );
+    }
+
     public static function fromPackageAndRate(
         Package $package,
         RateResponse $rate,

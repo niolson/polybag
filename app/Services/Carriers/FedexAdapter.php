@@ -92,11 +92,11 @@ class FedexAdapter implements CarrierAdapterInterface
 
     public function prepareRateRequest(RateRequest $request, array $serviceCodes): ?PreparedRateRequest
     {
-        // Sandbox international mock rates don't need an API call
-        $internationalCodes = array_intersect($serviceCodes, self::INTERNATIONAL_SERVICE_CODES);
-        if ($this->isSandbox() && $this->isInternational($request) && ! empty($internationalCodes)) {
-            return null;
-        }
+        // TODO: restore sandbox international mock rates if needed
+        // $internationalCodes = array_intersect($serviceCodes, self::INTERNATIONAL_SERVICE_CODES);
+        // if ($this->isSandbox() && $this->isInternational($request) && ! empty($internationalCodes)) {
+        //     return null;
+        // }
 
         if (empty($request->packages)) {
             return null;
@@ -228,6 +228,28 @@ class FedexAdapter implements CarrierAdapterInterface
                 ...($request->saturdayDelivery ? [
                     'shipmentSpecialServices' => [
                         'specialServiceTypes' => ['SATURDAY_DELIVERY'],
+                    ],
+                ] : []),
+                ...($request->destinationCountry !== 'US' ? [
+                    'customsClearanceDetail' => [
+                        'dutiesPayment' => [
+                            'paymentType' => 'SENDER',
+                        ],
+                        'commodities' => [
+                            [
+                                'description' => 'Merchandise',
+                                'quantity' => 1,
+                                'quantityUnits' => 'PCS',
+                                'weight' => [
+                                    'units' => 'LB',
+                                    'value' => $package->weight,
+                                ],
+                                'customsValue' => [
+                                    'amount' => '1.00',
+                                    'currency' => 'USD',
+                                ],
+                            ],
+                        ],
                     ],
                 ] : []),
             ],
@@ -775,10 +797,10 @@ class FedexAdapter implements CarrierAdapterInterface
 
     private function buildContact(AddressData $address): array
     {
-        $streetLines = array_filter([
-            $address->streetAddress,
-            $address->streetAddress2,
-        ]);
+        $streetLines = array_filter(array_map(
+            fn ($line) => $line ? substr($line, 0, 35) : null,
+            [$address->streetAddress, $address->streetAddress2],
+        ));
 
         return [
             'contact' => array_filter([
