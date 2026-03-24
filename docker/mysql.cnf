@@ -1,0 +1,5 @@
+[mysqld]
+# Encryption at rest (TDE)
+early-plugin-load=keyring_file.so
+keyring_file_data=/var/lib/mysql-keyring/keyring
+default_table_encryption=ON

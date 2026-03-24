@@ -13,6 +13,8 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
     volumes:
       - mysql-data:/var/lib/mysql
+      - mysql-keyring:/var/lib/mysql-keyring
+      - ./mysql.cnf:/etc/mysql/conf.d/encryption.cnf:ro
     networks:
       - shared
     healthcheck:
@@ -38,6 +40,7 @@ services:
 
 volumes:
   mysql-data:
+  mysql-keyring:
   redis-data:
 
 networks:

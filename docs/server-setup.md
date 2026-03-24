@@ -139,6 +139,43 @@ docker exec shared-mysql mysqladmin ping -h localhost
 docker exec shared-redis redis-cli -a <password> ping
 ```
 
+### Encryption at Rest (TDE)
+
+Shared MySQL is configured with InnoDB tablespace encryption by default. The `mysql.cnf` file enables the `keyring_file` plugin and sets `default_table_encryption=ON`, so all new tables are encrypted automatically.
+
+**How it works:**
+- Data files on disk are encrypted with AES — queries, indexes, and search work normally (decrypted transparently at the query layer)
+- The keyring file is stored in a separate Docker volume (`mysql-keyring`) from the data volume (`mysql-data`)
+- Each tenant's `db:encrypt-tables` command runs on startup to encrypt any pre-existing unencrypted tables
+
+**Copy the MySQL config to the shared directory:**
+
+```bash
+cp <repo>/docker/mysql.cnf /opt/shared/mysql.cnf
+```
+
+**Keyring backup:**
+
+The keyring file is critical — if lost, encrypted data is unrecoverable. Back it up separately from the database:
+
+```bash
+# Find the keyring volume mount
+docker volume inspect shared_mysql-keyring --format '{{ .Mountpoint }}'
+
+# Copy the keyring file to a secure backup location (NOT the same location as DB backups)
+cp /var/lib/docker/volumes/shared_mysql-keyring/_data/keyring /path/to/secure/backup/
+```
+
+Back up the keyring after initial setup and after any key rotation. Store it in a different location from your database backups (different cloud account, different physical location, or a password manager vault).
+
+**Existing servers:** If upgrading an existing shared-mysql instance, restart it after adding the config:
+
+```bash
+cd /opt/shared && docker compose up -d
+```
+
+Then each tenant's next deploy will run `db:encrypt-tables` to encrypt existing tables.
+
 ## 7. Create Tenants Directory
 
 ```bash
@@ -157,26 +194,48 @@ openssl req -x509 -new -key /opt/shared/qz/qz-private-key.pem \
   -subj "/CN=*.polybag.app"
 ```
 
-## 9. OAuth Callback Proxy (Optional)
+## 9. OAuth Broker (Optional)
 
-A shared OAuth proxy on `connect.<domain>` routes OAuth callbacks to the correct tenant. This avoids registering per-tenant callback URLs with each OAuth provider. Skip this if you don't need OAuth integrations.
+The OAuth broker (`connect.<domain>`) handles OAuth authorization code flows on behalf of all PolyBag instances (shared tenants and on-prem). It holds provider client credentials centrally so individual instances don't need them. Skip this if you don't need OAuth integrations.
+
+The broker is a separate Laravel app — see the [polybag-connect](https://github.com/niolson/polybag-connect) repo.
 
 ### Generate shared secret
 
 ```bash
-echo "OAUTH_PROXY_SECRET=$(openssl rand -hex 32)" > /opt/shared/oauth.env
-echo "OAUTH_PROXY_URL=https://connect.polybag.app" >> /opt/shared/oauth.env
+echo "OAUTH_BROKER_SECRET=$(openssl rand -hex 32)" > /opt/shared/oauth.env
 ```
 
-> Replace `polybag.app` with your domain suffix. The provisioning script reads this file and appends the values to each tenant's `.env`.
+> The provisioning script reads this file and sets `OAUTH_BROKER_SECRET`, `OAUTH_BROKER_URL`, and `OAUTH_INSTANCE_ID` in each tenant's `.env`.
 
-### Deploy the proxy
+### Deploy the broker
 
 ```bash
-cp -r <repo>/infra/oauth-proxy /opt/oauth-proxy
-grep '^OAUTH_PROXY_SECRET=' /opt/shared/oauth.env > /opt/oauth-proxy/.env
-cd /opt/oauth-proxy && docker compose up -d --build
+git clone https://github.com/niolson/polybag-connect.git /opt/polybag-connect
+cd /opt/polybag-connect
+cp .env.example .env
 ```
+
+Edit `/opt/polybag-connect/.env`:
+- Set `SHARED_TENANT_SECRET` to the value from `/opt/shared/oauth.env`
+- Set `REDIS_HOST=shared-redis` and `REDIS_PASSWORD` (from `/opt/shared/.env`)
+- Add provider credentials (`SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`, etc.)
+
+Build and start:
+
+```bash
+cd /opt/polybag-connect && docker compose up -d --build
+```
+
+### Register on-prem instances
+
+On-prem instances need individual secrets. Register them from inside the broker container:
+
+```bash
+docker exec -it polybag-connect-app-1 php artisan instance:register <instance-id>
+```
+
+This outputs a secret to give to the on-prem customer for their `.env`.
 
 ### Add Caddy route
 
@@ -184,7 +243,7 @@ Append to `/opt/caddy/Caddyfile`:
 
 ```
 connect.polybag.app {
-    reverse_proxy oauth-proxy:8080
+    reverse_proxy polybag-connect-app-1:8080
 }
 ```
 
@@ -197,8 +256,8 @@ docker compose -f /opt/caddy/docker-compose.yml exec caddy caddy reload --config
 ### Verify
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}" "https://connect.polybag.app/oauth/shopify/callback?state=garbage"
-# Should return 400
+curl -s -o /dev/null -w "%{http_code}" "https://connect.polybag.app/health"
+# Should return 200
 ```
 
 ## 10. Provision Tenants

@@ -17,6 +17,7 @@ if [ $count -ge 30 ]; then
 fi
 
 php artisan migrate --force
+php artisan db:encrypt-tables 2>/dev/null || true
 php artisan optimize
 
 exec php-fpm
