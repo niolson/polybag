@@ -42,7 +42,10 @@ function importTestSource(Collection $shipments, Collection $items = new Collect
             return [];
         }
 
-        public function markExported(string $shipmentReference): bool { return false; }
+        public function markExported(string $shipmentReference): bool
+        {
+            return false;
+        }
     };
 }
 

@@ -10,10 +10,38 @@ class OAuthCallbackController extends Controller
 {
     public function __construct(private readonly OAuthService $oauthService) {}
 
-    public function callback(Request $request, string $provider): RedirectResponse
+    /**
+     * Handle the broker's redirect back with a transfer code.
+     * Claims the tokens server-to-server and stores them.
+     */
+    public function receive(Request $request, string $provider): RedirectResponse
     {
+        // Handle error redirects from the broker
+        if ($request->has('error')) {
+            logger()->error("OAuth error for {$provider}", [
+                'error' => $request->input('error'),
+                'description' => $request->input('error_description'),
+            ]);
+
+            return redirect()->route('filament.app.pages.settings')
+                ->with('oauth_notification', [
+                    'status' => 'danger',
+                    'title' => 'Connection failed: '.($request->input('error_description') ?: $request->input('error')),
+                ]);
+        }
+
+        $transferCode = $request->input('transfer_code');
+
+        if (empty($transferCode)) {
+            return redirect()->route('filament.app.pages.settings')
+                ->with('oauth_notification', [
+                    'status' => 'danger',
+                    'title' => 'Connection failed: no transfer code received.',
+                ]);
+        }
+
         try {
-            $this->oauthService->handleCallback($provider, $request->query());
+            $this->oauthService->handleReceive($provider, $transferCode);
 
             return redirect()->route('filament.app.pages.settings')
                 ->with('oauth_notification', [
@@ -21,7 +49,7 @@ class OAuthCallbackController extends Controller
                     'title' => ucfirst($provider).' connected successfully.',
                 ]);
         } catch (\Throwable $e) {
-            logger()->error("OAuth callback failed for {$provider}", [
+            logger()->error("OAuth receive failed for {$provider}", [
                 'error' => $e->getMessage(),
             ]);
 

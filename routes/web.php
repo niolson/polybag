@@ -30,6 +30,6 @@ Route::get('/up', function () {
 
 Route::post('/qz/sign', [QzSignController::class, 'sign'])->name('qz.sign')->middleware(['auth', 'throttle:60,1']);
 
-Route::get('/oauth/{provider}/callback', [OAuthCallbackController::class, 'callback'])
-    ->name('oauth.callback')
+Route::get('/oauth/{provider}/receive', [OAuthCallbackController::class, 'receive'])
+    ->name('oauth.receive')
     ->middleware('auth');

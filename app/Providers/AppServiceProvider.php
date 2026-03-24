@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Http\Integrations\Shopify\ShopifyOAuthProvider;
+use App\Http\Integrations\Ups\UpsOAuthProvider;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
@@ -80,6 +81,7 @@ class AppServiceProvider extends ServiceProvider
 
         // Register OAuth providers
         app(OAuthProviderRegistry::class)->register(new ShopifyOAuthProvider);
+        app(OAuthProviderRegistry::class)->register(new UpsOAuthProvider);
 
         // Register API routes here (before Filament's catch-all at path('/'))
         // so they take priority over the panel's {any} wildcard route.

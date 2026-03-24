@@ -3,8 +3,8 @@
 namespace App\Services;
 
 use App\Models\Setting;
-use App\Support\OAuthStateEncoder;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use RuntimeException;
 
@@ -16,10 +16,7 @@ class OAuthService
     ) {}
 
     /**
-     * Generate the authorization URL and store state in session.
-     *
-     * When OAUTH_PROXY_URL is configured, the state is encrypted with the
-     * tenant's return URL so the proxy can route the callback back here.
+     * Generate the broker authorization URL and store nonce in session.
      */
     public function initiateAuthorization(string $providerKey): string
     {
@@ -29,83 +26,88 @@ class OAuthService
             throw new RuntimeException("Provider '{$providerKey}' does not support authorization code flow.");
         }
 
+        $brokerUrl = config('services.oauth.broker_url');
+        $brokerSecret = config('services.oauth.broker_secret');
+        $instanceId = config('services.oauth.instance_id');
+
+        if (! $brokerUrl || ! $brokerSecret || ! $instanceId) {
+            throw new RuntimeException('OAuth broker is not configured. Set OAUTH_BROKER_URL, OAUTH_BROKER_SECRET, and OAUTH_INSTANCE_ID.');
+        }
+
         $nonce = Str::random(40);
         session()->put("oauth_state.{$providerKey}", $nonce);
 
-        $proxyUrl = config('services.oauth.proxy_url');
-        $proxySecret = config('services.oauth.proxy_secret');
+        $returnUrl = config('app.url');
+        $signature = hash_hmac('sha256', "{$providerKey}:{$instanceId}:{$returnUrl}:{$nonce}", $brokerSecret);
 
-        if ($proxyUrl && $proxySecret) {
-            // Proxy mode: encrypt nonce + return URL into state
-            $state = OAuthStateEncoder::encode($nonce, config('app.url'), $proxySecret);
-            $redirectUri = rtrim($proxyUrl, '/')."/oauth/{$providerKey}/callback";
-        } else {
-            // Direct mode: plain nonce as state
-            $state = $nonce;
-            $redirectUri = null;
-        }
+        $params = array_filter([
+            'return_url' => $returnUrl,
+            'instance_id' => $instanceId,
+            'nonce' => $nonce,
+            'signature' => $signature,
+            ...$provider->getBrokerParams(),
+        ]);
 
-        return $provider->getAuthorizationUrl($state, $redirectUri);
+        return rtrim($brokerUrl, '/')."/oauth/{$providerKey}/authorize?".http_build_query($params);
     }
 
     /**
-     * Handle the OAuth callback: validate, exchange code, store tokens.
+     * Handle the broker's redirect back: claim tokens via server-to-server call.
      */
-    public function handleCallback(string $providerKey, array $params): void
+    public function handleReceive(string $providerKey, string $transferCode): void
     {
         $provider = $this->registry->get($providerKey);
 
-        // Extract the nonce from state — in proxy mode, the state is encrypted
-        $proxySecret = config('services.oauth.proxy_secret');
-        $actualState = $params['state'] ?? '';
+        $brokerUrl = config('services.oauth.broker_url');
+        $brokerSecret = config('services.oauth.broker_secret');
+        $instanceId = config('services.oauth.instance_id');
 
-        if ($proxySecret) {
-            $decoded = OAuthStateEncoder::decode($actualState, $proxySecret);
-            if (! $decoded) {
-                throw new RuntimeException('Failed to decrypt OAuth state. Check OAUTH_PROXY_SECRET.');
-            }
-            $actualNonce = $decoded['nonce'];
-        } else {
-            $actualNonce = $actualState;
+        $signature = hash_hmac('sha256', $transferCode, $brokerSecret);
+
+        $response = Http::post(rtrim($brokerUrl, '/').'/oauth/claim', [
+            'transfer_code' => $transferCode,
+            'instance_id' => $instanceId,
+            'signature' => $signature,
+        ]);
+
+        if (! $response->successful()) {
+            throw new RuntimeException('Failed to claim tokens from broker: '.$response->body());
         }
+
+        $data = $response->json();
 
         // Validate nonce to prevent CSRF
         $expectedNonce = session()->pull("oauth_state.{$providerKey}");
 
-        if (empty($expectedNonce) || ! hash_equals($expectedNonce, $actualNonce)) {
+        if (empty($expectedNonce) || ! hash_equals($expectedNonce, $data['nonce'] ?? '')) {
             throw new RuntimeException('OAuth state mismatch. Please try again.');
         }
 
-        // Provider-specific validation (e.g. Shopify HMAC) — runs against original unmodified params
-        $provider->validateCallback($params);
-
-        // Exchange code for token
-        $code = $params['code'] ?? '';
-        if (empty($code)) {
-            throw new RuntimeException('No authorization code received.');
-        }
-
-        $tokenData = $provider->exchangeCodeForToken($code, $params);
-
-        $accessToken = $tokenData['access_token'] ?? null;
+        $accessToken = $data['access_token'] ?? null;
         if (empty($accessToken)) {
-            throw new RuntimeException('No access token in provider response.');
+            throw new RuntimeException('No access token received from broker.');
         }
 
         // Store tokens in encrypted settings
         $group = $providerKey;
         $this->settings->set($provider->getTokenSettingsKey(), $accessToken, 'string', encrypted: true, group: $group);
 
-        if ($provider->getRefreshTokenSettingsKey() && ! empty($tokenData['refresh_token'])) {
-            $this->settings->set($provider->getRefreshTokenSettingsKey(), $tokenData['refresh_token'], 'string', encrypted: true, group: $group);
+        if ($provider->getRefreshTokenSettingsKey() && ! empty($data['refresh_token'])) {
+            $this->settings->set($provider->getRefreshTokenSettingsKey(), $data['refresh_token'], 'string', encrypted: true, group: $group);
+        }
+
+        // Store token expiry if provided
+        if (! empty($data['expires_in'])) {
+            $this->settings->set(
+                "{$providerKey}.oauth_token_expires_at",
+                now()->addSeconds((int) $data['expires_in'])->toIso8601String(),
+                group: $group,
+            );
         }
 
         // Store granted scopes and connection timestamp
-        $this->settings->set(
-            "{$providerKey}.oauth_scopes",
-            $tokenData['scope'] ?? implode(',', $provider->getScopes()),
-            group: $group,
-        );
+        $scopes = $data['extra']['scope'] ?? $data['scope'] ?? '';
+        $this->settings->set("{$providerKey}.oauth_scopes", $scopes, group: $group);
         $this->settings->set("{$providerKey}.oauth_connected_at", now()->toIso8601String(), group: $group);
 
         // Set auth mode to authorization_code
@@ -113,6 +115,67 @@ class OAuthService
 
         // Clear any cached client_credentials token for this provider
         Cache::forget("{$providerKey}_access_token");
+    }
+
+    /**
+     * Refresh an expired token via the broker.
+     *
+     * @return array{access_token: string, refresh_token: ?string, expires_in: ?int}
+     */
+    public function refreshToken(string $providerKey): array
+    {
+        $provider = $this->registry->get($providerKey);
+        $refreshTokenKey = $provider->getRefreshTokenSettingsKey();
+
+        if (! $refreshTokenKey) {
+            throw new RuntimeException("Provider '{$providerKey}' does not support token refresh.");
+        }
+
+        $refreshToken = $this->settings->get($refreshTokenKey);
+
+        if (empty($refreshToken)) {
+            throw new RuntimeException("No refresh token stored for '{$providerKey}'.");
+        }
+
+        $brokerUrl = config('services.oauth.broker_url');
+        $brokerSecret = config('services.oauth.broker_secret');
+        $instanceId = config('services.oauth.instance_id');
+
+        $signature = hash_hmac('sha256', $refreshToken, $brokerSecret);
+
+        $response = Http::post(rtrim($brokerUrl, '/')."/oauth/{$providerKey}/refresh", [
+            'refresh_token' => $refreshToken,
+            'instance_id' => $instanceId,
+            'signature' => $signature,
+        ]);
+
+        if (! $response->successful()) {
+            throw new RuntimeException('Token refresh failed: '.$response->body());
+        }
+
+        $data = $response->json();
+        $group = $providerKey;
+
+        // Update stored tokens
+        if (! empty($data['access_token'])) {
+            $this->settings->set($provider->getTokenSettingsKey(), $data['access_token'], 'string', encrypted: true, group: $group);
+        }
+
+        if (! empty($data['refresh_token'])) {
+            $this->settings->set($refreshTokenKey, $data['refresh_token'], 'string', encrypted: true, group: $group);
+        }
+
+        if (! empty($data['expires_in'])) {
+            $this->settings->set(
+                "{$providerKey}.oauth_token_expires_at",
+                now()->addSeconds((int) $data['expires_in'])->toIso8601String(),
+                group: $group,
+            );
+        }
+
+        $this->settings->clearCache();
+
+        return $data;
     }
 
     /**
@@ -138,6 +201,7 @@ class OAuthService
             $provider->getRefreshTokenSettingsKey(),
             "{$providerKey}.oauth_scopes",
             "{$providerKey}.oauth_connected_at",
+            "{$providerKey}.oauth_token_expires_at",
             "{$providerKey}.auth_mode",
         ]);
 

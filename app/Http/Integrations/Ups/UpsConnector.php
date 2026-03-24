@@ -5,7 +5,13 @@ namespace App\Http\Integrations\Ups;
 use App\Http\Integrations\Concerns\HasCachedAuthentication;
 use App\Http\Integrations\Concerns\RetriesTransientErrors;
 use App\Services\SettingsService;
+use Carbon\Carbon;
+use DateInterval;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use RuntimeException;
 use Saloon\Helpers\OAuth2\OAuthConfig;
+use Saloon\Http\Auth\TokenAuthenticator;
 use Saloon\Http\Connector;
 use Saloon\Traits\OAuth2\ClientCredentialsBasicAuthGrant;
 use Saloon\Traits\Plugins\HasTimeout;
@@ -59,5 +65,159 @@ class UpsConnector extends Connector
     protected static function getAuthenticatorCacheKey(): string
     {
         return 'ups_authenticator';
+    }
+
+    /**
+     * Get an authenticated connector, using OAuth token if connected via auth code flow,
+     * otherwise falling back to client credentials.
+     */
+    public static function getAuthenticatedConnector(): static
+    {
+        $settings = app(SettingsService::class);
+
+        if ($settings->get('ups.auth_mode') === 'authorization_code') {
+            return static::fromOAuthToken($settings);
+        }
+
+        // Client credentials flow (parent trait behavior)
+        return static::fromClientCredentials();
+    }
+
+    /**
+     * Client credentials flow — delegates to the HasCachedAuthentication trait.
+     */
+    private static function fromClientCredentials(): static
+    {
+        /** @phpstan-ignore new.static */
+        $connector = new static;
+        $cacheKey = static::getAuthenticatorCacheKey();
+
+        $authenticator = Cache::get($cacheKey);
+
+        if (! $authenticator) {
+            $authenticator = Cache::lock($cacheKey.':lock', 10)->block(5, function () use ($connector, $cacheKey) {
+                $cached = Cache::get($cacheKey);
+                if ($cached) {
+                    return $cached;
+                }
+
+                $authenticator = $connector->getAccessToken();
+
+                Cache::put(
+                    $cacheKey,
+                    $authenticator,
+                    $authenticator->getExpiresAt()->sub(DateInterval::createFromDateString('10 minutes'))
+                );
+
+                return $authenticator;
+            });
+        }
+
+        $connector->authenticate($authenticator);
+
+        return $connector;
+    }
+
+    /**
+     * OAuth authorization code flow — uses stored token with automatic refresh.
+     */
+    private static function fromOAuthToken(SettingsService $settings): static
+    {
+        /** @phpstan-ignore new.static */
+        $connector = new static;
+        $cacheKey = 'ups_oauth_token';
+
+        // Try cache first
+        $cachedToken = Cache::get($cacheKey);
+
+        if ($cachedToken) {
+            $connector->authenticate(new TokenAuthenticator($cachedToken));
+
+            return $connector;
+        }
+
+        // Cache miss — check stored token and refresh if needed
+        $token = Cache::lock($cacheKey.':lock', 10)->block(5, function () use ($settings, $cacheKey) {
+            // Double-check cache after acquiring lock
+            $cached = Cache::get($cacheKey);
+            if ($cached) {
+                return $cached;
+            }
+
+            $accessToken = $settings->get('ups.oauth_access_token');
+            $expiresAt = $settings->get('ups.oauth_token_expires_at');
+
+            if (! $accessToken) {
+                throw new RuntimeException('UPS OAuth token not found. Please reconnect via Settings.');
+            }
+
+            // If token is still valid (with 10-minute buffer), cache and use it
+            if ($expiresAt && Carbon::parse($expiresAt)->subMinutes(10)->isFuture()) {
+                $ttl = Carbon::parse($expiresAt)->subMinutes(10)->diffInSeconds(now());
+                Cache::put($cacheKey, $accessToken, (int) $ttl);
+
+                return $accessToken;
+            }
+
+            // Token expired — refresh it
+            return static::refreshOAuthToken($settings, $cacheKey);
+        });
+
+        $connector->authenticate(new TokenAuthenticator($token));
+
+        return $connector;
+    }
+
+    /**
+     * Refresh the OAuth access token using the stored refresh token.
+     */
+    private static function refreshOAuthToken(SettingsService $settings, string $cacheKey): string
+    {
+        $refreshToken = $settings->get('ups.oauth_refresh_token');
+
+        if (! $refreshToken) {
+            throw new RuntimeException('UPS refresh token not found. Please reconnect via Settings.');
+        }
+
+        $clientId = $settings->get('ups.client_id', config('services.ups.client_id'));
+        $clientSecret = $settings->get('ups.client_secret', config('services.ups.client_secret'));
+
+        $response = Http::withBasicAuth($clientId, $clientSecret)
+            ->asForm()
+            ->post('https://onlinetools.ups.com/security/v1/oauth/token', [
+                'grant_type' => 'refresh_token',
+                'refresh_token' => $refreshToken,
+            ]);
+
+        if (! $response->successful()) {
+            // Refresh failed — clear OAuth state so user can reconnect
+            logger()->error('UPS OAuth refresh failed', ['response' => $response->body()]);
+
+            throw new RuntimeException('UPS OAuth token refresh failed. Please reconnect via Settings.');
+        }
+
+        $data = $response->json();
+        $newAccessToken = $data['access_token'] ?? null;
+
+        if (! $newAccessToken) {
+            throw new RuntimeException('UPS token refresh response missing access_token.');
+        }
+
+        // Store new tokens
+        $settings->set('ups.oauth_access_token', $newAccessToken, 'string', encrypted: true, group: 'ups');
+
+        if (! empty($data['refresh_token'])) {
+            $settings->set('ups.oauth_refresh_token', $data['refresh_token'], 'string', encrypted: true, group: 'ups');
+        }
+
+        $expiresIn = (int) ($data['expires_in'] ?? 14400);
+        $expiresAt = now()->addSeconds($expiresIn)->toIso8601String();
+        $settings->set('ups.oauth_token_expires_at', $expiresAt, group: 'ups');
+
+        // Cache with 10-minute buffer
+        $cacheTtl = max($expiresIn - 600, 60);
+        Cache::put($cacheKey, $newAccessToken, $cacheTtl);
+
+        return $newAccessToken;
     }
 }

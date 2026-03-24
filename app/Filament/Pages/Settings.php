@@ -16,6 +16,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Actions;
+use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Form;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -123,8 +124,34 @@ class Settings extends Page
     /**
      * Build the Shopify credential fields, wrapped in a collapsible section for hosted mode.
      *
-     * @return array<\Filament\Schemas\Components\Component>
+     * @return array<Component>
      */
+    private function upsCredentialFields(): array
+    {
+        $fields = [
+            TextInput::make('ups_client_id')
+                ->label('Client ID')
+                ->password()
+                ->placeholder(fn () => $this->getCredentialPlaceholder('ups.client_id', 'services.ups.client_id')),
+            TextInput::make('ups_client_secret')
+                ->label('Client Secret')
+                ->password()
+                ->placeholder(fn () => $this->getCredentialPlaceholder('ups.client_secret', 'services.ups.client_secret')),
+        ];
+
+        if (config('services.oauth.broker_url')) {
+            return [
+                Section::make('Custom App Credentials')
+                    ->description('Override the shared OAuth credentials with your own UPS API credentials.')
+                    ->collapsed()
+                    ->schema($fields)
+                    ->columns(2),
+            ];
+        }
+
+        return $fields;
+    }
+
     private function shopifyCredentialFields(): array
     {
         $fields = [
@@ -138,7 +165,7 @@ class Settings extends Page
                 ->placeholder(fn () => $this->getCredentialPlaceholder('shopify.client_secret', 'services.shopify.client_secret')),
         ];
 
-        if (config('services.oauth.proxy_url')) {
+        if (config('services.oauth.broker_url')) {
             return [
                 Section::make('Custom App Credentials')
                     ->description('Override the shared OAuth credentials with a custom app created in your Shopify admin.')
@@ -149,6 +176,13 @@ class Settings extends Page
         }
 
         return $fields;
+    }
+
+    private function isBrokerConfigured(): bool
+    {
+        return config('services.oauth.broker_url')
+            && config('services.oauth.broker_secret')
+            && config('services.oauth.instance_id');
     }
 
     /**
@@ -295,31 +329,67 @@ class Settings extends Page
                         ->collapsed(),
 
                     Section::make('UPS Credentials')
-                        ->description('API credentials for UPS shipping services')
+                        ->description('Connect your UPS account via OAuth for rates and label generation.')
                         ->schema([
-                            TextInput::make('ups_client_id')
-                                ->label('Client ID')
-                                ->password()
-                                ->placeholder(fn () => $this->getCredentialPlaceholder('ups.client_id', 'services.ups.client_id')),
-                            TextInput::make('ups_client_secret')
-                                ->label('Client Secret')
-                                ->password()
-                                ->placeholder(fn () => $this->getCredentialPlaceholder('ups.client_secret', 'services.ups.client_secret')),
+                            Placeholder::make('ups_oauth_status')
+                                ->label('OAuth Status')
+                                ->content(function () {
+                                    $oauthService = app(OAuthService::class);
+                                    if ($oauthService->isConnected('ups')) {
+                                        $connectedAt = app(SettingsService::class)->get('ups.oauth_connected_at');
+                                        $time = $connectedAt ? Carbon::parse($connectedAt)->diffForHumans() : '';
+
+                                        return new HtmlString(
+                                            '<span class="font-medium text-success-600 dark:text-success-400">Connected via OAuth</span>'
+                                            .($time ? " &mdash; {$time}" : '')
+                                        );
+                                    }
+
+                                    return new HtmlString('<span class="text-gray-400">Not connected</span>');
+                                }),
                             TextInput::make('ups_account_number')
                                 ->label('Account Number')
                                 ->maxLength(50),
+
+                            ...$this->upsCredentialFields(),
+                        ])
+                        ->footerActions([
+                            Action::make('ups_connect')
+                                ->label(fn () => app(OAuthService::class)->isConnected('ups') ? 'Reconnect' : 'Connect with OAuth')
+                                ->icon('heroicon-o-link')
+                                ->color(fn () => app(OAuthService::class)->isConnected('ups') ? 'warning' : 'primary')
+                                ->disabled(fn () => ! $this->isBrokerConfigured())
+                                ->tooltip(fn () => ! $this->isBrokerConfigured() ? 'OAuth broker not configured. Set OAUTH_BROKER_URL, OAUTH_BROKER_SECRET, and OAUTH_INSTANCE_ID in .env.' : null)
+                                ->requiresConfirmation()
+                                ->modalHeading(fn () => app(OAuthService::class)->isConnected('ups') ? 'Reconnect UPS' : 'Connect UPS')
+                                ->modalDescription(fn () => app(OAuthService::class)->isConnected('ups')
+                                    ? 'This will replace the existing OAuth token with a new one. You will be redirected to UPS to re-authorize.'
+                                    : 'You will be redirected to UPS to authorize access.')
+                                ->action(function () {
+                                    $url = app(OAuthService::class)->initiateAuthorization('ups');
+                                    $this->redirect($url, navigate: false);
+                                }),
+                            Action::make('ups_disconnect')
+                                ->label('Disconnect')
+                                ->icon('heroicon-o-x-mark')
+                                ->color('danger')
+                                ->visible(fn () => app(OAuthService::class)->isConnected('ups'))
+                                ->requiresConfirmation()
+                                ->modalHeading('Disconnect UPS OAuth')
+                                ->modalDescription('This will remove the OAuth access token. You can reconnect anytime, or the app will fall back to client credentials if configured.')
+                                ->action(function () {
+                                    app(OAuthService::class)->disconnect('ups');
+                                    Notification::make()->success()->title('UPS disconnected.')->send();
+                                }),
                         ])
                         ->columns(2)
                         ->collapsed(),
 
                     Section::make('Shopify Integration')
-                        ->description(fn () => config('services.oauth.proxy_url')
-                            ? 'Connect your Shopify store via OAuth to import orders and export fulfillments.'
-                            : 'Credentials for importing orders from Shopify. Create a custom app in your Shopify admin to get these credentials.')
+                        ->description('Connect your Shopify store via OAuth to import orders and export fulfillments.')
                         ->schema([
                             Placeholder::make('shopify_oauth_status')
                                 ->label('OAuth Status')
-                                ->visible(fn () => (bool) config('services.oauth.proxy_url'))
                                 ->content(function () {
                                     $oauthService = app(OAuthService::class);
                                     if ($oauthService->isConnected('shopify')) {
@@ -345,8 +415,6 @@ class Settings extends Page
                                 ->placeholder('2025-01')
                                 ->maxLength(20),
 
-                            // Hosted (proxy mode): credentials in a collapsed section
-                            // On-prem (direct mode): credentials shown directly in parent section
                             ...$this->shopifyCredentialFields(),
                         ])
                         ->footerActions([
@@ -354,7 +422,8 @@ class Settings extends Page
                                 ->label(fn () => app(OAuthService::class)->isConnected('shopify') ? 'Reconnect' : 'Connect with OAuth')
                                 ->icon('heroicon-o-link')
                                 ->color(fn () => app(OAuthService::class)->isConnected('shopify') ? 'warning' : 'primary')
-                                ->visible(fn () => (bool) config('services.oauth.proxy_url'))
+                                ->disabled(fn () => ! $this->isBrokerConfigured())
+                                ->tooltip(fn () => ! $this->isBrokerConfigured() ? 'OAuth broker not configured. Set OAUTH_BROKER_URL, OAUTH_BROKER_SECRET, and OAUTH_INSTANCE_ID in .env.' : null)
                                 ->requiresConfirmation()
                                 ->modalHeading(fn () => app(OAuthService::class)->isConnected('shopify') ? 'Reconnect Shopify' : 'Connect Shopify')
                                 ->modalDescription(fn () => app(OAuthService::class)->isConnected('shopify')
@@ -368,7 +437,7 @@ class Settings extends Page
                                 ->label('Disconnect')
                                 ->icon('heroicon-o-x-mark')
                                 ->color('danger')
-                                ->visible(fn () => config('services.oauth.proxy_url') && app(OAuthService::class)->isConnected('shopify'))
+                                ->visible(fn () => app(OAuthService::class)->isConnected('shopify'))
                                 ->requiresConfirmation()
                                 ->modalHeading('Disconnect Shopify OAuth')
                                 ->modalDescription('This will remove the OAuth access token. You can reconnect anytime, or the app will fall back to client credentials if configured.')
@@ -505,6 +574,7 @@ class Settings extends Page
             Cache::forget('usps_payment_authorization_token');
             Cache::forget('fedex_authenticator');
             Cache::forget('ups_authenticator');
+            Cache::forget('ups_oauth_token');
             Cache::forget('amazon_sp_api_access_token');
             Cache::forget('shopify_access_token');
         }

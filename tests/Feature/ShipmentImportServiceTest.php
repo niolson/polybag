@@ -43,7 +43,10 @@ function fakeSource(Collection $shipments, Collection $items = new Collection): 
             return [];
         }
 
-        public function markExported(string $shipmentReference): bool { return false; }
+        public function markExported(string $shipmentReference): bool
+        {
+            return false;
+        }
     };
 }
 

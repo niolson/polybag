@@ -68,8 +68,9 @@ return [
     ],
 
     'oauth' => [
-        'proxy_url' => env('OAUTH_PROXY_URL'),
-        'proxy_secret' => env('OAUTH_PROXY_SECRET'),
+        'broker_url' => env('OAUTH_BROKER_URL'),
+        'broker_secret' => env('OAUTH_BROKER_SECRET'),
+        'instance_id' => env('OAUTH_INSTANCE_ID'),
     ],
 
     'amazon' => [

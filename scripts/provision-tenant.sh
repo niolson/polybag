@@ -207,23 +207,18 @@ else
     info "Generate one after setup: docker compose exec -it app php artisan app:generate-qz-cert"
 fi
 
-# --- Shared OAuth Proxy ---
+# --- Shared OAuth Broker ---
 
 if [ -f "${SHARED_DIR}/oauth.env" ]; then
-    info "Adding shared OAuth proxy configuration..."
+    info "Adding shared OAuth broker configuration..."
 
-    # Set proxy URL and secret
-    OAUTH_SECRET=$(grep '^OAUTH_PROXY_SECRET=' "${SHARED_DIR}/oauth.env" | cut -d= -f2-)
-    [ -n "$OAUTH_SECRET" ] && sed -i "s|^OAUTH_PROXY_SECRET=.*|OAUTH_PROXY_SECRET=${OAUTH_SECRET}|" .env
-    sed -i "s|^OAUTH_PROXY_URL=.*|OAUTH_PROXY_URL=https://connect.${DEFAULT_DOMAIN_SUFFIX}|" .env
+    # Set broker URL, secret, and instance ID
+    OAUTH_SECRET=$(grep '^OAUTH_BROKER_SECRET=' "${SHARED_DIR}/oauth.env" | cut -d= -f2-)
+    [ -n "$OAUTH_SECRET" ] && sed -i "s|^OAUTH_BROKER_SECRET=.*|OAUTH_BROKER_SECRET=${OAUTH_SECRET}|" .env
+    sed -i "s|^OAUTH_BROKER_URL=.*|OAUTH_BROKER_URL=https://connect.${DEFAULT_DOMAIN_SUFFIX}|" .env
+    sed -i "s|^OAUTH_INSTANCE_ID=.*|OAUTH_INSTANCE_ID=${TENANT}.${DEFAULT_DOMAIN_SUFFIX}|" .env
 
-    # Set shared OAuth app credentials (sed replaces empty values from .env.example)
-    SHOPIFY_CID=$(grep '^SHOPIFY_CLIENT_ID=' "${SHARED_DIR}/oauth.env" | cut -d= -f2-)
-    SHOPIFY_SEC=$(grep '^SHOPIFY_CLIENT_SECRET=' "${SHARED_DIR}/oauth.env" | cut -d= -f2-)
-    [ -n "$SHOPIFY_CID" ] && sed -i "s|^SHOPIFY_CLIENT_ID=.*|SHOPIFY_CLIENT_ID=${SHOPIFY_CID}|" .env
-    [ -n "$SHOPIFY_SEC" ] && sed -i "s|^SHOPIFY_CLIENT_SECRET=.*|SHOPIFY_CLIENT_SECRET=${SHOPIFY_SEC}|" .env
-
-    ok "OAuth proxy configuration added."
+    ok "OAuth broker configuration added."
 else
     info "No shared OAuth config found at ${SHARED_DIR}/oauth.env (skipping)."
 fi
