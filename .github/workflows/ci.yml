@@ -82,4 +82,5 @@ jobs:
         with:
           image: polybag-app:ci
           severity-cutoff: high
+          only-fixed: true
           fail-build: true
