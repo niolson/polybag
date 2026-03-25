@@ -101,8 +101,9 @@ class Settings extends Page
             'batch_shipping_enabled' => app(SettingsService::class)->get('batch_shipping_enabled', true),
             'manual_shipping_enabled' => app(SettingsService::class)->get('manual_shipping_enabled', true),
             'carrier_api_timeout' => app(SettingsService::class)->get('carrier_api_timeout', 15),
-            'audit_log_retention_days' => app(SettingsService::class)->get('audit_log_retention_days', 90),
+            'audit_log_retention_days' => app(SettingsService::class)->get('audit_log_retention_days', 365),
             'rate_quote_retention_days' => app(SettingsService::class)->get('rate_quote_retention_days', 60),
+            'pii_retention_days' => app(SettingsService::class)->get('pii_retention_days', 90),
             'archiving_enabled' => app(SettingsService::class)->get('archiving_enabled', false),
             'archive_retention_days' => app(SettingsService::class)->get('archive_retention_days', 365),
             'sandbox_mode' => app(SettingsService::class)->get('sandbox_mode', false),
@@ -262,7 +263,7 @@ class Settings extends Page
                                 ->numeric()
                                 ->minValue(0)
                                 ->maxValue(3650)
-                                ->default(90)
+                                ->default(365)
                                 ->suffix('days'),
                             TextInput::make('rate_quote_retention_days')
                                 ->label('Rate Quote Retention')
@@ -271,6 +272,14 @@ class Settings extends Page
                                 ->minValue(0)
                                 ->maxValue(3650)
                                 ->default(60)
+                                ->suffix('days'),
+                            TextInput::make('pii_retention_days')
+                                ->label('PII Retention (default)')
+                                ->helperText('Days to keep recipient PII (name, address, phone, email) after shipping. Per-channel overrides can be set on each channel. Set to 0 to disable.')
+                                ->numeric()
+                                ->minValue(0)
+                                ->maxValue(3650)
+                                ->default(90)
                                 ->suffix('days'),
                             Toggle::make('archiving_enabled')
                                 ->label('Shipment Archiving')
@@ -517,8 +526,9 @@ class Settings extends Page
             'batch_shipping_enabled' => $data['batch_shipping_enabled'] ?? true,
             'manual_shipping_enabled' => $data['manual_shipping_enabled'] ?? true,
             'carrier_api_timeout' => (int) ($data['carrier_api_timeout'] ?? 15),
-            'audit_log_retention_days' => (int) ($data['audit_log_retention_days'] ?? 90),
+            'audit_log_retention_days' => (int) ($data['audit_log_retention_days'] ?? 365),
             'rate_quote_retention_days' => (int) ($data['rate_quote_retention_days'] ?? 60),
+            'pii_retention_days' => (int) ($data['pii_retention_days'] ?? 90),
             'archiving_enabled' => (bool) ($data['archiving_enabled'] ?? false),
             'archive_retention_days' => (int) ($data['archive_retention_days'] ?? 365),
             'sandbox_mode' => $sandboxMode,

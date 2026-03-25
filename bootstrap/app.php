@@ -27,6 +27,11 @@ return Application::configure(basePath: dirname(__DIR__))
             ->dailyAt('01:00')
             ->withoutOverlapping();
 
+        // Purge PII from shipped shipments past retention period
+        $schedule->command('shipments:purge-pii')
+            ->dailyAt('01:30')
+            ->withoutOverlapping();
+
         // Archive old shipped shipments (checks if archiving is enabled)
         $schedule->command('shipments:archive')
             ->weeklyOn(Schedule::SUNDAY, '02:00')

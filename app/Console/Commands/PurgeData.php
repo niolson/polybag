@@ -27,7 +27,7 @@ class PurgeData extends Command
     private function purgeAuditLogs(SettingsService $settings): void
     {
         $days = (int) ($this->option('days')
-            ?? $settings->get('audit_log_retention_days', 90));
+            ?? $settings->get('audit_log_retention_days', 365));
 
         if ($days === 0) {
             $this->info('Audit log retention is set to 0 (keep forever). Skipping.');

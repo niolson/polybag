@@ -14,10 +14,12 @@ class Channel extends Model
         'name',
         'icon',
         'active',
+        'pii_retention_days',
     ];
 
     protected $casts = [
         'active' => 'boolean',
+        'pii_retention_days' => 'integer',
     ];
 
     public function shipments(): HasMany
