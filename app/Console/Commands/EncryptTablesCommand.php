@@ -14,7 +14,7 @@ class EncryptTablesCommand extends Command
     public function handle(): int
     {
         $tables = DB::select("
-            SELECT table_name, create_options
+            SELECT table_name AS `table_name`, create_options AS `create_options`
             FROM information_schema.tables
             WHERE table_schema = DATABASE()
             AND engine = 'InnoDB'
