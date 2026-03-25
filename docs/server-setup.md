@@ -182,7 +182,70 @@ Then each tenant's next deploy will run `db:encrypt-tables` to encrypt existing 
 mkdir -p /opt/tenants
 ```
 
-## 8. Generate Wildcard QZ Tray Certificate (Optional)
+## 8. Database Backups
+
+Automated daily backups to S3-compatible storage (Hetzner Object Storage, AWS S3, etc.).
+
+### Install AWS CLI
+
+```bash
+apt install -y awscli
+```
+
+### Configure credentials
+
+```bash
+cp <repo>/infra/backup.env.example /opt/shared/backup.env
+nano /opt/shared/backup.env  # set S3_ACCESS_KEY, S3_SECRET_KEY
+```
+
+### Test the backup
+
+```bash
+/opt/tenants/<any-tenant>/scripts/backup-db.sh
+```
+
+This will dump all `polybag_*` databases, compress them, and upload to the S3 bucket. You can also back up a single database:
+
+```bash
+/opt/tenants/<any-tenant>/scripts/backup-db.sh polybag_acme
+```
+
+### Schedule daily backups
+
+```bash
+crontab -e
+# Add:
+0 3 * * * /opt/tenants/<any-tenant>/scripts/backup-db.sh >> /var/log/polybag-backup.log 2>&1
+```
+
+Runs daily at 03:00 UTC. Old backups are automatically pruned after `BACKUP_RETENTION_DAYS` (default 30).
+
+### Keyring backup
+
+The MySQL keyring file should also be backed up to S3. Add this to the same crontab:
+
+```bash
+5 3 * * * docker cp shared-mysql:/var/lib/mysql-keyring/keyring /tmp/keyring && \
+  AWS_ACCESS_KEY_ID=$(grep S3_ACCESS_KEY /opt/shared/backup.env | cut -d= -f2-) \
+  AWS_SECRET_ACCESS_KEY=$(grep S3_SECRET_KEY /opt/shared/backup.env | cut -d= -f2-) \
+  aws s3 cp /tmp/keyring s3://polybag/backups/keyring/keyring-$(date +\%Y-\%m-\%d) \
+  --endpoint-url https://hel1.your-objectstorage.com && rm /tmp/keyring
+```
+
+### Restore from backup
+
+```bash
+# Download the backup
+aws s3 cp s3://polybag/backups/db/polybag_acme_2026-03-25_030000.sql.gz /tmp/ \
+  --endpoint-url https://hel1.your-objectstorage.com
+
+# Restore
+gunzip -c /tmp/polybag_acme_2026-03-25_030000.sql.gz | \
+  docker exec -i shared-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" polybag_acme
+```
+
+## 9. Generate Wildcard QZ Tray Certificate (Optional)
 
 For `*.polybag.app` tenants, a shared QZ Tray signing certificate avoids generating one per tenant:
 
@@ -194,7 +257,7 @@ openssl req -x509 -new -key /opt/shared/qz/qz-private-key.pem \
   -subj "/CN=*.polybag.app"
 ```
 
-## 9. OAuth Broker (Optional)
+## 10. OAuth Broker (Optional)
 
 The OAuth broker (`connect.<domain>`) handles OAuth authorization code flows on behalf of all PolyBag instances (shared tenants and on-prem). It holds provider client credentials centrally so individual instances don't need them. Skip this if you don't need OAuth integrations.
 
@@ -260,7 +323,7 @@ curl -s -o /dev/null -w "%{http_code}" "https://connect.polybag.app/health"
 # Should return 200
 ```
 
-## 10. Provision Tenants
+## 11. Provision Tenants
 
 ### Shared mode (default)
 
