@@ -78,9 +78,8 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Scan app image for CVEs
-        uses: docker/scout-action@v1
+        uses: anchore/scan-action@v6
         with:
-          command: cves
-          image: local://polybag-app:ci
-          only-severities: critical,high
-          exit-code: true
+          image: polybag-app:ci
+          severity-cutoff: high
+          fail-build: true
