@@ -35,6 +35,12 @@ jobs:
       - name: Build assets
         run: npm run build
 
+      - name: Audit PHP dependencies
+        run: composer audit
+
+      - name: Audit npm dependencies
+        run: npm audit
+
       - name: Run tests
         run: php artisan test
         env:
@@ -56,6 +62,8 @@ jobs:
         with:
           context: .
           target: app
+          tags: polybag-app:ci
+          load: true
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -68,3 +76,11 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Scan app image for CVEs
+        uses: docker/scout-action@v1
+        with:
+          command: cves
+          image: local://polybag-app:ci
+          only-severities: critical,high
+          exit-code: true
