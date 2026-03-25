@@ -81,7 +81,7 @@ Create `/opt/caddy/docker-compose.yml`:
 ```yaml
 services:
   caddy:
-    image: caddy:alpine
+    image: caddy:alpine@sha256:a1b7e624f860619cea121bdbc5dec2e112401666298c6507c6793b0a3ee6fc8e
     restart: unless-stopped
     ports:
       - "80:80"

@@ -6,7 +6,7 @@
 
 services:
   shared-mysql:
-    image: mysql:8.4
+    image: mysql:8.4@sha256:77e7fd3d377ad2d9e7983d457b71ff8a04c0f19e41948d722f15c508a48dcce3
     container_name: shared-mysql
     restart: unless-stopped
     environment:
@@ -24,7 +24,7 @@ services:
       retries: 5
 
   shared-redis:
-    image: redis:alpine
+    image: redis:alpine@sha256:883c7c980a2ff698f71c95cada99f968a54483ce5baad707b65877cfe0c98f1c
     container_name: shared-redis
     restart: unless-stopped
     command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory 256mb --maxmemory-policy allkeys-lru
