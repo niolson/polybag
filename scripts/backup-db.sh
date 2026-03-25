@@ -69,15 +69,35 @@ export AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY"
 TOTAL=0
 FAILED=0
 
+ENCRYPTION_KEY="${BACKUP_ENCRYPTION_KEY:-}"
+
 for DB in $DATABASES; do
-    FILENAME="${DB}_${DATE}.sql.gz"
+    if [ -n "$ENCRYPTION_KEY" ]; then
+        FILENAME="${DB}_${DATE}.sql.gz.enc"
+    else
+        FILENAME="${DB}_${DATE}.sql.gz"
+    fi
     FILEPATH="${TMPDIR}/${FILENAME}"
 
     echo "Backing up ${DB}..."
 
-    if docker exec "$MYSQL_CONTAINER" mysqldump -uroot -p"$MYSQL_ROOT_PASS" \
+    if [ -n "$ENCRYPTION_KEY" ]; then
+        # Dump, compress, and encrypt
+        if ! docker exec "$MYSQL_CONTAINER" mysqldump -uroot -p"$MYSQL_ROOT_PASS" \
+            --single-transaction --routines --triggers "$DB" 2>/dev/null \
+            | gzip | openssl enc -aes-256-cbc -pbkdf2 -pass env:BACKUP_ENCRYPTION_KEY -out "$FILEPATH" 2>/dev/null; then
+            echo "  ERROR: Failed to dump ${DB}"
+            FAILED=$((FAILED + 1))
+            continue
+        fi
+    elif ! docker exec "$MYSQL_CONTAINER" mysqldump -uroot -p"$MYSQL_ROOT_PASS" \
         --single-transaction --routines --triggers "$DB" 2>/dev/null | gzip > "$FILEPATH"; then
+        echo "  ERROR: Failed to dump ${DB}"
+        FAILED=$((FAILED + 1))
+        continue
+    fi
 
+    if [ -s "$FILEPATH" ]; then
         SIZE=$(du -h "$FILEPATH" | cut -f1)
 
         if aws s3 cp "$FILEPATH" "s3://${S3_BUCKET}/${S3_PREFIX}/${FILENAME}" \

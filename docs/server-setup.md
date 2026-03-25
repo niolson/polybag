@@ -233,14 +233,29 @@ The MySQL keyring file should also be backed up to S3. Add this to the same cron
   --endpoint-url https://hel1.your-objectstorage.com && rm /tmp/keyring
 ```
 
+### Backup encryption
+
+Backups are optionally encrypted with AES-256 before upload. To enable, generate a key and add it to `backup.env`:
+
+```bash
+echo "BACKUP_ENCRYPTION_KEY=$(openssl rand -hex 32)" >> /opt/shared/backup.env
+```
+
+Store this key in a password manager — if lost, encrypted backups are unrecoverable.
+
 ### Restore from backup
 
 ```bash
 # Download the backup
-aws s3 cp s3://polybag/backups/db/polybag_acme_2026-03-25_030000.sql.gz /tmp/ \
+aws s3 cp s3://polybag/backups/db/polybag_acme_2026-03-25_030000.sql.gz.enc /tmp/ \
   --endpoint-url https://hel1.your-objectstorage.com
 
-# Restore
+# Restore (encrypted backup)
+openssl enc -aes-256-cbc -pbkdf2 -d -pass pass:"$BACKUP_ENCRYPTION_KEY" \
+  -in /tmp/polybag_acme_2026-03-25_030000.sql.gz.enc | gunzip | \
+  docker exec -i shared-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" polybag_acme
+
+# Restore (unencrypted backup)
 gunzip -c /tmp/polybag_acme_2026-03-25_030000.sql.gz | \
   docker exec -i shared-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" polybag_acme
 ```
