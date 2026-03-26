@@ -366,6 +366,49 @@ scripts/provision-tenant.sh --mode standalone acme
 
 See `scripts/provision-tenant.sh` for details.
 
+## Google SSO Setup
+
+Google SSO allows users to sign in with their Google account instead of a password. All installs (hosted and on-prem) use the same Google Cloud project (`polybag-login`) but separate OAuth client IDs.
+
+### For hosted tenants
+
+The shared client ID is already configured. Just add the tenant's redirect URI:
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com) > APIs & Services > Credentials
+2. Click the **polybag-hosted** OAuth client ID
+3. Add `https://{tenant}.polybag.app/auth/google/callback` to Authorized redirect URIs
+4. Save
+
+The tenant enables SSO via Settings > Single Sign-On > Google SSO toggle.
+
+### For on-prem customers
+
+Create a separate OAuth client ID for each on-prem customer (so the secret stays under your control):
+
+1. Go to Google Cloud Console > APIs & Services > Credentials
+2. Click **Create Credentials** > OAuth client ID > Web application
+3. Name: customer name (e.g. "Acme Corp")
+4. Authorized redirect URI: `https://{customer-domain}/auth/google/callback`
+5. Copy the **Client ID** and **Client Secret**
+
+Send the customer:
+- `GOOGLE_CLIENT_ID` — the client ID
+- `GOOGLE_CLIENT_SECRET` — the client secret
+
+They add these to their `.env` file. SSO is then enabled via Settings.
+
+### Credentials to send on-prem customers
+
+| Credential | Where it goes | How to get it |
+|---|---|---|
+| `GOOGLE_CLIENT_ID` | `.env` | Create in Google Console (per customer) |
+| `GOOGLE_CLIENT_SECRET` | `.env` | Created with the client ID |
+| `OAUTH_BROKER_SECRET` | `.env` | From `instance:register` command (if using OAuth broker) |
+| `OAUTH_BROKER_URL` | `.env` | `https://connect.polybag.app` (if using OAuth broker) |
+| `OAUTH_INSTANCE_ID` | `.env` | Generated during instance registration |
+
+Google SSO and OAuth broker credentials are independent — a customer can use one, both, or neither.
+
 ## On-Premise Installation
 
 For single-tenant on-premise deployments (no Caddy, direct port access):
