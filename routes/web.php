@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Auth\GoogleController;
 use App\Http\Controllers\OAuthCallbackController;
 use App\Http\Controllers\QzSignController;
 use Illuminate\Support\Facades\DB;
@@ -33,3 +34,6 @@ Route::post('/qz/sign', [QzSignController::class, 'sign'])->name('qz.sign')->mid
 Route::get('/oauth/{provider}/receive', [OAuthCallbackController::class, 'receive'])
     ->name('oauth.receive')
     ->middleware('auth');
+
+Route::get('/auth/google/redirect', [GoogleController::class, 'redirect'])->name('auth.google.redirect');
+Route::get('/auth/google/callback', [GoogleController::class, 'callback'])->name('auth.google.callback');

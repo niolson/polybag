@@ -30,15 +30,21 @@ class UserResource extends Resource
                 Forms\Components\TextInput::make('name')
                     ->required()
                     ->maxLength(255),
-                Forms\Components\TextInput::make('username')
-                    ->required()
+                Forms\Components\TextInput::make('email')
+                    ->email()
+                    ->unique(ignoreRecord: true)
                     ->maxLength(255),
+                Forms\Components\TextInput::make('username')
+                    ->unique(ignoreRecord: true)
+                    ->maxLength(255)
+                    ->helperText('Optional if email is provided.'),
                 Forms\Components\TextInput::make('password')
                     ->password()
                     ->dehydrateStateUsing(fn (string $state): string => Hash::make($state))
                     ->dehydrated(fn (?string $state): bool => filled($state))
                     ->required(fn (string $operation): bool => $operation === 'create')
-                    ->maxLength(255),
+                    ->maxLength(255)
+                    ->helperText('Leave empty for SSO-only users (no local password).'),
                 Forms\Components\Select::make('role')
                     ->options(Role::class)
                     ->required(),
@@ -52,6 +58,8 @@ class UserResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('name')
+                    ->searchable(),
+                Tables\Columns\TextColumn::make('email')
                     ->searchable(),
                 Tables\Columns\TextColumn::make('username')
                     ->searchable(),

@@ -23,20 +23,30 @@ class CreateUser extends Command
             required: true,
         );
 
+        $email = text(
+            label: 'Email',
+            validate: fn (string $value) => match (true) {
+                ! empty($value) && ! filter_var($value, FILTER_VALIDATE_EMAIL) => 'Invalid email address.',
+                ! empty($value) && User::where('email', $value)->exists() => 'Email already exists.',
+                default => null,
+            },
+        );
+
         $username = text(
-            label: 'Username',
-            required: true,
-            validate: fn (string $value) => User::where('username', $value)->exists()
+            label: 'Username (optional if email provided)',
+            validate: fn (string $value) => ! empty($value) && User::where('username', $value)->exists()
                 ? 'Username already exists.'
                 : null,
         );
 
-        $password = password(
-            label: 'Password',
-            required: true,
-            validate: fn (string $value) => strlen($value) < 8
-                ? 'Password must be at least 8 characters.'
-                : null,
+        if (empty($email) && empty($username)) {
+            $this->error('Either email or username is required.');
+
+            return self::FAILURE;
+        }
+
+        $pw = password(
+            label: 'Password (leave empty for SSO-only)',
         );
 
         $role = select(
@@ -45,14 +55,16 @@ class CreateUser extends Command
             default: Role::User->value,
         );
 
-        User::create([
+        User::create(array_filter([
             'name' => $name,
-            'username' => $username,
-            'password' => $password,
+            'email' => $email ?: null,
+            'username' => $username ?: null,
+            'password' => $pw ?: null,
             'role' => $role,
-        ]);
+        ]));
 
-        $this->info("User '{$username}' created successfully.");
+        $identifier = $email ?: $username;
+        $this->info("User '{$identifier}' created successfully.");
 
         return self::SUCCESS;
     }

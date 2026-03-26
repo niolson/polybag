@@ -15,8 +15,10 @@ class User extends Authenticatable implements FilamentUser
 
     protected $fillable = [
         'name',
+        'email',
         'username',
         'password',
+        'password_changed_at',
         'role',
         'active',
     ];
@@ -30,9 +32,30 @@ class User extends Authenticatable implements FilamentUser
     {
         return [
             'password' => 'hashed',
+            'password_changed_at' => 'datetime',
             'role' => Role::class,
             'active' => 'boolean',
         ];
+    }
+
+    /**
+     * Track password changes automatically.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (User $user) {
+            if ($user->isDirty('password') && $user->password !== null) {
+                $user->password_changed_at = now();
+            }
+        });
+    }
+
+    /**
+     * Whether this user has a local password (vs SSO-only).
+     */
+    public function hasLocalPassword(): bool
+    {
+        return $this->password !== null;
     }
 
     public function canAccessPanel(Panel $panel): bool

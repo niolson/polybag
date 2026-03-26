@@ -82,4 +82,10 @@ return [
         'marketplace_id' => env('AMAZON_SP_API_MARKETPLACE_ID', 'ATVPDKIKX0DER'),
     ],
 
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect' => '/auth/google/callback',
+    ],
+
 ];

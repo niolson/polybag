@@ -106,6 +106,12 @@ class Settings extends Page
             'pii_retention_days' => app(SettingsService::class)->get('pii_retention_days', 90),
             'archiving_enabled' => app(SettingsService::class)->get('archiving_enabled', false),
             'archive_retention_days' => app(SettingsService::class)->get('archive_retention_days', 365),
+            'password_min_length' => app(SettingsService::class)->get('password_min_length', 8),
+            'password_require_mixed_case' => app(SettingsService::class)->get('password_require_mixed_case', true),
+            'password_require_numbers' => app(SettingsService::class)->get('password_require_numbers', true),
+            'password_require_symbols' => app(SettingsService::class)->get('password_require_symbols', false),
+            'password_expiration_days' => app(SettingsService::class)->get('password_expiration_days', 0),
+            'google_sso_enabled' => app(SettingsService::class)->get('google_sso_enabled', false),
             'sandbox_mode' => app(SettingsService::class)->get('sandbox_mode', false),
             'suppress_printing' => app(SettingsService::class)->get('suppress_printing', false),
 
@@ -251,6 +257,49 @@ class Settings extends Page
                                 ->maxValue(60)
                                 ->default(15)
                                 ->suffix('seconds'),
+                        ])
+                        ->columns(1),
+
+                    Section::make('Password Policy')
+                        ->description('Password requirements for local accounts')
+                        ->schema([
+                            TextInput::make('password_min_length')
+                                ->label('Minimum Length')
+                                ->numeric()
+                                ->minValue(8)
+                                ->maxValue(128)
+                                ->default(8)
+                                ->suffix('characters'),
+                            Toggle::make('password_require_mixed_case')
+                                ->label('Require Mixed Case')
+                                ->helperText('Require at least one uppercase and one lowercase letter.')
+                                ->default(true),
+                            Toggle::make('password_require_numbers')
+                                ->label('Require Numbers')
+                                ->helperText('Require at least one numeric character.')
+                                ->default(true),
+                            Toggle::make('password_require_symbols')
+                                ->label('Require Symbols')
+                                ->helperText('Require at least one special character.')
+                                ->default(false),
+                            TextInput::make('password_expiration_days')
+                                ->label('Password Expiration')
+                                ->helperText('Force users to change passwords after this many days. Set to 0 to disable.')
+                                ->numeric()
+                                ->minValue(0)
+                                ->maxValue(3650)
+                                ->default(0)
+                                ->suffix('days'),
+                        ])
+                        ->columns(2),
+
+                    Section::make('Single Sign-On')
+                        ->description('Allow users to sign in with external identity providers')
+                        ->schema([
+                            Toggle::make('google_sso_enabled')
+                                ->label('Google SSO')
+                                ->helperText('Show "Sign in with Google" button on the login page. Requires Google OAuth credentials in .env.')
+                                ->default(false),
                         ])
                         ->columns(1),
 
@@ -531,6 +580,12 @@ class Settings extends Page
             'pii_retention_days' => (int) ($data['pii_retention_days'] ?? 90),
             'archiving_enabled' => (bool) ($data['archiving_enabled'] ?? false),
             'archive_retention_days' => (int) ($data['archive_retention_days'] ?? 365),
+            'password_min_length' => (int) ($data['password_min_length'] ?? 8),
+            'password_require_mixed_case' => (bool) ($data['password_require_mixed_case'] ?? true),
+            'password_require_numbers' => (bool) ($data['password_require_numbers'] ?? true),
+            'password_require_symbols' => (bool) ($data['password_require_symbols'] ?? false),
+            'password_expiration_days' => (int) ($data['password_expiration_days'] ?? 0),
+            'google_sso_enabled' => (bool) ($data['google_sso_enabled'] ?? false),
             'sandbox_mode' => $sandboxMode,
             'suppress_printing' => $suppressPrinting,
         ];
