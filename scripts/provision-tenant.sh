@@ -223,6 +223,20 @@ else
     info "No shared OAuth config found at ${SHARED_DIR}/oauth.env (skipping)."
 fi
 
+# --- Shared Google SSO ---
+
+GOOGLE_CID=$(grep '^GOOGLE_CLIENT_ID=' "${SHARED_DIR}/.env" 2>/dev/null | cut -d= -f2-)
+GOOGLE_SEC=$(grep '^GOOGLE_CLIENT_SECRET=' "${SHARED_DIR}/.env" 2>/dev/null | cut -d= -f2-)
+
+if [ -n "$GOOGLE_CID" ] && [ -n "$GOOGLE_SEC" ]; then
+    info "Adding shared Google SSO credentials..."
+    sed -i "s|^GOOGLE_CLIENT_ID=.*|GOOGLE_CLIENT_ID=${GOOGLE_CID}|" .env
+    sed -i "s|^GOOGLE_CLIENT_SECRET=.*|GOOGLE_CLIENT_SECRET=${GOOGLE_SEC}|" .env
+    ok "Google SSO credentials added. Remember to register https://${TENANT}.${DEFAULT_DOMAIN_SUFFIX}/auth/google/callback in Google Console."
+else
+    info "No Google SSO credentials in ${SHARED_DIR}/.env (skipping)."
+fi
+
 # --- Build & Start ---
 
 info "Building and starting containers (${MODE} mode)..."
