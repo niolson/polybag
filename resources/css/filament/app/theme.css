@@ -285,11 +285,11 @@
    LOGIN PAGE — Outside @layer for higher specificity
    ═══════════════════════════════════════════════ */
 body.fi-body:has(.fi-simple-layout) {
-    background: #1a1f2e !important;
+    background: rgb(241 245 249) !important;
 }
 
 .fi-simple-layout {
-    background: #1a1f2e !important;
+    background: rgb(241 245 249) !important;
     min-height: 100vh;
     position: relative;
 }
@@ -302,15 +302,7 @@ body.fi-body:has(.fi-simple-layout) {
 .fi-simple-main {
     background: white;
     border-radius: 0.75rem;
-    box-shadow: 0 20px 60px -15px rgba(0, 0, 0, 0.3);
-}
-
-.fi-simple-header {
-    color: rgba(255, 255, 255, 0.9) !important;
-}
-
-.fi-simple-header-heading {
-    color: rgba(255, 255, 255, 0.65) !important;
+    box-shadow: 0 20px 60px -15px rgba(0, 0, 0, 0.1);
 }
 
 .fi-simple-layout::before {
@@ -318,8 +310,8 @@ body.fi-body:has(.fi-simple-layout) {
     position: fixed;
     inset: 0;
     background-image:
-        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        linear-gradient(rgb(226 232 240 / 0.5) 1px, transparent 1px),
+        linear-gradient(90deg, rgb(226 232 240 / 0.5) 1px, transparent 1px);
     background-size: 48px 48px;
     pointer-events: none;
     z-index: 0;
@@ -333,7 +325,7 @@ body.fi-body:has(.fi-simple-layout) {
     transform: translateX(-50%);
     width: 600px;
     height: 400px;
-    background: radial-gradient(ellipse, rgba(13, 148, 136, 0.15) 0%, transparent 70%);
+    background: radial-gradient(ellipse, rgba(13, 148, 136, 0.1) 0%, transparent 70%);
     pointer-events: none;
     z-index: 0;
 }
@@ -341,4 +333,60 @@ body.fi-body:has(.fi-simple-layout) {
 .fi-simple-layout > * {
     position: relative;
     z-index: 1;
+}
+
+/* Dark mode login — class-based (logged-in user override) */
+.dark body.fi-body:has(.fi-simple-layout),
+body.fi-body.dark:has(.fi-simple-layout) {
+    background: #0f1219 !important;
+}
+
+.dark .fi-simple-layout,
+body.fi-body.dark .fi-simple-layout {
+    background: #0f1219 !important;
+}
+
+.dark .fi-simple-main,
+body.fi-body.dark .fi-simple-main {
+    background: rgb(30 41 59);
+    box-shadow: 0 20px 60px -15px rgba(0, 0, 0, 0.5);
+}
+
+.dark .fi-simple-layout::before,
+body.fi-body.dark .fi-simple-layout::before {
+    background-image:
+        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}
+
+/* Dark mode login — system preference (login page, no session) */
+@media (prefers-color-scheme: dark) {
+    body.fi-body:has(.fi-simple-layout) {
+        background: #0f1219 !important;
+    }
+
+    .fi-simple-layout {
+        background: #0f1219 !important;
+    }
+
+    .fi-simple-main {
+        background: rgb(30 41 59);
+        box-shadow: 0 20px 60px -15px rgba(0, 0, 0, 0.5);
+    }
+
+    .fi-simple-layout::before {
+        background-image:
+            linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    }
+}
+
+/* Stack login form actions vertically */
+.fi-simple-main .fi-ac {
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+.fi-simple-main .fi-ac > .fi-btn {
+    width: 100% !important;
 }

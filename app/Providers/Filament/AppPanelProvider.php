@@ -33,7 +33,7 @@ class AppPanelProvider extends PanelProvider
             ->viteTheme('resources/css/filament/app/theme.css')
             ->login(Login::class)
             ->font('DM Sans')
-            ->defaultThemeMode(ThemeMode::Light)
+            ->defaultThemeMode(ThemeMode::System)
             ->colors([
                 'primary' => '#0d9488',
                 'gray' => Color::Slate,
