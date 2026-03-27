@@ -36,9 +36,10 @@ reboot
 
 If using a cloud provider firewall (Hetzner, DigitalOcean, etc.), allow inbound on:
 
-- **22** (SSH)
-- **80** (HTTP)
-- **443** (HTTPS)
+- **22/tcp** (SSH)
+- **80/tcp** (HTTP)
+- **443/tcp** (HTTPS)
+- **443/udp** (HTTP/3 / QUIC)
 
 Block everything else.
 
