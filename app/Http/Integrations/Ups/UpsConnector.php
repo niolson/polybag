@@ -8,7 +8,6 @@ use App\Services\SettingsService;
 use Carbon\Carbon;
 use DateInterval;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
 use RuntimeException;
 use Saloon\Helpers\OAuth2\OAuthConfig;
 use Saloon\Http\Auth\TokenAuthenticator;
@@ -169,52 +168,20 @@ class UpsConnector extends Connector
     }
 
     /**
-     * Refresh the OAuth access token using the stored refresh token.
+     * Refresh the OAuth access token via the broker.
      */
     private static function refreshOAuthToken(SettingsService $settings, string $cacheKey): string
     {
-        $refreshToken = $settings->get('ups.oauth_refresh_token');
+        $data = app(\App\Services\OAuthService::class)->refreshToken('ups');
 
-        if (! $refreshToken) {
-            throw new RuntimeException('UPS refresh token not found. Please reconnect via Settings.');
-        }
-
-        $clientId = $settings->get('ups.client_id', config('services.ups.client_id'));
-        $clientSecret = $settings->get('ups.client_secret', config('services.ups.client_secret'));
-
-        $response = Http::withBasicAuth($clientId, $clientSecret)
-            ->asForm()
-            ->post('https://onlinetools.ups.com/security/v1/oauth/token', [
-                'grant_type' => 'refresh_token',
-                'refresh_token' => $refreshToken,
-            ]);
-
-        if (! $response->successful()) {
-            // Refresh failed — clear OAuth state so user can reconnect
-            logger()->error('UPS OAuth refresh failed', ['response' => $response->body()]);
-
-            throw new RuntimeException('UPS OAuth token refresh failed. Please reconnect via Settings.');
-        }
-
-        $data = $response->json();
         $newAccessToken = $data['access_token'] ?? null;
 
         if (! $newAccessToken) {
             throw new RuntimeException('UPS token refresh response missing access_token.');
         }
 
-        // Store new tokens
-        $settings->set('ups.oauth_access_token', $newAccessToken, 'string', encrypted: true, group: 'ups');
-
-        if (! empty($data['refresh_token'])) {
-            $settings->set('ups.oauth_refresh_token', $data['refresh_token'], 'string', encrypted: true, group: 'ups');
-        }
-
-        $expiresIn = (int) ($data['expires_in'] ?? 14400);
-        $expiresAt = now()->addSeconds($expiresIn)->toIso8601String();
-        $settings->set('ups.oauth_token_expires_at', $expiresAt, group: 'ups');
-
         // Cache with 10-minute buffer
+        $expiresIn = (int) ($data['expires_in'] ?? 14400);
         $cacheTtl = max($expiresIn - 600, 60);
         Cache::put($cacheKey, $newAccessToken, $cacheTtl);
 

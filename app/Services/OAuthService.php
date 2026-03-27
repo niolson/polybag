@@ -105,6 +105,15 @@ class OAuthService
             );
         }
 
+        // Store refresh token expiry if provided (e.g. UPS)
+        if (! empty($data['refresh_token_expires_in'])) {
+            $this->settings->set(
+                "{$providerKey}.oauth_refresh_token_expires_at",
+                now()->addSeconds((int) $data['refresh_token_expires_in'])->toIso8601String(),
+                group: $group,
+            );
+        }
+
         // Store granted scopes and connection timestamp
         $scopes = $data['extra']['scope'] ?? $data['scope'] ?? '';
         $this->settings->set("{$providerKey}.oauth_scopes", $scopes, group: $group);
@@ -135,6 +144,13 @@ class OAuthService
 
         if (empty($refreshToken)) {
             throw new RuntimeException("No refresh token stored for '{$providerKey}'.");
+        }
+
+        // Check if refresh token has expired
+        $refreshExpiresAt = $this->settings->get("{$providerKey}.oauth_refresh_token_expires_at");
+        if ($refreshExpiresAt && now()->greaterThan($refreshExpiresAt)) {
+            logger()->warning("{$providerKey} refresh token expired", ['expired_at' => $refreshExpiresAt]);
+            throw new RuntimeException(ucfirst($providerKey).' refresh token has expired. Please reconnect via Settings.');
         }
 
         $brokerUrl = config('services.oauth.broker_url');
@@ -173,6 +189,14 @@ class OAuthService
             );
         }
 
+        if (! empty($data['refresh_token_expires_in'])) {
+            $this->settings->set(
+                "{$providerKey}.oauth_refresh_token_expires_at",
+                now()->addSeconds((int) $data['refresh_token_expires_in'])->toIso8601String(),
+                group: $group,
+            );
+        }
+
         $this->settings->clearCache();
 
         return $data;
@@ -202,6 +226,7 @@ class OAuthService
             "{$providerKey}.oauth_scopes",
             "{$providerKey}.oauth_connected_at",
             "{$providerKey}.oauth_token_expires_at",
+            "{$providerKey}.oauth_refresh_token_expires_at",
             "{$providerKey}.auth_mode",
         ]);
 

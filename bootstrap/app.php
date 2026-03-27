@@ -36,6 +36,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('shipments:archive')
             ->weeklyOn(Schedule::SUNDAY, '02:00')
             ->withoutOverlapping();
+
+        // Proactively refresh OAuth tokens to prevent expiry
+        $schedule->command('oauth:refresh')
+            ->weeklyOn(Schedule::WEDNESDAY, '03:00')
+            ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->trustProxies(at: '*');

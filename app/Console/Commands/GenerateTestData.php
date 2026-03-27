@@ -456,6 +456,7 @@ class GenerateTestData extends Command
                     'length' => round(mt_rand(200, 2000) / 100, 2),
                     'cost' => $pkgShipped ? round(mt_rand((int) ($service['costMin'] * 100), (int) ($service['costMax'] * 100)) / 100, 2) : null,
                     'status' => $pkgShipped ? 'shipped' : 'unshipped',
+                    'ship_date' => $pkgShipped ? substr($shippedAt, 0, 10) : null,
                     'shipped_at' => $shippedAt,
                     'shipped_by_user_id' => $pkgShipped ? $this->userIds[array_rand($this->userIds)] : null,
                     'exported' => $pkgShipped && mt_rand(1, 2) === 1,
