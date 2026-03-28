@@ -5,7 +5,7 @@ namespace App\Notifications;
 use App\Enums\LabelBatchStatus;
 use App\Filament\Resources\LabelBatchResource;
 use App\Models\LabelBatch;
-use Filament\Notifications\Actions\Action;
+use Filament\Actions\Action;
 use Filament\Notifications\Notification as FilamentNotification;
 use Illuminate\Notifications\Notification;
 
