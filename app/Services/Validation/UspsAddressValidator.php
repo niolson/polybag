@@ -199,14 +199,21 @@ class UspsAddressValidator implements AddressValidationInterface
     protected function applyValidatedAddress(Shipment $shipment, array $response): void
     {
         $dpv = $response['additionalInfo']['DPVConfirmation'] ?? '';
+        $carrierRoute = $response['additionalInfo']['carrierRoute'] ?? '';
 
-        [$deliverability, $message] = match ($dpv) {
-            'Y' => [Deliverability::Yes, 'Address confirmed deliverable'],
-            'D' => [Deliverability::Maybe, 'Primary address confirmed, secondary number missing'],
-            'S' => [Deliverability::Maybe, 'Primary address confirmed, secondary number not confirmed'],
-            'N' => [Deliverability::No, 'Address found but not confirmed as deliverable'],
-            default => [Deliverability::No, 'DPV confirmation not available'],
-        };
+        // Phantom routes (R777–R779) are physical addresses that USPS cannot deliver to
+        if (in_array($carrierRoute, ['R777', 'R778', 'R779'])) {
+            $deliverability = Deliverability::No;
+            $message = 'Address exists but is not deliverable (phantom route)';
+        } else {
+            [$deliverability, $message] = match ($dpv) {
+                'Y' => [Deliverability::Yes, 'Address confirmed deliverable'],
+                'D' => [Deliverability::Maybe, 'Primary address confirmed, secondary number missing'],
+                'S' => [Deliverability::Maybe, 'Primary address confirmed, secondary number not confirmed'],
+                'N' => [Deliverability::No, 'Address found but not confirmed as deliverable'],
+                default => [Deliverability::No, 'DPV confirmation not available'],
+            };
+        }
 
         $shipment->deliverability = $deliverability;
         $shipment->validation_message = $message;
