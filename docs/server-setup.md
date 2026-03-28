@@ -410,6 +410,84 @@ They add these to their `.env` file. SSO is then enabled via Settings.
 
 Google SSO and OAuth broker credentials are independent — a customer can use one, both, or neither.
 
+## Database Import via SSH Tunnel
+
+When importing shipments from a customer's database that is behind a firewall or not directly accessible, use the built-in SSH tunnel support.
+
+### 1. Generate a keypair on the PolyBag server
+
+```bash
+ssh-keygen -t ed25519 -f /opt/ssh-keys/customer-name -N "" -C "polybag-import"
+```
+
+Send the **public key** (`/opt/ssh-keys/customer-name.pub`) to the customer.
+
+### 2. Customer setup (their server)
+
+The customer creates a restricted SSH user that can only tunnel to their database:
+
+```bash
+# Create a user with no shell access
+sudo useradd -m -s /usr/sbin/nologin polybag
+sudo mkdir -p /home/polybag/.ssh
+sudo chmod 700 /home/polybag/.ssh
+
+# Add the public key with restrictions
+echo 'no-pty,no-X11-forwarding,no-agent-forwarding,permitopen="127.0.0.1:3306" ssh-ed25519 AAAA... polybag-import' \
+  | sudo tee /home/polybag/.ssh/authorized_keys
+sudo chmod 600 /home/polybag/.ssh/authorized_keys
+sudo chown -R polybag:polybag /home/polybag/.ssh
+```
+
+The `permitopen` directive restricts the tunnel to only forward to the database. Adjust the host and port to match where MySQL/SQL Server/etc. is listening. If the database is on a different host from the SSH server (e.g. a bastion host), use that internal IP instead of `127.0.0.1`.
+
+### 3. Configure the PolyBag instance
+
+Add to the tenant's `.env`:
+
+```bash
+# Import database connection
+SHIPMENT_IMPORT_DB_DRIVER=mysql
+SHIPMENT_IMPORT_DB_HOST=db.customer.internal   # The DB host (used as tunnel remote target)
+SHIPMENT_IMPORT_DB_PORT=3306
+SHIPMENT_IMPORT_DB_DATABASE=orders
+SHIPMENT_IMPORT_DB_USERNAME=readonly_user
+SHIPMENT_IMPORT_DB_PASSWORD=secret
+
+# SSH tunnel
+SHIPMENT_IMPORT_SSH_ENABLED=true
+SHIPMENT_IMPORT_SSH_HOST=bastion.customer.com   # SSH host to connect to
+SHIPMENT_IMPORT_SSH_USER=polybag
+SHIPMENT_IMPORT_SSH_KEY=/opt/ssh-keys/customer-name
+
+# Optional: override the tunnel's remote side (defaults to DB_HOST:DB_PORT)
+# Use when the DB host in DB_HOST is not reachable from the SSH server
+# (e.g. DB_HOST is a DNS name that only resolves externally)
+# SHIPMENT_IMPORT_SSH_REMOTE_HOST=127.0.0.1
+# SHIPMENT_IMPORT_SSH_REMOTE_PORT=3306
+```
+
+When `SSH_REMOTE_HOST` is not set, the tunnel forwards to `DB_HOST:DB_PORT` as seen from the SSH server. Set `SSH_REMOTE_HOST=127.0.0.1` when the database runs on the same machine as the SSH server.
+
+### 4. Test the connection
+
+```bash
+php artisan shipments:import --dry-run
+```
+
+### How it works
+
+The tunnel opens automatically when the import runs, forwards a random local port through SSH to the remote database, and closes when the import finishes. No persistent tunnel or background service is needed.
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `Permission denied (publickey,password)` | Key not installed or wrong permissions on remote | Check `authorized_keys` exists, permissions are `600`, owned by the SSH user |
+| `Connection refused` on SSH | SSH not running or wrong port | Verify `SHIPMENT_IMPORT_SSH_HOST` and `SSH_PORT` |
+| `Cannot connect to import database` | Tunnel opened but DB rejected connection | Check `DB_USERNAME`/`DB_PASSWORD`, and that the DB allows connections from `127.0.0.1` (or whatever `SSH_REMOTE_HOST` is set to) |
+| `SSH tunnel timed out` | Firewall blocking SSH or `permitopen` mismatch | Check that the SSH port is open and `permitopen` in `authorized_keys` matches the DB host:port |
+
 ## On-Premise Installation
 
 For single-tenant on-premise deployments (no Caddy, direct port access):

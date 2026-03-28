@@ -35,6 +35,20 @@ return [
             'connection' => env('SHIPMENT_IMPORT_DB_CONNECTION', 'import'),
             'enabled' => env('SHIPMENT_IMPORT_DATABASE_ENABLED', true),
 
+            // SSH tunnel: connect to the import DB through an SSH bastion host
+            // remote_host/remote_port override what the tunnel connects to on the
+            // remote side (defaults to DB host/port from the connection config).
+            // Set remote_host to 127.0.0.1 when the DB runs on the SSH host itself.
+            'ssh' => [
+                'enabled' => env('SHIPMENT_IMPORT_SSH_ENABLED', false),
+                'host' => env('SHIPMENT_IMPORT_SSH_HOST'),
+                'port' => env('SHIPMENT_IMPORT_SSH_PORT', 22),
+                'user' => env('SHIPMENT_IMPORT_SSH_USER'),
+                'key' => env('SHIPMENT_IMPORT_SSH_KEY'),
+                'remote_host' => env('SHIPMENT_IMPORT_SSH_REMOTE_HOST'),
+                'remote_port' => env('SHIPMENT_IMPORT_SSH_REMOTE_PORT'),
+            ],
+
             // Table names
             'shipments_table' => env('SHIPMENT_IMPORT_SHIPMENTS_TABLE', 'shipments'),
             'shipment_items_table' => env('SHIPMENT_IMPORT_ITEMS_TABLE', 'shipment_items'),
