@@ -58,4 +58,8 @@ function something()
 
 uses()->beforeEach(function (): void {
     Location::factory()->default()->create();
+    \App\Models\Setting::updateOrCreate(
+        ['key' => 'setup_complete'],
+        ['value' => '1', 'type' => 'boolean', 'group' => 'system'],
+    );
 })->in('Feature', 'Unit');
