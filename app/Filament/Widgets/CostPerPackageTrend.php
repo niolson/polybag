@@ -15,7 +15,7 @@ class CostPerPackageTrend extends ChartWidget
 
     protected static ?int $sort = 0;
 
-    protected int|string|array $columnSpan = 'full';
+    protected int|string|array $columnSpan = 1;
 
     protected ?string $pollingInterval = '60s';
 
