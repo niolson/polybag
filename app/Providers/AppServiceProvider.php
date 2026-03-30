@@ -8,10 +8,8 @@ use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\Location;
-use App\Models\Package;
 use App\Models\Product;
 use App\Models\Setting;
-use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\ShippingRule;
 use App\Models\User;
@@ -31,8 +29,6 @@ use App\Services\SettingsService;
 use App\Services\ShippingRateService;
 use App\Services\Validation\FakeAddressValidator;
 use App\Services\Validation\UspsAddressValidator;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -82,50 +78,6 @@ class AppServiceProvider extends ServiceProvider
         // Register OAuth providers
         app(OAuthProviderRegistry::class)->register(new ShopifyOAuthProvider);
         app(OAuthProviderRegistry::class)->register(new UpsOAuthProvider);
-
-        // Register API routes here (before Filament's catch-all at path('/'))
-        // so they take priority over the panel's {any} wildcard route.
-        Route::prefix('api')->group(function () {
-            if (app()->environment(['local', 'testing'])) {
-                Route::get('/health', function () {
-                    $healthy = true;
-
-                    try {
-                        DB::connection()->getPdo();
-                    } catch (\Throwable) {
-                        $healthy = false;
-                    }
-
-                    return response()->json([
-                        'status' => $healthy ? 'ok' : 'degraded',
-                        'fake_carriers' => (bool) config('app.fake_carriers'),
-                    ], $healthy ? 200 : 503);
-                });
-            }
-
-            if (app()->environment('local') && config('app.fake_carriers')) {
-                Route::post('/test/create-package', function () {
-                    $shipment = Shipment::whereDoesntHave('packages', fn ($q) => $q->whereNotNull('shipped_at'))
-                        ->whereNotNull('postal_code')
-                        ->first();
-
-                    abort_unless($shipment, 422, 'No shippable shipment found');
-
-                    $boxSize = BoxSize::first();
-
-                    $package = Package::create([
-                        'shipment_id' => $shipment->id,
-                        'box_size_id' => $boxSize?->id,
-                        'weight' => 1.5,
-                        'length' => $boxSize?->length ?? 10,
-                        'width' => $boxSize?->width ?? 8,
-                        'height' => $boxSize?->height ?? 4,
-                    ]);
-
-                    return response()->json(['package_id' => $package->id]);
-                });
-            }
-        });
 
         if (config('app.fake_carriers')) {
             $registry = app(CarrierRegistry::class);
