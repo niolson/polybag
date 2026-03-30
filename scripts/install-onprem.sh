@@ -170,6 +170,14 @@ openssl req -x509 -new -key storage/app/private/qz-private-key.pem \
 chmod 644 storage/app/private/qz-private-key.pem
 ok "QZ Tray certificate generated for ${QZ_DOMAIN}."
 
+# --- Generate SSH keypair for import tunneling ---
+
+info "Generating SSH keypair for import tunneling..."
+mkdir -p storage/app/private/ssh
+ssh-keygen -t ed25519 -f storage/app/private/ssh/id_ed25519 -N "" -q -C "polybag-import"
+chmod 600 storage/app/private/ssh/id_ed25519
+ok "SSH keypair generated."
+
 # --- Restart to pick up new key ---
 
 info "Restarting app with new key..."

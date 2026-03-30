@@ -91,7 +91,7 @@ class SshTunnel
         $status = proc_get_status($this->process);
 
         if ($status['running']) {
-            posix_kill($status['pid'], SIGTERM);
+            posix_kill($status['pid'], 15); // SIGTERM
         }
 
         proc_close($this->process);

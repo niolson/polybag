@@ -4,6 +4,7 @@ namespace App\Services\ShipmentImport\Sources;
 
 use App\Contracts\ExportDestinationInterface;
 use App\Contracts\ImportSourceInterface;
+use App\Services\SettingsService;
 use App\Services\ShipmentImport\FieldMapper;
 use App\Services\SshTunnel;
 use Illuminate\Support\Collection;
@@ -20,8 +21,55 @@ class DatabaseSource implements ExportDestinationInterface, ImportSourceInterfac
 
     public function __construct(array $config)
     {
-        $this->config = $config;
-        $this->fieldMapper = new FieldMapper($config['field_mapping'] ?? []);
+        $this->config = self::resolveConfigFromSettings($config);
+        $this->fieldMapper = new FieldMapper($this->config['field_mapping'] ?? []);
+    }
+
+    /**
+     * Merge settings-based config over env/config values.
+     * Settings take priority; env/config is the fallback.
+     */
+    private static function resolveConfigFromSettings(array $config): array
+    {
+        $settings = app(SettingsService::class);
+
+        // Check if any settings-based DB config exists
+        $dbHost = $settings->get('import.db_host');
+        if ($dbHost !== null) {
+            $connection = $config['connection'] ?? 'import';
+
+            config([
+                "database.connections.{$connection}.driver" => $settings->get('import.db_driver') ?? config("database.connections.{$connection}.driver"),
+                "database.connections.{$connection}.host" => $dbHost,
+                "database.connections.{$connection}.port" => $settings->get('import.db_port') ?? config("database.connections.{$connection}.port"),
+                "database.connections.{$connection}.database" => $settings->get('import.db_database') ?? config("database.connections.{$connection}.database"),
+                "database.connections.{$connection}.username" => $settings->get('import.db_username') ?? config("database.connections.{$connection}.username"),
+                "database.connections.{$connection}.password" => $settings->get('import.db_password') ?? config("database.connections.{$connection}.password"),
+            ]);
+
+            DB::purge($connection);
+        }
+
+        // Override SSH config from settings if present
+        $sshEnabled = $settings->get('import.ssh_enabled');
+        if ($sshEnabled !== null) {
+            $sshHost = $settings->get('import.ssh_host') ?: ($config['ssh']['host'] ?? null);
+            $sshUser = $settings->get('import.ssh_user') ?: ($config['ssh']['user'] ?? null);
+            $remoteHost = $settings->get('import.ssh_remote_host') ?: ($config['ssh']['remote_host'] ?? null);
+            $remotePort = $settings->get('import.ssh_remote_port') ?: ($config['ssh']['remote_port'] ?? null);
+
+            $config['ssh'] = [
+                'enabled' => $sshEnabled,
+                'host' => $sshHost,
+                'port' => (int) ($settings->get('import.ssh_port') ?: ($config['ssh']['port'] ?? 22)),
+                'user' => $sshUser,
+                'key' => storage_path('app/private/ssh/id_ed25519'),
+                'remote_host' => $remoteHost,
+                'remote_port' => $remotePort,
+            ];
+        }
+
+        return $config;
     }
 
     /**

@@ -207,6 +207,11 @@ else
     info "Generate one after setup: docker compose exec -it app php artisan app:generate-qz-cert"
 fi
 
+# --- SSH Key for Import Tunneling ---
+info "Generating SSH keypair for import tunneling..."
+docker compose exec app php artisan app:generate-ssh-key --force
+ok "SSH keypair generated."
+
 # --- Shared OAuth Broker ---
 
 if [ -f "${SHARED_DIR}/oauth.env" ]; then

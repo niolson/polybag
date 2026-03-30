@@ -44,7 +44,7 @@ return [
                 'host' => env('SHIPMENT_IMPORT_SSH_HOST'),
                 'port' => env('SHIPMENT_IMPORT_SSH_PORT', 22),
                 'user' => env('SHIPMENT_IMPORT_SSH_USER'),
-                'key' => env('SHIPMENT_IMPORT_SSH_KEY'),
+                'key' => env('SHIPMENT_IMPORT_SSH_KEY', storage_path('app/private/ssh/id_ed25519')),
                 'remote_host' => env('SHIPMENT_IMPORT_SSH_REMOTE_HOST'),
                 'remote_port' => env('SHIPMENT_IMPORT_SSH_REMOTE_PORT'),
             ],

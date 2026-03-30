@@ -7,10 +7,12 @@ use App\Models\Location;
 use App\Models\Setting;
 use App\Services\OAuthService;
 use App\Services\SettingsService;
+use App\Services\SshTunnel;
 use BackedEnum;
 use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -22,6 +24,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\HtmlString;
 use UnitEnum;
 
@@ -67,6 +70,7 @@ class Settings extends Page
         'amazon_client_id' => 'amazon.client_id',
         'amazon_client_secret' => 'amazon.client_secret',
         'amazon_refresh_token' => 'amazon.refresh_token',
+        'import_db_password' => 'import.db_password',
     ];
 
     /**
@@ -82,6 +86,16 @@ class Settings extends Page
         'shopify_shop_domain' => 'shopify.shop_domain',
         'shopify_api_version' => 'shopify.api_version',
         'amazon_marketplace_id' => 'amazon.marketplace_id',
+        'import_db_driver' => 'import.db_driver',
+        'import_db_host' => 'import.db_host',
+        'import_db_port' => 'import.db_port',
+        'import_db_database' => 'import.db_database',
+        'import_db_username' => 'import.db_username',
+        'import_ssh_host' => 'import.ssh_host',
+        'import_ssh_port' => 'import.ssh_port',
+        'import_ssh_user' => 'import.ssh_user',
+        'import_ssh_remote_host' => 'import.ssh_remote_host',
+        'import_ssh_remote_port' => 'import.ssh_remote_port',
     ];
 
     public function mount(): void
@@ -123,6 +137,20 @@ class Settings extends Page
             'shopify_shop_domain' => app(SettingsService::class)->get('shopify.shop_domain', config('services.shopify.shop_domain', '')),
             'shopify_api_version' => app(SettingsService::class)->get('shopify.api_version', config('services.shopify.api_version', '2025-01')),
             'amazon_marketplace_id' => app(SettingsService::class)->get('amazon.marketplace_id', config('services.amazon.marketplace_id', 'ATVPDKIKX0DER')),
+
+            // Database import
+            'import_db_driver' => app(SettingsService::class)->get('import.db_driver', config('database.connections.import.driver', 'mysql')),
+            'import_db_host' => app(SettingsService::class)->get('import.db_host', config('database.connections.import.host', '')),
+            'import_db_port' => app(SettingsService::class)->get('import.db_port', config('database.connections.import.port', '')),
+            'import_db_database' => app(SettingsService::class)->get('import.db_database', config('database.connections.import.database', '')),
+            'import_db_username' => app(SettingsService::class)->get('import.db_username', config('database.connections.import.username', '')),
+            'import_ssh_enabled' => (bool) app(SettingsService::class)->get('import.ssh_enabled', false),
+            'import_ssh_host' => app(SettingsService::class)->get('import.ssh_host', ''),
+            'import_ssh_port' => app(SettingsService::class)->get('import.ssh_port', '22'),
+            'import_ssh_user' => app(SettingsService::class)->get('import.ssh_user', ''),
+            'import_ssh_remote_host' => app(SettingsService::class)->get('import.ssh_remote_host', ''),
+            'import_ssh_remote_port' => app(SettingsService::class)->get('import.ssh_remote_port', ''),
+            'ssh_public_key' => $this->getSshPublicKey(),
 
             // Encrypted fields are left empty — placeholder shows status
         ]);
@@ -530,6 +558,73 @@ class Settings extends Page
                         ->columns(2)
                         ->collapsed(),
 
+                    Section::make('Database Import')
+                        ->description('Configure the external database connection for importing shipments. These settings override any SHIPMENT_IMPORT_DB_* environment variables.')
+                        ->schema([
+                            Select::make('import_db_driver')
+                                ->label('Driver')
+                                ->options([
+                                    'mysql' => 'MySQL / MariaDB',
+                                    'pgsql' => 'PostgreSQL',
+                                    'sqlsrv' => 'SQL Server',
+                                    'sqlite' => 'SQLite',
+                                ])
+                                ->default('mysql'),
+                            TextInput::make('import_db_host')
+                                ->label('Host'),
+                            TextInput::make('import_db_port')
+                                ->label('Port'),
+                            TextInput::make('import_db_database')
+                                ->label('Database'),
+                            TextInput::make('import_db_username')
+                                ->label('Username'),
+                            TextInput::make('import_db_password')
+                                ->label('Password')
+                                ->password()
+                                ->revealable()
+                                ->placeholder(fn () => $this->getCredentialPlaceholder('import.db_password', 'database.connections.import.password')),
+                            Toggle::make('import_ssh_enabled')
+                                ->label('Connect via SSH Tunnel')
+                                ->columnSpanFull()
+                                ->live(),
+                            TextInput::make('import_ssh_host')
+                                ->label('SSH Host')
+                                ->visible(fn (Get $get) => (bool) $get('import_ssh_enabled')),
+                            TextInput::make('import_ssh_port')
+                                ->label('SSH Port')
+                                ->default('22')
+                                ->visible(fn (Get $get) => (bool) $get('import_ssh_enabled')),
+                            TextInput::make('import_ssh_user')
+                                ->label('SSH User')
+                                ->visible(fn (Get $get) => (bool) $get('import_ssh_enabled')),
+                            TextInput::make('import_ssh_remote_host')
+                                ->label('Remote Host')
+                                ->helperText('DB host as seen from the SSH server. Leave blank to use the DB host above.')
+                                ->visible(fn (Get $get) => (bool) $get('import_ssh_enabled')),
+                            TextInput::make('import_ssh_remote_port')
+                                ->label('Remote Port')
+                                ->helperText('DB port as seen from the SSH server. Leave blank to use the DB port above.')
+                                ->visible(fn (Get $get) => (bool) $get('import_ssh_enabled')),
+                            TextInput::make('ssh_public_key')
+                                ->label('SSH Public Key')
+                                ->helperText('Add this to ~/.ssh/authorized_keys on the SSH host. Add permitopen="host:port" to restrict forwarding.')
+                                ->visible(fn (Get $get) => (bool) $get('import_ssh_enabled'))
+                                ->columnSpanFull()
+                                ->readOnly()
+                                ->copyable()
+                                ->dehydrated(false),
+                        ])
+                        ->columns(2)
+                        ->collapsed()
+                        ->footerActions([
+                            Action::make('test_import_connection')
+                                ->label('Test Connection')
+                                ->icon('heroicon-o-signal')
+                                ->action(function () {
+                                    $this->testImportConnection();
+                                }),
+                        ]),
+
                     Section::make('Testing')
                         ->description('Sandbox and testing settings')
                         ->schema([
@@ -631,6 +726,9 @@ class Settings extends Page
             app(SettingsService::class)->set($settingKey, $value, 'string', group: $group);
         }
 
+        // Save import SSH enabled as boolean
+        app(SettingsService::class)->set('import.ssh_enabled', (bool) ($data['import_ssh_enabled'] ?? false), 'boolean', group: 'import');
+
         app(SettingsService::class)->clearCache();
 
         // Clear cached OAuth tokens when sandbox mode or credentials change
@@ -648,5 +746,80 @@ class Settings extends Page
             ->success()
             ->title('Settings saved')
             ->send();
+    }
+
+    private function getSshPublicKey(): string
+    {
+        $pubKeyPath = storage_path('app/private/ssh/id_ed25519.pub');
+        if (! file_exists($pubKeyPath)) {
+            return 'SSH key not generated. Run: php artisan app:generate-ssh-key';
+        }
+
+        return 'no-pty,no-X11-forwarding,no-agent-forwarding '.trim(file_get_contents($pubKeyPath));
+    }
+
+    private function testImportConnection(): void
+    {
+        $data = $this->data;
+        $connection = 'import';
+
+        // Temporarily apply form values to the connection config
+        config([
+            "database.connections.{$connection}.driver" => $data['import_db_driver'] ?? 'mysql',
+            "database.connections.{$connection}.host" => $data['import_db_host'] ?? '127.0.0.1',
+            "database.connections.{$connection}.port" => $data['import_db_port'] ?? '3306',
+            "database.connections.{$connection}.database" => $data['import_db_database'] ?? '',
+            "database.connections.{$connection}.username" => $data['import_db_username'] ?? '',
+            "database.connections.{$connection}.password" => ! empty($data['import_db_password'])
+                ? $data['import_db_password']
+                : (app(SettingsService::class)->get('import.db_password') ?? config("database.connections.{$connection}.password")),
+        ]);
+
+        DB::purge($connection);
+
+        $sshConfig = null;
+        $tunnel = null;
+
+        try {
+            // Open SSH tunnel if enabled
+            if ($data['import_ssh_enabled'] ?? false) {
+                $keyPath = storage_path('app/private/ssh/id_ed25519');
+                if (! file_exists($keyPath)) {
+                    throw new \RuntimeException('SSH key not found. Run `php artisan app:generate-ssh-key` first.');
+                }
+
+                $tunnel = SshTunnel::fromConfig([
+                    'ssh_host' => $data['import_ssh_host'] ?? '',
+                    'ssh_port' => (int) ($data['import_ssh_port'] ?? 22),
+                    'ssh_user' => $data['import_ssh_user'] ?? '',
+                    'ssh_key' => $keyPath,
+                    'remote_host' => $data['import_ssh_remote_host'] ?: ($data['import_db_host'] ?? '127.0.0.1'),
+                    'remote_port' => (int) ($data['import_ssh_remote_port'] ?: ($data['import_db_port'] ?? 3306)),
+                ]);
+
+                $localPort = $tunnel->open();
+                config([
+                    "database.connections.{$connection}.host" => '127.0.0.1',
+                    "database.connections.{$connection}.port" => $localPort,
+                ]);
+                DB::purge($connection);
+            }
+
+            DB::connection($connection)->getPdo();
+
+            Notification::make()
+                ->success()
+                ->title('Connection successful')
+                ->send();
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->danger()
+                ->title('Connection failed')
+                ->body($e->getMessage())
+                ->send();
+        } finally {
+            $tunnel?->close();
+            DB::purge($connection);
+        }
     }
 }

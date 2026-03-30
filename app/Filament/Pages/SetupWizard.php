@@ -507,14 +507,30 @@ class SetupWizard extends Page
                             ->label('SSH User')
                             ->visible(fn (Get $get) => $get('db_ssh_enabled'))
                             ->required(fn (Get $get) => $get('db_ssh_enabled')),
-                        Forms\Components\TextInput::make('db_ssh_key')
-                            ->label('SSH Key Path')
+                        Forms\Components\TextInput::make('db_ssh_remote_host')
+                            ->label('Remote Host')
+                            ->helperText('DB host as seen from the SSH server. Leave blank to use the DB host above.')
+                            ->visible(fn (Get $get) => $get('db_ssh_enabled')),
+                        Forms\Components\TextInput::make('db_ssh_remote_port')
+                            ->label('Remote Port')
+                            ->helperText('DB port as seen from the SSH server. Leave blank to use the DB port above.')
+                            ->visible(fn (Get $get) => $get('db_ssh_enabled')),
+                        Forms\Components\TextInput::make('ssh_public_key')
+                            ->label('SSH Public Key')
+                            ->helperText('Add this to ~/.ssh/authorized_keys on the SSH host.')
                             ->visible(fn (Get $get) => $get('db_ssh_enabled'))
-                            ->required(fn (Get $get) => $get('db_ssh_enabled'))
-                            ->placeholder('/opt/ssh-keys/customer-name'),
-                        Forms\Components\Placeholder::make('db_env_note')
-                            ->label('')
-                            ->content('These settings are saved to the database. You will also need to set the corresponding SHIPMENT_IMPORT_DB_* environment variables in your .env file for the database connection to work.'),
+                            ->columnSpanFull()
+                            ->readOnly()
+                            ->copyable()
+                            ->dehydrated(false)
+                            ->default(function () {
+                                $pubKeyPath = storage_path('app/private/ssh/id_ed25519.pub');
+                                if (! file_exists($pubKeyPath)) {
+                                    return 'SSH key not generated. Run: php artisan app:generate-ssh-key';
+                                }
+
+                                return 'no-pty,no-X11-forwarding,no-agent-forwarding '.trim(file_get_contents($pubKeyPath));
+                            }),
                     ])
                     ->columns(2),
 
@@ -746,20 +762,21 @@ class SetupWizard extends Page
         $settings->set('import_source', $source, group: 'system');
 
         if ($source === 'database') {
-            $settings->set('import_db_driver', $data['db_driver'] ?? 'mysql', group: 'import');
-            $settings->set('import_db_host', $data['db_host'] ?? '127.0.0.1', group: 'import');
-            $settings->set('import_db_port', $data['db_port'] ?? '3306', group: 'import');
-            $settings->set('import_db_database', $data['db_database'] ?? '', group: 'import');
-            $settings->set('import_db_username', $data['db_username'] ?? '', group: 'import');
+            $settings->set('import.db_driver', $data['db_driver'] ?? 'mysql', group: 'import');
+            $settings->set('import.db_host', $data['db_host'] ?? '127.0.0.1', group: 'import');
+            $settings->set('import.db_port', $data['db_port'] ?? '3306', group: 'import');
+            $settings->set('import.db_database', $data['db_database'] ?? '', group: 'import');
+            $settings->set('import.db_username', $data['db_username'] ?? '', group: 'import');
             if (! empty($data['db_password'])) {
-                $settings->set('import_db_password', $data['db_password'], 'string', encrypted: true, group: 'import');
+                $settings->set('import.db_password', $data['db_password'], 'string', encrypted: true, group: 'import');
             }
-            $settings->set('import_ssh_enabled', $data['db_ssh_enabled'] ?? false, 'boolean', group: 'import');
+            $settings->set('import.ssh_enabled', $data['db_ssh_enabled'] ?? false, 'boolean', group: 'import');
             if ($data['db_ssh_enabled'] ?? false) {
-                $settings->set('import_ssh_host', $data['db_ssh_host'] ?? '', group: 'import');
-                $settings->set('import_ssh_port', $data['db_ssh_port'] ?? '22', group: 'import');
-                $settings->set('import_ssh_user', $data['db_ssh_user'] ?? '', group: 'import');
-                $settings->set('import_ssh_key', $data['db_ssh_key'] ?? '', group: 'import');
+                $settings->set('import.ssh_host', $data['db_ssh_host'] ?? '', group: 'import');
+                $settings->set('import.ssh_port', $data['db_ssh_port'] ?? '22', group: 'import');
+                $settings->set('import.ssh_user', $data['db_ssh_user'] ?? '', group: 'import');
+                $settings->set('import.ssh_remote_host', $data['db_ssh_remote_host'] ?? '', group: 'import');
+                $settings->set('import.ssh_remote_port', $data['db_ssh_remote_port'] ?? '', group: 'import');
             }
         } elseif ($source === 'shopify') {
             if (! empty($data['shopify_shop_domain'])) {
