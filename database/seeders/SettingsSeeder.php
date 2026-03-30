@@ -241,6 +241,18 @@ class SettingsSeeder extends Seeder
                 'type' => 'boolean',
                 'group' => 'testing',
             ],
+            [
+                'key' => 'setup_complete',
+                'value' => '1',
+                'type' => 'boolean',
+                'group' => 'system',
+            ],
+            [
+                'key' => 'setup_wizard_step',
+                'value' => '1',
+                'type' => 'integer',
+                'group' => 'system',
+            ],
         ];
 
         foreach ($settings as $setting) {
