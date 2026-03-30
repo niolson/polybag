@@ -13,6 +13,7 @@ use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -25,7 +26,6 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\HtmlString;
 use UnitEnum;
 
 /**
@@ -96,6 +96,7 @@ class Settings extends Page
         'import_ssh_user' => 'import.ssh_user',
         'import_ssh_remote_host' => 'import.ssh_remote_host',
         'import_ssh_remote_port' => 'import.ssh_remote_port',
+        'import_ssh_host_key' => 'import.ssh_host_key',
     ];
 
     public function mount(): void
@@ -150,6 +151,7 @@ class Settings extends Page
             'import_ssh_user' => app(SettingsService::class)->get('import.ssh_user', ''),
             'import_ssh_remote_host' => app(SettingsService::class)->get('import.ssh_remote_host', ''),
             'import_ssh_remote_port' => app(SettingsService::class)->get('import.ssh_remote_port', ''),
+            'import_ssh_host_key' => app(SettingsService::class)->get('import.ssh_host_key', ''),
             'ssh_public_key' => $this->getSshPublicKey(),
 
             // Encrypted fields are left empty — placeholder shows status
@@ -419,20 +421,10 @@ class Settings extends Page
                         ->schema([
                             Placeholder::make('ups_oauth_status')
                                 ->label('OAuth Status')
-                                ->content(function () {
-                                    $oauthService = app(OAuthService::class);
-                                    if ($oauthService->isConnected('ups')) {
-                                        $connectedAt = app(SettingsService::class)->get('ups.oauth_connected_at');
-                                        $time = $connectedAt ? Carbon::parse($connectedAt)->diffForHumans() : '';
-
-                                        return new HtmlString(
-                                            '<span class="font-medium text-success-600 dark:text-success-400">Connected via OAuth</span>'
-                                            .($time ? " &mdash; {$time}" : '')
-                                        );
-                                    }
-
-                                    return new HtmlString('<span class="text-gray-400">Not connected</span>');
-                                }),
+                                ->content(fn () => $this->renderOauthStatus(
+                                    provider: 'ups',
+                                    connectedAt: app(SettingsService::class)->get('ups.oauth_connected_at'),
+                                )),
                             TextInput::make('ups_account_number')
                                 ->label('Account Number')
                                 ->maxLength(50),
@@ -476,22 +468,11 @@ class Settings extends Page
                         ->schema([
                             Placeholder::make('shopify_oauth_status')
                                 ->label('OAuth Status')
-                                ->content(function () {
-                                    $oauthService = app(OAuthService::class);
-                                    if ($oauthService->isConnected('shopify')) {
-                                        $connectedAt = app(SettingsService::class)->get('shopify.oauth_connected_at');
-                                        $scopes = app(SettingsService::class)->get('shopify.oauth_scopes');
-                                        $time = $connectedAt ? Carbon::parse($connectedAt)->diffForHumans() : '';
-
-                                        return new HtmlString(
-                                            '<span class="font-medium text-success-600 dark:text-success-400">Connected via OAuth</span>'
-                                            .($time ? " &mdash; {$time}" : '')
-                                            .($scopes ? '<br><span class="text-xs text-gray-500">Scopes: '.$scopes.'</span>' : '')
-                                        );
-                                    }
-
-                                    return new HtmlString('<span class="text-gray-400">Not connected</span>');
-                                }),
+                                ->content(fn () => $this->renderOauthStatus(
+                                    provider: 'shopify',
+                                    connectedAt: app(SettingsService::class)->get('shopify.oauth_connected_at'),
+                                    scopes: app(SettingsService::class)->get('shopify.oauth_scopes'),
+                                )),
                             TextInput::make('shopify_shop_domain')
                                 ->label('Shop Domain')
                                 ->placeholder('mystore.myshopify.com')
@@ -605,9 +586,16 @@ class Settings extends Page
                                 ->label('Remote Port')
                                 ->helperText('DB port as seen from the SSH server. Leave blank to use the DB port above.')
                                 ->visible(fn (Get $get) => (bool) $get('import_ssh_enabled')),
+                            Textarea::make('import_ssh_host_key')
+                                ->label('SSH Server Host Key')
+                                ->helperText('Paste the SSH server host key so PolyBag can verify it is connecting to the correct server. Example: bastion.example.com ssh-ed25519 AAAA...')
+                                ->visible(fn (Get $get) => (bool) $get('import_ssh_enabled'))
+                                ->required(fn (Get $get) => (bool) $get('import_ssh_enabled'))
+                                ->rows(3)
+                                ->columnSpanFull(),
                             TextInput::make('ssh_public_key')
                                 ->label('SSH Public Key')
-                                ->helperText('Add this to ~/.ssh/authorized_keys on the SSH host. Add permitopen="host:port" to restrict forwarding.')
+                                ->helperText('Add this to ~/.ssh/authorized_keys on the SSH host. This allows PolyBag to log in. Add permitopen="host:port" to restrict forwarding.')
                                 ->visible(fn (Get $get) => (bool) $get('import_ssh_enabled'))
                                 ->columnSpanFull()
                                 ->readOnly()
@@ -728,6 +716,7 @@ class Settings extends Page
 
         // Save import SSH enabled as boolean
         app(SettingsService::class)->set('import.ssh_enabled', (bool) ($data['import_ssh_enabled'] ?? false), 'boolean', group: 'import');
+        $this->writeImportSshKnownHostsFile($data['import_ssh_host_key'] ?? '');
 
         app(SettingsService::class)->clearCache();
 
@@ -756,6 +745,46 @@ class Settings extends Page
         }
 
         return 'no-pty,no-X11-forwarding,no-agent-forwarding '.trim(file_get_contents($pubKeyPath));
+    }
+
+    private function getImportSshKnownHostsPath(): string
+    {
+        return storage_path('app/private/ssh/import_known_hosts');
+    }
+
+    private function writeImportSshKnownHostsFile(?string $knownHostsEntry): void
+    {
+        $path = $this->getImportSshKnownHostsPath();
+        $entry = trim((string) $knownHostsEntry);
+
+        if ($entry === '') {
+            if (file_exists($path)) {
+                @unlink($path);
+            }
+
+            return;
+        }
+
+        $directory = dirname($path);
+        if (! is_dir($directory)) {
+            mkdir($directory, 0700, true);
+        }
+
+        file_put_contents($path, $entry.PHP_EOL);
+        chmod($path, 0600);
+    }
+
+    private function renderOauthStatus(string $provider, ?string $connectedAt = null, ?string $scopes = null): \Illuminate\Support\HtmlString
+    {
+        $oauthService = app(OAuthService::class);
+
+        return new \Illuminate\Support\HtmlString(
+            view('filament.pages.settings.oauth-status', [
+                'connected' => $oauthService->isConnected($provider),
+                'time' => $connectedAt ? Carbon::parse($connectedAt)->diffForHumans() : null,
+                'scopes' => $scopes,
+            ])->render()
+        );
     }
 
     private function testImportConnection(): void
@@ -795,6 +824,8 @@ class Settings extends Page
                     'ssh_key' => $keyPath,
                     'remote_host' => $data['import_ssh_remote_host'] ?: ($data['import_db_host'] ?? '127.0.0.1'),
                     'remote_port' => (int) ($data['import_ssh_remote_port'] ?: ($data['import_db_port'] ?? 3306)),
+                    'known_hosts_entry' => $data['import_ssh_host_key'] ?? '',
+                    'known_hosts_file' => $this->getImportSshKnownHostsPath(),
                 ]);
 
                 $localPort = $tunnel->open();

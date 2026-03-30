@@ -86,23 +86,22 @@ class AppServiceProvider extends ServiceProvider
         // Register API routes here (before Filament's catch-all at path('/'))
         // so they take priority over the panel's {any} wildcard route.
         Route::prefix('api')->group(function () {
-            Route::get('/health', function () {
-                $status = ['status' => 'ok'];
+            if (app()->environment(['local', 'testing'])) {
+                Route::get('/health', function () {
+                    $healthy = true;
 
-                try {
-                    DB::connection()->getPdo();
-                    $status['db'] = 'ok';
-                } catch (\Throwable) {
-                    $status['db'] = 'failed';
-                    $status['status'] = 'degraded';
-                }
+                    try {
+                        DB::connection()->getPdo();
+                    } catch (\Throwable) {
+                        $healthy = false;
+                    }
 
-                if (config('app.fake_carriers')) {
-                    $status['fake_carriers'] = true;
-                }
-
-                return response()->json($status, $status['status'] === 'ok' ? 200 : 503);
-            });
+                    return response()->json([
+                        'status' => $healthy ? 'ok' : 'degraded',
+                        'fake_carriers' => (bool) config('app.fake_carriers'),
+                    ], $healthy ? 200 : 503);
+                });
+            }
 
             if (app()->environment('local') && config('app.fake_carriers')) {
                 Route::post('/test/create-package', function () {

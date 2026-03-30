@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\Role;
 use App\Http\Integrations\Shopify\ShopifyOAuthProvider;
 use App\Models\Setting;
 use App\Models\User;
@@ -57,6 +58,19 @@ it('stores tokens on valid receive with transfer code', function (): void {
     expect(app(SettingsService::class)->get('shopify.oauth_access_token'))->toBe('shpat_live_token');
     expect(app(SettingsService::class)->get('shopify.auth_mode'))->toBe('authorization_code');
     expect(app(SettingsService::class)->get('shopify.oauth_connected_at'))->not->toBeNull();
+});
+
+it('forbids non-admin users from receiving oauth callbacks', function (): void {
+    $user = User::factory()->create(['role' => Role::User]);
+
+    Http::fake();
+
+    $this->actingAs($user)
+        ->withSession(['oauth_state.shopify' => 'nonce'])
+        ->get('/oauth/shopify/receive?transfer_code=abc123')
+        ->assertForbidden();
+
+    Http::assertNothingSent();
 });
 
 it('rejects receive with mismatched nonce', function (): void {

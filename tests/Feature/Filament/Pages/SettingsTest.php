@@ -111,3 +111,39 @@ it('does not clear API auth caches when sandbox_mode does not change', function 
     expect(Cache::has('usps_authenticator'))->toBeTrue()
         ->and(Cache::has('fedex_authenticator'))->toBeTrue();
 });
+
+it('escapes oauth scopes in the settings page', function (): void {
+    $payload = '<img src=x onerror=alert(\'pwnd\')>';
+
+    Setting::create(['key' => 'shopify.oauth_access_token', 'value' => 'token', 'type' => 'string', 'encrypted' => true, 'group' => 'shopify']);
+    Setting::create(['key' => 'shopify.oauth_connected_at', 'value' => now()->toIso8601String(), 'type' => 'string', 'group' => 'shopify']);
+    Setting::create(['key' => 'shopify.oauth_scopes', 'value' => $payload, 'type' => 'string', 'group' => 'shopify']);
+    app(SettingsService::class)->clearCache();
+
+    $this->get(Settings::getUrl())
+        ->assertOk()
+        ->assertSee(e($payload), false)
+        ->assertDontSee($payload, false);
+});
+
+it('saves ssh server host key and writes a known_hosts file', function (): void {
+    $knownHostsPath = storage_path('app/private/ssh/import_known_hosts');
+    @unlink($knownHostsPath);
+
+    $hostKey = 'bastion.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBastionKeyExample';
+
+    Livewire::test(Settings::class)
+        ->fillForm([
+            'import_ssh_enabled' => true,
+            'import_ssh_host_key' => $hostKey,
+        ])
+        ->call('save')
+        ->assertNotified();
+
+    app(SettingsService::class)->clearCache();
+    expect(app(SettingsService::class)->get('import.ssh_host_key'))->toBe($hostKey);
+    expect(file_exists($knownHostsPath))->toBeTrue();
+    expect(trim((string) file_get_contents($knownHostsPath)))->toBe($hostKey);
+
+    @unlink($knownHostsPath);
+});

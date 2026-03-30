@@ -57,6 +57,7 @@ class DatabaseSource implements ExportDestinationInterface, ImportSourceInterfac
             $sshUser = $settings->get('import.ssh_user') ?: ($config['ssh']['user'] ?? null);
             $remoteHost = $settings->get('import.ssh_remote_host') ?: ($config['ssh']['remote_host'] ?? null);
             $remotePort = $settings->get('import.ssh_remote_port') ?: ($config['ssh']['remote_port'] ?? null);
+            $hostKey = $settings->get('import.ssh_host_key') ?: ($config['ssh']['host_key'] ?? null);
 
             $config['ssh'] = [
                 'enabled' => $sshEnabled,
@@ -66,6 +67,8 @@ class DatabaseSource implements ExportDestinationInterface, ImportSourceInterfac
                 'key' => storage_path('app/private/ssh/id_ed25519'),
                 'remote_host' => $remoteHost,
                 'remote_port' => $remotePort,
+                'host_key' => $hostKey,
+                'known_hosts_file' => storage_path('app/private/ssh/import_known_hosts'),
             ];
         }
 
@@ -263,7 +266,7 @@ class DatabaseSource implements ExportDestinationInterface, ImportSourceInterfac
             return;
         }
 
-        foreach (['host', 'user', 'key'] as $required) {
+        foreach (['host', 'user', 'key', 'host_key'] as $required) {
             if (empty($sshConfig[$required])) {
                 throw new InvalidArgumentException("SSH tunnel config missing: ssh.{$required}");
             }
@@ -279,6 +282,8 @@ class DatabaseSource implements ExportDestinationInterface, ImportSourceInterfac
             'ssh_key' => $sshConfig['key'],
             'remote_host' => $sshConfig['remote_host'] ?? $dbConfig['host'],
             'remote_port' => (int) ($sshConfig['remote_port'] ?? $dbConfig['port']),
+            'known_hosts_entry' => $sshConfig['host_key'],
+            'known_hosts_file' => $sshConfig['known_hosts_file'] ?? storage_path('app/private/ssh/import_known_hosts'),
         ]);
 
         $localPort = $this->tunnel->open();

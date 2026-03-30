@@ -234,24 +234,11 @@ class SetupWizard extends Page
                 Forms\Components\Placeholder::make('existing_box_sizes')
                     ->label('Existing Box Sizes')
                     ->visible(fn () => BoxSize::exists())
-                    ->content(function () {
-                        $boxes = BoxSize::all();
-                        $html = '<table class="w-full text-sm"><thead class="text-left text-gray-500 dark:text-gray-400 border-b"><tr>'
-                            .'<th class="pb-2 pr-4">Label</th><th class="pb-2 pr-4">Code</th><th class="pb-2 pr-4">Type</th>'
-                            .'<th class="pb-2 pr-4">Dimensions</th><th class="pb-2">Max Weight</th></tr></thead><tbody>';
-                        foreach ($boxes as $box) {
-                            $dims = "{$box->length} x {$box->width} x {$box->height} in";
-                            $html .= "<tr class=\"border-b border-gray-100 dark:border-gray-700\">"
-                                ."<td class=\"py-2 pr-4\">{$box->label}</td>"
-                                ."<td class=\"py-2 pr-4 font-mono text-xs\">{$box->code}</td>"
-                                ."<td class=\"py-2 pr-4\">{$box->type->getLabel()}</td>"
-                                ."<td class=\"py-2 pr-4\">{$dims}</td>"
-                                ."<td class=\"py-2\">{$box->max_weight} lbs</td></tr>";
-                        }
-                        $html .= '</tbody></table>';
-
-                        return new \Illuminate\Support\HtmlString($html);
-                    }),
+                    ->content(fn () => new \Illuminate\Support\HtmlString(
+                        view('filament.pages.setup-wizard.existing-box-sizes', [
+                            'boxes' => BoxSize::all(),
+                        ])->render()
+                    )),
                 Forms\Components\Repeater::make('box_sizes')
                     ->label('Add New Box Sizes')
                     ->schema([
@@ -325,20 +312,11 @@ class SetupWizard extends Page
                         Forms\Components\Placeholder::make('existing_channels')
                             ->label('Existing Channels')
                             ->visible(fn () => Channel::exists())
-                            ->content(function () {
-                                $channels = Channel::with('aliases')->get();
-                                $html = '<table class="w-full text-sm"><thead class="text-left text-gray-500 dark:text-gray-400 border-b"><tr>'
-                                    .'<th class="pb-2 pr-4">Name</th><th class="pb-2">Aliases</th></tr></thead><tbody>';
-                                foreach ($channels as $ch) {
-                                    $aliases = $ch->aliases->pluck('reference')->join(', ') ?: '-';
-                                    $html .= "<tr class=\"border-b border-gray-100 dark:border-gray-700\">"
-                                        ."<td class=\"py-2 pr-4\">{$ch->name}</td>"
-                                        ."<td class=\"py-2 text-gray-500\">{$aliases}</td></tr>";
-                                }
-                                $html .= '</tbody></table>';
-
-                                return new \Illuminate\Support\HtmlString($html);
-                            }),
+                            ->content(fn () => new \Illuminate\Support\HtmlString(
+                                view('filament.pages.setup-wizard.existing-channels', [
+                                    'channels' => Channel::with('aliases')->get(),
+                                ])->render()
+                            )),
                         Forms\Components\Repeater::make('channels')
                             ->label('Add New Channels')
                             ->schema([
@@ -379,24 +357,11 @@ class SetupWizard extends Page
                         Forms\Components\Placeholder::make('existing_methods')
                             ->label('Existing Shipping Methods')
                             ->visible(fn () => ShippingMethod::exists())
-                            ->content(function () {
-                                $methods = ShippingMethod::with(['aliases', 'carrierServices'])->get();
-                                $html = '<table class="w-full text-sm"><thead class="text-left text-gray-500 dark:text-gray-400 border-b"><tr>'
-                                    .'<th class="pb-2 pr-4">Name</th><th class="pb-2 pr-4">Commitment</th><th class="pb-2 pr-4">Carrier Services</th><th class="pb-2">Aliases</th></tr></thead><tbody>';
-                                foreach ($methods as $m) {
-                                    $aliases = $m->aliases->pluck('reference')->join(', ') ?: '-';
-                                    $services = $m->carrierServices->map(fn ($cs) => $cs->carrier->name . ': ' . $cs->name)->join(', ') ?: '-';
-                                    $days = $m->commitment_days ? "{$m->commitment_days} days" : '-';
-                                    $html .= "<tr class=\"border-b border-gray-100 dark:border-gray-700\">"
-                                        ."<td class=\"py-2 pr-4\">{$m->name}</td>"
-                                        ."<td class=\"py-2 pr-4\">{$days}</td>"
-                                        ."<td class=\"py-2 pr-4 text-gray-500\">{$services}</td>"
-                                        ."<td class=\"py-2 text-gray-500\">{$aliases}</td></tr>";
-                                }
-                                $html .= '</tbody></table>';
-
-                                return new \Illuminate\Support\HtmlString($html);
-                            }),
+                            ->content(fn () => new \Illuminate\Support\HtmlString(
+                                view('filament.pages.setup-wizard.existing-methods', [
+                                    'methods' => ShippingMethod::with(['aliases', 'carrierServices'])->get(),
+                                ])->render()
+                            )),
                         Forms\Components\Placeholder::make('alias_hint')
                             ->label('')
                             ->content('If you know the reference values your import source will send, add them as aliases. Otherwise, map them later using the Unmapped References tools in Settings.'),
@@ -515,9 +480,16 @@ class SetupWizard extends Page
                             ->label('Remote Port')
                             ->helperText('DB port as seen from the SSH server. Leave blank to use the DB port above.')
                             ->visible(fn (Get $get) => $get('db_ssh_enabled')),
+                        Forms\Components\Textarea::make('db_ssh_host_key')
+                            ->label('SSH Server Host Key')
+                            ->helperText('Paste the SSH server host key so PolyBag can verify it is connecting to the correct server. Example: bastion.example.com ssh-ed25519 AAAA...')
+                            ->visible(fn (Get $get) => $get('db_ssh_enabled'))
+                            ->required(fn (Get $get) => $get('db_ssh_enabled'))
+                            ->rows(3)
+                            ->columnSpanFull(),
                         Forms\Components\TextInput::make('ssh_public_key')
                             ->label('SSH Public Key')
-                            ->helperText('Add this to ~/.ssh/authorized_keys on the SSH host.')
+                            ->helperText('Add this to ~/.ssh/authorized_keys on the SSH host. This allows PolyBag to log in.')
                             ->visible(fn (Get $get) => $get('db_ssh_enabled'))
                             ->columnSpanFull()
                             ->readOnly()
@@ -777,6 +749,7 @@ class SetupWizard extends Page
                 $settings->set('import.ssh_user', $data['db_ssh_user'] ?? '', group: 'import');
                 $settings->set('import.ssh_remote_host', $data['db_ssh_remote_host'] ?? '', group: 'import');
                 $settings->set('import.ssh_remote_port', $data['db_ssh_remote_port'] ?? '', group: 'import');
+                $settings->set('import.ssh_host_key', $data['db_ssh_host_key'] ?? '', group: 'import');
             }
         } elseif ($source === 'shopify') {
             if (! empty($data['shopify_shop_domain'])) {

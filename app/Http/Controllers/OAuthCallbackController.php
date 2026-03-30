@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\Role;
 use App\Services\OAuthService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -16,6 +17,8 @@ class OAuthCallbackController extends Controller
      */
     public function receive(Request $request, string $provider): RedirectResponse
     {
+        abort_unless($request->user()?->role->isAtLeast(Role::Admin), 403);
+
         // Handle error redirects from the broker
         if ($request->has('error')) {
             logger()->error("OAuth error for {$provider}", [
