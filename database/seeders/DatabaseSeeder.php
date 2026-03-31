@@ -38,10 +38,9 @@ class DatabaseSeeder extends Seeder
         $this->call([
             SettingsSeeder::class,
             LocationSeeder::class,
+            ReferenceDataSeeder::class,
             ChannelSeeder::class,
-            CarrierSeeder::class,
-            BoxSizeSeeder::class,
-            ShippingMethodSeeder::class,
+            OperationalDefaultsSeeder::class,
             ShipmentSeeder::class,
         ]);
 

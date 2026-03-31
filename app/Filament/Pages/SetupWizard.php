@@ -14,6 +14,8 @@ use App\Models\Location;
 use App\Models\ShippingMethod;
 use App\Models\ShippingMethodAlias;
 use App\Services\SettingsService;
+use Database\Seeders\BoxSizeSeeder;
+use Database\Seeders\ShippingMethodSeeder;
 use Filament\Actions\Action;
 use Filament\Forms;
 use Filament\Notifications\Notification;
@@ -81,10 +83,12 @@ class SetupWizard extends Page
             'carrier_ups_services' => CarrierService::whereHas('carrier', fn ($q) => $q->where('name', 'UPS'))->where('active', true)->pluck('id')->toArray(),
 
             // Step 3: Box sizes (repeater is for new additions only)
+            'prepopulate_box_sizes' => false,
             'box_sizes' => [],
 
             // Step 4: Channels & shipping methods (repeaters are for new additions only)
             'channels' => [],
+            'prepopulate_shipping_methods' => false,
             'shipping_methods' => [],
 
             // Step 5: Import source
@@ -228,6 +232,10 @@ class SetupWizard extends Page
             ->icon('heroicon-o-square-3-stack-3d')
             ->description('Define your box sizes')
             ->schema([
+                Forms\Components\Toggle::make('prepopulate_box_sizes')
+                    ->label('Load recommended starter box sizes')
+                    ->helperText('Adds a reusable starter set of common box sizes and mailers. You can edit or remove them later.')
+                    ->default(false),
                 Forms\Components\Placeholder::make('box_size_notice')
                     ->label('')
                     ->content('Box sizes speed up the packing workflow by pre-filling dimensions. You can skip this step and enter dimensions manually when shipping, or add box sizes later.'),
@@ -354,6 +362,11 @@ class SetupWizard extends Page
                 Section::make('Shipping Methods')
                     ->description('Shipping methods define how orders are fulfilled (e.g. Standard Ground, Priority, Express).')
                     ->schema([
+                        Forms\Components\Toggle::make('prepopulate_shipping_methods')
+                            ->label('Load recommended starter shipping methods')
+                            ->helperText('Adds a starter set of common shipping methods mapped to supported carrier services. You can edit or remove them later.')
+                            ->default(false)
+                            ->columnSpanFull(),
                         Forms\Components\Placeholder::make('existing_methods')
                             ->label('Existing Shipping Methods')
                             ->visible(fn () => ShippingMethod::exists())
@@ -664,6 +677,10 @@ class SetupWizard extends Page
         $data = $this->form->getState();
         $boxSizes = $data['box_sizes'] ?? [];
 
+        if ($data['prepopulate_box_sizes'] ?? false) {
+            app(BoxSizeSeeder::class)->run();
+        }
+
         foreach ($boxSizes as $box) {
             BoxSize::create([
                 'label' => $box['label'],
@@ -703,6 +720,10 @@ class SetupWizard extends Page
                     $channel->aliases()->create(['reference' => $alias]);
                 }
             }
+        }
+
+        if ($data['prepopulate_shipping_methods'] ?? false) {
+            app(ShippingMethodSeeder::class)->run();
         }
 
         foreach ($data['shipping_methods'] ?? [] as $methodData) {
