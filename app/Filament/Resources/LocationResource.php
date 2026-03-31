@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Support\AddressForm;
 use App\Filament\Resources\LocationResource\Pages;
 use App\Models\Carrier;
 use App\Models\Location;
@@ -65,17 +66,11 @@ class LocationResource extends Resource
                         Forms\Components\TextInput::make('city')
                             ->required()
                             ->maxLength(255),
-                        Forms\Components\TextInput::make('state_or_province')
-                            ->label('State / Province')
-                            ->required()
-                            ->maxLength(255),
+                        AddressForm::administrativeAreaSelect(),
                         Forms\Components\TextInput::make('postal_code')
                             ->required()
                             ->maxLength(20),
-                        Forms\Components\TextInput::make('country')
-                            ->required()
-                            ->maxLength(2)
-                            ->default('US'),
+                        AddressForm::countrySelect(),
                         Forms\Components\TextInput::make('phone')
                             ->tel()
                             ->maxLength(20),

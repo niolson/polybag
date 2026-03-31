@@ -6,6 +6,7 @@ use App\Enums\Deliverability;
 use App\Enums\PackageStatus;
 use App\Enums\ShipmentStatus;
 use App\Services\AddressValidationService;
+use App\Services\AddressReferenceService;
 use App\Services\SettingsService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -65,6 +66,19 @@ class Shipment extends Model
         'deliver_by' => 'date',
         'metadata' => 'array',
     ];
+
+    protected static function booted(): void
+    {
+        static::saving(function (Shipment $shipment): void {
+            $addressReference = app(AddressReferenceService::class);
+
+            $shipment->country = $addressReference->normalizeCountry($shipment->country) ?? ($shipment->country ? strtoupper(trim($shipment->country)) : null);
+            $shipment->state_or_province = $addressReference->normalizeSubdivision($shipment->country, $shipment->state_or_province);
+
+            $shipment->validated_country = $addressReference->normalizeCountry($shipment->validated_country) ?? ($shipment->validated_country ? strtoupper(trim($shipment->validated_country)) : null);
+            $shipment->validated_state_or_province = $addressReference->normalizeSubdivision($shipment->validated_country, $shipment->validated_state_or_province);
+        });
+    }
 
     /**
      * @return array<string, mixed>

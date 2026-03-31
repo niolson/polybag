@@ -33,6 +33,10 @@
             stateOrProvince: '',
             postalCode: '',
             country: 'US',
+            countrySearch: '',
+            countryOptions: @js($countryOptions),
+            subdivisionOptionsByCountry: @js($subdivisionOptionsByCountry),
+            administrativeAreaLabels: @js($administrativeAreaLabels),
             phone: '',
             email: '',
             shippingMethodId: null,
@@ -40,6 +44,8 @@
             boxInput: '',
 
             init() {
+                this.country = this.countryOptions['US'] ? 'US' : Object.keys(this.countryOptions)[0] || '';
+
                 const stored = localStorage.getItem('manualShipAutoShip');
                 if (stored !== null) {
                     this.autoShipEnabled = stored === 'true';
@@ -54,6 +60,20 @@
                 } else {
                     document.addEventListener('qz-tray:connected', () => this.autoConnectScale());
                 }
+            },
+
+            filteredCountryOptions() {
+                const search = this.countrySearch.trim().toLowerCase();
+
+                if (!search) {
+                    return this.countryOptions;
+                }
+
+                return Object.fromEntries(
+                    Object.entries(this.countryOptions).filter(([code, label]) =>
+                        code.toLowerCase().includes(search) || label.toLowerCase().includes(search)
+                    )
+                );
             },
 
             scanBox() {
@@ -90,9 +110,28 @@
                 }
             },
 
+            getSubdivisionOptions() {
+                return this.subdivisionOptionsByCountry[this.country] || {};
+            },
+
+            hasSubdivisionOptions() {
+                return Object.keys(this.getSubdivisionOptions()).length > 0;
+            },
+
+            getAdministrativeAreaLabel() {
+                return this.administrativeAreaLabels[this.country] || 'State / Province';
+            },
+
+            onCountryChange() {
+                if (this.hasSubdivisionOptions() && !Object.prototype.hasOwnProperty.call(this.getSubdivisionOptions(), this.stateOrProvince)) {
+                    this.stateOrProvince = '';
+                }
+            },
+
             isReadyToShip() {
                 if (!this.address1 || !this.city || !this.country) return false;
                 if (!this.firstName && !this.lastName && !this.company) return false;
+                if (this.hasSubdivisionOptions() && !this.stateOrProvince) return false;
 
                 const w = parseFloat(this.weight);
                 const h = parseFloat(this.height);
@@ -146,6 +185,7 @@
                 this.stateOrProvince = '';
                 this.postalCode = '';
                 this.country = 'US';
+                this.countrySearch = '';
                 this.phone = '';
                 this.email = '';
                 this.shippingMethodId = null;
@@ -291,10 +331,26 @@
                             </x-filament::input.wrapper>
                         </div>
                         <div>
-                            <label class="fi-fo-field-wrp-label text-sm font-medium text-gray-950 dark:text-white">State / Province</label>
-                            <x-filament::input.wrapper>
-                                <x-filament::input type="text" x-model="stateOrProvince" x-bind:disabled="isShipping" />
-                            </x-filament::input.wrapper>
+                            <label class="fi-fo-field-wrp-label text-sm font-medium text-gray-950 dark:text-white" x-text="getAdministrativeAreaLabel()"></label>
+                            <template x-if="hasSubdivisionOptions()">
+                                <x-filament::input.wrapper>
+                                    <select
+                                        x-model="stateOrProvince"
+                                        x-bind:disabled="isShipping"
+                                        class="fi-input block w-full border-none bg-transparent py-1.5 text-base text-gray-950 outline-none transition duration-75 placeholder:text-gray-400 focus:ring-0 disabled:text-gray-500 dark:text-white sm:text-sm sm:leading-6"
+                                    >
+                                        <option value="">Select option</option>
+                                        <template x-for="(label, code) in getSubdivisionOptions()" :key="code">
+                                            <option :value="code" x-text="label"></option>
+                                        </template>
+                                    </select>
+                                </x-filament::input.wrapper>
+                            </template>
+                            <template x-if="!hasSubdivisionOptions()">
+                                <x-filament::input.wrapper>
+                                    <x-filament::input type="text" x-model="stateOrProvince" x-bind:disabled="isShipping" />
+                                </x-filament::input.wrapper>
+                            </template>
                         </div>
                     </div>
 
@@ -307,20 +363,24 @@
                         </div>
                         <div>
                             <label class="fi-fo-field-wrp-label text-sm font-medium text-gray-950 dark:text-white">Country</label>
+                            <x-filament::input.wrapper class="mb-2">
+                                <x-filament::input
+                                    type="text"
+                                    x-model="countrySearch"
+                                    x-bind:disabled="isShipping"
+                                    placeholder="Start typing to search"
+                                />
+                            </x-filament::input.wrapper>
                             <x-filament::input.wrapper>
                                 <select
                                     x-model="country"
+                                    x-on:change="onCountryChange()"
                                     x-bind:disabled="isShipping"
                                     class="fi-input block w-full border-none bg-transparent py-1.5 text-base text-gray-950 outline-none transition duration-75 placeholder:text-gray-400 focus:ring-0 disabled:text-gray-500 dark:text-white sm:text-sm sm:leading-6"
                                 >
-                                    <option value="US">United States</option>
-                                    <option value="CA">Canada</option>
-                                    <option value="MX">Mexico</option>
-                                    <option value="GB">United Kingdom</option>
-                                    <option value="DE">Germany</option>
-                                    <option value="FR">France</option>
-                                    <option value="AU">Australia</option>
-                                    <option value="JP">Japan</option>
+                                    <template x-for="(label, code) in filteredCountryOptions()" :key="code">
+                                        <option :value="code" :selected="code === country" x-text="label"></option>
+                                    </template>
                                 </select>
                             </x-filament::input.wrapper>
                         </div>

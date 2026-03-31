@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\AddressReferenceService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -66,6 +67,11 @@ class Location extends Model
     protected static function booted(): void
     {
         static::saving(function (Location $location) {
+            $addressReference = app(AddressReferenceService::class);
+
+            $location->country = $addressReference->normalizeCountry($location->country) ?? ($location->country ? strtoupper(trim($location->country)) : null);
+            $location->state_or_province = $addressReference->normalizeSubdivision($location->country, $location->state_or_province);
+
             if ($location->is_default && $location->isDirty('is_default')) {
                 static::where('id', '!=', $location->id ?? 0)
                     ->where('is_default', true)

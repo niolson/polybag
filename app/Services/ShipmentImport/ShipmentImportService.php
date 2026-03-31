@@ -17,6 +17,7 @@ use App\Models\ShippingMethodAlias;
 use App\Models\User;
 use App\Notifications\ImportCompleted as ImportCompletedNotification;
 use App\Services\PhoneParserService;
+use App\Services\AddressReferenceService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -276,6 +277,8 @@ class ShipmentImportService
      */
     private function prepareShipmentData(array $data): ?array
     {
+        $data = app(AddressReferenceService::class)->normalizeAddressFields($data);
+
         ['errors' => $validationErrors, 'warnings' => $validationWarnings] = $this->validateShipmentData($data);
         if (! empty($validationErrors)) {
             $this->errors[] = "Validation errors for shipment {$data['shipment_reference']}: ".implode(', ', $validationErrors);
@@ -467,6 +470,7 @@ class ShipmentImportService
     {
         $errors = [];
         $warnings = [];
+        $addressReference = app(AddressReferenceService::class);
 
         // Required fields
         if (empty($data['shipment_reference'])) {
@@ -481,7 +485,7 @@ class ShipmentImportService
             $errors[] = 'Missing city';
         }
 
-        $country = $data['country'] ?? 'US';
+        $country = $addressReference->normalizeCountry($data['country'] ?? 'US') ?? ($data['country'] ?? 'US');
 
         // Postal code: warn if missing for US, validate format if present
         if (empty($data['postal_code'])) {
@@ -497,7 +501,7 @@ class ShipmentImportService
 
         // State/province: warn if missing for US/CA, validate code if present for US
         if (empty($data['state_or_province'])) {
-            if (in_array($country, ['US', 'CA'], true)) {
+            if ($addressReference->isAdministrativeAreaRequired($country)) {
                 $warnings[] = 'Missing state/province';
             }
         } elseif ($country === 'US') {
@@ -512,6 +516,12 @@ class ShipmentImportService
             $state = strtoupper(trim($data['state_or_province']));
             if (strlen($state) === 2 && ! in_array($state, $validStates, true)) {
                 $warnings[] = "Invalid US state code: {$state}";
+            }
+        } elseif ($addressReference->usesAdministrativeArea($country)) {
+            $normalizedSubdivision = $addressReference->normalizeSubdivision($country, $data['state_or_province']);
+
+            if ($normalizedSubdivision !== null && $normalizedSubdivision !== trim($data['state_or_province'])) {
+                $data['state_or_province'] = $normalizedSubdivision;
             }
         }
 

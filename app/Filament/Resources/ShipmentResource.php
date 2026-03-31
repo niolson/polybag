@@ -9,6 +9,7 @@ use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\ShipmentResource\Pages;
 use App\Filament\Resources\ShipmentResource\RelationManagers\PackagesRelationManager;
 use App\Filament\Resources\ShipmentResource\RelationManagers\ShipmentItemsRelationManager;
+use App\Filament\Support\AddressForm;
 use App\Jobs\ValidateAddressJob;
 use App\Models\BoxSize;
 use App\Models\Location;
@@ -157,22 +158,17 @@ class ShipmentResource extends Resource
                                     ->maxLength(255)
                                     ->live(onBlur: true)
                                     ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
-                                Forms\Components\TextInput::make('state_or_province')
-                                    ->label('State or Province')
-                                    ->maxLength(255)
-                                    ->live(onBlur: true)
-                                    ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
+                                AddressForm::administrativeAreaSelect(
+                                    afterStateUpdated: fn (Components\Utilities\Set $set) => $set('checked', false),
+                                ),
                                 Forms\Components\TextInput::make('postal_code')
                                     ->label('Postal Code')
                                     ->maxLength(255)
                                     ->live(onBlur: true)
                                     ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
-                                Forms\Components\TextInput::make('country')
-                                    ->required()
-                                    ->maxLength(255)
-                                    ->default('US')
-                                    ->live(onBlur: true)
-                                    ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
+                                AddressForm::countrySelect(
+                                    afterStateUpdated: fn (Components\Utilities\Set $set) => $set('checked', false),
+                                ),
                             ])
                             ->columns(2),
 

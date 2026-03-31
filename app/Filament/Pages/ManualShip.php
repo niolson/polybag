@@ -13,6 +13,7 @@ use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Services\AddressValidationService;
+use App\Services\AddressReferenceService;
 use App\Services\CacheService;
 use App\Services\LabelGenerationService;
 use App\Services\SettingsService;
@@ -73,6 +74,15 @@ class ManualShip extends Page
 
     public ?int $shippingMethodId = null;
 
+    /** @var array<string, string> */
+    public array $countryOptions = [];
+
+    /** @var array<string, array<string, string>> */
+    public array $subdivisionOptionsByCountry = [];
+
+    /** @var array<string, string> */
+    public array $administrativeAreaLabels = [];
+
     // Package fields
     public array $boxSizes = [];
 
@@ -93,6 +103,13 @@ class ManualShip extends Page
     public function mount(): void
     {
         $this->boxSizes = app(CacheService::class)->getBoxSizesForPacking();
+
+        $addressReference = app(AddressReferenceService::class);
+        $this->countryOptions = $addressReference->getCountryOptions();
+        $this->subdivisionOptionsByCountry = $addressReference->getAllSubdivisionOptions();
+        $this->administrativeAreaLabels = collect(array_keys($this->countryOptions))
+            ->mapWithKeys(fn (string $countryCode): array => [$countryCode => $addressReference->getAdministrativeAreaLabel($countryCode)])
+            ->all();
     }
 
     public function ship(
@@ -124,9 +141,9 @@ class ManualShip extends Page
         $this->address1 = $address1;
         $this->address2 = $address2;
         $this->city = $city;
-        $this->stateOrProvince = $stateOrProvince;
         $this->postalCode = $postalCode;
-        $this->country = $country;
+        $this->country = app(AddressReferenceService::class)->normalizeCountry($country) ?? strtoupper(trim($country));
+        $this->stateOrProvince = app(AddressReferenceService::class)->normalizeSubdivision($this->country, $stateOrProvince) ?? '';
         $this->phone = $phone;
         $this->email = $email;
         $this->shippingMethodId = $shippingMethodId;
@@ -263,6 +280,13 @@ class ManualShip extends Page
 
         if (empty($this->country)) {
             $this->notifyError('Missing Info', 'Please enter a country.');
+
+            return false;
+        }
+
+        if (app(AddressReferenceService::class)->isAdministrativeAreaRequired($this->country) && empty($this->stateOrProvince)) {
+            $label = app(AddressReferenceService::class)->getAdministrativeAreaLabel($this->country);
+            $this->notifyError('Missing Info', "Please enter a {$label}.");
 
             return false;
         }

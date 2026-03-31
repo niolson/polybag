@@ -223,6 +223,36 @@ it('stores the raw shipping method reference even when resolved', function (): v
     expect($shipment->shipping_method_reference)->toBe('ground');
 });
 
+it('normalizes imported country and subdivision values before saving', function (): void {
+    $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
+
+    $source = fakeSource(collect([
+        [
+            'shipment_reference' => 'ORD-NORM-001',
+            'first_name' => 'Jane',
+            'last_name' => 'Smith',
+            'address1' => '123 Main St',
+            'city' => 'Los Angeles',
+            'state_or_province' => 'California',
+            'postal_code' => '90001',
+            'country' => 'United States',
+            'channel_id' => 'web',
+        ],
+    ]));
+
+    $result = ShipmentImportService::forSource($source)->import();
+
+    expect($result->shipmentsCreated)->toBe(1)
+        ->and($result->hasErrors())->toBeFalse();
+
+    $shipment = Shipment::where('shipment_reference', 'ORD-NORM-001')->first();
+
+    expect($shipment)->not->toBeNull()
+        ->and($shipment->country)->toBe('US')
+        ->and($shipment->state_or_province)->toBe('CA')
+        ->and($shipment->channel_id)->toBe($channel->id);
+});
+
 it('resolves shipping method via alias', function (): void {
     $method = ShippingMethod::factory()->create();
     ShippingMethodAlias::factory()->create([

@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Enums\BoxSizeType;
 use App\Enums\FedexPackageType;
 use App\Enums\Role;
+use App\Filament\Support\AddressForm;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
@@ -177,19 +178,18 @@ class SetupWizard extends Page
                             ->label('City')
                             ->required()
                             ->maxLength(255),
-                        Forms\Components\TextInput::make('location_state')
-                            ->label('State / Province')
-                            ->required()
-                            ->maxLength(255),
+                        AddressForm::administrativeAreaSelect(
+                            field: 'location_state',
+                            countryField: 'location_country',
+                        ),
                         Forms\Components\TextInput::make('location_postal_code')
                             ->label('Postal Code')
                             ->required()
                             ->maxLength(20),
-                        Forms\Components\TextInput::make('location_country')
-                            ->label('Country')
-                            ->required()
-                            ->maxLength(2)
-                            ->default('US'),
+                        AddressForm::countrySelect(
+                            field: 'location_country',
+                            subdivisionField: 'location_state',
+                        ),
                         Forms\Components\TextInput::make('location_phone')
                             ->label('Phone')
                             ->tel(),
