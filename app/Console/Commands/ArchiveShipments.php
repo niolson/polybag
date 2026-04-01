@@ -23,7 +23,7 @@ class ArchiveShipments extends Command
     private const SHIPMENT_EXPORT_COLUMNS = [
         'id', 'shipment_reference', 'first_name', 'last_name', 'company',
         'address1', 'address2', 'city', 'state_or_province', 'postal_code', 'country',
-        'value', 'channel_id', 'shipping_method_id', 'status', 'created_at',
+        'phone', 'phone_e164', 'phone_extension', 'value', 'channel_id', 'shipping_method_id', 'status', 'created_at',
     ];
 
     private const PACKAGE_EXPORT_COLUMNS = [

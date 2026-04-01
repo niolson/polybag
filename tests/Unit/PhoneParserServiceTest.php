@@ -7,6 +7,7 @@ it('parses a standard US number', function (): void {
 
     expect($result->isValid())->toBeTrue()
         ->and($result->phone)->toBe('5125551234')
+        ->and($result->e164)->toBe('+15125551234')
         ->and($result->extension)->toBeNull()
         ->and($result->error)->toBeNull();
 });
@@ -16,6 +17,7 @@ it('parses a number with ext. format', function (): void {
 
     expect($result->isValid())->toBeTrue()
         ->and($result->phone)->toBe('2107284548')
+        ->and($result->e164)->toBe('+12107284548')
         ->and($result->extension)->toBe('65440')
         ->and($result->error)->toBeNull();
 });
@@ -25,6 +27,7 @@ it('parses a number with x extension format', function (): void {
 
     expect($result->isValid())->toBeTrue()
         ->and($result->phone)->toBe('5125551234')
+        ->and($result->e164)->toBe('+15125551234')
         ->and($result->extension)->toBe('1234')
         ->and($result->error)->toBeNull();
 });
@@ -34,6 +37,7 @@ it('parses an international format number', function (): void {
 
     expect($result->isValid())->toBeTrue()
         ->and($result->phone)->toBe('2079460958')
+        ->and($result->e164)->toBe('+442079460958')
         ->and($result->extension)->toBeNull()
         ->and($result->error)->toBeNull();
 });
@@ -43,6 +47,7 @@ it('returns error for an invalid string', function (): void {
 
     expect($result->isValid())->toBeFalse()
         ->and($result->phone)->toBeNull()
+        ->and($result->e164)->toBeNull()
         ->and($result->extension)->toBeNull()
         ->and($result->error)->not->toBeNull();
 });
@@ -59,6 +64,7 @@ it('parses a formatted US number with dashes', function (): void {
 
     expect($result->isValid())->toBeTrue()
         ->and($result->phone)->toBe('5125551234')
+        ->and($result->e164)->toBe('+15125551234')
         ->and($result->extension)->toBeNull();
 });
 
@@ -67,5 +73,6 @@ it('returns error for too-short number', function (): void {
 
     expect($result->isValid())->toBeFalse()
         ->and($result->phone)->toBeNull()
+        ->and($result->e164)->toBeNull()
         ->and($result->error)->not->toBeNull();
 });

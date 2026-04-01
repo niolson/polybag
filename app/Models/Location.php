@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Services\AddressReferenceService;
+use App\Services\PhoneParserService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -26,6 +27,7 @@ class Location extends Model
         'country',
         'timezone',
         'phone',
+        'phone_e164',
         'is_default',
         'active',
     ];
@@ -71,6 +73,10 @@ class Location extends Model
 
             $location->country = $addressReference->normalizeCountry($location->country) ?? ($location->country ? strtoupper(trim($location->country)) : null);
             $location->state_or_province = $addressReference->normalizeSubdivision($location->country, $location->state_or_province);
+            $location->phone = filled($location->phone) ? trim($location->phone) : null;
+            $location->phone_e164 = $location->phone
+                ? PhoneParserService::parse($location->phone, $location->country)->e164
+                : null;
 
             if ($location->is_default && $location->isDirty('is_default')) {
                 static::where('id', '!=', $location->id ?? 0)

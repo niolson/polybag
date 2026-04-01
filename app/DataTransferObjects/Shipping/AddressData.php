@@ -4,6 +4,7 @@ namespace App\DataTransferObjects\Shipping;
 
 use App\Models\Location;
 use App\Models\Shipment;
+use App\Services\PhoneParserService;
 
 readonly class AddressData
 {
@@ -34,7 +35,7 @@ readonly class AddressData
             postalCode: $shipment->validated_postal_code ?? $shipment->postal_code,
             country: $shipment->validated_country ?? $shipment->country ?? 'US',
             company: $shipment->validated_company ?? $shipment->company,
-            phone: $shipment->phone,
+            phone: PhoneParserService::nationalDigits($shipment->phone_e164, $shipment->validated_country ?? $shipment->country ?? 'US'),
             email: $shipment->email,
             phoneExtension: $shipment->phone_extension,
         );
@@ -52,7 +53,7 @@ readonly class AddressData
             postalCode: $location->postal_code,
             country: $location->country,
             company: $location->company,
-            phone: $location->phone,
+            phone: PhoneParserService::nationalDigits($location->phone_e164, $location->country),
         );
     }
 

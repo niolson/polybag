@@ -25,6 +25,7 @@ class PurgePiiCommand extends Command
         'city',
         'state_or_province',
         'phone',
+        'phone_e164',
         'phone_extension',
         'email',
         'validated_company',

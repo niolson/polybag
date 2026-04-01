@@ -425,7 +425,8 @@ it('imports shipment with phone extension and stores them separately', function 
 
     $shipment = Shipment::where('shipment_reference', 'ORD-PHONE-001')->first();
     expect($shipment)->not->toBeNull()
-        ->and($shipment->phone)->toBe('2107284548')
+        ->and($shipment->phone)->toBe('+1 210-728-4548 ext. 65440')
+        ->and($shipment->phone_e164)->toBe('+12107284548')
         ->and($shipment->phone_extension)->toBe('65440')
         ->and($shipment->validation_message)->toBeNull();
 });
@@ -455,9 +456,10 @@ it('imports shipment with invalid phone number and stores warning', function ():
 
     $shipment = Shipment::where('shipment_reference', 'ORD-PHONE-002')->first();
     expect($shipment)->not->toBeNull()
-        ->and($shipment->phone)->toBeNull()
+        ->and($shipment->phone)->toBe('not-a-phone')
+        ->and($shipment->phone_e164)->toBeNull()
         ->and($shipment->phone_extension)->toBeNull()
-        ->and($shipment->validation_message)->toContain('Invalid phone number removed');
+        ->and($shipment->validation_message)->toContain('Invalid phone number could not be normalized');
 });
 
 it('imports shipment with invalid email and stores warning', function (): void {
@@ -515,9 +517,10 @@ it('imports shipment with both invalid phone and email', function (): void {
 
     $shipment = Shipment::where('shipment_reference', 'ORD-BOTH-001')->first();
     expect($shipment)->not->toBeNull()
-        ->and($shipment->phone)->toBeNull()
+        ->and($shipment->phone)->toBe('not-a-phone')
+        ->and($shipment->phone_e164)->toBeNull()
         ->and($shipment->email)->toBeNull()
-        ->and($shipment->validation_message)->toContain('Invalid phone number removed')
+        ->and($shipment->validation_message)->toContain('Invalid phone number could not be normalized')
         ->and($shipment->validation_message)->toContain('Invalid email removed');
 });
 
@@ -547,6 +550,7 @@ it('imports shipment with valid phone and email without warnings', function (): 
 
     $shipment = Shipment::where('shipment_reference', 'ORD-VALID-001')->first();
     expect($shipment->phone)->toBe('5125551234')
+        ->and($shipment->phone_e164)->toBe('+15125551234')
         ->and($shipment->phone_extension)->toBeNull()
         ->and($shipment->email)->toBe('alice@example.com')
         ->and($shipment->validation_message)->toBeNull();
@@ -578,6 +582,7 @@ it('imports shipment with separate phone_extension field from source', function 
 
     $shipment = Shipment::where('shipment_reference', 'ORD-EXT-001')->first();
     expect($shipment->phone)->toBe('4085551234')
+        ->and($shipment->phone_e164)->toBe('+14085551234')
         ->and($shipment->phone_extension)->toBe('999');
 });
 
@@ -604,7 +609,8 @@ it('uses separate phone_extension field over parsed extension', function (): voi
 
     $shipment = Shipment::where('shipment_reference', 'ORD-EXT-002')->first();
     // Separate field takes precedence over parsed extension
-    expect($shipment->phone)->toBe('4155551234')
+    expect($shipment->phone)->toBe('+1 415-555-1234 ext. 999')
+        ->and($shipment->phone_e164)->toBe('+14155551234')
         ->and($shipment->phone_extension)->toBe('777');
 });
 

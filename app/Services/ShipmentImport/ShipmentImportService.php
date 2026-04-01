@@ -193,7 +193,7 @@ class ShipmentImportService
         $updateColumns = [
             'first_name', 'last_name', 'company',
             'address1', 'address2', 'city', 'state_or_province', 'postal_code', 'country',
-            'phone', 'phone_extension', 'email', 'value',
+            'phone', 'phone_e164', 'phone_extension', 'email', 'value',
             'validation_message', 'shipping_method_reference', 'shipping_method_id',
             'channel_reference', 'deliver_by', 'metadata', 'updated_at',
         ];
@@ -288,16 +288,16 @@ class ShipmentImportService
 
         // Parse phone number using libphonenumber
         $phoneExtension = $data['phone_extension'] ?? null;
+        $phoneE164 = null;
         if (! empty($data['phone'])) {
-            $phoneResult = PhoneParserService::parse($data['phone']);
+            $phoneResult = PhoneParserService::parse($data['phone'], $data['country'] ?? 'US');
             if ($phoneResult->isValid()) {
-                $data['phone'] = $phoneResult->phone;
+                $phoneE164 = $phoneResult->e164;
                 if ($phoneExtension === null && $phoneResult->extension !== null) {
                     $phoneExtension = $phoneResult->extension;
                 }
             } else {
-                $validationWarnings[] = "Invalid phone number removed: {$data['phone']}";
-                $data['phone'] = null;
+                $validationWarnings[] = "Invalid phone number could not be normalized: {$data['phone']}";
             }
         }
 
@@ -322,6 +322,7 @@ class ShipmentImportService
             'postal_code' => $data['postal_code'] ?? null,
             'country' => $data['country'] ?? 'US',
             'phone' => $data['phone'] ?? null,
+            'phone_e164' => $phoneE164,
             'phone_extension' => $phoneExtension,
             'email' => $data['email'] ?? null,
             'value' => $data['value'] ?? null,

@@ -7,6 +7,7 @@ use App\Enums\PackageStatus;
 use App\Enums\ShipmentStatus;
 use App\Services\AddressValidationService;
 use App\Services\AddressReferenceService;
+use App\Services\PhoneParserService;
 use App\Services\SettingsService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -32,6 +33,7 @@ class Shipment extends Model
         'postal_code',
         'country',
         'phone',
+        'phone_e164',
         'phone_extension',
         'email',
         'value',
@@ -77,6 +79,21 @@ class Shipment extends Model
 
             $shipment->validated_country = $addressReference->normalizeCountry($shipment->validated_country) ?? ($shipment->validated_country ? strtoupper(trim($shipment->validated_country)) : null);
             $shipment->validated_state_or_province = $addressReference->normalizeSubdivision($shipment->validated_country, $shipment->validated_state_or_province);
+
+            $shipment->phone = filled($shipment->phone) ? trim($shipment->phone) : null;
+            $shipment->phone_extension = filled($shipment->phone_extension) ? trim($shipment->phone_extension) : null;
+
+            if ($shipment->phone) {
+                $parsedPhone = PhoneParserService::parse($shipment->phone, $shipment->country);
+                $shipment->phone_e164 = $parsedPhone->e164;
+
+                if (blank($shipment->phone_extension) && $parsedPhone->extension !== null) {
+                    $shipment->phone_extension = $parsedPhone->extension;
+                }
+            } else {
+                $shipment->phone_e164 = null;
+                $shipment->phone_extension = null;
+            }
         });
     }
 
