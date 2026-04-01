@@ -255,74 +255,14 @@ class ShipmentResource extends Resource
 
                         return $indicators;
                     }),
-                Tables\Filters\Filter::make('deliver_by')
-                    ->form([
-                        Forms\Components\DatePicker::make('deliver_by_from')
-                            ->label('Deliver By From'),
-                        Forms\Components\DatePicker::make('deliver_by_until')
-                            ->label('Deliver By Until'),
-                    ])
-                    ->columns(2)
-                    ->query(function ($query, array $data) {
-                        return $query
-                            ->when($data['deliver_by_from'], fn ($query, $date) => $query->whereDate('deliver_by', '>=', $date))
-                            ->when($data['deliver_by_until'], fn ($query, $date) => $query->whereDate('deliver_by', '<=', $date));
-                    })
-                    ->indicateUsing(function (array $data): array {
-                        $indicators = [];
-                        if ($data['deliver_by_from'] ?? null) {
-                            $indicators['deliver_by_from'] = 'Deliver by from '.$data['deliver_by_from'];
-                        }
-                        if ($data['deliver_by_until'] ?? null) {
-                            $indicators['deliver_by_until'] = 'Deliver by until '.$data['deliver_by_until'];
-                        }
 
-                        return $indicators;
-                    }),
-                Tables\Filters\Filter::make('value_range')
-                    ->form([
-                        Forms\Components\TextInput::make('value_from')
-                            ->label('Min Value ($)')
-                            ->numeric(),
-                        Forms\Components\TextInput::make('value_to')
-                            ->label('Max Value ($)')
-                            ->numeric(),
-                    ])
-                    ->columns(2)
-                    ->query(function ($query, array $data) {
-                        return $query
-                            ->when($data['value_from'], fn ($query, $val) => $query->where('value', '>=', $val))
-                            ->when($data['value_to'], fn ($query, $val) => $query->where('value', '<=', $val));
-                    })
-                    ->indicateUsing(function (array $data): array {
-                        $indicators = [];
-                        if ($data['value_from'] ?? null) {
-                            $indicators['value_from'] = 'Value ≥ $'.$data['value_from'];
-                        }
-                        if ($data['value_to'] ?? null) {
-                            $indicators['value_to'] = 'Value ≤ $'.$data['value_to'];
-                        }
-
-                        return $indicators;
-                    }),
-            ], layout: FiltersLayout::AboveContent)
+            ], layout: FiltersLayout::Dropdown)
             ->deferFilters(false)
             ->filtersFormColumns(4)
             ->filtersFormSchema(fn (array $filters): array => [
-                $filters['status'],
-                $filters['deliverability'],
                 $filters['channel'],
                 $filters['shipping_method'],
-                Section::make('More Filters')
-                    ->schema([
-                        $filters['created_at'],
-                        $filters['deliver_by'],
-                        $filters['value_range'],
-                    ])
-                    ->columns(4)
-                    ->collapsed()
-                    ->compact()
-                    ->columnSpanFull(),
+                $filters['created_at'],
             ])
             ->defaultSort('created_at', 'desc')
             ->recordActions([])

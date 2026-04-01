@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\Deliverability;
 use App\Enums\Role;
 use App\Enums\ShipmentStatus;
 use App\Filament\Resources\ShipmentResource\Pages\ListShipments;
@@ -32,4 +33,25 @@ it('filters shipments by status', function (): void {
         ->filterTable('status', ShipmentStatus::Open->value)
         ->assertCanSeeTableRecords([$notShipped])
         ->assertCanNotSeeTableRecords([$shipped]);
+});
+
+it('filters shipments by status and deliverability tab groups together', function (): void {
+    $matchingShipment = Shipment::factory()->create([
+        'status' => ShipmentStatus::Open,
+        'deliverability' => Deliverability::Yes,
+    ]);
+    $wrongStatusShipment = Shipment::factory()->create([
+        'status' => ShipmentStatus::Shipped,
+        'deliverability' => Deliverability::Yes,
+    ]);
+    $wrongDeliverabilityShipment = Shipment::factory()->create([
+        'status' => ShipmentStatus::Open,
+        'deliverability' => Deliverability::No,
+    ]);
+
+    Livewire::test(ListShipments::class)
+        ->set('activeStatusTab', ShipmentStatus::Open->value)
+        ->set('activeDeliverabilityTab', Deliverability::Yes->value)
+        ->assertCanSeeTableRecords([$matchingShipment])
+        ->assertCanNotSeeTableRecords([$wrongStatusShipment, $wrongDeliverabilityShipment]);
 });
