@@ -4,11 +4,143 @@ namespace App\Filament\Support;
 
 use App\Services\AddressReferenceService;
 use Filament\Forms;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 
 class AddressForm
 {
+    /**
+     * @return array<int, mixed>
+     */
+    public static function recipientAddressFields(
+        string $prefix = '',
+        bool $includeCompany = true,
+        bool $includePhone = true,
+        bool $includeEmail = false,
+        bool $requireNames = false,
+        bool $requirePostalCode = false,
+        int $postalCodeMaxLength = 255,
+        int $phoneMaxLength = 255,
+        ?\Closure $afterStateUpdated = null,
+    ): array {
+        $field = fn (string $name): string => $prefix.$name;
+        $touch = function ($component) use ($afterStateUpdated) {
+            if ($component instanceof Forms\Components\TextInput) {
+                $component->live(onBlur: true);
+            }
+
+            if ($afterStateUpdated instanceof \Closure) {
+                $component->afterStateUpdated(fn (Set $set) => $afterStateUpdated($set));
+            }
+
+            return $component;
+        };
+
+        $fields = [
+            self::countrySelect(
+                field: $field('country'),
+                subdivisionField: $field('state_or_province'),
+                afterStateUpdated: $afterStateUpdated,
+            )
+                ->label('Country / Region')
+                ->columnSpanFull(),
+            Grid::make(2)
+                ->schema([
+                    $touch(
+                        Forms\Components\TextInput::make($field('first_name'))
+                            ->label('First Name')
+                            ->required($requireNames)
+                            ->maxLength(255)
+                    ),
+                    $touch(
+                        Forms\Components\TextInput::make($field('last_name'))
+                            ->label('Last Name')
+                            ->required($requireNames)
+                            ->maxLength(255)
+                    ),
+                ])
+                ->columnSpanFull(),
+        ];
+
+        if ($includeCompany) {
+            $fields[] = $touch(
+                Forms\Components\TextInput::make($field('company'))
+                    ->label('Company')
+                    ->maxLength(255)
+                    ->columnSpanFull()
+            );
+        }
+
+        $fields[] = $touch(
+            Forms\Components\TextInput::make($field('address1'))
+                ->label('Address')
+                ->required()
+                ->maxLength(255)
+                ->columnSpanFull()
+        );
+
+        $fields[] = $touch(
+            Forms\Components\TextInput::make($field('address2'))
+                ->label('Apartment, suite, etc.')
+                ->maxLength(255)
+                ->columnSpanFull()
+        );
+
+        $fields[] = Grid::make([
+            'default' => 1,
+            'md' => 3,
+        ])
+            ->schema([
+                $touch(
+                    Forms\Components\TextInput::make($field('city'))
+                        ->label('City')
+                        ->required()
+                        ->maxLength(255)
+                ),
+                self::administrativeAreaSelect(
+                    field: $field('state_or_province'),
+                    countryField: $field('country'),
+                    afterStateUpdated: $afterStateUpdated,
+                ),
+                $touch(
+                    Forms\Components\TextInput::make($field('postal_code'))
+                        ->label('Postal Code')
+                        ->required($requirePostalCode)
+                        ->maxLength($postalCodeMaxLength)
+                ),
+            ])
+            ->columnSpanFull();
+
+        if ($includePhone || $includeEmail) {
+            $contactFields = [];
+
+            if ($includePhone) {
+                $contactFields[] = $touch(
+                    Forms\Components\TextInput::make($field('phone'))
+                        ->label('Phone')
+                        ->tel()
+                        ->maxLength($phoneMaxLength)
+                );
+            }
+
+            if ($includeEmail) {
+                $contactFields[] = $touch(
+                    Forms\Components\TextInput::make($field('email'))
+                        ->label('Email')
+                        ->email()
+                        ->maxLength(255)
+                );
+            }
+
+            $fields[] = Grid::make(max(1, count($contactFields)))
+                ->schema($contactFields)
+                ->columnSpanFull();
+        }
+
+        return $fields;
+    }
+
     public static function countrySelect(
         string $field = 'country',
         string $subdivisionField = 'state_or_province',

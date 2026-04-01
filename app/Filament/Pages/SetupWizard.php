@@ -156,43 +156,14 @@ class SetupWizard extends Page
                             ->required()
                             ->maxLength(255)
                             ->default('Main Warehouse'),
-                        Forms\Components\TextInput::make('location_company')
-                            ->label('Company')
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('location_first_name')
-                            ->label('First Name')
-                            ->required()
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('location_last_name')
-                            ->label('Last Name')
-                            ->required()
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('location_address1')
-                            ->label('Street Address')
-                            ->required()
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('location_address2')
-                            ->label('Street Address 2')
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('location_city')
-                            ->label('City')
-                            ->required()
-                            ->maxLength(255),
-                        AddressForm::administrativeAreaSelect(
-                            field: 'location_state',
-                            countryField: 'location_country',
+                        ...AddressForm::recipientAddressFields(
+                            prefix: 'location_',
+                            includeCompany: true,
+                            includePhone: true,
+                            requireNames: true,
+                            requirePostalCode: true,
+                            postalCodeMaxLength: 20,
                         ),
-                        Forms\Components\TextInput::make('location_postal_code')
-                            ->label('Postal Code')
-                            ->required()
-                            ->maxLength(20),
-                        AddressForm::countrySelect(
-                            field: 'location_country',
-                            subdivisionField: 'location_state',
-                        ),
-                        Forms\Components\TextInput::make('location_phone')
-                            ->label('Phone')
-                            ->tel(),
                         Forms\Components\Select::make('location_timezone')
                             ->label('Timezone')
                             ->options(fn () => collect(timezone_identifiers_list())

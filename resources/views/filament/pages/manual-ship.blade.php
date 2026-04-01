@@ -56,7 +56,8 @@
             }
         }"
     >
-        <div class="flex items-center justify-end gap-3 mb-4">
+        <div class="sticky top-0 z-10 mb-4 rounded-xl border border-gray-200/70 bg-white/90 p-3 shadow-sm backdrop-blur dark:border-white/10 dark:bg-gray-950/80">
+            <div class="flex flex-wrap items-center justify-end gap-3">
             @if($isAdmin)
                 <button
                     type="button"
@@ -100,6 +101,7 @@
                 <span wire:loading.remove x-text="autoShipEnabled ? 'Auto Ship' : 'Ship'"></span>
                 <span wire:loading>Working...</span>
             </button>
+            </div>
         </div>
 
         <form id="manual-ship-form" wire:submit="ship" class="space-y-6">
@@ -107,16 +109,35 @@
 
             <x-filament::section>
                 <x-slot name="heading">Scale Status</x-slot>
+                <x-slot name="description">Live workstation status for the connected shipping scale.</x-slot>
 
-                <div class="flex items-center gap-3 text-sm">
-                    <div x-show="scaleConnected" x-cloak class="text-success-600 dark:text-success-400">
-                        Scale connected
+                <div class="grid gap-3 sm:grid-cols-3">
+                    <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-white/10 dark:bg-white/5">
+                        <div class="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">Connection</div>
+                        <div x-show="scaleConnected" x-cloak class="mt-2 text-sm font-semibold text-success-600 dark:text-success-400">
+                            Connected
+                        </div>
+                        <div x-show="!scaleConnected" class="mt-2 text-sm font-semibold text-gray-600 dark:text-gray-300">
+                            Not connected
+                        </div>
                     </div>
-                    <div x-show="!scaleConnected" class="text-gray-500 dark:text-gray-400">
-                        No scale connected
+                    <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-white/10 dark:bg-white/5">
+                        <div class="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">Scale State</div>
+                        <div x-show="scaleConnected && scaleStable" x-cloak class="mt-2 text-sm font-semibold text-success-600 dark:text-success-400">
+                            Stable
+                        </div>
+                        <div x-show="scaleConnected && !scaleStable" x-cloak class="mt-2 text-sm font-semibold text-warning-600 dark:text-warning-400">
+                            In motion
+                        </div>
+                        <div x-show="!scaleConnected" class="mt-2 text-sm font-semibold text-gray-600 dark:text-gray-300">
+                            Waiting
+                        </div>
                     </div>
-                    <div x-show="scaleConnected && !scaleStable" x-cloak class="text-warning-600 dark:text-warning-400">
-                        Weight in motion...
+                    <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-white/10 dark:bg-white/5">
+                        <div class="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">Behavior</div>
+                        <div class="mt-2 text-sm text-gray-600 dark:text-gray-300">
+                            Stable readings update the Weight field automatically.
+                        </div>
                     </div>
                 </div>
             </x-filament::section>

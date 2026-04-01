@@ -47,34 +47,14 @@ class LocationResource extends Resource
                             ->required(),
                     ]),
                 Components\Section::make('Address')
-                    ->schema([
-                        Forms\Components\TextInput::make('company')
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('first_name')
-                            ->required()
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('last_name')
-                            ->required()
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('address1')
-                            ->label('Street Address')
-                            ->required()
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('address2')
-                            ->label('Street Address 2')
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('city')
-                            ->required()
-                            ->maxLength(255),
-                        AddressForm::administrativeAreaSelect(),
-                        Forms\Components\TextInput::make('postal_code')
-                            ->required()
-                            ->maxLength(20),
-                        AddressForm::countrySelect(),
-                        Forms\Components\TextInput::make('phone')
-                            ->tel()
-                            ->maxLength(20),
-                    ])->columns(2),
+                    ->schema(AddressForm::recipientAddressFields(
+                        includeCompany: true,
+                        includePhone: true,
+                        requireNames: true,
+                        requirePostalCode: true,
+                        postalCodeMaxLength: 20,
+                        phoneMaxLength: 20,
+                    ))->columns(2),
                 Components\Section::make('Carrier Pickup Schedule')
                     ->schema([
                         Forms\Components\Repeater::make('carrierLocations')

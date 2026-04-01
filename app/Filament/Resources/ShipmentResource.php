@@ -125,52 +125,18 @@ class ShipmentResource extends Resource
                 Section::make('Recipient & Address')
                     ->inlineLabel()
                     ->schema([
-                        Forms\Components\TextInput::make('first_name')
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('last_name')
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('company')
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('phone')
-                            ->tel()
-                            ->maxLength(255),
+                        Section::make('Shipping Address')
+                            ->inlineLabel()
+                            ->schema(AddressForm::recipientAddressFields(
+                                includeCompany: true,
+                                includePhone: true,
+                                includeEmail: true,
+                                afterStateUpdated: fn (Components\Utilities\Set $set) => $set('checked', false),
+                            ))
+                            ->columns(2),
                         Forms\Components\TextInput::make('phone_extension')
                             ->label('Phone Ext.')
                             ->maxLength(6),
-                        Forms\Components\TextInput::make('email')
-                            ->email()
-                            ->maxLength(255),
-
-                        Section::make('Shipping Address')
-                            ->inlineLabel()
-                            ->schema([
-                                Forms\Components\TextInput::make('address1')
-                                    ->required()
-                                    ->maxLength(255)
-                                    ->live(onBlur: true)
-                                    ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
-                                Forms\Components\TextInput::make('address2')
-                                    ->maxLength(255)
-                                    ->live(onBlur: true)
-                                    ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
-                                Forms\Components\TextInput::make('city')
-                                    ->required()
-                                    ->maxLength(255)
-                                    ->live(onBlur: true)
-                                    ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
-                                AddressForm::administrativeAreaSelect(
-                                    afterStateUpdated: fn (Components\Utilities\Set $set) => $set('checked', false),
-                                ),
-                                Forms\Components\TextInput::make('postal_code')
-                                    ->label('Postal Code')
-                                    ->maxLength(255)
-                                    ->live(onBlur: true)
-                                    ->afterStateUpdated(fn (Components\Utilities\Set $set) => $set('checked', false)),
-                                AddressForm::countrySelect(
-                                    afterStateUpdated: fn (Components\Utilities\Set $set) => $set('checked', false),
-                                ),
-                            ])
-                            ->columns(2),
 
                         Forms\Components\Hidden::make('checked'),
 

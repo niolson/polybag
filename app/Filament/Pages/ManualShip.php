@@ -21,6 +21,7 @@ use Filament\Forms;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
@@ -73,101 +74,90 @@ class ManualShip extends Page implements HasForms
     {
         return $form
             ->schema([
-                Section::make('Recipient & Address')
+                Grid::make([
+                    'default' => 1,
+                    'lg' => 2,
+                ])
                     ->schema([
-                        Forms\Components\TextInput::make('shipment_reference')
-                            ->label('Reference')
-                            ->helperText('Optional')
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('first_name')
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('last_name')
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('company')
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('address1')
-                            ->label('Address 1')
-                            ->required()
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('address2')
-                            ->label('Address 2')
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('city')
-                            ->required()
-                            ->maxLength(255),
-                        AddressForm::administrativeAreaSelect(),
-                        Forms\Components\TextInput::make('postal_code')
-                            ->label('Postal Code')
-                            ->maxLength(255),
-                        AddressForm::countrySelect(),
-                        Forms\Components\TextInput::make('phone')
-                            ->tel()
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('email')
-                            ->email()
-                            ->maxLength(255),
-                        Forms\Components\Select::make('shipping_method_id')
-                            ->label('Shipping Method')
-                            ->options(fn (): array => $this->getShippingMethodOptions())
-                            ->searchable()
-                            ->native(false)
-                            ->placeholder('— None —'),
-                    ])
-                    ->columns(2),
-                Section::make('Package')
-                    ->schema([
-                        Forms\Components\Select::make('box_size_id')
-                            ->label('Box Size')
-                            ->options(fn (): array => $this->getBoxSizeOptions())
-                            ->searchable()
-                            ->native(false)
-                            ->placeholder('Custom')
-                            ->live()
-                            ->afterStateUpdated(function (Set $set, ?string $state): void {
-                                if (! $state) {
-                                    return;
-                                }
+                        Section::make('Recipient & Address')
+                            ->description('Enter the destination details for this manual shipment.')
+                            ->schema([
+                                Forms\Components\TextInput::make('shipment_reference')
+                                    ->label('Reference')
+                                    ->helperText('Optional - External channel reference number')
+                                    ->maxLength(255)
+                                    ->columnSpanFull(),
+                                ...AddressForm::recipientAddressFields(
+                                    includeCompany: true,
+                                    includePhone: true,
+                                    includeEmail: true,
+                                ),
+                                Forms\Components\Select::make('shipping_method_id')
+                                    ->label('Shipping Method')
+                                    ->options(fn (): array => $this->getShippingMethodOptions())
+                                    ->searchable()
+                                    ->native(false)
+                                    ->placeholder('— None —')
+                                    ->columnSpanFull(),
+                            ])
+                            ->columns(2),
+                        Section::make('Package')
+                            ->description('Choose a saved box and confirm the measured package dimensions.')
+                            ->schema([
+                                Forms\Components\Select::make('box_size_id')
+                                    ->label('Box Size')
+                                    ->options(fn (): array => $this->getBoxSizeOptions())
+                                    ->searchable()
+                                    ->native(false)
+                                    ->placeholder('Custom')
+                                    ->live()
+                                    ->afterStateUpdated(function (Set $set, ?string $state): void {
+                                        if (! $state) {
+                                            return;
+                                        }
 
-                                $box = BoxSize::find($state);
+                                        $box = BoxSize::find($state);
 
-                                if (! $box) {
-                                    return;
-                                }
+                                        if (! $box) {
+                                            return;
+                                        }
 
-                                $set('height', (string) $box->height);
-                                $set('width', (string) $box->width);
-                                $set('length', (string) $box->length);
-                            }),
-                        Forms\Components\TextInput::make('weight')
-                            ->label('Weight')
-                            ->suffix('lbs')
-                            ->required()
-                            ->numeric()
-                            ->minValue(0.01)
-                            ->step(0.01),
-                        Forms\Components\TextInput::make('height')
-                            ->label('Height')
-                            ->suffix('in')
-                            ->required()
-                            ->numeric()
-                            ->minValue(0.01)
-                            ->step(0.01),
-                        Forms\Components\TextInput::make('width')
-                            ->label('Width')
-                            ->suffix('in')
-                            ->required()
-                            ->numeric()
-                            ->minValue(0.01)
-                            ->step(0.01),
-                        Forms\Components\TextInput::make('length')
-                            ->label('Length')
-                            ->suffix('in')
-                            ->required()
-                            ->numeric()
-                            ->minValue(0.01)
-                            ->step(0.01),
-                    ])
-                    ->columns(2),
+                                        $set('height', (string) $box->height);
+                                        $set('width', (string) $box->width);
+                                        $set('length', (string) $box->length);
+                                    }),
+                                Forms\Components\TextInput::make('weight')
+                                    ->label('Weight')
+                                    ->suffix('lbs')
+                                    ->helperText('Auto-fills from the connected scale when stable.')
+                                    ->required()
+                                    ->numeric()
+                                    ->minValue(0.01)
+                                    ->step(0.01),
+                                Forms\Components\TextInput::make('height')
+                                    ->label('Height')
+                                    ->suffix('in')
+                                    ->required()
+                                    ->numeric()
+                                    ->minValue(0.01)
+                                    ->step(0.01),
+                                Forms\Components\TextInput::make('width')
+                                    ->label('Width')
+                                    ->suffix('in')
+                                    ->required()
+                                    ->numeric()
+                                    ->minValue(0.01)
+                                    ->step(0.01),
+                                Forms\Components\TextInput::make('length')
+                                    ->label('Length')
+                                    ->suffix('in')
+                                    ->required()
+                                    ->numeric()
+                                    ->minValue(0.01)
+                                    ->step(0.01),
+                            ])
+                            ->columns(2),
+                    ]),
             ])
             ->statePath('data');
     }
