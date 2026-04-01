@@ -70,6 +70,7 @@ class SetupWizard extends Page
             'location_address2' => $location?->address2,
             'location_city' => $location?->city,
             'location_state' => $location?->state_or_province,
+            'location_state_or_province' => $location?->state_or_province,
             'location_postal_code' => $location?->postal_code,
             'location_country' => $location?->country ?? 'US',
             'location_phone' => $location?->phone,
@@ -595,6 +596,8 @@ class SetupWizard extends Page
 
         $settings->set('company_name', $data['company_name'], group: 'company');
 
+        $locationStateOrProvince = $data['location_state_or_province'] ?? $data['location_state'] ?? null;
+
         Location::updateOrCreate(
             ['is_default' => true],
             [
@@ -605,7 +608,7 @@ class SetupWizard extends Page
                 'address1' => $data['location_address1'],
                 'address2' => $data['location_address2'],
                 'city' => $data['location_city'],
-                'state_or_province' => $data['location_state'],
+                'state_or_province' => $locationStateOrProvince,
                 'postal_code' => $data['location_postal_code'],
                 'country' => $data['location_country'],
                 'phone' => $data['location_phone'],

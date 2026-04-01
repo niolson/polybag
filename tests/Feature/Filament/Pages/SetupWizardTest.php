@@ -73,9 +73,9 @@ function fillRequiredSetupWizardFields(\Livewire\Features\SupportTesting\Testabl
         'location_last_name' => 'Doe',
         'location_address1' => '123 Market Street',
         'location_city' => 'Philadelphia',
-        'location_state' => 'PA',
-        'location_postal_code' => '19106',
         'location_country' => 'US',
+        'location_state_or_province' => 'PA',
+        'location_postal_code' => '19106',
         'location_timezone' => 'America/New_York',
     ];
 
