@@ -23,6 +23,7 @@ class Shipment extends Model
 
     protected $fillable = [
         'shipment_reference',
+        'source_record_id',
         'first_name',
         'last_name',
         'company',
@@ -53,6 +54,7 @@ class Shipment extends Model
         'shipping_method_id',
         'channel_reference',
         'channel_id',
+        'import_source_id',
         'status',
         'deliver_by',
         'metadata',
@@ -208,5 +210,10 @@ class Shipment extends Model
     public function channel(): BelongsTo
     {
         return $this->belongsTo(Channel::class);
+    }
+
+    public function importSource(): BelongsTo
+    {
+        return $this->belongsTo(ImportSource::class);
     }
 }

@@ -139,6 +139,7 @@ it('imports amazon orders into shipments table with metadata', function (): void
     expect($shipment->country)->toBe('US');
     expect($shipment->email)->toBe('test@marketplace.amazon.com');
     expect($shipment->channel_id)->toBe($channel->id);
+    expect($shipment->source_record_id)->toBe('111-2222222-3333333');
 
     // Metadata stored correctly
     expect($shipment->metadata)->toBeArray();

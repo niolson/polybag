@@ -36,7 +36,7 @@ function fakeExportSource(bool $exportEnabled = true, ?string $exportError = nul
             return collect();
         }
 
-        public function fetchShipmentItems(string $shipmentReference): Collection
+        public function fetchShipmentItems(string $sourceRecordId): Collection
         {
             return collect();
         }
@@ -48,7 +48,7 @@ function fakeExportSource(bool $exportEnabled = true, ?string $exportError = nul
             return [];
         }
 
-        public function markExported(string $shipmentReference): bool
+        public function markExported(string $sourceRecordId): bool
         {
             return false;
         }

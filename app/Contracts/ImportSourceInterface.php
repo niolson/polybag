@@ -21,7 +21,7 @@ interface ImportSourceInterface
      * Fetch shipment items for a specific shipment reference
      * Returns a collection of normalized item data arrays
      */
-    public function fetchShipmentItems(string $shipmentReference): Collection;
+    public function fetchShipmentItems(string $sourceRecordId): Collection;
 
     /**
      * Validate the source configuration
@@ -40,5 +40,5 @@ interface ImportSourceInterface
      *
      * @return bool True if the source was actually updated, false if no-op.
      */
-    public function markExported(string $shipmentReference): bool;
+    public function markExported(string $sourceRecordId): bool;
 }

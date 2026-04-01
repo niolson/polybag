@@ -17,7 +17,7 @@ class ShopifySource implements ExportDestinationInterface, ImportSourceInterface
 
     private ShopifyConnector $connector;
 
-    /** @var array<string, array> Cached order data keyed by shipment reference */
+    /** @var array<string, array> Cached order data keyed by source record ID */
     private array $orderCache = [];
 
     private const CARRIER_MAP = [
@@ -74,7 +74,7 @@ class ShopifySource implements ExportDestinationInterface, ImportSourceInterface
 
     public function getSourceName(): string
     {
-        return 'shopify';
+        return $this->config['config_key'] ?? 'shopify';
     }
 
     public function validateConfiguration(): void
@@ -124,7 +124,7 @@ class ShopifySource implements ExportDestinationInterface, ImportSourceInterface
                 $allOrders[] = $mapped;
 
                 // Cache full order for fetchShipmentItems
-                $this->orderCache[$mapped['shipment_reference']] = $order;
+                $this->orderCache[$mapped['source_record_id']] = $order;
             }
 
             $cursor = ($pageInfo['hasNextPage'] ?? false) ? ($pageInfo['endCursor'] ?? null) : null;
@@ -133,9 +133,9 @@ class ShopifySource implements ExportDestinationInterface, ImportSourceInterface
         return collect($allOrders);
     }
 
-    public function fetchShipmentItems(string $shipmentReference): Collection
+    public function fetchShipmentItems(string $sourceRecordId): Collection
     {
-        $order = $this->orderCache[$shipmentReference] ?? null;
+        $order = $this->orderCache[$sourceRecordId] ?? null;
 
         if (! $order) {
             return collect();
@@ -154,7 +154,7 @@ class ShopifySource implements ExportDestinationInterface, ImportSourceInterface
         return [];
     }
 
-    public function markExported(string $shipmentReference): bool
+    public function markExported(string $sourceRecordId): bool
     {
         // No-op: Shopify tracks fulfillment status natively.
         // Orders are excluded from future imports once fulfilled.
@@ -247,6 +247,7 @@ class ShopifySource implements ExportDestinationInterface, ImportSourceInterface
         }
 
         return [
+            'source_record_id' => $order['id'] ?? ($order['name'] ?? ''),
             'shipment_reference' => $order['name'] ?? '',
             'first_name' => $address['firstName'] ?? null,
             'last_name' => $address['lastName'] ?? null,

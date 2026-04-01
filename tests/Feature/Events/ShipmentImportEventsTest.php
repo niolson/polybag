@@ -6,6 +6,7 @@ use App\Events\ShipmentImported;
 use App\Events\ShipmentUpdated;
 use App\Models\Channel;
 use App\Models\ChannelAlias;
+use App\Models\ImportSource;
 use App\Models\Shipment;
 use App\Services\ShipmentImport\ShipmentImportService;
 use Illuminate\Support\Collection;
@@ -30,7 +31,7 @@ function importTestSource(Collection $shipments, Collection $items = new Collect
             return $this->shipments;
         }
 
-        public function fetchShipmentItems(string $shipmentReference): Collection
+        public function fetchShipmentItems(string $sourceRecordId): Collection
         {
             return $this->items;
         }
@@ -42,7 +43,7 @@ function importTestSource(Collection $shipments, Collection $items = new Collect
             return [];
         }
 
-        public function markExported(string $shipmentReference): bool
+        public function markExported(string $sourceRecordId): bool
         {
             return false;
         }
@@ -81,8 +82,16 @@ it('dispatches ShipmentUpdated for existing shipments', function (): void {
     Event::fake([ShipmentImported::class, ShipmentUpdated::class, ImportCompleted::class]);
 
     $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
+    $importSource = ImportSource::create([
+        'config_key' => 'test',
+        'name' => 'Test',
+        'driver' => 'tests',
+        'active' => true,
+    ]);
     Shipment::factory()->create([
         'shipment_reference' => 'EXISTING-001',
+        'source_record_id' => 'EXISTING-001',
+        'import_source_id' => $importSource->id,
         'channel_id' => $channel->id,
     ]);
 

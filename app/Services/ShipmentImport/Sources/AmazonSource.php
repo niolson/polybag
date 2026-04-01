@@ -18,7 +18,7 @@ class AmazonSource implements ExportDestinationInterface, ImportSourceInterface
 
     private AmazonSpApiConnector $connector;
 
-    /** @var array<string, array> Cached order data keyed by shipment reference */
+    /** @var array<string, array> Cached order data keyed by source record ID */
     private array $orderCache = [];
 
     private const CARRIER_MAP = [
@@ -36,7 +36,7 @@ class AmazonSource implements ExportDestinationInterface, ImportSourceInterface
 
     public function getSourceName(): string
     {
-        return 'amazon';
+        return $this->config['config_key'] ?? 'amazon';
     }
 
     public function validateConfiguration(): void
@@ -108,16 +108,16 @@ class AmazonSource implements ExportDestinationInterface, ImportSourceInterface
                 $mapped = $this->mapOrderToShipment($order);
                 $allOrders[] = $mapped;
 
-                $this->orderCache[$mapped['shipment_reference']] = $order;
+                $this->orderCache[$mapped['source_record_id']] = $order;
             }
         } while ($paginationToken !== null);
 
         return collect($allOrders);
     }
 
-    public function fetchShipmentItems(string $shipmentReference): Collection
+    public function fetchShipmentItems(string $sourceRecordId): Collection
     {
-        $order = $this->orderCache[$shipmentReference] ?? null;
+        $order = $this->orderCache[$sourceRecordId] ?? null;
 
         if (! $order) {
             return collect();
@@ -136,7 +136,7 @@ class AmazonSource implements ExportDestinationInterface, ImportSourceInterface
         return [];
     }
 
-    public function markExported(string $shipmentReference): bool
+    public function markExported(string $sourceRecordId): bool
     {
         // No-op: Amazon tracks fulfillment status natively.
         // Fulfilled orders won't match the Unshipped filter on next import.
@@ -249,6 +249,7 @@ class AmazonSource implements ExportDestinationInterface, ImportSourceInterface
         $lastName = $nameParts[1] ?? null;
 
         return [
+            'source_record_id' => $order['orderId'] ?? '',
             'shipment_reference' => $order['orderId'] ?? '',
             'first_name' => $firstName,
             'last_name' => $lastName,

@@ -3,6 +3,7 @@
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Models\Channel;
 use App\Models\ChannelAlias;
+use App\Models\ImportSource;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\ShipmentImport\PackageExportService;
@@ -146,6 +147,9 @@ it('imports shopify orders into shipments table with metadata', function (): voi
     expect($shipment->country)->toBe('US');
     expect($shipment->email)->toBe('test@example.com');
     expect($shipment->channel_id)->toBe($channel->id);
+    expect($shipment->source_record_id)->toBe('gid://shopify/Order/1001');
+    expect($shipment->importSource)->not->toBeNull();
+    expect($shipment->importSource->config_key)->toBe('shopify');
 
     // Metadata stored correctly
     expect($shipment->metadata)->toBeArray();
@@ -293,4 +297,46 @@ it('imports multiple pages of orders', function (): void {
     expect($result->shipmentsCreated)->toBe(2);
     expect(Shipment::where('shipment_reference', '#1001')->exists())->toBeTrue();
     expect(Shipment::where('shipment_reference', '#1002')->exists())->toBeTrue();
+});
+
+it('deduplicates shopify imports by order id instead of displayed name', function (): void {
+    $channel = tap(Channel::factory()->create(['name' => 'Shopify']), fn ($c) => ChannelAlias::create(['reference' => 'Shopify', 'channel_id' => $c->id]));
+
+    $firstOrder = sampleOrder('#1001', 'gid://shopify/Order/1001');
+    $secondOrder = sampleOrder('#1001-RENAMED', 'gid://shopify/Order/1001');
+
+    Saloon::fake([
+        GraphQL::class => shopifyOrdersResponse([$firstOrder]),
+    ]);
+
+    $source = new ShopifySource([
+        'driver' => ShopifySource::class,
+        'enabled' => true,
+        'channel_name' => 'Shopify',
+        'shipping_method' => null,
+        'notify_customer' => false,
+        'export' => ['enabled' => false, 'field_mapping' => []],
+    ]);
+
+    $result1 = ShipmentImportService::forSource($source)->import();
+
+    Saloon::fake([
+        GraphQL::class => shopifyOrdersResponse([$secondOrder]),
+    ]);
+
+    $result2 = ShipmentImportService::forSource($source)->import();
+
+    expect($result1->shipmentsCreated)->toBe(1)
+        ->and($result2->shipmentsUpdated)->toBe(1)
+        ->and($result2->shipmentsCreated)->toBe(0)
+        ->and(Shipment::count())->toBe(1);
+
+    $shipment = Shipment::first();
+    expect($shipment->source_record_id)->toBe('gid://shopify/Order/1001')
+        ->and($shipment->shipment_reference)->toBe('#1001-RENAMED')
+        ->and($shipment->channel_id)->toBe($channel->id);
+
+    $importSource = ImportSource::where('config_key', 'shopify')->first();
+    expect($importSource)->not->toBeNull()
+        ->and($shipment->import_source_id)->toBe($importSource->id);
 });

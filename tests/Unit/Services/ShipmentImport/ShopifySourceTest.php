@@ -214,7 +214,7 @@ it('maps line items using unfulfilled quantity', function (): void {
     $source = new ShopifySource(shopifyConfig());
     $source->fetchShipments();
 
-    $items = $source->fetchShipmentItems('#1001');
+    $items = $source->fetchShipmentItems('gid://shopify/Order/1001');
 
     // Only unfulfilled items (Red Widget has 0 unfulfilled, should be excluded)
     expect($items)->toHaveCount(1);

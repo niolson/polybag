@@ -91,7 +91,7 @@ class DatabaseSource implements ExportDestinationInterface, ImportSourceInterfac
 
     public function getSourceName(): string
     {
-        return 'database';
+        return $this->config['config_key'] ?? 'database';
     }
 
     public function validateConfiguration(): void
@@ -148,7 +148,7 @@ class DatabaseSource implements ExportDestinationInterface, ImportSourceInterfac
         });
     }
 
-    public function fetchShipmentItems(string $shipmentReference): Collection
+    public function fetchShipmentItems(string $sourceRecordId): Collection
     {
         $connection = $this->config['connection'];
 
@@ -156,13 +156,13 @@ class DatabaseSource implements ExportDestinationInterface, ImportSourceInterfac
         if (! empty($this->config['shipment_items_query'])) {
             $results = DB::connection($connection)
                 ->select($this->config['shipment_items_query'], [
-                    'shipment_reference' => $shipmentReference,
+                    'shipment_reference' => $sourceRecordId,
                 ]);
         } else {
             // Default: lookup by shipment_id field matching the reference
             $results = DB::connection($connection)
                 ->table($this->config['shipment_items_table'])
-                ->where('shipment_id', $shipmentReference)
+                ->where('shipment_id', $sourceRecordId)
                 ->get();
         }
 
@@ -176,7 +176,7 @@ class DatabaseSource implements ExportDestinationInterface, ImportSourceInterfac
         return $this->config['field_mapping'] ?? [];
     }
 
-    public function markExported(string $shipmentReference): bool
+    public function markExported(string $sourceRecordId): bool
     {
         $markExported = $this->config['mark_exported'] ?? [];
 
@@ -186,7 +186,7 @@ class DatabaseSource implements ExportDestinationInterface, ImportSourceInterfac
 
         DB::connection($this->config['connection'])
             ->statement($markExported['query'], [
-                'shipment_reference' => $shipmentReference,
+                'shipment_reference' => $sourceRecordId,
             ]);
 
         return true;

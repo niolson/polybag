@@ -96,6 +96,8 @@ class ImportShipmentsCommand extends Command
             );
         }
 
+        $config['config_key'] = $sourceName;
+
         return new $driverClass($config);
     }
 

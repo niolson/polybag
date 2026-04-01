@@ -9,6 +9,7 @@ use App\Events\ShipmentImported;
 use App\Events\ShipmentUpdated;
 use App\Models\Channel;
 use App\Models\ChannelAlias;
+use App\Models\ImportSource;
 use App\Models\Product;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
@@ -26,6 +27,8 @@ class ShipmentImportService
 {
     private ImportSourceInterface $source;
 
+    private ImportSource $importSource;
+
     private array $stats;
 
     private array $errors;
@@ -42,6 +45,7 @@ class ShipmentImportService
     public function __construct(ImportSourceInterface $source)
     {
         $this->source = $source;
+        $this->importSource = $this->resolveImportSource($source);
         $this->resetStats();
     }
 
@@ -152,7 +156,7 @@ class ShipmentImportService
     {
         $now = now();
         $preparedRows = [];
-        $validDataByRef = [];
+        $validDataBySourceRecord = [];
 
         // Phase 1: Validate and prepare all shipment data as arrays
         foreach ($batch as $data) {
@@ -165,7 +169,7 @@ class ShipmentImportService
                 $prepared['created_at'] = $now;
                 $prepared['updated_at'] = $now;
                 $preparedRows[] = $prepared;
-                $validDataByRef[$data['shipment_reference']] = $data;
+                $validDataBySourceRecord[$prepared['source_record_id']] = $data;
             } catch (\Exception $e) {
                 $this->errors[] = "Error importing shipment {$data['shipment_reference']}: ".$e->getMessage();
 
@@ -180,90 +184,61 @@ class ShipmentImportService
             return;
         }
 
-        // Track which references already exist for event dispatching
-        $references = array_column($preparedRows, 'shipment_reference');
-        $existingRefs = Shipment::whereIn('shipment_reference', $references)
-            ->pluck('shipment_reference')
+        // Track which source record IDs already exist for event dispatching
+        $sourceRecordIds = array_column($preparedRows, 'source_record_id');
+        $existingSourceRecordIds = Shipment::where('import_source_id', $this->importSource->id)
+            ->whereIn('source_record_id', $sourceRecordIds)
+            ->pluck('source_record_id')
             ->all();
 
-        // Phase 2: Split into mapped (channel resolved) and unmapped (channel unknown)
-        $mappedRows = array_filter($preparedRows, fn ($row) => $row['channel_id'] !== null);
-        $unmappedRows = array_filter($preparedRows, fn ($row) => $row['channel_id'] === null);
-
         $updateColumns = [
+            'shipment_reference',
             'first_name', 'last_name', 'company',
             'address1', 'address2', 'city', 'state_or_province', 'postal_code', 'country',
             'phone', 'phone_e164', 'phone_extension', 'email', 'value',
             'validation_message', 'shipping_method_reference', 'shipping_method_id',
             'channel_reference', 'deliver_by', 'metadata', 'updated_at',
+            'channel_id',
         ];
 
-        // Phase 2a: Upsert mapped rows using composite unique key
-        if (! empty($mappedRows)) {
-            $mappedRows = array_values($mappedRows);
-            $existingMappedCount = Shipment::where(function ($query) use ($mappedRows): void {
-                foreach ($mappedRows as $row) {
-                    $query->orWhere(function ($q) use ($row): void {
-                        $q->where('channel_id', $row['channel_id'])
-                            ->where('shipment_reference', $row['shipment_reference']);
-                    });
-                }
-            })->count();
+        Shipment::upsert($preparedRows, ['import_source_id', 'source_record_id'], $updateColumns);
 
-            Shipment::upsert($mappedRows, ['channel_id', 'shipment_reference'], $updateColumns);
-
-            $this->stats['shipments_created'] += count($mappedRows) - $existingMappedCount;
-            $this->stats['shipments_updated'] += $existingMappedCount;
-        }
-
-        // Phase 2b: Handle unmapped rows individually (can't use composite upsert with null channel_id)
-        foreach ($unmappedRows as $row) {
-            $existing = Shipment::where('shipment_reference', $row['shipment_reference'])
-                ->where('channel_reference', $row['channel_reference'])
-                ->whereNull('channel_id')
-                ->first();
-
-            if ($existing) {
-                $existing->update($row);
-                $this->stats['shipments_updated']++;
-            } else {
-                Shipment::create($row);
-                $this->stats['shipments_created']++;
-            }
-        }
+        $existingCount = count($existingSourceRecordIds);
+        $this->stats['shipments_created'] += count($preparedRows) - $existingCount;
+        $this->stats['shipments_updated'] += $existingCount;
 
         // Phase 3: Fetch shipment IDs for item processing
-        $references = array_column($preparedRows, 'shipment_reference');
-        $shipmentMap = Shipment::whereIn('shipment_reference', $references)
-            ->pluck('id', 'shipment_reference');
+        $shipmentMap = Shipment::where('import_source_id', $this->importSource->id)
+            ->whereIn('source_record_id', $sourceRecordIds)
+            ->get()
+            ->keyBy('source_record_id');
 
         // Phase 4: Import items and mark exported
-        foreach ($validDataByRef as $reference => $data) {
-            $shipmentId = $shipmentMap[$reference] ?? null;
-            if (! $shipmentId) {
+        foreach ($validDataBySourceRecord as $sourceRecordId => $data) {
+            /** @var Shipment|null $shipment */
+            $shipment = $shipmentMap[$sourceRecordId] ?? null;
+            if (! $shipment) {
                 continue;
             }
 
-            $this->importShipmentItems($shipmentId, $reference);
+            $this->importShipmentItems($shipment->id, $sourceRecordId);
 
-            $shipment = Shipment::find($shipmentId);
-            if ($shipment) {
-                if (in_array($reference, $existingRefs, true)) {
-                    ShipmentUpdated::dispatch($shipment);
-                } else {
-                    ShipmentImported::dispatch($shipment);
-                }
+            if (in_array($sourceRecordId, $existingSourceRecordIds, true)) {
+                ShipmentUpdated::dispatch($shipment);
+            } else {
+                ShipmentImported::dispatch($shipment);
             }
 
             try {
-                if ($this->source->markExported($reference)) {
+                if ($this->source->markExported($sourceRecordId)) {
                     $this->stats['shipments_exported']++;
                 }
             } catch (\Exception $e) {
-                $this->errors[] = "Error marking shipment {$reference} as exported: ".$e->getMessage();
+                $this->errors[] = "Error marking shipment {$sourceRecordId} as exported: ".$e->getMessage();
 
                 $this->log('warning', 'Failed to mark shipment as exported', [
-                    'shipment_reference' => $reference,
+                    'shipment_reference' => $data['shipment_reference'] ?? $sourceRecordId,
+                    'source_record_id' => $sourceRecordId,
                     'error' => $e->getMessage(),
                 ]);
             }
@@ -311,6 +286,8 @@ class ShipmentImportService
         }
 
         return [
+            'import_source_id' => $this->importSource->id,
+            'source_record_id' => $data['source_record_id'] ?? $data['shipment_reference'],
             'shipment_reference' => $data['shipment_reference'],
             'first_name' => $data['first_name'] ?? null,
             'last_name' => $data['last_name'] ?? null,
@@ -336,9 +313,9 @@ class ShipmentImportService
         ];
     }
 
-    private function importShipmentItems(int $shipmentId, string $shipmentReference): void
+    private function importShipmentItems(int $shipmentId, string $sourceRecordId): void
     {
-        $items = $this->source->fetchShipmentItems($shipmentReference);
+        $items = $this->source->fetchShipmentItems($sourceRecordId);
 
         foreach ($items as $itemData) {
             $productId = $this->resolveProductId($itemData);
@@ -444,6 +421,22 @@ class ShipmentImportService
             'shipments_exported' => 0,
         ];
         $this->errors = [];
+    }
+
+    private function resolveImportSource(ImportSourceInterface $source): ImportSource
+    {
+        $configKey = $source->getSourceName();
+        $config = config("shipment-import.sources.{$configKey}", []);
+
+        return ImportSource::firstOrCreate(
+            ['config_key' => $configKey],
+            [
+                'name' => (string) ($config['name'] ?? str($configKey)->replace(['_', '-'], ' ')->title()),
+                'driver' => (string) ($config['driver'] ?? $source::class),
+                'active' => (bool) ($config['enabled'] ?? true),
+                'settings' => null,
+            ],
+        );
     }
 
     private function log(string $level, string $message, array $context = []): void

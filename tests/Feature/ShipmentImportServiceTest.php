@@ -3,6 +3,7 @@
 use App\Contracts\ImportSourceInterface;
 use App\Models\Channel;
 use App\Models\ChannelAlias;
+use App\Models\ImportSource;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\ShippingMethodAlias;
@@ -12,18 +13,19 @@ use Illuminate\Support\Collection;
 
 uses(RefreshDatabase::class);
 
-function fakeSource(Collection $shipments, Collection $items = new Collection): ImportSourceInterface
+function fakeSource(Collection $shipments, Collection $items = new Collection, string $sourceName = 'test'): ImportSourceInterface
 {
-    return new class($shipments, $items) implements ImportSourceInterface
+    return new class($shipments, $items, $sourceName) implements ImportSourceInterface
     {
         public function __construct(
             private Collection $shipments,
             private Collection $items,
+            private string $sourceName,
         ) {}
 
         public function getSourceName(): string
         {
-            return 'test';
+            return $this->sourceName;
         }
 
         public function fetchShipments(): Collection
@@ -31,7 +33,7 @@ function fakeSource(Collection $shipments, Collection $items = new Collection): 
             return $this->shipments;
         }
 
-        public function fetchShipmentItems(string $shipmentReference): Collection
+        public function fetchShipmentItems(string $sourceRecordId): Collection
         {
             return $this->items;
         }
@@ -43,16 +45,16 @@ function fakeSource(Collection $shipments, Collection $items = new Collection): 
             return [];
         }
 
-        public function markExported(string $shipmentReference): bool
+        public function markExported(string $sourceRecordId): bool
         {
             return false;
         }
     };
 }
 
-function fakeSourceWithExportTracking(Collection $shipments, Collection $items = new Collection): ImportSourceInterface
+function fakeSourceWithExportTracking(Collection $shipments, Collection $items = new Collection, string $sourceName = 'test'): ImportSourceInterface
 {
-    return new class($shipments, $items) implements ImportSourceInterface
+    return new class($shipments, $items, $sourceName) implements ImportSourceInterface
     {
         /** @var array<string> */
         public array $exportedReferences = [];
@@ -60,11 +62,12 @@ function fakeSourceWithExportTracking(Collection $shipments, Collection $items =
         public function __construct(
             private Collection $shipments,
             private Collection $items,
+            private string $sourceName,
         ) {}
 
         public function getSourceName(): string
         {
-            return 'test';
+            return $this->sourceName;
         }
 
         public function fetchShipments(): Collection
@@ -72,7 +75,7 @@ function fakeSourceWithExportTracking(Collection $shipments, Collection $items =
             return $this->shipments;
         }
 
-        public function fetchShipmentItems(string $shipmentReference): Collection
+        public function fetchShipmentItems(string $sourceRecordId): Collection
         {
             return $this->items;
         }
@@ -84,27 +87,28 @@ function fakeSourceWithExportTracking(Collection $shipments, Collection $items =
             return [];
         }
 
-        public function markExported(string $shipmentReference): bool
+        public function markExported(string $sourceRecordId): bool
         {
-            $this->exportedReferences[] = $shipmentReference;
+            $this->exportedReferences[] = $sourceRecordId;
 
             return true;
         }
     };
 }
 
-function fakeSourceWithExportFailure(Collection $shipments, Collection $items = new Collection): ImportSourceInterface
+function fakeSourceWithExportFailure(Collection $shipments, Collection $items = new Collection, string $sourceName = 'test'): ImportSourceInterface
 {
-    return new class($shipments, $items) implements ImportSourceInterface
+    return new class($shipments, $items, $sourceName) implements ImportSourceInterface
     {
         public function __construct(
             private Collection $shipments,
             private Collection $items,
+            private string $sourceName,
         ) {}
 
         public function getSourceName(): string
         {
-            return 'test';
+            return $this->sourceName;
         }
 
         public function fetchShipments(): Collection
@@ -112,7 +116,7 @@ function fakeSourceWithExportFailure(Collection $shipments, Collection $items = 
             return $this->shipments;
         }
 
-        public function fetchShipmentItems(string $shipmentReference): Collection
+        public function fetchShipmentItems(string $sourceRecordId): Collection
         {
             return $this->items;
         }
@@ -124,7 +128,7 @@ function fakeSourceWithExportFailure(Collection $shipments, Collection $items = 
             return [];
         }
 
-        public function markExported(string $shipmentReference): bool
+        public function markExported(string $sourceRecordId): bool
         {
             throw new RuntimeException('External database unavailable');
         }
@@ -163,7 +167,10 @@ it('imports a shipment with a matching shipping method', function (): void {
     expect($shipment->shipping_method_id)->toBe($method->id)
         ->and($shipment->shipping_method_reference)->toBe('standard')
         ->and($shipment->channel_id)->toBe($channel->id)
-        ->and($shipment->channel_reference)->toBe('web');
+        ->and($shipment->channel_reference)->toBe('web')
+        ->and($shipment->source_record_id)->toBe('ORD-001')
+        ->and($shipment->importSource)->not->toBeNull()
+        ->and($shipment->importSource->config_key)->toBe('test');
 });
 
 it('imports a shipment when shipping method reference does not match', function (): void {
@@ -696,6 +703,105 @@ it('deduplicates unmapped channel shipments on re-import', function (): void {
 
     // Should still only have one shipment
     expect(Shipment::where('shipment_reference', 'ORD-CH-003')->count())->toBe(1);
+});
+
+it('does not duplicate a shipment when channel is manually assigned between imports', function (): void {
+    $source = fakeSource(collect([
+        [
+            'shipment_reference' => 'ORD-CH-006',
+            'first_name' => 'Riley',
+            'last_name' => 'Parker',
+            'address1' => '400 Import Way',
+            'city' => 'Phoenix',
+            'state_or_province' => 'AZ',
+            'postal_code' => '85001',
+            'country' => 'US',
+            'channel_id' => 'UNMAPPED_CHANNEL',
+        ],
+    ]));
+
+    ShipmentImportService::forSource($source)->import();
+
+    $channel = Channel::factory()->create(['name' => 'Manual Channel']);
+
+    $shipment = Shipment::where('shipment_reference', 'ORD-CH-006')->first();
+    $shipment->update(['channel_id' => $channel->id]);
+
+    $result = ShipmentImportService::forSource($source)->import();
+
+    expect($result->shipmentsUpdated)->toBe(1)
+        ->and($result->shipmentsCreated)->toBe(0)
+        ->and(Shipment::where('shipment_reference', 'ORD-CH-006')->count())->toBe(1);
+
+    $shipment = Shipment::where('shipment_reference', 'ORD-CH-006')->first();
+    expect($shipment->channel_id)->toBeNull()
+        ->and($shipment->channel_reference)->toBe('UNMAPPED_CHANNEL')
+        ->and($shipment->source_record_id)->toBe('ORD-CH-006');
+});
+
+it('allows the same displayed shipment reference to exist twice for one source when source_record_id differs', function (): void {
+    $source = fakeSource(collect([
+        [
+            'shipment_reference' => 'ORD-DUP-DISPLAY',
+            'source_record_id' => 'SRC-001',
+            'first_name' => 'Alex',
+            'last_name' => 'One',
+            'address1' => '1 Main St',
+            'city' => 'Dallas',
+            'state_or_province' => 'TX',
+            'postal_code' => '75001',
+            'country' => 'US',
+        ],
+        [
+            'shipment_reference' => 'ORD-DUP-DISPLAY',
+            'source_record_id' => 'SRC-002',
+            'first_name' => 'Alex',
+            'last_name' => 'Two',
+            'address1' => '2 Main St',
+            'city' => 'Dallas',
+            'state_or_province' => 'TX',
+            'postal_code' => '75002',
+            'country' => 'US',
+        ],
+    ]));
+
+    $result = ShipmentImportService::forSource($source)->import();
+
+    expect($result->shipmentsCreated)->toBe(2)
+        ->and(Shipment::where('shipment_reference', 'ORD-DUP-DISPLAY')->count())->toBe(2);
+
+    expect(Shipment::where('source_record_id', 'SRC-001')->exists())->toBeTrue()
+        ->and(Shipment::where('source_record_id', 'SRC-002')->exists())->toBeTrue();
+});
+
+it('allows the same displayed shipment reference from two different import sources', function (): void {
+    $shipments = collect([
+        [
+            'shipment_reference' => 'ORD-CROSS-001',
+            'first_name' => 'Jamie',
+            'last_name' => 'Source',
+            'address1' => '100 Shared Ref Rd',
+            'city' => 'Miami',
+            'state_or_province' => 'FL',
+            'postal_code' => '33101',
+            'country' => 'US',
+        ],
+    ]);
+
+    $resultA = ShipmentImportService::forSource(fakeSource($shipments, sourceName: 'source_a'))->import();
+    $resultB = ShipmentImportService::forSource(fakeSource($shipments, sourceName: 'source_b'))->import();
+
+    expect($resultA->shipmentsCreated)->toBe(1)
+        ->and($resultB->shipmentsCreated)->toBe(1)
+        ->and(Shipment::where('shipment_reference', 'ORD-CROSS-001')->count())->toBe(2);
+
+    $sourceA = ImportSource::where('config_key', 'source_a')->first();
+    $sourceB = ImportSource::where('config_key', 'source_b')->first();
+
+    expect($sourceA)->not->toBeNull()
+        ->and($sourceB)->not->toBeNull()
+        ->and(Shipment::where('shipment_reference', 'ORD-CROSS-001')->where('import_source_id', $sourceA->id)->exists())->toBeTrue()
+        ->and(Shipment::where('shipment_reference', 'ORD-CROSS-001')->where('import_source_id', $sourceB->id)->exists())->toBeTrue();
 });
 
 it('stores channel_reference even when channel is resolved', function (): void {
