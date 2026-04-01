@@ -7,25 +7,39 @@ use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Events\PackageCreated;
 use App\Filament\Concerns\NotifiesUser;
+use App\Filament\Support\AddressForm;
 use App\Models\BoxSize;
 use App\Models\Channel;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Services\AddressValidationService;
-use App\Services\AddressReferenceService;
-use App\Services\CacheService;
 use App\Services\LabelGenerationService;
 use App\Services\SettingsService;
 use BackedEnum;
+use Filament\Forms;
+use Filament\Forms\Concerns\InteractsWithForms;
+use Filament\Forms\Contracts\HasForms;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Set;
+use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Session;
 use UnitEnum;
 
-class ManualShip extends Page
+class ManualShip extends Page implements HasForms
 {
+    use InteractsWithForms;
     use NotifiesUser;
+
+    public ?array $data = [];
+
+    public bool $autoShipEnabled = false;
+
+    public string $labelFormat = 'pdf';
+
+    public ?int $labelDpi = null;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-pencil-square';
 
@@ -47,141 +61,149 @@ class ManualShip extends Page
             && app(SettingsService::class)->get('manual_shipping_enabled', true);
     }
 
-    // Address fields
-    public string $shipmentReference = '';
-
-    public string $firstName = '';
-
-    public string $lastName = '';
-
-    public string $company = '';
-
-    public string $address1 = '';
-
-    public string $address2 = '';
-
-    public string $city = '';
-
-    public string $stateOrProvince = '';
-
-    public string $postalCode = '';
-
-    public string $country = 'US';
-
-    public string $phone = '';
-
-    public string $email = '';
-
-    public ?int $shippingMethodId = null;
-
-    /** @var array<string, string> */
-    public array $countryOptions = [];
-
-    /** @var array<string, array<string, string>> */
-    public array $subdivisionOptionsByCountry = [];
-
-    /** @var array<string, string> */
-    public array $administrativeAreaLabels = [];
-
-    // Package fields
-    public array $boxSizes = [];
-
-    public ?int $boxSizeId = null;
-
-    public string $weight = '';
-
-    public string $height = '';
-
-    public string $width = '';
-
-    public string $length = '';
-
-    public string $labelFormat = 'pdf';
-
-    public ?int $labelDpi = null;
-
     public function mount(): void
     {
-        $this->boxSizes = app(CacheService::class)->getBoxSizesForPacking();
-
-        $addressReference = app(AddressReferenceService::class);
-        $this->countryOptions = $addressReference->getCountryOptions();
-        $this->subdivisionOptionsByCountry = $addressReference->getAllSubdivisionOptions();
-        $this->administrativeAreaLabels = collect(array_keys($this->countryOptions))
-            ->mapWithKeys(fn (string $countryCode): array => [$countryCode => $addressReference->getAdministrativeAreaLabel($countryCode)])
-            ->all();
+        $this->form->fill([
+            'country' => 'US',
+            'label_format' => 'pdf',
+        ]);
     }
 
-    public function ship(
-        string $firstName,
-        string $lastName,
-        string $company,
-        string $address1,
-        string $address2,
-        string $city,
-        string $stateOrProvince,
-        string $postalCode,
-        string $country,
-        string $phone,
-        string $email,
-        ?int $shippingMethodId,
-        ?int $boxSizeId,
-        string $weight,
-        string $height,
-        string $width,
-        string $length,
-        bool $autoShip,
-        string $shipmentReference = '',
-        string $labelFormat = 'pdf',
-        ?int $labelDpi = null,
-    ): void {
-        $this->firstName = $firstName;
-        $this->lastName = $lastName;
-        $this->company = $company;
-        $this->address1 = $address1;
-        $this->address2 = $address2;
-        $this->city = $city;
-        $this->postalCode = $postalCode;
-        $this->country = app(AddressReferenceService::class)->normalizeCountry($country) ?? strtoupper(trim($country));
-        $this->stateOrProvince = app(AddressReferenceService::class)->normalizeSubdivision($this->country, $stateOrProvince) ?? '';
-        $this->phone = $phone;
-        $this->email = $email;
-        $this->shippingMethodId = $shippingMethodId;
-        $this->boxSizeId = $boxSizeId;
-        $this->weight = $weight;
-        $this->height = $height;
-        $this->width = $width;
-        $this->length = $length;
-        $this->shipmentReference = $shipmentReference;
-        $this->labelFormat = $labelFormat;
-        $this->labelDpi = $labelDpi;
+    public function form(Schema $form): Schema
+    {
+        return $form
+            ->schema([
+                Section::make('Recipient & Address')
+                    ->schema([
+                        Forms\Components\TextInput::make('shipment_reference')
+                            ->label('Reference')
+                            ->helperText('Optional')
+                            ->maxLength(255),
+                        Forms\Components\TextInput::make('first_name')
+                            ->maxLength(255),
+                        Forms\Components\TextInput::make('last_name')
+                            ->maxLength(255),
+                        Forms\Components\TextInput::make('company')
+                            ->maxLength(255),
+                        Forms\Components\TextInput::make('address1')
+                            ->label('Address 1')
+                            ->required()
+                            ->maxLength(255),
+                        Forms\Components\TextInput::make('address2')
+                            ->label('Address 2')
+                            ->maxLength(255),
+                        Forms\Components\TextInput::make('city')
+                            ->required()
+                            ->maxLength(255),
+                        AddressForm::administrativeAreaSelect(),
+                        Forms\Components\TextInput::make('postal_code')
+                            ->label('Postal Code')
+                            ->maxLength(255),
+                        AddressForm::countrySelect(),
+                        Forms\Components\TextInput::make('phone')
+                            ->tel()
+                            ->maxLength(255),
+                        Forms\Components\TextInput::make('email')
+                            ->email()
+                            ->maxLength(255),
+                        Forms\Components\Select::make('shipping_method_id')
+                            ->label('Shipping Method')
+                            ->options(fn (): array => $this->getShippingMethodOptions())
+                            ->searchable()
+                            ->native(false)
+                            ->placeholder('— None —'),
+                    ])
+                    ->columns(2),
+                Section::make('Package')
+                    ->schema([
+                        Forms\Components\Select::make('box_size_id')
+                            ->label('Box Size')
+                            ->options(fn (): array => $this->getBoxSizeOptions())
+                            ->searchable()
+                            ->native(false)
+                            ->placeholder('Custom')
+                            ->live()
+                            ->afterStateUpdated(function (Set $set, ?string $state): void {
+                                if (! $state) {
+                                    return;
+                                }
 
-        if ($autoShip && ! auth()->user()->role->isAtLeast(Role::Admin)) {
-            $autoShip = false;
-        }
+                                $box = BoxSize::find($state);
 
-        if (! $this->validateForm()) {
+                                if (! $box) {
+                                    return;
+                                }
+
+                                $set('height', (string) $box->height);
+                                $set('width', (string) $box->width);
+                                $set('length', (string) $box->length);
+                            }),
+                        Forms\Components\TextInput::make('weight')
+                            ->label('Weight')
+                            ->suffix('lbs')
+                            ->required()
+                            ->numeric()
+                            ->minValue(0.01)
+                            ->step(0.01),
+                        Forms\Components\TextInput::make('height')
+                            ->label('Height')
+                            ->suffix('in')
+                            ->required()
+                            ->numeric()
+                            ->minValue(0.01)
+                            ->step(0.01),
+                        Forms\Components\TextInput::make('width')
+                            ->label('Width')
+                            ->suffix('in')
+                            ->required()
+                            ->numeric()
+                            ->minValue(0.01)
+                            ->step(0.01),
+                        Forms\Components\TextInput::make('length')
+                            ->label('Length')
+                            ->suffix('in')
+                            ->required()
+                            ->numeric()
+                            ->minValue(0.01)
+                            ->step(0.01),
+                    ])
+                    ->columns(2),
+            ])
+            ->statePath('data');
+    }
+
+    public function ship(): void
+    {
+        $data = $this->form->getState();
+
+        if (! $this->validateBusinessRules($data)) {
             return;
         }
 
-        if ($autoShip) {
-            $this->autoShip();
-        } else {
-            $this->manualShip();
+        if ($this->autoShipEnabled && ! auth()->user()->role->isAtLeast(Role::Admin)) {
+            $this->autoShipEnabled = false;
         }
+
+        if ($this->autoShipEnabled) {
+            $this->autoShip($data);
+
+            return;
+        }
+
+        $this->manualShip($data);
     }
 
-    private function manualShip(): void
+    private function manualShip(array $data): void
     {
-        $package = $this->createShipmentAndPackage();
+        $package = $this->createShipmentAndPackage($data);
 
         Session::put('ship_return_url', '/manual-ship');
         $this->redirect('/ship/'.$package->id);
     }
 
-    private function autoShip(): void
+    private function autoShip(array $data): void
     {
-        $package = $this->createShipmentAndPackage();
+        $package = $this->createShipmentAndPackage($data);
         $shipment = $package->shipment;
 
         $result = app(LabelGenerationService::class)->autoShip(
@@ -208,30 +230,29 @@ class ManualShip extends Page
         $this->resetForm();
     }
 
-    private function createShipmentAndPackage(): Package
+    private function createShipmentAndPackage(array $data): Package
     {
-        return DB::transaction(function () {
+        return DB::transaction(function () use ($data) {
             $manualChannel = Channel::where('name', 'Manual')->first();
 
             $shipment = Shipment::create([
-                'shipment_reference' => $this->shipmentReference ?: null,
-                'first_name' => $this->firstName,
-                'last_name' => $this->lastName,
-                'company' => $this->company ?: null,
-                'address1' => $this->address1,
-                'address2' => $this->address2 ?: null,
-                'city' => $this->city,
-                'state_or_province' => $this->stateOrProvince,
-                'postal_code' => $this->postalCode,
-                'country' => $this->country,
-                'phone' => $this->phone ?: null,
-                'email' => $this->email ?: null,
-                'shipping_method_id' => $this->shippingMethodId,
+                'shipment_reference' => $data['shipment_reference'] ?: null,
+                'first_name' => $data['first_name'] ?: null,
+                'last_name' => $data['last_name'] ?: null,
+                'company' => $data['company'] ?: null,
+                'address1' => $data['address1'],
+                'address2' => $data['address2'] ?: null,
+                'city' => $data['city'],
+                'state_or_province' => $data['state_or_province'] ?: null,
+                'postal_code' => $data['postal_code'] ?: null,
+                'country' => $data['country'],
+                'phone' => $data['phone'] ?: null,
+                'email' => $data['email'] ?: null,
+                'shipping_method_id' => $data['shipping_method_id'] ?: null,
                 'channel_id' => $manualChannel?->id,
                 'status' => 'open',
             ]);
 
-            // Validate address (non-blocking)
             try {
                 app(AddressValidationService::class)->validate($shipment);
                 $shipment->refresh();
@@ -245,11 +266,11 @@ class ManualShip extends Page
 
             $package = Package::create([
                 'shipment_id' => $shipment->id,
-                'box_size_id' => $this->boxSizeId,
-                'weight' => $this->weight,
-                'height' => $this->height,
-                'width' => $this->width,
-                'length' => $this->length,
+                'box_size_id' => $data['box_size_id'] ?: null,
+                'weight' => $data['weight'],
+                'height' => $data['height'],
+                'width' => $data['width'],
+                'length' => $data['length'],
             ]);
 
             PackageCreated::dispatch($package, $shipment);
@@ -258,53 +279,16 @@ class ManualShip extends Page
         });
     }
 
-    private function validateForm(): bool
+    private function validateBusinessRules(array $data): bool
     {
-        if (empty($this->firstName) && empty($this->lastName) && empty($this->company)) {
+        if (blank($data['first_name'] ?? null) && blank($data['last_name'] ?? null) && blank($data['company'] ?? null)) {
             $this->notifyError('Missing Info', 'Please enter a name or company.');
 
             return false;
         }
 
-        if (empty($this->address1)) {
-            $this->notifyError('Missing Info', 'Please enter an address.');
-
-            return false;
-        }
-
-        if (empty($this->city)) {
-            $this->notifyError('Missing Info', 'Please enter a city.');
-
-            return false;
-        }
-
-        if (empty($this->country)) {
-            $this->notifyError('Missing Info', 'Please enter a country.');
-
-            return false;
-        }
-
-        if (app(AddressReferenceService::class)->isAdministrativeAreaRequired($this->country) && empty($this->stateOrProvince)) {
-            $label = app(AddressReferenceService::class)->getAdministrativeAreaLabel($this->country);
-            $this->notifyError('Missing Info', "Please enter a {$label}.");
-
-            return false;
-        }
-
-        if ($this->boxSizeId !== null && ! BoxSize::where('id', $this->boxSizeId)->exists()) {
+        if (! empty($data['box_size_id']) && ! BoxSize::where('id', $data['box_size_id'])->exists()) {
             $this->notifyError('Invalid Box Size', 'The selected box size does not exist.');
-
-            return false;
-        }
-
-        if (empty($this->weight) || $this->weight <= 0) {
-            $this->notifyError('Missing Info', 'Please enter a weight.');
-
-            return false;
-        }
-
-        if (empty($this->height) || $this->height <= 0 || empty($this->width) || $this->width <= 0 || empty($this->length) || $this->length <= 0) {
-            $this->notifyError('Missing Info', 'Please enter all dimensions.');
 
             return false;
         }
@@ -314,34 +298,36 @@ class ManualShip extends Page
 
     private function resetForm(): void
     {
-        $this->shipmentReference = '';
-        $this->firstName = '';
-        $this->lastName = '';
-        $this->company = '';
-        $this->address1 = '';
-        $this->address2 = '';
-        $this->city = '';
-        $this->stateOrProvince = '';
-        $this->postalCode = '';
-        $this->country = 'US';
-        $this->phone = '';
-        $this->email = '';
-        $this->shippingMethodId = null;
-        $this->boxSizeId = null;
-        $this->weight = '';
-        $this->height = '';
-        $this->width = '';
-        $this->length = '';
+        $this->form->fill([
+            'country' => 'US',
+        ]);
 
         $this->dispatch('form-reset');
     }
 
+    /**
+     * @return array<int, string>
+     */
     public function getShippingMethodOptions(): array
     {
         return ShippingMethod::where('active', true)
             ->orderBy('name')
             ->pluck('name', 'id')
             ->toArray();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function getBoxSizeOptions(): array
+    {
+        return BoxSize::query()
+            ->orderBy('label')
+            ->get()
+            ->mapWithKeys(fn (BoxSize $box): array => [
+                $box->id => sprintf('%s (%s" x %s" x %s")', $box->label, $box->length, $box->width, $box->height),
+            ])
+            ->all();
     }
 
     public function reprintLastLabel(): void
@@ -362,7 +348,6 @@ class ManualShip extends Page
             return;
         }
 
-        // Verify the current user shipped this package or has elevated permissions
         $user = auth()->user();
         if (! $user->role->isAtLeast(Role::Manager) && $package->shipped_by_user_id !== $user->id) {
             $this->notifyError('Access Denied', 'You can only reprint labels for packages you shipped.');
