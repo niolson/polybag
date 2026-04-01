@@ -5,6 +5,8 @@ namespace App\Filament\Resources;
 use App\Enums\Deliverability;
 use App\Enums\Role;
 use App\Enums\ShipmentStatus;
+use App\Filament\Pages\UnmappedChannelReferences;
+use App\Filament\Pages\UnmappedShippingReferences;
 use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\ShipmentResource\Pages;
 use App\Filament\Resources\ShipmentResource\RelationManagers\PackagesRelationManager;
@@ -112,12 +114,12 @@ class ShipmentResource extends Resource
                         // Unmapped warnings (edit only)
                         Forms\Components\Placeholder::make('unmapped_channel_warning')
                             ->label('')
-                            ->content('⚠ Channel reference is unmapped. [Fix it](/app/unmapped-channel-references)')
+                            ->content('⚠ Channel reference is unmapped. [Fix it]('.UnmappedChannelReferences::getUrl().')')
                             ->visible(fn (?Shipment $record): bool => $record !== null && $record->channel_id === null && filled($record->channel_reference)),
 
                         Forms\Components\Placeholder::make('unmapped_shipping_warning')
                             ->label('')
-                            ->content('⚠ Shipping method reference is unmapped. [Fix it](/app/unmapped-shipping-references)')
+                            ->content('⚠ Shipping method reference is unmapped. [Fix it]('.UnmappedShippingReferences::getUrl().')')
                             ->visible(fn (?Shipment $record): bool => $record !== null && $record->shipping_method_id === null && filled($record->shipping_method_reference)),
                     ]),
 
@@ -404,14 +406,14 @@ class ShipmentResource extends Resource
                             ->label('Unmapped Channel')
                             ->icon('heroicon-o-exclamation-triangle')
                             ->color('warning')
-                            ->url('/app/unmapped-channel-references')
+                            ->url(UnmappedChannelReferences::getUrl())
                             ->visible(fn (Shipment $record): bool => $record->channel_id === null && filled($record->channel_reference)),
 
                         TextEntry::make('shipping_method_reference')
                             ->label('Unmapped Shipping Method')
                             ->icon('heroicon-o-exclamation-triangle')
                             ->color('warning')
-                            ->url('/app/unmapped-shipping-references')
+                            ->url(UnmappedShippingReferences::getUrl())
                             ->visible(fn (Shipment $record): bool => $record->shipping_method_id === null && filled($record->shipping_method_reference)),
                     ]),
 
