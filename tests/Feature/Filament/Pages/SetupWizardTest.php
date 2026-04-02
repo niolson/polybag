@@ -8,6 +8,7 @@ use App\Models\ShippingMethodAlias;
 use App\Models\User;
 use App\Services\SettingsService;
 use Database\Seeders\ReferenceDataSeeder;
+use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
@@ -64,7 +65,7 @@ function invokePrivateMethod(object $instance, string $method): void
     $reflection->invoke($instance);
 }
 
-function fillRequiredSetupWizardFields(\Livewire\Features\SupportTesting\Testable $component): void
+function fillRequiredSetupWizardFields(Testable $component): void
 {
     $requiredData = [
         'company_name' => 'Acme Fulfillment',
@@ -76,6 +77,7 @@ function fillRequiredSetupWizardFields(\Livewire\Features\SupportTesting\Testabl
         'location_country' => 'US',
         'location_state_or_province' => 'PA',
         'location_postal_code' => '19106',
+        'location_phone' => '+12155550123',
         'location_timezone' => 'America/New_York',
     ];
 
