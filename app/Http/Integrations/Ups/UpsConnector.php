@@ -4,6 +4,7 @@ namespace App\Http\Integrations\Ups;
 
 use App\Http\Integrations\Concerns\HasCachedAuthentication;
 use App\Http\Integrations\Concerns\RetriesTransientErrors;
+use App\Services\OAuthService;
 use App\Services\SettingsService;
 use Carbon\Carbon;
 use DateInterval;
@@ -55,9 +56,11 @@ class UpsConnector extends Connector
 
     protected function defaultOauthConfig(): OAuthConfig
     {
+        $settings = app(SettingsService::class);
+
         return OAuthConfig::make()
-            ->setClientId(app(SettingsService::class)->get('ups.client_id', config('services.ups.client_id')))
-            ->setClientSecret(app(SettingsService::class)->get('ups.client_secret', config('services.ups.client_secret')))
+            ->setClientId((string) $settings->get('ups.client_id', ''))
+            ->setClientSecret((string) $settings->get('ups.client_secret', ''))
             ->setTokenEndpoint('/security/v1/oauth/token');
     }
 
@@ -172,7 +175,7 @@ class UpsConnector extends Connector
      */
     private static function refreshOAuthToken(SettingsService $settings, string $cacheKey): string
     {
-        $data = app(\App\Services\OAuthService::class)->refreshToken('ups');
+        $data = app(OAuthService::class)->refreshToken('ups');
 
         $newAccessToken = $data['access_token'] ?? null;
 

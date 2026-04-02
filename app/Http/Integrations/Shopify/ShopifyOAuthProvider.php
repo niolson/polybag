@@ -40,10 +40,7 @@ class ShopifyOAuthProvider implements OAuthProvider
 
     public function getBrokerParams(): array
     {
-        $shopDomain = app(SettingsService::class)->get(
-            'shopify.shop_domain',
-            config('services.shopify.shop_domain')
-        );
+        $shopDomain = app(SettingsService::class)->get('shopify.shop_domain');
 
         return array_filter(['shop' => $shopDomain]);
     }

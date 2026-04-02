@@ -10,9 +10,9 @@ beforeEach(function (): void {
     app(SettingsService::class)->clearCache();
     Cache::forget('shopify_access_token');
 
-    Setting::create(['key' => 'shopify.shop_domain', 'value' => 'test-shop.myshopify.com', 'type' => 'string', 'group' => 'shopify']);
-    Setting::create(['key' => 'shopify.client_id', 'value' => 'test-client-id', 'type' => 'string', 'encrypted' => true, 'group' => 'shopify']);
-    Setting::create(['key' => 'shopify.client_secret', 'value' => 'test-client-secret', 'type' => 'string', 'encrypted' => true, 'group' => 'shopify']);
+    Setting::updateOrCreate(['key' => 'shopify.shop_domain'], ['value' => 'test-shop.myshopify.com', 'type' => 'string', 'group' => 'shopify']);
+    Setting::updateOrCreate(['key' => 'shopify.client_id'], ['value' => 'test-client-id', 'type' => 'string', 'encrypted' => true, 'group' => 'shopify']);
+    Setting::updateOrCreate(['key' => 'shopify.client_secret'], ['value' => 'test-client-secret', 'type' => 'string', 'encrypted' => true, 'group' => 'shopify']);
 
     app(SettingsService::class)->clearCache();
 });

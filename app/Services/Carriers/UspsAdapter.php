@@ -139,7 +139,7 @@ class UspsAdapter implements CarrierAdapterInterface
                     'priceType' => 'CONTRACT',
                     'paymentAccount' => [
                         'accountType' => 'EPS',
-                        'accountNumber' => app(SettingsService::class)->get('usps.crid', config('services.usps.crid')),
+                        'accountNumber' => app(SettingsService::class)->get('usps.crid'),
                     ],
                 ],
             ],
@@ -431,9 +431,11 @@ class UspsAdapter implements CarrierAdapterInterface
 
     public function isConfigured(): bool
     {
-        return ! empty(app(SettingsService::class)->get('usps.client_id', config('services.usps.client_id')))
-            && ! empty(app(SettingsService::class)->get('usps.client_secret', config('services.usps.client_secret')))
-            && ! empty(app(SettingsService::class)->get('usps.crid', config('services.usps.crid')));
+        $settings = app(SettingsService::class);
+
+        return filled($settings->get('usps.client_id'))
+            && filled($settings->get('usps.client_secret'))
+            && filled($settings->get('usps.crid'));
     }
 
     public function supportsMultiPackage(): bool

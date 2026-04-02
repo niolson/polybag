@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Location;
+use App\Models\Setting;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -58,8 +59,80 @@ function something()
 
 uses()->beforeEach(function (): void {
     Location::factory()->default()->create();
-    \App\Models\Setting::updateOrCreate(
+    Setting::updateOrCreate(
         ['key' => 'setup_complete'],
         ['value' => '1', 'type' => 'boolean', 'group' => 'system'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'usps.client_id'],
+        ['value' => 'test_client_id', 'type' => 'string', 'group' => 'usps'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'usps.client_secret'],
+        ['value' => 'test_client_secret', 'type' => 'string', 'group' => 'usps'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'usps.crid'],
+        ['value' => 'test_crid', 'type' => 'string', 'group' => 'usps'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'usps.mid'],
+        ['value' => 'test_mid', 'type' => 'string', 'group' => 'usps'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'fedex.api_key'],
+        ['value' => 'test_api_key', 'type' => 'string', 'group' => 'fedex'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'fedex.api_secret'],
+        ['value' => 'test_api_secret', 'type' => 'string', 'group' => 'fedex'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'fedex.account_number'],
+        ['value' => 'test_account', 'type' => 'string', 'group' => 'fedex'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'ups.client_id'],
+        ['value' => 'test_client_id', 'type' => 'string', 'group' => 'ups'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'ups.client_secret'],
+        ['value' => 'test_client_secret', 'type' => 'string', 'group' => 'ups'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'ups.account_number'],
+        ['value' => 'test_account', 'type' => 'string', 'group' => 'ups'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'shopify.shop_domain'],
+        ['value' => 'test-shop.myshopify.com', 'type' => 'string', 'group' => 'shopify'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'shopify.client_id'],
+        ['value' => 'test-client-id', 'type' => 'string', 'group' => 'shopify'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'shopify.client_secret'],
+        ['value' => 'test-client-secret', 'type' => 'string', 'group' => 'shopify'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'shopify.api_version'],
+        ['value' => '2025-01', 'type' => 'string', 'group' => 'shopify'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'amazon.client_id'],
+        ['value' => 'test-client-id', 'type' => 'string', 'group' => 'amazon'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'amazon.client_secret'],
+        ['value' => 'test-client-secret', 'type' => 'string', 'group' => 'amazon'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'amazon.refresh_token'],
+        ['value' => 'test-refresh-token', 'type' => 'string', 'group' => 'amazon'],
+    );
+    Setting::updateOrCreate(
+        ['key' => 'amazon.marketplace_id'],
+        ['value' => 'ATVPDKIKX0DER', 'type' => 'string', 'group' => 'amazon'],
     );
 })->in('Feature', 'Unit');

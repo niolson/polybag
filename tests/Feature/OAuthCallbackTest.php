@@ -19,7 +19,7 @@ beforeEach(function (): void {
         'app.url' => 'https://test.polybag.app',
     ]);
 
-    Setting::create(['key' => 'shopify.shop_domain', 'value' => 'test-shop.myshopify.com', 'type' => 'string', 'group' => 'shopify']);
+    Setting::updateOrCreate(['key' => 'shopify.shop_domain'], ['value' => 'test-shop.myshopify.com', 'type' => 'string', 'group' => 'shopify']);
 
     app(SettingsService::class)->clearCache();
 

@@ -9,8 +9,10 @@ use App\Http\Integrations\Fedex\Requests\CancelShipment;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Http\Integrations\Fedex\Requests\Rates;
 use App\Models\Package;
+use App\Models\Setting;
 use App\Models\Shipment;
 use App\Services\Carriers\FedexAdapter;
+use App\Services\SettingsService;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
 
@@ -27,21 +29,17 @@ it('supports multi-package shipments', function (): void {
 });
 
 it('checks if adapter is configured', function (): void {
-    config([
-        'services.fedex.api_key' => 'test_api_key',
-        'services.fedex.api_secret' => 'test_api_secret',
-        'services.fedex.account_number' => 'test_account',
-    ]);
+    Setting::updateOrCreate(['key' => 'fedex.api_key'], ['value' => 'test_api_key', 'type' => 'string']);
+    Setting::updateOrCreate(['key' => 'fedex.api_secret'], ['value' => 'test_api_secret', 'type' => 'string']);
+    Setting::updateOrCreate(['key' => 'fedex.account_number'], ['value' => 'test_account', 'type' => 'string']);
+    app(SettingsService::class)->clearCache();
 
     expect($this->adapter->isConfigured())->toBeTrue();
 });
 
 it('returns false when not configured', function (): void {
-    config([
-        'services.fedex.api_key' => null,
-        'services.fedex.api_secret' => null,
-        'services.fedex.account_number' => null,
-    ]);
+    Setting::whereIn('key', ['fedex.api_key', 'fedex.api_secret', 'fedex.account_number'])->delete();
+    app(SettingsService::class)->clearCache();
 
     expect($this->adapter->isConfigured())->toBeFalse();
 });

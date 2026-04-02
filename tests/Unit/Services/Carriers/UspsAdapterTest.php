@@ -12,8 +12,10 @@ use App\Http\Integrations\USPS\Requests\Label;
 use App\Http\Integrations\USPS\Requests\PaymentAuthorization;
 use App\Http\Integrations\USPS\Requests\ShippingOptions;
 use App\Models\Package;
+use App\Models\Setting;
 use App\Models\Shipment;
 use App\Services\Carriers\UspsAdapter;
+use App\Services\SettingsService;
 use Saloon\Exceptions\Request\Statuses\InternalServerErrorException;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
@@ -31,21 +33,17 @@ it('does not support multi-package shipments', function (): void {
 });
 
 it('checks if adapter is configured', function (): void {
-    config([
-        'services.usps.client_id' => 'test_client_id',
-        'services.usps.client_secret' => 'test_client_secret',
-        'services.usps.crid' => 'test_crid',
-    ]);
+    Setting::updateOrCreate(['key' => 'usps.client_id'], ['value' => 'test_client_id', 'type' => 'string']);
+    Setting::updateOrCreate(['key' => 'usps.client_secret'], ['value' => 'test_client_secret', 'type' => 'string']);
+    Setting::updateOrCreate(['key' => 'usps.crid'], ['value' => 'test_crid', 'type' => 'string']);
+    app(SettingsService::class)->clearCache();
 
     expect($this->adapter->isConfigured())->toBeTrue();
 });
 
 it('returns false when not configured', function (): void {
-    config([
-        'services.usps.client_id' => null,
-        'services.usps.client_secret' => null,
-        'services.usps.crid' => null,
-    ]);
+    Setting::whereIn('key', ['usps.client_id', 'usps.client_secret', 'usps.crid'])->delete();
+    app(SettingsService::class)->clearCache();
 
     expect($this->adapter->isConfigured())->toBeFalse();
 });

@@ -5,6 +5,7 @@ use App\Http\Integrations\Amazon\Requests\SearchOrders;
 use App\Models\Channel;
 use App\Models\ChannelAlias;
 use App\Models\Package;
+use App\Models\Setting;
 use App\Models\Shipment;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\PackageExportService;
@@ -95,13 +96,15 @@ function sampleAmazonOrderItems(): array
 }
 
 beforeEach(function (): void {
+    Setting::updateOrCreate(['key' => 'amazon.client_id'], ['value' => 'test-client-id', 'type' => 'string', 'group' => 'amazon']);
+    Setting::updateOrCreate(['key' => 'amazon.client_secret'], ['value' => 'test-client-secret', 'type' => 'string', 'group' => 'amazon']);
+    Setting::updateOrCreate(['key' => 'amazon.refresh_token'], ['value' => 'test-refresh-token', 'type' => 'string', 'group' => 'amazon']);
+    Setting::updateOrCreate(['key' => 'amazon.marketplace_id'], ['value' => 'ATVPDKIKX0DER', 'type' => 'string', 'group' => 'amazon']);
+    app(SettingsService::class)->clearCache();
+
     config([
         'services.amazon.base_url' => 'https://sellingpartnerapi-na.amazon.com',
         'services.amazon.sandbox_url' => 'https://sandbox.sellingpartnerapi-na.amazon.com',
-        'services.amazon.client_id' => 'test-client-id',
-        'services.amazon.client_secret' => 'test-client-secret',
-        'services.amazon.refresh_token' => 'test-refresh-token',
-        'services.amazon.marketplace_id' => 'ATVPDKIKX0DER',
     ]);
 
     Cache::put('amazon_sp_api_access_token', 'test-access-token', 3600);
@@ -287,7 +290,8 @@ it('imports multiple pages of amazon orders', function (): void {
 });
 
 it('validates amazon configuration requires credentials', function (): void {
-    config(['services.amazon.client_id' => null]);
+    Setting::where('key', 'amazon.client_id')->delete();
+    app(SettingsService::class)->clearCache();
 
     $source = new AmazonSource([
         'driver' => AmazonSource::class,

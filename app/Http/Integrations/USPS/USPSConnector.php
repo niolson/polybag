@@ -52,9 +52,11 @@ class USPSConnector extends Connector
 
     protected function defaultOauthConfig(): OAuthConfig
     {
+        $settings = app(SettingsService::class);
+
         return OAuthConfig::make()
-            ->setClientId(app(SettingsService::class)->get('usps.client_id', config('services.usps.client_id')))
-            ->setClientSecret(app(SettingsService::class)->get('usps.client_secret', config('services.usps.client_secret')))
+            ->setClientId((string) $settings->get('usps.client_id', ''))
+            ->setClientSecret((string) $settings->get('usps.client_secret', ''))
             ->setDefaultScopes(['addresses', 'domestic-prices', 'international-prices', 'payments', 'labels', 'international-labels', 'shipments', 'scan-forms'])
             ->setTokenEndpoint('/oauth2/v3/token');
     }
@@ -80,17 +82,17 @@ class USPSConnector extends Connector
                 'roles' => [
                     [
                         'roleName' => 'PAYER',
-                        'CRID' => app(SettingsService::class)->get('usps.crid', config('services.usps.crid')),
-                        'MID' => app(SettingsService::class)->get('usps.mid', config('services.usps.mid')),
-                        'manifestMID' => app(SettingsService::class)->get('usps.mid', config('services.usps.mid')),
+                        'CRID' => app(SettingsService::class)->get('usps.crid'),
+                        'MID' => app(SettingsService::class)->get('usps.mid'),
+                        'manifestMID' => app(SettingsService::class)->get('usps.mid'),
                         'accountType' => 'EPS',
-                        'accountNumber' => app(SettingsService::class)->get('usps.crid', config('services.usps.crid')),
+                        'accountNumber' => app(SettingsService::class)->get('usps.crid'),
                     ],
                     [
                         'roleName' => 'LABEL_OWNER',
-                        'CRID' => app(SettingsService::class)->get('usps.crid', config('services.usps.crid')),
-                        'MID' => app(SettingsService::class)->get('usps.mid', config('services.usps.mid')),
-                        'manifestMID' => app(SettingsService::class)->get('usps.mid', config('services.usps.mid')),
+                        'CRID' => app(SettingsService::class)->get('usps.crid'),
+                        'MID' => app(SettingsService::class)->get('usps.mid'),
+                        'manifestMID' => app(SettingsService::class)->get('usps.mid'),
                     ],
                 ],
             ]);

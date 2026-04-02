@@ -50,9 +50,11 @@ class FedexConnector extends Connector
 
     protected function defaultOauthConfig(): OAuthConfig
     {
+        $settings = app(SettingsService::class);
+
         return OAuthConfig::make()
-            ->setClientId(app(SettingsService::class)->get('fedex.api_key', config('services.fedex.api_key')))
-            ->setClientSecret(app(SettingsService::class)->get('fedex.api_secret', config('services.fedex.api_secret')))
+            ->setClientId((string) $settings->get('fedex.api_key', ''))
+            ->setClientSecret((string) $settings->get('fedex.api_secret', ''))
             ->setTokenEndpoint('/oauth/token');
     }
 

@@ -5,7 +5,9 @@ use App\Models\Channel;
 use App\Models\ChannelAlias;
 use App\Models\ImportSource;
 use App\Models\Package;
+use App\Models\Setting;
 use App\Models\Shipment;
+use App\Services\SettingsService;
 use App\Services\ShipmentImport\PackageExportService;
 use App\Services\ShipmentImport\ShipmentImportService;
 use App\Services\ShipmentImport\Sources\ShopifySource;
@@ -105,12 +107,11 @@ function fulfillmentSuccessResponse(): MockResponse
 }
 
 beforeEach(function (): void {
-    config([
-        'services.shopify.shop_domain' => 'test-shop.myshopify.com',
-        'services.shopify.client_id' => 'test-client-id',
-        'services.shopify.client_secret' => 'test-client-secret',
-        'services.shopify.api_version' => '2025-01',
-    ]);
+    Setting::updateOrCreate(['key' => 'shopify.shop_domain'], ['value' => 'test-shop.myshopify.com', 'type' => 'string', 'group' => 'shopify']);
+    Setting::updateOrCreate(['key' => 'shopify.client_id'], ['value' => 'test-client-id', 'type' => 'string', 'group' => 'shopify']);
+    Setting::updateOrCreate(['key' => 'shopify.client_secret'], ['value' => 'test-client-secret', 'type' => 'string', 'group' => 'shopify']);
+    Setting::updateOrCreate(['key' => 'shopify.api_version'], ['value' => '2025-01', 'type' => 'string', 'group' => 'shopify']);
+    app(SettingsService::class)->clearCache();
 
     Cache::put('shopify_access_token', 'shpat_test_token', 3600);
 });

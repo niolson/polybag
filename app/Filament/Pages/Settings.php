@@ -26,6 +26,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\HtmlString;
 use UnitEnum;
 
 /**
@@ -131,20 +132,20 @@ class Settings extends Page
             'suppress_printing' => app(SettingsService::class)->get('suppress_printing', false),
 
             // Non-encrypted credential fields get their current values
-            'usps_crid' => app(SettingsService::class)->get('usps.crid', config('services.usps.crid', '')),
-            'usps_mid' => app(SettingsService::class)->get('usps.mid', config('services.usps.mid', '')),
-            'fedex_account_number' => app(SettingsService::class)->get('fedex.account_number', config('services.fedex.account_number', '')),
-            'ups_account_number' => app(SettingsService::class)->get('ups.account_number', config('services.ups.account_number', '')),
-            'shopify_shop_domain' => app(SettingsService::class)->get('shopify.shop_domain', config('services.shopify.shop_domain', '')),
-            'shopify_api_version' => app(SettingsService::class)->get('shopify.api_version', config('services.shopify.api_version', '2025-01')),
-            'amazon_marketplace_id' => app(SettingsService::class)->get('amazon.marketplace_id', config('services.amazon.marketplace_id', 'ATVPDKIKX0DER')),
+            'usps_crid' => app(SettingsService::class)->get('usps.crid', ''),
+            'usps_mid' => app(SettingsService::class)->get('usps.mid', ''),
+            'fedex_account_number' => app(SettingsService::class)->get('fedex.account_number', ''),
+            'ups_account_number' => app(SettingsService::class)->get('ups.account_number', ''),
+            'shopify_shop_domain' => app(SettingsService::class)->get('shopify.shop_domain', ''),
+            'shopify_api_version' => app(SettingsService::class)->get('shopify.api_version', '2025-01'),
+            'amazon_marketplace_id' => app(SettingsService::class)->get('amazon.marketplace_id', 'ATVPDKIKX0DER'),
 
             // Database import
-            'import_db_driver' => app(SettingsService::class)->get('import.db_driver', config('database.connections.import.driver', 'mysql')),
-            'import_db_host' => app(SettingsService::class)->get('import.db_host', config('database.connections.import.host', '')),
-            'import_db_port' => app(SettingsService::class)->get('import.db_port', config('database.connections.import.port', '')),
-            'import_db_database' => app(SettingsService::class)->get('import.db_database', config('database.connections.import.database', '')),
-            'import_db_username' => app(SettingsService::class)->get('import.db_username', config('database.connections.import.username', '')),
+            'import_db_driver' => app(SettingsService::class)->get('import.db_driver', 'mysql'),
+            'import_db_host' => app(SettingsService::class)->get('import.db_host', ''),
+            'import_db_port' => app(SettingsService::class)->get('import.db_port', ''),
+            'import_db_database' => app(SettingsService::class)->get('import.db_database', ''),
+            'import_db_username' => app(SettingsService::class)->get('import.db_username', ''),
             'import_ssh_enabled' => (bool) app(SettingsService::class)->get('import.ssh_enabled', false),
             'import_ssh_host' => app(SettingsService::class)->get('import.ssh_host', ''),
             'import_ssh_port' => app(SettingsService::class)->get('import.ssh_port', '22'),
@@ -227,7 +228,7 @@ class Settings extends Page
      */
     private function getCredentialPlaceholder(string $settingKey, string $configKey): string
     {
-        $value = app(SettingsService::class)->get($settingKey) ?? config($configKey);
+        $value = app(SettingsService::class)->get($settingKey);
 
         return ! empty($value) ? 'Configured (leave empty to keep)' : 'Not configured';
     }
@@ -774,11 +775,11 @@ class Settings extends Page
         chmod($path, 0600);
     }
 
-    private function renderOauthStatus(string $provider, ?string $connectedAt = null, ?string $scopes = null): \Illuminate\Support\HtmlString
+    private function renderOauthStatus(string $provider, ?string $connectedAt = null, ?string $scopes = null): HtmlString
     {
         $oauthService = app(OAuthService::class);
 
-        return new \Illuminate\Support\HtmlString(
+        return new HtmlString(
             view('filament.pages.settings.oauth-status', [
                 'connected' => $oauthService->isConnected($provider),
                 'time' => $connectedAt ? Carbon::parse($connectedAt)->diffForHumans() : null,

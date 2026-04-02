@@ -7,7 +7,7 @@ use App\Services\SettingsService;
 beforeEach(function (): void {
     app(SettingsService::class)->clearCache();
 
-    Setting::create(['key' => 'shopify.shop_domain', 'value' => 'test-shop.myshopify.com', 'type' => 'string', 'group' => 'shopify']);
+    Setting::updateOrCreate(['key' => 'shopify.shop_domain'], ['value' => 'test-shop.myshopify.com', 'type' => 'string', 'group' => 'shopify']);
 
     app(SettingsService::class)->clearCache();
 });
@@ -43,7 +43,6 @@ it('returns shop domain in broker params', function (): void {
 it('returns empty broker params when shop domain is not set', function (): void {
     Setting::where('key', 'shopify.shop_domain')->update(['value' => '']);
     app(SettingsService::class)->clearCache();
-    config(['services.shopify.shop_domain' => null]);
 
     $provider = new ShopifyOAuthProvider;
 

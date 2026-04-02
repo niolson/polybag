@@ -6,8 +6,10 @@ use App\Http\Integrations\USPS\Requests\ShippingOptions;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\Package;
+use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
+use App\Services\SettingsService;
 use App\Services\ShippingRateService;
 use Illuminate\Support\Collection;
 use Saloon\Http\Faking\MockResponse;
@@ -349,14 +351,13 @@ it('falls back to all configured carriers when shipment has no shipping method',
         ]),
     ]);
 
-    config([
-        'services.usps.client_id' => 'test',
-        'services.usps.client_secret' => 'test',
-        'services.usps.crid' => 'test',
-        'services.fedex.api_key' => 'test',
-        'services.fedex.api_secret' => 'test',
-        'services.fedex.account_number' => 'test',
-    ]);
+    Setting::updateOrCreate(['key' => 'usps.client_id'], ['value' => 'test', 'type' => 'string']);
+    Setting::updateOrCreate(['key' => 'usps.client_secret'], ['value' => 'test', 'type' => 'string']);
+    Setting::updateOrCreate(['key' => 'usps.crid'], ['value' => 'test', 'type' => 'string']);
+    Setting::updateOrCreate(['key' => 'fedex.api_key'], ['value' => 'test', 'type' => 'string']);
+    Setting::updateOrCreate(['key' => 'fedex.api_secret'], ['value' => 'test', 'type' => 'string']);
+    Setting::updateOrCreate(['key' => 'fedex.account_number'], ['value' => 'test', 'type' => 'string']);
+    app(SettingsService::class)->clearCache();
 
     // Create shipment with NO shipping method
     $shipment = Shipment::factory()->create([
@@ -375,7 +376,11 @@ it('falls back to all configured carriers when shipment has no shipping method',
     $rates = app(ShippingRateService::class)->getShippingRates($package->id);
 
     expect($rates)->toBeInstanceOf(Collection::class)
-        ->and($rates)->not->toBeEmpty();
+        ->and($rates)->toHaveCount(2);
+
+    $carriers = $rates->pluck('carrier')->toArray();
+    expect($carriers)->toContain('USPS')
+        ->and($carriers)->toContain('FedEx');
 });
 
 it('only returns rates for configured service codes', function (): void {

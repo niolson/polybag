@@ -28,12 +28,14 @@ class AmazonSpApiConnector extends Connector
 
     public static function fromConfig(): self
     {
+        $settings = app(SettingsService::class);
+
         return new self(
             baseUrl: config('services.amazon.base_url') ?? 'https://sellingpartnerapi-na.amazon.com',
             sandboxUrl: config('services.amazon.sandbox_url') ?? 'https://sandbox.sellingpartnerapi-na.amazon.com',
-            clientId: app(SettingsService::class)->get('amazon.client_id', config('services.amazon.client_id') ?? ''),
-            clientSecret: app(SettingsService::class)->get('amazon.client_secret', config('services.amazon.client_secret') ?? ''),
-            refreshToken: app(SettingsService::class)->get('amazon.refresh_token', config('services.amazon.refresh_token') ?? ''),
+            clientId: (string) $settings->get('amazon.client_id', ''),
+            clientSecret: (string) $settings->get('amazon.client_secret', ''),
+            refreshToken: (string) $settings->get('amazon.refresh_token', ''),
         );
     }
 
