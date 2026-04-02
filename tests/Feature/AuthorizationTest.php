@@ -94,10 +94,6 @@ describe('manager role access', function (): void {
         Livewire::test(ListShipments::class)->assertSuccessful();
     });
 
-    it('can create shipments', function (): void {
-        Livewire::test(CreateShipment::class)->assertSuccessful();
-    });
-
     it('can edit shipments', function (): void {
         $shipment = Shipment::factory()->create();
         Livewire::test(EditShipment::class, ['record' => $shipment->getRouteKey()])->assertSuccessful();
@@ -128,6 +124,10 @@ describe('manager role access', function (): void {
     });
 
     // Resources NOT accessible to manager
+    it('can create shipments', function (): void {
+        Livewire::test(CreateShipment::class)->assertForbidden();
+    });
+
     it('cannot list users', function (): void {
         Livewire::test(ListUsers::class)->assertForbidden();
     });
