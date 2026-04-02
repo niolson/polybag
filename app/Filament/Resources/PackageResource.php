@@ -177,7 +177,9 @@ class PackageResource extends Resource
                     ->size('sm')
                     ->copyable()
                     ->placeholder('—'),
-                Tables\Columns\TextColumn::make('shipping_method')
+                Tables\Columns\TextColumn::make('carrier')
+                    ->placeholder('—'),
+                Tables\Columns\TextColumn::make('service')
                     ->placeholder('—'),
                 Tables\Columns\TextColumn::make('weight')
                     ->numeric()

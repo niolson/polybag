@@ -87,10 +87,10 @@ class ListShipments extends ListRecords
                 'property' => 'activeDeliverabilityTab',
                 'tabs' => [
                     'all' => 'All',
-                    Deliverability::NotChecked->value => 'Not Checked',
                     Deliverability::Yes->value => 'Yes',
                     Deliverability::Maybe->value => 'Maybe',
                     Deliverability::No->value => 'No',
+                    Deliverability::NotChecked->value => 'Not Checked',
                 ],
             ],
         ];

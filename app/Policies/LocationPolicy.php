@@ -3,19 +3,19 @@
 namespace App\Policies;
 
 use App\Enums\Role;
-use App\Models\Shipment;
+use App\Models\Location;
 use App\Models\User;
 
-class ShipmentPolicy
+class LocationPolicy
 {
     public function viewAny(User $user): bool
     {
-        return true;
+        return $user->role->isAtLeast(Role::Manager);
     }
 
-    public function view(User $user, Shipment $shipment): bool
+    public function view(User $user, Location $location): bool
     {
-        return true;
+        return $user->role->isAtLeast(Role::Manager);
     }
 
     public function create(User $user): bool
@@ -23,12 +23,12 @@ class ShipmentPolicy
         return $user->role->isAtLeast(Role::Admin);
     }
 
-    public function update(User $user, Shipment $shipment): bool
+    public function update(User $user, Location $location): bool
     {
         return $user->role->isAtLeast(Role::Manager);
     }
 
-    public function delete(User $user, Shipment $shipment): bool
+    public function delete(User $user, Location $location): bool
     {
         return $user->role->isAtLeast(Role::Admin);
     }

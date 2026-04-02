@@ -48,6 +48,10 @@ class ShipmentItemsRelationManager extends RelationManager
                     ->money('USD'),
                 Tables\Columns\IconColumn::make('transparency')
                     ->boolean()
+                    ->trueIcon('heroicon-o-check-circle')
+                    ->falseIcon('heroicon-o-minus-circle')
+                    ->trueColor('success')
+                    ->falseColor('gray')
                     ->visible(fn (): bool => (bool) app(SettingsService::class)->get('transparency_enabled', true)),
             ])
             ->filters([

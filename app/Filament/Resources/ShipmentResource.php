@@ -91,7 +91,7 @@ class ShipmentResource extends Resource
             ->schema([
                 // Left column — Shipment Details
                 Section::make('Shipment Details')
-                    ->inlineLabel()
+                    // ->inlineLabel()
                     ->schema([
                         Forms\Components\TextInput::make('shipment_reference')
                             ->maxLength(255),
@@ -125,10 +125,10 @@ class ShipmentResource extends Resource
 
                 // Right column — Recipient & Address
                 Section::make('Recipient & Address')
-                    ->inlineLabel()
+                    // ->inlineLabel()
                     ->schema([
                         Section::make('Shipping Address')
-                            ->inlineLabel()
+                            // ->inlineLabel()
                             ->schema(AddressForm::recipientAddressFields(
                                 includeCompany: true,
                                 includePhone: true,
@@ -136,9 +136,9 @@ class ShipmentResource extends Resource
                                 afterStateUpdated: fn (Components\Utilities\Set $set) => $set('checked', false),
                             ))
                             ->columns(2),
-                        Forms\Components\TextInput::make('phone_extension')
-                            ->label('Phone Ext.')
-                            ->maxLength(6),
+                        // Forms\Components\TextInput::make('phone_extension')
+                        //     ->label('Phone Ext.')
+                        //     ->maxLength(6),
 
                         Forms\Components\Hidden::make('checked'),
 
@@ -209,10 +209,10 @@ class ShipmentResource extends Resource
                     ->sortable()
                     ->placeholder('—')
                     ->toggleable(isToggledHiddenByDefault: true),
+                Tables\Columns\TextColumn::make('status')
+                    ->badge(),
                 Tables\Columns\TextColumn::make('deliverability')
                     ->label('Deliverable')
-                    ->badge(),
-                Tables\Columns\TextColumn::make('status')
                     ->badge(),
                 Tables\Columns\TextColumn::make('created_at')
                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())
@@ -272,7 +272,7 @@ class ShipmentResource extends Resource
                 Actions\BulkAction::make('batch-ship')
                     ->label('Batch Ship')
                     ->icon('heroicon-o-paper-airplane')
-                    ->visible(fn () => auth()->user()->role->isAtLeast(Role::Admin) && app(SettingsService::class)->get('batch_shipping_enabled', true))
+                    ->visible(fn () => auth()->user()->role->isAtLeast(Role::Manager) && app(SettingsService::class)->get('batch_shipping_enabled', true))
                     ->schema([
                         Forms\Components\Select::make('box_size_id')
                             ->label('Box Size')
