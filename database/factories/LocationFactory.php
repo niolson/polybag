@@ -23,6 +23,7 @@ class LocationFactory extends Factory
             'postal_code' => fake()->postcode(),
             'country' => 'US',
             'timezone' => 'America/New_York',
+            'fedex_hub_id' => null,
             'phone' => fake()->optional()->phoneNumber(),
             'is_default' => false,
             'active' => true,

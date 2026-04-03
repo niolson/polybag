@@ -2,8 +2,8 @@
 
 namespace App\Filament\Resources;
 
-use App\Filament\Support\AddressForm;
 use App\Filament\Resources\LocationResource\Pages;
+use App\Filament\Support\AddressForm;
 use App\Models\Carrier;
 use App\Models\Location;
 use BackedEnum;
@@ -22,6 +22,13 @@ class LocationResource extends Resource
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-building-office-2';
 
     protected static \UnitEnum|string|null $navigationGroup = 'Settings';
+
+    protected static function hasActiveFedexCarrier(): bool
+    {
+        return Carrier::active()
+            ->where('name', 'FedEx')
+            ->exists();
+    }
 
     public static function form(Schema $form): Schema
     {
@@ -45,6 +52,14 @@ class LocationResource extends Resource
                             ->searchable()
                             ->default('America/New_York')
                             ->required(),
+                        Forms\Components\Select::make('fedex_hub_id')
+                            ->label('FedEx Hub ID')
+                            ->helperText('Used for FedEx Ground Economy / SmartPost shipments from this origin.')
+                            ->options(config('fedex.ground_economy_hubs'))
+                            ->searchable()
+                            ->placeholder('Select a FedEx hub')
+                            ->visible(fn (): bool => static::hasActiveFedexCarrier())
+                            ->dehydrated(fn ($state): bool => static::hasActiveFedexCarrier() || filled($state)),
                     ]),
                 Components\Section::make('Address')
                     ->schema(AddressForm::recipientAddressFields(

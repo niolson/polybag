@@ -15,6 +15,7 @@ use App\Http\Integrations\Fedex\FedexConnector;
 use App\Http\Integrations\Fedex\Requests\CancelShipment as CancelShipmentRequest;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Http\Integrations\Fedex\Requests\Rates;
+use App\Models\Location;
 use App\Models\Package;
 use App\Services\SettingsService;
 use Illuminate\Support\Collection;
@@ -58,6 +59,14 @@ class FedexAdapter implements CarrierAdapterInterface
         'EXPRESS_SAVER' => 3,        // Wednesday → Saturday (3-day)
     ];
 
+    private const SMART_POST_SERVICE_CODE = 'SMART_POST';
+
+    private const SMART_POST_LIGHTWEIGHT_INDICIA = 'PRESORTED_STANDARD';
+
+    private const SMART_POST_HEAVYWEIGHT_INDICIA = 'PARCEL_SELECT';
+
+    private const SMART_POST_LIGHTWEIGHT_ENDORSEMENT = 'ADDRESS_CORRECTION';
+
     public function getCarrierName(): string
     {
         return 'FedEx';
@@ -83,7 +92,7 @@ class FedexAdapter implements CarrierAdapterInterface
         }
 
         $connector = FedexConnector::getFedexConnector();
-        $apiRequest = $this->buildRateApiRequest($this->adjustRequestForSaturday($request, $serviceCodes));
+        $apiRequest = $this->buildRateApiRequest($this->adjustRequestForSaturday($request, $serviceCodes), $serviceCodes);
         $response = $connector->send($apiRequest);
 
         // Pass original $request so parseRateResponse knows Saturday was requested
@@ -103,7 +112,7 @@ class FedexAdapter implements CarrierAdapterInterface
         }
 
         $connector = FedexConnector::getFedexConnector();
-        $apiRequest = $this->buildRateApiRequest($this->adjustRequestForSaturday($request, $serviceCodes));
+        $apiRequest = $this->buildRateApiRequest($this->adjustRequestForSaturday($request, $serviceCodes), $serviceCodes);
         $pendingRequest = $connector->createPendingRequest($apiRequest);
 
         return new PreparedRateRequest(
@@ -187,11 +196,13 @@ class FedexAdapter implements CarrierAdapterInterface
     /**
      * Build the FedEx rate API request.
      */
-    private function buildRateApiRequest(RateRequest $request): Rates
+    private function buildRateApiRequest(RateRequest $request, array $serviceCodes): Rates
     {
         $package = $request->packages[0];
+        $smartPostInfoDetail = $this->buildSmartPostInfoDetail($request, $serviceCodes);
 
         $apiRequest = new Rates;
+
         $apiRequest->body()->set([
             'accountNumber' => [
                 'value' => app(SettingsService::class)->get('fedex.account_number'),
@@ -214,6 +225,9 @@ class FedexAdapter implements CarrierAdapterInterface
                 ],
                 'pickupType' => 'USE_SCHEDULED_PICKUP',
                 'rateRequestType' => ['ACCOUNT'],
+                ...($smartPostInfoDetail ? [
+                    'serviceType' => self::SMART_POST_SERVICE_CODE,
+                ] : []),
                 'requestedPackageLineItems' => [
                     [
                         'weight' => [
@@ -222,6 +236,9 @@ class FedexAdapter implements CarrierAdapterInterface
                         ],
                     ],
                 ],
+                ...($smartPostInfoDetail ? [
+                    'smartPostInfoDetail' => $smartPostInfoDetail,
+                ] : []),
                 ...($request->shipDate ? [
                     'shipDatestamp' => $request->shipDate->format('Y-m-d'),
                 ] : []),
@@ -260,6 +277,78 @@ class FedexAdapter implements CarrierAdapterInterface
         ]);
 
         return $apiRequest;
+    }
+
+    /**
+     * @param  array<int, string>  $serviceCodes
+     * @return array<string, string>|null
+     */
+    private function buildSmartPostInfoDetail(RateRequest $request, array $serviceCodes): ?array
+    {
+        if (! in_array(self::SMART_POST_SERVICE_CODE, $serviceCodes, true)) {
+            return null;
+        }
+
+        $hubId = $this->resolveFedexHubId($request->locationId);
+        if (! filled($hubId)) {
+            logger()->warning('FedEx SmartPost requested but no hub ID is configured for the origin location', [
+                'location_id' => $request->locationId,
+            ]);
+
+            return null;
+        }
+
+        $weight = (float) ($request->packages[0]->weight ?? 0);
+        if ($weight < 1.0) {
+            return [
+                'hubId' => $hubId,
+                'indicia' => self::SMART_POST_LIGHTWEIGHT_INDICIA,
+                'ancillaryEndorsement' => self::SMART_POST_LIGHTWEIGHT_ENDORSEMENT,
+            ];
+        }
+
+        return [
+            'hubId' => $hubId,
+            'indicia' => self::SMART_POST_HEAVYWEIGHT_INDICIA,
+        ];
+    }
+
+    private function resolveFedexHubId(?int $locationId): ?string
+    {
+        $location = $locationId
+            ? Location::query()->find($locationId)
+            : Location::getDefault();
+
+        return filled($location?->fedex_hub_id) ? (string) $location->fedex_hub_id : null;
+    }
+
+    /**
+     * @return array<string, string>|null
+     */
+    private function buildShipmentSmartPostInfoDetail(ShipRequest $request): ?array
+    {
+        $hubId = $this->resolveFedexHubId($request->locationId);
+        if (! filled($hubId)) {
+            logger()->warning('FedEx SmartPost shipment requested but no hub ID is configured for the origin location', [
+                'location_id' => $request->locationId,
+            ]);
+
+            return null;
+        }
+
+        $weight = (float) $request->packageData->weight;
+        if ($weight < 1.0) {
+            return [
+                'hubId' => $hubId,
+                'indicia' => self::SMART_POST_LIGHTWEIGHT_INDICIA,
+                'ancillaryEndorsement' => self::SMART_POST_LIGHTWEIGHT_ENDORSEMENT,
+            ];
+        }
+
+        return [
+            'hubId' => $hubId,
+            'indicia' => self::SMART_POST_HEAVYWEIGHT_INDICIA,
+        ];
     }
 
     public function createShipment(ShipRequest $request): ShipResponse
@@ -311,6 +400,14 @@ class FedexAdapter implements CarrierAdapterInterface
                     ],
                 ],
             ];
+
+            if (($request->selectedRate->metadata['serviceType'] ?? null) === self::SMART_POST_SERVICE_CODE) {
+                $smartPostInfoDetail = $this->buildShipmentSmartPostInfoDetail($request);
+
+                if ($smartPostInfoDetail) {
+                    $requestedShipment['smartPostInfoDetail'] = $smartPostInfoDetail;
+                }
+            }
 
             // Add customs clearance detail for international shipments
             if ($request->toAddress->country !== 'US' && ! empty($request->customsItems)) {

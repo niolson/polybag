@@ -20,6 +20,7 @@ readonly class ShipRequest
         public string $labelFormat = 'pdf',
         public ?int $labelDpi = null,
         public bool $saturdayDelivery = false,
+        public ?int $locationId = null,
         public ?CarbonImmutable $shipDate = null,
     ) {}
 
@@ -62,6 +63,7 @@ readonly class ShipRequest
             labelFormat: $this->labelFormat,
             labelDpi: $this->labelDpi,
             saturdayDelivery: $this->saturdayDelivery,
+            locationId: $this->locationId,
             shipDate: $this->shipDate,
         );
     }
@@ -99,6 +101,7 @@ readonly class ShipRequest
             labelFormat: $labelFormat,
             labelDpi: $labelDpi,
             saturdayDelivery: (bool) $shippingMethod?->saturday_delivery,
+            locationId: $package->location_id,
             shipDate: $shipDate,
         );
     }

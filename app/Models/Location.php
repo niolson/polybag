@@ -26,6 +26,7 @@ class Location extends Model
         'postal_code',
         'country',
         'timezone',
+        'fedex_hub_id',
         'phone',
         'phone_e164',
         'is_default',

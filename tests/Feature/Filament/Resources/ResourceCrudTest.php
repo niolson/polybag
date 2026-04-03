@@ -11,6 +11,10 @@ use App\Filament\Resources\CarrierServiceResource\Pages\ListCarrierServices;
 use App\Filament\Resources\ChannelResource\Pages\CreateChannel;
 use App\Filament\Resources\ChannelResource\Pages\EditChannel;
 use App\Filament\Resources\ChannelResource\Pages\ListChannels;
+use App\Filament\Resources\LocationResource;
+use App\Filament\Resources\LocationResource\Pages\CreateLocation;
+use App\Filament\Resources\LocationResource\Pages\EditLocation;
+use App\Filament\Resources\LocationResource\Pages\ListLocations;
 use App\Filament\Resources\ProductResource\Pages\CreateProduct;
 use App\Filament\Resources\ProductResource\Pages\EditProduct;
 use App\Filament\Resources\ProductResource\Pages\ListProducts;
@@ -24,6 +28,7 @@ use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\Channel;
+use App\Models\Location;
 use App\Models\Product;
 use App\Models\ShippingMethod;
 use App\Models\User;
@@ -136,6 +141,66 @@ it('can edit a CarrierService', function (): void {
         ->assertHasNoFormErrors();
 
     expect($record->refresh())->name->toBe('Renamed Service');
+});
+
+// LocationResource
+
+it('can render Location list page', function (): void {
+    Livewire::test(ListLocations::class)->assertSuccessful();
+});
+
+it('can render Location create page', function (): void {
+    Livewire::test(CreateLocation::class)->assertSuccessful();
+});
+
+it('can render Location edit page', function (): void {
+    $record = Location::factory()->create();
+    Livewire::test(EditLocation::class, ['record' => $record->id])->assertSuccessful();
+});
+
+it('shows the fedex hub selector when fedex is active', function (): void {
+    Carrier::factory()->fedex()->create(['active' => true]);
+
+    $this->get(LocationResource::getUrl('create'))
+        ->assertOk()
+        ->assertSeeText('FedEx Hub ID');
+});
+
+it('hides the fedex hub selector when fedex is inactive', function (): void {
+    Carrier::factory()->fedex()->create(['active' => false]);
+
+    $this->get(LocationResource::getUrl('create'))
+        ->assertOk()
+        ->assertDontSeeText('FedEx Hub ID');
+});
+
+it('can create a Location with a fedex hub id when fedex is active', function (): void {
+    Carrier::factory()->fedex()->create(['active' => true]);
+
+    Livewire::test(CreateLocation::class)
+        ->fillForm([
+            'name' => 'East Coast Warehouse',
+            'is_default' => true,
+            'active' => true,
+            'timezone' => 'America/New_York',
+            'fedex_hub_id' => '5015',
+            'company' => 'PolyBag',
+            'first_name' => 'Jane',
+            'last_name' => 'Doe',
+            'address1' => '123 Main St',
+            'city' => 'Boston',
+            'country' => 'US',
+            'state_or_province' => 'MA',
+            'postal_code' => '02110',
+            'phone' => '+16175551212',
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $this->assertDatabaseHas(Location::class, [
+        'name' => 'East Coast Warehouse',
+        'fedex_hub_id' => '5015',
+    ]);
 });
 
 // ChannelResource
