@@ -26,6 +26,7 @@ use App\Services\OAuthService;
 use App\Services\RateQuoteLogger;
 use App\Services\RuleEvaluator;
 use App\Services\SettingsService;
+use App\Services\ShipmentImport\RuntimeConfig;
 use App\Services\ShippingRateService;
 use App\Services\Validation\FakeAddressValidator;
 use App\Services\Validation\UspsAddressValidator;
@@ -48,6 +49,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(ManifestService::class);
         $this->app->singleton(OAuthProviderRegistry::class);
         $this->app->singleton(OAuthService::class);
+        $this->app->singleton(RuntimeConfig::class);
 
         $this->app->singleton(AddressValidationService::class, function () {
             $validators = config('app.fake_carriers')

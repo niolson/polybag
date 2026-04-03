@@ -2,6 +2,7 @@
 
 use App\Filament\Pages\Settings;
 use App\Models\Setting;
+use App\Models\ShippingMethod;
 use App\Models\User;
 use App\Services\SettingsService;
 use Illuminate\Support\Facades\Cache;
@@ -146,4 +147,56 @@ it('saves ssh server host key and writes a known_hosts file', function (): void 
     expect(trim((string) file_get_contents($knownHostsPath)))->toBe($hostKey);
 
     @unlink($knownHostsPath);
+});
+
+it('saves tenant-managed import and marketplace settings', function (): void {
+    $shippingMethod = ShippingMethod::factory()->create();
+
+    Livewire::test(Settings::class)
+        ->fillForm([
+            'import_source' => 'shopify',
+            'shopify_import_enabled' => true,
+            'shopify_export_enabled' => true,
+            'shopify_channel_name' => 'Storefront',
+            'shopify_shipping_method' => (string) $shippingMethod->id,
+            'shopify_notify_customer' => true,
+            'amazon_import_enabled' => true,
+            'amazon_export_enabled' => true,
+            'amazon_channel_name' => 'Marketplace',
+            'amazon_shipping_method' => (string) $shippingMethod->id,
+            'amazon_lookback_days' => 14,
+        ])
+        ->call('save')
+        ->assertNotified();
+
+    app(SettingsService::class)->clearCache();
+
+    expect(app(SettingsService::class)->get('import_source'))->toBe('shopify')
+        ->and(app(SettingsService::class)->get('shopify.import_enabled'))->toBeTrue()
+        ->and(app(SettingsService::class)->get('shopify.export_enabled'))->toBeTrue()
+        ->and(app(SettingsService::class)->get('shopify.channel_name'))->toBe('Storefront')
+        ->and(app(SettingsService::class)->get('shopify.shipping_method'))->toBe((string) $shippingMethod->id)
+        ->and(app(SettingsService::class)->get('shopify.notify_customer'))->toBeTrue()
+        ->and(app(SettingsService::class)->get('amazon.import_enabled'))->toBeTrue()
+        ->and(app(SettingsService::class)->get('amazon.export_enabled'))->toBeTrue()
+        ->and(app(SettingsService::class)->get('amazon.channel_name'))->toBe('Marketplace')
+        ->and(app(SettingsService::class)->get('amazon.shipping_method'))->toBe((string) $shippingMethod->id)
+        ->and(app(SettingsService::class)->get('amazon.lookback_days'))->toBe(14);
+});
+
+it('saves database import and export sql queries', function (): void {
+    Livewire::test(Settings::class)
+        ->fillForm([
+            'import_shipments_query' => 'select * from shipments where exported = 0',
+            'import_shipment_items_query' => 'select * from shipment_items where shipment_id = :shipment_reference',
+            'import_export_query' => 'update orders set tracking_number = :tracking_number where id = :shipment_reference',
+        ])
+        ->call('save')
+        ->assertNotified();
+
+    app(SettingsService::class)->clearCache();
+
+    expect(app(SettingsService::class)->get('import.shipments_query'))->toBe('select * from shipments where exported = 0')
+        ->and(app(SettingsService::class)->get('import.shipment_items_query'))->toBe('select * from shipment_items where shipment_id = :shipment_reference')
+        ->and(app(SettingsService::class)->get('import.export_query'))->toBe('update orders set tracking_number = :tracking_number where id = :shipment_reference');
 });

@@ -38,7 +38,7 @@ class PackageExportService
         $package->loadMissing('shipment.channel');
 
         $channelName = $package->shipment?->channel?->name;
-        $channelMap = config('shipment-import.export_channel_map', []);
+        $channelMap = app(RuntimeConfig::class)->exportChannelMap();
 
         // Resolve which sources to export to
         $sourceNames = $channelMap[$channelName] ?? $channelMap['*'] ?? null;
@@ -52,7 +52,7 @@ class PackageExportService
         $errors = [];
 
         foreach ($sourceNames as $sourceName) {
-            $sourceConfig = config("shipment-import.sources.{$sourceName}");
+            $sourceConfig = app(RuntimeConfig::class)->sourceConfig($sourceName);
 
             if (! $sourceConfig || empty($sourceConfig['export']['enabled'])) {
                 continue;

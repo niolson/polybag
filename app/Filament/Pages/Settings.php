@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Enums\Role;
 use App\Models\Location;
 use App\Models\Setting;
+use App\Models\ShippingMethod;
 use App\Services\OAuthService;
 use App\Services\SettingsService;
 use App\Services\SshTunnel;
@@ -117,6 +118,7 @@ class Settings extends Page
             'batch_shipping_enabled' => app(SettingsService::class)->get('batch_shipping_enabled', true),
             'manual_shipping_enabled' => app(SettingsService::class)->get('manual_shipping_enabled', true),
             'carrier_api_timeout' => app(SettingsService::class)->get('carrier_api_timeout', 15),
+            'import_source' => app(SettingsService::class)->get('import_source', 'database'),
             'audit_log_retention_days' => app(SettingsService::class)->get('audit_log_retention_days', 365),
             'rate_quote_retention_days' => app(SettingsService::class)->get('rate_quote_retention_days', 60),
             'pii_retention_days' => app(SettingsService::class)->get('pii_retention_days', 90),
@@ -138,7 +140,17 @@ class Settings extends Page
             'ups_account_number' => app(SettingsService::class)->get('ups.account_number', ''),
             'shopify_shop_domain' => app(SettingsService::class)->get('shopify.shop_domain', ''),
             'shopify_api_version' => app(SettingsService::class)->get('shopify.api_version', '2025-01'),
+            'shopify_import_enabled' => app(SettingsService::class)->get('shopify.import_enabled', false),
+            'shopify_export_enabled' => app(SettingsService::class)->get('shopify.export_enabled', false),
+            'shopify_channel_name' => app(SettingsService::class)->get('shopify.channel_name', 'Shopify'),
+            'shopify_shipping_method' => app(SettingsService::class)->get('shopify.shipping_method', ''),
+            'shopify_notify_customer' => app(SettingsService::class)->get('shopify.notify_customer', false),
             'amazon_marketplace_id' => app(SettingsService::class)->get('amazon.marketplace_id', 'ATVPDKIKX0DER'),
+            'amazon_import_enabled' => app(SettingsService::class)->get('amazon.import_enabled', false),
+            'amazon_export_enabled' => app(SettingsService::class)->get('amazon.export_enabled', false),
+            'amazon_channel_name' => app(SettingsService::class)->get('amazon.channel_name', 'Amazon'),
+            'amazon_shipping_method' => app(SettingsService::class)->get('amazon.shipping_method', ''),
+            'amazon_lookback_days' => app(SettingsService::class)->get('amazon.lookback_days', 30),
 
             // Database import
             'import_db_driver' => app(SettingsService::class)->get('import.db_driver', 'mysql'),
@@ -146,6 +158,9 @@ class Settings extends Page
             'import_db_port' => app(SettingsService::class)->get('import.db_port', ''),
             'import_db_database' => app(SettingsService::class)->get('import.db_database', ''),
             'import_db_username' => app(SettingsService::class)->get('import.db_username', ''),
+            'import_shipments_query' => app(SettingsService::class)->get('import.shipments_query', ''),
+            'import_shipment_items_query' => app(SettingsService::class)->get('import.shipment_items_query', ''),
+            'import_export_query' => app(SettingsService::class)->get('import.export_query', ''),
             'import_ssh_enabled' => (bool) app(SettingsService::class)->get('import.ssh_enabled', false),
             'import_ssh_host' => app(SettingsService::class)->get('import.ssh_host', ''),
             'import_ssh_port' => app(SettingsService::class)->get('import.ssh_port', '22'),
@@ -238,6 +253,21 @@ class Settings extends Page
         return $schema
             ->components([
                 Form::make([
+                    Section::make('Shipment Import')
+                        ->description('Choose which tenant-managed import source is used by default. Batch size and log channel remain deployment-level config.')
+                        ->schema([
+                            Select::make('import_source')
+                                ->label('Default Import Source')
+                                ->options([
+                                    'database' => 'Database',
+                                    'shopify' => 'Shopify',
+                                    'amazon' => 'Amazon',
+                                ])
+                                ->default('database')
+                                ->required(),
+                        ])
+                        ->columns(1),
+
                     Section::make('Company Information')
                         ->description('General company settings')
                         ->schema([
@@ -482,6 +512,21 @@ class Settings extends Page
                                 ->label('API Version')
                                 ->placeholder('2025-01')
                                 ->maxLength(20),
+                            Toggle::make('shopify_import_enabled')
+                                ->label('Enable Shopify Import'),
+                            Toggle::make('shopify_export_enabled')
+                                ->label('Enable Shopify Export'),
+                            TextInput::make('shopify_channel_name')
+                                ->label('Channel Name')
+                                ->placeholder('Shopify')
+                                ->maxLength(255),
+                            Select::make('shopify_shipping_method')
+                                ->label('Default Shipping Method')
+                                ->options(fn () => ShippingMethod::query()->orderBy('name')->pluck('name', 'id')->all())
+                                ->searchable()
+                                ->placeholder('None'),
+                            Toggle::make('shopify_notify_customer')
+                                ->label('Notify Customer on Export'),
 
                             ...$this->shopifyCredentialFields(),
                         ])
@@ -536,12 +581,30 @@ class Settings extends Page
                                 ->label('Marketplace ID')
                                 ->placeholder('ATVPDKIKX0DER')
                                 ->maxLength(50),
+                            Toggle::make('amazon_import_enabled')
+                                ->label('Enable Amazon Import'),
+                            Toggle::make('amazon_export_enabled')
+                                ->label('Enable Amazon Export'),
+                            TextInput::make('amazon_channel_name')
+                                ->label('Channel Name')
+                                ->placeholder('Amazon')
+                                ->maxLength(255),
+                            Select::make('amazon_shipping_method')
+                                ->label('Default Shipping Method')
+                                ->options(fn () => ShippingMethod::query()->orderBy('name')->pluck('name', 'id')->all())
+                                ->searchable()
+                                ->placeholder('None'),
+                            TextInput::make('amazon_lookback_days')
+                                ->label('Lookback Days')
+                                ->numeric()
+                                ->default(30)
+                                ->minValue(1),
                         ])
                         ->columns(2)
                         ->collapsed(),
 
                     Section::make('Database Import')
-                        ->description('Configure the external database connection for importing shipments. These settings override any SHIPMENT_IMPORT_DB_* environment variables.')
+                        ->description('Configure the external database connection and optional SQL queries for importing shipments and exporting tracking updates.')
                         ->schema([
                             Select::make('import_db_driver')
                                 ->label('Driver')
@@ -565,6 +628,21 @@ class Settings extends Page
                                 ->password()
                                 ->revealable()
                                 ->placeholder(fn () => $this->getCredentialPlaceholder('import.db_password', 'database.connections.import.password')),
+                            Textarea::make('import_shipments_query')
+                                ->label('Shipments Query')
+                                ->helperText('Optional custom SQL to fetch shipments. Leave blank to query the configured shipments table.')
+                                ->rows(4)
+                                ->columnSpanFull(),
+                            Textarea::make('import_shipment_items_query')
+                                ->label('Shipment Items Query')
+                                ->helperText('Optional custom SQL to fetch shipment items. Use :shipment_reference as the placeholder value.')
+                                ->rows(4)
+                                ->columnSpanFull(),
+                            Textarea::make('import_export_query')
+                                ->label('Export Query')
+                                ->helperText('Optional SQL used to export tracking data back to the external database. Leave blank to disable database export queries.')
+                                ->rows(4)
+                                ->columnSpanFull(),
                             Toggle::make('import_ssh_enabled')
                                 ->label('Connect via SSH Tunnel')
                                 ->columnSpanFull()
@@ -659,6 +737,7 @@ class Settings extends Page
             'batch_shipping_enabled' => $data['batch_shipping_enabled'] ?? true,
             'manual_shipping_enabled' => $data['manual_shipping_enabled'] ?? true,
             'carrier_api_timeout' => (int) ($data['carrier_api_timeout'] ?? 15),
+            'import_source' => $data['import_source'] ?? 'database',
             'audit_log_retention_days' => (int) ($data['audit_log_retention_days'] ?? 365),
             'rate_quote_retention_days' => (int) ($data['rate_quote_retention_days'] ?? 60),
             'pii_retention_days' => (int) ($data['pii_retention_days'] ?? 90),
@@ -672,6 +751,19 @@ class Settings extends Page
             'google_sso_enabled' => (bool) ($data['google_sso_enabled'] ?? false),
             'sandbox_mode' => $sandboxMode,
             'suppress_printing' => $suppressPrinting,
+            'shopify.import_enabled' => (bool) ($data['shopify_import_enabled'] ?? false),
+            'shopify.export_enabled' => (bool) ($data['shopify_export_enabled'] ?? false),
+            'shopify.channel_name' => $data['shopify_channel_name'] ?? 'Shopify',
+            'shopify.shipping_method' => blank($data['shopify_shipping_method'] ?? null) ? null : (string) $data['shopify_shipping_method'],
+            'shopify.notify_customer' => (bool) ($data['shopify_notify_customer'] ?? false),
+            'amazon.import_enabled' => (bool) ($data['amazon_import_enabled'] ?? false),
+            'amazon.export_enabled' => (bool) ($data['amazon_export_enabled'] ?? false),
+            'amazon.channel_name' => $data['amazon_channel_name'] ?? 'Amazon',
+            'amazon.shipping_method' => blank($data['amazon_shipping_method'] ?? null) ? null : (string) $data['amazon_shipping_method'],
+            'amazon.lookback_days' => (int) ($data['amazon_lookback_days'] ?? 30),
+            'import.shipments_query' => blank($data['import_shipments_query'] ?? null) ? null : trim((string) $data['import_shipments_query']),
+            'import.shipment_items_query' => blank($data['import_shipment_items_query'] ?? null) ? null : trim((string) $data['import_shipment_items_query']),
+            'import.export_query' => blank($data['import_export_query'] ?? null) ? null : trim((string) $data['import_export_query']),
         ];
 
         // Update each standard setting

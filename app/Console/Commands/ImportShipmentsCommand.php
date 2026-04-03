@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Contracts\ImportSourceInterface;
+use App\Services\ShipmentImport\RuntimeConfig;
 use App\Services\ShipmentImport\ShipmentImportService;
 use Illuminate\Console\Command;
 
@@ -17,7 +18,7 @@ class ImportShipmentsCommand extends Command
 
     public function handle(): int
     {
-        $sourceName = $this->option('source') ?? config('shipment-import.default', 'database');
+        $sourceName = $this->option('source') ?? app(RuntimeConfig::class)->defaultSource();
 
         $this->info("Using import source: {$sourceName}");
 
@@ -74,7 +75,7 @@ class ImportShipmentsCommand extends Command
 
     private function resolveSource(string $sourceName): ImportSourceInterface
     {
-        $config = config("shipment-import.sources.{$sourceName}");
+        $config = app(RuntimeConfig::class)->sourceConfig($sourceName);
 
         if (! $config) {
             throw new \InvalidArgumentException(

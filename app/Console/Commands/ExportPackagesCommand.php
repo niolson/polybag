@@ -6,6 +6,7 @@ use App\Contracts\ExportDestinationInterface;
 use App\Enums\PackageStatus;
 use App\Models\Package;
 use App\Services\ShipmentImport\PackageExportService;
+use App\Services\ShipmentImport\RuntimeConfig;
 use Illuminate\Console\Command;
 
 class ExportPackagesCommand extends Command
@@ -67,7 +68,7 @@ class ExportPackagesCommand extends Command
     {
         $this->info('Validating export destination configurations...');
 
-        $channelMap = config('shipment-import.export_channel_map', []);
+        $channelMap = app(RuntimeConfig::class)->exportChannelMap();
 
         if (empty($channelMap)) {
             $this->warn('No export channel mappings configured.');
@@ -79,7 +80,7 @@ class ExportPackagesCommand extends Command
         $hasErrors = false;
 
         foreach ($sourceNames as $sourceName) {
-            $config = config("shipment-import.sources.{$sourceName}");
+            $config = app(RuntimeConfig::class)->sourceConfig($sourceName);
 
             if (! $config) {
                 $this->error("Source '{$sourceName}' is not configured.");

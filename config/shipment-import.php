@@ -15,7 +15,7 @@ return [
     | specifying a source.
     |
     */
-    'default' => env('SHIPMENT_IMPORT_SOURCE', 'database'),
+    'default' => 'database',
 
     /*
     |--------------------------------------------------------------------------
@@ -55,8 +55,8 @@ return [
 
             // Optional: Custom SQL queries (set to null to use table-based queries)
             // Use :shipment_reference as placeholder for item queries
-            'shipments_query' => env('SHIPMENT_IMPORT_SHIPMENTS_QUERY'),
-            'shipment_items_query' => env('SHIPMENT_IMPORT_ITEMS_QUERY'),
+            'shipments_query' => null,
+            'shipment_items_query' => null,
 
             // Filter criteria for table-based queries
             'filters' => [
@@ -73,7 +73,7 @@ return [
             // Export: write package data back to the external database after shipping
             'export' => [
                 'enabled' => env('SHIPMENT_EXPORT_DATABASE_ENABLED', false),
-                'query' => env('SHIPMENT_EXPORT_QUERY', 'UPDATE orders SET tracking_number = :tracking_number WHERE id = :shipment_reference'),
+                'query' => null,
                 'field_mapping' => [
                     // internal_name => query_parameter_name
                     'tracking_number' => 'tracking_number',
@@ -123,13 +123,13 @@ return [
 
         'shopify' => [
             'driver' => ShopifySource::class,
-            'enabled' => env('SHIPMENT_IMPORT_SHOPIFY_ENABLED', false),
-            'channel_name' => env('SHOPIFY_CHANNEL_NAME', 'Shopify'),
-            'shipping_method' => env('SHOPIFY_SHIPPING_METHOD'),
-            'notify_customer' => env('SHOPIFY_NOTIFY_CUSTOMER', false),
+            'enabled' => false,
+            'channel_name' => 'Shopify',
+            'shipping_method' => null,
+            'notify_customer' => false,
 
             'export' => [
-                'enabled' => env('SHIPMENT_EXPORT_SHOPIFY_ENABLED', false),
+                'enabled' => false,
                 'field_mapping' => [
                     'tracking_number' => 'tracking_number',
                     'carrier' => 'carrier',
@@ -141,12 +141,12 @@ return [
 
         'amazon' => [
             'driver' => AmazonSource::class,
-            'enabled' => env('SHIPMENT_IMPORT_AMAZON_ENABLED', false),
-            'channel_name' => env('AMAZON_CHANNEL_NAME', 'Amazon'),
-            'shipping_method' => env('AMAZON_SHIPPING_METHOD'),
-            'lookback_days' => env('AMAZON_IMPORT_LOOKBACK_DAYS', 30),
+            'enabled' => false,
+            'channel_name' => 'Amazon',
+            'shipping_method' => null,
+            'lookback_days' => 30,
             'export' => [
-                'enabled' => env('SHIPMENT_EXPORT_AMAZON_ENABLED', false),
+                'enabled' => false,
                 'field_mapping' => [
                     'tracking_number' => 'tracking_number',
                     'carrier' => 'carrier',
