@@ -26,7 +26,7 @@ RUN npm run build
 FROM php:8.4-fpm@sha256:888e807b1de2fc32ff430ede9ab64755a72a4bd99c80e7962d3b5fa4a84cd1d5 AS app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     curl \
     libzip-dev \
     libpng-dev \
