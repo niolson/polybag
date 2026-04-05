@@ -10,7 +10,7 @@
     "test:e2e:headed": "node e2e/run.mjs --headed"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.2",
+    "@playwright/test": "^1.59.1",
     "@tailwindcss/vite": "^4.1.18",
     "@types/node": "^25.5.0",
     "axios": "^1.11.0",
