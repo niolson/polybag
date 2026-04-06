@@ -234,6 +234,9 @@ class OAuthService
 
         $this->settings->clearCache();
         Cache::forget("{$providerKey}_access_token");
+        Cache::forget("{$providerKey}_oauth_token");
+        Cache::forget("{$providerKey}_authenticator");
+        Cache::forget("{$providerKey}_payment_authorization_token");
     }
 
     /**

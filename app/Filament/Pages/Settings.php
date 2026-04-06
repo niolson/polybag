@@ -414,6 +414,13 @@ class Settings extends Page
                     Section::make('USPS Credentials')
                         ->description('API credentials for USPS shipping services')
                         ->schema([
+                            Placeholder::make('usps_oauth_status')
+                                ->label('OAuth Status')
+                                ->content(fn () => $this->renderOauthStatus(
+                                    provider: 'usps',
+                                    connectedAt: app(SettingsService::class)->get('usps.oauth_connected_at'),
+                                ))
+                                ->columnSpanFull(),
                             TextInput::make('usps_client_id')
                                 ->label('Client ID')
                                 ->password()
@@ -439,6 +446,33 @@ class Settings extends Page
                                 ->columnSpanFull(),
                         ])
                         ->footerActions([
+                            Action::make('usps_connect')
+                                ->label(fn () => app(OAuthService::class)->isConnected('usps') ? 'Reconnect' : 'Connect with OAuth')
+                                ->icon('heroicon-o-link')
+                                ->color(fn () => app(OAuthService::class)->isConnected('usps') ? 'warning' : 'primary')
+                                ->disabled(fn () => ! $this->isBrokerConfigured())
+                                ->tooltip(fn () => ! $this->isBrokerConfigured() ? 'OAuth broker not configured. Set OAUTH_BROKER_URL, OAUTH_BROKER_SECRET, and OAUTH_INSTANCE_ID in .env.' : null)
+                                ->requiresConfirmation()
+                                ->modalHeading(fn () => app(OAuthService::class)->isConnected('usps') ? 'Reconnect USPS' : 'Connect USPS')
+                                ->modalDescription(fn () => app(OAuthService::class)->isConnected('usps')
+                                    ? 'This will replace the existing OAuth token with a new one. You will be redirected to USPS to re-authorize.'
+                                    : 'You will be redirected to USPS to authorize access.')
+                                ->action(function () {
+                                    $url = app(OAuthService::class)->initiateAuthorization('usps');
+                                    $this->redirect($url, navigate: false);
+                                }),
+                            Action::make('usps_disconnect')
+                                ->label('Disconnect')
+                                ->icon('heroicon-o-x-mark')
+                                ->color('danger')
+                                ->visible(fn () => app(OAuthService::class)->isConnected('usps'))
+                                ->requiresConfirmation()
+                                ->modalHeading('Disconnect USPS OAuth')
+                                ->modalDescription('This will remove the OAuth access token. You can reconnect anytime, or the app will fall back to client credentials if configured.')
+                                ->action(function () {
+                                    app(OAuthService::class)->disconnect('usps');
+                                    Notification::make()->success()->title('USPS disconnected.')->send();
+                                }),
                             Action::make('test_usps_connection')
                                 ->label('Test Connection')
                                 ->icon('heroicon-o-signal')

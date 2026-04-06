@@ -5,9 +5,14 @@ namespace App\Http\Integrations\USPS;
 use App\Http\Integrations\Concerns\HasCachedAuthentication;
 use App\Http\Integrations\Concerns\RetriesTransientErrors;
 use App\Http\Integrations\USPS\Requests\PaymentAuthorization;
+use App\Services\OAuthService;
 use App\Services\SettingsService;
+use Carbon\Carbon;
+use DateInterval;
 use Illuminate\Support\Facades\Cache;
+use RuntimeException;
 use Saloon\Helpers\OAuth2\OAuthConfig;
+use Saloon\Http\Auth\TokenAuthenticator;
 use Saloon\Http\Connector;
 use Saloon\Traits\OAuth2\ClientCredentialsGrant;
 use Saloon\Traits\Plugins\HasTimeout;
@@ -67,6 +72,114 @@ class USPSConnector extends Connector
     }
 
     /**
+     * Get an authenticated connector, using OAuth token if connected via auth code flow,
+     * otherwise falling back to client credentials.
+     */
+    public static function getAuthenticatedConnector(): static
+    {
+        $settings = app(SettingsService::class);
+
+        if ($settings->get('usps.auth_mode') === 'authorization_code') {
+            return static::fromOAuthToken($settings);
+        }
+
+        // Client credentials flow (HasCachedAuthentication trait behavior)
+        /** @phpstan-ignore new.static */
+        $connector = new static;
+        $cacheKey = static::getAuthenticatorCacheKey();
+
+        $authenticator = Cache::get($cacheKey);
+
+        if (! $authenticator) {
+            $authenticator = Cache::lock($cacheKey.':lock', 10)->block(5, function () use ($connector, $cacheKey) {
+                $cached = Cache::get($cacheKey);
+                if ($cached) {
+                    return $cached;
+                }
+
+                $authenticator = $connector->getAccessToken();
+
+                Cache::put(
+                    $cacheKey,
+                    $authenticator,
+                    $authenticator->getExpiresAt()->sub(DateInterval::createFromDateString('10 minutes'))
+                );
+
+                return $authenticator;
+            });
+        }
+
+        $connector->authenticate($authenticator);
+
+        return $connector;
+    }
+
+    /**
+     * OAuth authorization code flow — uses stored token with automatic refresh.
+     */
+    private static function fromOAuthToken(SettingsService $settings): static
+    {
+        /** @phpstan-ignore new.static */
+        $connector = new static;
+        $cacheKey = 'usps_oauth_token';
+
+        $cachedToken = Cache::get($cacheKey);
+
+        if ($cachedToken) {
+            $connector->authenticate(new TokenAuthenticator($cachedToken));
+
+            return $connector;
+        }
+
+        $token = Cache::lock($cacheKey.':lock', 10)->block(5, function () use ($settings, $cacheKey) {
+            $cached = Cache::get($cacheKey);
+            if ($cached) {
+                return $cached;
+            }
+
+            $accessToken = $settings->get('usps.oauth_access_token');
+            $expiresAt = $settings->get('usps.oauth_token_expires_at');
+
+            if (! $accessToken) {
+                throw new RuntimeException('USPS OAuth token not found. Please reconnect via Settings.');
+            }
+
+            if ($expiresAt && Carbon::parse($expiresAt)->subMinutes(10)->isFuture()) {
+                $ttl = Carbon::parse($expiresAt)->subMinutes(10)->diffInSeconds(now());
+                Cache::put($cacheKey, $accessToken, (int) $ttl);
+
+                return $accessToken;
+            }
+
+            return static::refreshOAuthToken($settings, $cacheKey);
+        });
+
+        $connector->authenticate(new TokenAuthenticator($token));
+
+        return $connector;
+    }
+
+    /**
+     * Refresh the OAuth access token via the broker.
+     */
+    private static function refreshOAuthToken(SettingsService $settings, string $cacheKey): string
+    {
+        $data = app(OAuthService::class)->refreshToken('usps');
+
+        $newAccessToken = $data['access_token'] ?? null;
+
+        if (! $newAccessToken) {
+            throw new RuntimeException('USPS token refresh response missing access_token.');
+        }
+
+        $expiresIn = (int) ($data['expires_in'] ?? 14400);
+        $cacheTtl = max($expiresIn - 600, 60);
+        Cache::put($cacheKey, $newAccessToken, $cacheTtl);
+
+        return $newAccessToken;
+    }
+
+    /**
      * @deprecated Use getAuthenticatedConnector() instead
      */
     public static function getUspsConnector(): self
@@ -106,7 +219,7 @@ class USPSConnector extends Connector
                     'status' => $response->status(),
                     'body' => $response->body(),
                 ]);
-                throw new \RuntimeException('USPS payment authorization returned empty token');
+                throw new RuntimeException('USPS payment authorization returned empty token');
             }
 
             Cache::put('usps_payment_authorization_token', $paymentAuthorizationToken, now()->addHours(7));

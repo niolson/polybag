@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Http\Integrations\Shopify\ShopifyOAuthProvider;
 use App\Http\Integrations\Ups\UpsOAuthProvider;
+use App\Http\Integrations\USPS\UspsOAuthProvider;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
@@ -80,6 +81,7 @@ class AppServiceProvider extends ServiceProvider
         // Register OAuth providers
         app(OAuthProviderRegistry::class)->register(new ShopifyOAuthProvider);
         app(OAuthProviderRegistry::class)->register(new UpsOAuthProvider);
+        app(OAuthProviderRegistry::class)->register(new UspsOAuthProvider);
 
         if (config('app.fake_carriers')) {
             $registry = app(CarrierRegistry::class);
