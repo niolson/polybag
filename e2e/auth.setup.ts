@@ -20,7 +20,7 @@ setup('authenticate', async ({ page }) => {
   await page.goto('/login');
 
   await page.getByLabel('Email or Username').fill('admin');
-  await page.getByLabel('Password').fill('admin');
+  await page.getByRole('textbox', { name: 'Password' }).fill('admin');
   await page.getByRole('button', { name: 'Sign in' }).click();
 
   // Wait for the dashboard to load after login
