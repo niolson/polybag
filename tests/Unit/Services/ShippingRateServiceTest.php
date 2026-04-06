@@ -1,5 +1,7 @@
 <?php
 
+use App\DataTransferObjects\Shipping\PackageData;
+use App\DataTransferObjects\Shipping\RateRequest;
 use App\Exceptions\NoActiveCarrierServicesException;
 use App\Http\Integrations\Fedex\Requests\Rates as FedexRates;
 use App\Http\Integrations\USPS\Requests\ShippingOptions;
@@ -9,9 +11,11 @@ use App\Models\Package;
 use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
+use App\Services\Carriers\UspsAdapter;
 use App\Services\SettingsService;
 use App\Services\ShippingRateService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
 
@@ -594,4 +598,54 @@ it('throws exception when all carriers are inactive', function (): void {
 
     expect(fn () => app(ShippingRateService::class)->getShippingRates($package->id))
         ->toThrow(NoActiveCarrierServicesException::class);
+});
+
+it('falls back to RETAIL pricing when CONTRACT returns 403', function (): void {
+    Cache::forget('usps_pricing_type');
+
+    $uspsRateResponse = [
+        'pricingOptions' => [[
+            'shippingOptions' => [[
+                'rateOptions' => [[
+                    'totalBasePrice' => 9.00,
+                    'commitment' => ['name' => '2-5 Business Days'],
+                    'rates' => [[
+                        'mailClass' => 'USPS_GROUND_ADVANTAGE',
+                        'processingCategory' => 'MACHINABLE',
+                        'rateIndicator' => 'SP',
+                        'destinationEntryFacilityType' => 'NONE',
+                        'description' => 'USPS Ground Advantage',
+                    ]],
+                ]],
+            ]],
+        ]],
+    ];
+
+    // Use a stateful callable — first send returns 403, retry returns success.
+    // Tested directly on UspsAdapter to avoid ShippingRateService's Phase 1 prepareRateRequest
+    // consuming a mock call before getRates is invoked.
+    $callCount = 0;
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        ShippingOptions::class => function () use (&$callCount, $uspsRateResponse): MockResponse {
+            $callCount++;
+
+            return $callCount === 1
+                ? MockResponse::make(['error' => ['code' => '403', 'message' => 'Not authorized']], 403)
+                : MockResponse::make($uspsRateResponse);
+        },
+    ]);
+
+    $rateRequest = new RateRequest(
+        originPostalCode: '90210',
+        destinationPostalCode: '10001',
+        packages: [new PackageData(weight: 2.5, length: 10, width: 8, height: 6)],
+    );
+
+    $rates = app(UspsAdapter::class)->getRates($rateRequest, []);
+
+    expect($rates)->toHaveCount(1)
+        ->and($rates[0]->price)->toBe(9.00);
+
+    expect(Cache::get('usps_pricing_type'))->toBe('RETAIL');
 });

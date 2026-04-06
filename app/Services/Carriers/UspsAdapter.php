@@ -20,6 +20,8 @@ use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Package;
 use App\Services\SettingsService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
+use Saloon\Exceptions\Request\Statuses\ForbiddenException;
 use Saloon\Http\Response;
 
 class UspsAdapter implements CarrierAdapterInterface
@@ -29,17 +31,38 @@ class UspsAdapter implements CarrierAdapterInterface
         return 'USPS';
     }
 
+    /**
+     * Cache key for the USPS pricing type (CONTRACT or RETAIL).
+     * Falls back to RETAIL and caches that if the account lacks EPS contract access.
+     */
+    private const PRICING_TYPE_CACHE_KEY = 'usps_pricing_type';
+
+    private function getPricingType(): string
+    {
+        return Cache::get(self::PRICING_TYPE_CACHE_KEY, 'CONTRACT');
+    }
+
     public function getRates(RateRequest $request, array $serviceCodes): Collection
     {
-        $prepared = $this->prepareRateRequest($request, $serviceCodes);
-
-        if (! $prepared) {
+        if (empty($request->packages)) {
             return collect();
         }
 
         $connector = USPSConnector::getUspsConnector();
         $apiRequest = $this->buildRateApiRequest($request);
-        $response = $connector->send($apiRequest);
+
+        try {
+            $response = $connector->send($apiRequest);
+        } catch (ForbiddenException $e) {
+            if ($this->getPricingType() === 'CONTRACT') {
+                logger()->warning('USPS CONTRACT pricing returned 403 — falling back to RETAIL and retrying');
+                Cache::put(self::PRICING_TYPE_CACHE_KEY, 'RETAIL', now()->addDays(7));
+                $apiRequest = $this->buildRateApiRequest($request);
+                $response = $connector->send($apiRequest);
+            } else {
+                throw $e;
+            }
+        }
 
         return $this->parseRateResponse($response, $request, $serviceCodes);
     }
@@ -133,16 +156,18 @@ class UspsAdapter implements CarrierAdapterInterface
         $package = $request->packages[0];
         $isInternational = $request->destinationCountry !== 'US';
 
+        $pricingType = $this->getPricingType();
+        $pricingOption = ['priceType' => $pricingType];
+
+        if ($pricingType === 'CONTRACT') {
+            $pricingOption['paymentAccount'] = [
+                'accountType' => 'EPS',
+                'accountNumber' => app(SettingsService::class)->get('usps.crid'),
+            ];
+        }
+
         $body = [
-            'pricingOptions' => [
-                [
-                    'priceType' => 'CONTRACT',
-                    'paymentAccount' => [
-                        'accountType' => 'EPS',
-                        'accountNumber' => app(SettingsService::class)->get('usps.crid'),
-                    ],
-                ],
-            ],
+            'pricingOptions' => [$pricingOption],
             'originZIPCode' => $request->originPostalCode,
             'packageDescription' => [
                 'weight' => $package->weight,
