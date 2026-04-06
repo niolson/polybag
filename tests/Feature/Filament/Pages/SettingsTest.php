@@ -1,12 +1,15 @@
 <?php
 
 use App\Filament\Pages\Settings;
+use App\Http\Integrations\USPS\Requests\ShippingOptions;
 use App\Models\Setting;
 use App\Models\ShippingMethod;
 use App\Models\User;
 use App\Services\SettingsService;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
+use Saloon\Http\Faking\MockResponse;
+use Saloon\Laravel\Facades\Saloon;
 
 beforeEach(function (): void {
     $this->actingAs(User::factory()->admin()->create());
@@ -199,4 +202,53 @@ it('saves database import and export sql queries', function (): void {
     expect(app(SettingsService::class)->get('import.shipments_query'))->toBe('select * from shipments where exported = 0')
         ->and(app(SettingsService::class)->get('import.shipment_items_query'))->toBe('select * from shipment_items where shipment_id = :shipment_reference')
         ->and(app(SettingsService::class)->get('import.export_query'))->toBe('update orders set tracking_number = :tracking_number where id = :shipment_reference');
+});
+
+it('test usps connection shows CONTRACT success notification', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        ShippingOptions::class => MockResponse::make(['pricingOptions' => [['shippingOptions' => []]]], 200),
+    ]);
+    Cache::forget('usps_pricing_type');
+
+    Livewire::test(Settings::class)
+        ->call('testUspsConnection')
+        ->assertNotified();
+
+    expect(Cache::get('usps_pricing_type'))->toBe('CONTRACT');
+});
+
+it('test usps connection shows RETAIL notification when CONTRACT returns 403', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        ShippingOptions::class => MockResponse::make(['error' => ['code' => '403', 'message' => 'Not authorized']], 403),
+    ]);
+    Cache::forget('usps_pricing_type');
+
+    Livewire::test(Settings::class)
+        ->call('testUspsConnection')
+        ->assertNotified();
+
+    expect(Cache::get('usps_pricing_type'))->toBe('RETAIL');
+});
+
+it('test usps connection shows danger notification when auth fails', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['error' => 'invalid_client'], 401),
+    ]);
+    Cache::forget('usps_pricing_type');
+
+    Livewire::test(Settings::class)
+        ->call('testUspsConnection')
+        ->assertNotified();
+
+    expect(Cache::get('usps_pricing_type'))->toBeNull();
+});
+
+it('displays pricing tier placeholder from cache on settings page', function (): void {
+    Cache::put('usps_pricing_type', 'RETAIL', 3600);
+
+    $this->get(Settings::getUrl())
+        ->assertOk()
+        ->assertSee('RETAIL');
 });

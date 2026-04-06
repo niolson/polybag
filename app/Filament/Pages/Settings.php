@@ -3,6 +3,8 @@
 namespace App\Filament\Pages;
 
 use App\Enums\Role;
+use App\Http\Integrations\USPS\Requests\ShippingOptions;
+use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Location;
 use App\Models\Setting;
 use App\Models\ShippingMethod;
@@ -28,6 +30,7 @@ use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\HtmlString;
+use Saloon\Exceptions\Request\Statuses\ForbiddenException;
 use UnitEnum;
 
 /**
@@ -425,6 +428,21 @@ class Settings extends Page
                             TextInput::make('usps_mid')
                                 ->label('MID')
                                 ->maxLength(50),
+                            Placeholder::make('usps_pricing_tier')
+                                ->label('Pricing Tier')
+                                ->content(fn () => match (Cache::get('usps_pricing_type')) {
+                                    'CONTRACT' => new HtmlString('<span class="text-success-600 dark:text-success-400 font-medium">CONTRACT</span> — negotiated rates'),
+                                    'RETAIL' => new HtmlString('<span class="text-warning-600 dark:text-warning-400 font-medium">RETAIL</span> — standard rates (no EPS contract)'),
+                                    default => new HtmlString('<span class="text-gray-400 dark:text-gray-500">Not tested yet</span>'),
+                                })
+                                ->dehydrated(false)
+                                ->columnSpanFull(),
+                        ])
+                        ->footerActions([
+                            Action::make('test_usps_connection')
+                                ->label('Test Connection')
+                                ->icon('heroicon-o-signal')
+                                ->action(fn () => $this->testUspsConnection()),
                         ])
                         ->columns(2)
                         ->collapsed(),
@@ -878,6 +896,62 @@ class Settings extends Page
                 'scopes' => $scopes,
             ])->render()
         );
+    }
+
+    public function testUspsConnection(): void
+    {
+        // Always test against saved credentials, not blank form fields
+        Cache::forget('usps_authenticator');
+
+        try {
+            $connector = new USPSConnector;
+            $connector->getAccessToken();
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->danger()
+                ->title('USPS authentication failed')
+                ->body($e->getMessage())
+                ->send();
+
+            return;
+        }
+
+        // Auth succeeded — now check whether the account has CONTRACT pricing
+        try {
+            $connector = USPSConnector::getAuthenticatedConnector();
+
+            $request = new ShippingOptions;
+            $request->body()->set([
+                'pricingOptions' => [['priceType' => 'CONTRACT', 'paymentAccount' => ['accountType' => 'EPS', 'accountNumber' => app(SettingsService::class)->get('usps.crid')]]],
+                'originZIPCode' => '90210',
+                'destinationZIPCode' => '10001',
+                'packageDescription' => ['weight' => 1.0, 'length' => 10, 'width' => 8, 'height' => 4, 'mailClass' => 'ALL_OUTBOUND', 'mailingDate' => date('Y-m-d')],
+            ]);
+
+            $connector->send($request);
+
+            Cache::put('usps_pricing_type', 'CONTRACT', now()->addDays(7));
+
+            Notification::make()
+                ->success()
+                ->title('USPS connected — CONTRACT pricing')
+                ->body('Negotiated rates are available for this account.')
+                ->send();
+        } catch (ForbiddenException) {
+            Cache::put('usps_pricing_type', 'RETAIL', now()->addDays(7));
+
+            Notification::make()
+                ->warning()
+                ->title('USPS connected — RETAIL pricing')
+                ->body('Authentication succeeded but this account does not have EPS contract access. Standard retail rates will be used. Contact USPS to enable negotiated rates.')
+                ->send();
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->warning()
+                ->title('USPS authenticated — rate test inconclusive')
+                ->body('Credentials are valid but the rate check failed: '.$e->getMessage())
+                ->send();
+        }
     }
 
     private function testImportConnection(): void
