@@ -19,8 +19,8 @@ setup('verify fake carriers enabled', async ({ request }) => {
 setup('authenticate', async ({ page }) => {
   await page.goto('/login');
 
-  await page.getByLabel('Username').fill('admin');
-  await page.locator('#form\\.password').fill('admin');
+  await page.getByLabel('Email or Username').fill('admin');
+  await page.getByLabel('Password').fill('admin');
   await page.getByRole('button', { name: 'Sign in' }).click();
 
   // Wait for the dashboard to load after login
