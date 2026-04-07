@@ -2,6 +2,8 @@
 
 namespace App\Contracts;
 
+use App\Services\SettingsService;
+
 interface OAuthProvider
 {
     /**
@@ -43,4 +45,10 @@ interface OAuthProvider
      * @return array<string, string>
      */
     public function getBrokerParams(): array;
+
+    /**
+     * Called after a successful OAuth connection. Providers can use this to
+     * extract and persist account-specific data from the access token.
+     */
+    public function afterConnect(string $accessToken, SettingsService $settings): void;
 }

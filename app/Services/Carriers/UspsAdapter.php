@@ -160,9 +160,10 @@ class UspsAdapter implements CarrierAdapterInterface
         $pricingOption = ['priceType' => $pricingType];
 
         if ($pricingType === 'CONTRACT') {
+            $settings = app(SettingsService::class);
             $pricingOption['paymentAccount'] = [
                 'accountType' => 'EPS',
-                'accountNumber' => app(SettingsService::class)->get('usps.crid'),
+                'accountNumber' => $settings->get('usps.eps_account', $settings->get('usps.crid')),
             ];
         }
 

@@ -3,6 +3,7 @@
 namespace App\Http\Integrations\Ups;
 
 use App\Contracts\OAuthProvider;
+use App\Services\SettingsService;
 
 class UpsOAuthProvider implements OAuthProvider
 {
@@ -40,4 +41,6 @@ class UpsOAuthProvider implements OAuthProvider
     {
         return [];
     }
+
+    public function afterConnect(string $accessToken, SettingsService $settings): void {}
 }

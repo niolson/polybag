@@ -44,4 +44,6 @@ class ShopifyOAuthProvider implements OAuthProvider
 
         return array_filter(['shop' => $shopDomain]);
     }
+
+    public function afterConnect(string $accessToken, SettingsService $settings): void {}
 }

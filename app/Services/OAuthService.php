@@ -122,6 +122,9 @@ class OAuthService
         // Set auth mode to authorization_code
         $this->settings->set("{$providerKey}.auth_mode", 'authorization_code', group: $group);
 
+        // Allow the provider to extract and store account-specific data from the token
+        $provider->afterConnect($accessToken, $this->settings);
+
         // Clear any cached client_credentials token for this provider
         Cache::forget("{$providerKey}_access_token");
     }

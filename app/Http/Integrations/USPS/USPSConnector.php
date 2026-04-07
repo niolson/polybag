@@ -80,6 +80,10 @@ class USPSConnector extends Connector
         $settings = app(SettingsService::class);
 
         if ($settings->get('usps.auth_mode') === 'authorization_code') {
+            if ($settings->get('sandbox_mode', false)) {
+                throw new RuntimeException('USPS is not available in sandbox mode when connected via OAuth. Disable sandbox mode to use your USPS account.');
+            }
+
             return static::fromOAuthToken($settings);
         }
 
@@ -190,22 +194,28 @@ class USPSConnector extends Connector
     public static function getUspsPaymentAuthorizationToken(): string
     {
         return Cache::get('usps_payment_authorization_token', function () {
+            $settings = app(SettingsService::class);
+            $crid = $settings->get('usps.crid');
+            $mid = $settings->get('usps.mid');
+            // EPS account number is distinct from CRID; auto-populated from OAuth JWT
+            $epsAccount = $settings->get('usps.eps_account', $crid);
+
             $request = new PaymentAuthorization;
             $request->body()->set([
                 'roles' => [
                     [
                         'roleName' => 'PAYER',
-                        'CRID' => app(SettingsService::class)->get('usps.crid'),
-                        'MID' => app(SettingsService::class)->get('usps.mid'),
-                        'manifestMID' => app(SettingsService::class)->get('usps.mid'),
+                        'CRID' => $crid,
+                        'MID' => $mid,
+                        'manifestMID' => $mid,
                         'accountType' => 'EPS',
-                        'accountNumber' => app(SettingsService::class)->get('usps.crid'),
+                        'accountNumber' => $epsAccount,
                     ],
                     [
                         'roleName' => 'LABEL_OWNER',
-                        'CRID' => app(SettingsService::class)->get('usps.crid'),
-                        'MID' => app(SettingsService::class)->get('usps.mid'),
-                        'manifestMID' => app(SettingsService::class)->get('usps.mid'),
+                        'CRID' => $crid,
+                        'MID' => $mid,
+                        'manifestMID' => $mid,
                     ],
                 ],
             ]);

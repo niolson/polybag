@@ -421,6 +421,11 @@ class Settings extends Page
                                     connectedAt: app(SettingsService::class)->get('usps.oauth_connected_at'),
                                 ))
                                 ->columnSpanFull(),
+                            Placeholder::make('usps_sandbox_warning')
+                                ->label('')
+                                ->content(new HtmlString('<div class="text-warning-600 dark:text-warning-400 text-sm font-medium">⚠ Sandbox mode is on. USPS OAuth tokens are issued by the production COP Navigator and cannot be used in sandbox mode — USPS rates and labels will be unavailable until sandbox mode is disabled.</div>'))
+                                ->columnSpanFull()
+                                ->visible(fn () => app(SettingsService::class)->get('sandbox_mode', false) && app(OAuthService::class)->isConnected('usps')),
                             TextInput::make('usps_client_id')
                                 ->label('Client ID')
                                 ->password()
@@ -934,29 +939,35 @@ class Settings extends Page
 
     public function testUspsConnection(): void
     {
-        // Always test against saved credentials, not blank form fields
+        $authMode = app(SettingsService::class)->get('usps.auth_mode', 'client_credentials');
+
+        // Clear cached tokens so we test fresh from stored credentials
         Cache::forget('usps_authenticator');
+        Cache::forget('usps_oauth_token');
 
-        try {
-            $connector = new USPSConnector;
-            $connector->getAccessToken();
-        } catch (\Throwable $e) {
-            Notification::make()
-                ->danger()
-                ->title('USPS authentication failed')
-                ->body($e->getMessage())
-                ->send();
+        // For client credentials, verify we can obtain a token before testing rates
+        if ($authMode !== 'authorization_code') {
+            try {
+                $connector = new USPSConnector;
+                $connector->getAccessToken();
+            } catch (\Throwable $e) {
+                Notification::make()
+                    ->danger()
+                    ->title('USPS authentication failed')
+                    ->body($e->getMessage())
+                    ->send();
 
-            return;
+                return;
+            }
         }
 
-        // Auth succeeded — now check whether the account has CONTRACT pricing
+        // Test with the connector that will actually be used — auth mode aware
         try {
             $connector = USPSConnector::getAuthenticatedConnector();
 
             $request = new ShippingOptions;
             $request->body()->set([
-                'pricingOptions' => [['priceType' => 'CONTRACT', 'paymentAccount' => ['accountType' => 'EPS', 'accountNumber' => app(SettingsService::class)->get('usps.crid')]]],
+                'pricingOptions' => [['priceType' => 'CONTRACT', 'paymentAccount' => ['accountType' => 'EPS', 'accountNumber' => app(SettingsService::class)->get('usps.eps_account', app(SettingsService::class)->get('usps.crid'))]]],
                 'originZIPCode' => '90210',
                 'destinationZIPCode' => '10001',
                 'packageDescription' => ['weight' => 1.0, 'length' => 10, 'width' => 8, 'height' => 4, 'mailClass' => 'ALL_OUTBOUND', 'mailingDate' => date('Y-m-d')],
