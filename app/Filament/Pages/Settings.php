@@ -2,19 +2,25 @@
 
 namespace App\Filament\Pages;
 
+use App\Data\FedexEulaText;
 use App\Enums\Role;
+use App\Exceptions\FedexRegistrationMaxRetriesException;
 use App\Http\Integrations\USPS\Requests\ShippingOptions;
 use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Location;
 use App\Models\Setting;
 use App\Models\ShippingMethod;
+use App\Services\FedexRegistrationService;
 use App\Services\OAuthService;
 use App\Services\SettingsService;
 use App\Services\SshTunnel;
 use BackedEnum;
 use Carbon\Carbon;
 use Filament\Actions\Action;
+use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -24,9 +30,12 @@ use Filament\Pages\Page;
 use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Form;
+use Filament\Schemas\Components\Html;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
+use Filament\Support\Exceptions\Halt;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\HtmlString;
@@ -57,6 +66,22 @@ class Settings extends Page
      * @var array<string, mixed>|null
      */
     public ?array $data = [];
+
+    // FedEx registration wizard transient state
+    public bool $fedexEulaAccepted = false;
+
+    public ?string $fedexAccountAuthToken = null;
+
+    public ?string $fedexFactor2Method = null;
+
+    public ?string $fedexMaskedEmail = null;
+
+    public ?string $fedexMaskedPhone = null;
+
+    /** @var string[] */
+    public array $fedexSecureCodeOptions = [];
+
+    public bool $fedexInvoiceAvailable = false;
 
     /**
      * Encrypted credential fields and their setting keys.
@@ -232,6 +257,36 @@ class Settings extends Page
         }
 
         return $fields;
+    }
+
+    public function resendFedexPin(): void
+    {
+        if (! $this->fedexAccountAuthToken || ! $this->fedexFactor2Method) {
+            return;
+        }
+
+        try {
+            app(FedexRegistrationService::class)->sendPin($this->fedexAccountAuthToken, $this->fedexFactor2Method);
+            Notification::make()->success()->title('PIN resent.')->send();
+        } catch (\Throwable $e) {
+            Notification::make()->danger()->title($e->getMessage())->send();
+        }
+    }
+
+    private function isFedexAccountConnected(): bool
+    {
+        return filled(app(SettingsService::class)->get('fedex.child_key'));
+    }
+
+    private function renderFedexAccountStatus(): HtmlString
+    {
+        $settings = app(SettingsService::class);
+
+        if (filled($settings->get('fedex.child_key'))) {
+            return new HtmlString('<span class="text-success-600 dark:text-success-400 font-medium">Connected</span> — child credentials provisioned via Account Registration');
+        }
+
+        return new HtmlString('<span class="text-gray-400 dark:text-gray-500">Not connected</span> — click Connect FedEx Account to provision credentials');
     }
 
     private function isBrokerConfigured(): bool
@@ -489,6 +544,10 @@ class Settings extends Page
                     Section::make('FedEx Credentials')
                         ->description('API credentials for FedEx shipping services')
                         ->schema([
+                            Placeholder::make('fedex_account_status')
+                                ->label('Account Status')
+                                ->content(fn () => $this->renderFedexAccountStatus())
+                                ->columnSpanFull(),
                             TextInput::make('fedex_api_key')
                                 ->label('API Key')
                                 ->password()
@@ -500,6 +559,261 @@ class Settings extends Page
                             TextInput::make('fedex_account_number')
                                 ->label('Account Number')
                                 ->maxLength(50),
+                        ])
+                        ->footerActions([
+                            Action::make('fedex_register')
+                                ->label(fn () => $this->isFedexAccountConnected() ? 'Reconnect FedEx Account' : 'Connect FedEx Account')
+                                ->icon('heroicon-o-link')
+                                ->color(fn () => $this->isFedexAccountConnected() ? 'warning' : 'primary')
+                                ->closeModalByClickingAway(false)
+                                ->closeModalByEscaping(false)
+                                ->mountUsing(function () {
+                                    $this->fedexEulaAccepted = false;
+                                    $this->fedexAccountAuthToken = null;
+                                    $this->fedexFactor2Method = null;
+                                    $this->fedexMaskedEmail = null;
+                                    $this->fedexMaskedPhone = null;
+                                    $this->fedexSecureCodeOptions = [];
+                                    $this->fedexInvoiceAvailable = false;
+                                })
+                                ->steps([
+                                    Step::make('Terms of Service')
+                                        ->description('Review and accept the FedEx EULA')
+                                        ->schema([
+                                            Html::make(fn () => new HtmlString(
+                                                view('filament.pages.settings.fedex-eula', [
+                                                    'eulaText' => FedexEulaText::TEXT,
+                                                ])->render()
+                                            ))->columnSpanFull(),
+                                            Hidden::make('eula_accepted')
+                                                ->default(false),
+                                        ])
+                                        ->afterValidation(function () {
+                                            if (! $this->fedexEulaAccepted) {
+                                                $this->addError('fedexEulaAccepted', 'You must scroll to the bottom and accept the FedEx EULA to continue.');
+
+                                                throw new Halt;
+                                            }
+                                        }),
+
+                                    Step::make('Account Verification')
+                                        ->description('Enter your FedEx account number and address')
+                                        ->schema([
+                                            TextInput::make('fedex_reg_account_number')
+                                                ->label('FedEx Account Number')
+                                                ->required()
+                                                ->length(9)
+                                                ->numeric(),
+                                            TextInput::make('fedex_reg_customer_name')
+                                                ->label('Company / Customer Name')
+                                                ->required()
+                                                ->maxLength(50)
+                                                ->columnSpanFull()
+                                                ->helperText('Must match the name on your FedEx account.'),
+                                            Toggle::make('fedex_reg_residential')
+                                                ->label('Residential Address')
+                                                ->default(false)
+                                                ->columnSpanFull(),
+                                            TextInput::make('fedex_reg_street1')
+                                                ->label('Street Address')
+                                                ->required()
+                                                ->maxLength(35)
+                                                ->columnSpanFull(),
+                                            TextInput::make('fedex_reg_street2')
+                                                ->label('Street Address Line 2')
+                                                ->maxLength(35)
+                                                ->columnSpanFull(),
+                                            TextInput::make('fedex_reg_city')
+                                                ->label('City')
+                                                ->required()
+                                                ->maxLength(35),
+                                            TextInput::make('fedex_reg_state')
+                                                ->label('State / Province')
+                                                ->required()
+                                                ->maxLength(2),
+                                            TextInput::make('fedex_reg_postal_code')
+                                                ->label('ZIP / Postal Code')
+                                                ->required()
+                                                ->maxLength(10),
+                                            Select::make('fedex_reg_country')
+                                                ->label('Country')
+                                                ->options(['US' => 'United States', 'CA' => 'Canada'])
+                                                ->default('US')
+                                                ->required(),
+                                        ])
+                                        ->columns(2)
+                                        ->afterValidation(function (Get $get) {
+                                            try {
+                                                $result = app(FedexRegistrationService::class)->validateAddress(
+                                                    accountNumber: $get('fedex_reg_account_number'),
+                                                    customerName: $get('fedex_reg_customer_name'),
+                                                    residential: (bool) ($get('fedex_reg_residential') ?? false),
+                                                    street1: $get('fedex_reg_street1'),
+                                                    street2: $get('fedex_reg_street2') ?? '',
+                                                    city: $get('fedex_reg_city'),
+                                                    stateOrProvinceCode: $get('fedex_reg_state'),
+                                                    postalCode: $get('fedex_reg_postal_code'),
+                                                    countryCode: $get('fedex_reg_country'),
+                                                );
+                                            } catch (\Throwable $e) {
+                                                Notification::make()->danger()->title('FedEx Error')->body($e->getMessage())->send();
+
+                                                throw new Halt;
+                                            }
+
+                                            // MFA bypassed — credentials returned immediately
+                                            if (! $result['mfaRequired']) {
+                                                app(FedexRegistrationService::class)->saveChildCredentials(
+                                                    $result['credentials']['child_Key'],
+                                                    $result['credentials']['child_secret'],
+                                                );
+                                                Notification::make()->success()->title('FedEx Account added Successfully.')->send();
+                                                $this->dispatch('close-modal', id: 'fedex_register-action');
+
+                                                throw new Halt;
+                                            }
+
+                                            $this->fedexAccountAuthToken = $result['accountAuthToken'];
+                                            $this->fedexMaskedEmail = $result['email'];
+                                            $this->fedexMaskedPhone = $result['phoneNumber'];
+                                            $this->fedexSecureCodeOptions = $result['options']['secureCode'];
+                                            $this->fedexInvoiceAvailable = $result['options']['invoice'];
+                                        }),
+
+                                    Step::make('Verification Method')
+                                        ->description('Choose how to verify your identity')
+                                        ->schema(function () {
+                                            $options = [];
+                                            foreach ($this->fedexSecureCodeOptions as $code) {
+                                                $options[$code] = match ($code) {
+                                                    'SMS' => 'PIN via SMS'.($this->fedexMaskedPhone ? " ({$this->fedexMaskedPhone})" : ''),
+                                                    'CALL' => 'PIN via Phone Call'.($this->fedexMaskedPhone ? " ({$this->fedexMaskedPhone})" : ''),
+                                                    'EMAIL' => 'PIN via Email'.($this->fedexMaskedEmail ? " ({$this->fedexMaskedEmail})" : ''),
+                                                    default => $code,
+                                                };
+                                            }
+                                            if ($this->fedexInvoiceAvailable) {
+                                                $options['INVOICE'] = 'Invoice Validation';
+                                            }
+
+                                            return [
+                                                Radio::make('fedex_factor2_method')
+                                                    ->label('Verification Method')
+                                                    ->options($options)
+                                                    ->required()
+                                                    ->live()
+                                                    ->columnSpanFull(),
+                                            ];
+                                        })
+                                        ->afterValidation(function (Get $get) {
+                                            $this->fedexFactor2Method = $get('fedex_factor2_method');
+
+                                            if ($this->fedexFactor2Method !== 'INVOICE') {
+                                                try {
+                                                    app(FedexRegistrationService::class)->sendPin(
+                                                        $this->fedexAccountAuthToken,
+                                                        $this->fedexFactor2Method,
+                                                    );
+                                                } catch (FedexRegistrationMaxRetriesException $e) {
+                                                    Notification::make()->danger()->title($e->getMessage())->send();
+
+                                                    throw new Halt;
+                                                } catch (\Throwable $e) {
+                                                    Notification::make()->danger()->title('FedEx Error')->body($e->getMessage())->send();
+
+                                                    throw new Halt;
+                                                }
+                                            }
+                                        }),
+
+                                    Step::make('Enter Verification')
+                                        ->description(fn () => $this->fedexFactor2Method === 'INVOICE' ? 'Enter a recent FedEx invoice' : 'Enter the PIN sent to you')
+                                        ->schema(function () {
+                                            if ($this->fedexFactor2Method === 'INVOICE') {
+                                                return [
+                                                    TextInput::make('fedex_invoice_number')
+                                                        ->label('Invoice Number')
+                                                        ->required()
+                                                        ->integer()
+                                                        ->maxLength(9),
+                                                    DatePicker::make('fedex_invoice_date')
+                                                        ->label('Invoice Date')
+                                                        ->required()
+                                                        ->maxDate(now())
+                                                        ->minDate(now()->subDays(90))
+                                                        ->helperText('Invoice must be within the last 90 days.'),
+                                                    TextInput::make('fedex_invoice_amount')
+                                                        ->label('Invoice Amount')
+                                                        ->required()
+                                                        ->numeric()
+                                                        ->minValue(0),
+                                                    Select::make('fedex_invoice_currency')
+                                                        ->label('Currency')
+                                                        ->options(['USD' => 'USD', 'CAD' => 'CAD', 'EUR' => 'EUR', 'GBP' => 'GBP'])
+                                                        ->default('USD')
+                                                        ->required(),
+                                                ];
+                                            }
+
+                                            return [
+                                                TextInput::make('fedex_pin')
+                                                    ->label('6-Digit PIN')
+                                                    ->required()
+                                                    ->length(6)
+                                                    ->numeric()
+                                                    ->columnSpanFull(),
+                                                Html::make(fn () => new HtmlString(
+                                                    '<button type="button" wire:click="resendFedexPin" class="text-sm text-primary-600 hover:underline dark:text-primary-400">Resend PIN</button>'
+                                                ))->columnSpanFull(),
+                                            ];
+                                        })
+                                        ->columns(2),
+                                ])
+                                ->action(function (array $data) {
+                                    try {
+                                        if ($this->fedexFactor2Method === 'INVOICE') {
+                                            $credentials = app(FedexRegistrationService::class)->verifyInvoice(
+                                                accountAuthToken: $this->fedexAccountAuthToken,
+                                                invoiceNumber: (int) $data['fedex_invoice_number'],
+                                                invoiceDate: $data['fedex_invoice_date'],
+                                                invoiceAmount: (float) $data['fedex_invoice_amount'],
+                                                invoiceCurrency: $data['fedex_invoice_currency'],
+                                            );
+                                        } else {
+                                            $credentials = app(FedexRegistrationService::class)->verifyPin(
+                                                accountAuthToken: $this->fedexAccountAuthToken,
+                                                pin: $data['fedex_pin'],
+                                            );
+                                        }
+                                    } catch (FedexRegistrationMaxRetriesException $e) {
+                                        Notification::make()->danger()->title($e->getMessage())->send();
+
+                                        throw new Halt;
+                                    } catch (\Throwable $e) {
+                                        Notification::make()->danger()->title('FedEx Error')->body($e->getMessage())->send();
+
+                                        throw new Halt;
+                                    }
+
+                                    app(FedexRegistrationService::class)->saveChildCredentials(
+                                        $credentials['child_Key'],
+                                        $credentials['child_secret'],
+                                    );
+
+                                    Notification::make()->success()->title('FedEx Account added Successfully.')->send();
+                                }),
+                            Action::make('fedex_disconnect')
+                                ->label('Disconnect')
+                                ->icon('heroicon-o-x-mark')
+                                ->color('danger')
+                                ->visible(fn () => $this->isFedexAccountConnected())
+                                ->requiresConfirmation()
+                                ->modalHeading('Disconnect FedEx Account')
+                                ->modalDescription('This will remove the child credentials. The app will fall back to the parent API key/secret. You can reconnect anytime.')
+                                ->action(function () {
+                                    app(FedexRegistrationService::class)->removeChildCredentials();
+                                    Notification::make()->success()->title('FedEx account disconnected.')->send();
+                                }),
                         ])
                         ->columns(2)
                         ->collapsed(),

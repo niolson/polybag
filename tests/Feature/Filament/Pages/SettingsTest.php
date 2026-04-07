@@ -1,10 +1,16 @@
 <?php
 
 use App\Filament\Pages\Settings;
+use App\Http\Integrations\Fedex\FedexConnector;
+use App\Http\Integrations\Fedex\Requests\Registration\SendPin;
+use App\Http\Integrations\Fedex\Requests\Registration\ValidateAddress;
+use App\Http\Integrations\Fedex\Requests\Registration\VerifyInvoice;
+use App\Http\Integrations\Fedex\Requests\Registration\VerifyPin;
 use App\Http\Integrations\USPS\Requests\ShippingOptions;
 use App\Models\Setting;
 use App\Models\ShippingMethod;
 use App\Models\User;
+use App\Services\FedexRegistrationService;
 use App\Services\SettingsService;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
@@ -251,4 +257,194 @@ it('displays pricing tier placeholder from cache on settings page', function ():
     $this->get(Settings::getUrl())
         ->assertOk()
         ->assertSee('RETAIL');
+});
+
+// ─── FedEx Account Registration ───────────────────────────────────────────────
+
+function fedexOauthMock(): array
+{
+    return ['*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600])];
+}
+
+function fedexMfaResponse(): array
+{
+    return [
+        'output' => [
+            'mfaOptions' => [[
+                'accountAuthToken' => 'test-auth-token',
+                'mfaRequired' => true,
+                'email' => 'TE***@EX***.COM',
+                'phoneNumber' => '***-***-1234',
+                'options' => [
+                    'invoice' => 'INVOICE',
+                    'secureCode' => ['SMS', 'CALL', 'EMAIL'],
+                ],
+            ]],
+        ],
+    ];
+}
+
+function fedexCredentialsResponse(): array
+{
+    return [
+        'output' => [
+            'credentials' => [
+                'child_Key' => 'test-child-key',
+                'child_secret' => 'test-child-secret',
+            ],
+        ],
+    ];
+}
+
+it('fedex account status shows not connected when no child key stored', function (): void {
+    $this->get(Settings::getUrl())
+        ->assertOk()
+        ->assertSee('Not connected');
+});
+
+it('fedex account status shows connected when child key is stored', function (): void {
+    Setting::create(['key' => 'fedex.child_key', 'value' => 'some-child-key', 'type' => 'string', 'encrypted' => true, 'group' => 'fedex']);
+    app(SettingsService::class)->clearCache();
+
+    $this->get(Settings::getUrl())
+        ->assertOk()
+        ->assertSee('Connected');
+});
+
+it('fedex connector uses child key when present', function (): void {
+    Setting::create(['key' => 'fedex.child_key', 'value' => 'child-key-123', 'type' => 'string', 'encrypted' => true, 'group' => 'fedex']);
+    Setting::create(['key' => 'fedex.child_secret', 'value' => 'child-secret-456', 'type' => 'string', 'encrypted' => true, 'group' => 'fedex']);
+    app(SettingsService::class)->clearCache();
+
+    $connector = new FedexConnector;
+    $config = (new ReflectionMethod($connector, 'defaultOauthConfig'))->invoke($connector);
+
+    expect($config->getClientId())->toBe('child-key-123')
+        ->and($config->getClientSecret())->toBe('child-secret-456');
+});
+
+it('fedex connector falls back to parent key when no child key', function (): void {
+    // Global beforeEach seeds fedex.api_key = test_api_key and fedex.api_secret = test_api_secret
+    app(SettingsService::class)->clearCache();
+
+    $connector = new FedexConnector;
+    $config = (new ReflectionMethod($connector, 'defaultOauthConfig'))->invoke($connector);
+
+    expect($config->getClientId())->toBe('test_api_key')
+        ->and($config->getClientSecret())->toBe('test_api_secret');
+});
+
+it('fedex registration service validates address and returns mfa options', function (): void {
+    Saloon::fake([
+        ...fedexOauthMock(),
+        ValidateAddress::class => MockResponse::make(fedexMfaResponse(), 200),
+    ]);
+
+    $result = app(FedexRegistrationService::class)->validateAddress(
+        accountNumber: '700257037',
+        customerName: 'Test Company',
+        residential: false,
+        street1: '15 W 18TH ST FL 7',
+        street2: '',
+        city: 'NEW YORK',
+        stateOrProvinceCode: 'NY',
+        postalCode: '10011',
+        countryCode: 'US',
+    );
+
+    expect($result['mfaRequired'])->toBeTrue()
+        ->and($result['accountAuthToken'])->toBe('test-auth-token')
+        ->and($result['email'])->toBe('TE***@EX***.COM');
+
+    Saloon::assertSent(ValidateAddress::class);
+});
+
+it('fedex registration service saves child credentials after pin verification', function (): void {
+    Saloon::fake([
+        ...fedexOauthMock(),
+        VerifyPin::class => MockResponse::make(fedexCredentialsResponse(), 200),
+    ]);
+
+    $credentials = app(FedexRegistrationService::class)->verifyPin('test-auth-token', '123456');
+
+    app(FedexRegistrationService::class)->saveChildCredentials(
+        $credentials['child_Key'],
+        $credentials['child_secret'],
+    );
+
+    app(SettingsService::class)->clearCache();
+
+    expect(Setting::where('key', 'fedex.child_key')->exists())->toBeTrue()
+        ->and(Setting::where('key', 'fedex.child_secret')->exists())->toBeTrue();
+});
+
+it('fedex registration service saves child credentials after invoice verification', function (): void {
+    Saloon::fake([
+        ...fedexOauthMock(),
+        VerifyInvoice::class => MockResponse::make(fedexCredentialsResponse(), 200),
+    ]);
+
+    $credentials = app(FedexRegistrationService::class)->verifyInvoice(
+        accountAuthToken: 'test-auth-token',
+        invoiceNumber: 234562278,
+        invoiceDate: now()->subDays(30)->format('Y-m-d'),
+        invoiceAmount: 234.00,
+        invoiceCurrency: 'USD',
+    );
+
+    app(FedexRegistrationService::class)->saveChildCredentials(
+        $credentials['child_Key'],
+        $credentials['child_secret'],
+    );
+
+    app(SettingsService::class)->clearCache();
+
+    expect(Setting::where('key', 'fedex.child_key')->exists())->toBeTrue();
+});
+
+it('fedex disconnect removes child credentials and clears authenticator cache', function (): void {
+    Setting::create(['key' => 'fedex.child_key', 'value' => 'some-key', 'type' => 'string', 'encrypted' => true, 'group' => 'fedex']);
+    Setting::create(['key' => 'fedex.child_secret', 'value' => 'some-secret', 'type' => 'string', 'encrypted' => true, 'group' => 'fedex']);
+    Cache::put('fedex_authenticator', 'cached-token', 3600);
+    app(SettingsService::class)->clearCache();
+
+    app(FedexRegistrationService::class)->removeChildCredentials();
+
+    app(SettingsService::class)->clearCache();
+
+    expect(Setting::where('key', 'fedex.child_key')->exists())->toBeFalse()
+        ->and(Setting::where('key', 'fedex.child_secret')->exists())->toBeFalse()
+        ->and(Cache::has('fedex_authenticator'))->toBeFalse();
+});
+
+it('fedex registration service mfa bypass returns credentials immediately', function (): void {
+    Saloon::fake([
+        ...fedexOauthMock(),
+        ValidateAddress::class => MockResponse::make([
+            'output' => [
+                'credentials' => [
+                    'child_Key' => 'bypass-child-key',
+                    'child_secret' => 'bypass-child-secret',
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $result = app(FedexRegistrationService::class)->validateAddress(
+        accountNumber: '700257037',
+        customerName: 'Test Company',
+        residential: false,
+        street1: '15 W 18TH ST FL 7',
+        street2: '',
+        city: 'NEW YORK',
+        stateOrProvinceCode: 'NY',
+        postalCode: '10011',
+        countryCode: 'US',
+    );
+
+    expect($result['mfaRequired'])->toBeFalse()
+        ->and($result['credentials']['child_Key'])->toBe('bypass-child-key');
+
+    Saloon::assertNotSent(SendPin::class);
+    Saloon::assertNotSent(VerifyPin::class);
 });

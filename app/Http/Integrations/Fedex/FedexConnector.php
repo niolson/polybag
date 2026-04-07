@@ -52,9 +52,14 @@ class FedexConnector extends Connector
     {
         $settings = app(SettingsService::class);
 
+        // Use child credentials when present (provisioned via Account Registration API),
+        // falling back to parent key/secret for direct developer access.
+        $clientId = $settings->get('fedex.child_key') ?: $settings->get('fedex.api_key', '');
+        $clientSecret = $settings->get('fedex.child_secret') ?: $settings->get('fedex.api_secret', '');
+
         return OAuthConfig::make()
-            ->setClientId((string) $settings->get('fedex.api_key', ''))
-            ->setClientSecret((string) $settings->get('fedex.api_secret', ''))
+            ->setClientId((string) $clientId)
+            ->setClientSecret((string) $clientSecret)
             ->setTokenEndpoint('/oauth/token');
     }
 

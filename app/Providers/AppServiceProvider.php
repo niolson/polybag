@@ -20,6 +20,7 @@ use App\Services\AddressValidationService;
 use App\Services\CacheService;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\FakeCarrierAdapter;
+use App\Services\FedexRegistrationService;
 use App\Services\LabelGenerationService;
 use App\Services\ManifestService;
 use App\Services\OAuthProviderRegistry;
@@ -50,6 +51,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(ManifestService::class);
         $this->app->singleton(OAuthProviderRegistry::class);
         $this->app->singleton(OAuthService::class);
+        $this->app->singleton(FedexRegistrationService::class);
         $this->app->singleton(RuntimeConfig::class);
 
         $this->app->singleton(AddressValidationService::class, function () {
