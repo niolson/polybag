@@ -1,11 +1,15 @@
 <?php
 
 use App\Http\Integrations\Fedex\FedexConnector;
+use App\Http\Integrations\Fedex\FedexRegistrationProxyConnector;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Http\Integrations\Fedex\Requests\Rates;
+use App\Http\Integrations\Fedex\Requests\Registration\ValidateAddress;
 use App\Models\Setting;
 use App\Services\SettingsService;
+use Saloon\Http\Faking\MockClient;
 use Saloon\Http\Faking\MockResponse;
+use Saloon\Http\PendingRequest;
 use Saloon\Laravel\Facades\Saloon;
 
 it('resolves production base URL by default', function (): void {
@@ -277,4 +281,71 @@ it('handles error responses', function (): void {
 
     expect($response->status())->toBe(400)
         ->and($response->json('errors.0.code'))->toBe('INVALID.INPUT.EXCEPTION');
+});
+
+// ─── FedexRegistrationProxyConnector ──────────────────────────────────────────
+
+it('proxy connector resolves base url from broker config', function (): void {
+    config(['services.oauth.broker_url' => 'https://polybag-connect.example.com']);
+
+    $connector = new FedexRegistrationProxyConnector;
+
+    expect($connector->resolveBaseUrl())->toBe('https://polybag-connect.example.com');
+});
+
+it('proxy connector strips trailing slash from broker url', function (): void {
+    config(['services.oauth.broker_url' => 'https://polybag-connect.example.com/']);
+
+    $connector = new FedexRegistrationProxyConnector;
+
+    expect($connector->resolveBaseUrl())->toBe('https://polybag-connect.example.com');
+});
+
+it('proxy connector injects instance_id, nonce, and signature into request body', function (): void {
+    config([
+        'services.oauth.broker_url' => 'https://polybag-connect.example.com',
+        'services.oauth.instance_id' => 'test-instance',
+        'services.oauth.broker_secret' => 'test-secret',
+    ]);
+
+    $capturedBody = null;
+    $capturedUrl = null;
+
+    $mockClient = new MockClient([
+        ValidateAddress::class => function (PendingRequest $pendingRequest) use (&$capturedBody, &$capturedUrl): MockResponse {
+            $capturedBody = $pendingRequest->body()->all();
+            $capturedUrl = $pendingRequest->getUrl();
+
+            return MockResponse::make(['output' => ['mfaOptions' => []]], 200);
+        },
+    ]);
+
+    $connector = new FedexRegistrationProxyConnector;
+    $connector->withMockClient($mockClient);
+    $connector->send(new ValidateAddress(
+        accountNumber: '123',
+        customerName: 'Test',
+        residential: false,
+        street1: '123 Main St',
+        street2: '',
+        city: 'New York',
+        stateOrProvinceCode: 'NY',
+        postalCode: '10001',
+        countryCode: 'US',
+    ));
+
+    expect($capturedUrl)->toBe('https://polybag-connect.example.com/fedex/registration/validate-address');
+
+    expect($capturedBody)
+        ->toHaveKey('instance_id', 'test-instance')
+        ->toHaveKey('nonce')
+        ->toHaveKey('signature');
+
+    $expectedSignature = hash_hmac(
+        'sha256',
+        '/registration/v2/address/keysgeneration:test-instance:'.$capturedBody['nonce'],
+        'test-secret',
+    );
+
+    expect($capturedBody['signature'])->toBe($expectedSignature);
 });

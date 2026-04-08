@@ -93,6 +93,8 @@ class Settings extends Page
         'usps_client_secret' => 'usps.client_secret',
         'fedex_api_key' => 'fedex.api_key',
         'fedex_api_secret' => 'fedex.api_secret',
+        'fedex_sandbox_api_key' => 'fedex.sandbox_api_key',
+        'fedex_sandbox_api_secret' => 'fedex.sandbox_api_secret',
         'ups_client_id' => 'ups.client_id',
         'ups_client_secret' => 'ups.client_secret',
         'shopify_client_id' => 'shopify.client_id',
@@ -283,7 +285,10 @@ class Settings extends Page
         $settings = app(SettingsService::class);
 
         if (filled($settings->get('fedex.child_key'))) {
-            return new HtmlString('<span class="text-success-600 dark:text-success-400 font-medium">Connected</span> — child credentials provisioned via Account Registration');
+            $isSandbox = $settings->get('sandbox_mode', false);
+            $env = $isSandbox ? 'sandbox' : 'production';
+
+            return new HtmlString("<span class=\"text-success-600 dark:text-success-400 font-medium\">Connected</span> — {$env} child credentials provisioned via Account Registration");
         }
 
         return new HtmlString('<span class="text-gray-400 dark:text-gray-500">Not connected</span> — click Connect FedEx Account to provision credentials');
@@ -301,7 +306,7 @@ class Settings extends Page
      */
     private function getCredentialPlaceholder(string $settingKey, string $configKey): string
     {
-        $value = app(SettingsService::class)->get($settingKey);
+        $value = app(SettingsService::class)->get($settingKey) ?? config($configKey);
 
         return ! empty($value) ? 'Configured (leave empty to keep)' : 'Not configured';
     }
@@ -549,16 +554,29 @@ class Settings extends Page
                                 ->content(fn () => $this->renderFedexAccountStatus())
                                 ->columnSpanFull(),
                             TextInput::make('fedex_api_key')
-                                ->label('API Key')
+                                ->label('Production API Key')
                                 ->password()
-                                ->placeholder(fn () => $this->getCredentialPlaceholder('fedex.api_key', 'services.fedex.api_key')),
+                                ->placeholder(fn () => $this->getCredentialPlaceholder('fedex.api_key', 'services.fedex.api_key'))
+                                ->visible(fn () => ! $this->isBrokerConfigured()),
                             TextInput::make('fedex_api_secret')
-                                ->label('API Secret')
+                                ->label('Production API Secret')
                                 ->password()
-                                ->placeholder(fn () => $this->getCredentialPlaceholder('fedex.api_secret', 'services.fedex.api_secret')),
+                                ->placeholder(fn () => $this->getCredentialPlaceholder('fedex.api_secret', 'services.fedex.api_secret'))
+                                ->visible(fn () => ! $this->isBrokerConfigured()),
+                            TextInput::make('fedex_sandbox_api_key')
+                                ->label('Sandbox API Key')
+                                ->password()
+                                ->placeholder(fn () => $this->getCredentialPlaceholder('fedex.sandbox_api_key', 'services.fedex.sandbox_api_key'))
+                                ->visible(fn () => ! $this->isBrokerConfigured()),
+                            TextInput::make('fedex_sandbox_api_secret')
+                                ->label('Sandbox API Secret')
+                                ->password()
+                                ->placeholder(fn () => $this->getCredentialPlaceholder('fedex.sandbox_api_secret', 'services.fedex.sandbox_api_secret'))
+                                ->visible(fn () => ! $this->isBrokerConfigured()),
                             TextInput::make('fedex_account_number')
                                 ->label('Account Number')
-                                ->maxLength(50),
+                                ->maxLength(50)
+                                ->readOnly(fn () => $this->isFedexAccountConnected()),
                         ])
                         ->footerActions([
                             Action::make('fedex_register')
@@ -667,6 +685,7 @@ class Settings extends Page
                                                     $result['credentials']['child_Key'],
                                                     $result['credentials']['child_secret'],
                                                 );
+                                                app(SettingsService::class)->set('fedex.account_number', $get('fedex_reg_account_number'), group: 'fedex');
                                                 Notification::make()->success()->title('FedEx Account added Successfully.')->send();
                                                 $this->dispatch('close-modal', id: 'fedex_register-action');
 
@@ -799,6 +818,7 @@ class Settings extends Page
                                         $credentials['child_Key'],
                                         $credentials['child_secret'],
                                     );
+                                    app(SettingsService::class)->set('fedex.account_number', $data['fedex_reg_account_number'], group: 'fedex');
 
                                     Notification::make()->success()->title('FedEx Account added Successfully.')->send();
                                 }),
@@ -1189,6 +1209,7 @@ class Settings extends Page
             Cache::forget('usps_authenticator');
             Cache::forget('usps_payment_authorization_token');
             Cache::forget('fedex_authenticator');
+            Cache::forget('fedex_authenticator_sandbox');
             Cache::forget('ups_authenticator');
             Cache::forget('ups_oauth_token');
             Cache::forget('amazon_sp_api_access_token');

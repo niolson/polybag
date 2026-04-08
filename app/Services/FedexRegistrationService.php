@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Exceptions\FedexRegistrationMaxRetriesException;
 use App\Http\Integrations\Fedex\FedexConnector;
+use App\Http\Integrations\Fedex\FedexRegistrationProxyConnector;
 use App\Http\Integrations\Fedex\Requests\Registration\SendPin;
 use App\Http\Integrations\Fedex\Requests\Registration\ValidateAddress;
 use App\Http\Integrations\Fedex\Requests\Registration\VerifyInvoice;
@@ -29,6 +30,19 @@ class FedexRegistrationService
     ) {}
 
     /**
+     * Returns the proxy connector when a broker URL is configured,
+     * otherwise falls back to the direct FedEx authenticated connector.
+     */
+    private function getConnector(): FedexConnector|FedexRegistrationProxyConnector
+    {
+        if (filled(config('services.oauth.broker_url'))) {
+            return new FedexRegistrationProxyConnector;
+        }
+
+        return FedexConnector::getAuthenticatedConnector();
+    }
+
+    /**
      * Validate account number and address (Factor 1).
      *
      * Returns an array with:
@@ -52,7 +66,7 @@ class FedexRegistrationService
         string $postalCode,
         string $countryCode,
     ): array {
-        $connector = FedexConnector::getAuthenticatedConnector();
+        $connector = $this->getConnector();
 
         $response = $connector->send(new ValidateAddress(
             accountNumber: $accountNumber,
@@ -107,7 +121,7 @@ class FedexRegistrationService
      */
     public function sendPin(string $accountAuthToken, string $option): void
     {
-        $connector = FedexConnector::getAuthenticatedConnector();
+        $connector = $this->getConnector();
 
         $response = $connector->send(new SendPin($accountAuthToken, $option));
 
@@ -123,7 +137,7 @@ class FedexRegistrationService
      */
     public function verifyPin(string $accountAuthToken, string $pin): array
     {
-        $connector = FedexConnector::getAuthenticatedConnector();
+        $connector = $this->getConnector();
 
         $response = $connector->send(new VerifyPin($accountAuthToken, $pin));
 
@@ -146,7 +160,7 @@ class FedexRegistrationService
         float $invoiceAmount,
         string $invoiceCurrency,
     ): array {
-        $connector = FedexConnector::getAuthenticatedConnector();
+        $connector = $this->getConnector();
 
         $response = $connector->send(new VerifyInvoice(
             accountAuthToken: $accountAuthToken,

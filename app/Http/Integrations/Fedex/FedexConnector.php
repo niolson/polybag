@@ -51,11 +51,20 @@ class FedexConnector extends Connector
     protected function defaultOauthConfig(): OAuthConfig
     {
         $settings = app(SettingsService::class);
+        $isSandbox = $settings->get('sandbox_mode', false);
 
-        // Use child credentials when present (provisioned via Account Registration API),
-        // falling back to parent key/secret for direct developer access.
-        $clientId = $settings->get('fedex.child_key') ?: $settings->get('fedex.api_key', '');
-        $clientSecret = $settings->get('fedex.child_secret') ?: $settings->get('fedex.api_secret', '');
+        // Child credentials (provisioned via Account Registration) take priority.
+        // Fall back to environment-appropriate parent credentials.
+        if (filled($settings->get('fedex.child_key'))) {
+            $clientId = $settings->get('fedex.child_key');
+            $clientSecret = $settings->get('fedex.child_secret');
+        } elseif ($isSandbox) {
+            $clientId = $settings->get('fedex.sandbox_api_key', config('services.fedex.sandbox_api_key', ''));
+            $clientSecret = $settings->get('fedex.sandbox_api_secret', config('services.fedex.sandbox_api_secret', ''));
+        } else {
+            $clientId = $settings->get('fedex.api_key', config('services.fedex.api_key', ''));
+            $clientSecret = $settings->get('fedex.api_secret', config('services.fedex.api_secret', ''));
+        }
 
         return OAuthConfig::make()
             ->setClientId((string) $clientId)
@@ -65,7 +74,11 @@ class FedexConnector extends Connector
 
     protected static function getAuthenticatorCacheKey(): string
     {
-        return 'fedex_authenticator';
+        // Separate cache keys for sandbox vs production — FedEx issues different
+        // client credentials per environment, so tokens are not interchangeable.
+        $isSandbox = app(SettingsService::class)->get('sandbox_mode', false);
+
+        return $isSandbox ? 'fedex_authenticator_sandbox' : 'fedex_authenticator';
     }
 
     /**

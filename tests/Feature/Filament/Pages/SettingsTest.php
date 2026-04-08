@@ -448,3 +448,33 @@ it('fedex registration service mfa bypass returns credentials immediately', func
     Saloon::assertNotSent(SendPin::class);
     Saloon::assertNotSent(VerifyPin::class);
 });
+
+it('fedex registration service routes through proxy when broker url is configured', function (): void {
+    config([
+        'services.oauth.broker_url' => 'https://polybag-connect.example.com',
+        'services.oauth.instance_id' => 'test-instance',
+        'services.oauth.broker_secret' => 'test-secret',
+    ]);
+
+    Saloon::fake([
+        ValidateAddress::class => MockResponse::make(fedexMfaResponse(), 200),
+    ]);
+
+    $result = app(FedexRegistrationService::class)->validateAddress(
+        accountNumber: '700257037',
+        customerName: 'Test Company',
+        residential: false,
+        street1: '15 W 18TH ST FL 7',
+        street2: '',
+        city: 'NEW YORK',
+        stateOrProvinceCode: 'NY',
+        postalCode: '10011',
+        countryCode: 'US',
+    );
+
+    expect($result['mfaRequired'])->toBeTrue();
+
+    // No OAuth token request — proxy connector handles auth on the broker side
+    Saloon::assertNotSent('*oauth*');
+    Saloon::assertSent(ValidateAddress::class);
+});

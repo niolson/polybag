@@ -49,6 +49,8 @@ return [
         'sandbox_url' => 'https://apis-sandbox.fedex.com',
         'api_key' => null,
         'api_secret' => null,
+        'sandbox_api_key' => env('FEDEX_SANDBOX_API_KEY'),
+        'sandbox_api_secret' => env('FEDEX_SANDBOX_API_SECRET'),
         'account_number' => null,
     ],
 
