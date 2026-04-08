@@ -183,8 +183,11 @@ class FedexRegistrationService
      */
     public function saveChildCredentials(string $childKey, string $childSecret): void
     {
+        $isSandbox = $this->settings->get('sandbox_mode', false);
+
         $this->settings->set('fedex.child_key', $childKey, 'string', encrypted: true, group: 'fedex');
         $this->settings->set('fedex.child_secret', $childSecret, 'string', encrypted: true, group: 'fedex');
+        $this->settings->set('fedex.child_env', $isSandbox ? 'sandbox' : 'production', group: 'fedex');
 
         Cache::forget('fedex_authenticator');
     }
@@ -194,7 +197,7 @@ class FedexRegistrationService
      */
     public function removeChildCredentials(): void
     {
-        Setting::whereIn('key', ['fedex.child_key', 'fedex.child_secret'])->delete();
+        Setting::whereIn('key', ['fedex.child_key', 'fedex.child_secret', 'fedex.child_env'])->delete();
         $this->settings->clearCache();
         Cache::forget('fedex_authenticator');
     }

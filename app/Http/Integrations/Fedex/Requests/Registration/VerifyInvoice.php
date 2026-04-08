@@ -39,7 +39,7 @@ class VerifyInvoice extends Request implements HasBody
             'invoiceDetail' => [
                 'number' => $this->invoiceNumber,
                 'date' => $this->invoiceDate,
-                'amount' => $this->invoiceAmount,
+                'amount' => number_format($this->invoiceAmount, 2, '.', ''),
                 'currency' => $this->invoiceCurrency,
             ],
         ];

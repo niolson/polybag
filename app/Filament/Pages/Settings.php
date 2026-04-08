@@ -287,7 +287,7 @@ class Settings extends Page
             $isSandbox = $settings->get('sandbox_mode', false);
             $env = $isSandbox ? 'sandbox' : 'production';
 
-            return new HtmlString("<span class=\"text-success-600 dark:text-success-400 font-medium\">Connected</span> — {$env} child credentials provisioned via Account Registration");
+            return new HtmlString("<span class=\"text-success-600 dark:text-success-400 font-medium\">Connected</span> — {$env} credentials provisioned via Account Registration");
         }
 
         return new HtmlString('<span class="text-gray-400 dark:text-gray-500">Not connected</span> — click Connect FedEx Account to provision credentials');
@@ -575,6 +575,7 @@ class Settings extends Page
                             TextInput::make('fedex_account_number')
                                 ->label('Account Number')
                                 ->maxLength(50)
+                                ->copyable()
                                 ->readOnly(fn () => $this->isFedexAccountConnected()),
                         ])
                         ->footerActions([
@@ -583,6 +584,7 @@ class Settings extends Page
                                 ->icon('heroicon-o-link')
                                 ->color(fn () => $this->isFedexAccountConnected() ? 'warning' : 'primary')
                                 ->modalWidth('7xl')
+                                ->extraModalWindowAttributes(['style' => 'max-width: 96rem;'])
                                 ->closeModalByClickingAway(false)
                                 ->closeModalByEscaping(false)
                                 ->mountUsing(function () {
@@ -685,7 +687,7 @@ class Settings extends Page
                                                 );
                                                 app(SettingsService::class)->set('fedex.account_number', $get('fedex_reg_account_number'), group: 'fedex');
                                                 Notification::make()->success()->title('FedEx Account added Successfully.')->send();
-                                                $this->dispatch('close-modal', id: 'fedex_register-action');
+                                                $this->redirect(static::getUrl());
 
                                                 throw new Halt;
                                             }
@@ -827,7 +829,7 @@ class Settings extends Page
                                 ->visible(fn () => $this->isFedexAccountConnected())
                                 ->requiresConfirmation()
                                 ->modalHeading('Disconnect FedEx Account')
-                                ->modalDescription('This will remove the child credentials. The app will fall back to the parent API key/secret. You can reconnect anytime.')
+                                ->modalDescription('This will remove your FedEx credentials. You can reconnect your account anytime.')
                                 ->action(function () {
                                     app(FedexRegistrationService::class)->removeChildCredentials();
                                     Notification::make()->success()->title('FedEx account disconnected.')->send();
