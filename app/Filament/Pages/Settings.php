@@ -2,7 +2,6 @@
 
 namespace App\Filament\Pages;
 
-use App\Data\FedexEulaText;
 use App\Enums\Role;
 use App\Exceptions\FedexRegistrationMaxRetriesException;
 use App\Http\Integrations\USPS\Requests\ShippingOptions;
@@ -583,6 +582,7 @@ class Settings extends Page
                                 ->label(fn () => $this->isFedexAccountConnected() ? 'Reconnect FedEx Account' : 'Connect FedEx Account')
                                 ->icon('heroicon-o-link')
                                 ->color(fn () => $this->isFedexAccountConnected() ? 'warning' : 'primary')
+                                ->modalWidth('7xl')
                                 ->closeModalByClickingAway(false)
                                 ->closeModalByEscaping(false)
                                 ->mountUsing(function () {
@@ -599,9 +599,7 @@ class Settings extends Page
                                         ->description('Review and accept the FedEx EULA')
                                         ->schema([
                                             Html::make(fn () => new HtmlString(
-                                                view('filament.pages.settings.fedex-eula', [
-                                                    'eulaText' => FedexEulaText::TEXT,
-                                                ])->render()
+                                                view('filament.pages.settings.fedex-eula')->render()
                                             ))->columnSpanFull(),
                                             Hidden::make('eula_accepted')
                                                 ->default(false),
