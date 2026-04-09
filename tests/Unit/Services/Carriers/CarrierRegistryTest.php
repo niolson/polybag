@@ -7,6 +7,7 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\FedexAdapter;
@@ -101,6 +102,16 @@ it('allows registering custom adapters', function (): void {
         public function cancelShipment(string $trackingNumber, Package $package): CancelResponse
         {
             return CancelResponse::failure('Not implemented');
+        }
+
+        public function supportsTracking(): bool
+        {
+            return false;
+        }
+
+        public function trackShipment(Package $package): TrackShipmentResponse
+        {
+            return TrackShipmentResponse::unsupported();
         }
 
         public function isConfigured(): bool

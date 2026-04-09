@@ -5,9 +5,11 @@ use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
+use App\Enums\TrackingStatus;
 use App\Http\Integrations\Fedex\Requests\CancelShipment;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Http\Integrations\Fedex\Requests\Rates;
+use App\Http\Integrations\Fedex\Requests\TrackShipment;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\Setting;
@@ -513,4 +515,123 @@ it('returns failure response when shipment creation fails', function (): void {
 
     expect($response->success)->toBeFalse()
         ->and($response->errorMessage)->toBe('FedEx response missing shipment data');
+});
+
+it('maps a FedEx tracking response into normalized tracking data', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        TrackShipment::class => MockResponse::make([
+            'output' => [
+                'completeTrackResults' => [
+                    [
+                        'trackResults' => [
+                            [
+                                'latestStatusDetail' => [
+                                    'code' => 'IT',
+                                    'description' => 'In transit',
+                                ],
+                                'estimatedDeliveryTimeWindow' => [
+                                    'window' => [
+                                        'ends' => '2026-04-10T18:00:00Z',
+                                    ],
+                                ],
+                                'scanEvents' => [
+                                    [
+                                        'date' => '2026-04-08T12:00:00Z',
+                                        'eventDescription' => 'Departed FedEx hub',
+                                        'derivedStatusCode' => 'IT',
+                                        'derivedStatus' => 'IN_TRANSIT',
+                                        'scanLocation' => [
+                                            'city' => 'Memphis',
+                                            'stateOrProvinceCode' => 'TN',
+                                            'countryCode' => 'US',
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]),
+    ]);
+
+    $package = Package::factory()->fedex()->create([
+        'carrier' => 'FedEx',
+        'tracking_number' => '794644790138',
+    ]);
+
+    $response = $this->adapter->trackShipment($package);
+
+    expect($response->success)->toBeTrue()
+        ->and($response->status)->toBe(TrackingStatus::InTransit)
+        ->and($response->statusLabel)->toBe('In transit')
+        ->and($response->estimatedDeliveryAt?->toIso8601String())->toBe('2026-04-10T18:00:00+00:00')
+        ->and($response->events)->toHaveCount(1)
+        ->and($response->events[0]->description)->toBe('Departed FedEx hub')
+        ->and($response->events[0]->location)->toBe('Memphis, TN, US');
+});
+
+it('maps FedEx delivery exceptions and returns into tracking statuses', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        TrackShipment::class => MockResponse::make([
+            'output' => [
+                'completeTrackResults' => [
+                    [
+                        'trackResults' => [
+                            [
+                                'latestStatusDetail' => [
+                                    'code' => 'SE',
+                                    'description' => 'Shipment exception',
+                                ],
+                                'scanEvents' => [],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]),
+    ]);
+
+    $package = Package::factory()->fedex()->create([
+        'carrier' => 'FedEx',
+        'tracking_number' => '794644790138',
+    ]);
+
+    $response = $this->adapter->trackShipment($package);
+
+    expect($response->status)->toBe(TrackingStatus::Exception);
+});
+
+it('maps FedEx ready for pickup statuses away from pre-transit', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        TrackShipment::class => MockResponse::make([
+            'output' => [
+                'completeTrackResults' => [
+                    [
+                        'trackResults' => [
+                            [
+                                'latestStatusDetail' => [
+                                    'code' => 'HL',
+                                    'description' => 'Ready for pickup',
+                                ],
+                                'scanEvents' => [],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]),
+    ]);
+
+    $package = Package::factory()->fedex()->create([
+        'carrier' => 'FedEx',
+        'tracking_number' => '794644790138',
+    ]);
+
+    $response = $this->adapter->trackShipment($package);
+
+    expect($response->status)->toBe(TrackingStatus::Exception);
 });

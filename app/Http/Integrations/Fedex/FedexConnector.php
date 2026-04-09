@@ -8,15 +8,19 @@ use App\Services\SettingsService;
 use DateTimeImmutable;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Saloon\Contracts\OAuthAuthenticator;
 use Saloon\Helpers\OAuth2\OAuthConfig;
 use Saloon\Http\Auth\AccessTokenAuthenticator;
 use Saloon\Http\Connector;
+use Saloon\Http\Response;
 use Saloon\Traits\OAuth2\ClientCredentialsGrant;
 use Saloon\Traits\Plugins\HasTimeout;
 
 class FedexConnector extends Connector
 {
-    use ClientCredentialsGrant;
+    use ClientCredentialsGrant {
+        getAccessToken as getClientCredentialsAccessToken;
+    }
     use HasCachedAuthentication;
     use HasTimeout;
     use RetriesTransientErrors;
@@ -88,13 +92,17 @@ class FedexConnector extends Connector
      * Override token acquisition to route through polybag-connect proxy when
      * child credentials are present, so the parent key/secret stays server-side.
      */
-    public function getAccessToken(bool $returnResponse = false): AccessTokenAuthenticator
-    {
+    public function getAccessToken(
+        array $scopes = [],
+        string $scopeSeparator = ' ',
+        bool $returnResponse = false,
+        ?callable $requestModifier = null,
+    ): OAuthAuthenticator|Response {
         $settings = app(SettingsService::class);
         $childKey = $settings->get('fedex.child_key');
 
         if (! filled($childKey)) {
-            return parent::getAccessToken($returnResponse);
+            return $this->getClientCredentialsAccessToken($scopes, $scopeSeparator, $returnResponse, $requestModifier);
         }
 
         $isSandbox = $settings->get('fedex.child_env') === 'sandbox';

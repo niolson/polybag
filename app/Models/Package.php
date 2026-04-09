@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\PackageStatus;
+use App\Enums\TrackingStatus;
 use App\Events\PackageCancelled;
 use App\Events\PackageShipped;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -42,6 +43,11 @@ class Package extends Model
         'shipped_by_user_id',
         'exported',
         'manifest_id',
+        'tracking_status',
+        'tracking_updated_at',
+        'delivered_at',
+        'tracking_details',
+        'tracking_checked_at',
     ];
 
     protected $casts = [
@@ -56,6 +62,11 @@ class Package extends Model
         'shipped_at' => 'datetime',
         'ship_date' => 'date',
         'exported' => 'boolean',
+        'tracking_status' => TrackingStatus::class,
+        'tracking_updated_at' => 'datetime',
+        'delivered_at' => 'datetime',
+        'tracking_details' => 'array',
+        'tracking_checked_at' => 'datetime',
     ];
 
     /**
@@ -151,6 +162,11 @@ class Package extends Model
                     'shipped_at' => now(),
                     'ship_date' => $response->shipDate?->format('Y-m-d'),
                     'shipped_by_user_id' => $shippedByUserId,
+                    'tracking_status' => TrackingStatus::PreTransit->value,
+                    'tracking_updated_at' => null,
+                    'delivered_at' => null,
+                    'tracking_details' => null,
+                    'tracking_checked_at' => null,
                     'updated_at' => now(),
                 ]);
 
@@ -192,6 +208,11 @@ class Package extends Model
                     'status' => PackageStatus::Unshipped->value,
                     'shipped_at' => null,
                     'shipped_by_user_id' => null,
+                    'tracking_status' => null,
+                    'tracking_updated_at' => null,
+                    'delivered_at' => null,
+                    'tracking_details' => null,
+                    'tracking_checked_at' => null,
                     'updated_at' => now(),
                 ]);
 

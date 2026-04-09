@@ -3,12 +3,14 @@
 namespace App\Filament\Resources;
 
 use App\Enums\PackageStatus;
+use App\Enums\TrackingStatus;
 use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\PackageResource\Pages;
 use App\Filament\Resources\PackageResource\RelationManagers\PackageItemsRelationManager;
 use App\Models\Location;
 use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
+use App\Services\TrackingService;
 use BackedEnum;
 use Filament\Actions;
 use Filament\Forms;
@@ -17,12 +19,14 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components;
+use Filament\Schemas\Components\Html;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\HtmlString;
 use Saloon\Exceptions\Request\RequestException;
 
 class PackageResource extends Resource
@@ -190,8 +194,14 @@ class PackageResource extends Resource
                     ->sortable(),
                 Tables\Columns\TextColumn::make('status')
                     ->badge(),
+                Tables\Columns\TextColumn::make('tracking_status')
+                    ->badge()
+                    ->placeholder('—'),
                 Tables\Columns\IconColumn::make('exported')
                     ->boolean(),
+                Tables\Columns\TextColumn::make('tracking_updated_at')
+                    ->dateTime('M j, Y g:i A', timezone: Location::timezone())
+                    ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('created_at')
                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->sortable()
@@ -200,6 +210,9 @@ class PackageResource extends Resource
             ->filters([
                 Tables\Filters\SelectFilter::make('status')
                     ->options(PackageStatus::class),
+                Tables\Filters\SelectFilter::make('tracking_status')
+                    ->options(TrackingStatus::class)
+                    ->label('Tracking Status'),
                 Tables\Filters\SelectFilter::make('carrier')
                     ->options([
                         'USPS' => 'USPS',
@@ -283,6 +296,7 @@ class PackageResource extends Resource
             ], layout: FiltersLayout::AboveContentCollapsible)
             ->recordActions([
                 Actions\ViewAction::make(),
+                static::makeTrackAction(),
                 Actions\Action::make('reprint')
                     ->label('Reprint')
                     ->icon('heroicon-o-printer')
@@ -317,6 +331,27 @@ class PackageResource extends Resource
                         }
                     }),
                 Actions\EditAction::make(),
+            ]);
+    }
+
+    public static function makeTrackAction(): Actions\Action
+    {
+        return Actions\Action::make('track')
+            ->label('Track')
+            ->icon('heroicon-o-map')
+            ->color('primary')
+            ->visible(fn (Package $record) => $record->status === PackageStatus::Shipped && filled($record->tracking_number) && filled($record->carrier))
+            ->slideOver()
+            ->modalWidth('3xl')
+            ->modalSubmitAction(false)
+            ->modalCancelActionLabel('Close')
+            ->mountUsing(function (Package $record): void {
+                app(TrackingService::class)->refreshPackage($record->fresh());
+            })
+            ->schema([
+                Html::make(fn (Package $record): HtmlString => new HtmlString(
+                    view('filament.components.package-tracking', ['package' => $record->fresh()])->render()
+                ))->columnSpanFull(),
             ]);
     }
 

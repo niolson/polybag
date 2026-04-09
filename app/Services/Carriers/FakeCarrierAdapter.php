@@ -9,6 +9,7 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Models\Package;
 use Illuminate\Support\Collection;
 use Saloon\Http\Response;
@@ -104,6 +105,16 @@ class FakeCarrierAdapter implements CarrierAdapterInterface
     public function cancelShipment(string $trackingNumber, Package $package): CancelResponse
     {
         return CancelResponse::success("Fake {$this->carrierName} shipment {$trackingNumber} cancelled");
+    }
+
+    public function supportsTracking(): bool
+    {
+        return false;
+    }
+
+    public function trackShipment(Package $package): TrackShipmentResponse
+    {
+        return TrackShipmentResponse::unsupported();
     }
 
     public function supportsMultiPackage(): bool

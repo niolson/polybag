@@ -4,10 +4,14 @@ namespace App\Filament\Widgets;
 
 use App\Enums\Deliverability;
 use App\Enums\LabelBatchItemStatus;
+use App\Enums\PackageStatus;
 use App\Enums\ShipmentStatus;
+use App\Enums\TrackingStatus;
 use App\Filament\Pages\UnmappedShippingReferences;
+use App\Filament\Resources\PackageResource;
 use App\Filament\Resources\ShipmentResource;
 use App\Models\LabelBatchItem;
+use App\Models\Package;
 use App\Models\Shipment;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
@@ -47,6 +51,17 @@ class ExceptionsWidget extends BaseWidget
             ->distinct('shipping_method_reference')
             ->count('shipping_method_reference');
 
+        $trackingExceptions = Package::query()
+            ->where('status', PackageStatus::Shipped)
+            ->where('tracking_status', TrackingStatus::Exception)
+            ->count();
+
+        $stuckPreTransit = Package::query()
+            ->where('status', PackageStatus::Shipped)
+            ->where('tracking_status', TrackingStatus::PreTransit)
+            ->where('shipped_at', '<=', now()->subHours(48))
+            ->count();
+
         return [
             Stat::make('Undeliverable Shipments', $undeliverable)
                 ->description('Last 90 days, deliverability "No"')
@@ -57,6 +72,16 @@ class ExceptionsWidget extends BaseWidget
                 ->description('Last 7 days')
                 ->descriptionIcon('heroicon-m-exclamation-triangle')
                 ->color($failedBatchItems > 0 ? 'danger' : 'success'),
+            Stat::make('Tracking Exceptions', $trackingExceptions)
+                ->description('Shipped packages needing attention')
+                ->descriptionIcon('heroicon-m-truck')
+                ->color($trackingExceptions > 0 ? 'danger' : 'success')
+                ->url(PackageResource::getUrl('index')),
+            Stat::make('Stuck Pre-Transit', $stuckPreTransit)
+                ->description('Pre-transit for more than 48 hours')
+                ->descriptionIcon('heroicon-m-clock')
+                ->color($stuckPreTransit > 0 ? 'warning' : 'success')
+                ->url(PackageResource::getUrl('index')),
             Stat::make('Unmapped Shipping References', $unmappedReferences)
                 ->description('Last 90 days, need mapping')
                 ->descriptionIcon('heroicon-m-link')

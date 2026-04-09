@@ -43,6 +43,7 @@ class ViewPackage extends ViewRecord
                         ->success()
                         ->send();
                 }),
+            PackageResource::makeTrackAction(),
             Action::make('void')
                 ->label('Void Label')
                 ->icon('heroicon-o-x-circle')
@@ -100,6 +101,17 @@ class ViewPackage extends ViewRecord
                         ]),
                         TextEntry::make('status')
                             ->badge(),
+                        TextEntry::make('tracking_status')
+                            ->badge()
+                            ->placeholder('—'),
+                        TextEntry::make('tracking_updated_at')
+                            ->label('Tracking Updated')
+                            ->dateTime('M j, Y g:i A', timezone: Location::timezone())
+                            ->placeholder('—'),
+                        TextEntry::make('delivered_at')
+                            ->label('Delivered At')
+                            ->dateTime('M j, Y g:i A', timezone: Location::timezone())
+                            ->placeholder('—'),
                         TextEntry::make('shipped_at')
                             ->label('Shipped At')
                             ->dateTime('M j, Y g:i A', timezone: Location::timezone()),

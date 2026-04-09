@@ -10,6 +10,7 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Http\Integrations\Ups\Requests\CreateShipment;
 use App\Http\Integrations\Ups\Requests\Rate;
 use App\Http\Integrations\Ups\Requests\VoidShipment;
@@ -137,6 +138,16 @@ class UpsAdapter implements CarrierAdapterInterface
         }
 
         return $results;
+    }
+
+    public function supportsTracking(): bool
+    {
+        return false;
+    }
+
+    public function trackShipment(Package $package): TrackShipmentResponse
+    {
+        return TrackShipmentResponse::unsupported();
     }
 
     /**

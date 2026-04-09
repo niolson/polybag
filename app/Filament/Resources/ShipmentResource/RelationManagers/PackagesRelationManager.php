@@ -48,6 +48,9 @@ class PackagesRelationManager extends RelationManager
             ->recordTitleAttribute('tracking_number')
             ->columns([
                 Tables\Columns\TextColumn::make('tracking_number'),
+                Tables\Columns\TextColumn::make('tracking_status')
+                    ->badge()
+                    ->placeholder('—'),
                 Tables\Columns\TextColumn::make('shipping_method'),
                 Tables\Columns\TextColumn::make('weight'),
                 Tables\Columns\TextColumn::make('cost')
@@ -65,6 +68,7 @@ class PackagesRelationManager extends RelationManager
                 Actions\CreateAction::make(),
             ])
             ->recordActions([
+                PackageResource::makeTrackAction(),
                 Actions\EditAction::make(),
                 Actions\DeleteAction::make()
                     ->before(function (Actions\DeleteAction $action, $record) {

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureUserIsAdmin;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -41,11 +42,15 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command('oauth:refresh')
             ->weeklyOn(Schedule::WEDNESDAY, '03:00')
             ->withoutOverlapping();
+
+        $schedule->command('packages:refresh-tracking')
+            ->everyFourHours()
+            ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->trustProxies(at: '*');
         $middleware->alias([
-            'admin' => \App\Http\Middleware\EnsureUserIsAdmin::class,
+            'admin' => EnsureUserIsAdmin::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

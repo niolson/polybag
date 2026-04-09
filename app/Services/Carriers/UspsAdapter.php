@@ -10,6 +10,7 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\BoxSizeType;
 use App\Http\Integrations\USPS\Requests\CancelInternationalLabel;
 use App\Http\Integrations\USPS\Requests\CancelLabel;
@@ -200,6 +201,16 @@ class UspsAdapter implements CarrierAdapterInterface
         return $isInternational
             ? $this->createInternationalShipment($request)
             : $this->createDomesticShipment($request);
+    }
+
+    public function supportsTracking(): bool
+    {
+        return false;
+    }
+
+    public function trackShipment(Package $package): TrackShipmentResponse
+    {
+        return TrackShipmentResponse::unsupported();
     }
 
     private function createDomesticShipment(ShipRequest $request): ShipResponse

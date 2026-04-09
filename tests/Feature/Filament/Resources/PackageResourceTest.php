@@ -7,6 +7,7 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
@@ -85,6 +86,16 @@ it('voids a label and clears shipping fields', function (): void {
         public function cancelShipment(string $trackingNumber, Package $package): CancelResponse
         {
             return CancelResponse::success('Label voided successfully.');
+        }
+
+        public function supportsTracking(): bool
+        {
+            return false;
+        }
+
+        public function trackShipment(Package $package): TrackShipmentResponse
+        {
+            return TrackShipmentResponse::unsupported();
         }
 
         public function isConfigured(): bool

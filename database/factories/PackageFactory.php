@@ -32,6 +32,11 @@ class PackageFactory extends Factory
             'status' => 'unshipped',
             'shipped_at' => null,
             'exported' => false,
+            'tracking_status' => null,
+            'tracking_updated_at' => null,
+            'delivered_at' => null,
+            'tracking_details' => null,
+            'tracking_checked_at' => null,
         ];
     }
 

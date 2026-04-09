@@ -10,14 +10,19 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\DataTransferObjects\Tracking\TrackingEventData;
+use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\FedexPackageType;
+use App\Enums\TrackingStatus;
 use App\Http\Integrations\Fedex\FedexConnector;
 use App\Http\Integrations\Fedex\Requests\CancelShipment as CancelShipmentRequest;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Http\Integrations\Fedex\Requests\Rates;
+use App\Http\Integrations\Fedex\Requests\TrackShipment;
 use App\Models\Location;
 use App\Models\Package;
 use App\Services\SettingsService;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Saloon\Http\Response;
 
@@ -70,6 +75,11 @@ class FedexAdapter implements CarrierAdapterInterface
     public function getCarrierName(): string
     {
         return 'FedEx';
+    }
+
+    public function supportsTracking(): bool
+    {
+        return true;
     }
 
     public function getRates(RateRequest $request, array $serviceCodes): Collection
@@ -554,6 +564,146 @@ class FedexAdapter implements CarrierAdapterInterface
             return CancelResponse::failure('FedEx returned status '.$response->status());
         } catch (\Exception $e) {
             return CancelResponse::failure($e->getMessage());
+        }
+    }
+
+    public function trackShipment(Package $package): TrackShipmentResponse
+    {
+        try {
+            $connector = FedexConnector::getFedexConnector();
+            $response = $connector->send(new TrackShipment($package->tracking_number));
+
+            if (! $response->successful()) {
+                return TrackShipmentResponse::failure(
+                    collect($response->json('errors', []))->pluck('message')->filter()->join(' ')
+                    ?: 'FedEx tracking request failed.',
+                    ['raw' => $response->json()],
+                );
+            }
+
+            $trackResult = $response->json('output.completeTrackResults.0.trackResults.0');
+
+            if (! is_array($trackResult)) {
+                return TrackShipmentResponse::failure('FedEx returned an unexpected tracking response.', [
+                    'raw' => $response->json(),
+                ]);
+            }
+
+            $statusCode = (string) data_get($trackResult, 'latestStatusDetail.code', '');
+            $statusLabel = data_get($trackResult, 'latestStatusDetail.description')
+                ?? data_get($trackResult, 'latestStatusDetail.statusByLocale')
+                ?? $statusCode;
+
+            $events = collect(data_get($trackResult, 'scanEvents', []))
+                ->filter(fn ($event) => is_array($event))
+                ->map(fn (array $event) => $this->mapTrackingEvent($event))
+                ->sortByDesc(fn (TrackingEventData $event) => $event->timestamp?->getTimestamp() ?? 0)
+                ->values()
+                ->all();
+
+            $estimatedDeliveryAt = $this->parseFedexDate(
+                data_get($trackResult, 'estimatedDeliveryTimeWindow.window.ends')
+                ?? data_get($trackResult, 'dateAndTimes.0.dateTime')
+                ?? data_get($trackResult, 'estimatedDeliveryTimestamp')
+            );
+
+            $deliveredAt = $this->resolveDeliveredAt($events, $statusCode, $trackResult);
+            $status = $this->mapTrackingStatus($statusCode, (string) $statusLabel);
+
+            return TrackShipmentResponse::success(
+                status: $status,
+                events: $events,
+                estimatedDeliveryAt: $estimatedDeliveryAt,
+                deliveredAt: $deliveredAt,
+                statusLabel: $statusLabel,
+                details: [
+                    'raw' => $response->json(),
+                ],
+            );
+        } catch (\Throwable $e) {
+            logger()->error('FedEx trackShipment error', [
+                'tracking_number' => $package->tracking_number,
+                'error' => $e->getMessage(),
+            ]);
+
+            return TrackShipmentResponse::failure('Unable to fetch FedEx tracking information.');
+        }
+    }
+
+    private function mapTrackingStatus(string $statusCode, string $statusLabel): TrackingStatus
+    {
+        $normalizedCode = strtoupper($statusCode);
+        $normalizedLabel = strtoupper($statusLabel);
+
+        return match (true) {
+            str_contains($normalizedCode, 'DL') || str_contains($normalizedLabel, 'DELIVER') => TrackingStatus::Delivered,
+            str_contains($normalizedCode, 'OD') || str_contains($normalizedLabel, 'OUT FOR DELIVERY') => TrackingStatus::OutForDelivery,
+            str_contains($normalizedCode, 'RS') || str_contains($normalizedLabel, 'RETURN') => TrackingStatus::Returned,
+            str_contains($normalizedCode, 'HL')
+                || str_contains($normalizedLabel, 'READY FOR PICKUP')
+                || str_contains($normalizedLabel, 'PICKUP')
+                || str_contains($normalizedLabel, 'HOLD') => TrackingStatus::Exception,
+            str_contains($normalizedCode, 'DE') || str_contains($normalizedCode, 'SE')
+                || str_contains($normalizedLabel, 'EXCEPTION')
+                || str_contains($normalizedLabel, 'DELAY') => TrackingStatus::Exception,
+            str_contains($normalizedCode, 'IT') || str_contains($normalizedCode, 'AR')
+                || str_contains($normalizedLabel, 'TRANSIT') => TrackingStatus::InTransit,
+            default => TrackingStatus::PreTransit,
+        };
+    }
+
+    /**
+     * @param  array<string, mixed>  $event
+     */
+    private function mapTrackingEvent(array $event): TrackingEventData
+    {
+        $locationParts = array_filter([
+            data_get($event, 'scanLocation.city'),
+            data_get($event, 'scanLocation.stateOrProvinceCode'),
+            data_get($event, 'scanLocation.countryCode'),
+        ]);
+
+        return new TrackingEventData(
+            timestamp: $this->parseFedexDate((string) ($event['date'] ?? '')),
+            location: empty($locationParts) ? null : implode(', ', $locationParts),
+            description: (string) (data_get($event, 'eventDescription') ?: data_get($event, 'exceptionDescription') ?: 'Tracking update'),
+            statusCode: data_get($event, 'derivedStatusCode'),
+            status: data_get($event, 'derivedStatus'),
+            raw: $event,
+        );
+    }
+
+    /**
+     * @param  array<int, TrackingEventData>  $events
+     * @param  array<string, mixed>  $trackResult
+     */
+    private function resolveDeliveredAt(array $events, string $statusCode, array $trackResult): ?CarbonImmutable
+    {
+        $deliveredEvent = collect($events)->first(fn (TrackingEventData $event) => $event->statusCode === 'DL');
+
+        if ($deliveredEvent instanceof TrackingEventData) {
+            return $deliveredEvent->timestamp;
+        }
+
+        if ($this->mapTrackingStatus($statusCode, (string) data_get($trackResult, 'latestStatusDetail.description', '')) === TrackingStatus::Delivered) {
+            return $this->parseFedexDate(
+                data_get($trackResult, 'dateAndTimes.0.dateTime') ?? data_get($trackResult, 'actualDeliveryTimestamp')
+            );
+        }
+
+        return null;
+    }
+
+    private function parseFedexDate(?string $value): ?CarbonImmutable
+    {
+        if (! filled($value)) {
+            return null;
+        }
+
+        try {
+            return CarbonImmutable::parse($value);
+        } catch (\Throwable) {
+            return null;
         }
     }
 
