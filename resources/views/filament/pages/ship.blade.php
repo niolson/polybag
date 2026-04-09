@@ -136,4 +136,6 @@
     </x-filament::modal>
 
     <x-filament-actions::modals />
+
+    <x-legal-disclaimers :show="['fedex']" />
 </x-filament-panels::page>
