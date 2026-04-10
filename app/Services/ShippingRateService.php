@@ -5,10 +5,12 @@ namespace App\Services;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\Enums\ServiceCapability;
 use App\Exceptions\NoActiveCarrierServicesException;
 use App\Models\CarrierService;
 use App\Models\Package;
 use App\Models\ShippingMethod;
+use App\Models\SpecialService;
 use App\Services\Carriers\CarrierRegistry;
 use GuzzleHttp\Promise\Utils as PromiseUtils;
 use Illuminate\Support\Collection;
@@ -16,6 +18,29 @@ use Saloon\Http\Senders\GuzzleSender;
 
 class ShippingRateService
 {
+    /**
+     * Carriers excluded from the last getShippingRates() call due to prohibited services.
+     * Keyed by carrier name, value is the human-readable reason.
+     *
+     * @var array<string, string>
+     */
+    private array $exclusions = [];
+
+    /**
+     * Returns carriers excluded from the last getShippingRates() call.
+     * Each entry is ['carrier' => string, 'reason' => string].
+     *
+     * @return array<int, array{carrier: string, reason: string}>
+     */
+    public function getExclusions(): array
+    {
+        return array_map(
+            fn ($carrier, $reason) => ['carrier' => $carrier, 'reason' => $reason],
+            array_keys($this->exclusions),
+            $this->exclusions,
+        );
+    }
+
     /**
      * Get shipping rates for a package from all applicable carriers.
      *
@@ -65,6 +90,10 @@ class ShippingRateService
                 $carrierTasks[] = ['name' => $name, 'serviceCodes' => []];
             }
         }
+
+        $this->exclusions = [];
+        $requiredServiceCodes = $this->getRequiredServiceCodes($shippingMethod ?? null);
+        $carrierTasks = $this->filterProhibitedCarriers($carrierTasks, $requiredServiceCodes);
 
         $rateOptions = $this->fetchRatesConcurrently($carrierTasks, $rateRequest);
 
@@ -196,6 +225,64 @@ class ShippingRateService
         }
 
         return $rateOptions;
+    }
+
+    /**
+     * Get the special service codes that are required or defaulted on a shipping method.
+     * These are the services that will always be applied to packages using this method,
+     * so they must be checked against each carrier's capabilities.
+     *
+     * @return array<string>
+     */
+    private function getRequiredServiceCodes(?ShippingMethod $shippingMethod): array
+    {
+        if (! $shippingMethod) {
+            return [];
+        }
+
+        return $shippingMethod->specialServices()
+            ->whereIn('shipping_method_special_service.mode', ['required', 'default'])
+            ->pluck('code')
+            ->all();
+    }
+
+    /**
+     * Filter out carrier tasks where the carrier prohibits any of the required services.
+     * Records the reason for each excluded carrier in $this->exclusions.
+     *
+     * @param  array<int, array{name: string, serviceCodes: array<string>}>  $carrierTasks
+     * @param  array<string>  $requiredServiceCodes
+     * @return array<int, array{name: string, serviceCodes: array<string>}>
+     */
+    private function filterProhibitedCarriers(array $carrierTasks, array $requiredServiceCodes): array
+    {
+        if (empty($requiredServiceCodes)) {
+            return $carrierTasks;
+        }
+
+        $registry = app(CarrierRegistry::class);
+        $serviceNames = SpecialService::whereIn('code', $requiredServiceCodes)
+            ->pluck('name', 'code');
+
+        return array_values(array_filter($carrierTasks, function (array $task) use ($registry, $requiredServiceCodes, $serviceNames): bool {
+            $carrierName = $task['name'];
+
+            if (! $registry->has($carrierName)) {
+                return true;
+            }
+
+            $adapter = $registry->get($carrierName);
+
+            foreach ($requiredServiceCodes as $code) {
+                if ($adapter->serviceCapability($code) === ServiceCapability::Prohibited) {
+                    $this->exclusions[$carrierName] = $carrierName.' does not support '.$serviceNames->get($code, $code).'.';
+
+                    return false;
+                }
+            }
+
+            return true;
+        }));
     }
 
     /**

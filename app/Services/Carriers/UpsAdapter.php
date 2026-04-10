@@ -11,17 +11,29 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
+use App\Enums\ServiceCapability;
 use App\Http\Integrations\Ups\Requests\CreateShipment;
 use App\Http\Integrations\Ups\Requests\Rate;
 use App\Http\Integrations\Ups\Requests\VoidShipment;
 use App\Http\Integrations\Ups\UpsConnector;
 use App\Models\Package;
+use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
 use App\Services\SettingsService;
 use Illuminate\Support\Collection;
 use Saloon\Http\Response;
 
 class UpsAdapter implements CarrierAdapterInterface
 {
+    use HasDefaultServiceCapabilities;
+
+    public function serviceCapability(string $serviceCode): ServiceCapability
+    {
+        return match ($serviceCode) {
+            'saturday_delivery' => ServiceCapability::Supported,
+            default => ServiceCapability::NotImplemented,
+        };
+    }
+
     /**
      * UPS service code to human-readable name mapping.
      *

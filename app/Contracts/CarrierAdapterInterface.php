@@ -9,6 +9,7 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
+use App\Enums\ServiceCapability;
 use App\Models\Package;
 use Illuminate\Support\Collection;
 use Saloon\Http\Response;
@@ -19,6 +20,15 @@ interface CarrierAdapterInterface
      * Get the carrier name (e.g., 'USPS', 'FedEx', 'UPS').
      */
     public function getCarrierName(): string;
+
+    /**
+     * Return this carrier's capability for a given special service code.
+     *
+     * - Supported: adapter sends it to the carrier API
+     * - Prohibited: carrier policy/legal restriction; carrier is excluded from rates
+     * - NotImplemented: not coded yet; service is silently skipped
+     */
+    public function serviceCapability(string $serviceCode): ServiceCapability;
 
     /**
      * Get shipping rates for the given request (synchronous).

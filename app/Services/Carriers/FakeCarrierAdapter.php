@@ -10,12 +10,22 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
+use App\Enums\ServiceCapability;
 use App\Models\Package;
+use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
 use Illuminate\Support\Collection;
 use Saloon\Http\Response;
 
 class FakeCarrierAdapter implements CarrierAdapterInterface
 {
+    use HasDefaultServiceCapabilities;
+
+    // In test/fake mode, report everything as Supported so capability checks don't filter rates.
+    public function serviceCapability(string $serviceCode): ServiceCapability
+    {
+        return ServiceCapability::Supported;
+    }
+
     /** @var array<string, array<int, array{code: string, name: string, price: float, transit: string, days: int}>> */
     private const RATES = [
         'USPS' => [

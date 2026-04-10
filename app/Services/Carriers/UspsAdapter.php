@@ -12,6 +12,7 @@ use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\BoxSizeType;
+use App\Enums\ServiceCapability;
 use App\Http\Integrations\USPS\Requests\CancelInternationalLabel;
 use App\Http\Integrations\USPS\Requests\CancelLabel;
 use App\Http\Integrations\USPS\Requests\InternationalLabel;
@@ -19,6 +20,7 @@ use App\Http\Integrations\USPS\Requests\Label;
 use App\Http\Integrations\USPS\Requests\ShippingOptions;
 use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Package;
+use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
 use App\Services\SettingsService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -27,6 +29,20 @@ use Saloon\Http\Response;
 
 class UspsAdapter implements CarrierAdapterInterface
 {
+    use HasDefaultServiceCapabilities;
+
+    public function serviceCapability(string $serviceCode): ServiceCapability
+    {
+        return match ($serviceCode) {
+            'cremated_remains' => ServiceCapability::Supported,
+            // Mailing alcohol is prohibited under 27 CFR 72.11 (federal law)
+            'alcohol' => ServiceCapability::Prohibited,
+            // USPS uses air transport for express services; ground-only battery shipments cannot be guaranteed
+            'lithium_battery_ground_only' => ServiceCapability::Prohibited,
+            default => ServiceCapability::NotImplemented,
+        };
+    }
+
     public function getCarrierName(): string
     {
         return 'USPS';

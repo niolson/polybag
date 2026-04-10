@@ -13,6 +13,7 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackingEventData;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\FedexPackageType;
+use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
 use App\Http\Integrations\Fedex\FedexConnector;
 use App\Http\Integrations\Fedex\Requests\CancelShipment as CancelShipmentRequest;
@@ -21,6 +22,7 @@ use App\Http\Integrations\Fedex\Requests\Rates;
 use App\Http\Integrations\Fedex\Requests\TrackShipment;
 use App\Models\Location;
 use App\Models\Package;
+use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
 use App\Services\SettingsService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -29,6 +31,18 @@ use Saloon\Http\Response;
 
 class FedexAdapter implements CarrierAdapterInterface
 {
+    use HasDefaultServiceCapabilities;
+
+    public function serviceCapability(string $serviceCode): ServiceCapability
+    {
+        return match ($serviceCode) {
+            'saturday_delivery' => ServiceCapability::Supported,
+            // FedEx does not accept cremated remains (service guide prohibition)
+            'cremated_remains' => ServiceCapability::Prohibited,
+            default => ServiceCapability::NotImplemented,
+        };
+    }
+
     /**
      * International service codes that need mock rates in sandbox mode.
      */

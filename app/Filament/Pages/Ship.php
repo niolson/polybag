@@ -86,7 +86,12 @@ class Ship extends Page implements HasForms
             return;
         }
 
-        $rates = app(ShippingRateService::class)->getShippingRates($this->package->id);
+        $rateService = app(ShippingRateService::class);
+        $rates = $rateService->getShippingRates($this->package->id);
+
+        foreach ($rateService->getExclusions() as $exclusion) {
+            $this->notifyWarning($exclusion['carrier'].' excluded', $exclusion['reason']);
+        }
 
         // Apply shipping rules (exclude services, etc.)
         $ruleResult = app(RuleEvaluator::class)->evaluate($this->package->shipment);
