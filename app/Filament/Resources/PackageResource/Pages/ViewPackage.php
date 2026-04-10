@@ -8,6 +8,7 @@ use App\Filament\Resources\ShipmentResource;
 use App\Models\Location;
 use App\Services\Carriers\CarrierRegistry;
 use Filament\Actions\Action;
+use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
@@ -146,6 +147,35 @@ class ViewPackage extends ViewRecord
                         TextEntry::make('shipment.country')
                             ->label('Country'),
                     ]),
+
+                Section::make('Special Services')
+                    ->visible(fn ($record) => $record->specialServices->isNotEmpty())
+                    ->schema([
+                        RepeatableEntry::make('specialServices')
+                            ->label('')
+                            ->columns(3)
+                            ->schema([
+                                TextEntry::make('specialService.name')
+                                    ->label('Service'),
+                                TextEntry::make('source')
+                                    ->label('Source')
+                                    ->badge()
+                                    ->formatStateUsing(fn ($state) => ucwords(str_replace('_', ' ', $state instanceof \BackedEnum ? $state->value : $state)))
+                                    ->color(fn ($state): string => match ($state instanceof \BackedEnum ? $state->value : $state) {
+                                        'shipping_method' => 'info',
+                                        'product' => 'warning',
+                                        'manual' => 'gray',
+                                        'system' => 'gray',
+                                        'rule' => 'success',
+                                        default => 'gray',
+                                    }),
+                                TextEntry::make('applied_at')
+                                    ->label('Applied At')
+                                    ->dateTime('M j, Y g:i A', timezone: Location::timezone())
+                                    ->placeholder('—'),
+                            ]),
+                    ]),
+
             ]);
     }
 }

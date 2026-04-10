@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\PackageStatus;
+use App\Enums\SpecialServiceSource;
 use App\Enums\TrackingStatus;
 use App\Events\PackageCancelled;
 use App\Events\PackageShipped;
@@ -185,10 +186,53 @@ class Package extends Model
             $this->refresh();
         });
 
+        $this->recordAppliedSpecialServices($response->appliedServices);
+
         $this->load('shipment.shipmentItems');
         $this->shipment->updateShippedStatus();
 
         PackageShipped::dispatch($this, $this->shipment);
+    }
+
+    /**
+     * Record which special services were actually applied when this package was shipped.
+     *
+     * @param  array<string>  $appliedServiceCodes  Service codes confirmed sent to the carrier
+     */
+    private function recordAppliedSpecialServices(array $appliedServiceCodes): void
+    {
+        if (empty($appliedServiceCodes)) {
+            return;
+        }
+
+        $shippingMethod = $this->shipment?->shippingMethod;
+        $services = SpecialService::whereIn('code', $appliedServiceCodes)->get()->keyBy('code');
+        $now = now();
+
+        foreach ($appliedServiceCodes as $code) {
+            $service = $services->get($code);
+
+            if (! $service) {
+                continue;
+            }
+
+            $pivotMode = $shippingMethod?->specialServices()
+                ->where('code', $code)
+                ->value('shipping_method_special_service.mode');
+
+            $source = $pivotMode ? SpecialServiceSource::ShippingMethod : SpecialServiceSource::System;
+            $sourceReference = $pivotMode ? (string) $shippingMethod->id : null;
+
+            $this->specialServices()->updateOrCreate(
+                ['special_service_id' => $service->id],
+                [
+                    'source' => $source,
+                    'source_reference' => $sourceReference,
+                    'config' => null,
+                    'applied_at' => $now,
+                ],
+            );
+        }
     }
 
     /**

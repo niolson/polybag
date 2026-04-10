@@ -6,6 +6,9 @@ use Carbon\CarbonImmutable;
 
 readonly class ShipResponse
 {
+    /**
+     * @param  array<string>  $appliedServices  Carrier-agnostic service codes actually sent to the carrier (e.g. 'saturday_delivery')
+     */
     public function __construct(
         public bool $success,
         public ?string $trackingNumber = null,
@@ -18,8 +21,12 @@ readonly class ShipResponse
         public ?int $labelDpi = null,
         public ?CarbonImmutable $shipDate = null,
         public ?string $errorMessage = null,
+        public array $appliedServices = [],
     ) {}
 
+    /**
+     * @param  array<string>  $appliedServices
+     */
     public static function success(
         string $trackingNumber,
         float $cost,
@@ -30,6 +37,7 @@ readonly class ShipResponse
         string $labelFormat = 'pdf',
         ?int $labelDpi = null,
         ?CarbonImmutable $shipDate = null,
+        array $appliedServices = [],
     ): self {
         return new self(
             success: true,
@@ -42,6 +50,7 @@ readonly class ShipResponse
             labelFormat: $labelFormat,
             labelDpi: $labelDpi,
             shipDate: $shipDate,
+            appliedServices: $appliedServices,
         );
     }
 

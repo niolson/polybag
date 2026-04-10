@@ -437,7 +437,8 @@ class FedexAdapter implements CarrierAdapterInterface
             if (! empty($request->selectedRate->metadata['isOneRate'])) {
                 $specialServiceTypes[] = 'FEDEX_ONE_RATE';
             }
-            if ($request->saturdayDelivery) {
+            $saturdayRequested = $request->saturdayDelivery;
+            if ($saturdayRequested) {
                 $specialServiceTypes[] = 'SATURDAY_DELIVERY';
             }
             if (! empty($specialServiceTypes)) {
@@ -450,20 +451,26 @@ class FedexAdapter implements CarrierAdapterInterface
             $responseData = $response->json();
 
             // If Saturday delivery was rejected, retry without it
-            if ($request->saturdayDelivery && ! $response->successful()) {
+            $saturdayApplied = $saturdayRequested;
+            if ($saturdayRequested && ! $response->successful()) {
                 $errors = $responseData['errors'] ?? [];
                 $isSaturdayError = collect($errors)->contains(function ($e) {
                     $code = $e['code'] ?? '';
                     $message = strtolower($e['message'] ?? '');
-                    // Check error message/code for Saturday references
-                    if (str_contains($message, 'saturday') || str_contains($code, 'SATURDAY')) {
+                    // Check message or code for Saturday references
+                    if (str_contains($message, 'saturday') || str_contains(strtolower($code), 'saturday')) {
                         return true;
                     }
-                    // ORGORDEST.SPECIALSERVICES.NOTALLOWED with SATURDAY_DELIVERY in parameterList
-                    if ($code === 'ORGORDEST.SPECIALSERVICES.NOTALLOWED') {
-                        return collect($e['parameterList'] ?? [])->contains(
-                            fn ($p) => ($p['value'] ?? '') === 'SATURDAY_DELIVERY'
-                        );
+                    // Errors that reference SATURDAY_DELIVERY in parameterList
+                    $saturdayInParams = collect($e['parameterList'] ?? [])->contains(
+                        fn ($p) => ($p['value'] ?? '') === 'SATURDAY_DELIVERY'
+                    );
+                    if ($saturdayInParams) {
+                        return true;
+                    }
+                    // Generic special-service rejection codes when Saturday was the only service requested
+                    if (in_array($code, ['SHIPMENT.SPECIALSERVICETYPE.NOTALLOWED', 'ORGORDEST.SPECIALSERVICES.NOTALLOWED'])) {
+                        return true;
                     }
 
                     return false;
@@ -473,6 +480,7 @@ class FedexAdapter implements CarrierAdapterInterface
                     logger()->info('FedEx Saturday delivery rejected, retrying without', [
                         'errors' => $errors,
                     ]);
+                    $saturdayApplied = false;
                     // Remove only SATURDAY_DELIVERY, preserve other special services (e.g. FEDEX_ONE_RATE)
                     $existingTypes = $requestedShipment['shipmentSpecialServices']['specialServiceTypes'] ?? [];
                     $remainingTypes = array_values(array_filter($existingTypes, fn ($t) => $t !== 'SATURDAY_DELIVERY'));
@@ -484,6 +492,12 @@ class FedexAdapter implements CarrierAdapterInterface
                     $response = $this->sendCreateShipment($connector, $requestedShipment);
                     $responseData = $response->json();
                 }
+            }
+
+            // Build the list of our service codes that were actually applied
+            $appliedServices = [];
+            if ($saturdayApplied) {
+                $appliedServices[] = 'saturday_delivery';
             }
 
             if (! $response->successful()) {
@@ -542,6 +556,7 @@ class FedexAdapter implements CarrierAdapterInterface
                 labelFormat: $request->labelFormat,
                 labelDpi: $request->labelDpi,
                 shipDate: $request->shipDate,
+                appliedServices: $appliedServices,
             );
         } catch (\Exception $e) {
             logger()->error('FedEx createShipment error', ['error' => $e->getMessage()]);
@@ -1049,7 +1064,11 @@ class FedexAdapter implements CarrierAdapterInterface
             'requestedShipment' => $requestedShipment,
         ]);
 
-        return $connector->send($apiRequest);
+        try {
+            return $connector->send($apiRequest);
+        } catch (RequestException $e) {
+            return $e->getResponse();
+        }
     }
 
     private function buildContact(AddressData $address): array
