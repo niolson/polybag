@@ -13,6 +13,7 @@ class ReferenceDataSeeder extends Seeder
     {
         $this->call([
             CarrierSeeder::class,
+            SpecialServiceSeeder::class,
         ]);
     }
 }

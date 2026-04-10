@@ -49,7 +49,7 @@ readonly class RateRequest
             destinationStateOrProvince: $shipment->validated_state_or_province ?? $shipment->state_or_province,
             residential: $shipment->validated_residential ?? $shipment->residential,
             packages: [PackageData::fromPackage($package)],
-            saturdayDelivery: (bool) $shippingMethod?->saturday_delivery,
+            saturdayDelivery: (bool) $shippingMethod?->hasDefaultService('saturday_delivery'),
             locationId: $package->location_id,
         );
     }

@@ -17,7 +17,7 @@ class ShippingMethodSeeder extends Seeder
         // Standard Ground - USPS Ground Advantage, FedEx Home Delivery
         $standardGround = ShippingMethod::firstOrCreate(
             ['name' => 'Standard Ground'],
-            ['commitment_days' => 5, 'saturday_delivery' => false, 'active' => true],
+            ['commitment_days' => 5, 'active' => true],
         );
         ShippingMethodAlias::firstOrCreate(
             ['reference' => '1'],
@@ -33,7 +33,7 @@ class ShippingMethodSeeder extends Seeder
         // 2 Day - Priority Mail, FedEx 2Day
         $twoDay = ShippingMethod::firstOrCreate(
             ['name' => '2 Day'],
-            ['commitment_days' => 2, 'saturday_delivery' => false, 'active' => true],
+            ['commitment_days' => 2, 'active' => true],
         );
         ShippingMethodAlias::firstOrCreate(
             ['reference' => '2'],
@@ -50,7 +50,7 @@ class ShippingMethodSeeder extends Seeder
         // International Economy - USPS Priority Mail International, FedEx International Economy
         $internationalEconomy = ShippingMethod::firstOrCreate(
             ['name' => 'International Economy'],
-            ['commitment_days' => 5, 'saturday_delivery' => false, 'active' => true],
+            ['commitment_days' => 5, 'active' => true],
         );
         ShippingMethodAlias::firstOrCreate(
             ['reference' => '3'],
@@ -66,7 +66,7 @@ class ShippingMethodSeeder extends Seeder
         // Overnight - Priority Mail Express, FedEx Priority/Standard Overnight
         $overnight = ShippingMethod::firstOrCreate(
             ['name' => 'Overnight'],
-            ['commitment_days' => 1, 'saturday_delivery' => false, 'active' => true],
+            ['commitment_days' => 1, 'active' => true],
         );
         ShippingMethodAlias::firstOrCreate(
             ['reference' => '4'],

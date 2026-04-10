@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Enums\HazmatClass;
 use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\ProductResource\Pages;
 use App\Models\Location;
@@ -10,6 +11,7 @@ use BackedEnum;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -78,6 +80,21 @@ class ProductResource extends Resource
                     ->helperText('2-letter country code (e.g., US, CN)'),
                 Forms\Components\Toggle::make('active')
                     ->default(true),
+                Section::make('Compliance')
+                    ->description('Flags that trigger special carrier handling requirements.')
+                    // ->collapsed()
+                    ->schema([
+                        Forms\Components\Toggle::make('contains_alcohol')
+                            ->label('Contains Alcohol')
+                            ->helperText('Requires adult signature at delivery. FedEx and UPS domestic only; USPS not supported.')
+                            ->columnSpanFull(),
+                        Forms\Components\Select::make('hazmat_class')
+                            ->label('Hazmat Classification')
+                            ->options(HazmatClass::class)
+                            ->placeholder('None')
+                            ->helperText('Automatically applies the appropriate carrier hazmat/dangerous goods service.')
+                            ->columnSpanFull(),
+                    ]),
             ]);
     }
 
@@ -102,6 +119,19 @@ class ProductResource extends Resource
                 Tables\Columns\TextColumn::make('weight')
                     ->numeric()
                     ->sortable(),
+                Tables\Columns\IconColumn::make('contains_alcohol')
+                    ->label('Alcohol')
+                    ->boolean()
+                    ->trueIcon('heroicon-o-exclamation-triangle')
+                    ->trueColor('warning')
+                    ->falseIcon('')
+                    ->toggleable(isToggledHiddenByDefault: true),
+                Tables\Columns\TextColumn::make('hazmat_class')
+                    ->label('Hazmat')
+                    ->badge()
+                    ->color('danger')
+                    ->formatStateUsing(fn ($state) => $state?->getLabel())
+                    ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\IconColumn::make('active')
                     ->boolean(),
                 Tables\Columns\TextColumn::make('created_at')
@@ -120,6 +150,11 @@ class ProductResource extends Resource
                 Tables\Filters\Filter::make('missing_weight')
                     ->label('Missing Weight')
                     ->query(fn ($query) => $query->whereNull('weight')->orWhere('weight', '<=', 0)),
+                Tables\Filters\TernaryFilter::make('contains_alcohol')
+                    ->label('Contains Alcohol'),
+                Tables\Filters\SelectFilter::make('hazmat_class')
+                    ->label('Hazmat Class')
+                    ->options(HazmatClass::class),
             ])
             ->recordActions([
                 Actions\EditAction::make(),

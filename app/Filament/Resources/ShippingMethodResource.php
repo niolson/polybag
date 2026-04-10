@@ -6,6 +6,7 @@ use App\Filament\Resources\ShippingMethodResource\Pages;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\AliasesRelationManager;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\CarrierServicesRelationManager;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\ShippingRulesRelationManager;
+use App\Filament\Resources\ShippingMethodResource\RelationManagers\SpecialServicesRelationManager;
 use App\Models\Location;
 use App\Models\ShippingMethod;
 use BackedEnum;
@@ -33,7 +34,6 @@ class ShippingMethodResource extends Resource
                     ->maxLength(255),
                 Forms\Components\TextInput::make('commitment_days')
                     ->numeric(),
-                Forms\Components\Toggle::make('saturday_delivery'),
                 Forms\Components\Toggle::make('active')
                     ->default(true),
             ]);
@@ -48,8 +48,6 @@ class ShippingMethodResource extends Resource
                 Tables\Columns\TextColumn::make('commitment_days')
                     ->numeric()
                     ->sortable(),
-                Tables\Columns\IconColumn::make('saturday_delivery')
-                    ->boolean(),
                 Tables\Columns\IconColumn::make('active')
                     ->boolean(),
                 Tables\Columns\TextColumn::make('created_at')
@@ -69,6 +67,7 @@ class ShippingMethodResource extends Resource
     {
         return [
             CarrierServicesRelationManager::class,
+            SpecialServicesRelationManager::class,
             AliasesRelationManager::class,
             ShippingRulesRelationManager::class,
         ];

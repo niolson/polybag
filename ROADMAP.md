@@ -325,7 +325,7 @@ When a package uses a BoxSize with a non-`YOUR_PACKAGING` `fedex_package_type`, 
 
 **Sandbox note:** FedEx sandbox does not support One Rate requests (returns errors). One Rate only works against the production API.
 
-### Phase C: FedEx Ground Economy (SmartPost)
+### Phase C: FedEx Ground Economy (SmartPost) - COMPLETED (2026-04-03) - test on live api when available
 
 FedEx Ground Economy (service type `SMART_POST`) — low-cost residential delivery via FedEx Ground + USPS last-mile. Requires `smartPostInfoDetail` in both rate and ship requests.
 
@@ -358,19 +358,79 @@ Currently, rate shopping always works (queries USPS Shipping Options API for val
 
 **Not recommended:** Binary search job against USPS API — zone-dependent pricing makes the thresholds non-uniform. Better to learn from real shipping data.
 
-### Phase E (was D): Extra Services Model
+### Phase E: Special Services Model
 
-USPS supports many optional services: insurance, signature required, certified mail, hazmat, Sunday delivery, etc. Other carriers have similar add-ons (FedEx delivery confirmation, UPS declared value, etc.).
+Cross-carrier special services: signature options, alcohol, lithium batteries, dry ice, hold at location, email notifications, declared value, Saturday delivery, and more. Currently, Saturday delivery lives as a dedicated column on `ShippingMethod` and alcohol/hazmat exist as a stub boolean concept. This replaces both with a proper extensible model.
 
-**Current state:** No data model for per-package extra services. Saturday delivery lives on ShippingMethod, which is fine for a single flag.
+**Design principles:**
+- `special_services` is a code-owned catalog (seeded via migrations, not user-editable) — an enum registry with DB rows
+- Product compliance facts (alcohol, hazmat, battery type) are product attributes, not service attachments — they exist before any label is created and affect carrier eligibility
+- Carrier adapters translate normalized internal service codes to carrier-specific API fields; the DB never stores carrier-specific codes
+- Package-level snapshot captures what was actually applied and why, independent of later config changes
+- Carrier-specific request payload stored separately for debugging
 
-**When to build:** Once 3+ extra services need support. Until then, individual flags on ShippingMethod or shipping rule actions are sufficient.
+#### V1 — Core Infrastructure
 
-**Proposed model (when needed):**
-- `ExtraService` — carrier, service_code, name, description, requires_value (bool)
-- `package_extra_services` pivot — package_id, extra_service_id, value (nullable, e.g. insurance amount)
-- `carrier_service_extra_services` pivot — which extra services are available for which carrier services
-- UI: multi-select on Ship page and in shipping rules
+**Schema changes:**
+
+`special_services` table (seeded, code-owned):
+- `id`, `code` (stable string key e.g. `signature_required`), `name`, `description`
+- `scope` enum: `shipment`, `package`
+- `category` string: `delivery`, `compliance`, `pickup`, `returns`, etc.
+- `requires_value` boolean, `config_schema` JSON nullable (describes what additional data the service needs, e.g. dry ice weight, email addresses)
+- `active` boolean
+
+`shipping_method_special_service` pivot (replaces `shipping_methods.saturday_delivery` and similar flags):
+- `shipping_method_id`, `special_service_id`
+- `mode` enum: `available`, `default`, `required`
+- `config` JSON nullable (service-specific defaults for this method, e.g. default signature level)
+- `sort_order`
+
+Product compliance columns (facts about what the product is, not service attachments):
+- `products.hazmat_class` — nullable string enum: `lithium_battery_in_equipment`, `lithium_battery_standalone`, `lithium_battery_ground_only`, `dry_ice`, `cremated_remains`, etc.
+- `products.contains_alcohol` boolean
+- Full regulatory hazmat (UN numbers, packing groups, emergency contacts) is deferred to V2
+
+`package_special_services` snapshot table:
+- `id`, `package_id`, `special_service_id`
+- `source` enum: `shipping_method`, `product`, `manual`, `system` (rule reserved for V2)
+- `source_reference` nullable (e.g. `product_id:42` for product-triggered services)
+- `config` JSON nullable (service-specific values: dry ice weight, email addresses, declared amount, etc.)
+- `applied_at`
+
+Package-level payload columns:
+- `packages.carrier_request_payload` JSON nullable — the exact serialized payload sent to the carrier API (for debugging label issues)
+
+**Resolution logic (runs at ship time, before label purchase):**
+
+1. Load shipping method defaults from pivot → add services with `mode: default` or `mode: required`
+2. Check product compliance flags on each package item → auto-add `hazmat_class`-triggered services (operator cannot clear these)
+3. Operator adjusts optional selections in Ship UI (constrained to `mode: available` services for the selected carrier service)
+4. Dry ice weight, notify emails, declared value, hold-at-location address → collected as `config` on the relevant `package_special_services` row
+5. Write `package_special_services` rows with `source` + `source_reference`
+6. Adapter reads rows → translates to carrier-specific API fields → writes `carrier_request_payload`
+
+**Carrier translation examples:**
+
+| Internal code | USPS | FedEx | UPS |
+|---|---|---|---|
+| `lithium_battery_in_equipment` | extra service 818 | `BATTERY` | 199 + UN3481 |
+| `lithium_battery_standalone` | extra service 820 | `STANDALONE_BATTERY` | 199 + UN3090 |
+| `dry_ice` | extra service 819 | `DRY_ICE` + weight | acc. 200 + weight |
+| `alcohol` | ❌ domestic | `ALCOHOL` | 205 (intl only) |
+| `adult_signature_required` | extra service 922 | `SIGNATURE_OPTION: ADULT` | DeliveryConfirmation subtype |
+| `saturday_delivery` | N/A | `SATURDAY_DELIVERY` | acc. 300 |
+
+**Seeded services (initial set):**
+`signature_required`, `adult_signature_required`, `saturday_delivery`, `hold_for_pickup`, `declared_value`, `email_notification`, `dry_ice`, `alcohol`, `lithium_battery_in_equipment`, `lithium_battery_standalone`, `lithium_battery_ground_only`, `carrier_release`
+
+**Migration note:** Migrate `shipping_methods.saturday_delivery` to a pivot row with `mode: default` or `mode: available` as appropriate. Remove the column.
+
+#### V2 — Rule Engine Integration
+
+Extend `ShippingRule` actions to add, remove, or require special services. The `package_special_services.source = 'rule'` column is already designed for this; the rule engine extension is deferred until a real merchant need surfaces.
+
+Also deferred to V2: full UN-number regulatory hazmat (flammable liquids, corrosives, radioactives) — these require per-substance dangerous goods declarations (UN number, proper shipping name, packing group, regulation set, emergency contacts) that are too complex for V1 and require DG-trained operators.
 
 ---
 

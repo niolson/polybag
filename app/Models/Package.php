@@ -27,6 +27,7 @@ class Package extends Model
         'carrier',
         'service',
         'metadata',
+        'carrier_request_payload',
         'label_data',
         'label_orientation',
         'label_format',
@@ -52,6 +53,7 @@ class Package extends Model
 
     protected $casts = [
         'metadata' => 'array',
+        'carrier_request_payload' => 'array',
         'weight' => 'decimal:2',
         'height' => 'decimal:2',
         'width' => 'decimal:2',
@@ -108,6 +110,11 @@ class Package extends Model
     public function rateQuotes(): HasMany
     {
         return $this->hasMany(RateQuote::class);
+    }
+
+    public function specialServices(): HasMany
+    {
+        return $this->hasMany(PackageSpecialService::class);
     }
 
     public function shippedBy(): BelongsTo

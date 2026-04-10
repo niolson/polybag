@@ -24,6 +24,7 @@ use App\Models\Package;
 use App\Services\SettingsService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
+use Saloon\Exceptions\Request\RequestException;
 use Saloon\Http\Response;
 
 class FedexAdapter implements CarrierAdapterInterface
@@ -103,7 +104,14 @@ class FedexAdapter implements CarrierAdapterInterface
 
         $connector = FedexConnector::getFedexConnector();
         $apiRequest = $this->buildRateApiRequest($this->adjustRequestForSaturday($request, $serviceCodes), $serviceCodes);
-        $response = $connector->send($apiRequest);
+
+        try {
+            $response = $connector->send($apiRequest);
+        } catch (RequestException $e) {
+            // Saloon throws on 4xx/5xx when retries are exhausted. Pass the response
+            // to parseRateResponse so the Saturday delivery retry logic can handle it.
+            $response = $e->getResponse();
+        }
 
         // Pass original $request so parseRateResponse knows Saturday was requested
         return $this->parseRateResponse($response, $request, $serviceCodes);
@@ -145,7 +153,7 @@ class FedexAdapter implements CarrierAdapterInterface
                     logger()->info('FedEx Saturday delivery not available for this destination, retrying without');
                     $requestWithout = $this->withoutSaturdayDelivery($request);
                     $connector = FedexConnector::getFedexConnector();
-                    $apiRequest = $this->buildRateApiRequest($requestWithout);
+                    $apiRequest = $this->buildRateApiRequest($requestWithout, $serviceCodes);
                     $retryResponse = $connector->send($apiRequest);
 
                     return $this->parseRateResponse($retryResponse, $requestWithout, $serviceCodes);

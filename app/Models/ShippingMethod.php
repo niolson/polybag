@@ -14,12 +14,10 @@ class ShippingMethod extends Model
     protected $fillable = [
         'name',
         'commitment_days',
-        'saturday_delivery',
         'active',
     ];
 
     protected $casts = [
-        'saturday_delivery' => 'boolean',
         'active' => 'boolean',
     ];
 
@@ -41,5 +39,23 @@ class ShippingMethod extends Model
     public function carrierServices(): BelongsToMany
     {
         return $this->belongsToMany(CarrierService::class);
+    }
+
+    public function specialServices(): BelongsToMany
+    {
+        return $this->belongsToMany(SpecialService::class)
+            ->withPivot(['mode', 'config'])
+            ->withTimestamps();
+    }
+
+    /**
+     * Check if this shipping method has a special service set as default or required.
+     */
+    public function hasDefaultService(string $code): bool
+    {
+        return $this->specialServices()
+            ->where('code', $code)
+            ->whereIn('shipping_method_special_service.mode', ['default', 'required'])
+            ->exists();
     }
 }

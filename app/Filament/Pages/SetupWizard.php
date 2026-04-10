@@ -10,22 +10,22 @@ use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\Channel;
-use App\Models\ChannelAlias;
 use App\Models\Location;
 use App\Models\ShippingMethod;
-use App\Models\ShippingMethodAlias;
+use App\Services\CacheService;
 use App\Services\SettingsService;
 use Database\Seeders\BoxSizeSeeder;
 use Database\Seeders\ShippingMethodSeeder;
-use Filament\Actions\Action;
 use Filament\Forms;
 use Filament\Notifications\Notification;
-use Filament\Schemas\Components\Utilities\Get;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Wizard;
 use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\HtmlString;
 
 class SetupWizard extends Page
 {
@@ -116,7 +116,7 @@ class SetupWizard extends Page
                 ])
                     ->startOnStep($startStep)
                     ->persistStepInQueryString('step')
-                    ->cancelAction(new \Illuminate\Support\HtmlString(\Illuminate\Support\Facades\Blade::render(<<<'BLADE'
+                    ->cancelAction(new HtmlString(Blade::render(<<<'BLADE'
                         <x-filament::button
                             type="button"
                             wire:click="skipWizard"
@@ -128,7 +128,7 @@ class SetupWizard extends Page
                             Skip wizard
                         </x-filament::button>
                     BLADE)))
-                    ->submitAction(new \Illuminate\Support\HtmlString(\Illuminate\Support\Facades\Blade::render(<<<'BLADE'
+                    ->submitAction(new HtmlString(Blade::render(<<<'BLADE'
                         <x-filament::button type="button" wire:click="completeSetup" icon="heroicon-o-check">
                             Complete Setup
                         </x-filament::button>
@@ -214,7 +214,7 @@ class SetupWizard extends Page
                 Forms\Components\Placeholder::make('existing_box_sizes')
                     ->label('Existing Box Sizes')
                     ->visible(fn () => BoxSize::exists())
-                    ->content(fn () => new \Illuminate\Support\HtmlString(
+                    ->content(fn () => new HtmlString(
                         view('filament.pages.setup-wizard.existing-box-sizes', [
                             'boxes' => BoxSize::all(),
                         ])->render()
@@ -292,7 +292,7 @@ class SetupWizard extends Page
                         Forms\Components\Placeholder::make('existing_channels')
                             ->label('Existing Channels')
                             ->visible(fn () => Channel::exists())
-                            ->content(fn () => new \Illuminate\Support\HtmlString(
+                            ->content(fn () => new HtmlString(
                                 view('filament.pages.setup-wizard.existing-channels', [
                                     'channels' => Channel::with('aliases')->get(),
                                 ])->render()
@@ -342,7 +342,7 @@ class SetupWizard extends Page
                         Forms\Components\Placeholder::make('existing_methods')
                             ->label('Existing Shipping Methods')
                             ->visible(fn () => ShippingMethod::exists())
-                            ->content(fn () => new \Illuminate\Support\HtmlString(
+                            ->content(fn () => new HtmlString(
                                 view('filament.pages.setup-wizard.existing-methods', [
                                     'methods' => ShippingMethod::with(['aliases', 'carrierServices'])->get(),
                                 ])->render()
@@ -360,8 +360,6 @@ class SetupWizard extends Page
                                     ->label('Commitment Days')
                                     ->numeric()
                                     ->nullable(),
-                                Forms\Components\Toggle::make('saturday_delivery')
-                                    ->label('Saturday Delivery'),
                                 Forms\Components\CheckboxList::make('carrier_services')
                                     ->label('Carrier Services')
                                     ->options(fn () => CarrierService::query()
@@ -643,7 +641,7 @@ class SetupWizard extends Page
             }
         }
 
-        app(\App\Services\CacheService::class)->clearCarrierServicesCache();
+        app(CacheService::class)->clearCarrierServicesCache();
     }
 
     private function saveBoxSizes(): void
@@ -704,7 +702,6 @@ class SetupWizard extends Page
             $method = ShippingMethod::create([
                 'name' => $methodData['name'],
                 'commitment_days' => $methodData['commitment_days'] ?? null,
-                'saturday_delivery' => $methodData['saturday_delivery'] ?? false,
                 'active' => true,
             ]);
 

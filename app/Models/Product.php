@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\HazmatClass;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -21,12 +22,19 @@ class Product extends Model
         'hs_tariff_number',
         'country_of_origin',
         'active',
+        'contains_alcohol',
+        'hazmat_class',
     ];
 
-    protected $casts = [
-        'weight' => 'decimal:2',
-        'active' => 'boolean',
-    ];
+    protected function casts(): array
+    {
+        return [
+            'weight' => 'decimal:2',
+            'active' => 'boolean',
+            'contains_alcohol' => 'boolean',
+            'hazmat_class' => HazmatClass::class,
+        ];
+    }
 
     /**
      * @return array<string, mixed>

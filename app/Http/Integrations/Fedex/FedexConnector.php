@@ -135,9 +135,20 @@ class FedexConnector extends Connector
 
     protected static function getAuthenticatorCacheKey(): string
     {
-        // Separate cache keys for sandbox vs production — FedEx issues different
-        // client credentials per environment, so tokens are not interchangeable.
-        $isSandbox = app(SettingsService::class)->get('sandbox_mode', false);
+        $settings = app(SettingsService::class);
+        $childKey = $settings->get('fedex.child_key');
+
+        // When child credentials are active, scope the cache key to the child key + env
+        // so we never serve a stale parent-credential token to a child-credential request
+        // (or vice versa), and different installations don't share tokens.
+        if (filled($childKey)) {
+            $env = $settings->get('fedex.child_env', 'production');
+
+            return 'fedex_authenticator_child_'.$env.'_'.hash('sha256', $childKey);
+        }
+
+        // No child credentials — use the global sandbox_mode toggle.
+        $isSandbox = (bool) $settings->get('sandbox_mode', false);
 
         return $isSandbox ? 'fedex_authenticator_sandbox' : 'fedex_authenticator';
     }

@@ -100,7 +100,7 @@ readonly class ShipRequest
             customsItems: $customsItems,
             labelFormat: $labelFormat,
             labelDpi: $labelDpi,
-            saturdayDelivery: (bool) $shippingMethod?->saturday_delivery,
+            saturdayDelivery: (bool) $shippingMethod?->hasDefaultService('saturday_delivery'),
             locationId: $package->location_id,
             shipDate: $shipDate,
         );
