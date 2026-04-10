@@ -577,6 +577,8 @@ class Settings extends Page
                                 ->maxLength(50)
                                 ->copyable()
                                 ->readOnly(fn () => $this->isFedexAccountConnected()),
+                            Html::make(fn () => new HtmlString(view('components.legal-disclaimers', ['show' => ['fedex']])->render()))
+                                ->columnSpanFull(),
                         ])
                         ->footerActions([
                             Action::make('fedex_register')
@@ -836,7 +838,6 @@ class Settings extends Page
                                 }),
                         ])
                         ->columns(2)
-                        ->footer(new HtmlString(view('components.legal-disclaimers', ['show' => ['fedex']])->render()))
                         ->collapsed(),
 
                     Section::make('UPS Credentials')

@@ -191,7 +191,7 @@ class FedexAdapter implements CarrierAdapterInterface
         if ($request->saturdayDelivery && $this->classifySaturdayEligibility($serviceCodes, $request) === 'mixed') {
             try {
                 $connector = FedexConnector::getFedexConnector();
-                $saturdayApiRequest = $this->buildRateApiRequest($request);
+                $saturdayApiRequest = $this->buildRateApiRequest($request, $serviceCodes);
                 $saturdayResponse = $connector->send($saturdayApiRequest);
 
                 if ($saturdayResponse->successful()) {

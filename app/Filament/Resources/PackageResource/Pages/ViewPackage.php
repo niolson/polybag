@@ -15,6 +15,7 @@ use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Contracts\View\View;
 
 class ViewPackage extends ViewRecord
 {
@@ -67,6 +68,15 @@ class ViewPackage extends ViewRecord
             Action::make('edit')
                 ->url(fn () => PackageResource::getUrl('edit', ['record' => $this->record])),
         ];
+    }
+
+    public function getFooter(): ?View
+    {
+        if (strcasecmp($this->record->carrier ?? '', 'fedex') !== 0) {
+            return null;
+        }
+
+        return view('components.legal-disclaimers', ['show' => ['fedex']]);
     }
 
     public function infolist(Schema $infolist): Schema
