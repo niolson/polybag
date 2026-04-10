@@ -122,8 +122,9 @@ class FedexRegistrationService
     public function sendPin(string $accountAuthToken, string $option): void
     {
         $connector = $this->getConnector();
+        $apiRequest = new SendPin($accountAuthToken, $option);
 
-        $response = $connector->send(new SendPin($accountAuthToken, $option));
+        $response = $connector->send($apiRequest);
 
         if (! $response->successful()) {
             $this->throwFromResponse($response->json('errors.0.code'), $response->json('errors.0.message'));
@@ -138,8 +139,9 @@ class FedexRegistrationService
     public function verifyPin(string $accountAuthToken, string $pin): array
     {
         $connector = $this->getConnector();
+        $apiRequest = new VerifyPin($accountAuthToken, $pin);
 
-        $response = $connector->send(new VerifyPin($accountAuthToken, $pin));
+        $response = $connector->send($apiRequest);
 
         if (! $response->successful()) {
             $this->throwFromResponse($response->json('errors.0.code'), $response->json('errors.0.message'));
@@ -161,14 +163,15 @@ class FedexRegistrationService
         string $invoiceCurrency,
     ): array {
         $connector = $this->getConnector();
-
-        $response = $connector->send(new VerifyInvoice(
+        $apiRequest = new VerifyInvoice(
             accountAuthToken: $accountAuthToken,
             invoiceNumber: $invoiceNumber,
             invoiceDate: $invoiceDate,
             invoiceAmount: $invoiceAmount,
             invoiceCurrency: $invoiceCurrency,
-        ));
+        );
+
+        $response = $connector->send($apiRequest);
 
         if (! $response->successful()) {
             $this->throwFromResponse($response->json('errors.0.code'), $response->json('errors.0.message'));

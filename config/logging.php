@@ -137,6 +137,13 @@ return [
             'replace_placeholders' => true,
         ],
 
+        'fedex-validation' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/fedex-validation.log'),
+            'level' => 'debug',
+            'replace_placeholders' => true,
+        ],
+
     ],
 
 ];
