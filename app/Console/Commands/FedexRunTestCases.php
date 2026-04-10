@@ -194,6 +194,14 @@ class FedexRunTestCases extends Command
             );
         }
 
+        // FedEx API is case-sensitive: the field is "homedeliveryPremiumType" (lowercase 'd'),
+        // not "homeDeliveryPremiumType". Rename it if the fixture uses the wrong casing.
+        if (isset($payload['requestedShipment']['shipmentSpecialServices']['homeDeliveryPremiumDetail']['homeDeliveryPremiumType'])) {
+            $detail = &$payload['requestedShipment']['shipmentSpecialServices']['homeDeliveryPremiumDetail'];
+            $detail['homedeliveryPremiumType'] = $detail['homeDeliveryPremiumType'];
+            unset($detail['homeDeliveryPremiumType']);
+        }
+
         // Ensure each package line item has a weight.
         $items = data_get($payload, 'requestedShipment.requestedPackageLineItems', []);
         foreach ($items as $i => $item) {
