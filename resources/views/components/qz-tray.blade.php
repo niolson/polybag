@@ -230,7 +230,11 @@
         // Listen for print events from Livewire
         document.addEventListener('livewire:init', () => {
             Livewire.on('print-label', async (event) => {
-                await printLabel(event.label, event.orientation || 'portrait', event.format || 'pdf', event.dpi || null);
+                if (event.orientation === 'report') {
+                    await printReport(event.label);
+                } else {
+                    await printLabel(event.label, event.orientation || 'portrait', event.format || 'pdf', event.dpi || null);
+                }
                 if (event.redirectTo) {
                     window.location.href = event.redirectTo;
                 }

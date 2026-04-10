@@ -325,7 +325,13 @@ class FedexRunTestCases extends Command
                 ?? data_get($body, 'output.transactionShipments.0.masterTrackingNumber');
 
             $encodedLabel = data_get($body, 'output.transactionShipments.0.pieceResponses.0.packageDocuments.0.encodedLabel');
-            $labelFormat = strtolower($tc['labelFormat'] ?? 'pdf');
+            $imageType = strtolower(data_get($payload, 'requestedShipment.labelSpecification.imageType', 'pdf'));
+            $labelFormat = match ($imageType) {
+                'zplii' => 'zpl',
+                default => $imageType, // pdf, png as-is
+            };
+            $labelStockType = data_get($payload, 'requestedShipment.labelSpecification.labelStockType', '');
+            $labelOrientation = str_contains($labelStockType, '85X11') ? 'report' : 'portrait';
 
             $this->line("  ✓ Tracking: {$trackingNumber}");
 
@@ -358,7 +364,8 @@ class FedexRunTestCases extends Command
                     'service' => data_get($body, 'output.transactionShipments.0.serviceType', $tc['description']),
                     'tracking_number' => $trackingNumber,
                     'label_data' => $encodedLabel,
-                    'label_orientation' => 'portrait',
+                    'label_format' => $labelFormat,
+                    'label_orientation' => $labelOrientation,
                     'cost' => data_get($body, 'output.transactionShipments.0.completedShipmentDetail.shipmentRating.shipmentRateDetails.0.totalNetFedExCharge'),
                     'weight' => data_get($payload, 'requestedShipment.requestedPackageLineItems.0.weight.value', 1),
                     'height' => 1,
