@@ -117,6 +117,11 @@ it('voids a label and clears shipping fields', function (): void {
         {
             return $rate;
         }
+
+        public function serviceCapability(string $serviceCode): \App\Enums\ServiceCapability
+        {
+            return \App\Enums\ServiceCapability::NotImplemented;
+        }
     });
 
     app(CarrierRegistry::class)->register('USPS', $testAdapterClass);

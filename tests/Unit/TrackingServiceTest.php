@@ -106,6 +106,11 @@ it('refreshes a package tracking snapshot and dispatches a status change event',
         {
             return $rate;
         }
+
+        public function serviceCapability(string $serviceCode): \App\Enums\ServiceCapability
+        {
+            return \App\Enums\ServiceCapability::NotImplemented;
+        }
     };
 
     app(CarrierRegistry::class)->registerInstance('FedEx', $adapter);
@@ -194,6 +199,11 @@ it('returns unsupported tracking safely without changing status unexpectedly', f
         public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
         {
             return $rate;
+        }
+
+        public function serviceCapability(string $serviceCode): \App\Enums\ServiceCapability
+        {
+            return \App\Enums\ServiceCapability::NotImplemented;
         }
     };
 
@@ -285,6 +295,11 @@ it('notifies operational users when a package enters exception or is stuck in pr
         public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
         {
             return $rate;
+        }
+
+        public function serviceCapability(string $serviceCode): \App\Enums\ServiceCapability
+        {
+            return \App\Enums\ServiceCapability::NotImplemented;
         }
     };
 

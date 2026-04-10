@@ -105,6 +105,11 @@ function trackingAdapter(): CarrierAdapterInterface
         {
             return $rate;
         }
+
+        public function serviceCapability(string $serviceCode): \App\Enums\ServiceCapability
+        {
+            return \App\Enums\ServiceCapability::NotImplemented;
+        }
     };
 }
 
