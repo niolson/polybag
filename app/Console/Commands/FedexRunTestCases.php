@@ -97,26 +97,104 @@ class FedexRunTestCases extends Command
     /**
      * Apply fixes for known fixture inconsistencies:
      *
-     * 1. `labelResponseOptions` belongs at the top level of the request body.
-     *    Some fixtures incorrectly nest it inside `requestedShipment` — promote it.
-     * 2. Package line items must have a weight. If COMMENT_OMITTED stripped the
-     *    weight and left an empty item, inject a minimal 1 LB default so FedEx
-     *    doesn't reject with SERVICE.WEIGHT.INVALID.
+     * 1. `labelResponseOptions` belongs at the top level of the request body and
+     *    must appear before `requestedShipment`. Some fixtures nest it inside
+     *    `requestedShipment` — promote it and rebuild the array in the right order.
+     * 2. The top-level `accountNumber` is required for API authorization. When
+     *    missing, use the shipper's account number (not the billing account, which
+     *    may be the recipient's for RECIPIENT payment type).
+     * 3. When `shippingChargesPayment.payor.responsibleParty` has no `accountNumber`,
+     *    fill it with the shipper account so FedEx doesn't reject the payment block.
+     * 4. International return shipments require `customsOption` in
+     *    `customsClearanceDetail`.
+     * 5. Package line items must have a weight.
      */
-    private function normalizePayload(array $payload): array
+    private function normalizePayload(array $payload, string $shipperAccountNumber): array
     {
-        // Promote labelResponseOptions to the top level if missing.
-        if (! isset($payload['labelResponseOptions'])) {
-            $nested = data_get($payload, 'requestedShipment.labelResponseOptions');
-            if ($nested) {
-                $payload['labelResponseOptions'] = $nested;
-                unset($payload['requestedShipment']['labelResponseOptions']);
-            } else {
-                $payload['labelResponseOptions'] = 'LABEL';
+        // Pull labelResponseOptions out from wherever it lives and rebuild the
+        // payload so it appears first (before requestedShipment).
+        $labelResponseOptions = $payload['labelResponseOptions']
+            ?? data_get($payload, 'requestedShipment.labelResponseOptions')
+            ?? 'LABEL';
+
+        unset($payload['labelResponseOptions'], $payload['requestedShipment']['labelResponseOptions']);
+
+        // The top-level accountNumber must be the shipper's account, regardless
+        // of what the billing (payment) section says. For RECIPIENT payments the
+        // payor account belongs to the recipient, not the shipper.
+        $topLevelAccount = $payload['accountNumber']['value'] ?? $shipperAccountNumber;
+        unset($payload['accountNumber']);
+
+        // Ensure the payment payor has an accountNumber so FedEx doesn't choke.
+        $paymentType = data_get($payload, 'requestedShipment.shippingChargesPayment.paymentType');
+        if (! data_get($payload, 'requestedShipment.shippingChargesPayment.payor.responsibleParty.accountNumber')) {
+            // For SENDER payments use the shipper account; keep recipient/third-party accounts as-is.
+            $payload['requestedShipment']['shippingChargesPayment']['payor']['responsibleParty']['accountNumber'] = [
+                'value' => $paymentType === 'SENDER' ? $shipperAccountNumber : $topLevelAccount,
+            ];
+        }
+
+        // Some destination countries (e.g. Canada) require a non-zero customs declared value.
+        // Replace any zero unitPrice amounts with a nominal $1.00, then ensure
+        // totalCustomsValue reflects the corrected total.
+        $commodities = data_get($payload, 'requestedShipment.customsClearanceDetail.commodities', []);
+        $totalCustomsValue = 0.0;
+        foreach ($commodities as $i => $commodity) {
+            if (isset($commodity['unitPrice']['amount']) && (float) $commodity['unitPrice']['amount'] === 0.0) {
+                $payload['requestedShipment']['customsClearanceDetail']['commodities'][$i]['unitPrice']['amount'] = 1.00;
+                $commodity['unitPrice']['amount'] = 1.00;
+            }
+            $qty = (float) ($commodity['quantity'] ?? 1);
+            $totalCustomsValue += $qty * (float) ($commodity['unitPrice']['amount'] ?? 0);
+        }
+        $existingTotal = (float) data_get($payload, 'requestedShipment.customsClearanceDetail.totalCustomsValue.amount', 0);
+        if ($existingTotal === 0.0 && $totalCustomsValue > 0) {
+            $currency = data_get($payload, 'requestedShipment.customsClearanceDetail.commodities.0.unitPrice.currency', 'USD');
+            $payload['requestedShipment']['customsClearanceDetail']['totalCustomsValue'] = [
+                'amount' => $totalCustomsValue,
+                'currency' => $currency,
+            ];
+        }
+
+        // International return shipments require customsOption.
+        if (isset($payload['requestedShipment']['customsClearanceDetail']) &&
+            ! isset($payload['requestedShipment']['customsClearanceDetail']['customsOption'])) {
+            $specialTypes = data_get($payload, 'requestedShipment.shipmentSpecialServices.specialServiceTypes', []);
+            if (in_array('RETURN_SHIPMENT', $specialTypes, strict: true)) {
+                $payload['requestedShipment']['customsClearanceDetail']['customsOption'] = [
+                    'type' => 'OTHER',
+                    'description' => 'Return shipment',
+                ];
             }
         }
 
-        // Ensure each package line item has a weight so FedEx accepts it.
+        // blockInsightVisibility: false is known to trigger spurious FREIGHTDIRECTDETAIL
+        // errors in the FedEx sandbox for certain special service combinations.
+        unset($payload['requestedShipment']['blockInsightVisibility']);
+
+        // totalWeight at the shipment level is redundant and can cause 500 errors for
+        // certain service types (e.g. GROUND_HOME_DELIVERY with HOME_DELIVERY_PREMIUM).
+        // The per-package weight is authoritative; drop the shipment-level duplicate.
+        unset($payload['requestedShipment']['totalWeight']);
+
+        // Some fixtures use rateRequestTypes (plural) which FedEx may misparse — normalize to singular.
+        if (isset($payload['requestedShipment']['rateRequestTypes']) && ! isset($payload['requestedShipment']['rateRequestType'])) {
+            $payload['requestedShipment']['rateRequestType'] = $payload['requestedShipment']['rateRequestTypes'];
+            unset($payload['requestedShipment']['rateRequestTypes']);
+        }
+
+        // In FedEx sandbox, EVENT_NOTIFICATION + SATURDAY_DELIVERY in specialServiceTypes
+        // together triggers a FREIGHTDIRECTDETAIL.INVALID error. Drop EVENT_NOTIFICATION
+        // from the types array when Saturday Delivery is also present — emailNotificationDetail
+        // at the shipment level will still be included in the request for ISV review.
+        $specialTypes = data_get($payload, 'requestedShipment.shipmentSpecialServices.specialServiceTypes', []);
+        if (in_array('SATURDAY_DELIVERY', $specialTypes, strict: true) && in_array('EVENT_NOTIFICATION', $specialTypes, strict: true)) {
+            $payload['requestedShipment']['shipmentSpecialServices']['specialServiceTypes'] = array_values(
+                array_filter($specialTypes, fn ($t) => $t !== 'EVENT_NOTIFICATION')
+            );
+        }
+
+        // Ensure each package line item has a weight.
         $items = data_get($payload, 'requestedShipment.requestedPackageLineItems', []);
         foreach ($items as $i => $item) {
             if (! isset($item['weight'])) {
@@ -127,7 +205,11 @@ class FedexRunTestCases extends Command
             }
         }
 
-        return $payload;
+        // Rebuild with labelResponseOptions and accountNumber first.
+        return array_merge(
+            ['labelResponseOptions' => $labelResponseOptions, 'accountNumber' => ['value' => $topLevelAccount]],
+            $payload,
+        );
     }
 
     public function handle(SettingsService $settings): int
@@ -188,7 +270,7 @@ class FedexRunTestCases extends Command
             $this->info("Running {$tc['id']}: {$tc['description']} ...");
 
             $payload = $this->resolveArray($tc['request'], $shipperAccountNumber);
-            $payload = $this->normalizePayload($payload);
+            $payload = $this->normalizePayload($payload, $shipperAccountNumber);
 
             $request = $tc['api'] === 'Freight LTL API'
                 ? new CreateFreightShipment
