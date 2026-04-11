@@ -155,7 +155,11 @@
                     return;
                 }
 
-                // Pixel path (PDF/image)
+                // Pixel path (PDF/image/PNG)
+                // Normalize image-type formats (gif, png, etc.) to 'image' for QZ Tray
+                const isImageFormat = format === 'image' || format === 'png' || format === 'gif';
+                if (isImageFormat) format = 'image';
+
                 // Rotate landscape images (e.g. UPS GIF) to portrait
                 let printData = base64Data;
                 if (format === 'image' && orientation === 'landscape') {
