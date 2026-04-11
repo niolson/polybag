@@ -26,6 +26,7 @@ use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
 use App\Services\SettingsService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Saloon\Exceptions\Request\RequestException;
 use Saloon\Http\Response;
 
@@ -126,6 +127,9 @@ class FedexAdapter implements CarrierAdapterInterface
             // to parseRateResponse so the Saturday delivery retry logic can handle it.
             $response = $e->getResponse();
         }
+
+        Log::channel('fedex-validation')->info('RATE REQUEST', ['payload' => $apiRequest->body()->all()]);
+        Log::channel('fedex-validation')->info('RATE RESPONSE', ['status' => $response->status(), 'body' => $response->json()]);
 
         // Pass original $request so parseRateResponse knows Saturday was requested
         return $this->parseRateResponse($response, $request, $serviceCodes);
@@ -608,7 +612,11 @@ class FedexAdapter implements CarrierAdapterInterface
     {
         try {
             $connector = FedexConnector::getFedexConnector();
-            $response = $connector->send(new TrackShipment($package->tracking_number));
+            $trackRequest = new TrackShipment($package->tracking_number);
+            $response = $connector->send($trackRequest);
+
+            Log::channel('fedex-validation')->info('TRACK REQUEST', ['tracking_number' => $package->tracking_number]);
+            Log::channel('fedex-validation')->info('TRACK RESPONSE', ['status' => $response->status(), 'body' => $response->json()]);
 
             if (! $response->successful()) {
                 return TrackShipmentResponse::failure(
