@@ -1,6 +1,7 @@
 <?php
 
 use App\Logging\CustomizeFormatter;
+use App\Logging\DeepNormalizerTap;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\SyslogUdpHandler;
@@ -142,6 +143,7 @@ return [
             'path' => storage_path('logs/fedex-validation.log'),
             'level' => 'debug',
             'replace_placeholders' => true,
+            'tap' => [DeepNormalizerTap::class],
         ],
 
     ],
