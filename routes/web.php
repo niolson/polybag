@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\TestPackageController;
 use App\Http\Controllers\Auth\GoogleController;
 use App\Http\Controllers\OAuthCallbackController;
 use App\Http\Controllers\QzSignController;
+use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/up', function () {
@@ -28,6 +29,7 @@ Route::prefix('api')->group(function () {
     }
 
     if (app()->environment(['local', 'testing'])) {
-        Route::post('/test/create-package', TestPackageController::class);
+        Route::post('/test/create-package', TestPackageController::class)
+            ->withoutMiddleware([ValidateCsrfToken::class]);
     }
 });

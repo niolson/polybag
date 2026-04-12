@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\BoxSize;
 use App\Models\Package;
 use App\Models\Shipment;
+use App\Models\ShippingMethod;
 use Illuminate\Http\JsonResponse;
 
 class TestPackageController extends Controller
@@ -18,7 +19,22 @@ class TestPackageController extends Controller
             ->whereNotNull('postal_code')
             ->first();
 
-        abort_unless($shipment, 422, 'No shippable shipment found');
+        if (! $shipment) {
+            $shippingMethod = ShippingMethod::query()
+                ->whereHas('carrierServices')
+                ->first();
+
+            abort_unless($shippingMethod, 422, 'No shippable shipment found');
+
+            $shipment = Shipment::factory()->validated()->create([
+                'shipping_method_id' => $shippingMethod->id,
+                'address1' => '10 Main St',
+                'city' => 'Memphis',
+                'state_or_province' => 'TN',
+                'postal_code' => '38116',
+                'country' => 'US',
+            ]);
+        }
 
         $boxSize = BoxSize::first();
 

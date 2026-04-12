@@ -16,9 +16,8 @@ test.describe('Shipping flow', () => {
     // Wait for the Ship page to load with rate options
     await expect(page.getByRole('heading', { name: 'Select Shipping Rate' })).toBeVisible({ timeout: 15000 });
 
-    // Verify the USPS fake rate is present
-    await expect(page.getByText('[USPS] Ground Advantage')).toBeVisible();
-    await expect(page.getByText('$8.50')).toBeVisible();
+    // Verify at least one fake carrier rate is present for the selected shipping method.
+    await expect(page.locator('main')).toContainText(/\[(USPS|FedEx|UPS)\]\s.+/);
 
     // Click the header Ship action button (not the sidebar "Ship" group toggle)
     await page.locator('main').getByRole('button', { name: 'Ship' }).click();
