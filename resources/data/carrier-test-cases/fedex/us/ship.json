@@ -1,0 +1,1141 @@
+{
+    "carrier": "fedex",
+    "region": "us",
+    "suite": "ship",
+    "source": "FedEx_Integrator_Test_Case_Baseline.xlsx \u2014 Americas_US_Test cases tab",
+    "meta": {
+        "territory": "Americas / US",
+        "mfa_test_account": {
+            "accountNumber": "700257037",
+            "address": {
+                "streetLines": [
+                    "15 W 18TH ST FL 7"
+                ],
+                "city": "NEW YORK",
+                "stateOrProvinceCode": "NY",
+                "postalCode": "100114624",
+                "countryCode": "US"
+            },
+            "sandbox_invoice": {
+                "invoiceNumber": "234562278",
+                "invoiceDate": "2023-02-13",
+                "amount": 234,
+                "currency": "USD"
+            }
+        },
+        "notes": [
+            "shipDatestamp: 'Current date' means today's date at runtime.",
+            "shipDatestamp: 'Friday' means the next Friday (for Saturday delivery tests).",
+            "shipDatestamp: 'Use 1 week post' means one week from today.",
+            "Use actual shipper account number wherever 'Please use shipper account number' appears.",
+            "IntegratorUS09 requires 3 API calls in order: UploadImages x2, then Ship.",
+            "IntegratorUS10 requires 8 API calls in order: Create Consolidation, Add Shipment 1-6, Confirm.",
+            "IntegratorUS11 is in the US_Exp_Dom header group (Ship API, not Freight)."
+        ]
+    },
+    "cases": [
+        {
+            "id": "IntegratorUS01",
+            "description": "Express Saver, Your Packaging, Alcohol",
+            "request_type": "create_shipment",
+            "supported": true,
+            "skip_reason": null,
+            "notes": [],
+            "api": "Ship API",
+            "endpoint": "POST /ship/v1/shipments",
+            "label_format": "pdf",
+            "request": {
+                "labelResponseOptions": "LABEL",
+                "requestedShipment": {
+                    "shipDatestamp": "CURRENT_DATE",
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "serviceType": "FEDEX_EXPRESS_SAVER",
+                    "packagingType": "YOUR_PACKAGING",
+                    "totalWeight": 36,
+                    "shipper": {
+                        "contact": {
+                            "personName": "James Weston",
+                            "companyName": "RTC",
+                            "phoneNumber": "9012633035"
+                        },
+                        "address": {
+                            "streetLines": [
+                                "1751 THOMPSON ST"
+                            ],
+                            "city": "AURORA",
+                            "stateOrProvinceCode": "OH",
+                            "postalCode": "44202",
+                            "countryCode": "US"
+                        }
+                    },
+                    "recipients": [
+                        {
+                            "contact": {
+                                "companyName": "Integrator",
+                                "personName": "323401",
+                                "phoneNumber": "9012633035"
+                            },
+                            "address": {
+                                "streetLines": [
+                                    "110 Fedex parkway"
+                                ],
+                                "city": "NEW ORLEANS",
+                                "stateOrProvinceCode": "LA",
+                                "postalCode": "70119",
+                                "countryCode": "US"
+                            }
+                        }
+                    ],
+                    "shippingChargesPayment": {
+                        "paymentType": "SENDER",
+                        "payor": {
+                            "responsibleParty": {
+                                "accountNumber": {
+                                    "value": "USE_SHIPPER_ACCOUNT_NUMBER"
+                                },
+                                "contact": {
+                                    "personName": "IntegratorUS01"
+                                },
+                                "address": {
+                                    "countryCode": "US"
+                                }
+                            }
+                        }
+                    },
+                    "rateRequestType": [
+                        "LIST"
+                    ],
+                    "totalPackageCount": 1,
+                    "labelSpecification": {
+                        "imageType": "PDF",
+                        "labelStockType": "PAPER_85X11_TOP_HALF_LABEL"
+                    },
+                    "requestedPackageLineItems": [
+                        {
+                            "declaredValue": {
+                                "amount": 250,
+                                "currency": "USD"
+                            },
+                            "weight": {
+                                "units": "LB",
+                                "value": 18
+                            },
+                            "dimensions": {
+                                "length": 20,
+                                "width": 15,
+                                "height": 20,
+                                "units": "IN"
+                            },
+                            "packageSpecialServices": {
+                                "specialServiceTypes": [
+                                    "ALCOHOL"
+                                ],
+                                "alcoholDetail": {
+                                    "alcoholRecipientType": "LICENSEE"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "IntegratorUS02",
+            "description": "Priority Overnight, Your Packaging, Email Notification, Saturday Delivery",
+            "request_type": "create_shipment",
+            "supported": true,
+            "skip_reason": null,
+            "notes": [
+                "shipDatestamp must be a Friday (Saturday delivery service)"
+            ],
+            "api": "Ship API",
+            "endpoint": "POST /ship/v1/shipments",
+            "label_format": "zpl",
+            "request": {
+                "accountNumber": {
+                    "value": "700257037"
+                },
+                "requestedShipment": {
+                    "shipDatestamp": "NEXT_FRIDAY",
+                    "labelResponseOptions": "LABEL",
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "serviceType": "PRIORITY_OVERNIGHT",
+                    "packagingType": "YOUR_PACKAGING",
+                    "blockInsightVisibility": false,
+                    "shipper": {
+                        "contact": {
+                            "personName": "James Weston",
+                            "companyName": "RTC",
+                            "phoneNumber": "9012633035"
+                        },
+                        "address": {
+                            "streetLines": [
+                                "1751 THOMPSON ST"
+                            ],
+                            "city": "AURORA",
+                            "stateOrProvinceCode": "OH",
+                            "postalCode": "44202",
+                            "countryCode": "US"
+                        }
+                    },
+                    "recipients": [
+                        {
+                            "contact": {
+                                "companyName": "Integrator",
+                                "personName": "323248",
+                                "phoneNumber": "9012633035"
+                            },
+                            "address": {
+                                "streetLines": [
+                                    "20 FedEx Pkwy"
+                                ],
+                                "city": "COLLIERVILLE",
+                                "stateOrProvinceCode": "TN",
+                                "postalCode": "38017",
+                                "countryCode": "US"
+                            }
+                        }
+                    ],
+                    "shippingChargesPayment": {
+                        "paymentType": "SENDER",
+                        "payor": {
+                            "responsibleParty": {
+                                "contact": {
+                                    "personName": "IntegratorUS02"
+                                }
+                            }
+                        }
+                    },
+                    "shipmentSpecialServices": {
+                        "specialServiceTypes": [
+                            "EVENT_NOTIFICATION",
+                            "SATURDAY_DELIVERY"
+                        ]
+                    },
+                    "emailNotificationDetail": {
+                        "aggregationType": "PER_PACKAGE",
+                        "personalMessage": "your personal message here",
+                        "emailNotificationsRecipients": [
+                            {
+                                "notificationType": "EMAIL",
+                                "emailAddress": "test001@fedex.com",
+                                "locale": "en_US",
+                                "name": "joe smith",
+                                "emailNotificationRecipientType": "RECIPIENT",
+                                "notificationFormatType": "TEXT",
+                                "notificationEventTypes": [
+                                    "ON_PICKUP_DRIVER_ARRIVED",
+                                    "ON_SHIPMENT"
+                                ]
+                            }
+                        ]
+                    },
+                    "labelSpecification": {
+                        "imageType": "ZPLII",
+                        "labelStockType": "STOCK_4X6"
+                    },
+                    "requestedPackageLineItems": [
+                        {
+                            "weight": {
+                                "units": "LB",
+                                "value": 20
+                            },
+                            "dimensions": {
+                                "length": 10,
+                                "width": 10,
+                                "height": 10,
+                                "units": "IN"
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "IntegratorUS03",
+            "description": "FedEx International Priority, Your Packaging",
+            "request_type": "create_shipment",
+            "supported": true,
+            "skip_reason": null,
+            "notes": [],
+            "api": "Ship API",
+            "endpoint": "POST /ship/v1/shipments",
+            "label_format": "pdf",
+            "request": {
+                "labelResponseOptions": "LABEL",
+                "accountNumber": {
+                    "value": "700257037"
+                },
+                "requestedShipment": {
+                    "shipDatestamp": "CURRENT_DATE",
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "serviceType": "FEDEX_INTERNATIONAL_PRIORITY",
+                    "packagingType": "YOUR_PACKAGING",
+                    "totalWeight": 30,
+                    "shipper": {
+                        "tins": [
+                            {
+                                "tinType": "PERSONAL_STATE",
+                                "number": "123456789"
+                            }
+                        ],
+                        "contact": {
+                            "personName": "James Weston",
+                            "companyName": "RTC",
+                            "phoneNumber": "9012633035"
+                        },
+                        "address": {
+                            "streetLines": [
+                                "1751 THOMPSON ST"
+                            ],
+                            "city": "AURORA",
+                            "stateOrProvinceCode": "OH",
+                            "postalCode": "44202",
+                            "countryCode": "US"
+                        }
+                    },
+                    "recipients": [
+                        {
+                            "contact": {
+                                "companyName": "Integrator",
+                                "personName": "413250",
+                                "phoneNumber": "9012633035"
+                            },
+                            "address": {
+                                "streetLines": [
+                                    "14 TOTTENHAM COURT ROAD"
+                                ],
+                                "city": "LONDON",
+                                "postalCode": "W1T1JY",
+                                "countryCode": "GB"
+                            }
+                        }
+                    ],
+                    "shippingChargesPayment": {
+                        "paymentType": "SENDER",
+                        "payor": {
+                            "responsibleParty": {
+                                "accountNumber": {
+                                    "value": "USE_SHIPPER_ACCOUNT_NUMBER"
+                                },
+                                "contact": {
+                                    "personName": "IntegratorUS03"
+                                },
+                                "address": {
+                                    "countryCode": "US"
+                                }
+                            }
+                        }
+                    },
+                    "customsClearanceDetail": {
+                        "dutiesPayment": {
+                            "paymentType": "SENDER",
+                            "payor": {
+                                "responsibleParty": {
+                                    "accountNumber": {
+                                        "value": "USE_SHIPPER_ACCOUNT_NUMBER"
+                                    },
+                                    "contact": {
+                                        "personName": "Integrator"
+                                    },
+                                    "address": {
+                                        "countryCode": "US"
+                                    }
+                                }
+                            }
+                        },
+                        "isDocumentOnly": false,
+                        "totalCustomsValue": {
+                            "currency": "USD",
+                            "amount": 55
+                        },
+                        "insuranceCharge": {
+                            "currency": "USD",
+                            "amount": 50
+                        },
+                        "commercialInvoice": {
+                            "freightCharge": {
+                                "currency": "USD",
+                                "amount": 25
+                            },
+                            "taxesOrMiscellaneousCharge": {
+                                "currency": "USD",
+                                "amount": 0
+                            },
+                            "taxesOrMiscellaneousChargeType": "OTHER",
+                            "shipmentPurpose": "SAMPLE",
+                            "customerReferences": [
+                                {
+                                    "customerReferenceType": "CUSTOMER_REFERENCE",
+                                    "value": "123456789"
+                                }
+                            ],
+                            "termsOfSale": "COMMENT_OMITTED"
+                        },
+                        "commodities": [
+                            {
+                                "numberOfPieces": 1,
+                                "description": "Dictionaries",
+                                "countryOfManufacture": "US",
+                                "weight": {
+                                    "units": "LB",
+                                    "value": 30
+                                },
+                                "quantity": 1,
+                                "quantityUnits": "EA",
+                                "unitPrice": {
+                                    "currency": "USD",
+                                    "amount": 100
+                                },
+                                "customsValue": {
+                                    "currency": "USD",
+                                    "amount": 55
+                                }
+                            }
+                        ],
+                        "exportDetail": {
+                            "b13AFilingOption": "NOT_REQUIRED",
+                            "exportComplianceStatement": "NO EEI 30.37(f)"
+                        }
+                    },
+                    "labelSpecification": {
+                        "imageType": "PDF",
+                        "labelStockType": "PAPER_85X11_TOP_HALF_LABEL"
+                    },
+                    "rateRequestTypes": [
+                        "LIST"
+                    ],
+                    "totalPackageCount": 1,
+                    "requestedPackageLineItems": [
+                        {
+                            "declaredValue": {
+                                "currency": "USD",
+                                "amount": 55
+                            },
+                            "weight": {
+                                "units": "LB",
+                                "value": 30
+                            },
+                            "dimensions": {
+                                "length": 20,
+                                "width": 20,
+                                "height": 20,
+                                "units": "IN"
+                            },
+                            "customerReferences": [
+                                {
+                                    "customerReferenceType": "CUSTOMER_REFERENCE",
+                                    "value": "Integrator"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "IntegratorUS04",
+            "description": "Home Delivery, Prepaid, Evening",
+            "request_type": "create_shipment",
+            "supported": true,
+            "skip_reason": null,
+            "notes": [],
+            "api": "Ship API",
+            "endpoint": "POST /ship/v1/shipments",
+            "label_format": "png",
+            "request": {
+                "labelResponseOptions": "LABEL",
+                "requestedShipment": {
+                    "shipDatestamp": "CURRENT_DATE",
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "packagingType": "YOUR_PACKAGING",
+                    "serviceType": "GROUND_HOME_DELIVERY",
+                    "totalWeight": 30,
+                    "shipper": {
+                        "contact": {
+                            "personName": "James Weston",
+                            "companyName": "Integrator",
+                            "phoneNumber": "9012633035"
+                        },
+                        "address": {
+                            "streetLines": [
+                                "1751 THOMPSON ST"
+                            ],
+                            "city": "AURORA",
+                            "stateOrProvinceCode": "OH",
+                            "postalCode": "44202",
+                            "countryCode": "US"
+                        }
+                    },
+                    "recipients": [
+                        {
+                            "contact": {
+                                "personName": "814",
+                                "companyName": "Integrator",
+                                "phoneNumber": "9012633035"
+                            },
+                            "address": {
+                                "streetLines": [
+                                    "109 FEDEX PRKWY"
+                                ],
+                                "city": "Collierville",
+                                "stateOrProvinceCode": "TN",
+                                "postalCode": "38017",
+                                "countryCode": "US",
+                                "residential": true
+                            }
+                        }
+                    ],
+                    "shippingChargesPayment": {
+                        "paymentType": "SENDER",
+                        "payor": {
+                            "responsibleParty": {
+                                "accountNumber": {
+                                    "value": "USE_SHIPPER_ACCOUNT_NUMBER"
+                                },
+                                "contact": {
+                                    "personName": "IntegratorUS04"
+                                },
+                                "address": {
+                                    "countryCode": "US"
+                                }
+                            }
+                        }
+                    },
+                    "shipmentSpecialServices": {
+                        "specialServiceTypes": [
+                            "HOME_DELIVERY_PREMIUM"
+                        ],
+                        "homeDeliveryPremiumDetail": {
+                            "homedeliveryPremiumType": "EVENING",
+                            "deliveryDate": "2020-07-07",
+                            "phoneNumber": {
+                                "localNumber": 1234567890
+                            }
+                        }
+                    },
+                    "requestedPackageLineItems": [
+                        {
+                            "weight": {
+                                "units": "LB",
+                                "value": 30
+                            },
+                            "dimensions": {
+                                "height": 20,
+                                "width": 15,
+                                "length": 20,
+                                "units": "IN"
+                            },
+                            "declaredValue": {
+                                "currency": "USD",
+                                "amount": 300
+                            },
+                            "packageSpecialServices": {
+                                "specialServiceTypes": [
+                                    "NON_STANDARD_CONTAINER"
+                                ]
+                            },
+                            "customerReferences": [
+                                {
+                                    "customerReferenceType": "CUSTOMER_REFERENCE",
+                                    "value": "Integrator"
+                                }
+                            ]
+                        }
+                    ],
+                    "totalPackageCount": 1,
+                    "labelSpecification": {
+                        "imageType": "PNG",
+                        "labelStockType": "PAPER_4X6"
+                    },
+                    "rateRequestTypes": [
+                        "LIST"
+                    ]
+                }
+            }
+        },
+        {
+            "id": "IntegratorUS05",
+            "description": "Ground, Recipient, MPS (multi-piece shipment \u2014 2 packages)",
+            "request_type": "create_shipment",
+            "supported": true,
+            "skip_reason": null,
+            "notes": [
+                "MPS: totalPackageCount=2, groupPackageCount=2"
+            ],
+            "api": "Ship API",
+            "endpoint": "POST /ship/v1/shipments",
+            "label_format": "pdf",
+            "request": {
+                "labelResponseOptions": "LABEL",
+                "requestedShipment": {
+                    "shipDatestamp": "CURRENT_DATE",
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "packagingType": "YOUR_PACKAGING",
+                    "serviceType": "FEDEX_GROUND",
+                    "blockInsightVisibility": false,
+                    "totalWeight": 20,
+                    "shipper": {
+                        "contact": {
+                            "personName": "James Weston",
+                            "companyName": "Integrator",
+                            "phoneNumber": "9012633035"
+                        },
+                        "address": {
+                            "streetLines": [
+                                "1751 THOMPSON ST"
+                            ],
+                            "city": "AURORA",
+                            "stateOrProvinceCode": "OH",
+                            "postalCode": "44202",
+                            "countryCode": "US"
+                        }
+                    },
+                    "recipients": [
+                        {
+                            "contact": {
+                                "personName": "422",
+                                "companyName": "Integrator",
+                                "phoneNumber": "9012633035"
+                            },
+                            "address": {
+                                "streetLines": [
+                                    "80 FEDEX PRKWY"
+                                ],
+                                "city": "Los Angeles",
+                                "stateOrProvinceCode": "CA",
+                                "postalCode": "90013",
+                                "countryCode": "US"
+                            }
+                        }
+                    ],
+                    "shippingChargesPayment": {
+                        "paymentType": "RECIPIENT",
+                        "payor": {
+                            "responsibleParty": {
+                                "accountNumber": {
+                                    "value": "222327008"
+                                },
+                                "contact": {
+                                    "personName": "IntegratorUS05"
+                                },
+                                "address": {
+                                    "countryCode": "US"
+                                }
+                            }
+                        }
+                    },
+                    "totalPackageCount": 2,
+                    "labelSpecification": {
+                        "imageType": "PDF",
+                        "labelStockType": "PAPER_85X11_TOP_HALF_LABEL"
+                    },
+                    "rateRequestTypes": [
+                        "LIST"
+                    ],
+                    "requestedPackageLineItems": [
+                        {
+                            "weight": {
+                                "units": "LB",
+                                "value": 20
+                            },
+                            "dimensions": {
+                                "length": 20,
+                                "width": 15,
+                                "height": 20,
+                                "units": "IN"
+                            },
+                            "declaredValue": {
+                                "currency": "USD",
+                                "amount": 100
+                            },
+                            "groupPackageCount": 2
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "IntegratorUS06",
+            "description": "International Ground, Prepaid, Return Manager Printed Label",
+            "request_type": "create_shipment",
+            "supported": true,
+            "skip_reason": null,
+            "notes": [],
+            "api": "Ship API",
+            "endpoint": "POST /ship/v1/shipments",
+            "label_format": "pdf",
+            "request": {
+                "labelResponseOptions": "LABEL",
+                "requestedShipment": {
+                    "shipDatestamp": "CURRENT_DATE",
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "packagingType": "YOUR_PACKAGING",
+                    "serviceType": "FEDEX_GROUND",
+                    "blockInsightVisibility": false,
+                    "shipper": {
+                        "contact": {
+                            "personName": "James Weston",
+                            "companyName": "Integrator",
+                            "phoneNumber": "9012633035"
+                        },
+                        "address": {
+                            "streetLines": [
+                                "1751 THOMPSON ST"
+                            ],
+                            "city": "AURORA",
+                            "stateOrProvinceCode": "OH",
+                            "postalCode": "44202",
+                            "countryCode": "US"
+                        }
+                    },
+                    "recipients": [
+                        {
+                            "contact": {
+                                "personName": "141",
+                                "companyName": "Integrator",
+                                "phoneNumber": "9012633035"
+                            },
+                            "address": {
+                                "streetLines": [
+                                    "80 FEDEX PRKWY"
+                                ],
+                                "city": "Mississauga",
+                                "stateOrProvinceCode": "ON",
+                                "postalCode": "L4W5K6",
+                                "countryCode": "CA",
+                                "residential": true
+                            }
+                        }
+                    ],
+                    "shippingChargesPayment": {
+                        "paymentType": "SENDER",
+                        "payor": {
+                            "responsibleParty": {
+                                "accountNumber": {
+                                    "value": "USE_SHIPPER_ACCOUNT_NUMBER"
+                                },
+                                "contact": {
+                                    "personName": "IntegratorUS06"
+                                },
+                                "address": {
+                                    "countryCode": "US"
+                                }
+                            }
+                        }
+                    },
+                    "customsClearanceDetail": {
+                        "commodities": [
+                            {
+                                "description": "Dictionaries",
+                                "countryOfManufacture": "US",
+                                "weight": {
+                                    "units": "LB",
+                                    "value": 10
+                                },
+                                "quantity": 1,
+                                "quantityUnits": "PC",
+                                "unitPrice": {
+                                    "currency": "USD",
+                                    "amount": 0
+                                }
+                            }
+                        ]
+                    },
+                    "shipmentSpecialServices": {
+                        "specialServiceTypes": [
+                            "RETURN_SHIPMENT"
+                        ],
+                        "returnShipmentDetail": {
+                            "returnType": "PRINT_RETURN_LABEL"
+                        }
+                    },
+                    "labelSpecification": {
+                        "imageType": "PDF",
+                        "labelStockType": "PAPER_85X11_TOP_HALF_LABEL"
+                    },
+                    "requestedPackageLineItems": [
+                        {
+                            "weight": {
+                                "units": "LB",
+                                "value": 10
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "IntegratorUS07",
+            "description": "FedEx Ground Economy (SmartPost)",
+            "request_type": "create_shipment",
+            "supported": true,
+            "skip_reason": null,
+            "notes": [],
+            "api": "Ship API",
+            "endpoint": "POST /ship/v1/shipments",
+            "label_format": "pdf",
+            "request": {
+                "labelResponseOptions": "LABEL",
+                "accountNumber": {
+                    "value": "740561073"
+                },
+                "requestedShipment": {
+                    "shipDatestamp": "CURRENT_DATE",
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "packagingType": "YOUR_PACKAGING",
+                    "serviceType": "SMART_POST",
+                    "shipper": {
+                        "contact": {
+                            "personName": "ANTHONY JAMES",
+                            "companyName": "RTC",
+                            "phoneNumber": "9012633035"
+                        },
+                        "address": {
+                            "streetLines": [
+                                "10 FedEx Pkwy"
+                            ],
+                            "city": "Collierville",
+                            "stateOrProvinceCode": "TN",
+                            "postalCode": "38017",
+                            "countryCode": "US"
+                        }
+                    },
+                    "recipients": [
+                        {
+                            "contact": {
+                                "companyName": "IntegratorUS08",
+                                "personName": "ANTHONY JAMES",
+                                "phoneNumber": "9012633035"
+                            },
+                            "address": {
+                                "streetLines": [
+                                    "62 Ford St"
+                                ],
+                                "city": "Brulington",
+                                "stateOrProvinceCode": "CT",
+                                "postalCode": "06013",
+                                "countryCode": "US"
+                            }
+                        }
+                    ],
+                    "shippingChargesPayment": {
+                        "paymentType": "SENDER",
+                        "payor": {
+                            "responsibleParty": {
+                                "accountNumber": {
+                                    "value": "740561073"
+                                },
+                                "address": {
+                                    "countryCode": "US"
+                                }
+                            }
+                        }
+                    },
+                    "labelSpecification": {
+                        "imageType": "PDF",
+                        "labelStockType": "PAPER_85X11_TOP_HALF_LABEL"
+                    },
+                    "requestedPackageLineItems": [
+                        {
+                            "customerReferences": [
+                                {
+                                    "customerReferenceType": "COMMENT_OMITTED",
+                                    "value": "COMMENT_OMITTED"
+                                }
+                            ]
+                        }
+                    ],
+                    "totalPackageCount": 1,
+                    "smartPostInfoDetail": {
+                        "indicia": "PARCEL_SELECT",
+                        "hubId": "5531"
+                    }
+                }
+            }
+        },
+        {
+            "id": "IntegratorUS08",
+            "description": "FedEx Freight Priority, Your Packaging, Inside Delivery",
+            "request_type": "create_freight_shipment",
+            "supported": false,
+            "skip_reason": "Requires the Locations API lookup flow.",
+            "notes": [],
+            "api": "Freight LTL API",
+            "endpoint": "POST /freight/v1/shipments",
+            "label_format": "zplii",
+            "request": {
+                "labelResponseOptions": "LABEL",
+                "freightRequestedShipment": {
+                    "shipDatestamp": "CURRENT_DATE",
+                    "totalWeight": 1000,
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "serviceType": "FEDEX_FREIGHT_PRIORITY",
+                    "packagingType": "YOUR_PACKAGING",
+                    "shipper": {
+                        "contact": {
+                            "personName": "QCONFIG",
+                            "companyName": "RTC",
+                            "phoneNumber": "9012633035"
+                        },
+                        "address": {
+                            "streetLines": [
+                                "SHIPPER ADDRESS LINE 1"
+                            ],
+                            "city": "CALIFORNIA",
+                            "stateOrProvinceCode": "CA",
+                            "postalCode": "93505",
+                            "countryCode": "US",
+                            "residential": false
+                        }
+                    },
+                    "recipient": {
+                        "contact": {
+                            "personName": "F-413404",
+                            "companyName": "IntegratorUS09",
+                            "phoneNumber": "1234567890"
+                        },
+                        "address": {
+                            "streetLines": [
+                                "RECIPIENT ADDRESS LINE 1"
+                            ],
+                            "city": "DENVER",
+                            "stateOrProvinceCode": "CO",
+                            "postalCode": "80204",
+                            "countryCode": "US",
+                            "residential": false
+                        },
+                        "dispositionType": "RETURNED"
+                    },
+                    "shippingChargesPayment": {
+                        "paymentType": "RECIPIENT",
+                        "payor": {
+                            "responsibleParty": {
+                                "accountNumber": {
+                                    "value": "630081440"
+                                },
+                                "contact": {
+                                    "personName": "F-413404",
+                                    "companyName": "Integrator",
+                                    "phoneNumber": "1234567890"
+                                },
+                                "address": {
+                                    "streetLines": [
+                                        "RECIPIENT ADDRESS LINE 1"
+                                    ],
+                                    "city": "DENVER",
+                                    "stateOrProvinceCode": "CO",
+                                    "postalCode": "80204",
+                                    "countryCode": "US",
+                                    "residential": false
+                                }
+                            }
+                        }
+                    },
+                    "freightShipmentSpecialServices": {
+                        "specialServiceTypes": [
+                            "INSIDE_DELIVERY"
+                        ]
+                    },
+                    "freightShipmentDetail": {
+                        "fedExFreightAccountNumber": "630081440",
+                        "fedExFreightBillingContactAndAddress": {
+                            "contact": {
+                                "personName": "Shipper Contact",
+                                "companyName": "Shipper Company"
+                            },
+                            "address": {
+                                "streetLines": [
+                                    "1202 Chalet Lane"
+                                ],
+                                "city": "Harrison",
+                                "stateOrProvinceCode": "AR",
+                                "postalCode": "72601",
+                                "countryCode": "US",
+                                "residential": false
+                            }
+                        },
+                        "role": "SHIPPER",
+                        "collectTermsType": "NON_RECOURSE_SHIPPER_SIGNED",
+                        "declaredValuePerUnit": {
+                            "currency": "USD",
+                            "amount": 0
+                        },
+                        "declaredValueUnits": "LB",
+                        "totalHandlingUnits": 1,
+                        "clientDiscountPercent": 0,
+                        "lineItems": [
+                            {
+                                "id": 10,
+                                "freightClass": "CLASS_050",
+                                "handlingUnits": 1,
+                                "subPackagingType": "BARREL",
+                                "pieces": 10,
+                                "purchaseOrderNumber": "54321",
+                                "description": "Axles",
+                                "weight": {
+                                    "units": "LB",
+                                    "value": 1000
+                                },
+                                "dimensions": {
+                                    "length": 20,
+                                    "width": 20,
+                                    "height": 20,
+                                    "units": "IN"
+                                }
+                            }
+                        ]
+                    },
+                    "labelSpecification": {
+                        "labelOrder": "SHIPPING_LABEL_FIRST",
+                        "labelFormatType": "COMMON2D",
+                        "imageType": "ZPLII",
+                        "labelStockType": "STOCK_4X6",
+                        "labelPrintingOrientation": "BOTTOM_EDGE_OF_TEXT_FIRST"
+                    },
+                    "shippingDocumentSpecification": {
+                        "shippingDocumentTypes": [
+                            "COMMERCIAL_INVOICE",
+                            "FEDEX_FREIGHT_STRAIGHT_BILL_OF_LADING"
+                        ],
+                        "commercialInvoiceDetail": {
+                            "documentFormat": {
+                                "provideInstructions": true,
+                                "stockType": "PAPER_LETTER",
+                                "locale": "en_US",
+                                "docType": "PDF"
+                            }
+                        },
+                        "freightBillOfLadingDetail": {
+                            "format": {
+                                "provideInstructions": true,
+                                "stockType": "PAPER_LETTER",
+                                "locale": "en_US",
+                                "docType": "PDF",
+                                "dispositionType": "RETURNED"
+                            }
+                        }
+                    },
+                    "rateRequestTypes": [
+                        "LIST",
+                        "PREFERRED"
+                    ],
+                    "preferredCurrency": "USD",
+                    "totalPackageCount": 1,
+                    "requestedPackageLineItems": [
+                        {
+                            "sequenceNumber": 1,
+                            "groupPackageCount": 1,
+                            "weight": {
+                                "units": "LB",
+                                "value": 1000
+                            },
+                            "dimensions": {
+                                "length": 20,
+                                "width": 20,
+                                "height": 20,
+                                "units": "IN"
+                            },
+                            "subPackagingType": "BARREL",
+                            "associatedFreightLineItems": [
+                                {
+                                    "id": 10
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "IntegratorUS09",
+            "description": "ETD \u2014 International Priority, Your Packaging, Indirect Signature (Trade Document Upload)",
+            "request_type": "create_shipment",
+            "supported": false,
+            "skip_reason": "Requires multi-step UploadImages calls before shipment creation.",
+            "notes": [
+                "3 API calls required in order: (1) Upload Image \u2014 Letterhead, (2) Upload Image \u2014 Signature, (3) Ship with ETD.",
+                "Alternatively: (1) Upload Image x2, (2) Upload Document (pre-shipment commercial invoice PDF), (3) Ship with ETD using document ID from upload response.",
+                "documentId in Ship request comes from the Upload API response."
+            ],
+            "api": "Trade Document Upload API + Ship API",
+            "endpoint": null,
+            "label_format": "pdf",
+            "request": []
+        },
+        {
+            "id": "IntegratorUS10",
+            "description": "Consolidation \u2014 International Priority Distribution (IPD) US",
+            "request_type": "create_shipment",
+            "supported": false,
+            "skip_reason": "Requires the consolidation workflow with multiple API calls.",
+            "notes": [
+                "8 API calls in order: (1) Create Consolidation \u2192 get consolidationKey, (2-7) Add Shipment 1-6 using that key, (8) Confirm Consolidation.",
+                "shipments 1-6 are identical except for minor commodity ID field differences.",
+                "consolidationKey (type/index/date) from Create response must be passed into all Add Shipment calls."
+            ],
+            "api": "Consolidation API",
+            "endpoint": null,
+            "label_format": "png",
+            "request": []
+        },
+        {
+            "id": "IntegratorUS11",
+            "description": "Priority Overnight, FedEx Medium Box, Hold at Location (HAL)",
+            "request_type": "create_shipment",
+            "supported": false,
+            "skip_reason": "Requires an unsupported multi-step validation flow.",
+            "notes": [
+                "HAL (Hold at Location) requires locationId from FedEx Locations Search API.",
+                "Locate a FedEx hold location near the recipient address before building this request."
+            ],
+            "api": "Ship API",
+            "endpoint": "POST /ship/v1/shipments",
+            "label_format": "zplii",
+            "request": {
+                "accountNumber": {
+                    "value": "700257037"
+                },
+                "requestedShipment": {
+                    "shipDatestamp": "CURRENT_DATE",
+                    "labelResponseOptions": "LABEL",
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "serviceType": "PRIORITY_OVERNIGHT",
+                    "packagingType": "FEDEX_MEDIUM_BOX",
+                    "shipper": {
+                        "comment": "Use same shipper details as other US Express tests (James Weston / RTC / 1751 THOMPSON ST / AURORA OH 44202)"
+                    },
+                    "recipients": [
+                        {
+                            "comment": "Recipient address from US_Exp_Dom header group"
+                        }
+                    ],
+                    "shippingChargesPayment": {
+                        "paymentType": "SENDER"
+                    },
+                    "shipmentSpecialServices": {
+                        "specialServiceTypes": [
+                            "HOLD_AT_LOCATION"
+                        ],
+                        "holdAtLocationDetail": {
+                            "locationContactAndAddress": {
+                                "contact": {
+                                    "comment": "HAL facility contact from Locations API"
+                                },
+                                "address": {
+                                    "comment": "HAL facility address from Locations API"
+                                }
+                            },
+                            "locationType": "COMMENT_OMITTED",
+                            "locationId": "LOOKUP_FROM_LOCATIONS_API"
+                        }
+                    },
+                    "labelSpecification": {
+                        "imageType": "ZPLII",
+                        "labelStockType": "STOCK_4X6"
+                    }
+                }
+            }
+        }
+    ]
+}

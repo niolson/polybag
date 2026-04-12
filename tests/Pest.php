@@ -18,7 +18,7 @@ use Tests\TestCase;
 
 pest()->extend(TestCase::class)
     ->use(RefreshDatabase::class)
-    ->in('Feature', 'Unit');
+    ->in('Feature', 'Unit', 'External');
 
 /*
 |--------------------------------------------------------------------------
@@ -135,4 +135,4 @@ uses()->beforeEach(function (): void {
         ['key' => 'amazon.marketplace_id'],
         ['value' => 'ATVPDKIKX0DER', 'type' => 'string', 'group' => 'amazon'],
     );
-})->in('Feature', 'Unit');
+})->in('Feature', 'Unit', 'External');

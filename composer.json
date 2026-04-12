@@ -61,6 +61,14 @@
             "@php artisan config:clear --ansi",
             "@php artisan test"
         ],
+        "test:external": [
+            "@php artisan config:clear --ansi",
+            "@php artisan test tests/External"
+        ],
+        "test:fedex-reference": [
+            "@php artisan config:clear --ansi",
+            "@php artisan test tests/External/Fedex"
+        ],
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
             "@php artisan package:discover --ansi",
