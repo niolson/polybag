@@ -10,16 +10,22 @@ use App\Services\SettingsService;
 use Carbon\Carbon;
 use DateInterval;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
+use Saloon\Contracts\OAuthAuthenticator;
 use Saloon\Helpers\OAuth2\OAuthConfig;
 use Saloon\Http\Auth\TokenAuthenticator;
 use Saloon\Http\Connector;
+use Saloon\Http\Request;
+use Saloon\Http\Response;
 use Saloon\Traits\OAuth2\ClientCredentialsGrant;
 use Saloon\Traits\Plugins\HasTimeout;
 
 class USPSConnector extends Connector
 {
-    use ClientCredentialsGrant;
+    use ClientCredentialsGrant {
+        getAccessToken as protected saloonGetAccessToken;
+    }
     use HasCachedAuthentication;
     use HasTimeout;
     use RetriesTransientErrors;
@@ -62,8 +68,37 @@ class USPSConnector extends Connector
         return OAuthConfig::make()
             ->setClientId((string) $settings->get('usps.client_id', ''))
             ->setClientSecret((string) $settings->get('usps.client_secret', ''))
-            ->setDefaultScopes(['addresses', 'domestic-prices', 'international-prices', 'payments', 'labels', 'international-labels', 'shipments', 'scan-forms'])
+            ->setDefaultScopes(['addresses', 'domestic-prices', 'international-prices', 'payments', 'labels', 'international-labels', 'shipments', 'scan-forms', 'tracking'])
             ->setTokenEndpoint('/oauth2/v3/token');
+    }
+
+    /**
+     * @param  array<string>  $scopes
+     * @param  callable(Request): (void)|null  $requestModifier
+     * @return ($returnResponse is true ? Response : OAuthAuthenticator)
+     */
+    public function getAccessToken(array $scopes = [], string $scopeSeparator = ' ', bool $returnResponse = false, ?callable $requestModifier = null): OAuthAuthenticator|Response
+    {
+        if ($returnResponse) {
+            return $this->saloonGetAccessToken($scopes, $scopeSeparator, true, $requestModifier);
+        }
+
+        $requestedScopes = $scopes === [] ? $this->oauthConfig()->getDefaultScopes() : $scopes;
+        $response = $this->saloonGetAccessToken($scopes, $scopeSeparator, true, $requestModifier);
+        $responseData = $this->decodeTokenResponseSafely($response);
+
+        Log::channel('usps-validation')->info('TOKEN RESPONSE', [
+            'uri' => rtrim($this->resolveBaseUrl(), '/').'/oauth2/v3/token',
+            'status' => $response->status(),
+            'requested_scopes' => $requestedScopes,
+            'granted_scope' => $responseData['scope'] ?? $responseData['scopes'] ?? null,
+            'expires_in' => $responseData['expires_in'] ?? null,
+            'token_type' => $responseData['token_type'] ?? null,
+        ]);
+
+        $response->throw();
+
+        return $this->createOAuthAuthenticatorFromResponse($response);
     }
 
     protected static function getAuthenticatorCacheKey(): string
@@ -236,5 +271,19 @@ class USPSConnector extends Connector
 
             return $paymentAuthorizationToken;
         });
+    }
+
+    /**
+     * @return array<int|string, mixed>
+     */
+    private function decodeTokenResponseSafely(Response $response): array
+    {
+        try {
+            $decoded = $response->json();
+
+            return is_array($decoded) ? $decoded : [];
+        } catch (\JsonException) {
+            return ['body' => $response->body()];
+        }
     }
 }

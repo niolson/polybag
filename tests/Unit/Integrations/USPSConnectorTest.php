@@ -8,6 +8,7 @@ use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Setting;
 use App\Services\SettingsService;
 use GuzzleHttp\Psr7\Response;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
@@ -64,6 +65,38 @@ it('requests correct endpoint for payment authorization', function (): void {
     $request = new PaymentAuthorization;
 
     expect($request->resolveEndpoint())->toBe('/payments/v3/payment-authorization');
+});
+
+it('logs USPS token scopes without logging the access token value', function (): void {
+    Setting::updateOrCreate(['key' => 'usps.client_id'], ['value' => 'test_client_id', 'type' => 'string']);
+    Setting::updateOrCreate(['key' => 'usps.client_secret'], ['value' => 'test_client_secret', 'type' => 'string']);
+    Setting::updateOrCreate(['key' => 'usps.crid'], ['value' => 'test_crid', 'type' => 'string']);
+    app(SettingsService::class)->clearCache();
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make([
+            'access_token' => 'secret-token-value',
+            'token_type' => 'Bearer',
+            'expires_in' => 3600,
+            'scope' => 'addresses tracking',
+        ]),
+    ]);
+
+    Log::spy();
+    Log::shouldReceive('channel')->once()->with('usps-validation')->andReturnSelf();
+    Log::shouldReceive('info')->once()->withArgs(function (string $message, array $context): bool {
+        return $message === 'TOKEN RESPONSE'
+            && $context['status'] === 200
+            && $context['granted_scope'] === 'addresses tracking'
+            && $context['token_type'] === 'Bearer'
+            && $context['expires_in'] === 3600
+            && ! str_contains(json_encode($context), 'secret-token-value');
+    });
+
+    $connector = new USPSConnector;
+    $authenticator = $connector->getAccessToken();
+
+    expect($authenticator->getAccessToken())->toBe('secret-token-value');
 });
 
 it('parses multipart label response correctly', function (): void {

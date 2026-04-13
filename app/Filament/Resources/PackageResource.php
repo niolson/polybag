@@ -343,9 +343,9 @@ class PackageResource extends Resource
             ->visible(fn (Package $record) => $record->status === PackageStatus::Shipped && filled($record->tracking_number) && filled($record->carrier))
             ->slideOver()
             ->modalWidth('3xl')
-            ->modalSubmitAction(false)
+            ->modalSubmitActionLabel('Refresh Tracking')
             ->modalCancelActionLabel('Close')
-            ->mountUsing(function (Package $record): void {
+            ->action(function (Package $record): void {
                 app(TrackingService::class)->refreshPackage($record->fresh());
             })
             ->schema([

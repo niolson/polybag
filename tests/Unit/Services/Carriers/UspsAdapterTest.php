@@ -6,11 +6,13 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\BoxSizeType;
+use App\Enums\TrackingStatus;
 use App\Http\Integrations\USPS\Requests\CancelInternationalLabel;
 use App\Http\Integrations\USPS\Requests\CancelLabel;
 use App\Http\Integrations\USPS\Requests\Label;
 use App\Http\Integrations\USPS\Requests\PaymentAuthorization;
 use App\Http\Integrations\USPS\Requests\ShippingOptions;
+use App\Http\Integrations\USPS\Requests\TrackShipment;
 use App\Models\Package;
 use App\Models\Setting;
 use App\Models\Shipment;
@@ -46,6 +48,10 @@ it('returns false when not configured', function (): void {
     app(SettingsService::class)->clearCache();
 
     expect($this->adapter->isConfigured())->toBeFalse();
+});
+
+it('supports tracking', function (): void {
+    expect($this->adapter->supportsTracking())->toBeTrue();
 });
 
 it('fetches rates from USPS API', function (): void {
@@ -265,6 +271,154 @@ it('returns failure when cancel API errors', function (): void {
 
     expect($response->success)->toBeFalse()
         ->and($response->message)->toContain('404');
+});
+
+it('maps a USPS tracking response into normalized tracking data', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        TrackShipment::class => MockResponse::make([
+            [
+                'trackingNumber' => '9400111899223456789012',
+                'status' => 'In Transit',
+                'statusCategory' => 'Moving Through Network',
+                'statusSummary' => 'In Transit to Next Facility',
+                'deliveryDateExpectation' => [
+                    'predictedDeliveryDate' => '2026-04-10',
+                    'predictedDeliveryWindowEndTime' => '18:00:00',
+                ],
+                'trackingEvents' => [
+                    [
+                        'eventType' => 'Departed USPS Regional Facility',
+                        'eventCode' => '18',
+                        'actionCode' => 'IN_TRANSIT',
+                        'eventCity' => 'Seattle',
+                        'eventState' => 'WA',
+                        'eventCountry' => 'US',
+                        'GMTTimestamp' => '2026-04-08T12:00:00Z',
+                    ],
+                ],
+            ],
+        ]),
+    ]);
+
+    $package = Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'tracking_number' => '9400111899223456789012',
+    ]);
+
+    $response = $this->adapter->trackShipment($package);
+
+    expect($response->success)->toBeTrue()
+        ->and($response->status)->toBe(TrackingStatus::InTransit)
+        ->and($response->statusLabel)->toBe('In Transit to Next Facility')
+        ->and($response->estimatedDeliveryAt?->format('Y-m-d H:i:s'))->toBe('2026-04-10 18:00:00')
+        ->and($response->events)->toHaveCount(1)
+        ->and($response->events[0]->description)->toBe('Departed USPS Regional Facility')
+        ->and($response->events[0]->location)->toBe('Seattle, WA, US');
+});
+
+it('maps USPS delivered responses into delivered tracking status', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        TrackShipment::class => MockResponse::make([
+            [
+                'trackingNumber' => '9400111899223456789012',
+                'status' => 'Delivered',
+                'statusCategory' => 'Delivered',
+                'statusSummary' => 'Delivered, In/At Mailbox',
+                'trackingEvents' => [
+                    [
+                        'eventType' => 'Delivered, In/At Mailbox',
+                        'eventCode' => '01',
+                        'actionCode' => 'DELIVERED',
+                        'eventCity' => 'Los Angeles',
+                        'eventState' => 'CA',
+                        'eventCountry' => 'US',
+                        'GMTTimestamp' => '2026-04-09T20:30:00Z',
+                    ],
+                ],
+            ],
+        ]),
+    ]);
+
+    $package = Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'tracking_number' => '9400111899223456789012',
+    ]);
+
+    $response = $this->adapter->trackShipment($package);
+
+    expect($response->success)->toBeTrue()
+        ->and($response->status)->toBe(TrackingStatus::Delivered)
+        ->and($response->deliveredAt?->toIso8601String())->toBe('2026-04-09T20:30:00+00:00');
+});
+
+it('maps USPS hold and pickup responses into exception tracking status', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        TrackShipment::class => MockResponse::make([
+            [
+                'trackingNumber' => '9400111899223456789012',
+                'status' => 'Available for Pickup',
+                'statusCategory' => 'Hold at Post Office',
+                'statusSummary' => 'Available for Pickup',
+                'trackingEvents' => [],
+            ],
+        ]),
+    ]);
+
+    $package = Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'tracking_number' => '9400111899223456789012',
+    ]);
+
+    $response = $this->adapter->trackShipment($package);
+
+    expect($response->success)->toBeTrue()
+        ->and($response->status)->toBe(TrackingStatus::Exception);
+});
+
+it('returns failure when USPS tracking API errors', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        TrackShipment::class => MockResponse::make([
+            'error' => [
+                'message' => 'Tracking number not found',
+            ],
+        ], 404),
+    ]);
+
+    $package = Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'tracking_number' => '9400111899223456789012',
+    ]);
+
+    $response = $this->adapter->trackShipment($package);
+
+    expect($response->success)->toBeFalse()
+        ->and($response->message)->toBe('Tracking number not found');
+});
+
+it('handles non-json USPS tracking errors without crashing', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        TrackShipment::class => MockResponse::make(
+            body: '<html><body>Application Error</body></html>',
+            status: 500,
+            headers: ['Content-Type' => 'text/html']
+        ),
+    ]);
+
+    $package = Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'tracking_number' => '9400111899223456789012',
+    ]);
+
+    $response = $this->adapter->trackShipment($package);
+
+    expect($response->success)->toBeFalse()
+        ->and($response->message)->toContain('Response')
+        ->and(data_get($response->details, 'raw.body'))->toContain('Application Error');
 });
 
 it('returns empty collection when API returns no rates', function (): void {

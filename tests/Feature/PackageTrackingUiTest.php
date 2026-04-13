@@ -10,6 +10,7 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackingEventData;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\Role;
+use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
 use App\Filament\Resources\PackageResource\Pages\ViewPackage;
@@ -106,9 +107,9 @@ function trackingAdapter(): CarrierAdapterInterface
             return $rate;
         }
 
-        public function serviceCapability(string $serviceCode): \App\Enums\ServiceCapability
+        public function serviceCapability(string $serviceCode): ServiceCapability
         {
-            return \App\Enums\ServiceCapability::NotImplemented;
+            return ServiceCapability::NotImplemented;
         }
     };
 }
@@ -123,7 +124,7 @@ it('shows track action on package list and view pages for shipped packages', fun
         ->assertActionVisible('track');
 });
 
-it('mounts the track action and refreshes tracking details', function () {
+it('opens the track action without refreshing tracking details', function () {
     $package = Package::factory()->fedex()->create([
         'tracking_status' => TrackingStatus::PreTransit,
         'tracking_details' => null,
@@ -133,6 +134,24 @@ it('mounts the track action and refreshes tracking details', function () {
 
     Livewire::test(ListPackages::class)
         ->mountTableAction('track', $package);
+
+    $package->refresh();
+
+    expect($package->tracking_status)->toBe(TrackingStatus::PreTransit)
+        ->and($package->tracking_details)->toBeNull();
+});
+
+it('refreshes tracking details when the track action is submitted', function () {
+    $package = Package::factory()->fedex()->create([
+        'tracking_status' => TrackingStatus::PreTransit,
+        'tracking_details' => null,
+    ]);
+
+    app(CarrierRegistry::class)->registerInstance('FedEx', trackingAdapter());
+
+    Livewire::test(ListPackages::class)
+        ->mountTableAction('track', $package)
+        ->callMountedTableAction();
 
     $package->refresh();
 

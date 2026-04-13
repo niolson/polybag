@@ -10,20 +10,26 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\DataTransferObjects\Tracking\TrackingEventData;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\BoxSizeType;
 use App\Enums\ServiceCapability;
+use App\Enums\TrackingStatus;
 use App\Http\Integrations\USPS\Requests\CancelInternationalLabel;
 use App\Http\Integrations\USPS\Requests\CancelLabel;
 use App\Http\Integrations\USPS\Requests\InternationalLabel;
 use App\Http\Integrations\USPS\Requests\Label;
 use App\Http\Integrations\USPS\Requests\ShippingOptions;
+use App\Http\Integrations\USPS\Requests\TrackShipment;
 use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Package;
 use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
 use App\Services\SettingsService;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Saloon\Exceptions\Request\RequestException;
 use Saloon\Exceptions\Request\Statuses\ForbiddenException;
 use Saloon\Http\Response;
 
@@ -221,12 +227,104 @@ class UspsAdapter implements CarrierAdapterInterface
 
     public function supportsTracking(): bool
     {
-        return false;
+        return true;
     }
 
     public function trackShipment(Package $package): TrackShipmentResponse
     {
-        return TrackShipmentResponse::unsupported();
+        try {
+            $connector = USPSConnector::getUspsConnector();
+            $trackRequest = new TrackShipment($package->tracking_number);
+            $requestUri = rtrim($connector->resolveBaseUrl(), '/').$trackRequest->resolveEndpoint();
+
+            Log::channel('usps-validation')->info('TRACK REQUEST', [
+                'tracking_number' => $package->tracking_number,
+                'uri' => $requestUri,
+                'payload' => $trackRequest->body()->all(),
+            ]);
+
+            $response = $connector->send($trackRequest);
+            $rawResponse = $this->decodeJsonSafely($response);
+
+            Log::channel('usps-validation')->info('TRACK RESPONSE', [
+                'tracking_number' => $package->tracking_number,
+                'uri' => $requestUri,
+                'status' => $response->status(),
+                'body' => $rawResponse,
+            ]);
+
+            if (! $response->successful()) {
+                return TrackShipmentResponse::failure(
+                    data_get($rawResponse, 'error.message')
+                        ?? data_get($rawResponse, 'message')
+                        ?? 'USPS tracking request failed.',
+                    ['raw' => $rawResponse],
+                );
+            }
+
+            $trackingDetails = collect($rawResponse)
+                ->filter(fn ($detail) => is_array($detail))
+                ->values();
+
+            $trackingDetail = $trackingDetails->first();
+
+            if (! is_array($trackingDetail)) {
+                return TrackShipmentResponse::failure('USPS returned an unexpected tracking response.', [
+                    'raw' => $rawResponse,
+                ]);
+            }
+
+            $statusLabel = $trackingDetail['statusSummary']
+                ?? $trackingDetail['status']
+                ?? $trackingDetail['statusCategory']
+                ?? 'Tracking update available';
+
+            $events = collect($trackingDetail['trackingEvents'] ?? [])
+                ->filter(fn ($event) => is_array($event))
+                ->map(fn (array $event): TrackingEventData => $this->mapTrackingEvent($event))
+                ->sortByDesc(fn (TrackingEventData $event) => $event->timestamp?->getTimestamp() ?? 0)
+                ->values()
+                ->all();
+
+            $estimatedDeliveryAt = $this->parseUspsEstimatedDelivery($trackingDetail);
+            $deliveredAt = $this->resolveDeliveredAt($events, $trackingDetail);
+            $status = $this->mapTrackingStatus($trackingDetail, $events);
+
+            return TrackShipmentResponse::success(
+                status: $status,
+                events: $events,
+                estimatedDeliveryAt: $estimatedDeliveryAt,
+                deliveredAt: $deliveredAt,
+                statusLabel: $statusLabel,
+                details: [
+                    'raw' => $rawResponse,
+                ],
+            );
+        } catch (RequestException $e) {
+            $rawResponse = $this->decodeJsonSafely($e->getResponse());
+
+            Log::channel('usps-validation')->info('TRACK RESPONSE', [
+                'tracking_number' => $package->tracking_number,
+                'uri' => rtrim(USPSConnector::getUspsConnector()->resolveBaseUrl(), '/').(new TrackShipment($package->tracking_number))->resolveEndpoint(),
+                'status' => $e->getResponse()->status(),
+                'body' => $rawResponse,
+            ]);
+
+            return TrackShipmentResponse::failure(
+                data_get($rawResponse, 'error.message')
+                    ?? data_get($rawResponse, 'message')
+                    ?? $e->getMessage()
+                    ?? 'USPS tracking request failed.',
+                ['raw' => $rawResponse],
+            );
+        } catch (\Throwable $e) {
+            logger()->error('USPS trackShipment error', [
+                'tracking_number' => $package->tracking_number,
+                'error' => $e->getMessage(),
+            ]);
+
+            return TrackShipmentResponse::failure('Unable to fetch USPS tracking information.');
+        }
     }
 
     private function createDomesticShipment(ShipRequest $request): ShipResponse
@@ -517,6 +615,196 @@ class UspsAdapter implements CarrierAdapterInterface
      * Rate indicators valid for all package types.
      */
     private const UNIVERSAL_RATE_INDICATORS = ['SP', 'PA'];
+
+    /**
+     * @return array<int|string, mixed>
+     */
+    private function decodeJsonSafely(Response $response): array
+    {
+        try {
+            $decoded = $response->json();
+
+            return is_array($decoded)
+                ? $decoded
+                : ['body' => $response->body()];
+        } catch (\JsonException) {
+            return ['body' => $response->body()];
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $trackingDetail
+     * @param  array<int, TrackingEventData>  $events
+     */
+    private function mapTrackingStatus(array $trackingDetail, array $events): TrackingStatus
+    {
+        $statusText = strtoupper(implode(' ', array_filter([
+            $trackingDetail['status'] ?? null,
+            $trackingDetail['statusCategory'] ?? null,
+            $trackingDetail['statusSummary'] ?? null,
+        ])));
+
+        if (
+            str_contains($statusText, 'DELIVERED')
+            || str_contains($statusText, 'DELIVERY CONFIRMED')
+        ) {
+            return TrackingStatus::Delivered;
+        }
+
+        if (str_contains($statusText, 'OUT FOR DELIVERY')) {
+            return TrackingStatus::OutForDelivery;
+        }
+
+        if (str_contains($statusText, 'RETURN')) {
+            return TrackingStatus::Returned;
+        }
+
+        if (
+            str_contains($statusText, 'EXCEPTION')
+            || str_contains($statusText, 'DELAY')
+            || str_contains($statusText, 'ALERT')
+            || str_contains($statusText, 'HOLD')
+            || str_contains($statusText, 'PICKUP')
+            || str_contains($statusText, 'NO ACCESS')
+            || str_contains($statusText, 'UNCLAIMED')
+            || str_contains($statusText, 'ACTION NEEDED')
+        ) {
+            return TrackingStatus::Exception;
+        }
+
+        if (
+            str_contains($statusText, 'PRE-SHIPMENT')
+            || str_contains($statusText, 'PRE SHIPMENT')
+            || str_contains($statusText, 'LABEL CREATED')
+            || str_contains($statusText, 'SHIPPING LABEL CREATED')
+        ) {
+            return TrackingStatus::PreTransit;
+        }
+
+        if (! empty($events)) {
+            return TrackingStatus::InTransit;
+        }
+
+        return TrackingStatus::PreTransit;
+    }
+
+    /**
+     * @param  array<string, mixed>  $event
+     */
+    private function mapTrackingEvent(array $event): TrackingEventData
+    {
+        $locationParts = array_filter([
+            $event['eventCity'] ?? null,
+            $event['eventState'] ?? null,
+            $event['eventCountry'] ?? null,
+        ]);
+
+        return new TrackingEventData(
+            timestamp: $this->parseUspsEventTimestamp($event),
+            location: empty($locationParts) ? null : implode(', ', $locationParts),
+            description: $event['eventType']
+                ?? $event['status']
+                ?? 'Tracking event',
+            statusCode: $event['eventCode'] ?? null,
+            status: $event['actionCode'] ?? null,
+            raw: $event,
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $trackingDetail
+     */
+    private function parseUspsEstimatedDelivery(array $trackingDetail): ?CarbonImmutable
+    {
+        $expectation = $trackingDetail['deliveryDateExpectation'] ?? [];
+
+        if (! is_array($expectation)) {
+            return null;
+        }
+
+        $date = $expectation['predictedDeliveryDate']
+            ?? $expectation['expectedDeliveryDate']
+            ?? $expectation['guaranteedDeliveryDate']
+            ?? null;
+
+        $endTime = $expectation['predictedDeliveryWindowEndTime']
+            ?? $expectation['endOfDay']
+            ?? null;
+
+        if (! is_string($date) || blank($date)) {
+            return null;
+        }
+
+        $dateTime = $date;
+
+        if (is_string($endTime) && filled($endTime) && ! str_contains($date, 'T')) {
+            $dateTime = "{$date} {$endTime}";
+        }
+
+        try {
+            return CarbonImmutable::parse($dateTime);
+        } catch (\Throwable) {
+            try {
+                return CarbonImmutable::parse($date);
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $event
+     */
+    private function parseUspsEventTimestamp(array $event): ?CarbonImmutable
+    {
+        $timestamp = $event['GMTTimestamp']
+            ?? $event['eventTimestamp']
+            ?? null;
+
+        if (! is_string($timestamp) || blank($timestamp)) {
+            return null;
+        }
+
+        try {
+            return CarbonImmutable::parse($timestamp);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * @param  array<int, TrackingEventData>  $events
+     * @param  array<string, mixed>  $trackingDetail
+     */
+    private function resolveDeliveredAt(array $events, array $trackingDetail): ?CarbonImmutable
+    {
+        $deliveredEvent = collect($events)->first(function (TrackingEventData $event): bool {
+            $description = strtoupper($event->description);
+            $statusCode = strtoupper((string) $event->statusCode);
+
+            return str_contains($description, 'DELIVER')
+                || in_array($statusCode, ['01', 'DELIVERED'], true);
+        });
+
+        if ($deliveredEvent instanceof TrackingEventData) {
+            return $deliveredEvent->timestamp;
+        }
+
+        $statusText = strtoupper(implode(' ', array_filter([
+            $trackingDetail['status'] ?? null,
+            $trackingDetail['statusCategory'] ?? null,
+            $trackingDetail['statusSummary'] ?? null,
+        ])));
+
+        if (str_contains($statusText, 'DELIVERED')) {
+            return $this->parseUspsEventTimestamp([
+                'GMTTimestamp' => $trackingDetail['deliveryDateExpectation']['expectedDeliveryDate'] ?? null,
+                'eventTimestamp' => $trackingDetail['deliveryDateExpectation']['expectedDeliveryDate'] ?? null,
+            ]);
+        }
+
+        return null;
+    }
 
     /**
      * Rate indicators valid only for boxes (non-soft pack).
