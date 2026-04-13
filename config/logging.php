@@ -154,6 +154,14 @@ return [
             'tap' => [DeepNormalizerTap::class],
         ],
 
+        'ups-validation' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/ups-validation.log'),
+            'level' => 'debug',
+            'replace_placeholders' => true,
+            'tap' => [DeepNormalizerTap::class],
+        ],
+
     ],
 
 ];
