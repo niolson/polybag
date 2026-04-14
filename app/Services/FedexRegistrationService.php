@@ -12,6 +12,7 @@ use App\Http\Integrations\Fedex\Requests\Registration\VerifyPin;
 use App\Models\Setting;
 use Illuminate\Support\Facades\Cache;
 use RuntimeException;
+use Saloon\Http\Request;
 use Saloon\Http\Response;
 
 class FedexRegistrationService
@@ -20,13 +21,14 @@ class FedexRegistrationService
      * Error codes that indicate MFA lockout (max retries reached).
      */
     private const MAX_RETRIES_CODES = [
-        'UNAUTHORIZED.ACCESS.ERROR',
-        'PIN.UNKNOWN.ERROR',
-        'INVOICE.UNKNOWN.ERROR',
+        'PINGENERATION.MAXRETRY.EXCEEDED',
+        'PINVALIDATION.MAXRETRY.EXCEEDED',
+        'INVOICEVALIDATION.MAXRETRY.EXCEEDED',
     ];
 
     public function __construct(
         private readonly SettingsService $settings,
+        private readonly FedexMfaAuditService $audit,
     ) {}
 
     /**
@@ -67,8 +69,7 @@ class FedexRegistrationService
         string $countryCode,
     ): array {
         $connector = $this->getConnector();
-
-        $response = $connector->send(new ValidateAddress(
+        $apiRequest = new ValidateAddress(
             accountNumber: $accountNumber,
             customerName: $customerName,
             residential: $residential,
@@ -78,7 +79,9 @@ class FedexRegistrationService
             stateOrProvinceCode: $stateOrProvinceCode,
             postalCode: $postalCode,
             countryCode: $countryCode,
-        ));
+        );
+        $response = $connector->send($apiRequest);
+        $this->recordExchange('address-validation', $apiRequest, $response);
 
         if (! $response->successful()) {
             $this->throwFromResponse($response->json('errors.0.code'), $response->json('errors.0.message'));
@@ -125,6 +128,7 @@ class FedexRegistrationService
         $apiRequest = new SendPin($accountAuthToken, $option);
 
         $response = $connector->send($apiRequest);
+        $this->recordExchange('send-pin', $apiRequest, $response);
 
         if (! $response->successful()) {
             $this->throwFromResponse($response->json('errors.0.code'), $response->json('errors.0.message'));
@@ -142,6 +146,7 @@ class FedexRegistrationService
         $apiRequest = new VerifyPin($accountAuthToken, $pin);
 
         $response = $connector->send($apiRequest);
+        $this->recordExchange('verify-pin', $apiRequest, $response);
 
         if (! $response->successful()) {
             $this->throwFromResponse($response->json('errors.0.code'), $response->json('errors.0.message'));
@@ -172,6 +177,7 @@ class FedexRegistrationService
         );
 
         $response = $connector->send($apiRequest);
+        $this->recordExchange('verify-invoice', $apiRequest, $response);
 
         if (! $response->successful()) {
             $this->throwFromResponse($response->json('errors.0.code'), $response->json('errors.0.message'));
@@ -193,6 +199,13 @@ class FedexRegistrationService
         $this->settings->set('fedex.child_env', $isSandbox ? 'sandbox' : 'production', group: 'fedex');
 
         Cache::forget('fedex_authenticator');
+    }
+
+    public function activateChildCredentials(string $childKey, string $childSecret): void
+    {
+        $this->saveChildCredentials($childKey, $childSecret);
+
+        FedexConnector::getAuthenticatedConnector();
     }
 
     /**
@@ -230,9 +243,33 @@ class FedexRegistrationService
     private function throwFromResponse(?string $code, ?string $message): void
     {
         if ($code && in_array($code, self::MAX_RETRIES_CODES, strict: true)) {
-            throw new FedexRegistrationMaxRetriesException;
+            throw new FedexRegistrationMaxRetriesException(
+                fedexCode: $code,
+                lockedMethods: match ($code) {
+                    'PINGENERATION.MAXRETRY.EXCEEDED' => ['SMS', 'CALL', 'EMAIL'],
+                    'PINVALIDATION.MAXRETRY.EXCEEDED' => ['SMS', 'CALL', 'EMAIL'],
+                    'INVOICEVALIDATION.MAXRETRY.EXCEEDED' => ['INVOICE'],
+                    default => [],
+                },
+            );
         }
 
         throw new RuntimeException($message ?? 'FedEx registration request failed.');
+    }
+
+    private function recordExchange(string $step, Request $request, Response $response): void
+    {
+        $this->audit->recordExchange(
+            $step,
+            [
+                'uri' => $request->resolveEndpoint(),
+                'headers' => $request->headers()->all(),
+                'body' => $request->body()->all(),
+            ],
+            [
+                'status' => $response->status(),
+                'body' => $response->json() ?? ['body' => $response->body()],
+            ],
+        );
     }
 }

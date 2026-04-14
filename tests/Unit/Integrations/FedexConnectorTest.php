@@ -7,6 +7,8 @@ use App\Http\Integrations\Fedex\Requests\Rates;
 use App\Http\Integrations\Fedex\Requests\Registration\ValidateAddress;
 use App\Models\Setting;
 use App\Services\SettingsService;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Saloon\Http\Faking\MockClient;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\PendingRequest;
@@ -281,6 +283,74 @@ it('handles error responses', function (): void {
 
     expect($response->status())->toBe(400)
         ->and($response->json('errors.0.code'))->toBe('INVALID.INPUT.EXCEPTION');
+});
+
+it('logs parent authorization artifacts when requesting a token directly', function (): void {
+    Storage::fake();
+
+    config([
+        'services.fedex.base_url' => 'https://apis.fedex.com',
+        'services.fedex.api_key' => 'parent-key',
+        'services.fedex.api_secret' => 'parent-secret',
+    ]);
+
+    Saloon::fake([
+        'https://apis.fedex.com/oauth/token' => MockResponse::make([
+            'access_token' => 'parent-access-token',
+            'token_type' => 'bearer',
+            'expires_in' => 3600,
+        ], 200),
+    ]);
+
+    $authenticator = (new FedexConnector)->getAccessToken();
+
+    expect($authenticator->getAccessToken())->toBe('parent-access-token');
+
+    Storage::assertExists('fedex-mfa/latest/parent-authorization/request.json');
+    Storage::assertExists('fedex-mfa/latest/parent-authorization/response.json');
+
+    $requestArtifact = json_decode(Storage::get('fedex-mfa/latest/parent-authorization/request.json'), true);
+    $responseArtifact = json_decode(Storage::get('fedex-mfa/latest/parent-authorization/response.json'), true);
+
+    expect(data_get($requestArtifact, 'body.client_id'))->toBe('[REDACTED]')
+        ->and(data_get($requestArtifact, 'body.client_secret'))->toBe('[REDACTED]')
+        ->and(data_get($responseArtifact, 'body.access_token'))->toBe('[REDACTED]');
+});
+
+it('logs child authorization artifacts when brokered child credentials request a token', function (): void {
+    Storage::fake();
+    Http::fake([
+        'https://broker.example.test/fedex/token' => Http::response([
+            'access_token' => 'child-access-token',
+            'token_type' => 'bearer',
+            'expires_in' => 3600,
+        ], 200),
+    ]);
+
+    config([
+        'services.oauth.broker_url' => 'https://broker.example.test',
+        'services.oauth.instance_id' => 'instance-123',
+        'services.oauth.broker_secret' => 'broker-secret',
+    ]);
+
+    Setting::create(['key' => 'fedex.child_key', 'value' => 'child-key-123', 'type' => 'string', 'encrypted' => true, 'group' => 'fedex']);
+    Setting::create(['key' => 'fedex.child_secret', 'value' => 'child-secret-456', 'type' => 'string', 'encrypted' => true, 'group' => 'fedex']);
+    Setting::create(['key' => 'fedex.child_env', 'value' => 'production', 'type' => 'string', 'group' => 'fedex']);
+    app(SettingsService::class)->clearCache();
+
+    $authenticator = (new FedexConnector)->getAccessToken();
+
+    expect($authenticator->getAccessToken())->toBe('child-access-token');
+
+    Storage::assertExists('fedex-mfa/latest/child-authorization/request.json');
+    Storage::assertExists('fedex-mfa/latest/child-authorization/response.json');
+
+    $requestArtifact = json_decode(Storage::get('fedex-mfa/latest/child-authorization/request.json'), true);
+    $responseArtifact = json_decode(Storage::get('fedex-mfa/latest/child-authorization/response.json'), true);
+
+    expect(data_get($requestArtifact, 'body.child_key'))->toBe('[REDACTED]')
+        ->and(data_get($requestArtifact, 'body.child_secret'))->toBe('[REDACTED]')
+        ->and(data_get($responseArtifact, 'body.access_token'))->toBe('[REDACTED]');
 });
 
 // ─── FedexRegistrationProxyConnector ──────────────────────────────────────────

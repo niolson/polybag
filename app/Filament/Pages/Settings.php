@@ -32,6 +32,7 @@ use Filament\Schemas\Components\Form;
 use Filament\Schemas\Components\Html;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Wizard;
 use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
 use Filament\Support\Exceptions\Halt;
@@ -81,6 +82,11 @@ class Settings extends Page
     public array $fedexSecureCodeOptions = [];
 
     public bool $fedexInvoiceAvailable = false;
+
+    /** @var string[] */
+    public array $fedexLockedFactor2Methods = [];
+
+    public bool $fedexSupportFallbackActive = false;
 
     /**
      * Encrypted credential fields and their setting keys.
@@ -270,8 +276,142 @@ class Settings extends Page
             app(FedexRegistrationService::class)->sendPin($this->fedexAccountAuthToken, $this->fedexFactor2Method);
             Notification::make()->success()->title('PIN resent.')->send();
         } catch (\Throwable $e) {
-            Notification::make()->danger()->title($e->getMessage())->send();
+            $this->notifyFedexRegistrationError($e);
         }
+    }
+
+    public function closeFedexRegistrationModal(): void
+    {
+        $this->unmountAction(false);
+    }
+
+    private function resetFedexRegistrationState(): void
+    {
+        $this->fedexEulaAccepted = false;
+        $this->fedexAccountAuthToken = null;
+        $this->fedexFactor2Method = null;
+        $this->fedexMaskedEmail = null;
+        $this->fedexMaskedPhone = null;
+        $this->fedexSecureCodeOptions = [];
+        $this->fedexInvoiceAvailable = false;
+        $this->fedexLockedFactor2Methods = [];
+        $this->fedexSupportFallbackActive = false;
+    }
+
+    private function renderFedexWizardSubmitAction(): HtmlString
+    {
+        if ($this->fedexSupportFallbackActive) {
+            return new HtmlString(
+                '<button type="button" wire:click="closeFedexRegistrationModal" class="fi-btn fi-color-gray fi-size-md inline-flex items-center justify-center gap-1 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-gray-700 ring-1 ring-gray-300 transition hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-700 dark:hover:bg-gray-700">Close</button>'
+            );
+        }
+
+        return new HtmlString(
+            '<button type="button" wire:click="callMountedAction" class="fi-btn fi-color-custom fi-size-md inline-flex items-center justify-center gap-1 rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-500 disabled:pointer-events-none disabled:opacity-70">Add Account</button>'
+        );
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function getFedexAvailableVerificationOptions(): array
+    {
+        $options = [];
+
+        foreach ($this->fedexSecureCodeOptions as $code) {
+            if (in_array($code, $this->fedexLockedFactor2Methods, strict: true)) {
+                continue;
+            }
+
+            $options[$code] = match ($code) {
+                'SMS' => 'PIN via SMS'.($this->fedexMaskedPhone ? " ({$this->fedexMaskedPhone})" : ''),
+                'CALL' => 'PIN via Phone Call'.($this->fedexMaskedPhone ? " ({$this->fedexMaskedPhone})" : ''),
+                'EMAIL' => 'PIN via Email'.($this->fedexMaskedEmail ? " ({$this->fedexMaskedEmail})" : ''),
+                default => $code,
+            };
+        }
+
+        if ($this->fedexInvoiceAvailable && ! in_array('INVOICE', $this->fedexLockedFactor2Methods, strict: true)) {
+            $options['INVOICE'] = 'Invoice Validation';
+        }
+
+        return $options;
+    }
+
+    public function hasAvailableFedexFactor2Methods(): bool
+    {
+        return $this->getFedexAvailableVerificationOptions() !== [];
+    }
+
+    /**
+     * @param  array{accountAuthToken: string, email: ?string, phoneNumber: ?string, options: array{invoice: bool, secureCode: array<int, string>}}  $result
+     */
+    private function storeFedexVerificationState(array $result): void
+    {
+        $this->fedexAccountAuthToken = $result['accountAuthToken'];
+        $this->fedexMaskedEmail = $result['email'];
+        $this->fedexMaskedPhone = $result['phoneNumber'];
+        $this->fedexSecureCodeOptions = $result['options']['secureCode'];
+        $this->fedexInvoiceAvailable = $result['options']['invoice'];
+        $this->fedexLockedFactor2Methods = [];
+        $this->fedexSupportFallbackActive = false;
+
+        $this->refreshMountedFedexAction();
+    }
+
+    private function completeFedexRegistration(string $accountNumber, string $childKey, string $childSecret): void
+    {
+        app(FedexRegistrationService::class)->activateChildCredentials($childKey, $childSecret);
+        app(SettingsService::class)->set('fedex.account_number', $accountNumber, group: 'fedex');
+    }
+
+    private function refreshMountedFedexAction(): void
+    {
+        if (empty($this->mountedActions ?? [])) {
+            return;
+        }
+
+        $this->cachedMountedActions = null;
+
+        foreach ($this->cachedSchemas as $schemaName => $schema) {
+            if (str($schemaName)->startsWith('mountedActionSchema')) {
+                unset($this->cachedSchemas[$schemaName]);
+            }
+        }
+
+        $this->cacheMountedActions($this->mountedActions);
+    }
+
+    private function notifyFedexRegistrationError(\Throwable $exception): void
+    {
+        Notification::make()
+            ->danger()
+            ->title('FedEx Error')
+            ->body($exception->getMessage())
+            ->send();
+    }
+
+    private function handleFedexRegistrationLockout(FedexRegistrationMaxRetriesException $exception): void
+    {
+        $this->fedexLockedFactor2Methods = array_values(array_unique([
+            ...$this->fedexLockedFactor2Methods,
+            ...$exception->lockedMethods,
+        ]));
+        $this->fedexSupportFallbackActive = true;
+
+        $mountedActionIndex = array_key_last($this->mountedActions ?? []);
+
+        if ($mountedActionIndex === null) {
+            return;
+        }
+
+        data_set($this->mountedActions[$mountedActionIndex], 'data.fedex_factor2_method', null);
+        data_set($this->mountedActions[$mountedActionIndex], 'data.fedex_pin', null);
+        data_set($this->mountedActions[$mountedActionIndex], 'data.fedex_invoice_number', null);
+        data_set($this->mountedActions[$mountedActionIndex], 'data.fedex_invoice_date', null);
+        data_set($this->mountedActions[$mountedActionIndex], 'data.fedex_invoice_amount', null);
+        data_set($this->mountedActions[$mountedActionIndex], 'data.fedex_invoice_currency', 'USD');
+        $this->refreshMountedFedexAction();
     }
 
     private function isFedexAccountConnected(): bool
@@ -589,15 +729,15 @@ class Settings extends Page
                                 ->extraModalWindowAttributes(['style' => 'max-width: 96rem;'])
                                 ->closeModalByClickingAway(false)
                                 ->closeModalByEscaping(false)
-                                ->mountUsing(function () {
-                                    $this->fedexEulaAccepted = false;
-                                    $this->fedexAccountAuthToken = null;
-                                    $this->fedexFactor2Method = null;
-                                    $this->fedexMaskedEmail = null;
-                                    $this->fedexMaskedPhone = null;
-                                    $this->fedexSecureCodeOptions = [];
-                                    $this->fedexInvoiceAvailable = false;
-                                })
+                                ->modalSubmitAction(false)
+                                ->mountUsing(fn () => $this->resetFedexRegistrationState())
+                                ->modifyWizardUsing(fn (Wizard $wizard) => $wizard
+                                    ->submitAction($this->renderFedexWizardSubmitAction())
+                                    ->previousAction(
+                                        fn (Action $action) => $action
+                                            ->hidden($this->fedexSupportFallbackActive && ! $this->hasAvailableFedexFactor2Methods())
+                                            ->disabled($this->fedexSupportFallbackActive && ! $this->hasAvailableFedexFactor2Methods())
+                                    ))
                                 ->steps([
                                     Step::make('Terms of Service')
                                         ->description('Review and accept the FedEx EULA')
@@ -683,51 +823,42 @@ class Settings extends Page
 
                                             // MFA bypassed — credentials returned immediately
                                             if (! $result['mfaRequired']) {
-                                                app(FedexRegistrationService::class)->saveChildCredentials(
-                                                    $result['credentials']['child_Key'],
-                                                    $result['credentials']['child_secret'],
-                                                );
-                                                app(SettingsService::class)->set('fedex.account_number', $get('fedex_reg_account_number'), group: 'fedex');
-                                                Notification::make()->success()->title('FedEx Account added Successfully.')->send();
-                                                $this->redirect(static::getUrl());
+                                                try {
+                                                    $this->completeFedexRegistration(
+                                                        accountNumber: $get('fedex_reg_account_number'),
+                                                        childKey: $result['credentials']['child_Key'],
+                                                        childSecret: $result['credentials']['child_secret'],
+                                                    );
+                                                    Notification::make()->success()->title('FedEx Account added Successfully.')->send();
+                                                    $this->redirect(static::getUrl());
 
-                                                throw new Halt;
+                                                    throw new Halt;
+                                                } catch (Halt $exception) {
+                                                    throw $exception;
+                                                } catch (\Throwable $e) {
+                                                    $this->notifyFedexRegistrationError($e);
+
+                                                    throw new Halt;
+                                                }
                                             }
 
-                                            $this->fedexAccountAuthToken = $result['accountAuthToken'];
-                                            $this->fedexMaskedEmail = $result['email'];
-                                            $this->fedexMaskedPhone = $result['phoneNumber'];
-                                            $this->fedexSecureCodeOptions = $result['options']['secureCode'];
-                                            $this->fedexInvoiceAvailable = $result['options']['invoice'];
+                                            $this->storeFedexVerificationState($result);
                                         }),
 
                                     Step::make('Verification Method')
                                         ->description('Choose how to verify your identity')
-                                        ->schema(function () {
-                                            $options = [];
-                                            foreach ($this->fedexSecureCodeOptions as $code) {
-                                                $options[$code] = match ($code) {
-                                                    'SMS' => 'PIN via SMS'.($this->fedexMaskedPhone ? " ({$this->fedexMaskedPhone})" : ''),
-                                                    'CALL' => 'PIN via Phone Call'.($this->fedexMaskedPhone ? " ({$this->fedexMaskedPhone})" : ''),
-                                                    'EMAIL' => 'PIN via Email'.($this->fedexMaskedEmail ? " ({$this->fedexMaskedEmail})" : ''),
-                                                    default => $code,
-                                                };
-                                            }
-                                            if ($this->fedexInvoiceAvailable) {
-                                                $options['INVOICE'] = 'Invoice Validation';
-                                            }
-
-                                            return [
-                                                Radio::make('fedex_factor2_method')
-                                                    ->label('Verification Method')
-                                                    ->options($options)
-                                                    ->required()
-                                                    ->live()
-                                                    ->columnSpanFull(),
-                                            ];
-                                        })
+                                        ->schema(fn () => [
+                                            Radio::make('fedex_factor2_method')
+                                                ->label('Verification Method')
+                                                ->options($this->getFedexAvailableVerificationOptions())
+                                                ->required()
+                                                ->live()
+                                                ->columnSpanFull(),
+                                        ])
                                         ->afterValidation(function (Get $get) {
                                             $this->fedexFactor2Method = $get('fedex_factor2_method');
+                                            $this->fedexSupportFallbackActive = false;
+                                            $this->refreshMountedFedexAction();
 
                                             if ($this->fedexFactor2Method !== 'INVOICE') {
                                                 try {
@@ -736,11 +867,9 @@ class Settings extends Page
                                                         $this->fedexFactor2Method,
                                                     );
                                                 } catch (FedexRegistrationMaxRetriesException $e) {
-                                                    Notification::make()->danger()->title($e->getMessage())->send();
-
-                                                    throw new Halt;
+                                                    $this->handleFedexRegistrationLockout($e);
                                                 } catch (\Throwable $e) {
-                                                    Notification::make()->danger()->title('FedEx Error')->body($e->getMessage())->send();
+                                                    $this->notifyFedexRegistrationError($e);
 
                                                     throw new Halt;
                                                 }
@@ -748,8 +877,29 @@ class Settings extends Page
                                         }),
 
                                     Step::make('Enter Verification')
-                                        ->description(fn () => $this->fedexFactor2Method === 'INVOICE' ? 'Enter a recent FedEx invoice' : 'Enter the PIN sent to you')
+                                        ->description(fn () => $this->fedexSupportFallbackActive
+                                            ? 'Contact customer service'
+                                            : ($this->fedexFactor2Method === 'INVOICE' ? 'Enter a recent FedEx invoice' : 'Enter the PIN sent to you'))
                                         ->schema(function () {
+                                            if ($this->fedexSupportFallbackActive) {
+                                                $body = $this->hasAvailableFedexFactor2Methods()
+                                                    ? 'We are unable to process this request. Please try again later or call FedEx Customer Service and ask for technical support. You may also go back and choose a different validation method.'
+                                                    : 'We are unable to process this request. Please try again later or call FedEx Customer Service and ask for technical support.';
+
+                                                return [
+                                                    Placeholder::make('fedex_support_fallback')
+                                                        ->hiddenLabel()
+                                                        ->content(new HtmlString(
+                                                            '<div>'.
+                                                            '<div class="rounded-lg border border-danger-200 bg-danger-50 p-4 text-sm font-medium text-danger-700 dark:border-danger-800 dark:bg-danger-950/40 dark:text-danger-300">'.
+                                                            $body.
+                                                            '</div>'.
+                                                            '</div>'
+                                                        ))
+                                                        ->columnSpanFull(),
+                                                ];
+                                            }
+
                                             if ($this->fedexFactor2Method === 'INVOICE') {
                                                 return [
                                                     TextInput::make('fedex_invoice_number')
@@ -791,6 +941,10 @@ class Settings extends Page
                                         ->columns(2),
                                 ])
                                 ->action(function (array $data) {
+                                    if ($this->fedexSupportFallbackActive) {
+                                        return;
+                                    }
+
                                     try {
                                         if ($this->fedexFactor2Method === 'INVOICE') {
                                             $credentials = app(FedexRegistrationService::class)->verifyInvoice(
@@ -806,21 +960,21 @@ class Settings extends Page
                                                 pin: $data['fedex_pin'],
                                             );
                                         }
+
+                                        $this->completeFedexRegistration(
+                                            accountNumber: $data['fedex_reg_account_number'],
+                                            childKey: $credentials['child_Key'],
+                                            childSecret: $credentials['child_secret'],
+                                        );
                                     } catch (FedexRegistrationMaxRetriesException $e) {
-                                        Notification::make()->danger()->title($e->getMessage())->send();
+                                        $this->handleFedexRegistrationLockout($e);
 
                                         throw new Halt;
                                     } catch (\Throwable $e) {
-                                        Notification::make()->danger()->title('FedEx Error')->body($e->getMessage())->send();
+                                        $this->notifyFedexRegistrationError($e);
 
                                         throw new Halt;
                                     }
-
-                                    app(FedexRegistrationService::class)->saveChildCredentials(
-                                        $credentials['child_Key'],
-                                        $credentials['child_secret'],
-                                    );
-                                    app(SettingsService::class)->set('fedex.account_number', $data['fedex_reg_account_number'], group: 'fedex');
 
                                     Notification::make()->success()->title('FedEx Account added Successfully.')->send();
                                 }),

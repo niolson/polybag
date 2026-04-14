@@ -4,6 +4,7 @@ namespace App\Http\Integrations\Fedex;
 
 use App\Http\Integrations\Concerns\HasCachedAuthentication;
 use App\Http\Integrations\Concerns\RetriesTransientErrors;
+use App\Services\FedexMfaAuditService;
 use App\Services\SettingsService;
 use DateTimeImmutable;
 use Illuminate\Support\Facades\Http;
@@ -12,15 +13,14 @@ use Saloon\Contracts\OAuthAuthenticator;
 use Saloon\Helpers\OAuth2\OAuthConfig;
 use Saloon\Http\Auth\AccessTokenAuthenticator;
 use Saloon\Http\Connector;
+use Saloon\Http\Request;
 use Saloon\Http\Response;
 use Saloon\Traits\OAuth2\ClientCredentialsGrant;
 use Saloon\Traits\Plugins\HasTimeout;
 
 class FedexConnector extends Connector
 {
-    use ClientCredentialsGrant {
-        getAccessToken as getClientCredentialsAccessToken;
-    }
+    use ClientCredentialsGrant;
     use HasCachedAuthentication;
     use HasTimeout;
     use RetriesTransientErrors;
@@ -100,37 +100,37 @@ class FedexConnector extends Connector
     ): OAuthAuthenticator|Response {
         $settings = app(SettingsService::class);
         $childKey = $settings->get('fedex.child_key');
+        $hasBroker = filled(config('services.oauth.broker_url'))
+            && filled(config('services.oauth.instance_id'))
+            && filled(config('services.oauth.broker_secret'));
 
-        if (! filled($childKey)) {
-            return $this->getClientCredentialsAccessToken($scopes, $scopeSeparator, $returnResponse, $requestModifier);
+        if (filled($childKey) && $hasBroker) {
+            return $this->getBrokeredChildAccessToken($settings, $returnResponse);
         }
 
-        $isSandbox = $settings->get('fedex.child_env') === 'sandbox';
-        $brokerUrl = rtrim(config('services.oauth.broker_url'), '/');
-        $proxyPath = '/fedex/token';
-        $fedexPath = '/oauth/token';
-        $instanceId = config('services.oauth.instance_id');
-        $secret = config('services.oauth.broker_secret');
-        $nonce = Str::random(40);
-        $signature = hash_hmac('sha256', "{$fedexPath}:{$instanceId}:{$nonce}", $secret);
+        $requestedScopes = $scopes === [] ? $this->oauthConfig()->getDefaultScopes() : $scopes;
+        $request = $this->resolveAccessTokenRequest($this->oauthConfig(), $scopes, $scopeSeparator);
+        $request = $this->oauthConfig()->invokeRequestModifier($request);
 
-        $response = Http::acceptJson()->asForm()->post($brokerUrl.$proxyPath, [
-            'instance_id' => $instanceId,
-            'nonce' => $nonce,
-            'signature' => $signature,
-            'child_key' => $childKey,
-            'child_secret' => $settings->get('fedex.child_secret'),
-            'sandbox' => $isSandbox ? '1' : '0',
-        ]);
+        if (is_callable($requestModifier)) {
+            $requestModifier($request);
+        }
+
+        $response = $this->send($request);
+
+        app(FedexMfaAuditService::class)->recordExchange(
+            filled($childKey) ? 'child-authorization' : 'parent-authorization',
+            $this->buildAuthRequestPayload($request, $requestedScopes, 'direct'),
+            $this->buildAuthResponsePayload($response),
+        );
+
+        if ($returnResponse) {
+            return $response;
+        }
 
         $response->throw();
 
-        $data = $response->json();
-        $expiresAt = isset($data['expires_in'])
-            ? new DateTimeImmutable('+'.$data['expires_in'].' seconds')
-            : null;
-
-        return new AccessTokenAuthenticator($data['access_token'], null, $expiresAt);
+        return $this->createOAuthAuthenticatorFromResponse($response);
     }
 
     protected static function getAuthenticatorCacheKey(): string
@@ -159,5 +159,77 @@ class FedexConnector extends Connector
     public static function getFedexConnector(): self
     {
         return self::getAuthenticatedConnector();
+    }
+
+    /**
+     * @return ($returnResponse is true ? Response : OAuthAuthenticator)
+     */
+    private function getBrokeredChildAccessToken(SettingsService $settings, bool $returnResponse): OAuthAuthenticator|Response
+    {
+        $isSandbox = $settings->get('fedex.child_env') === 'sandbox';
+        $brokerUrl = rtrim(config('services.oauth.broker_url'), '/');
+        $proxyPath = '/fedex/token';
+        $fedexPath = '/oauth/token';
+        $instanceId = config('services.oauth.instance_id');
+        $secret = config('services.oauth.broker_secret');
+        $nonce = Str::random(40);
+        $signature = hash_hmac('sha256', "{$fedexPath}:{$instanceId}:{$nonce}", $secret);
+        $requestPayload = [
+            'instance_id' => $instanceId,
+            'nonce' => $nonce,
+            'signature' => $signature,
+            'child_key' => $settings->get('fedex.child_key'),
+            'child_secret' => $settings->get('fedex.child_secret'),
+            'sandbox' => $isSandbox ? '1' : '0',
+        ];
+
+        $response = Http::acceptJson()->asForm()->post($brokerUrl.$proxyPath, $requestPayload);
+
+        app(FedexMfaAuditService::class)->recordExchange(
+            'child-authorization',
+            [
+                'transport' => 'broker-proxy',
+                'uri' => $brokerUrl.$proxyPath,
+                'body' => $requestPayload,
+            ],
+            [
+                'status' => $response->status(),
+                'body' => $response->json() ?? ['body' => $response->body()],
+            ],
+        );
+
+        $response->throw();
+
+        $data = $response->json();
+        $expiresAt = isset($data['expires_in'])
+            ? new DateTimeImmutable('+'.$data['expires_in'].' seconds')
+            : null;
+
+        return new AccessTokenAuthenticator($data['access_token'], null, $expiresAt);
+    }
+
+    /**
+     * @param  array<string>  $requestedScopes
+     * @return array<string, mixed>
+     */
+    private function buildAuthRequestPayload(Request $request, array $requestedScopes, string $transport): array
+    {
+        return [
+            'transport' => $transport,
+            'uri' => rtrim($this->resolveBaseUrl(), '/').$request->resolveEndpoint(),
+            'requested_scopes' => $requestedScopes,
+            'body' => $request->body()->all(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildAuthResponsePayload(Response $response): array
+    {
+        return [
+            'status' => $response->status(),
+            'body' => $response->json() ?? ['body' => $response->body()],
+        ];
     }
 }

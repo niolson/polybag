@@ -235,6 +235,11 @@
 
         <h2>Section 23. Complete Agreement</h2>
         <p>The Agreement constitutes the entire agreement between You and FedEx with respect to FedEx Technology accessed or utilized by or integrated with the Application, and supersedes any prior or contemporaneous understandings, representations, statements or agreements, written or oral, regarding FedEx Technology. No amendment to or modification of the Agreement will be binding on FedEx without FedEx's written consent. In addition, except for FedEx Representatives, there are no third party beneficiaries to this Agreement. The provisions of Sections 1(b), 4, 5, 6, 7, 8, 9, 10, 11, and 12 and Key Definitions of this EULA survive the termination of the Agreement. The headings are provided for convenience only and are not intended to affect the construction or interpretation of the Agreement. All words used in the Agreement are to be construed to be of such gender or number as the circumstances require. In this EULA, the words "including," "includes" or "include" are to be read as listing non-exclusive examples of the matters referred to, whether or not words such as "without limitation" or "but not limited to" are used in each instance. Where the Agreement states that a party "will," "shall" or "must" perform in some manner or otherwise act or omit to act, it means that the party is legally obligated to do so in accordance with the Agreement. The words "date hereof" refer to the date of this EULA. The word "extent" in the phrase "to the extent" means the degree to which a subject or other thing extends, and such phrase will not mean simply "if." The term "or" will not be deemed to be exclusive. All terms defined in the Agreement will have the defined meanings when used in any certificate or other document made or delivered pursuant hereto unless otherwise defined therein. Any reference to a statute is deemed also to refer to any amendments or successor legislation as in effect at the relevant time. Any reference to a contract or other document as of a given date means the contract or other document as amended, supplemented and modified from time to time through such date.</p>
+
+        <p class="mt-6 text-center font-bold">
+            FedEx Confidential<br>
+            FedEx Form No. 2002382 v 4 June 2024 Rev
+        </p>
     </div>
 
     <p

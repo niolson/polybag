@@ -1,5 +1,6 @@
 <?php
 
+use App\Exceptions\FedexRegistrationMaxRetriesException;
 use App\Filament\Pages\Settings;
 use App\Http\Integrations\Fedex\FedexConnector;
 use App\Http\Integrations\Fedex\Requests\Registration\SendPin;
@@ -12,7 +13,10 @@ use App\Models\ShippingMethod;
 use App\Models\User;
 use App\Services\FedexRegistrationService;
 use App\Services\SettingsService;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
@@ -134,6 +138,14 @@ it('escapes oauth scopes in the settings page', function (): void {
         ->assertOk()
         ->assertSee(e($payload), false)
         ->assertDontSee($payload, false);
+});
+
+it('shows the fedex eula confidentiality footer', function (): void {
+    $renderedEula = Blade::render("@include('filament.pages.settings.fedex-eula')");
+
+    expect($renderedEula)
+        ->toContain('FedEx Confidential')
+        ->toContain('FedEx Form No. 2002382 v 4 June 2024 Rev');
 });
 
 it('saves ssh server host key and writes a known_hosts file', function (): void {
@@ -335,6 +347,8 @@ it('fedex connector falls back to parent key when no child key', function (): vo
 });
 
 it('fedex registration service validates address and returns mfa options', function (): void {
+    Storage::fake();
+
     Saloon::fake([
         ...fedexOauthMock(),
         ValidateAddress::class => MockResponse::make(fedexMfaResponse(), 200),
@@ -357,6 +371,8 @@ it('fedex registration service validates address and returns mfa options', funct
         ->and($result['email'])->toBe('TE***@EX***.COM');
 
     Saloon::assertSent(ValidateAddress::class);
+    Storage::assertExists('fedex-mfa/latest/address-validation/request.json');
+    Storage::assertExists('fedex-mfa/latest/address-validation/response.json');
 });
 
 it('fedex registration service saves child credentials after pin verification', function (): void {
@@ -447,6 +463,78 @@ it('fedex registration service mfa bypass returns credentials immediately', func
 
     Saloon::assertNotSent(SendPin::class);
     Saloon::assertNotSent(VerifyPin::class);
+});
+
+it('fedex registration service activates child credentials and captures child authorization artifacts', function (): void {
+    Storage::fake();
+    Http::fake([
+        'https://broker.example.test/fedex/token' => Http::response([
+            'access_token' => 'child-access-token',
+            'token_type' => 'bearer',
+            'expires_in' => 3600,
+        ], 200),
+    ]);
+
+    config([
+        'services.oauth.broker_url' => 'https://broker.example.test',
+        'services.oauth.instance_id' => 'test-instance',
+        'services.oauth.broker_secret' => 'test-secret',
+    ]);
+
+    app(FedexRegistrationService::class)->activateChildCredentials('child-key-123', 'child-secret-456');
+    app(SettingsService::class)->clearCache();
+
+    expect(app(SettingsService::class)->get('fedex.child_key'))->toBe('child-key-123')
+        ->and(app(SettingsService::class)->get('fedex.child_secret'))->toBe('child-secret-456');
+
+    Storage::assertExists('fedex-mfa/latest/child-authorization/request.json');
+    Storage::assertExists('fedex-mfa/latest/child-authorization/response.json');
+});
+
+it('fedex registration service maps current fedex max retry codes to the fallback exception', function (): void {
+    Saloon::fake([
+        ...fedexOauthMock(),
+        VerifyPin::class => MockResponse::make([
+            'errors' => [[
+                'code' => 'PINVALIDATION.MAXRETRY.EXCEEDED',
+                'message' => 'max retry exceeded for PIN validation',
+            ]],
+        ], 400),
+    ]);
+
+    try {
+        app(FedexRegistrationService::class)->verifyPin('test-auth-token', '123456');
+        $this->fail('Expected FedEx max retry exception was not thrown.');
+    } catch (FedexRegistrationMaxRetriesException $exception) {
+        expect($exception->fedexCode)->toBe('PINVALIDATION.MAXRETRY.EXCEEDED')
+            ->and($exception->lockedMethods)->toBe(['SMS', 'CALL', 'EMAIL']);
+    }
+});
+
+it('settings page filters exhausted fedex verification methods', function (): void {
+    $page = Livewire::test(Settings::class)->instance();
+
+    $page->fedexSecureCodeOptions = ['SMS', 'CALL', 'EMAIL'];
+    $page->fedexMaskedPhone = '***-***-1234';
+    $page->fedexMaskedEmail = 'TE***@EX***.COM';
+    $page->fedexInvoiceAvailable = true;
+    $page->fedexLockedFactor2Methods = ['SMS', 'CALL', 'EMAIL'];
+
+    expect($page->getFedexAvailableVerificationOptions())
+        ->toBe(['INVOICE' => 'Invoice Validation'])
+        ->and($page->hasAvailableFedexFactor2Methods())->toBeTrue();
+});
+
+it('settings page reports when all fedex verification methods are exhausted', function (): void {
+    $page = Livewire::test(Settings::class)->instance();
+
+    $page->fedexSecureCodeOptions = ['SMS', 'CALL', 'EMAIL'];
+    $page->fedexInvoiceAvailable = true;
+    $page->fedexLockedFactor2Methods = ['SMS', 'CALL', 'EMAIL', 'INVOICE'];
+
+    expect($page->getFedexAvailableVerificationOptions())
+        ->toBe([])
+        ->and($page->hasAvailableFedexFactor2Methods())->toBeFalse();
 });
 
 it('fedex registration service routes through proxy when broker url is configured', function (): void {
