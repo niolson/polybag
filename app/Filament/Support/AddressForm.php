@@ -120,6 +120,7 @@ class AddressForm
                     Forms\Components\TextInput::make($field('phone'))
                         ->label('Phone')
                         ->tel()
+                        ->telRegex('/^[+]?[0-9\s()\-\.\/]+(?:\s*(?:ext\.?|x|#)\s*[0-9]+)?$/i')
                         ->maxLength($phoneMaxLength)
                 );
             }
