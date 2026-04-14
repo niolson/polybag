@@ -2,7 +2,7 @@
 
 @php
     $disclaimers = [
-        'fedex' => 'The FedEx service marks are owned by Federal Express Corporation and are used by permission.',
+        'fedex' => 'FedEx service marks are owned by Federal Express Corporation and are used by permission.',
     ];
 
     $active = collect($show)

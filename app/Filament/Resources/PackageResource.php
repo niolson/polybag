@@ -168,6 +168,7 @@ class PackageResource extends Resource
 
                 $query->whereKey($ids);
             })
+            ->defaultSort('created_at', 'desc')
             ->columns([
                 Tables\Columns\TextColumn::make('id')
                     ->sortable(),
