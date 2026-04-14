@@ -796,13 +796,6 @@ class UspsAdapter implements CarrierAdapterInterface
             $trackingDetail['statusSummary'] ?? null,
         ])));
 
-        if (str_contains($statusText, 'DELIVERED')) {
-            return $this->parseUspsEventTimestamp([
-                'GMTTimestamp' => $trackingDetail['deliveryDateExpectation']['expectedDeliveryDate'] ?? null,
-                'eventTimestamp' => $trackingDetail['deliveryDateExpectation']['expectedDeliveryDate'] ?? null,
-            ]);
-        }
-
         return null;
     }
 

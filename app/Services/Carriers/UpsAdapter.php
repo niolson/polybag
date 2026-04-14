@@ -165,10 +165,11 @@ class UpsAdapter implements CarrierAdapterInterface
 
     public function trackShipment(Package $package): TrackShipmentResponse
     {
+        $connector = UpsConnector::getAuthenticatedConnector();
+        $trackRequest = new TrackShipment($package->tracking_number);
+        $requestUri = rtrim($connector->resolveBaseUrl(), '/').$trackRequest->resolveEndpoint();
+
         try {
-            $connector = UpsConnector::getAuthenticatedConnector();
-            $trackRequest = new TrackShipment($package->tracking_number);
-            $requestUri = rtrim($connector->resolveBaseUrl(), '/').$trackRequest->resolveEndpoint();
 
             Log::channel('ups-validation')->info('TRACK REQUEST', [
                 'tracking_number' => $package->tracking_number,
@@ -235,7 +236,7 @@ class UpsAdapter implements CarrierAdapterInterface
 
             Log::channel('ups-validation')->info('TRACK RESPONSE', [
                 'tracking_number' => $package->tracking_number,
-                'uri' => rtrim(UpsConnector::getAuthenticatedConnector()->resolveBaseUrl(), '/').(new TrackShipment($package->tracking_number))->resolveEndpoint(),
+                'uri' => $requestUri,
                 'status' => $e->getResponse()->status(),
                 'body' => $rawResponse,
             ]);
