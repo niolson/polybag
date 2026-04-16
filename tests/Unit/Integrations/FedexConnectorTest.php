@@ -7,6 +7,7 @@ use App\Http\Integrations\Fedex\Requests\Rates;
 use App\Http\Integrations\Fedex\Requests\Registration\ValidateAddress;
 use App\Models\Setting;
 use App\Services\SettingsService;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Saloon\Http\Faking\MockClient;
@@ -349,6 +350,59 @@ it('logs child authorization artifacts when brokered child credentials request a
     $responseArtifact = json_decode(Storage::get('fedex-mfa/latest/child-authorization/response.json'), true);
 
     expect(data_get($requestArtifact, 'body.child_key'))->toBe('[REDACTED]')
+        ->and(data_get($requestArtifact, 'body.child_secret'))->toBe('[REDACTED]')
+        ->and(data_get($responseArtifact, 'body.access_token'))->toBe('[REDACTED]');
+});
+
+it('uses direct child authorization when broker mode is disabled', function (): void {
+    Storage::fake();
+    Http::fake([
+        'https://apis-sandbox.fedex.com/oauth/token' => Http::response([
+            'access_token' => 'child-access-token',
+            'token_type' => 'bearer',
+            'expires_in' => 3600,
+        ], 200),
+    ]);
+
+    config([
+        'services.oauth.broker_url' => null,
+        'services.oauth.instance_id' => null,
+        'services.oauth.broker_secret' => null,
+        'services.fedex.sandbox_url' => 'https://apis-sandbox.fedex.com',
+        'services.fedex.sandbox_api_key' => 'parent-sandbox-key',
+        'services.fedex.sandbox_api_secret' => 'parent-sandbox-secret',
+    ]);
+
+    Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
+    Setting::create(['key' => 'fedex.child_key', 'value' => 'child-key-123', 'type' => 'string', 'encrypted' => true, 'group' => 'fedex']);
+    Setting::create(['key' => 'fedex.child_secret', 'value' => 'child-secret-456', 'type' => 'string', 'encrypted' => true, 'group' => 'fedex']);
+    Setting::create(['key' => 'fedex.child_env', 'value' => 'sandbox', 'type' => 'string', 'group' => 'fedex']);
+    app(SettingsService::class)->clearCache();
+
+    $authenticator = (new FedexConnector)->getAccessToken();
+
+    expect($authenticator->getAccessToken())->toBe('child-access-token');
+
+    Http::assertSent(function (Request $request): bool {
+        return $request->url() === 'https://apis-sandbox.fedex.com/oauth/token'
+            && $request['grant_type'] === 'csp_credentials'
+            && $request['client_id'] === 'parent-sandbox-key'
+            && $request['client_secret'] === 'parent-sandbox-secret'
+            && $request['child_key'] === 'child-key-123'
+            && $request['child_secret'] === 'child-secret-456';
+    });
+
+    Storage::assertExists('fedex-mfa/latest/child-authorization/request.json');
+    Storage::assertExists('fedex-mfa/latest/child-authorization/response.json');
+
+    $requestArtifact = json_decode(Storage::get('fedex-mfa/latest/child-authorization/request.json'), true);
+    $responseArtifact = json_decode(Storage::get('fedex-mfa/latest/child-authorization/response.json'), true);
+
+    expect(data_get($requestArtifact, 'transport'))->toBe('direct')
+        ->and(data_get($requestArtifact, 'body.grant_type'))->toBe('csp_credentials')
+        ->and(data_get($requestArtifact, 'body.client_id'))->toBe('[REDACTED]')
+        ->and(data_get($requestArtifact, 'body.client_secret'))->toBe('[REDACTED]')
+        ->and(data_get($requestArtifact, 'body.child_key'))->toBe('[REDACTED]')
         ->and(data_get($requestArtifact, 'body.child_secret'))->toBe('[REDACTED]')
         ->and(data_get($responseArtifact, 'body.access_token'))->toBe('[REDACTED]');
 });

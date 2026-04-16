@@ -198,7 +198,7 @@ class FedexRegistrationService
         $this->settings->set('fedex.child_secret', $childSecret, 'string', encrypted: true, group: 'fedex');
         $this->settings->set('fedex.child_env', $isSandbox ? 'sandbox' : 'production', group: 'fedex');
 
-        Cache::forget('fedex_authenticator');
+        $this->clearFedexAuthenticatorCaches($childKey, $isSandbox ? 'sandbox' : 'production');
     }
 
     public function activateChildCredentials(string $childKey, string $childSecret): void
@@ -213,9 +213,24 @@ class FedexRegistrationService
      */
     public function removeChildCredentials(): void
     {
+        $childKey = $this->settings->get('fedex.child_key');
+        $childEnv = $this->settings->get('fedex.child_env', 'production');
+
         Setting::whereIn('key', ['fedex.child_key', 'fedex.child_secret', 'fedex.child_env'])->delete();
         $this->settings->clearCache();
+        $this->clearFedexAuthenticatorCaches($childKey, $childEnv);
+    }
+
+    private function clearFedexAuthenticatorCaches(?string $childKey = null, string $childEnv = 'production'): void
+    {
         Cache::forget('fedex_authenticator');
+        Cache::forget('fedex_authenticator_sandbox');
+
+        if (blank($childKey)) {
+            return;
+        }
+
+        Cache::forget('fedex_authenticator_child_'.$childEnv.'_'.hash('sha256', $childKey));
     }
 
     /**

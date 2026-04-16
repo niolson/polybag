@@ -66,21 +66,7 @@ class FedexConnector extends Connector
 
     protected function defaultOauthConfig(): OAuthConfig
     {
-        $settings = app(SettingsService::class);
-        $isSandbox = $settings->get('sandbox_mode', false);
-
-        // Child credentials (provisioned via Account Registration) take priority.
-        // Fall back to environment-appropriate parent credentials.
-        if (filled($settings->get('fedex.child_key'))) {
-            $clientId = $settings->get('fedex.child_key');
-            $clientSecret = $settings->get('fedex.child_secret');
-        } elseif ($isSandbox) {
-            $clientId = $settings->get('fedex.sandbox_api_key', config('services.fedex.sandbox_api_key', ''));
-            $clientSecret = $settings->get('fedex.sandbox_api_secret', config('services.fedex.sandbox_api_secret', ''));
-        } else {
-            $clientId = $settings->get('fedex.api_key', config('services.fedex.api_key', ''));
-            $clientSecret = $settings->get('fedex.api_secret', config('services.fedex.api_secret', ''));
-        }
+        ['clientId' => $clientId, 'clientSecret' => $clientSecret] = $this->getParentCredentials();
 
         return OAuthConfig::make()
             ->setClientId((string) $clientId)
@@ -106,6 +92,10 @@ class FedexConnector extends Connector
 
         if (filled($childKey) && $hasBroker) {
             return $this->getBrokeredChildAccessToken($settings, $returnResponse);
+        }
+
+        if (filled($childKey)) {
+            return $this->getDirectChildAccessToken($settings, $returnResponse);
         }
 
         $requestedScopes = $scopes === [] ? $this->oauthConfig()->getDefaultScopes() : $scopes;
@@ -209,6 +199,53 @@ class FedexConnector extends Connector
     }
 
     /**
+     * @return ($returnResponse is true ? Response : OAuthAuthenticator)
+     */
+    private function getDirectChildAccessToken(SettingsService $settings, bool $returnResponse): OAuthAuthenticator|Response
+    {
+        ['clientId' => $clientId, 'clientSecret' => $clientSecret] = $this->getParentCredentials();
+        $uri = rtrim($this->resolveBaseUrl(), '/').'/oauth/token';
+
+        $requestPayload = [
+            'grant_type' => 'csp_credentials',
+            'client_id' => $clientId,
+            'client_secret' => $clientSecret,
+            'child_key' => $settings->get('fedex.child_key'),
+            'child_secret' => $settings->get('fedex.child_secret'),
+        ];
+
+        $response = Http::acceptJson()->asForm()->post($uri, $requestPayload);
+
+        app(FedexMfaAuditService::class)->recordExchange(
+            'child-authorization',
+            [
+                'transport' => 'direct',
+                'uri' => $uri,
+                'body' => $requestPayload,
+            ],
+            [
+                'status' => $response->status(),
+                'body' => $response->json() ?? ['body' => $response->body()],
+            ],
+        );
+
+        $response->throw();
+
+        $data = $response->json();
+        $expiresAt = isset($data['expires_in'])
+            ? new DateTimeImmutable('+'.$data['expires_in'].' seconds')
+            : null;
+
+        $authenticator = new AccessTokenAuthenticator($data['access_token'], null, $expiresAt);
+
+        if ($returnResponse) {
+            return $authenticator;
+        }
+
+        return $authenticator;
+    }
+
+    /**
      * @param  array<string>  $requestedScopes
      * @return array<string, mixed>
      */
@@ -230,6 +267,29 @@ class FedexConnector extends Connector
         return [
             'status' => $response->status(),
             'body' => $response->json() ?? ['body' => $response->body()],
+        ];
+    }
+
+    /**
+     * @return array{clientId: string, clientSecret: string}
+     */
+    private function getParentCredentials(): array
+    {
+        $settings = app(SettingsService::class);
+        $isSandbox = filled($settings->get('fedex.child_key'))
+            ? $settings->get('fedex.child_env') === 'sandbox'
+            : (bool) $settings->get('sandbox_mode', false);
+
+        if ($isSandbox) {
+            return [
+                'clientId' => (string) $settings->get('fedex.sandbox_api_key', config('services.fedex.sandbox_api_key', '')),
+                'clientSecret' => (string) $settings->get('fedex.sandbox_api_secret', config('services.fedex.sandbox_api_secret', '')),
+            ];
+        }
+
+        return [
+            'clientId' => (string) $settings->get('fedex.api_key', config('services.fedex.api_key', '')),
+            'clientSecret' => (string) $settings->get('fedex.api_secret', config('services.fedex.api_secret', '')),
         ];
     }
 }

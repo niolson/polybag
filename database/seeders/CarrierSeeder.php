@@ -27,16 +27,16 @@ class CarrierSeeder extends Seeder
 
         $fedex = Carrier::firstOrCreate(['name' => 'FedEx']);
         foreach ([
-            ['name' => 'FedEx Ground Home Delivery', 'service_code' => 'GROUND_HOME_DELIVERY'],
-            ['name' => 'FedEx Ground', 'service_code' => 'FEDEX_GROUND'],
-            ['name' => 'FedEx Ground Economy', 'service_code' => 'SMART_POST'],
-            ['name' => 'FedEx International Priority', 'service_code' => 'FEDEX_INTERNATIONAL_PRIORITY'],
-            ['name' => 'FedEx International Economy', 'service_code' => 'FEDEX_INTERNATIONAL_ECONOMY'],
-            ['name' => 'FedEx Priority Overnight', 'service_code' => 'PRIORITY_OVERNIGHT'],
-            ['name' => 'FedEx Standard Overnight', 'service_code' => 'STANDARD_OVERNIGHT'],
-            ['name' => 'FedEx 2Day', 'service_code' => 'FEDEX_2_DAY'],
-            ['name' => 'FedEx 2Day AM', 'service_code' => 'FEDEX_2_DAY_AM'],
-            ['name' => 'FedEx Express Saver', 'service_code' => 'FEDEX_EXPRESS_SAVER'],
+            ['name' => 'FedEx Home Delivery®', 'service_code' => 'GROUND_HOME_DELIVERY'],
+            ['name' => 'FedEx Ground®', 'service_code' => 'FEDEX_GROUND'],
+            ['name' => 'FedEx Ground® Economy', 'service_code' => 'SMART_POST'],
+            ['name' => 'FedEx International Priority®', 'service_code' => 'FEDEX_INTERNATIONAL_PRIORITY'],
+            ['name' => 'FedEx International Economy®', 'service_code' => 'FEDEX_INTERNATIONAL_ECONOMY'],
+            ['name' => 'FedEx Priority Overnight®', 'service_code' => 'PRIORITY_OVERNIGHT'],
+            ['name' => 'FedEx Standard Overnight®', 'service_code' => 'STANDARD_OVERNIGHT'],
+            ['name' => 'FedEx 2Day®', 'service_code' => 'FEDEX_2_DAY'],
+            ['name' => 'FedEx 2Day® A.M.', 'service_code' => 'FEDEX_2_DAY_AM'],
+            ['name' => 'FedEx Express Saver®', 'service_code' => 'FEDEX_EXPRESS_SAVER'],
         ] as $service) {
             $fedex->carrierServices()->firstOrCreate(
                 ['service_code' => $service['service_code']],

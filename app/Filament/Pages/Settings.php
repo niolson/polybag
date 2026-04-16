@@ -9,6 +9,7 @@ use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Location;
 use App\Models\Setting;
 use App\Models\ShippingMethod;
+use App\Services\AddressReferenceService;
 use App\Services\FedexRegistrationService;
 use App\Services\OAuthService;
 use App\Services\SettingsService;
@@ -32,6 +33,7 @@ use Filament\Schemas\Components\Form;
 use Filament\Schemas\Components\Html;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Components\Wizard;
 use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
@@ -788,18 +790,24 @@ class Settings extends Page
                                                 ->required()
                                                 ->maxLength(35),
                                             TextInput::make('fedex_reg_state')
-                                                ->label('State / Province')
+                                                ->label(fn (Get $get): string => app(AddressReferenceService::class)->getAdministrativeAreaLabel($get('fedex_reg_country')))
                                                 ->required()
-                                                ->maxLength(2),
+                                                ->maxLength(35),
                                             TextInput::make('fedex_reg_postal_code')
                                                 ->label('ZIP / Postal Code')
                                                 ->required()
                                                 ->maxLength(10),
                                             Select::make('fedex_reg_country')
                                                 ->label('Country')
-                                                ->options(['US' => 'United States', 'CA' => 'Canada'])
+                                                ->options(fn (): array => app(AddressReferenceService::class)->getCountryOptions())
+                                                ->native(true)
                                                 ->default('US')
-                                                ->required(),
+                                                ->required()
+                                                ->live()
+                                                ->afterStateUpdated(function (Set $set): void {
+                                                    $set('fedex_reg_state', null);
+                                                })
+                                                ->dehydrateStateUsing(fn (?string $state): ?string => app(AddressReferenceService::class)->normalizeCountry($state) ?? ($state ? strtoupper(trim($state)) : null)),
                                         ])
                                         ->columns(2)
                                         ->afterValidation(function (Get $get) {
