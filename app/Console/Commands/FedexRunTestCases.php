@@ -11,10 +11,14 @@ use Illuminate\Console\Command;
 
 class FedexRunTestCases extends Command
 {
+    private const SUPPORTED_REGIONS = ['us', 'ca', 'lac'];
+
+    private const SUPPORTED_SUITES = ['ship', 'rate'];
+
     protected $signature = 'fedex:run-test-cases
         {cases?* : Test case IDs to run (e.g. IntegratorUS01 IntegratorUS02). Runs all by default.}
-        {--region=us : Fixture region to load from resources/data/carrier-test-cases/fedex}
-        {--suite=ship : Fixture suite to load from resources/data/carrier-test-cases/fedex}
+        {--region=us : Fixture region to load from resources/data/carrier-test-cases/fedex (us, ca, lac)}
+        {--suite=ship : Fixture suite to load from resources/data/carrier-test-cases/fedex (ship, rate)}
         {--fixture= : Explicit path to a test case JSON file}
         {--save-labels : Save label files under storage/app/dev/fedex-test-runs/}
         {--dump-payloads : Save resolved request/response payloads under storage/app/dev/fedex-test-runs/}';
@@ -27,10 +31,25 @@ class FedexRunTestCases extends Command
         FedexTestCaseNormalizer $normalizer,
         FedexTestCaseRunner $runner,
     ): int {
+        $region = strtolower((string) $this->option('region'));
+        $suiteName = strtolower((string) $this->option('suite'));
+
+        if (! in_array($region, self::SUPPORTED_REGIONS, true)) {
+            $this->error('Unsupported region ['.$region.']. Valid regions: '.implode(', ', self::SUPPORTED_REGIONS));
+
+            return self::FAILURE;
+        }
+
+        if (! in_array($suiteName, self::SUPPORTED_SUITES, true)) {
+            $this->error('Unsupported suite ['.$suiteName.']. Valid suites: '.implode(', ', self::SUPPORTED_SUITES));
+
+            return self::FAILURE;
+        }
+
         try {
             $suite = $repository->load(
-                region: (string) $this->option('region'),
-                suite: (string) $this->option('suite'),
+                region: $region,
+                suite: $suiteName,
                 path: $this->option('fixture') ?: null,
             );
         } catch (\RuntimeException $exception) {

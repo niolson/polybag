@@ -203,6 +203,30 @@ it('can create a Location with a fedex hub id when fedex is active', function ()
     ]);
 });
 
+it('rejects a location phone number that does not parse for the selected country', function (): void {
+    Livewire::test(CreateLocation::class)
+        ->fillForm([
+            'name' => 'Mexico Warehouse',
+            'is_default' => true,
+            'active' => true,
+            'timezone' => 'America/Mexico_City',
+            'company' => 'PolyBag',
+            'first_name' => 'Jane',
+            'last_name' => 'Doe',
+            'address1' => 'Av. Vasco De Quiroga 2999',
+            'city' => 'Mexico City',
+            'country' => 'MX',
+            'state_or_province' => 'CMX',
+            'postal_code' => '01210',
+            'phone' => '4155550132',
+        ])
+        ->call('create');
+
+    $this->assertDatabaseMissing(Location::class, [
+        'name' => 'Mexico Warehouse',
+    ]);
+});
+
 // ChannelResource
 
 it('can render Channel list page', function (): void {

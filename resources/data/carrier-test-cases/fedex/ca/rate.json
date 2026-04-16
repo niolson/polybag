@@ -1,0 +1,108 @@
+{
+    "carrier": "fedex",
+    "region": "ca",
+    "suite": "rate",
+    "source": "CA_Test_Cases.md",
+    "meta": {
+        "territory": "Canada",
+        "notes": [
+            "These are source-derived rate scenarios.",
+            "Rate test case execution is not implemented by fedex:run-test-cases yet.",
+            "The source markdown included schema typos such as 'adress' and 'stateorProvinceCode'; these fixtures use corrected field names."
+        ]
+    },
+    "cases": [
+        {
+            "id": "IntegratorCA06",
+            "description": "International Economy Rate Quote",
+            "request_type": "rate",
+            "supported": false,
+            "skip_reason": "Rate test case execution is not implemented yet.",
+            "notes": [],
+            "api": "Rate API",
+            "endpoint": "POST /rate/v1/rates/quotes",
+            "label_format": null,
+            "request": {
+                "accountNumber": {
+                    "value": "614365501"
+                },
+                "rateRequestControlParameters": {
+                    "servicesNeededOnRateFailure": true,
+                    "rateSortOrder": "SERVICENAMETRADITIONAL"
+                },
+                "requestedShipment": {
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "serviceType": "INTERNATIONAL_ECONOMY",
+                    "packagingType": "FEDEX_TUBE",
+                    "shipper": {
+                        "address": {
+                            "city": "Mississauga",
+                            "countryCode": "CA",
+                            "postalCode": "L4W5K6",
+                            "residential": false,
+                            "stateOrProvinceCode": "ON"
+                        }
+                    },
+                    "recipient": {
+                        "address": {
+                            "city": "Marion",
+                            "countryCode": "US",
+                            "postalCode": "43301",
+                            "residential": false,
+                            "stateOrProvinceCode": "OH"
+                        }
+                    },
+                    "shippingChargesPayment": {
+                        "paymentType": "SENDER",
+                        "payor": {
+                            "responsibleParty": {
+                                "accountNumber": {
+                                    "value": "614365501"
+                                },
+                                "address": {
+                                    "city": "Mississauga",
+                                    "countryCode": "CA",
+                                    "postalCode": "L4W5K6",
+                                    "residential": false,
+                                    "stateOrProvinceCode": "ON"
+                                }
+                            }
+                        }
+                    },
+                    "requestedPackageLineItems": [
+                        {
+                            "weight": {
+                                "units": "KG",
+                                "value": 0.68
+                            }
+                        }
+                    ],
+                    "customsClearanceDetail": {
+                        "commodities": [
+                            {
+                                "description": "Dictionaries",
+                                "name": "DescriptionLine1",
+                                "quantity": 2,
+                                "quantityUnits": "EA",
+                                "countryOfManufacture": "CA",
+                                "harmonizedCode": "1234567891",
+                                "customsValue": {
+                                    "amount": 1200,
+                                    "currency": "CAD"
+                                },
+                                "unitPrice": {
+                                    "amount": 600,
+                                    "currency": "CAD"
+                                },
+                                "weight": {
+                                    "units": "KG",
+                                    "value": 0.68
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    ]
+}

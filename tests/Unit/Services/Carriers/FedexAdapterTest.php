@@ -1,6 +1,7 @@
 <?php
 
 use App\DataTransferObjects\Shipping\AddressData;
+use App\DataTransferObjects\Shipping\CustomsItem;
 use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
@@ -88,6 +89,35 @@ it('fetches rates from FedEx API', function (): void {
         ->and($rate->transitTime)->toBe('THREE_DAYS');
 
     Saloon::assertSent(Rates::class);
+});
+
+it('uses request countries when building FedEx rate payloads', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Rates::class => MockResponse::make([
+            'output' => [
+                'rateReplyDetails' => [],
+            ],
+        ]),
+    ]);
+
+    $request = new RateRequest(
+        originPostalCode: 'L4W5K6',
+        destinationPostalCode: '99502',
+        originCountry: 'CA',
+        destinationCountry: 'US',
+        packages: [new PackageData(weight: 5.0, length: 12, width: 10, height: 8)],
+    );
+
+    $this->adapter->getRates($request, ['FEDEX_GROUND']);
+
+    Saloon::assertSent(function (Rates $request) {
+        $body = $request->body()->all();
+
+        return ($body['requestedShipment']['shipper']['address']['countryCode'] ?? null) === 'CA'
+            && ($body['requestedShipment']['recipient']['address']['countryCode'] ?? null) === 'US'
+            && ($body['requestedShipment']['customsClearanceDetail']['dutiesPayment']['paymentType'] ?? null) === 'SENDER';
+    });
 });
 
 it('filters rates by service codes', function (): void {
@@ -366,6 +396,99 @@ it('creates shipment and returns tracking info', function (): void {
         ->and($response->labelData)->toBe('JVBERi0xLjQKYmFzZTY0bGFiZWxkYXRh');
 
     Saloon::assertSent(CreateShipment::class);
+});
+
+it('uses the ship-from country for FedEx customs duties payment', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => MockResponse::make([
+            'output' => [
+                'transactionShipments' => [
+                    [
+                        'masterTrackingNumber' => '794644790138',
+                        'completedShipmentDetail' => [
+                            'shipmentRating' => [
+                                'shipmentRateDetails' => [
+                                    ['totalNetCharge' => 12.75],
+                                ],
+                            ],
+                        ],
+                        'pieceResponses' => [
+                            [
+                                'trackingNumber' => '794644790138',
+                                'packageDocuments' => [
+                                    ['encodedLabel' => 'JVBERi0xLjQKYmFzZTY0bGFiZWxkYXRh'],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]),
+    ]);
+
+    $fromAddress = new AddressData(
+        firstName: 'Shipping',
+        lastName: 'Center',
+        streetAddress: '5985 EXPLORER DR',
+        city: 'Mississauga',
+        stateOrProvince: 'ON',
+        postalCode: 'L4W5K6',
+        country: 'CA',
+        company: 'RTC',
+        phone: '9052125456',
+    );
+
+    $toAddress = new AddressData(
+        firstName: 'John',
+        lastName: 'Doe',
+        streetAddress: '1 MARKET ST',
+        city: 'Lancaster',
+        stateOrProvince: 'PA',
+        postalCode: '17601',
+        country: 'US',
+        phone: '555-987-6543',
+    );
+
+    $packageData = new PackageData(weight: 5.0, length: 12, width: 10, height: 8);
+
+    $selectedRate = new RateResponse(
+        carrier: 'FedEx',
+        serviceCode: 'FEDEX_INTERNATIONAL_PRIORITY',
+        serviceName: 'FedEx International Priority',
+        price: 12.75,
+        metadata: [
+            'serviceType' => 'FEDEX_INTERNATIONAL_PRIORITY',
+        ],
+    );
+
+    $request = new ShipRequest(
+        fromAddress: $fromAddress,
+        toAddress: $toAddress,
+        packageData: $packageData,
+        selectedRate: $selectedRate,
+        customsItems: [
+            new CustomsItem(
+                description: 'Dictionaries',
+                quantity: 1,
+                unitValue: 15,
+                weight: 5,
+                countryOfOrigin: 'CA',
+            ),
+        ],
+    );
+
+    $this->adapter->createShipment($request);
+
+    Saloon::assertSent(function ($request) {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $body = $request->body()->all();
+
+        return ($body['requestedShipment']['customsClearanceDetail']['dutiesPayment']['payor']['responsibleParty']['address']['countryCode'] ?? null) === 'CA';
+    });
 });
 
 it('includes smart post info detail in create shipment requests for smart post service', function (): void {

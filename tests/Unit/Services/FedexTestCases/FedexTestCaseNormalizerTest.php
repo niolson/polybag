@@ -34,7 +34,7 @@ it('resolves placeholders and promotes top-level shipment fields', function (): 
         ->and(data_get($payload, 'requestedShipment.requestedPackageLineItems.0.weight.value'))->toBe(1);
 });
 
-it('removes event notifications from Saturday-delivery special service types', function (): void {
+it('preserves event notifications alongside Saturday-delivery special service types', function (): void {
     $testCase = new FedexTestCaseData(
         id: 'Case02',
         description: 'Saturday notification normalization',
@@ -54,5 +54,5 @@ it('removes event notifications from Saturday-delivery special service types', f
     $payload = app(FedexTestCaseNormalizer::class)->normalize($testCase, '123456789');
 
     expect(data_get($payload, 'requestedShipment.shipmentSpecialServices.specialServiceTypes'))
-        ->toBe(['SATURDAY_DELIVERY']);
+        ->toBe(['EVENT_NOTIFICATION', 'SATURDAY_DELIVERY']);
 });

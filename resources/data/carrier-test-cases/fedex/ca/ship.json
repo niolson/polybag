@@ -1,0 +1,610 @@
+{
+    "carrier": "fedex",
+    "region": "ca",
+    "suite": "ship",
+    "source": "CA_Test_Cases.md",
+    "meta": {
+        "territory": "Canada",
+        "notes": [
+            "shipDatestamp: 'Current Date' and 'Current date' mean today's date at runtime.",
+            "shipDatestamp: 'Friday' means the next Friday (for Saturday delivery tests).",
+            "Use the active FedEx shipper account number wherever the source data says 'Canadian Test Account Number'.",
+            "The source markdown included a few schema typos; these fixtures use the corrected request field names."
+        ]
+    },
+    "cases": [
+        {
+            "id": "IntegratorCA01",
+            "description": "Express Saver, Your Packaging",
+            "request_type": "create_shipment",
+            "supported": true,
+            "skip_reason": null,
+            "notes": [],
+            "api": "Ship API",
+            "endpoint": "POST /ship/v1/shipments",
+            "label_format": "pdf",
+            "request": {
+                "labelResponseOptions": "LABEL",
+                "requestedShipment": {
+                    "shipDatestamp": "CURRENT_DATE",
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "serviceType": "FEDEX_EXPRESS_SAVER",
+                    "packagingType": "YOUR_PACKAGING",
+                    "totalWeight": 15,
+                    "blockInsightVisibility": false,
+                    "shipper": {
+                        "contact": {
+                            "personName": "Integrator",
+                            "companyName": "RTC",
+                            "phoneNumber": "9052125456"
+                        },
+                        "address": {
+                            "streetLines": [
+                                "5985 EXPLORER DR"
+                            ],
+                            "city": "Mississauga",
+                            "stateOrProvinceCode": "ON",
+                            "postalCode": "L4W5K6",
+                            "countryCode": "CA"
+                        }
+                    },
+                    "recipients": [
+                        {
+                            "contact": {
+                                "companyName": "Recipient Company",
+                                "personName": "FES-1001",
+                                "phoneNumber": "9052125251"
+                            },
+                            "address": {
+                                "streetLines": [
+                                    "Recipient address Line 1"
+                                ],
+                                "city": "Winnipeg",
+                                "stateOrProvinceCode": "MB",
+                                "postalCode": "R2G0A1",
+                                "countryCode": "CA"
+                            }
+                        }
+                    ],
+                    "shippingChargesPayment": {
+                        "paymentType": "SENDER",
+                        "payor": {
+                            "responsibleParty": {
+                                "accountNumber": {
+                                    "value": "USE_SHIPPER_ACCOUNT_NUMBER"
+                                },
+                                "contact": {
+                                    "personName": "Integrator Testing"
+                                },
+                                "address": {
+                                    "countryCode": "CA"
+                                }
+                            }
+                        }
+                    },
+                    "rateRequestType": [
+                        "LIST"
+                    ],
+                    "totalPackageCount": 1,
+                    "labelSpecification": {
+                        "imageType": "PDF",
+                        "labelStockType": "PAPER_85X11_TOP_HALF_LABEL"
+                    },
+                    "requestedPackageLineItems": [
+                        {
+                            "weight": {
+                                "units": "LB",
+                                "value": 15
+                            },
+                            "dimensions": {
+                                "length": 25,
+                                "width": 25,
+                                "height": 25,
+                                "units": "IN"
+                            },
+                            "customerReferences": [
+                                {
+                                    "customerReferenceType": "CUSTOMER_REFERENCE",
+                                    "value": "CUSTOMER_REFERENCE"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "IntegratorCA02",
+            "description": "Priority Overnight, FedEx Tube",
+            "request_type": "create_shipment",
+            "supported": true,
+            "skip_reason": null,
+            "notes": [],
+            "api": "Ship API",
+            "endpoint": "POST /ship/v1/shipments",
+            "label_format": "png",
+            "request": {
+                "labelResponseOptions": "LABEL",
+                "requestedShipment": {
+                    "shipDatestamp": "CURRENT_DATE",
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "serviceType": "PRIORITY_OVERNIGHT",
+                    "packagingType": "FEDEX_TUBE",
+                    "totalWeight": 15,
+                    "blockInsightVisibility": false,
+                    "shipper": {
+                        "contact": {
+                            "personName": "Integrator",
+                            "companyName": "RTC",
+                            "phoneNumber": "9052125456"
+                        },
+                        "address": {
+                            "streetLines": [
+                                "5985 EXPLORER DR"
+                            ],
+                            "city": "Mississauga",
+                            "stateOrProvinceCode": "ON",
+                            "postalCode": "L4W5K6",
+                            "countryCode": "CA"
+                        }
+                    },
+                    "recipients": [
+                        {
+                            "contact": {
+                                "companyName": "Recipient Company",
+                                "personName": "PO-1007",
+                                "phoneNumber": "9012367890"
+                            },
+                            "address": {
+                                "streetLines": [
+                                    "Recipient address Line 1"
+                                ],
+                                "city": "St-Laurent",
+                                "stateOrProvinceCode": "PQ",
+                                "postalCode": "H4S1A1",
+                                "countryCode": "CA"
+                            }
+                        }
+                    ],
+                    "shippingChargesPayment": {
+                        "paymentType": "SENDER",
+                        "payor": {
+                            "responsibleParty": {
+                                "accountNumber": {
+                                    "value": "USE_SHIPPER_ACCOUNT_NUMBER"
+                                },
+                                "contact": {
+                                    "personName": "Integrator Testing"
+                                },
+                                "address": {
+                                    "countryCode": "CA"
+                                }
+                            }
+                        }
+                    },
+                    "rateRequestType": [
+                        "LIST"
+                    ],
+                    "totalPackageCount": 1,
+                    "labelSpecification": {
+                        "imageType": "PNG",
+                        "labelStockType": "PAPER_4X6"
+                    },
+                    "requestedPackageLineItems": [
+                        {
+                            "weight": {
+                                "units": "LB",
+                                "value": 15
+                            },
+                            "customerReferences": [
+                                {
+                                    "customerReferenceType": "CUSTOMER_REFERENCE",
+                                    "value": "CUSTOMER_REFERENCE"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "IntegratorCA03",
+            "description": "International Priority, FedEx Tube, Saturday Delivery",
+            "request_type": "create_shipment",
+            "supported": true,
+            "skip_reason": null,
+            "notes": [
+                "shipDatestamp must be a Friday (Saturday delivery service)."
+            ],
+            "api": "Ship API",
+            "endpoint": "POST /ship/v1/shipments",
+            "label_format": "pdf",
+            "request": {
+                "labelResponseOptions": "LABEL",
+                "requestedShipment": {
+                    "shipDatestamp": "NEXT_FRIDAY",
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "serviceType": "FEDEX_INTERNATIONAL_PRIORITY",
+                    "packagingType": "FEDEX_TUBE",
+                    "totalWeight": 4,
+                    "shipper": {
+                        "contact": {
+                            "personName": "integrator",
+                            "companyName": "RTC",
+                            "phoneNumber": "9052125456"
+                        },
+                        "address": {
+                            "streetLines": [
+                                "5985 EXPLORER DR"
+                            ],
+                            "city": "Mississauga",
+                            "stateOrProvinceCode": "ON",
+                            "postalCode": "L4W5K6",
+                            "countryCode": "CA"
+                        }
+                    },
+                    "recipients": [
+                        {
+                            "contact": {
+                                "companyName": "Recipient Company",
+                                "personName": "IP-1007",
+                                "phoneNumber": "9012367890"
+                            },
+                            "address": {
+                                "streetLines": [
+                                    "Intergrator Testing"
+                                ],
+                                "city": "Lancaster",
+                                "stateOrProvinceCode": "PA",
+                                "postalCode": "17601",
+                                "countryCode": "US"
+                            }
+                        }
+                    ],
+                    "shippingChargesPayment": {
+                        "paymentType": "SENDER",
+                        "payor": {
+                            "responsibleParty": {
+                                "accountNumber": {
+                                    "value": "USE_SHIPPER_ACCOUNT_NUMBER"
+                                },
+                                "contact": {
+                                    "personName": "Integrator Testing"
+                                },
+                                "address": {
+                                    "countryCode": "CA"
+                                }
+                            }
+                        }
+                    },
+                    "shipmentSpecialServices": {
+                        "specialServiceTypes": [
+                            "SATURDAY_DELIVERY"
+                        ]
+                    },
+                    "customsClearanceDetail": {
+                        "dutiesPayment": {
+                            "paymentType": "THIRD_PARTY",
+                            "payor": {
+                                "responsibleParty": {
+                                    "accountNumber": {
+                                        "value": "198823520"
+                                    },
+                                    "contact": {
+                                        "personName": "Integrator Testing"
+                                    },
+                                    "address": {
+                                        "countryCode": "CA"
+                                    }
+                                }
+                            }
+                        },
+                        "commodities": [
+                            {
+                                "description": "Dictionaries",
+                                "numberOfPieces": 1,
+                                "quantity": 1,
+                                "quantityUnits": "EA",
+                                "countryOfManufacture": "CA",
+                                "customsValue": {
+                                    "amount": 15,
+                                    "currency": "CAD"
+                                },
+                                "unitPrice": {
+                                    "amount": 15,
+                                    "currency": "CAD"
+                                },
+                                "weight": {
+                                    "units": "LB",
+                                    "value": 4
+                                }
+                            }
+                        ],
+                        "exportDetail": {
+                            "b13AFilingOption": "NOT_REQUIRED"
+                        },
+                        "isDocumentOnly": true,
+                        "totalCustomsValue": {
+                            "amount": 15,
+                            "currency": "CAD"
+                        }
+                    },
+                    "rateRequestType": [
+                        "LIST"
+                    ],
+                    "totalPackageCount": 1,
+                    "labelSpecification": {
+                        "imageType": "PDF",
+                        "labelStockType": "PAPER_85X11_TOP_HALF_LABEL"
+                    },
+                    "requestedPackageLineItems": [
+                        {
+                            "weight": {
+                                "units": "LB",
+                                "value": 4
+                            },
+                            "customerReferences": [
+                                {
+                                    "customerReferenceType": "CUSTOMER_REFERENCE",
+                                    "value": "CUSTOMER_REFERENCE"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "IntegratorCA04",
+            "description": "FedEx Ground, Your Packaging, Signature Option",
+            "request_type": "create_shipment",
+            "supported": true,
+            "skip_reason": null,
+            "notes": [],
+            "api": "Ship API",
+            "endpoint": "POST /ship/v1/shipments",
+            "label_format": "pdf",
+            "request": {
+                "labelResponseOptions": "LABEL",
+                "requestedShipment": {
+                    "shipDatestamp": "CURRENT_DATE",
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "serviceType": "FEDEX_GROUND",
+                    "packagingType": "YOUR_PACKAGING",
+                    "totalWeight": 60,
+                    "blockInsightVisibility": false,
+                    "shipper": {
+                        "contact": {
+                            "personName": "2509",
+                            "companyName": "RTC",
+                            "phoneNumber": "9052125000"
+                        },
+                        "address": {
+                            "streetLines": [
+                                "5985 EXPLORER DR"
+                            ],
+                            "city": "Mississauga",
+                            "stateOrProvinceCode": "ON",
+                            "postalCode": "L4W5K6",
+                            "countryCode": "CA"
+                        }
+                    },
+                    "recipients": [
+                        {
+                            "contact": {
+                                "companyName": "Recipient Company",
+                                "personName": "2509",
+                                "phoneNumber": "8009887652"
+                            },
+                            "address": {
+                                "streetLines": [
+                                    "Recipient Address Line 10"
+                                ],
+                                "city": "Anchorage",
+                                "stateOrProvinceCode": "AK",
+                                "postalCode": "99502",
+                                "countryCode": "US"
+                            }
+                        }
+                    ],
+                    "shippingChargesPayment": {
+                        "paymentType": "THIRD_PARTY",
+                        "payor": {
+                            "responsibleParty": {
+                                "accountNumber": {
+                                    "value": "150067600"
+                                },
+                                "address": {
+                                    "countryCode": "CA"
+                                }
+                            }
+                        }
+                    },
+                    "customsClearanceDetail": {
+                        "dutiesPayment": {
+                            "paymentType": "THIRD_PARTY",
+                            "payor": {
+                                "responsibleParty": {
+                                    "accountNumber": {
+                                        "value": "150067600"
+                                    },
+                                    "contact": {
+                                        "personName": "Integrator Testing"
+                                    },
+                                    "address": {
+                                        "countryCode": "CA"
+                                    }
+                                }
+                            }
+                        },
+                        "commodities": [
+                            {
+                                "description": "Dictionaries",
+                                "numberOfPieces": 1,
+                                "quantity": 1,
+                                "quantityUnits": "EA",
+                                "countryOfManufacture": "CA",
+                                "customsValue": {
+                                    "amount": 100,
+                                    "currency": "CAD"
+                                },
+                                "unitPrice": {
+                                    "amount": 100,
+                                    "currency": "CAD"
+                                },
+                                "weight": {
+                                    "units": "LB",
+                                    "value": 60
+                                }
+                            }
+                        ],
+                        "isDocumentOnly": false,
+                        "totalCustomsValue": {
+                            "amount": 100,
+                            "currency": "CAD"
+                        }
+                    },
+                    "rateRequestType": [
+                        "LIST"
+                    ],
+                    "totalPackageCount": 1,
+                    "labelSpecification": {
+                        "imageType": "PDF",
+                        "labelStockType": "PAPER_85X11_TOP_HALF_LABEL"
+                    },
+                    "requestedPackageLineItems": [
+                        {
+                            "declaredValue": {
+                                "amount": 100,
+                                "currency": "CAD"
+                            },
+                            "weight": {
+                                "units": "LB",
+                                "value": 60
+                            },
+                            "dimensions": {
+                                "length": 25,
+                                "width": 25,
+                                "height": 25,
+                                "units": "IN"
+                            },
+                            "customerReferences": [
+                                {
+                                    "customerReferenceType": "CUSTOMER_REFERENCE",
+                                    "value": "CUSTOMER_REFERENCE"
+                                }
+                            ],
+                            "packageSpecialServices": {
+                                "specialServiceTypes": [
+                                    "SIGNATURE_OPTION"
+                                ],
+                                "signatureOptionType": "DIRECT"
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "IntegratorCA05",
+            "description": "FedEx Ground, Your Packaging",
+            "request_type": "create_shipment",
+            "supported": true,
+            "skip_reason": null,
+            "notes": [],
+            "api": "Ship API",
+            "endpoint": "POST /ship/v1/shipments",
+            "label_format": "zpl",
+            "request": {
+                "labelResponseOptions": "LABEL",
+                "requestedShipment": {
+                    "shipDatestamp": "CURRENT_DATE",
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "serviceType": "FEDEX_GROUND",
+                    "packagingType": "YOUR_PACKAGING",
+                    "totalWeight": 23,
+                    "blockInsightVisibility": false,
+                    "shipper": {
+                        "contact": {
+                            "personName": "1502",
+                            "companyName": "RTC",
+                            "phoneNumber": "9052125456"
+                        },
+                        "address": {
+                            "streetLines": [
+                                "5985 EXPLORER DR"
+                            ],
+                            "city": "Mississauga",
+                            "stateOrProvinceCode": "ON",
+                            "postalCode": "L4W5K6",
+                            "countryCode": "CA"
+                        }
+                    },
+                    "recipients": [
+                        {
+                            "contact": {
+                                "companyName": "Recipient Company",
+                                "personName": "1502",
+                                "phoneNumber": "8889708898"
+                            },
+                            "address": {
+                                "streetLines": [
+                                    "Recipient Address Line 1"
+                                ],
+                                "city": "Burnaby",
+                                "stateOrProvinceCode": "BC",
+                                "postalCode": "V5H4K7",
+                                "countryCode": "CA"
+                            }
+                        }
+                    ],
+                    "shippingChargesPayment": {
+                        "paymentType": "SENDER",
+                        "payor": {
+                            "responsibleParty": {
+                                "accountNumber": {
+                                    "value": "USE_SHIPPER_ACCOUNT_NUMBER"
+                                },
+                                "address": {
+                                    "countryCode": "CA"
+                                }
+                            }
+                        }
+                    },
+                    "rateRequestType": [
+                        "LIST"
+                    ],
+                    "totalPackageCount": 1,
+                    "labelSpecification": {
+                        "imageType": "ZPLII",
+                        "labelStockType": "STOCK_4X6"
+                    },
+                    "requestedPackageLineItems": [
+                        {
+                            "declaredValue": {
+                                "amount": 1200,
+                                "currency": "CAD"
+                            },
+                            "weight": {
+                                "units": "LB",
+                                "value": 23
+                            },
+                            "dimensions": {
+                                "length": 20,
+                                "width": 20,
+                                "height": 20,
+                                "units": "IN"
+                            },
+                            "customerReferences": [
+                                {
+                                    "customerReferenceType": "CUSTOMER_REFERENCE",
+                                    "value": "CUSTOMER_REFERENCE"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}

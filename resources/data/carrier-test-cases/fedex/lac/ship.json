@@ -1,0 +1,474 @@
+{
+    "carrier": "fedex",
+    "region": "lac",
+    "suite": "ship",
+    "source": "LAC_Test_Cases.md",
+    "meta": {
+        "territory": "Latin America & Caribbean",
+        "notes": [
+            "shipDatestamp: 'Current Date' and 'Current System Date' mean today's date at runtime.",
+            "Use the active FedEx shipper account number wherever the source data says 'shipper account number', 'Shipper Account Number', or 'Please use shipper account number'.",
+            "The source markdown included a few field-path typos; these fixtures use corrected request field names where the intended schema was clear."
+        ]
+    },
+    "cases": [
+        {
+            "id": "IntegratorLAC01",
+            "description": "International Economy, Your Packaging, Broker Select Option",
+            "request_type": "create_shipment",
+            "supported": true,
+            "skip_reason": null,
+            "notes": [],
+            "api": "Ship API",
+            "endpoint": "POST /ship/v1/shipments",
+            "label_format": "pdf",
+            "request": {
+                "customerTransactionId": "IntegratorLAC01",
+                "labelResponseOptions": "LABEL",
+                "accountNumber": {
+                    "value": "USE_SHIPPER_ACCOUNT_NUMBER"
+                },
+                "requestedShipment": {
+                    "shipDatestamp": "CURRENT_DATE",
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "serviceType": "INTERNATIONAL_ECONOMY",
+                    "packagingType": "YOUR_PACKAGING",
+                    "totalWeight": 20,
+                    "shipper": {
+                        "contact": {
+                            "personName": "Acme Mexico",
+                            "companyName": "FedEx",
+                            "phoneNumber": "9012633035"
+                        },
+                        "address": {
+                            "streetLines": [
+                                "Av. Vasco De Quiroga 2999"
+                            ],
+                            "city": "Mexico City",
+                            "postalCode": "01210",
+                            "countryCode": "MX"
+                        },
+                        "tins": [
+                            {
+                                "tinType": "PERSONAL_STATE",
+                                "number": "123456789"
+                            }
+                        ]
+                    },
+                    "recipients": [
+                        {
+                            "contact": {
+                                "companyName": "FedEx",
+                                "personName": "LAC-503",
+                                "phoneNumber": "9012633035"
+                            },
+                            "address": {
+                                "streetLines": [
+                                    "FEDEX PARKWAY"
+                                ],
+                                "city": "PORTLAND",
+                                "stateOrProvinceCode": "ME",
+                                "postalCode": "04101",
+                                "countryCode": "US"
+                            }
+                        }
+                    ],
+                    "shippingChargesPayment": {
+                        "paymentType": "SENDER",
+                        "payor": {
+                            "responsibleParty": {
+                                "accountNumber": {
+                                    "value": "USE_SHIPPER_ACCOUNT_NUMBER"
+                                },
+                                "contact": {
+                                    "personName": "12345"
+                                }
+                            }
+                        }
+                    },
+                    "shipmentSpecialServices": {
+                        "specialServiceTypes": [
+                            "BROKER_SELECT_OPTION"
+                        ]
+                    },
+                    "customsClearanceDetail": {
+                        "recipientCustomsId": {
+                            "type": "PASSPORT",
+                            "value": "12345678"
+                        },
+                        "brokers": [
+                            {
+                                "type": "IMPORT",
+                                "broker": {
+                                    "accountNumber": {
+                                        "value": "Broker Account Number"
+                                    },
+                                    "contact": {
+                                        "companyName": "CompanyName",
+                                        "emailAddress": "integratortesting@xyz.com",
+                                        "personName": "Shayilaja",
+                                        "phoneExtension": "3293",
+                                        "phoneNumber": "8975898616"
+                                    },
+                                    "address": {
+                                        "streetLines": [
+                                            "Recipient_Address_Line1"
+                                        ],
+                                        "city": "PORTLAND",
+                                        "stateOrProvinceCode": "ME",
+                                        "postalCode": "04101",
+                                        "countryCode": "US"
+                                    },
+                                    "tins": [
+                                        {
+                                            "tinType": "PERSONAL_STATE",
+                                            "number": "1234567890"
+                                        }
+                                    ]
+                                }
+                            }
+                        ],
+                        "commercialInvoice": {
+                            "comments": [
+                                "FEDEX BUSINESS"
+                            ],
+                            "customerReferences": [
+                                {
+                                    "customerReferenceType": "CUSTOMER_REFERENCE",
+                                    "value": "123456789"
+                                }
+                            ],
+                            "originatorName": "Originator Name",
+                            "shipmentPurpose": "SAMPLE",
+                            "taxesOrMiscellaneousCharge": {
+                                "amount": 25,
+                                "currency": "USD"
+                            }
+                        },
+                        "dutiesPayment": {
+                            "paymentType": "SENDER",
+                            "payor": {
+                                "responsibleParty": {
+                                    "accountNumber": {
+                                        "value": "USE_SHIPPER_ACCOUNT_NUMBER"
+                                    },
+                                    "contact": {
+                                        "personName": "12345"
+                                    },
+                                    "address": {
+                                        "countryCode": "MX"
+                                    }
+                                }
+                            }
+                        },
+                        "importerOfRecord": {
+                            "accountNumber": {
+                                "value": "222326460"
+                            },
+                            "contact": {
+                                "companyName": "CompanyName",
+                                "personName": "Takshak",
+                                "phoneNumber": "8975898616"
+                            },
+                            "address": {
+                                "streetLines": [
+                                    "FEDEX PARKWAY"
+                                ],
+                                "city": "PORTLAND",
+                                "stateOrProvinceCode": "ME",
+                                "postalCode": "04101",
+                                "countryCode": "US"
+                            },
+                            "tins": [
+                                {
+                                    "tinType": "PERSONAL_STATE",
+                                    "number": "1234567890"
+                                }
+                            ]
+                        },
+                        "insuranceCharge": {
+                            "amount": 100,
+                            "currency": "USD"
+                        },
+                        "commodities": [
+                            {
+                                "description": "Dictionaries and encyclopedias, and serial installments thereof",
+                                "numberOfPieces": 1,
+                                "quantity": 1,
+                                "quantityUnits": "EA",
+                                "countryOfManufacture": "FR",
+                                "customsValue": {
+                                    "amount": 100,
+                                    "currency": "USD"
+                                },
+                                "unitPrice": {
+                                    "amount": 100,
+                                    "currency": "USD"
+                                },
+                                "weight": {
+                                    "units": "KG",
+                                    "value": 20
+                                }
+                            }
+                        ],
+                        "isDocumentOnly": true,
+                        "totalCustomsValue": {
+                            "amount": 100,
+                            "currency": "USD"
+                        }
+                    },
+                    "rateRequestType": [
+                        "LIST"
+                    ],
+                    "totalPackageCount": 1,
+                    "labelSpecification": {
+                        "imageType": "PDF",
+                        "labelStockType": "PAPER_85X11_TOP_HALF_LABEL"
+                    },
+                    "requestedPackageLineItems": [
+                        {
+                            "declaredValue": {
+                                "amount": 100,
+                                "currency": "USD"
+                            },
+                            "weight": {
+                                "units": "KG",
+                                "value": 20
+                            },
+                            "dimensions": {
+                                "length": 20,
+                                "width": 30,
+                                "height": 20,
+                                "units": "CM"
+                            },
+                            "customerReferences": [
+                                {
+                                    "customerReferenceType": "CUSTOMER_REFERENCE",
+                                    "value": "Integrator testing"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "IntegratorLAC02",
+            "description": "Standard Overnight, Your Packaging, Hold at Location",
+            "request_type": "create_shipment",
+            "supported": true,
+            "skip_reason": "HAL source data is incomplete and may require additional location lookup details before execution.",
+            "notes": [],
+            "api": "Ship API",
+            "endpoint": "POST /ship/v1/shipments",
+            "label_format": "zpl",
+            "request": {
+                "customerTransactionId": "IntegratorLAC07",
+                "labelResponseOptions": "LABEL",
+                "requestedShipment": {
+                    "shipDatestamp": "CURRENT_DATE",
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "serviceType": "STANDARD_OVERNIGHT",
+                    "packagingType": "YOUR_PACKAGING",
+                    "totalWeight": 50,
+                    "shipper": {
+                        "contact": {
+                            "personName": "Acme Mexico",
+                            "companyName": "RTC",
+                            "phoneNumber": "9012633035"
+                        },
+                        "address": {
+                            "streetLines": [
+                                "Av. Vasco De Quiroga 2999"
+                            ],
+                            "city": "Mexico City",
+                            "postalCode": "01210",
+                            "countryCode": "MX"
+                        }
+                    },
+                    "recipients": [
+                        {
+                            "contact": {
+                                "companyName": "Integrator testing",
+                                "personName": "LAC-302",
+                                "phoneNumber": "9012633035"
+                            },
+                            "address": {
+                                "streetLines": [
+                                    "IES Avenue"
+                                ],
+                                "city": "MEXICO CITY",
+                                "postalCode": "15510",
+                                "countryCode": "MX"
+                            }
+                        }
+                    ],
+                    "shippingChargesPayment": {
+                        "paymentType": "RECIPIENT",
+                        "payor": {
+                            "responsibleParty": {
+                                "accountNumber": {
+                                    "value": "222326460"
+                                },
+                                "contact": {
+                                    "personName": "RTC Testing"
+                                },
+                                "address": {
+                                    "countryCode": "MX"
+                                }
+                            }
+                        }
+                    },
+                    "shipmentSpecialServices": {
+                        "specialServiceTypes": [
+                            "HOLD_AT_LOCATION"
+                        ],
+                        "holdAtLocationDetail": {
+                            "locationId": "AJSB",
+                            "locationContactAndAddress": {
+                                "contact": {
+                                    "companyName": "FedEx World Service Center",
+                                    "personName": "Greg Pearson",
+                                    "phoneNumber": "9012633035"
+                                },
+                                "address": {
+                                    "streetLines": [
+                                        "Irapuato Núm. 188-P"
+                                    ],
+                                    "city": "Mexico",
+                                    "postalCode": "15520",
+                                    "countryCode": "MX"
+                                }
+                            }
+                        }
+                    },
+                    "rateRequestType": [
+                        "LIST"
+                    ],
+                    "totalPackageCount": 1,
+                    "labelSpecification": {
+                        "imageType": "ZPLII",
+                        "labelStockType": "STOCK_4X6"
+                    },
+                    "requestedPackageLineItems": [
+                        {
+                            "declaredValue": {
+                                "amount": 200,
+                                "currency": "NMP"
+                            },
+                            "weight": {
+                                "units": "KG",
+                                "value": 50
+                            },
+                            "dimensions": {
+                                "length": 50,
+                                "width": 40,
+                                "height": 50,
+                                "units": "CM"
+                            },
+                            "customerReferences": [
+                                {
+                                    "customerReferenceType": "CUSTOMER_REFERENCE",
+                                    "value": "Integrator testing"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "IntegratorLAC03",
+            "description": "Priority Overnight, Your Packaging",
+            "request_type": "create_shipment",
+            "supported": true,
+            "skip_reason": null,
+            "notes": [],
+            "api": "Ship API",
+            "endpoint": "POST /ship/v1/shipments",
+            "label_format": "pdf",
+            "request": {
+                "customerTransactionId": "IntegratorLAC09",
+                "labelResponseOptions": "LABEL",
+                "requestedShipment": {
+                    "shipDatestamp": "CURRENT_DATE",
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "serviceType": "PRIORITY_OVERNIGHT",
+                    "packagingType": "YOUR_PACKAGING",
+                    "totalWeight": 15,
+                    "shipper": {
+                        "contact": {
+                            "personName": "Acme Colombia",
+                            "companyName": "RTC",
+                            "phoneNumber": "9012633035"
+                        },
+                        "address": {
+                            "streetLines": [
+                                "Terminal de Carga 1B FedEx"
+                            ],
+                            "city": "Bogota",
+                            "postalCode": "110911",
+                            "countryCode": "CO"
+                        }
+                    },
+                    "recipients": [
+                        {
+                            "contact": {
+                                "companyName": "Integrator testing",
+                                "personName": "LAC-309",
+                                "phoneNumber": "9012633035"
+                            },
+                            "address": {
+                                "streetLines": [
+                                    "IES Avenue"
+                                ],
+                                "city": "Acacias",
+                                "postalCode": "110911",
+                                "countryCode": "CO"
+                            }
+                        }
+                    ],
+                    "shippingChargesPayment": {
+                        "paymentType": "SENDER",
+                        "payor": {
+                            "responsibleParty": {
+                                "accountNumber": {
+                                    "value": "USE_SHIPPER_ACCOUNT_NUMBER"
+                                },
+                                "contact": {
+                                    "personName": "RTC Testing"
+                                },
+                                "address": {
+                                    "countryCode": "CO"
+                                }
+                            }
+                        }
+                    },
+                    "totalPackageCount": 1,
+                    "labelSpecification": {
+                        "imageType": "PDF",
+                        "labelStockType": "PAPER_85X11_TOP_HALF_LABEL"
+                    },
+                    "requestedPackageLineItems": [
+                        {
+                            "declaredValue": {
+                                "amount": 500,
+                                "currency": "COP"
+                            },
+                            "weight": {
+                                "units": "KG",
+                                "value": 15
+                            },
+                            "dimensions": {
+                                "length": 10,
+                                "width": 20,
+                                "height": 10,
+                                "units": "CM"
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}

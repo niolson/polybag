@@ -1,0 +1,84 @@
+{
+    "carrier": "fedex",
+    "region": "lac",
+    "suite": "rate",
+    "source": "LAC_Test_Cases.md",
+    "meta": {
+        "territory": "Latin America & Caribbean",
+        "notes": [
+            "These are source-derived rate scenarios.",
+            "Rate test case execution is not implemented by fedex:run-test-cases yet.",
+            "The source markdown included schema typos such as 'Payor' and 'totalpackageCount'; these fixtures use corrected request field names."
+        ]
+    },
+    "cases": [
+        {
+            "id": "IntegratorLAC04",
+            "description": "First Overnight Rate Quote",
+            "request_type": "rate",
+            "supported": false,
+            "skip_reason": "Rate test case execution is not implemented yet.",
+            "notes": [],
+            "api": "Rate API",
+            "endpoint": "POST /rate/v1/rates/quotes",
+            "label_format": null,
+            "request": {
+                "accountNumber": {
+                    "value": "697347704"
+                },
+                "rateRequestControlParameters": {
+                    "returnTransitTimes": true
+                },
+                "requestedShipment": {
+                    "pickupType": "USE_SCHEDULED_PICKUP",
+                    "serviceType": "FIRST_OVERNIGHT",
+                    "preferredCurrency": "NMP",
+                    "rateRequestType": [
+                        "LIST"
+                    ],
+                    "packagingType": "YOUR_PACKAGING",
+                    "totalPackageCount": 1,
+                    "shipper": {
+                        "address": {
+                            "city": "Mexico City",
+                            "countryCode": "MX",
+                            "postalCode": "1210",
+                            "residential": false
+                        }
+                    },
+                    "recipient": {
+                        "address": {
+                            "city": "Mexico City",
+                            "countryCode": "MX",
+                            "postalCode": "15510",
+                            "residential": false
+                        }
+                    },
+                    "shippingChargesPayment": {
+                        "paymentType": "SENDER",
+                        "payor": {
+                            "responsibleParty": {
+                                "accountNumber": {
+                                    "value": "697347704"
+                                }
+                            }
+                        }
+                    },
+                    "requestedPackageLineItems": [
+                        {
+                            "declaredValue": {
+                                "amount": 300,
+                                "currency": "NMP"
+                            },
+                            "weight": {
+                                "units": "KG",
+                                "value": 12
+                            }
+                        }
+                    ],
+                    "totalWeight": 12
+                }
+            }
+        }
+    ]
+}

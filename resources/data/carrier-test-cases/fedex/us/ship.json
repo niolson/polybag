@@ -215,7 +215,7 @@
                     "emailNotificationDetail": {
                         "aggregationType": "PER_PACKAGE",
                         "personalMessage": "your personal message here",
-                        "emailNotificationsRecipients": [
+                        "emailNotificationRecipients": [
                             {
                                 "notificationType": "EMAIL",
                                 "emailAddress": "test001@fedex.com",
@@ -223,7 +223,7 @@
                                 "name": "joe smith",
                                 "emailNotificationRecipientType": "RECIPIENT",
                                 "notificationFormatType": "TEXT",
-                                "notificationEventTypes": [
+                                "notificationEventType": [
                                     "ON_PICKUP_DRIVER_ARRIVED",
                                     "ON_SHIPMENT"
                                 ]

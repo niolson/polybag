@@ -100,16 +100,16 @@ class FedexAdapter implements CarrierAdapterInterface
 
     public function getRates(RateRequest $request, array $serviceCodes): Collection
     {
-        // Check if we need to return mock rates for international sandbox testing
-        $internationalCodes = array_intersect($serviceCodes, self::INTERNATIONAL_SERVICE_CODES);
-        if ($this->isSandbox() && $this->isInternational($request) && ! empty($internationalCodes)) {
-            logger()->debug('FedEx sandbox detected with international destination - returning mock rates', [
-                'destination_country' => $request->destinationCountry,
-                'service_codes' => $internationalCodes,
-            ]);
+        // // Check if we need to return mock rates for international sandbox testing
+        // $internationalCodes = array_intersect($serviceCodes, self::INTERNATIONAL_SERVICE_CODES);
+        // if ($this->isSandbox() && $this->isInternational($request) && ! empty($internationalCodes)) {
+        //     logger()->debug('FedEx sandbox detected with international destination - returning mock rates', [
+        //         'destination_country' => $request->destinationCountry,
+        //         'service_codes' => $internationalCodes,
+        //     ]);
 
-            return $this->getMockInternationalRates($request, $internationalCodes);
-        }
+        //     return $this->getMockInternationalRates($request, $internationalCodes);
+        // }
 
         $prepared = $this->prepareRateRequest($request, $serviceCodes);
 
@@ -250,7 +250,7 @@ class FedexAdapter implements CarrierAdapterInterface
                 'shipper' => [
                     'address' => [
                         'postalCode' => $request->originPostalCode,
-                        'countryCode' => 'US',
+                        'countryCode' => $request->originCountry,
                     ],
                 ],
                 'recipient' => [
@@ -283,7 +283,7 @@ class FedexAdapter implements CarrierAdapterInterface
                         'specialServiceTypes' => ['SATURDAY_DELIVERY'],
                     ],
                 ] : []),
-                ...($request->destinationCountry !== 'US' ? [
+                ...($this->isInternational($request) ? [
                     'customsClearanceDetail' => [
                         'dutiesPayment' => [
                             'paymentType' => 'SENDER',
@@ -446,7 +446,7 @@ class FedexAdapter implements CarrierAdapterInterface
             }
 
             // Add customs clearance detail for international shipments
-            if ($request->toAddress->country !== 'US' && ! empty($request->customsItems)) {
+            if ($request->toAddress->country !== $request->fromAddress->country && ! empty($request->customsItems)) {
                 $requestedShipment['customsClearanceDetail'] = $this->buildCustomsClearanceDetail($request);
             }
 
@@ -980,13 +980,13 @@ class FedexAdapter implements CarrierAdapterInterface
                 'shipper' => [
                     'address' => [
                         'postalCode' => $request->originPostalCode,
-                        'countryCode' => 'US',
+                        'countryCode' => $request->originCountry,
                     ],
                 ],
                 'recipient' => [
                     'address' => [
                         'postalCode' => $request->destinationPostalCode,
-                        'countryCode' => 'US',
+                        'countryCode' => $request->destinationCountry,
                     ],
                 ],
                 'pickupType' => 'USE_SCHEDULED_PICKUP',
@@ -1167,7 +1167,7 @@ class FedexAdapter implements CarrierAdapterInterface
                 'payor' => [
                     'responsibleParty' => [
                         'address' => [
-                            'countryCode' => 'US',
+                            'countryCode' => $request->fromAddress->country,
                         ],
                         'accountNumber' => [
                             'value' => app(SettingsService::class)->get('fedex.account_number'),
@@ -1192,7 +1192,7 @@ class FedexAdapter implements CarrierAdapterInterface
      */
     private function isInternational(RateRequest $request): bool
     {
-        return $request->destinationCountry !== 'US';
+        return $request->originCountry !== $request->destinationCountry;
     }
 
     /**

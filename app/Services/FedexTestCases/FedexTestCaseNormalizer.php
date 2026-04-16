@@ -153,14 +153,6 @@ class FedexTestCaseNormalizer
             unset($payload['requestedShipment']['rateRequestTypes']);
         }
 
-        $specialTypes = data_get($payload, 'requestedShipment.shipmentSpecialServices.specialServiceTypes', []);
-
-        if (in_array('SATURDAY_DELIVERY', $specialTypes, true) && in_array('EVENT_NOTIFICATION', $specialTypes, true)) {
-            $payload['requestedShipment']['shipmentSpecialServices']['specialServiceTypes'] = array_values(
-                array_filter($specialTypes, fn (string $type): bool => $type !== 'EVENT_NOTIFICATION')
-            );
-        }
-
         if (isset($payload['requestedShipment']['shipmentSpecialServices']['homeDeliveryPremiumDetail']['homeDeliveryPremiumType'])) {
             $detail = &$payload['requestedShipment']['shipmentSpecialServices']['homeDeliveryPremiumDetail'];
             $detail['homedeliveryPremiumType'] = $detail['homeDeliveryPremiumType'];
