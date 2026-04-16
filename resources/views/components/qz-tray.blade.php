@@ -194,7 +194,7 @@
         }
 
         // Print report (8.5x11) via QZ Tray
-        async function printReport(base64Data) {
+        async function printReport(base64Data, format = 'pdf') {
             const printer = getReportPrinter();
 
             if (!printer) {
@@ -216,9 +216,11 @@
                     scaleContent: true
                 });
 
+                const isImageFormat = format === 'image' || format === 'png' || format === 'gif';
+
                 const data = [{
                     type: 'pixel',
-                    format: 'pdf',
+                    format: isImageFormat ? 'image' : 'pdf',
                     flavor: 'base64',
                     data: base64Data
                 }];
@@ -235,7 +237,7 @@
         document.addEventListener('livewire:init', () => {
             Livewire.on('print-label', async (event) => {
                 if (event.orientation === 'report') {
-                    await printReport(event.label);
+                    await printReport(event.label, event.format || 'pdf');
                 } else {
                     await printLabel(event.label, event.orientation || 'portrait', event.format || 'pdf', event.dpi || null);
                 }

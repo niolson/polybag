@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Enums\Role;
 use App\Exceptions\FedexRegistrationMaxRetriesException;
+use App\Filament\Support\AddressForm;
 use App\Http\Integrations\USPS\Requests\ShippingOptions;
 use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Location;
@@ -33,11 +34,11 @@ use Filament\Schemas\Components\Form;
 use Filament\Schemas\Components\Html;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
-use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Components\Wizard;
 use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
 use Filament\Support\Exceptions\Halt;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\HtmlString;
@@ -304,12 +305,16 @@ class Settings extends Page
     {
         if ($this->fedexSupportFallbackActive) {
             return new HtmlString(
-                '<button type="button" wire:click="closeFedexRegistrationModal" class="fi-btn fi-color-gray fi-size-md inline-flex items-center justify-center gap-1 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-gray-700 ring-1 ring-gray-300 transition hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-200 dark:ring-gray-700 dark:hover:bg-gray-700">Close</button>'
+                Blade::render(
+                    '<x-filament::button type="button" wire:click="closeFedexRegistrationModal" color="gray">Close</x-filament::button>'
+                )
             );
         }
 
         return new HtmlString(
-            '<button type="button" wire:click="callMountedAction" class="fi-btn fi-color-custom fi-size-md inline-flex items-center justify-center gap-1 rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-500 disabled:pointer-events-none disabled:opacity-70">Add Account</button>'
+            Blade::render(
+                '<x-filament::button type="button" wire:click="callMountedAction">Add Account</x-filament::button>'
+            )
         );
     }
 
@@ -365,6 +370,7 @@ class Settings extends Page
     {
         app(FedexRegistrationService::class)->activateChildCredentials($childKey, $childSecret);
         app(SettingsService::class)->set('fedex.account_number', $accountNumber, group: 'fedex');
+        $this->fedex_account_number = $accountNumber;
     }
 
     private function refreshMountedFedexAction(): void
@@ -728,16 +734,19 @@ class Settings extends Page
                                 ->icon('heroicon-o-link')
                                 ->color(fn () => $this->isFedexAccountConnected() ? 'warning' : 'primary')
                                 ->modalHeading(fn () => new HtmlString(
-                                    '<span class="flex items-center gap-2"><img src="' . asset('images/fedex-logo.svg') . '" alt="FedEx" class="h-5 inline-block">'
-                                        . ($this->isFedexAccountConnected() ? 'Reconnect FedEx Account' : 'Connect FedEx Account')
-                                        . '</span>'
+                                    '<span class="flex items-center gap-2"><img src="'.asset('images/fedex-logo.svg').'" alt="FedEx" class="h-5 inline-block">'
+                                        .($this->isFedexAccountConnected() ? 'Reconnect FedEx Account' : 'Connect FedEx Account')
+                                        .'</span>'
                                 ))
                                 ->modalWidth('7xl')
                                 ->extraModalWindowAttributes(['style' => 'max-width: 96rem;'])
                                 ->closeModalByClickingAway(false)
                                 ->closeModalByEscaping(false)
                                 ->modalSubmitAction(false)
-                                ->mountUsing(fn () => $this->resetFedexRegistrationState())
+                                ->mountUsing(function (?Schema $schema): void {
+                                    $this->resetFedexRegistrationState();
+                                    $schema?->fill();
+                                })
                                 ->modifyWizardUsing(fn (Wizard $wizard) => $wizard
                                     ->submitAction($this->renderFedexWizardSubmitAction())
                                     ->nextAction(fn (Action $action) => $action->disabled(! $this->fedexEulaAccepted))
@@ -782,6 +791,9 @@ class Settings extends Page
                                                 ->label('Residential Address')
                                                 ->default(false)
                                                 ->columnSpanFull(),
+                                            AddressForm::countrySelect('fedex_reg_country', 'fedex_reg_state')
+                                                ->label('Country')
+                                                ->columnSpanFull(),
                                             TextInput::make('fedex_reg_street1')
                                                 ->label('Street Address')
                                                 ->required()
@@ -795,27 +807,21 @@ class Settings extends Page
                                                 ->label('City')
                                                 ->required()
                                                 ->maxLength(35),
-                                            TextInput::make('fedex_reg_state')
+                                            Select::make('fedex_reg_state')
                                                 ->label(fn (Get $get): string => app(AddressReferenceService::class)->getAdministrativeAreaLabel($get('fedex_reg_country')))
-                                                ->required()
-                                                ->maxLength(35),
+                                                ->options(fn (Get $get): array => app(AddressReferenceService::class)->getSubdivisionOptions($get('fedex_reg_country')))
+                                                ->native(false)
+                                                ->searchable()
+                                                ->optionsLimit(300)
+                                                ->required(fn (Get $get): bool => app(AddressReferenceService::class)->isAdministrativeAreaRequired($get('fedex_reg_country')))
+                                                ->hidden(fn (Get $get): bool => app(AddressReferenceService::class)->getSubdivisionOptions($get('fedex_reg_country')) === [])
+                                                ->live(),
                                             TextInput::make('fedex_reg_postal_code')
                                                 ->label('ZIP / Postal Code')
                                                 ->required()
                                                 ->maxLength(10),
-                                            Select::make('fedex_reg_country')
-                                                ->label('Country')
-                                                ->options(fn (): array => app(AddressReferenceService::class)->getCountryOptions())
-                                                ->native(true)
-                                                ->default('US')
-                                                ->required()
-                                                ->live()
-                                                ->afterStateUpdated(function (Set $set): void {
-                                                    $set('fedex_reg_state', null);
-                                                })
-                                                ->dehydrateStateUsing(fn (?string $state): ?string => app(AddressReferenceService::class)->normalizeCountry($state) ?? ($state ? strtoupper(trim($state)) : null)),
                                         ])
-                                        ->columns(2)
+                                        ->columns(3)
                                         ->afterValidation(function (Get $get) {
                                             try {
                                                 $result = app(FedexRegistrationService::class)->validateAddress(
@@ -825,7 +831,7 @@ class Settings extends Page
                                                     street1: $get('fedex_reg_street1'),
                                                     street2: $get('fedex_reg_street2') ?? '',
                                                     city: $get('fedex_reg_city'),
-                                                    stateOrProvinceCode: $get('fedex_reg_state'),
+                                                    stateOrProvinceCode: $get('fedex_reg_state') ?? '',
                                                     postalCode: $get('fedex_reg_postal_code'),
                                                     countryCode: $get('fedex_reg_country'),
                                                 );
@@ -991,6 +997,7 @@ class Settings extends Page
                                     }
 
                                     Notification::make()->success()->title('FedEx Account added Successfully.')->send();
+                                    $this->redirect(static::getUrl());
                                 }),
                             Action::make('fedex_disconnect')
                                 ->label('Disconnect')
