@@ -687,7 +687,7 @@ class Settings extends Page
                         ->columns(2)
                         ->collapsed(),
 
-                    Section::make('FedEx Credentials')
+                    Section::make(new HtmlString('<span class="flex items-center gap-2"><img src="'.asset('images/fedex-logo.svg').'" alt="FedEx" class="h-5 inline-block">FedEx Credentials</span>'))
                         ->description('API credentials for FedEx shipping services')
                         ->schema([
                             Placeholder::make('fedex_account_status')
@@ -727,6 +727,11 @@ class Settings extends Page
                                 ->label(fn () => $this->isFedexAccountConnected() ? 'Reconnect FedEx Account' : 'Connect FedEx Account')
                                 ->icon('heroicon-o-link')
                                 ->color(fn () => $this->isFedexAccountConnected() ? 'warning' : 'primary')
+                                ->modalHeading(fn () => new HtmlString(
+                                    '<span class="flex items-center gap-2"><img src="' . asset('images/fedex-logo.svg') . '" alt="FedEx" class="h-5 inline-block">'
+                                        . ($this->isFedexAccountConnected() ? 'Reconnect FedEx Account' : 'Connect FedEx Account')
+                                        . '</span>'
+                                ))
                                 ->modalWidth('7xl')
                                 ->extraModalWindowAttributes(['style' => 'max-width: 96rem;'])
                                 ->closeModalByClickingAway(false)
@@ -735,6 +740,7 @@ class Settings extends Page
                                 ->mountUsing(fn () => $this->resetFedexRegistrationState())
                                 ->modifyWizardUsing(fn (Wizard $wizard) => $wizard
                                     ->submitAction($this->renderFedexWizardSubmitAction())
+                                    ->nextAction(fn (Action $action) => $action->disabled(! $this->fedexEulaAccepted))
                                     ->previousAction(
                                         fn (Action $action) => $action
                                             ->hidden($this->fedexSupportFallbackActive && ! $this->hasAvailableFedexFactor2Methods())
