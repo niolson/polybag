@@ -1,6 +1,6 @@
 # Stage 1: Install Composer dependencies
 # Pin digests to prevent supply chain attacks — update with `docker manifest inspect <image>`
-FROM php:8.4-cli-alpine@sha256:35d2128457116c6842350c3aad3ecd123755f69e75efb047acfd6275625496e4 AS vendor
+FROM php:8.4-cli-alpine@sha256:2fcdc81aca56742cfcb6b9e8c31c4a14f43e21d67ee4748bea80ce1f01fc2520 AS vendor
 
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
@@ -23,7 +23,7 @@ COPY --from=vendor /app/vendor vendor
 RUN npm run build
 
 # Stage 3: PHP application
-FROM php:8.4-fpm@sha256:d31cf114d43fee26655a76b0d09dddeaab3f09391eb4edf3f35e1f1c919e1b28 AS app
+FROM php:8.4-fpm@sha256:fa35946edf6a72eed16b28620e7d76a9441b73fd12bb33f936a3cb142459c376 AS app
 
 # Install system dependencies
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
