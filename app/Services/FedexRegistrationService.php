@@ -12,6 +12,7 @@ use App\Http\Integrations\Fedex\Requests\Registration\VerifyPin;
 use App\Models\Setting;
 use Illuminate\Support\Facades\Cache;
 use RuntimeException;
+use Saloon\Exceptions\Request\RequestException;
 use Saloon\Http\Request;
 use Saloon\Http\Response;
 
@@ -80,7 +81,11 @@ class FedexRegistrationService
             postalCode: $postalCode,
             countryCode: $countryCode,
         );
-        $response = $connector->send($apiRequest);
+        try {
+            $response = $connector->send($apiRequest);
+        } catch (RequestException $exception) {
+            $response = $exception->getResponse();
+        }
         $this->recordExchange('address-validation', $apiRequest, $response);
 
         if (! $response->successful()) {
@@ -127,7 +132,11 @@ class FedexRegistrationService
         $connector = $this->getConnector();
         $apiRequest = new SendPin($accountAuthToken, $option);
 
-        $response = $connector->send($apiRequest);
+        try {
+            $response = $connector->send($apiRequest);
+        } catch (RequestException $exception) {
+            $response = $exception->getResponse();
+        }
         $this->recordExchange('send-pin', $apiRequest, $response);
 
         if (! $response->successful()) {
@@ -145,7 +154,11 @@ class FedexRegistrationService
         $connector = $this->getConnector();
         $apiRequest = new VerifyPin($accountAuthToken, $pin);
 
-        $response = $connector->send($apiRequest);
+        try {
+            $response = $connector->send($apiRequest);
+        } catch (RequestException $exception) {
+            $response = $exception->getResponse();
+        }
         $this->recordExchange('verify-pin', $apiRequest, $response);
 
         if (! $response->successful()) {
@@ -176,7 +189,11 @@ class FedexRegistrationService
             invoiceCurrency: $invoiceCurrency,
         );
 
-        $response = $connector->send($apiRequest);
+        try {
+            $response = $connector->send($apiRequest);
+        } catch (RequestException $exception) {
+            $response = $exception->getResponse();
+        }
         $this->recordExchange('verify-invoice', $apiRequest, $response);
 
         if (! $response->successful()) {

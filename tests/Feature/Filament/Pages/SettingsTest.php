@@ -323,7 +323,7 @@ it('fedex account status shows connected when child key is stored', function ():
         ->assertSee('Connected');
 });
 
-it('fedex connector uses child key when present', function (): void {
+it('fedex connector keeps parent oauth config when child key is present', function (): void {
     Setting::create(['key' => 'fedex.child_key', 'value' => 'child-key-123', 'type' => 'string', 'encrypted' => true, 'group' => 'fedex']);
     Setting::create(['key' => 'fedex.child_secret', 'value' => 'child-secret-456', 'type' => 'string', 'encrypted' => true, 'group' => 'fedex']);
     app(SettingsService::class)->clearCache();
@@ -331,8 +331,8 @@ it('fedex connector uses child key when present', function (): void {
     $connector = new FedexConnector;
     $config = (new ReflectionMethod($connector, 'defaultOauthConfig'))->invoke($connector);
 
-    expect($config->getClientId())->toBe('child-key-123')
-        ->and($config->getClientSecret())->toBe('child-secret-456');
+    expect($config->getClientId())->toBe('test_api_key')
+        ->and($config->getClientSecret())->toBe('test_api_secret');
 });
 
 it('fedex connector falls back to parent key when no child key', function (): void {
