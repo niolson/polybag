@@ -7,7 +7,13 @@ use Saloon\Enums\Method;
 use Saloon\Http\Request;
 use Saloon\Traits\Body\HasJsonBody;
 
-class CreateFreightShipment extends Request implements HasBody
+/**
+ * Confirm a FedEx consolidation.
+ *
+ * Endpoint: POST /ship/v1/consolidations/confirmations
+ * Response path for job ID: output.jobId
+ */
+class ConfirmConsolidation extends Request implements HasBody
 {
     use HasJsonBody;
 
@@ -15,6 +21,6 @@ class CreateFreightShipment extends Request implements HasBody
 
     public function resolveEndpoint(): string
     {
-        return '/ship/v1/freight/shipments';
+        return '/ship/v1/consolidations/confirmations';
     }
 }

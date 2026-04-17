@@ -100,12 +100,15 @@ class FedexTestCaseNormalizer
         $topLevelAccount = $payload['accountNumber']['value'] ?? $shipperAccountNumber;
         unset($payload['accountNumber']);
 
-        $paymentType = data_get($payload, 'requestedShipment.shippingChargesPayment.paymentType');
+        // Only auto-fill the account number for standard shipments (not freight, which uses freightRequestedShipment)
+        if (isset($payload['requestedShipment'])) {
+            $paymentType = data_get($payload, 'requestedShipment.shippingChargesPayment.paymentType');
 
-        if (! data_get($payload, 'requestedShipment.shippingChargesPayment.payor.responsibleParty.accountNumber')) {
-            $payload['requestedShipment']['shippingChargesPayment']['payor']['responsibleParty']['accountNumber'] = [
-                'value' => $paymentType === 'SENDER' ? $shipperAccountNumber : $topLevelAccount,
-            ];
+            if (! data_get($payload, 'requestedShipment.shippingChargesPayment.payor.responsibleParty.accountNumber')) {
+                $payload['requestedShipment']['shippingChargesPayment']['payor']['responsibleParty']['accountNumber'] = [
+                    'value' => $paymentType === 'SENDER' ? $shipperAccountNumber : $topLevelAccount,
+                ];
+            }
         }
 
         $commodities = data_get($payload, 'requestedShipment.customsClearanceDetail.commodities', []);
