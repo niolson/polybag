@@ -866,6 +866,9 @@
             "label_format": "zplii",
             "request": {
                 "labelResponseOptions": "LABEL",
+                "accountNumber": {
+                    "value": "740561073"
+                },
                 "freightRequestedShipment": {
                     "shipDatestamp": "CURRENT_DATE",
                     "totalWeight": 1000,
@@ -874,7 +877,6 @@
                     "packagingType": "YOUR_PACKAGING",
                     "shipper": {
                         "contact": {
-                            "personName": "QCONFIG",
                             "companyName": "RTC",
                             "phoneNumber": "9012633035"
                         },
@@ -891,7 +893,6 @@
                     },
                     "recipient": {
                         "contact": {
-                            "personName": "F-413404",
                             "companyName": "IntegratorUS09",
                             "phoneNumber": "1234567890"
                         },
@@ -904,8 +905,7 @@
                             "postalCode": "80204",
                             "countryCode": "US",
                             "residential": false
-                        },
-                        "dispositionType": "RETURNED"
+                        }
                     },
                     "shippingChargesPayment": {
                         "paymentType": "RECIPIENT",
@@ -915,7 +915,6 @@
                                     "value": "630081440"
                                 },
                                 "contact": {
-                                    "personName": "F-413404",
                                     "companyName": "Integrator",
                                     "phoneNumber": "1234567890"
                                 },
@@ -938,10 +937,11 @@
                         ]
                     },
                     "freightShipmentDetail": {
-                        "fedExFreightAccountNumber": "630081440",
+                        "fedExFreightAccountNumber": {
+                            "value": "630081440"
+                        },
                         "fedExFreightBillingContactAndAddress": {
                             "contact": {
-                                "personName": "Shipper Contact",
                                 "companyName": "Shipper Company"
                             },
                             "address": {
@@ -964,7 +964,7 @@
                         "declaredValueUnits": "LB",
                         "totalHandlingUnits": 1,
                         "clientDiscountPercent": 0,
-                        "lineItems": [
+                        "lineItem": [
                             {
                                 "id": 10,
                                 "freightClass": "CLASS_050",
@@ -995,17 +995,8 @@
                     },
                     "shippingDocumentSpecification": {
                         "shippingDocumentTypes": [
-                            "COMMERCIAL_INVOICE",
                             "FEDEX_FREIGHT_STRAIGHT_BILL_OF_LADING"
                         ],
-                        "commercialInvoiceDetail": {
-                            "documentFormat": {
-                                "provideInstructions": true,
-                                "stockType": "PAPER_LETTER",
-                                "locale": "en_US",
-                                "docType": "PDF"
-                            }
-                        },
                         "freightBillOfLadingDetail": {
                             "format": {
                                 "provideInstructions": true,
@@ -1016,7 +1007,7 @@
                             }
                         }
                     },
-                    "rateRequestTypes": [
+                    "rateRequestType": [
                         "LIST",
                         "PREFERRED"
                     ],

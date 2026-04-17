@@ -47,6 +47,8 @@ return [
     'fedex' => [
         'base_url' => 'https://apis.fedex.com',
         'sandbox_url' => 'https://apis-sandbox.fedex.com',
+        'document_base_url' => 'https://documentapi.prod.fedex.com',
+        'document_sandbox_url' => 'https://documentapitest.prod.fedex.com/sandbox',
         'api_key' => null,
         'api_secret' => null,
         'sandbox_api_key' => env('FEDEX_SANDBOX_API_KEY'),

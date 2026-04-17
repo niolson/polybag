@@ -1,8 +1,14 @@
 <?php
 
+use App\Http\Integrations\Fedex\FedexConnector;
+use App\Http\Integrations\Fedex\Requests\CreateFreightShipment;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Models\Package;
 use App\Models\Shipment;
+use App\Services\FedexTestCases\FedexTestCaseNormalizer;
+use App\Services\FedexTestCases\FedexTestCaseRepository;
+use App\Services\FedexTestCases\FedexTestCaseRunner;
+use Saloon\Http\Auth\AccessTokenAuthenticator;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
 
@@ -183,6 +189,82 @@ it('runs the LAC ship suite through the region option', function (): void {
         ->expectsOutputToContain('Running IntegratorLAC03')
         ->expectsOutputToContain('Tracking: 222222222222')
         ->assertSuccessful();
+});
+
+it('normalizes IntegratorUS08 with the corrected Freight LTL payload', function (): void {
+    $suite = app(FedexTestCaseRepository::class)->load(region: 'us', suite: 'ship');
+    $testCase = collect($suite->cases())->firstWhere('id', 'IntegratorUS08');
+
+    expect($testCase)->not->toBeNull();
+
+    $payload = app(FedexTestCaseNormalizer::class)->normalize($testCase, '700257037');
+
+    expect(data_get($payload, 'freightRequestedShipment.shipper.contact.personName'))->toBeNull()
+        ->and(data_get($payload, 'accountNumber.value'))->toBe('740561073')
+        ->and(data_get($payload, 'freightRequestedShipment.recipient.contact.personName'))->toBeNull()
+        ->and(data_get($payload, 'freightRequestedShipment.shippingChargesPayment.payor.responsibleParty.contact.personName'))->toBeNull()
+        ->and(data_get($payload, 'freightRequestedShipment.freightShipmentDetail.fedExFreightBillingContactAndAddress.contact.personName'))->toBeNull()
+        ->and(data_get($payload, 'freightRequestedShipment.rateRequestTypes'))->toBeNull()
+        ->and(data_get($payload, 'freightRequestedShipment.rateRequestType'))->toBe(['LIST', 'PREFERRED'])
+        ->and(data_get($payload, 'freightRequestedShipment.freightShipmentDetail.lineItems'))->toBeNull()
+        ->and(data_get($payload, 'freightRequestedShipment.freightShipmentDetail.lineItem.0.id'))->toBe(10)
+        ->and(data_get($payload, 'freightRequestedShipment.freightShipmentDetail.fedExFreightAccountNumber.value'))->toBe('630081440')
+        ->and(data_get($payload, 'freightRequestedShipment.recipient.dispositionType'))->toBeNull()
+        ->and(data_get($payload, 'freightRequestedShipment.shippingDocumentSpecification.commercialInvoiceDetail'))->toBeNull()
+        ->and(data_get($payload, 'freightRequestedShipment.shippingDocumentSpecification.shippingDocumentTypes'))->toBe(['FEDEX_FREIGHT_STRAIGHT_BILL_OF_LADING']);
+});
+
+it('stores Freight LTL labels using the freight image type', function (): void {
+    Saloon::fake([
+        CreateFreightShipment::class => MockResponse::make([
+            'output' => [
+                'transactionShipments' => [
+                    [
+                        'serviceType' => 'FEDEX_FREIGHT_PRIORITY',
+                        'pieceResponses' => [
+                            [
+                                'trackingNumber' => '794804116230',
+                                'packageDocuments' => [
+                                    [
+                                        'encodedLabel' => base64_encode('freight-zpl'),
+                                    ],
+                                ],
+                            ],
+                        ],
+                        'completedShipmentDetail' => [
+                            'shipmentRating' => [
+                                'shipmentRateDetails' => [
+                                    [
+                                        'totalNetFedExCharge' => 123.45,
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]),
+    ]);
+
+    $suite = app(FedexTestCaseRepository::class)->load(region: 'us', suite: 'ship');
+    $testCase = collect($suite->cases())->firstWhere('id', 'IntegratorUS08');
+
+    expect($testCase)->not->toBeNull();
+
+    $payload = app(FedexTestCaseNormalizer::class)->normalize($testCase, '700257037');
+    $connector = new FedexConnector;
+    $connector->authenticate(new AccessTokenAuthenticator('test-token'));
+
+    $result = app(FedexTestCaseRunner::class)->run(
+        connector: $connector,
+        testCase: $testCase,
+        payload: $payload,
+        saveLabels: false,
+        artifactDirectory: null,
+    );
+
+    expect($result['success'])->toBeTrue()
+        ->and(Package::query()->latest('id')->first()?->label_format)->toBe('zpl');
 });
 
 it('fails fast for an unsupported region', function (): void {

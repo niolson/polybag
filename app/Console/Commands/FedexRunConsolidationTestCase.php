@@ -27,6 +27,10 @@ use Saloon\Http\Request;
  */
 class FedexRunConsolidationTestCase extends Command
 {
+    private const RESULTS_POLL_MAX_ATTEMPTS = 5;
+
+    private const RESULTS_POLL_DELAY_MICROSECONDS = 200_000;
+
     protected $signature = 'fedex:run-consolidation-test
         {--save-artifacts : Save request/response/label files under storage/app/dev/fedex-test-runs/}';
 
@@ -95,7 +99,7 @@ class FedexRunConsolidationTestCase extends Command
         $this->line('  Step 1: Creating consolidation...');
 
         $payload = [
-            'accountNumber' => ['value' => '123456789'],
+            'accountNumber' => ['value' => '740561073'],
             'customerTransactionId' => 'IntegratorUS10_Create consolidation',
             'requestedConsolidation' => [
                 'consolidationType' => 'INTERNATIONAL_PRIORITY_DISTRIBUTION',
@@ -103,7 +107,7 @@ class FedexRunConsolidationTestCase extends Command
                 'specialServicesRequested' => [
                     'specialServiceTypes' => ['INTERNATIONAL_CONTROLLED_EXPORT_SERVICE'],
                     'internationalControlledExportDetail' => [
-                        'licenseOrPermitExpirationDate' => '2024-12-18',
+                        'licenseOrPermitExpirationDate' => '2026-12-18',
                         'licenseOrPermitNumber' => '123',
                         'type' => 'DEA_486',
                     ],
@@ -138,7 +142,7 @@ class FedexRunConsolidationTestCase extends Command
                         'stateOrProvinceCode' => 'ON',
                     ],
                     'contact' => ['personName' => 'SHPC-440836-CL2203C8', 'phoneNumber' => '9012633035', 'companyName' => 'GRT'],
-                    'accountNumber' => ['value' => '123456789'],
+                    'accountNumber' => ['value' => '740561073'],
                 ],
                 'labelSpecification' => ['labelFormatType' => 'COMMON2D', 'labelStockType' => 'PAPER_4X6', 'imageType' => 'PNG'],
                 'customsClearanceDetail' => [
@@ -148,13 +152,14 @@ class FedexRunConsolidationTestCase extends Command
                             'countryCode' => 'CA',
                             'postalCode' => 'M1M1M1',
                             'streetLines' => ['MORELOS 417 COL CENTRO', 'Suite 101'],
+                            'stateOrProvinceCode' => 'ON',
                         ],
                         'contact' => ['personName' => 'SHPC-440836-CL2203C8', 'phoneNumber' => '9012633035', 'companyName' => 'GRT'],
                     ],
                     'customsValue' => ['amount' => 200, 'currency' => 'USD'],
                     'dutiesPayment' => [
-                        'payor' => ['responsibleParty' => ['address' => ['countryCode' => 'US'], 'accountNumber' => ['value' => '123456789']]],
-                        'billingDetails' => '123456789',
+                        'payor' => ['responsibleParty' => ['address' => ['countryCode' => 'US'], 'accountNumber' => ['value' => '740561073']]],
+                        'billingDetails' => '740561073',
                         'paymentType' => 'THIRD_PARTY',
                     ],
                     'documentContent' => 'NON_DOCUMENTS',
@@ -179,7 +184,7 @@ class FedexRunConsolidationTestCase extends Command
                     'unitSystem' => 'ENGLISH',
                 ],
                 'shippingChargesPayment' => [
-                    'payor' => ['responsibleParty' => ['address' => ['countryCode' => 'US'], 'accountNumber' => ['value' => '123456789']]],
+                    'payor' => ['responsibleParty' => ['address' => ['countryCode' => 'US'], 'accountNumber' => ['value' => '740561073']]],
                     'paymentType' => 'THIRD_PARTY',
                 ],
             ],
@@ -211,16 +216,17 @@ class FedexRunConsolidationTestCase extends Command
         $this->line('  Step '.($shipmentNumber + 1).": Adding shipment {$shipmentNumber}/6...");
 
         $payload = [
-            'accountNumber' => ['value' => '123456789'],
+            'accountNumber' => ['value' => '740561073'],
             'customerTransactionId' => "IntegratorUS10_Add shipment {$shipmentNumber}",
             'consolidationKey' => $this->consolidationKey,
             'processingOptionType' => 'ALLOW_ASYNCHRONOUS',
             'labelResponseOptions' => 'LABEL',
+            'shipAction' => 'CONFIRM',
             'requestedShipment' => [
                 'serviceType' => 'INTERNATIONAL_PRIORITY_DISTRIBUTION',
                 'pickupType' => 'USE_SCHEDULED_PICKUP',
                 'dropoffType' => 'REGULAR_PICKUP',
-                'shipTimestamp' => now()->toIso8601String(),
+                'shipDatestamp' => now()->format('Y-m-d'),
                 'packagingType' => 'YOUR_PACKAGING',
                 'shipper' => [
                     'address' => [
@@ -277,23 +283,23 @@ class FedexRunConsolidationTestCase extends Command
                 ],
                 'customsClearanceDetail' => [
                     'dutiesPayment' => [
-                        'payor' => ['responsibleParty' => ['address' => ['countryCode' => 'US'], 'accountNumber' => ['value' => '123456789']]],
-                        'billingDetails' => '123456789',
+                        'payor' => ['responsibleParty' => ['address' => ['countryCode' => 'US'], 'accountNumber' => ['value' => '740561073']]],
+                        'billingDetails' => '740561073',
                         'paymentType' => 'THIRD_PARTY',
                     ],
                     'totalCustomsValue' => ['amount' => 500, 'currency' => 'USD'],
                     'isDocumentOnly' => false,
                 ],
                 'shippingChargesPayment' => [
-                    'payor' => ['responsibleParty' => ['address' => ['countryCode' => 'US'], 'accountNumber' => ['value' => '123456789']]],
+                    'payor' => ['responsibleParty' => ['address' => ['countryCode' => 'US'], 'accountNumber' => ['value' => '740561073']]],
                     'paymentType' => 'THIRD_PARTY',
                 ],
                 'specialServicesRequested' => [
                     'specialServiceTypes' => ['INTERNATIONAL_CONTROLLED_EXPORT_SERVICE'],
                     'internationalControlledExportDetail' => [
-                        'licenseOrPermitExpirationDate' => '2024-12-18',
+                        'licenseOrPermitExpirationDate' => '2026-12-18',
                         'licenseOrPermitNumber' => '123',
-                        'internationalControlledExportType' => 'DEA_486',
+                        'type' => 'DEA_486',
                     ],
                 ],
                 'requestedPackageLineItems' => [[
@@ -312,8 +318,9 @@ class FedexRunConsolidationTestCase extends Command
                         'quantityUnits' => 'EA',
                     ]],
                 ]],
-                'processingOption' => 'PACKAGE_LEVEL_COMMODITIES',
-                'openShipmentAction' => 'CONFIRM',
+                'processingOption' => [
+                    'options' => ['PACKAGE_LEVEL_COMMODITIES'],
+                ],
             ],
         ];
 
@@ -351,7 +358,7 @@ class FedexRunConsolidationTestCase extends Command
         $this->line('  Step 8: Confirming consolidation...');
 
         $payload = [
-            'accountNumber' => ['value' => '123456789'],
+            'accountNumber' => ['value' => '740561073'],
             'customerTransactionId' => 'IntegratorUS10_Confirm Consolidation',
             'consolidationKey' => $this->consolidationKey,
             'labelSpecification' => ['labelFormatType' => 'COMMON2D', 'labelStockType' => 'PAPER_4X6', 'imageType' => 'PDF'],
@@ -390,21 +397,44 @@ class FedexRunConsolidationTestCase extends Command
         $this->line('  Step 9: Getting consolidation results...');
 
         $payload = [
-            'accountNumber' => ['value' => '123456789'],
-            'customerTransactionId' => 'IntegratorUS10_Confirm Results',
+            'accountNumber' => ['value' => '740561073'],
             'jobId' => $this->jobId,
         ];
 
-        $response = $this->sendRequest($connector, new GetConsolidationResults, $payload, 'Step9_GetResults', $artifactDir);
+        for ($attempt = 1; $attempt <= self::RESULTS_POLL_MAX_ATTEMPTS; $attempt++) {
+            $result = $this->sendRequestResult(
+                $connector,
+                new GetConsolidationResults,
+                $payload,
+                'Step9_GetResults',
+                $artifactDir,
+                emitError: false,
+            );
 
-        if ($response === null) {
-            return false;
+            if ($result['success']) {
+                /** @var array<string, mixed> $response */
+                $response = $result['body'];
+                $shipmentCount = count(data_get($response, 'output.transactionShipments', []));
+                $this->line("  ✓ Results received — {$shipmentCount} transaction shipment(s).");
+
+                return true;
+            }
+
+            $code = $result['error_code'] ?? 'UNKNOWN';
+            $message = $result['message'] ?? 'No message';
+            $status = $result['status'] ?? 'ERR';
+
+            if ($code !== 'SHIPMENT.REPLYDATA.NOTREADY' || $attempt === self::RESULTS_POLL_MAX_ATTEMPTS) {
+                $this->error("  ✗ Step9_GetResults failed ({$status}): [{$code}] {$message}");
+
+                return false;
+            }
+
+            $this->line("  … Results not ready yet, retrying ({$attempt}/".self::RESULTS_POLL_MAX_ATTEMPTS.')');
+            usleep(self::RESULTS_POLL_DELAY_MICROSECONDS);
         }
 
-        $shipmentCount = count(data_get($response, 'output.transactionShipments', []));
-        $this->line("  ✓ Results received — {$shipmentCount} transaction shipment(s).");
-
-        return true;
+        return false;
     }
 
     /**
@@ -421,6 +451,23 @@ class FedexRunConsolidationTestCase extends Command
         string $stepLabel,
         ?string $artifactDir,
     ): ?array {
+        $result = $this->sendRequestResult($connector, $request, $payload, $stepLabel, $artifactDir, emitError: true);
+
+        return $result['success'] ? $result['body'] : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array{success: bool, body: array<string, mixed>, status?: int, error_code?: string, message?: string}
+     */
+    private function sendRequestResult(
+        FedexConnector $connector,
+        Request $request,
+        array $payload,
+        string $stepLabel,
+        ?string $artifactDir,
+        bool $emitError,
+    ): array {
         $request->body()->set($payload);
 
         Log::channel('fedex-validation')->info("=== US10 {$stepLabel} ===");
@@ -430,10 +477,16 @@ class FedexRunConsolidationTestCase extends Command
             $response = $connector->send($request);
         } catch (\Throwable $e) {
             if (! method_exists($e, 'getResponse') || $e->getResponse() === null) {
-                $this->error("  ✗ {$stepLabel} exception: {$e->getMessage()}");
+                if ($emitError) {
+                    $this->error("  ✗ {$stepLabel} exception: {$e->getMessage()}");
+                }
                 Log::channel('fedex-validation')->error("{$stepLabel} EXCEPTION: {$e->getMessage()}");
 
-                return null;
+                return [
+                    'success' => false,
+                    'body' => [],
+                    'message' => $e->getMessage(),
+                ];
             }
 
             $response = $e->getResponse();
@@ -450,11 +503,23 @@ class FedexRunConsolidationTestCase extends Command
         if (! $response->successful()) {
             $code = data_get($responseBody, 'errors.0.code', 'UNKNOWN');
             $message = data_get($responseBody, 'errors.0.message', 'No message');
-            $this->error("  ✗ {$stepLabel} failed ({$response->status()}): [{$code}] {$message}");
 
-            return null;
+            if ($emitError) {
+                $this->error("  ✗ {$stepLabel} failed ({$response->status()}): [{$code}] {$message}");
+            }
+
+            return [
+                'success' => false,
+                'body' => is_array($responseBody) ? $responseBody : [],
+                'status' => $response->status(),
+                'error_code' => $code,
+                'message' => $message,
+            ];
         }
 
-        return $responseBody;
+        return [
+            'success' => true,
+            'body' => is_array($responseBody) ? $responseBody : [],
+        ];
     }
 }

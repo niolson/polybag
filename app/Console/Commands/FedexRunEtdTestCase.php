@@ -2,10 +2,13 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\PackageStatus;
 use App\Http\Integrations\Fedex\FedexConnector;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Http\Integrations\Fedex\Requests\UploadEtdDocument;
 use App\Http\Integrations\Fedex\Requests\UploadEtdImage;
+use App\Models\Package;
+use App\Models\Shipment;
 use App\Services\SettingsService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -145,7 +148,7 @@ class FedexRunEtdTestCase extends Command
             return self::FAILURE;
         }
 
-        return $this->handleShipResponse($shipResponse, $artifactDir, 'US09-A');
+        return $this->handleShipResponse($shipResponse, $shipPayload, $artifactDir, 'US09-A');
     }
 
     private function runVariantB(FedexConnector $connector, string $shipperAccountNumber, ?string $artifactDir): int
@@ -198,7 +201,7 @@ class FedexRunEtdTestCase extends Command
             return self::FAILURE;
         }
 
-        return $this->handleShipResponse($shipResponse, $artifactDir, 'US09-B');
+        return $this->handleShipResponse($shipResponse, $shipPayload, $artifactDir, 'US09-B');
     }
 
     /**
@@ -262,13 +265,19 @@ class FedexRunEtdTestCase extends Command
 
     /**
      * @param  array<string, mixed>  $shipResponse
+     * @param  array<string, mixed>  $shipPayload
      */
-    private function handleShipResponse(array $shipResponse, ?string $artifactDir, string $label): int
+    private function handleShipResponse(array $shipResponse, array $shipPayload, ?string $artifactDir, string $label): int
     {
         $trackingNumber = data_get($shipResponse, 'output.transactionShipments.0.pieceResponses.0.trackingNumber')
             ?? data_get($shipResponse, 'output.transactionShipments.0.masterTrackingNumber');
 
         $encodedLabel = data_get($shipResponse, 'output.transactionShipments.0.pieceResponses.0.packageDocuments.0.encodedLabel');
+        $imageType = strtolower((string) data_get($shipPayload, 'requestedShipment.labelSpecification.imageType', 'pdf'));
+        $labelFormat = match ($imageType) {
+            'zplii' => 'zpl',
+            default => $imageType,
+        };
 
         $this->line("  ✓ Shipment created — Tracking: {$trackingNumber}");
 
@@ -282,10 +291,85 @@ class FedexRunEtdTestCase extends Command
             $this->line("  Artifacts saved under: storage/app/{$artifactDir}");
         }
 
+        $recordIds = $this->createStubRecords(
+            shipPayload: $shipPayload,
+            shipResponse: $shipResponse,
+            trackingNumber: is_string($trackingNumber) ? $trackingNumber : null,
+            encodedLabel: is_string($encodedLabel) ? $encodedLabel : null,
+            labelFormat: $labelFormat,
+        );
+
+        if ($recordIds['package_id'] && $recordIds['shipment_id']) {
+            $this->line("  ✓ Package record created: ID {$recordIds['package_id']} (Shipment ID {$recordIds['shipment_id']})");
+        }
+
         $this->line('  Full request/response logged to: storage/logs/fedex-validation.log');
         Log::channel('fedex-validation')->info("{$label} completed — tracking: {$trackingNumber}");
 
         return self::SUCCESS;
+    }
+
+    /**
+     * @param  array<string, mixed>  $shipPayload
+     * @param  array<string, mixed>  $shipResponse
+     * @return array<string, int|null>
+     */
+    private function createStubRecords(
+        array $shipPayload,
+        array $shipResponse,
+        ?string $trackingNumber,
+        ?string $encodedLabel,
+        string $labelFormat,
+    ): array {
+        try {
+            $recipient = data_get($shipPayload, 'requestedShipment.recipients.0', []);
+            $shipment = Shipment::create([
+                'city' => data_get($recipient, 'address.city', 'N/A'),
+                'country' => data_get($recipient, 'address.countryCode', 'US'),
+                'first_name' => data_get($recipient, 'contact.personName'),
+                'last_name' => null,
+                'address1' => data_get($recipient, 'address.streetLines.0'),
+                'state_or_province' => data_get($recipient, 'address.stateOrProvinceCode'),
+                'postal_code' => data_get($recipient, 'address.postalCode'),
+                'status' => 'shipped',
+                'metadata' => [
+                    'fedex_test_case_id' => 'IntegratorUS09',
+                    'fedex_test_case_description' => 'Electronic Trade Documents',
+                ],
+            ]);
+
+            $package = Package::create([
+                'shipment_id' => $shipment->id,
+                'status' => PackageStatus::Shipped,
+                'carrier' => 'FedEx',
+                'service' => data_get($shipResponse, 'output.transactionShipments.0.serviceType', 'IntegratorUS09'),
+                'tracking_number' => $trackingNumber,
+                'label_data' => $encodedLabel,
+                'label_format' => $labelFormat,
+                'label_orientation' => 'report',
+                'cost' => data_get($shipResponse, 'output.transactionShipments.0.completedShipmentDetail.shipmentRating.shipmentRateDetails.0.totalNetFedExCharge'),
+                'weight' => data_get($shipPayload, 'requestedShipment.requestedPackageLineItems.0.weight.value', 1),
+                'height' => 1,
+                'width' => 1,
+                'length' => 1,
+                'shipped_at' => now(),
+                'carrier_request_payload' => $shipPayload,
+            ]);
+
+            return [
+                'package_id' => $package->id,
+                'shipment_id' => $shipment->id,
+            ];
+        } catch (\Throwable $exception) {
+            Log::channel('fedex-validation')->warning('Unable to create stub records for US09 ETD test case', [
+                'error' => $exception->getMessage(),
+            ]);
+
+            return [
+                'package_id' => null,
+                'shipment_id' => null,
+            ];
+        }
     }
 
     /**
@@ -304,10 +388,20 @@ class FedexRunEtdTestCase extends Command
 
         if ($includeImageUsages) {
             $commercialInvoiceDetail['customerImageUsages'] = [
-                ['id' => 'IMAGE_1', 'type' => 'LETTERHEAD'],
-                ['id' => 'IMAGE_2', 'type' => 'SIGNATURE'],
+                ['id' => 'IMAGE_1', 'type' => 'LETTER_HEAD', 'providedImageType' => 'LETTER_HEAD'],
+                ['id' => 'IMAGE_2', 'type' => 'SIGNATURE', 'providedImageType' => 'SIGNATURE'],
             ];
         }
+
+        $etdDetail = $includeImageUsages
+            ? ['requestedDocumentTypes' => ['COMMERCIAL_INVOICE']]
+            : [
+                'attachedDocuments' => [[
+                    'documentType' => 'COMMERCIAL_INVOICE',
+                    'documentId' => $attachedDocId,
+                    'description' => $attachedDocDescription,
+                ]],
+            ];
 
         return [
             'labelResponseOptions' => 'LABEL',
@@ -339,13 +433,7 @@ class FedexRunEtdTestCase extends Command
                 ],
                 'shipmentSpecialServices' => [
                     'specialServiceTypes' => ['ELECTRONIC_TRADE_DOCUMENTS'],
-                    'etdDetail' => [
-                        'attachedDocuments' => [[
-                            'documentType' => 'COMMERCIAL_INVOICE',
-                            'documentId' => $attachedDocId,
-                            'description' => $attachedDocDescription,
-                        ]],
-                    ],
+                    'etdDetail' => $etdDetail,
                 ],
                 'customsClearanceDetail' => [
                     'dutiesPayment' => [
@@ -366,7 +454,7 @@ class FedexRunEtdTestCase extends Command
                         'countryOfManufacture' => 'US',
                         'weight' => ['units' => 'LB', 'value' => 10],
                         'quantity' => 1,
-                        'quantityUnits' => 'pcs',
+                        'quantityUnits' => 'PCS',
                         'unitPrice' => ['currency' => 'USD', 'amount' => 25],
                         'customsValue' => ['currency' => 'USD', 'amount' => 25],
                     ]],

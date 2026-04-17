@@ -75,13 +75,14 @@ class FedexTestCaseRunner
         $trackingNumber = data_get($body, 'output.transactionShipments.0.pieceResponses.0.trackingNumber')
             ?? data_get($body, 'output.transactionShipments.0.masterTrackingNumber');
 
+        $shipmentPath = isset($payload['freightRequestedShipment']) ? 'freightRequestedShipment' : 'requestedShipment';
         $encodedLabel = data_get($body, 'output.transactionShipments.0.pieceResponses.0.packageDocuments.0.encodedLabel');
-        $imageType = strtolower((string) data_get($payload, 'requestedShipment.labelSpecification.imageType', 'pdf'));
+        $imageType = strtolower((string) data_get($payload, "{$shipmentPath}.labelSpecification.imageType", 'pdf'));
         $labelFormat = match ($imageType) {
             'zplii' => 'zpl',
             default => $imageType,
         };
-        $labelStockType = (string) data_get($payload, 'requestedShipment.labelSpecification.labelStockType', '');
+        $labelStockType = (string) data_get($payload, "{$shipmentPath}.labelSpecification.labelStockType", '');
         $labelOrientation = str_contains($labelStockType, '85X11') ? 'report' : 'portrait';
         $labelPath = null;
 
@@ -128,7 +129,9 @@ class FedexTestCaseRunner
         string $labelOrientation,
     ): array {
         try {
-            $recipient = data_get($payload, 'requestedShipment.recipients.0', []);
+            $shipmentPath = isset($payload['freightRequestedShipment']) ? 'freightRequestedShipment' : 'requestedShipment';
+            $recipient = data_get($payload, "{$shipmentPath}.recipients.0")
+                ?? data_get($payload, "{$shipmentPath}.recipient", []);
             $shipment = Shipment::create([
                 'city' => data_get($recipient, 'address.city', 'N/A'),
                 'country' => data_get($recipient, 'address.countryCode', 'US'),
@@ -154,7 +157,7 @@ class FedexTestCaseRunner
                 'label_format' => $labelFormat,
                 'label_orientation' => $labelOrientation,
                 'cost' => data_get($body, 'output.transactionShipments.0.completedShipmentDetail.shipmentRating.shipmentRateDetails.0.totalNetFedExCharge'),
-                'weight' => data_get($payload, 'requestedShipment.requestedPackageLineItems.0.weight.value', 1),
+                'weight' => data_get($payload, "{$shipmentPath}.requestedPackageLineItems.0.weight.value", 1),
                 'height' => 1,
                 'width' => 1,
                 'length' => 1,

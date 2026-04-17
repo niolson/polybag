@@ -5,6 +5,8 @@ use App\Http\Integrations\Fedex\FedexRegistrationProxyConnector;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Http\Integrations\Fedex\Requests\Rates;
 use App\Http\Integrations\Fedex\Requests\Registration\ValidateAddress;
+use App\Http\Integrations\Fedex\Requests\UploadEtdDocument;
+use App\Http\Integrations\Fedex\Requests\UploadEtdImage;
 use App\Models\Setting;
 use App\Services\SettingsService;
 use Illuminate\Http\Client\Request;
@@ -50,6 +52,51 @@ it('requests correct endpoint for create shipment', function (): void {
     $request = new CreateShipment;
 
     expect($request->resolveEndpoint())->toBe('/ship/v1/shipments');
+});
+
+it('routes ETD upload requests to the sandbox document API host', function (): void {
+    config([
+        'services.fedex.document_sandbox_url' => 'https://documentapitest.prod.fedex.com/sandbox',
+    ]);
+
+    Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
+    app(SettingsService::class)->clearCache();
+
+    $capturedUrls = [];
+
+    $mockClient = new MockClient([
+        UploadEtdImage::class => function (PendingRequest $pendingRequest) use (&$capturedUrls): MockResponse {
+            $capturedUrls['image'] = $pendingRequest->getUrl();
+
+            return MockResponse::make(['output' => ['documentReferenceId' => 'image-doc-id']], 200);
+        },
+        UploadEtdDocument::class => function (PendingRequest $pendingRequest) use (&$capturedUrls): MockResponse {
+            $capturedUrls['document'] = $pendingRequest->getUrl();
+
+            return MockResponse::make(['output' => ['meta' => ['docId' => 'document-doc-id']]], 200);
+        },
+    ]);
+
+    $connector = new FedexConnector;
+    $connector->withMockClient($mockClient);
+
+    $connector->send(new UploadEtdImage(
+        imageType: 'LETTERHEAD',
+        imageIndex: 'IMAGE_1',
+        filename: 'letterhead.png',
+        fileContent: 'png-bytes',
+    ));
+
+    $connector->send(new UploadEtdDocument(
+        filename: 'commercial-invoice.pdf',
+        contentType: 'application/pdf',
+        originCountryCode: 'US',
+        destCountryCode: 'GB',
+        fileContent: 'pdf-bytes',
+    ));
+
+    expect($capturedUrls['image'] ?? null)->toBe('https://documentapitest.prod.fedex.com/sandbox/documents/v1/lhsimages/upload')
+        ->and($capturedUrls['document'] ?? null)->toBe('https://documentapitest.prod.fedex.com/sandbox/documents/v1/etds/upload');
 });
 
 it('builds correct rate request', function (): void {
