@@ -7,6 +7,7 @@ use App\Enums\TrackingStatus;
 use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\PackageResource\Pages;
 use App\Filament\Resources\PackageResource\RelationManagers\PackageItemsRelationManager;
+use App\Filament\Support\CarrierLogoColumn;
 use App\Models\Location;
 use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
@@ -182,7 +183,7 @@ class PackageResource extends Resource
                     ->size('sm')
                     ->copyable()
                     ->placeholder('—'),
-                Tables\Columns\TextColumn::make('carrier')
+                CarrierLogoColumn::make('carrier')
                     ->placeholder('—'),
                 Tables\Columns\TextColumn::make('service')
                     ->placeholder('—'),

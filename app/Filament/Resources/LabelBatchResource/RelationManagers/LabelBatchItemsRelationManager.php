@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\LabelBatchResource\RelationManagers;
 
 use App\Filament\Resources\ShipmentResource;
+use App\Filament\Support\CarrierLogoColumn;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -30,7 +31,7 @@ class LabelBatchItemsRelationManager extends RelationManager
                     ->label('Tracking')
                     ->placeholder('—')
                     ->copyable(),
-                Tables\Columns\TextColumn::make('carrier')
+                CarrierLogoColumn::make('carrier')
                     ->placeholder('—'),
                 Tables\Columns\TextColumn::make('service')
                     ->placeholder('—'),

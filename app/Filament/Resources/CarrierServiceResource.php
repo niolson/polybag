@@ -3,6 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\CarrierServiceResource\Pages;
+use App\Filament\Support\CarrierLogoColumn;
 use App\Models\CarrierService;
 use App\Models\Location;
 use BackedEnum;
@@ -49,12 +50,13 @@ class CarrierServiceResource extends Resource
     {
         return $table
             ->columns([
-                Tables\Columns\TextColumn::make('carrier.name')
+                CarrierLogoColumn::make('carrier.name', fn ($record) => $record->carrier?->name)
                     ->sortable(),
-                Tables\Columns\TextColumn::make('service_code')
-                    ->searchable(),
                 Tables\Columns\TextColumn::make('name')
                     ->searchable(),
+                Tables\Columns\TextColumn::make('service_code')
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\IconColumn::make('active')
                     ->boolean()
                     ->sortable(),

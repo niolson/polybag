@@ -48,4 +48,23 @@ class Carrier extends Model
     {
         return $query->where('active', true);
     }
+
+    /**
+     * Return the public URL for this carrier's logo, or null if no logo file exists.
+     */
+    public function logoUrl(): ?string
+    {
+        return static::logoUrlForName($this->name);
+    }
+
+    /**
+     * Return the public URL for a carrier logo by name, or null if no logo file exists.
+     */
+    public static function logoUrlForName(string $name): ?string
+    {
+        $slug = strtolower(str_replace(' ', '-', $name));
+        $path = public_path("images/{$slug}-logo.svg");
+
+        return file_exists($path) ? asset("images/{$slug}-logo.svg") : null;
+    }
 }

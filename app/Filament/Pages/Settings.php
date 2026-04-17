@@ -7,6 +7,7 @@ use App\Exceptions\FedexRegistrationMaxRetriesException;
 use App\Filament\Support\AddressForm;
 use App\Http\Integrations\USPS\Requests\ShippingOptions;
 use App\Http\Integrations\USPS\USPSConnector;
+use App\Models\Carrier;
 use App\Models\Location;
 use App\Models\Setting;
 use App\Models\ShippingMethod;
@@ -693,7 +694,7 @@ class Settings extends Page
                         ->columns(2)
                         ->collapsed(),
 
-                    Section::make(new HtmlString('<span class="flex items-center gap-2"><img src="'.asset('images/fedex-logo.svg').'" alt="FedEx" class="h-5 inline-block">FedEx Credentials</span>'))
+                    Section::make(new HtmlString('<span class="flex items-center gap-2"><img src="'.Carrier::logoUrlForName('FedEx').'" alt="FedEx" class="h-8 inline-block">FedEx Credentials</span>'))
                         ->description('API credentials for FedEx shipping services')
                         ->schema([
                             Placeholder::make('fedex_account_status')
@@ -734,7 +735,7 @@ class Settings extends Page
                                 ->icon('heroicon-o-link')
                                 ->color(fn () => $this->isFedexAccountConnected() ? 'warning' : 'primary')
                                 ->modalHeading(fn () => new HtmlString(
-                                    '<span class="flex items-center gap-2"><img src="'.asset('images/fedex-logo.svg').'" alt="FedEx" class="h-5 inline-block">'
+                                    '<span class="flex items-center gap-2"><img src="'.Carrier::logoUrlForName('FedEx').'" alt="FedEx" class="h-5 inline-block">'
                                         .($this->isFedexAccountConnected() ? 'Reconnect FedEx Account' : 'Connect FedEx Account')
                                         .'</span>'
                                 ))

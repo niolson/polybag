@@ -6,6 +6,7 @@ use App\Enums\Deliverability;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
+use App\Filament\Support\CarrierLogoColumn;
 use App\Models\LabelBatchItem;
 use App\Models\Package;
 use BackedEnum;
@@ -93,7 +94,7 @@ class PackingValidationReport extends Page implements HasTable
                         return number_format($diff, 1).'%';
                     })
                     ->color('warning'),
-                Tables\Columns\TextColumn::make('carrier')
+                CarrierLogoColumn::make('carrier')
                     ->sortable(),
             ])
             ->filters([
@@ -193,7 +194,7 @@ class PackingValidationReport extends Page implements HasTable
                     ->label('Validation Message')
                     ->limit(60)
                     ->tooltip(fn ($record) => $record->validation_message),
-                Tables\Columns\TextColumn::make('carrier'),
+                CarrierLogoColumn::make('carrier'),
                 Tables\Columns\TextColumn::make('tracking_number')
                     ->label('Tracking'),
             ])

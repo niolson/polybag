@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ShippingMethodResource\RelationManagers;
 
+use App\Filament\Support\CarrierLogoColumn;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Resources\RelationManagers\RelationManager;
@@ -28,7 +29,7 @@ class CarrierServicesRelationManager extends RelationManager
         return $table
             ->recordTitleAttribute('name')
             ->columns([
-                Tables\Columns\TextColumn::make('carrier.name'),
+                CarrierLogoColumn::make('carrier.name', fn ($record) => $record->carrier?->name),
                 Tables\Columns\TextColumn::make('service_code'),
                 Tables\Columns\TextColumn::make('name'),
             ])
