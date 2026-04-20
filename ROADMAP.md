@@ -4,131 +4,7 @@ Planned features and improvements for PolyBag, organized by commercial launch pr
 
 ## Background
 
-This app was originally built as an internal tool for VitaminLife, a supplement company with 20,000+ unique SKUs. The scan-and-validate packing workflow was designed for that environment, where package contents, dimensions, and weight aren't known until each order is physically packed. Most businesses in the target market (100–5,000 packages/day) will have fewer SKUs and more predictable shipments, so the product needs to support both manual pack-and-ship and automated batch workflows.
-
-## Completed
-
-- [x] **Delivery date estimates** — Get estimated delivery dates from carrier APIs and filter out shipping methods that won't arrive by the shipment's deliver-by date. Show all options with a warning if nothing meets the deadline.
-- [x] **Filter rates by carrier services** — On the ship page, only show rates for carrier services that are configured for the shipment's shipping method.
-- [x] **Pack page loading state** — Show a spinner and disable form inputs while waiting for auto-ship response or ship page navigation, preventing duplicate submissions.
-- [x] **Shopify GraphQL** — Import orders and export fulfillments via Shopify Admin API.
-- [x] **Amazon SP-API** — Import orders and export fulfillments via Amazon Selling Partner API.
-- [x] **UPS** — Rate quotes, label generation, tracking.
-
----
-
-## Phase 1: Commercial Viability (Build Before Launch)
-
-### 1.1 Laravel Event System — COMPLETED (2026-02-24)
-
-8 domain events dispatched at model/service boundaries, queued `ExportShippedPackage` listener replaces inline export calls, `EventServiceProvider` registered. All events are infrastructure for webhooks (2.1), audit logging (1.4), and future listeners.
-
----
-
-### 1.2 Batch Label Generation — COMPLETED (2026-02-25)
-
-"Batch Ship" bulk action on the Shipments table. User selects shipments, picks a box size, and the system generates all labels in the background using `Bus::batch()` with `allowFailures()`. Weight is calculated as `BoxSize.empty_weight + SUM(item.quantity * product.weight)`. Dimensions come from the selected box size. Label format/DPI read from browser localStorage.
-
-Jobs run via `GenerateLabelJob` (one per package), which calls `LabelGenerationService::generateLabel()`. Failures are domain-level — the job catches exceptions and marks items as failed rather than re-throwing, so one carrier error doesn't cancel the whole batch. Failed packages are cleaned up (deleted).
-
-Results page (`/batch-ship/{id}`) polls every 2 seconds via `wire:poll`, showing a progress bar, success/failed/pending counts, total cost, and per-shipment results. "Print All Labels" button sends all successful labels to QZ Tray sequentially.
-
-Also added `resolvePreSelectedRate()` to `CarrierAdapterInterface` — USPS fetches rates for the pre-selected service code to find the cheapest variant (e.g. cubic vs non-cubic pricing), while FedEx and UPS pass through unchanged.
-
-**Files added:** `LabelBatchStatus` + `LabelBatchItemStatus` enums, `LabelBatch` + `LabelBatchItem` models + migrations + factories, `GenerateLabelJob`, `BatchLabelService`, `BatchValidationResult` DTO, `BatchShipResults` page + Blade view, batch localStorage Blade component, 3 test files.
-
-**Files modified:** `CarrierAdapterInterface` (added `resolvePreSelectedRate`), `UspsAdapter` / `FedexAdapter` / `UpsAdapter` (implemented it), `LabelGenerationService` (calls `resolvePreSelectedRate` for rule-based rates), `ShipmentResource` (bulk action), `qz-tray.blade.php` (batch print event), 4 test files (updated mock adapters).
-
----
-
-### 1.3 Shipping Rules Engine + LabelGenerationService — COMPLETED (2026-02-25)
-
-Lightweight shipping rules engine with two action types: `UseService` (pre-assign a carrier service, skip rate shopping) and `ExcludeService` (remove a service from rate results). Rules are scoped to a shipping method or global (null = all methods), evaluated in priority order.
-
-Also extracted shared label generation logic from Pack.php and Ship.php into `LabelGenerationService::generateLabel()`, and moved `getDeliverByDate()` from Ship.php to the Shipment model. The service handles rule evaluation, rate shopping (with deadline-aware selection), and carrier API calls, but does NOT call `markShipped()` — the caller handles that since cleanup behavior differs.
-
-**Conditional rules (2026-02-25):** Activated the `conditions` JSON column with 7 condition types: weight (lbs), order value ($), item count, destination zone (Continental US / Non-Continental / Territories / International), destination state (in/not_in), sales channel, and residential/commercial. All conditions within a rule use AND logic; use multiple rules for OR. `DestinationZone` enum defines zone membership. `RuleEvaluator` accepts an optional `Package` param for weight checks. Replaced standalone `ShippingRuleResource` with a `ShippingRulesRelationManager` on `ShippingMethodResource` — drag-and-drop reordering, Builder-based condition editor in slideOver.
-
-**Files added:** `ShippingRuleAction` enum, `LabelResult` + `RuleEvaluationResult` DTOs, `ShippingRule` model + migration + factory, `RuleEvaluator` service, `LabelGenerationService`, `DestinationZone` enum, `ShippingRulesRelationManager`, 33 tests.
-
-**Files modified:** `Shipment.php` (added `getDeliverByDate()`), `Pack.php` (autoShip uses LabelGenerationService), `Ship.php` (removed getDeliverByDate, added rule filtering/pre-selection in mount), `CarrierRegistry.php` (added `registerInstance()` and `reset()` for testing), `ShippingMethod.php` (added `shippingRules()` relationship), `ShippingMethodResource.php` (added relation manager), `LabelGenerationService.php` (passes Package to RuleEvaluator).
-
-**Files removed:** `ShippingRuleResource` + pages (replaced by RelationManager).
-
----
-
-### 1.4 Reporting, Analytics & Rate Logging — COMPLETED (2026-02-25)
-
-Rate logging infrastructure persists all rate quotes per package with a `selected` flag. `ShippingRateService` logs rates after every rate shop (try-catch wrapped so logging failures never break shipping). Ship page and `LabelGenerationService` mark the chosen rate.
-
-Dashboard widgets: StatsOverview (pending, shipped today/week/month, shipping cost with trend), ShippedShipmentsChart (bar, half width), CarrierBreakdownChart (doughnut, half width), CostPerPackageTrend (30-day line, half width), ExceptionsWidget (undeliverable shipments, failed batches, unmapped references with links).
-
-Four reporting pages in `app/Filament/Pages/Reports/` under a "Reports" nav group (Manager role minimum): Shipping Cost Analysis (filterable table with summary stats), Rate Comparison (selected vs cheapest rate, potential savings), Volume Report (grouped by channel/shipping method/month), Packing Validation (weight mismatches >10%, batch failures, shipped-despite-validation-issues).
-
-**Still TODO:** CSV/Excel export on report tables, delivery confidence scoring (needs tracking data from Phase 2.3)
-
----
-
-### 1.5 Advanced Filtering — COMPLETED (2026-02-25)
-
-Shipment filters: created date range (existed), deliver-by date range, shipping method (existed), channel (existed), shipped status (existed), deliverability (existed), destination state (searchable select from existing data), order value range. Package filters: shipped status (existed), carrier (existed), exported (existed), service, manifested, label format (PDF/ZPL), shipped date range, cost range. Both resources use collapsible above-content filter layout.
-
-### 1.6 Audit Trail — COMPLETED (2026-03-18)
-
-`AuditLog` model with polymorphic `auditable` relation, `AuditAction` enum (12 cases), and `AuditLog::record()` static helper that resolves user/IP from context. Event-driven logging via `AuditLogListener` (auto-discovered `handle*` methods) for all 8 domain events. `AuditableObserver` for CRUD on config models (User, Carrier, CarrierService, Location, BoxSize, ShippingMethod, ShippingRule, Product). `SettingObserver` for encrypted settings with value masking. `BatchStarted` action logged directly in `BatchLabelService`.
-
-Shipping source tracking (Pack, Ship, Manual Ship, Batch Ship) via Referer header and LabelBatchItem lookup. Batch-shipped packages attribute the user from `shipped_by_user_id` instead of `auth()->id()` (null in queue context).
-
-Admin-only Filament resource with filters by action, user, model type, and date range. Searchable by record ID. View page links to the corresponding model's resource page (view or edit). Configurable retention via App Settings ("Data Retention" section, default 90 days, 0 = keep forever). Scheduled `audit:purge` command runs daily at 01:00.
-
----
-
-### 1.7 Database Notifications for Batch & Import Operations — COMPLETED (2026-03-19)
-
-Filament `databaseNotifications()` enabled in AppPanelProvider (bell icon in topbar). Two Laravel notification classes for future email/Slack extensibility:
-
-- **`BatchLabelCompleted`** — sent to initiating user (`LabelBatch.user_id`) from `BatchLabelService::finally()`. Status-aware title, icon, color, and "View Results" action linking to batch results page.
-- **`ImportCompleted`** — sent to all active admin users from `ShipmentImportService`. Covers both successful imports (stats summary) and configuration validation failures (error details).
-
-Old notifications cleaned up by `audit:purge` command (read notifications >30 days, all notifications >90 days).
-
----
-
-### 1.8 Data Retention & Archiving — COMPLETED (2026-03-19)
-
-Renamed `audit:purge` to `data:purge` — now also purges rate quotes older than configurable days (default 60). Rate quote retention is configurable via App Settings alongside audit log retention.
-
-`shipments:archive` command exports old fully-shipped shipments/packages to CSV (`storage/app/archives/`) and deletes from active tables. Respects FK order (package_items → rate_quotes → packages → shipment_items → shipments). Default OFF — enabled via "Shipment Archiving" toggle in App Settings. Scheduled weekly on Sundays at 02:00 (exits early if disabled). `--dry-run` flag previews without deleting. `daily_shipping_stats` preserves all historical reporting after archival.
-
-Database Health widget on dashboard (Admin-only) shows row counts for shipments, packages, rate quotes, and audit logs with color-coded thresholds (green <100k, yellow 100k–500k, red >500k). Cached 1 hour.
-
-No soft deletes — a future "void" feature will handle hiding shipments/packages from stats while keeping them searchable.
-
-**Later (Phase 3):**
-
-- Configurable retention policies per customer
-- Automated archival to S3/external storage
-- Archive viewer for historical lookups
-
-### 1.9 Setup Wizard
-
-Guided first-run experience for new installations. Currently, a new customer has to discover the correct configuration order themselves (Settings → Carriers → Box Sizes → Shipping Methods → Import Sources). A setup wizard reduces support burden and time-to-value.
-
-**Steps:**
-
-1. Company information (name, ship-from address → creates default Location)
-2. Carrier setup (enter API credentials, enable services — test connection inline)
-3. Box sizes (create at least one)
-4. Shipping methods & channels (create defaults or import from source)
-5. Import source configuration (Database, Shopify, or Amazon — skip if manual entry)
-6. Device settings (printer, scale — can be deferred to workstation level)
-
-**Implementation:**
-
-- Multi-step Filament page (not a resource) with validation per step
-- `SetupComplete` flag in Settings — wizard auto-redirects until complete
-- Skippable for advanced users (link to "skip wizard, configure manually")
-- Admin-only; other roles see a "setup in progress" message until complete
+This app was originally built as an internal tool for a company with 20,000+ unique SKUs. The scan-and-validate packing workflow was designed for that environment, where package contents, dimensions, and weight aren't known until each order is physically packed. Most businesses in the target market (100–5,000 packages/day) will have fewer SKUs and more predictable shipments, so the product needs to support both manual pack-and-ship and automated batch workflows.
 
 ---
 
@@ -309,46 +185,66 @@ Let users personalize their dashboard — choose which widgets to display, reord
 
 Carrier APIs support many more options than currently implemented. This section tracks specific enhancements, prioritized by real-world shipping impact.
 
-### Phase A: Saturday Delivery (FedEx + UPS) — COMPLETED (2026-03-16)
+### FedEx Ground Economy (SmartPost) — needs live API testing
 
-Saturday delivery flag on rate and ship requests is gated to Thursdays only (`RateRequest::isSaturdayDeliveryApplicable()`). On Thursdays, both FedEx and UPS include the flag; if FedEx rejects it for the destination (e.g. `SERVICE.PACKAGECOMBINATION.INVALID` or `ORGORDEST.SPECIALSERVICES.NOTALLOWED`), the adapter retries without it. UPS has the same retry pattern on the ship side. Saturday delivery removed from UPS rate requests (not needed there).
+Implementation is complete (see git history). Needs testing against a live FedEx API account — sandbox account `740561073` supports Ground Economy but new developer portal accounts may have issues (see FedEx support notes from 2026-03-23).
 
-**Future:** If we add more conditional FedEx services, consider querying the [FedEx Service Availability API](https://developer.fedex.com/api/en-at/catalog/service-availability/docs.html) instead of the try/retry pattern. One Rate (Phase B) uses a separate rate request rather than retry, so the current Saturday retry pattern is still fine.
+### Special Services — Adapter Wiring
 
-### Phase B: FedEx One Rate — COMPLETED (2026-03-17)
+The special services catalog, `serviceCapability()` classification, and UI are in place. Saturday delivery is fully wired for FedEx and UPS. The remaining work is wiring each service into the rate/ship request builders in each adapter.
 
-Flat-rate Express pricing for FedEx-branded packaging (envelope, pak, small/medium/large/extra-large box). Up to 50 lbs, domestic US only. Eligible services: First Overnight, Priority Overnight, Standard Overnight, 2Day AM, 2Day, Express Saver.
+**USPS** — `saturday_delivery` should be `Supported` no-op (USPS delivers Saturday natively, nothing to add to the request). Wire up remaining:
 
-When a package uses a BoxSize with a non-`YOUR_PACKAGING` `fedex_package_type`, the adapter sends a second rate request with `FEDEX_ONE_RATE` special service and the FedEx packaging type. One Rate results are merged with standard rates, suffixed with "(One Rate)". Failures are non-fatal (logged as warning, standard rates still display). On the ship side, `isOneRate` and `fedexPackageType` are carried in rate metadata to set `packagingType` and add `FEDEX_ONE_RATE` to special services. Saturday retry preserves `FEDEX_ONE_RATE` when removing `SATURDAY_DELIVERY`.
+- [ ] `saturday_delivery` — mark `Supported`, no-op (USPS delivers Saturday natively)
+- [ ] `signature_required` — extra service 119 (Signature Confirmation)
+- [ ] `adult_signature_required` — extra service 922 (Adult Signature Required)
+- [ ] `carrier_release` — extra service 415 (Carrier Release)
+- [ ] `declared_value` — extra service 900 (Declared Value) + amount
+- [ ] `email_notification` — extra service 476 or Informed Delivery notification
+- [ ] `dry_ice` — extra service 819 + weight
+- [ ] `lithium_battery_in_equipment` — extra service 818 (Hazmat - Lithium Battery)
+- [ ] `lithium_battery_standalone` — extra service 820 (Hazmat - Lithium Battery Standalone)
+- [ ] `cremated_remains` — currently `Supported` but not wired; extra service 813
+- [ ] `hold_at_location` — mark `Prohibited` (USPS doesn't offer hold-at-location)
+- [ ] `evening_delivery` — mark `Prohibited` (not a USPS concept)
+- [x] `alcohol` — `Prohibited` (USPS domestic prohibition, correct)
+- [x] `lithium_battery_ground_only` — `Prohibited` (USPS uses air transport, correct)
 
-**Own packaging:** Tested against live FedEx API — `YOUR_PACKAGING` with `FEDEX_ONE_RATE` returns `SERVICE.PACKAGECOMBINATION.INVALID`. FedEx One Rate requires FedEx-branded packaging. The adapter excludes `YOUR_PACKAGING` from eligibility.
+**FedEx** — saturday_delivery is fully wired (rate + ship + retry logic). Wire up remaining:
 
-**Sandbox note:** FedEx sandbox does not support One Rate requests (returns errors). One Rate only works against the production API.
+- [x] `saturday_delivery` — fully wired
+- [x] `cremated_remains` — `Prohibited` (FedEx policy, correct)
+- [ ] `signature_required` — `INDIRECT` or `DIRECT` in `signatureOptionType`
+- [ ] `adult_signature_required` — `ADULT` in `signatureOptionType`
+- [ ] `carrier_release` — `NO_SIGNATURE_REQUIRED` in `signatureOptionType`
+- [ ] `declared_value` — `declaredValue` on `requestedPackageLineItems`
+- [ ] `email_notification` — `EVENT_NOTIFICATION` special service + email list
+- [ ] `dry_ice` — `DRY_ICE` special service + `dryIceWeight`
+- [ ] `alcohol` — `ALCOHOL` special service (requires FedEx alcohol shipping agreement)
+- [ ] `lithium_battery_in_equipment` — `BATTERY` special service
+- [ ] `lithium_battery_standalone` — `STANDALONE_BATTERY` special service
+- [ ] `lithium_battery_ground_only` — mark `Prohibited` (air services restriction)
+- [ ] `hold_at_location` — `HOLD_AT_LOCATION` special service + facility address
+- [ ] `evening_delivery` — `HOME_DELIVERY_PREMIUM` with `EVENING` type (Home Delivery only)
 
-### Phase C: FedEx Ground Economy (SmartPost) - COMPLETED (2026-04-03) - test on live api when available
+**UPS** — saturday_delivery is fully wired (rate + ship + retry logic). Wire up remaining:
 
-FedEx Ground Economy (service type `SMART_POST`) — low-cost residential delivery via FedEx Ground + USPS last-mile. Requires `smartPostInfoDetail` in both rate and ship requests.
+- [x] `saturday_delivery` — fully wired
+- [ ] `signature_required` — `DeliveryConfirmation` code 1
+- [ ] `adult_signature_required` — `DeliveryConfirmation` code 2
+- [ ] `carrier_release` — leave-if-no-response option
+- [ ] `declared_value` — `DeclaredValue` on package
+- [ ] `email_notification` — accessorial code 012 (Ship Notification)
+- [ ] `dry_ice` — accessorial code 200 + dry ice weight
+- [ ] `alcohol` — accessorial code 205 (international only; mark `Prohibited` for domestic)
+- [ ] `lithium_battery_in_equipment` — accessorial code 199 + UN3481
+- [ ] `lithium_battery_standalone` — accessorial code 199 + UN3090
+- [ ] `lithium_battery_ground_only` — mark `Prohibited` (air services restriction)
+- [ ] `hold_at_location` — `UAPAddress` on `ShipTo` + accessorial code 054
+- [ ] `cremated_remains` — mark `Prohibited` (UPS does not accept cremated remains)
+- [ ] `evening_delivery` — mark `Prohibited` (UPS doesn't offer this)
 
-**Key fields:**
-
-- **`hubId`** — 4-digit FedEx hub ID. List available in FedEx docs. Add a hub selector to Location settings (per-origin).
-- **`indicia`** — weight-based:
-  - Under 1 lb: `PRESORTED_STANDARD` (requires `ancillaryEndorsement` — investigate valid values: `ADDRESS_CORRECTION`, `CARRIER_LEAVE_IF_NO_RESPONSE`, `CHANGE_SERVICE`, `FORWARDING_SERVICE`, `RETURN_SERVICE`)
-  - 1 lb and over: `PARCEL_SELECT` (no endorsement needed)
-
-**Implementation:**
-
-- Add `fedex_hub_id` to Location model/settings
-- In `FedexAdapter`, detect `SMART_POST` service type and build `smartPostInfoDetail` with weight-based indicia
-- Rate request: include `smartPostInfoDetail` when Ground Economy services are in the requested service codes
-- Ship request: include `smartPostInfoDetail` when selected rate is Ground Economy
-- Carrier service seeder: add `SMART_POST` to FedEx service codes
-
-**Note:** FedEx sandbox account `740561073` supports Ground Economy. New developer portal accounts may have issues — see FedEx support notes from 2026-03-23.
-
----
-
-### Phase D (was C): USPS Rate Indicator Optimization
+### Phase D: USPS Rate Indicator Optimization
 
 Currently, rate shopping always works (queries USPS Shipping Options API for valid mailClass + rateIndicator pairs). The optimization is skipping rate shopping for known-cheap combinations.
 
@@ -419,12 +315,7 @@ Package-level payload columns:
 | `dry_ice` | extra service 819 | `DRY_ICE` + weight | acc. 200 + weight |
 | `alcohol` | ❌ domestic | `ALCOHOL` | 205 (intl only) |
 | `adult_signature_required` | extra service 922 | `SIGNATURE_OPTION: ADULT` | DeliveryConfirmation subtype |
-| `saturday_delivery` | N/A | `SATURDAY_DELIVERY` | acc. 300 |
-
-**Seeded services (initial set):**
-`signature_required`, `adult_signature_required`, `saturday_delivery`, `hold_for_pickup`, `declared_value`, `email_notification`, `dry_ice`, `alcohol`, `lithium_battery_in_equipment`, `lithium_battery_standalone`, `lithium_battery_ground_only`, `carrier_release`
-
-**Migration note:** Migrate `shipping_methods.saturday_delivery` to a pivot row with `mode: default` or `mode: available` as appropriate. Remove the column.
+| `saturday_delivery` | native (no-op) | `SATURDAY_DELIVERY` | acc. 300 |
 
 #### V2 — Rule Engine Integration
 
@@ -453,11 +344,6 @@ May or may not be in scope depending on product direction and customer demand.
 
 ## Authentication & Security
 
-- [x] **Password policy** — configurable min length, mixed case, numbers, symbols via Settings
-- [x] **Password expiration** — configurable days, forced password change on login
-- [x] **Google SSO** — "Sign in with Google" via Laravel Socialite, admin pre-creates users with matching email
-- [x] **SSO-only users** — nullable password, users can only sign in via SSO
-- [x] **Email + username login** — single field auto-detects, both supported
 - **Login rate limiting** — Filament has basic throttling, but needs tuning for public-facing deployments
 - **MFA** — optional TOTP (Google Authenticator) for local auth accounts
 - **Additional SSO providers** — Microsoft, Okta, generic OIDC/SAML. Architecture supports adding providers via Socialite drivers + Settings toggle. Google implementation serves as template.
@@ -523,6 +409,7 @@ Shipping data contains recipient PII (names, addresses, phone, email). Different
 
 Address alongside the roadmap:
 
+- **CSV/Excel export on report tables** — Report pages lack export functionality. Delivery confidence scoring also needs tracking data from Phase 2.3.
 - **Test coverage:** Pest is configured but coverage needs expansion. Carrier adapters, import service, and rate shopping should have thorough test suites before adding more complexity.
 - **Error handling:** Carrier API failures should be graceful with user-friendly messages. Consider a circuit breaker pattern for carrier APIs that are down.
 - **Documentation:** User-facing (how to configure carriers, set up import sources) and developer-facing (how to add a carrier adapter, how events work).
@@ -534,3 +421,4 @@ Address alongside the roadmap:
 - **Workstation-based device settings:** Device settings (printer, label format, DPI, scale backend, scale IDs) are currently stored in browser localStorage, which breaks in incognito mode, after cache clears, or on browser reinstall. Move to a server-side `Workstation` model keyed by hostname (from `qz.websocket.getNetworkInfo()`). Fallback chain: localStorage (instant) → database lookup by hostname (transparent recovery) → Device Settings prompt (new workstation). Settings are per-machine, not per-user, which matches the physical hardware. Device Settings page saves to both localStorage and database. QZ Tray not running falls back to localStorage-only (current behavior).
 - **Void shipments/packages:** Remove shipments and packages from stats and prevent re-import without deleting the record. Keeps data searchable and auditable. Replaces the need for soft deletes.
 - **Shared credential rotation script:** `scripts/rotate-shared-creds.sh` — reads updated values from `/opt/shared/.env` and `/opt/shared/oauth.env`, sed-replaces into all tenant `.env` files, restarts containers. Currently manual. Build when needed (credential rotation is infrequent).
+- **Data archiving (Phase 3):** Configurable retention policies per customer, automated archival to S3/external storage, archive viewer for historical lookups.
