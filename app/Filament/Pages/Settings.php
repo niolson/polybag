@@ -735,7 +735,7 @@ class Settings extends Page
                                 ->icon('heroicon-o-link')
                                 ->color(fn () => $this->isFedexAccountConnected() ? 'warning' : 'primary')
                                 ->modalHeading(fn () => new HtmlString(
-                                    '<span class="flex items-center gap-2"><img src="'.Carrier::logoUrlForName('FedEx').'" alt="FedEx" class="h-5 inline-block">'
+                                    '<span class="flex items-center gap-2"><img src="'.Carrier::logoUrlForName('FedEx').'" alt="FedEx" class="h-8 inline-block">'
                                         .($this->isFedexAccountConnected() ? 'Reconnect FedEx Account' : 'Connect FedEx Account')
                                         .'</span>'
                                 ))

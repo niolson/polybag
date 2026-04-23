@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 38" fill="none">
+  <style>
+    .bag-outline { display: inline; }
+    .bag-solid { display: none; }
+
+    @media (prefers-color-scheme: dark) {
+      .bag-outline { display: none; }
+      .bag-solid { display: inline; }
+    }
+  </style>
+
+  <g class="bag-outline">
+    <rect x="1.5" y="1.5" width="29" height="35" rx="2" stroke="#0d9488" stroke-width="2.5"></rect>
+    <rect x="1.5" y="1.5" width="29" height="7.5" rx="2" fill="rgba(13,148,136,0.08)" stroke="#0d9488" stroke-width="2.5"></rect>
+    <line x1="15" y1="26" x2="15" y2="34" stroke="#0d9488" stroke-width="2" stroke-linecap="round"></line>
+    <line x1="18.5" y1="26" x2="18.5" y2="34" stroke="#0d9488" stroke-width="2" stroke-linecap="round"></line>
+    <line x1="22" y1="26" x2="22" y2="34" stroke="#0d9488" stroke-width="2" stroke-linecap="round"></line>
+    <line x1="25.5" y1="26" x2="25.5" y2="34" stroke="#0d9488" stroke-width="2" stroke-linecap="round"></line>
+  </g>
+
+  <g class="bag-solid">
+    <rect x="0" y="0" width="32" height="38" rx="4" fill="#0d9488"></rect>
+    <rect x="0" y="0" width="32" height="9" rx="4" fill="rgba(255,255,255,0.18)"></rect>
+    <rect x="0" y="5" width="32" height="4" fill="rgba(255,255,255,0.18)"></rect>
+    <line x1="15" y1="26" x2="15" y2="34" stroke="white" stroke-width="2" stroke-linecap="round"></line>
+    <line x1="18.5" y1="26" x2="18.5" y2="34" stroke="white" stroke-width="2" stroke-linecap="round"></line>
+    <line x1="22" y1="26" x2="22" y2="34" stroke="white" stroke-width="2" stroke-linecap="round"></line>
+    <line x1="25.5" y1="26" x2="25.5" y2="34" stroke="white" stroke-width="2" stroke-linecap="round"></line>
+  </g>
+</svg>
