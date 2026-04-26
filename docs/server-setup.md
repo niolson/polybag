@@ -367,6 +367,187 @@ scripts/provision-tenant.sh --mode standalone acme
 
 See `scripts/provision-tenant.sh` for details.
 
+## 12. Security Hardening
+
+One-time hardening applied to the server after initial setup.
+
+### UFW Firewall
+
+Host-level firewall (complements any cloud provider firewall from step 2):
+
+```bash
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22/tcp    # SSH
+ufw allow 80/tcp    # HTTP
+ufw allow 443/tcp   # HTTPS
+ufw allow 443/udp   # HTTP/3 / QUIC
+ufw logging medium
+ufw enable
+```
+
+### SSH Hardening
+
+Edit `/etc/ssh/sshd_config` (or a file in `/etc/ssh/sshd_config.d/`):
+
+```
+PermitRootLogin without-password   # Key-only, no password
+PasswordAuthentication no
+X11Forwarding no
+MaxAuthTries 3
+AllowTcpForwarding no
+ClientAliveCountMax 2
+LogLevel VERBOSE
+```
+
+Restart SSH after changes:
+
+```bash
+systemctl restart ssh
+```
+
+### fail2ban
+
+Protects against brute-force attacks by banning IPs after repeated failures.
+
+```bash
+apt install -y fail2ban
+```
+
+Create `/etc/fail2ban/jail.local`:
+
+```ini
+[DEFAULT]
+maxretry = 5
+findtime = 10m
+bantime = 1h
+
+[sshd]
+enabled = true
+maxretry = 3
+bantime = 24h
+
+[nginx-http-auth]
+enabled = true
+
+[nginx-botsearch]
+enabled = true
+```
+
+```bash
+systemctl enable --now fail2ban
+```
+
+Active jails: `sshd` (3 attempts, 24h ban), `nginx-http-auth`, `nginx-botsearch`. Default: 5 attempts, 1h ban, 10-minute find window.
+
+Config: `/etc/fail2ban/jail.local`
+
+### auditd
+
+Kernel-level audit logging for sensitive file and syscall activity.
+
+```bash
+apt install -y auditd
+systemctl enable --now auditd
+```
+
+Custom rules go in `/etc/audit/rules.d/hardening.rules`. The rules on this server monitor:
+
+- `/etc/passwd`, `/etc/shadow`, `/etc/group`, `/etc/sudoers`, `/etc/ssh/sshd_config`
+- Login/logout events
+- Docker socket access
+- Privilege escalation syscalls (`setuid`, `setgid`, etc.)
+
+### AIDE (File Integrity Monitoring)
+
+Detects unauthorized changes to critical system files.
+
+```bash
+apt install -y aide
+```
+
+> **Important:** The default AIDE config will OOM this server. Use a minimal custom config at `/etc/aide/aide.conf` that watches critical paths only.
+
+Paths monitored on this server: `/etc/ssh`, `/etc/passwd`, `/etc/shadow`, `/etc/gshadow`, `/etc/group`, `/etc/sudoers`, `/etc/sudoers.d`, `/etc/cron.d`, `/etc/crontab`, `/etc/hosts`, `/etc/resolv.conf`, `/etc/fail2ban`, `/etc/audit`
+
+Initialize the database (always use `nice`/`ionice` on this server — raw `aideinit` will OOM):
+
+```bash
+nice -n 19 ionice -c 3 aideinit
+cp /var/lib/aide/aide.db.new /var/lib/aide/aide.db
+```
+
+Daily check at 3am via `/etc/cron.d/aide-check`, output sent to syslog via `logger -t aide`.
+
+Database: `/var/lib/aide/aide.db`
+
+**Never run `aideinit` without `nice -n 19 ionice -c 3` on this server.**
+
+### Kernel / Network Hardening
+
+Disable unused network protocols and USB storage via `/etc/modprobe.d/disable-unused-protocols.conf`:
+
+```
+install dccp /bin/true
+install sctp /bin/true
+install rds /bin/true
+install tipc /bin/true
+install usb-storage /bin/true
+```
+
+### System Hardening
+
+**Core dumps** — disable in `/etc/security/limits.conf`:
+
+```
+* hard core 0
+```
+
+**Umask** — tighten to `027` in `/etc/login.defs`:
+
+```
+UMASK 027
+```
+
+**Additional packages:**
+
+```bash
+apt install -y debsums apt-show-versions libpam-tmpdir
+```
+
+### Postfix
+
+If Postfix is installed, harden the banner and disable VRFY in `/etc/postfix/main.cf`:
+
+```
+smtpd_banner = ESMTP
+disable_vrfy_command = yes
+```
+
+### Logwatch
+
+Daily log summary written to `/var/log/logwatch/YYYY-MM-DD.log`.
+
+```bash
+apt install -y logwatch
+```
+
+Config: `/etc/logwatch/conf/logwatch.conf`
+
+Runs at 6am daily via `/etc/cron.d/logwatch`. No mail relay configured — when ready, set `Output = mail` and `MailTo = you@domain.com` in the config.
+
+### Lynis
+
+Weekly security audit.
+
+```bash
+apt install -y lynis
+```
+
+Weekly audit every Sunday at 2am via `/etc/cron.d/lynis`. Report: `/var/log/lynis-weekly.log`.
+
+---
+
 ## Google SSO Setup
 
 Google SSO allows users to sign in with their Google account instead of a password. All installs (hosted and on-prem) use the same Google Cloud project (`polybag-login`) but separate OAuth client IDs.
