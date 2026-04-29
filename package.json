@@ -21,6 +21,7 @@
     "vite": "^7.3.2"
   },
   "dependencies": {
-    "jsbarcode": "^3.12.3"
+    "jsbarcode": "^3.12.3",
+    "qz-tray": "^2.2.6"
   }
 }

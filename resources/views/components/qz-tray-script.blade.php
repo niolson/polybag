@@ -1,5 +1,4 @@
-<!-- QZ Tray Library (CDN - not bundler-friendly, must be loaded via script tag) -->
-<script src="https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.min.js"></script>
+@vite('resources/js/qz.js')
 
 <script>
     /**
