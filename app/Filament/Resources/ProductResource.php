@@ -78,6 +78,10 @@ class ProductResource extends Resource
                 Forms\Components\TextInput::make('country_of_origin')
                     ->maxLength(2)
                     ->helperText('2-letter country code (e.g., US, CN)'),
+                Forms\Components\TextInput::make('bin_location')
+                    ->label('Bin Location')
+                    ->maxLength(50)
+                    ->helperText('Warehouse bin location (e.g. A-01-3). Used to sort picking summaries.'),
                 Forms\Components\Toggle::make('active')
                     ->default(true),
                 Section::make('Compliance')
@@ -116,6 +120,11 @@ class ProductResource extends Resource
             ->columns([
                 Tables\Columns\TextColumn::make('name'),
                 Tables\Columns\TextColumn::make('sku'),
+                Tables\Columns\TextColumn::make('bin_location')
+                    ->label('Bin')
+                    ->placeholder('—')
+                    ->sortable()
+                    ->toggleable(),
                 Tables\Columns\TextColumn::make('weight')
                     ->numeric()
                     ->sortable(),

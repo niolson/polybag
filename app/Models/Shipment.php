@@ -4,9 +4,10 @@ namespace App\Models;
 
 use App\Enums\Deliverability;
 use App\Enums\PackageStatus;
+use App\Enums\PickingStatus;
 use App\Enums\ShipmentStatus;
-use App\Services\AddressValidationService;
 use App\Services\AddressReferenceService;
+use App\Services\AddressValidationService;
 use App\Services\PhoneParserService;
 use App\Services\SettingsService;
 use Carbon\Carbon;
@@ -56,6 +57,7 @@ class Shipment extends Model
         'channel_id',
         'import_source_id',
         'status',
+        'picking_status',
         'deliver_by',
         'metadata',
     ];
@@ -67,6 +69,7 @@ class Shipment extends Model
         'value' => 'decimal:2',
         'deliverability' => Deliverability::class,
         'status' => ShipmentStatus::class,
+        'picking_status' => PickingStatus::class,
         'deliver_by' => 'date',
         'metadata' => 'array',
     ];
@@ -215,5 +218,10 @@ class Shipment extends Model
     public function importSource(): BelongsTo
     {
         return $this->belongsTo(ImportSource::class);
+    }
+
+    public function pickBatchShipments(): HasMany
+    {
+        return $this->hasMany(PickBatchShipment::class);
     }
 }

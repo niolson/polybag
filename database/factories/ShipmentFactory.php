@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Enums\Deliverability;
+use App\Enums\PickingStatus;
 use App\Models\Channel;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
@@ -35,6 +36,7 @@ class ShipmentFactory extends Factory
             'channel_reference' => null,
             'channel_id' => Channel::factory(),
             'status' => 'open',
+            'picking_status' => PickingStatus::Pending,
         ];
     }
 

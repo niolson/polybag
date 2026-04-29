@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\TestPackageController;
 use App\Http\Controllers\Auth\GoogleController;
 use App\Http\Controllers\OAuthCallbackController;
+use App\Http\Controllers\PickBatchController;
 use App\Http\Controllers\QzSignController;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Support\Facades\Route;
@@ -15,6 +16,13 @@ Route::get('/up', function () {
 });
 
 Route::post('/qz/sign', [QzSignController::class, 'sign'])->name('qz.sign')->middleware(['auth', 'throttle:60,1']);
+
+Route::middleware(['auth', 'manager'])->group(function () {
+    Route::get('/pick-batches/{pickBatch}/summary', [PickBatchController::class, 'summary'])
+        ->name('pick-batches.summary');
+    Route::get('/pick-batches/{pickBatch}/pack-slips', [PickBatchController::class, 'packSlips'])
+        ->name('pick-batches.pack-slips');
+});
 
 Route::get('/oauth/{provider}/receive', [OAuthCallbackController::class, 'receive'])
     ->name('oauth.receive')

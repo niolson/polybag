@@ -25,6 +25,7 @@ use App\Services\LabelGenerationService;
 use App\Services\ManifestService;
 use App\Services\OAuthProviderRegistry;
 use App\Services\OAuthService;
+use App\Services\PickBatchService;
 use App\Services\RateQuoteLogger;
 use App\Services\RuleEvaluator;
 use App\Services\SettingsService;
@@ -49,6 +50,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(ShippingRateService::class);
         $this->app->singleton(LabelGenerationService::class);
         $this->app->singleton(ManifestService::class);
+        $this->app->singleton(PickBatchService::class);
         $this->app->singleton(OAuthProviderRegistry::class);
         $this->app->singleton(OAuthService::class);
         $this->app->singleton(FedexRegistrationService::class);

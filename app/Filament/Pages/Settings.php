@@ -156,6 +156,7 @@ class Settings extends Page
             'transparency_enabled' => app(SettingsService::class)->get('transparency_enabled', true),
             'batch_shipping_enabled' => app(SettingsService::class)->get('batch_shipping_enabled', true),
             'manual_shipping_enabled' => app(SettingsService::class)->get('manual_shipping_enabled', true),
+            'picking_enabled' => app(SettingsService::class)->get('picking_enabled', false),
             'carrier_api_timeout' => app(SettingsService::class)->get('carrier_api_timeout', 15),
             'import_source' => app(SettingsService::class)->get('import_source', 'database'),
             'audit_log_retention_days' => app(SettingsService::class)->get('audit_log_retention_days', 365),
@@ -515,6 +516,10 @@ class Settings extends Page
                                 ->label('Manual Shipping')
                                 ->helperText('When enabled, the Manual Ship page is available for creating ad-hoc shipments.')
                                 ->default(true),
+                            Toggle::make('picking_enabled')
+                                ->label('Picking')
+                                ->helperText('When enabled, pickers can create pick batches and print picking summaries before packing.')
+                                ->default(false),
                         ])
                         ->columns(1),
 
@@ -619,7 +624,7 @@ class Settings extends Page
                         ])
                         ->columns(2),
 
-                    Section::make('USPS Credentials')
+                    Section::make(new HtmlString('<span class="flex items-center gap-2"><img src="'.Carrier::logoUrlForName('USPS').'" alt="USPS" class="h-12 inline-block">USPS Credentials</span>'))
                         ->description('API credentials for USPS shipping services')
                         ->schema([
                             Placeholder::make('usps_oauth_status')
@@ -694,7 +699,7 @@ class Settings extends Page
                         ->columns(2)
                         ->collapsed(),
 
-                    Section::make(new HtmlString('<span class="flex items-center gap-2"><img src="'.Carrier::logoUrlForName('FedEx').'" alt="FedEx" class="h-8 inline-block">FedEx Credentials</span>'))
+                    Section::make(new HtmlString('<span class="flex items-center gap-2"><img src="'.Carrier::logoUrlForName('FedEx').'" alt="FedEx" class="h-12 inline-block">FedEx Credentials</span>'))
                         ->description('API credentials for FedEx shipping services')
                         ->schema([
                             Placeholder::make('fedex_account_status')
@@ -1016,7 +1021,7 @@ class Settings extends Page
                         ->columns(2)
                         ->collapsed(),
 
-                    Section::make('UPS Credentials')
+                    Section::make(new HtmlString('<span class="flex items-center gap-2"><img src="'.Carrier::logoUrlForName('UPS').'" alt="UPS" class="h-12 inline-block">UPS Credentials</span>'))
                         ->description('Connect your UPS account via OAuth for rates and label generation.')
                         ->schema([
                             Placeholder::make('ups_oauth_status')
@@ -1305,6 +1310,7 @@ class Settings extends Page
             'transparency_enabled' => $data['transparency_enabled'] ?? true,
             'batch_shipping_enabled' => $data['batch_shipping_enabled'] ?? true,
             'manual_shipping_enabled' => $data['manual_shipping_enabled'] ?? true,
+            'picking_enabled' => (bool) ($data['picking_enabled'] ?? false),
             'carrier_api_timeout' => (int) ($data['carrier_api_timeout'] ?? 15),
             'import_source' => $data['import_source'] ?? 'database',
             'audit_log_retention_days' => (int) ($data['audit_log_retention_days'] ?? 365),

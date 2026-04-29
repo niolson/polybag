@@ -3,11 +3,13 @@
 namespace App\Filament\Resources;
 
 use App\Enums\Deliverability;
+use App\Enums\PickingStatus;
 use App\Enums\Role;
 use App\Enums\ShipmentStatus;
+use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Pages\UnmappedChannelReferences;
 use App\Filament\Pages\UnmappedShippingReferences;
-use App\Filament\Concerns\InteractsWithScoutSearch;
+use App\Filament\Resources\PickBatches\PickBatchResource;
 use App\Filament\Resources\ShipmentResource\Pages;
 use App\Filament\Resources\ShipmentResource\RelationManagers\PackagesRelationManager;
 use App\Filament\Resources\ShipmentResource\RelationManagers\ShipmentItemsRelationManager;
@@ -17,6 +19,7 @@ use App\Models\BoxSize;
 use App\Models\Location;
 use App\Models\Shipment;
 use App\Services\BatchLabelService;
+use App\Services\PickBatchService;
 use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Actions;
@@ -211,6 +214,10 @@ class ShipmentResource extends Resource
                     ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('status')
                     ->badge(),
+                Tables\Columns\TextColumn::make('picking_status')
+                    ->badge()
+                    ->toggleable(isToggledHiddenByDefault: true)
+                    ->visible(fn () => app(SettingsService::class)->get('picking_enabled', false)),
                 Tables\Columns\TextColumn::make('deliverability')
                     ->label('Deliverable')
                     ->badge(),
@@ -222,6 +229,10 @@ class ShipmentResource extends Resource
             ->filters([
                 Tables\Filters\SelectFilter::make('status')
                     ->options(ShipmentStatus::class),
+                Tables\Filters\SelectFilter::make('picking_status')
+                    ->options(PickingStatus::class)
+                    ->label('Picking Status')
+                    ->visible(fn () => app(SettingsService::class)->get('picking_enabled', false)),
                 Tables\Filters\SelectFilter::make('deliverability')
                     ->options(Deliverability::class)
                     ->label('Deliverability'),
@@ -331,6 +342,33 @@ class ShipmentResource extends Resource
                         );
 
                         redirect(LabelBatchResource::getUrl('view', ['record' => $batch]));
+                    })
+                    ->deselectRecordsAfterCompletion(),
+                Actions\BulkAction::make('create-picking-batch')
+                    ->label('Create Picking Batch')
+                    ->icon('heroicon-o-inbox-stack')
+                    ->visible(fn () => auth()->user()->role->isAtLeast(Role::Manager) && app(SettingsService::class)->get('picking_enabled', false))
+                    ->requiresConfirmation()
+                    ->modalHeading('Create Picking Batch')
+                    ->modalDescription('Create a pick batch from the selected shipments. Only pending shipments will be included.')
+                    ->modalSubmitActionLabel('Create Batch')
+                    ->action(function (Collection $records): void {
+                        $batch = app(PickBatchService::class)->createFromShipments(
+                            $records,
+                            auth()->user(),
+                        );
+
+                        if ($batch->total_shipments === 0) {
+                            Notification::make()
+                                ->warning()
+                                ->title('No eligible shipments')
+                                ->body('Only shipments with pending picking status can be added to a pick batch.')
+                                ->send();
+
+                            return;
+                        }
+
+                        redirect(PickBatchResource::getUrl('view', ['record' => $batch]));
                     })
                     ->deselectRecordsAfterCompletion(),
                 Actions\BulkAction::make('validate-addresses')

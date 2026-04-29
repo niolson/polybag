@@ -36,6 +36,10 @@ class ShippingMethodResource extends Resource
                     ->numeric(),
                 Forms\Components\Toggle::make('active')
                     ->default(true),
+                Forms\Components\Toggle::make('is_expedited')
+                    ->label('Expedited')
+                    ->helperText('When enabled, shipments with this method are prioritized in auto-generated pick batches.')
+                    ->default(false),
             ]);
     }
 
@@ -50,6 +54,10 @@ class ShippingMethodResource extends Resource
                     ->sortable(),
                 Tables\Columns\IconColumn::make('active')
                     ->boolean(),
+                Tables\Columns\IconColumn::make('is_expedited')
+                    ->label('Expedited')
+                    ->boolean()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('created_at')
                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->sortable()

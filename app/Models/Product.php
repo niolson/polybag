@@ -24,6 +24,7 @@ class Product extends Model
         'active',
         'contains_alcohol',
         'hazmat_class',
+        'bin_location',
     ];
 
     protected function casts(): array

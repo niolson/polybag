@@ -15,10 +15,12 @@ class ShippingMethod extends Model
         'name',
         'commitment_days',
         'active',
+        'is_expedited',
     ];
 
     protected $casts = [
         'active' => 'boolean',
+        'is_expedited' => 'boolean',
     ];
 
     public function shipments(): HasMany
