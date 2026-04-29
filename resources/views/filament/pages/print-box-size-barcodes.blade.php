@@ -105,7 +105,7 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+    @vite('resources/js/barcodes.js')
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             generateBarcodes();

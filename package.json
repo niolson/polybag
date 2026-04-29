@@ -19,5 +19,8 @@
     "playwright": "^1.58.2",
     "tailwindcss": "^4.2.4",
     "vite": "^7.3.2"
+  },
+  "dependencies": {
+    "jsbarcode": "^3.12.3"
   }
 }

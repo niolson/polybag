@@ -26,7 +26,7 @@ export default defineConfig(({ mode }) => {
     return {
         plugins: [
             laravel({
-                input: ['resources/css/app.css', 'resources/js/app.js', 'resources/css/filament/app/theme.css'],
+                input: ['resources/css/app.css', 'resources/js/app.js', 'resources/js/barcodes.js', 'resources/css/filament/app/theme.css'],
                 refresh: true,
             }),
             tailwindcss(),
