@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\DataTransferObjects\Shipping\ClassifiedRate;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\PackageStatus;
@@ -10,6 +11,7 @@ use App\Filament\Concerns\NotifiesUser;
 use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\RateQuoteLogger;
+use App\Services\RateSelector;
 use App\Services\RuleEvaluator;
 use App\Services\SettingsService;
 use App\Services\ShippingRateService;
@@ -153,69 +155,31 @@ class Ship extends Page implements HasForms
         $deadline = $this->package?->shipment->getDeliverByDate();
         $this->deliverByDate = $deadline?->format('D, M j');
 
-        $formRateOptionLabels = [];
-        $formRateOptionDescriptions = [];
-        $onTimeKeys = [];
-        $lateKeys = [];
+        $rates = collect($this->rateOptions)->map(fn (array $arr) => RateResponse::fromArray($arr));
+        $classified = app(RateSelector::class)->classify($rates, $deadline);
 
-        foreach ($this->rateOptions as $key => $rateArray) {
-            $rate = RateResponse::fromArray($rateArray);
-            $formRateOptionLabels[$key] = $rate->formLabel();
-            $description = $rate->formDescription();
+        $labels = [];
+        $descriptions = [];
+        $options = [];
 
-            if ($deadline) {
-                $parsed = $rate->parsedDeliveryDate();
-                if ($parsed && $parsed->gt($deadline)) {
-                    $description .= ' — LATE';
-                    $lateKeys[] = $key;
-                } elseif (! $parsed) {
-                    // Unknown delivery date with a deadline — mark uncertain
-                    $lateKeys[] = $key;
-                } else {
-                    $onTimeKeys[] = $key;
-                }
-            } else {
-                $onTimeKeys[] = $key;
+        foreach ($classified as $key => $cr) {
+            $labels[$key] = $cr->rate->formLabel();
+            $description = $cr->rate->formDescription();
+            if (! $cr->isOnTime) {
+                $description .= ' — LATE';
             }
-
-            $formRateOptionDescriptions[$key] = $description;
+            $descriptions[$key] = $description;
+            $options[$key] = $cr->rate->toArray();
         }
 
-        // Sort: on-time first (by price), then late (by price)
-        $sortedKeys = collect($onTimeKeys)
-            ->sortBy(fn ($key) => $this->rateOptions[$key]['price'])
-            ->merge(collect($lateKeys)->sortBy(fn ($key) => $this->rateOptions[$key]['price']))
-            ->values();
+        $this->rateOptions = $options;
+        $this->formRateOptionLabels = $labels;
+        $this->formRateOptionDescriptions = $descriptions;
+        $this->allRatesLate = $deadline !== null && $classified->isNotEmpty() && $classified->every(fn (ClassifiedRate $cr) => ! $cr->isOnTime);
 
-        $sortedLabels = [];
-        $sortedDescriptions = [];
-        $sortedOptions = [];
-        foreach ($sortedKeys as $newKey => $oldKey) {
-            $sortedLabels[$newKey] = $formRateOptionLabels[$oldKey];
-            $sortedDescriptions[$newKey] = $formRateOptionDescriptions[$oldKey];
-            $sortedOptions[$newKey] = $this->rateOptions[$oldKey];
-        }
-
-        $this->rateOptions = $sortedOptions;
-        $this->formRateOptionLabels = $sortedLabels;
-        $this->formRateOptionDescriptions = $sortedDescriptions;
-        $this->allRatesLate = $deadline && empty($onTimeKeys) && ! empty($lateKeys);
-
-        // Default to cheapest on-time rate, or cheapest overall if all late
-        if (! empty($this->rateOptions)) {
-            $defaultKey = collect($this->rateOptions)->sortBy('price')->keys()->first();
-
-            if (! empty($onTimeKeys)) {
-                // Find the first on-time key (already sorted by price in sortedOptions)
-                foreach ($sortedOptions as $key => $option) {
-                    if (in_array($key, array_keys($sortedLabels)) && ! str_contains($sortedDescriptions[$key] ?? '', 'LATE')) {
-                        $defaultKey = $key;
-                        break;
-                    }
-                }
-            }
-
-            $this->form->fill(['rateOptions' => $defaultKey]);
+        if ($classified->isNotEmpty()) {
+            // Index 0 is always the recommended rate: cheapest on-time, or cheapest overall if all late
+            $this->form->fill(['rateOptions' => 0]);
         }
     }
 

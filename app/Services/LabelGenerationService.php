@@ -9,9 +9,7 @@ use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\PackageStatus;
 use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
-use Carbon\Carbon;
 use Closure;
-use Illuminate\Support\Collection;
 use Saloon\Exceptions\Request\RequestException;
 use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 
@@ -49,7 +47,7 @@ class LabelGenerationService
             }
 
             $deadline = $package->shipment->getDeliverByDate();
-            $selectedRate = $this->selectBestRate($rates, $deadline);
+            $selectedRate = app(RateSelector::class)->selectBest($rates, $deadline);
 
             app(RateQuoteLogger::class)->markSelected($package->id, $selectedRate);
         }
@@ -138,32 +136,5 @@ class LabelGenerationService
                 $onCleanup();
             }
         }
-    }
-
-    /**
-     * Select the best rate: cheapest on-time rate if a deadline exists,
-     * otherwise cheapest overall.
-     *
-     * @param  Collection<int, RateResponse>  $rates
-     */
-    private function selectBestRate(Collection $rates, ?Carbon $deadline): RateResponse
-    {
-        if (! $deadline) {
-            return $rates->sortBy('price')->first();
-        }
-
-        $onTime = $rates->filter(function (RateResponse $rate) use ($deadline) {
-            $deliveryDate = $rate->parsedDeliveryDate();
-
-            // If no delivery date, treat as uncertain — don't prefer it
-            return $deliveryDate && $deliveryDate->lte($deadline);
-        });
-
-        if ($onTime->isNotEmpty()) {
-            return $onTime->sortBy('price')->first();
-        }
-
-        // All rates are late or unknown — pick cheapest overall
-        return $rates->sortBy('price')->first();
     }
 }
