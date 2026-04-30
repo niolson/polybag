@@ -2,9 +2,11 @@
 
 namespace App\Filament\Pages;
 
+use App\DataTransferObjects\PrintRequest;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Concerns\NotifiesUser;
+use App\Filament\Concerns\PrintsLabels;
 use App\Models\BoxSize;
 use App\Models\Package;
 use App\Models\Shipment;
@@ -23,6 +25,7 @@ use UnitEnum;
 class Pack extends Page
 {
     use NotifiesUser;
+    use PrintsLabels;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-archive-box-arrow-down';
 
@@ -156,10 +159,8 @@ class Pack extends Page
 
         Session::put('last_shipped_package_id', $package->id);
 
-        if ($result->response->labelData && ! app(SettingsService::class)->get('suppress_printing', false)) {
-            $this->dispatch('print-label', label: $result->response->labelData, orientation: $result->response->labelOrientation ?? 'portrait', format: $result->response->labelFormat ?? 'pdf', dpi: $result->response->labelDpi);
-        } elseif ($result->response->labelData) {
-            $this->notifyInfo('Label printing suppressed (sandbox mode)');
+        if ($result->response->labelData) {
+            $this->dispatchPrint(PrintRequest::fromShipResponse($result->response));
         }
 
         $this->notifySuccess('Auto Shipped', $result->summaryMessage());
@@ -400,7 +401,7 @@ class Pack extends Page
             return;
         }
 
-        $this->dispatch('print-label', label: $package->label_data, orientation: $package->label_orientation ?? 'portrait', format: $package->label_format ?? 'pdf', dpi: $package->label_dpi);
+        $this->dispatchPrint(PrintRequest::fromPackage($package));
         $this->notifySuccess('Label Reprinted', "Reprinted label for tracking: {$package->tracking_number}");
     }
 

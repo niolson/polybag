@@ -2,18 +2,19 @@
 
 namespace App\Filament\Pages;
 
+use App\DataTransferObjects\PrintRequest;
 use App\DataTransferObjects\Shipping\ClassifiedRate;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Concerns\NotifiesUser;
+use App\Filament\Concerns\PrintsLabels;
 use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\RateQuoteLogger;
 use App\Services\RateSelector;
 use App\Services\RuleEvaluator;
-use App\Services\SettingsService;
 use App\Services\ShippingRateService;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -30,6 +31,7 @@ class Ship extends Page implements HasForms
 {
     use InteractsWithForms;
     use NotifiesUser;
+    use PrintsLabels;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-paper-airplane';
 
@@ -227,17 +229,8 @@ class Ship extends Page implements HasForms
 
             $this->notifySuccess('Package Shipped', "Tracking: {$response->trackingNumber}");
 
-            if ($response->labelData && ! app(SettingsService::class)->get('suppress_printing', false)) {
-                $this->dispatch('print-label',
-                    label: $response->labelData,
-                    orientation: $response->labelOrientation ?? 'portrait',
-                    format: $response->labelFormat ?? 'pdf',
-                    dpi: $response->labelDpi,
-                    redirectTo: $this->returnUrl,
-                );
-            } elseif ($response->labelData) {
-                $this->notifyInfo('Label printing suppressed (sandbox mode)');
-                $this->redirect($this->returnUrl);
+            if ($response->labelData) {
+                $this->dispatchPrint(PrintRequest::fromShipResponse($response), redirectTo: $this->returnUrl);
             } else {
                 $this->redirect($this->returnUrl);
             }
