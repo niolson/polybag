@@ -5,7 +5,6 @@ namespace App\Filament\Pages;
 use App\Enums\Deliverability;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
-use App\Events\PackageCreated;
 use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Support\AddressForm;
 use App\Models\BoxSize;
@@ -15,6 +14,7 @@ use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Services\AddressValidationService;
 use App\Services\LabelGenerationService;
+use App\Services\PackagingService;
 use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Forms;
@@ -185,7 +185,7 @@ class ManualShip extends Page implements HasForms
 
     private function manualShip(array $data): void
     {
-        $package = $this->createShipmentAndPackage($data);
+        ['shipment' => $shipment, 'package' => $package] = $this->createShipmentAndPackage($data);
 
         Session::put('ship_return_url', '/manual-ship');
         $this->redirect('/ship/'.$package->id);
@@ -193,8 +193,7 @@ class ManualShip extends Page implements HasForms
 
     private function autoShip(array $data): void
     {
-        $package = $this->createShipmentAndPackage($data);
-        $shipment = $package->shipment;
+        ['shipment' => $shipment, 'package' => $package] = $this->createShipmentAndPackage($data);
 
         $result = app(LabelGenerationService::class)->autoShip(
             package: $package,
@@ -214,34 +213,25 @@ class ManualShip extends Page implements HasForms
 
         if ($result->response->labelData && ! app(SettingsService::class)->get('suppress_printing', false)) {
             $this->dispatch('print-label', label: $result->response->labelData, orientation: $result->response->labelOrientation ?? 'portrait', format: $result->response->labelFormat ?? 'pdf', dpi: $result->response->labelDpi);
+        } elseif ($result->response->labelData) {
+            $this->notifyInfo('Label printing suppressed (sandbox mode)');
         }
 
         $this->notifySuccess('Shipped', $result->summaryMessage());
         $this->resetForm();
     }
 
-    private function createShipmentAndPackage(array $data): Package
+    /**
+     * Create a shipment and package, with optional address validation.
+     * Returns both so callers can reference the shipment (e.g. for cleanup on failure).
+     *
+     * @return array{shipment: Shipment, package: Package}
+     */
+    private function createShipmentAndPackage(array $data): array
     {
         return DB::transaction(function () use ($data) {
-            $manualChannel = Channel::where('name', 'Manual')->first();
-
-            $shipment = Shipment::create([
-                'shipment_reference' => $data['shipment_reference'] ?: null,
-                'first_name' => $data['first_name'] ?: null,
-                'last_name' => $data['last_name'] ?: null,
-                'company' => $data['company'] ?: null,
-                'address1' => $data['address1'],
-                'address2' => $data['address2'] ?: null,
-                'city' => $data['city'],
-                'state_or_province' => $data['state_or_province'] ?: null,
-                'postal_code' => $data['postal_code'] ?: null,
-                'country' => $data['country'],
-                'phone' => $data['phone'] ?: null,
-                'email' => $data['email'] ?: null,
-                'shipping_method_id' => $data['shipping_method_id'] ?: null,
-                'channel_id' => $manualChannel?->id,
-                'status' => 'open',
-            ]);
+            $channelId = Channel::where('name', 'Manual')->first()?->id;
+            $shipment = app(PackagingService::class)->createShipment($data, $channelId);
 
             try {
                 app(AddressValidationService::class)->validate($shipment);
@@ -254,18 +244,16 @@ class ManualShip extends Page implements HasForms
                 logger()->warning('ManualShip address validation failed', ['error' => $e->getMessage()]);
             }
 
-            $package = Package::create([
-                'shipment_id' => $shipment->id,
-                'box_size_id' => $data['box_size_id'] ?: null,
-                'weight' => $data['weight'],
-                'height' => $data['height'],
-                'width' => $data['width'],
-                'length' => $data['length'],
-            ]);
+            $package = app(PackagingService::class)->createPackage(
+                shipment: $shipment,
+                weight: $data['weight'],
+                height: $data['height'],
+                width: $data['width'],
+                length: $data['length'],
+                boxSizeId: $data['box_size_id'] ?: null,
+            );
 
-            PackageCreated::dispatch($package, $shipment);
-
-            return $package;
+            return compact('shipment', 'package');
         });
     }
 

@@ -4,13 +4,14 @@ namespace App\Filament\Pages;
 
 use App\Enums\PackageStatus;
 use App\Enums\Role;
-use App\Events\PackageCreated;
 use App\Filament\Concerns\NotifiesUser;
 use App\Models\BoxSize;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\CacheService;
+use App\Services\Carriers\CarrierRegistry;
 use App\Services\LabelGenerationService;
+use App\Services\PackagingService;
 use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Pages\Page;
@@ -155,8 +156,10 @@ class Pack extends Page
 
         Session::put('last_shipped_package_id', $package->id);
 
-        if ($result->response->labelData) {
+        if ($result->response->labelData && ! app(SettingsService::class)->get('suppress_printing', false)) {
             $this->dispatch('print-label', label: $result->response->labelData, orientation: $result->response->labelOrientation ?? 'portrait', format: $result->response->labelFormat ?? 'pdf', dpi: $result->response->labelDpi);
+        } elseif ($result->response->labelData) {
+            $this->notifyInfo('Label printing suppressed (sandbox mode)');
         }
 
         $this->notifySuccess('Auto Shipped', $result->summaryMessage());
@@ -165,7 +168,7 @@ class Pack extends Page
 
     /**
      * Create a package from the current packing state.
-     * Cleans up any previous in-progress package from this user's session before creating.
+     * Cleans up any previous in-progress package from this session before creating.
      *
      * TODO: Review this orphan cleanup process. Deleting packages silently can be
      * surprising. Consider reusing/updating the existing package instead of
@@ -198,32 +201,31 @@ class Pack extends Page
                 Session::forget('in_progress_package_id');
             }
 
-            $package = Package::create([
-                'shipment_id' => $this->shipment->id,
-                'box_size_id' => $this->boxSizeId,
-                'weight' => $this->weight,
-                'height' => $this->height,
-                'width' => $this->width,
-                'length' => $this->length,
-            ]);
-
-            $packageItems = [];
-            foreach ($this->packingItems as $packingItem) {
-                $packageItems[] = [
-                    'shipment_item_id' => $packingItem['id'],
-                    'product_id' => $packingItem['product_id'],
-                    'quantity' => $packingItem['packed'],
-                    'transparency_codes' => $packingItem['transparency_codes'] ?? [],
-                ];
-            }
-            $package->packageItems()->createMany($packageItems);
-
-            $package->update(['weight_mismatch' => $package->computeWeightMismatch()]);
-
-            PackageCreated::dispatch($package, $this->shipment);
-
-            return $package;
+            return app(PackagingService::class)->createPackage(
+                shipment: $this->shipment,
+                weight: $this->weight,
+                height: $this->height,
+                width: $this->width,
+                length: $this->length,
+                boxSizeId: $this->boxSizeId,
+                packingItems: $this->mapPackingItems(),
+            );
         });
+    }
+
+    /**
+     * Map client-submitted packing items to the format expected by PackagingService.
+     *
+     * @return array<int, array{shipment_item_id: int, product_id: int, quantity: int, transparency_codes: array<string>}>
+     */
+    private function mapPackingItems(): array
+    {
+        return array_map(fn (array $item) => [
+            'shipment_item_id' => $item['id'],
+            'product_id' => $item['product_id'],
+            'quantity' => $item['packed'],
+            'transparency_codes' => $item['transparency_codes'] ?? [],
+        ], $this->packingItems);
     }
 
     /**
