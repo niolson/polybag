@@ -2,10 +2,16 @@
 
 namespace App\Filament\Pages;
 
+use App\Contracts\PackageDraftWorkflow;
+use App\DataTransferObjects\PackageDrafts\Measurements;
+use App\DataTransferObjects\PackageDrafts\PackageDraftInput;
+use App\DataTransferObjects\PackageDrafts\PackageDraftOptions;
 use App\DataTransferObjects\PrintRequest;
 use App\Enums\Deliverability;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
+use App\Exceptions\PackageDraftIncompleteException;
+use App\Exceptions\PackageDraftInvalidException;
 use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Concerns\PrintsLabels;
 use App\Filament\Support\AddressForm;
@@ -177,13 +183,17 @@ class ManualShip extends Page implements HasForms
             $this->autoShipEnabled = false;
         }
 
-        if ($this->autoShipEnabled) {
-            $this->autoShip($data);
+        try {
+            if ($this->autoShipEnabled) {
+                $this->autoShip($data);
 
-            return;
+                return;
+            }
+
+            $this->manualShip($data);
+        } catch (PackageDraftIncompleteException|PackageDraftInvalidException $e) {
+            $this->notifyError('Not Ready', $e->getMessage());
         }
-
-        $this->manualShip($data);
     }
 
     private function manualShip(array $data): void
@@ -203,7 +213,6 @@ class ManualShip extends Page implements HasForms
             labelFormat: $this->labelFormat,
             labelDpi: $this->labelDpi,
             userId: auth()->id(),
-            onCleanup: fn () => $shipment->delete(),
         );
 
         if (! $result->success) {
@@ -245,16 +254,22 @@ class ManualShip extends Page implements HasForms
                 logger()->warning('ManualShip address validation failed', ['error' => $e->getMessage()]);
             }
 
-            $package = app(PackagingService::class)->createPackage(
+            $options = new PackageDraftOptions(requireCompletePackedItems: false);
+            $draft = app(PackageDraftWorkflow::class)->saveForShipment(
                 shipment: $shipment,
-                weight: $data['weight'],
-                height: $data['height'],
-                width: $data['width'],
-                length: $data['length'],
-                boxSizeId: $data['box_size_id'] ?: null,
+                input: new PackageDraftInput(
+                    measurements: new Measurements($data['weight'], $data['height'], $data['width'], $data['length']),
+                    boxSizeId: $data['box_size_id'] ?: null,
+                ),
+                options: $options,
+            );
+            $ready = app(PackageDraftWorkflow::class)->assertReadyToShip(
+                shipment: $shipment,
+                packageDraftId: $draft->packageDraftId,
+                options: $options,
             );
 
-            return compact('shipment', 'package');
+            return ['shipment' => $shipment, 'package' => $ready->package];
         });
     }
 

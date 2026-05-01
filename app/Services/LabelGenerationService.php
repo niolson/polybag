@@ -83,12 +83,13 @@ class LabelGenerationService
         ?int $labelDpi = null,
         ?int $userId = null,
         ?Closure $onCleanup = null,
+        bool $cleanupOnFailure = true,
     ): AutoShipResult {
         try {
             $result = $this->generateLabel($package, $labelFormat, $labelDpi);
 
             if (! $result->success) {
-                $this->cleanupPackage($package, $onCleanup);
+                $this->cleanupPackage($package, $onCleanup, $cleanupOnFailure);
 
                 return AutoShipResult::failed('Shipping Error', $result->errorMessage);
             }
@@ -98,13 +99,13 @@ class LabelGenerationService
             return AutoShipResult::shipped($result->response, $result->selectedRate);
 
         } catch (RequestTimeOutException $e) {
-            $this->cleanupPackage($package, $onCleanup);
+            $this->cleanupPackage($package, $onCleanup, $cleanupOnFailure);
             logger()->error('AutoShip timeout', ['package_id' => $package->id]);
 
             return AutoShipResult::failed('Carrier Timeout', 'The carrier API is not responding. Please try again in a few moments.');
 
         } catch (RequestException $e) {
-            $this->cleanupPackage($package, $onCleanup);
+            $this->cleanupPackage($package, $onCleanup, $cleanupOnFailure);
             logger()->error('AutoShip carrier error', ['package_id' => $package->id, 'error' => $e->getMessage()]);
 
             return AutoShipResult::failed('Carrier Error', 'Unable to connect to the carrier. Please try again.');
@@ -116,7 +117,7 @@ class LabelGenerationService
             return AutoShipResult::failed('Package State Changed', $e->getMessage());
 
         } catch (\Exception $e) {
-            $this->cleanupPackage($package, $onCleanup);
+            $this->cleanupPackage($package, $onCleanup, $cleanupOnFailure);
             logger()->error('AutoShip error', ['package_id' => $package->id, 'error' => $e->getMessage()]);
 
             return AutoShipResult::failed('Auto Ship Error', 'An unexpected error occurred. Please try again.');
@@ -127,8 +128,12 @@ class LabelGenerationService
      * Delete a package and its items if it hasn't been shipped.
      * Calls the optional cleanup callback after deletion (e.g. to delete a shipment).
      */
-    private function cleanupPackage(Package $package, ?Closure $onCleanup): void
+    private function cleanupPackage(Package $package, ?Closure $onCleanup, bool $cleanupOnFailure): void
     {
+        if (! $cleanupOnFailure) {
+            return;
+        }
+
         if ($package->exists && $package->status !== PackageStatus::Shipped) {
             $package->packageItems()->delete();
             $package->delete();

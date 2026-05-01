@@ -149,3 +149,36 @@ it('passes label format and DPI to ship request', function (): void {
     expect($result->success)->toBeTrue()
         ->and($result->response->labelFormat)->toBe('zpl');
 });
+
+it('can preserve a package draft when auto ship fails', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'MockCarrier', 'active' => true]);
+    $service = CarrierService::factory()->create([
+        'carrier_id' => $carrier->id,
+        'name' => 'Test Service',
+        'service_code' => 'TEST',
+        'active' => true,
+    ]);
+    $method = ShippingMethod::factory()->create();
+    $method->carrierServices()->attach($service->id);
+    $shipment = Shipment::factory()->create(['shipping_method_id' => $method->id]);
+    $package = Package::factory()->for($shipment)->create();
+
+    ShippingRule::factory()->create([
+        'shipping_method_id' => $method->id,
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+    ]);
+
+    $mockAdapter = Mockery::mock(CarrierAdapterInterface::class);
+    $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
+    $mockAdapter->shouldReceive('createShipment')->once()->andReturn(
+        ShipResponse::failure('Address validation failed')
+    );
+
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $mockAdapter);
+
+    $result = app(LabelGenerationService::class)->autoShip($package, cleanupOnFailure: false);
+
+    expect($result->success)->toBeFalse()
+        ->and($package->fresh())->not->toBeNull();
+});

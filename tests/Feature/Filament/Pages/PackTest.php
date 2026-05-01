@@ -160,9 +160,12 @@ it('rejects ship when dimensions are missing', function (): void {
 
     Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->call('ship', $packingItems, null, '1.5', '10', '8', '', false)
-        ->assertNotified();
+        ->assertNotified('Not Ready');
 
-    expect(Package::where('shipment_id', $shipment->id)->exists())->toBeFalse();
+    $package = Package::where('shipment_id', $shipment->id)->first();
+    expect($package)->not->toBeNull()
+        ->and($package->status)->toBe(PackageStatus::Unshipped)
+        ->and($package->length)->toBeNull();
 });
 
 it('rejects ship when items not fully packed', function (): void {
@@ -188,9 +191,12 @@ it('rejects ship when items not fully packed', function (): void {
 
     Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->call('ship', $packingItems, null, '1.5', '10', '8', '6', false)
-        ->assertNotified();
+        ->assertNotified('Not Ready');
 
-    expect(Package::where('shipment_id', $shipment->id)->exists())->toBeFalse();
+    $package = Package::where('shipment_id', $shipment->id)->first();
+    expect($package)->not->toBeNull()
+        ->and($package->status)->toBe(PackageStatus::Unshipped)
+        ->and($package->packageItems->first()->quantity)->toBe(1);
 });
 
 it('ships with transparency codes', function (): void {
@@ -307,9 +313,10 @@ it('cleans up existing unshipped packages before creating a new one', function (
         ->call('ship', $packingItems, $boxSize->id, '2.0', '10', '8', '6', false)
         ->assertRedirect();
 
-    // Orphan should be deleted, only the new package remains
+    // Existing unshipped package is now the durable Package Draft and is updated in place.
     expect(Package::where('shipment_id', $shipment->id)->count())->toBe(1)
-        ->and(Package::find($orphan->id))->toBeNull();
+        ->and(Package::find($orphan->id))->not->toBeNull()
+        ->and((float) Package::find($orphan->id)->weight)->toBe(2.0);
 });
 
 it('preserves shipped packages when creating a new one', function (): void {

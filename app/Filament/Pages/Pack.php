@@ -2,22 +2,27 @@
 
 namespace App\Filament\Pages;
 
+use App\Contracts\PackageDraftWorkflow;
+use App\DataTransferObjects\PackageDrafts\Measurements;
+use App\DataTransferObjects\PackageDrafts\PackageDraftInput;
+use App\DataTransferObjects\PackageDrafts\PackageDraftItemInput;
+use App\DataTransferObjects\PackageDrafts\PackageDraftOptions;
+use App\DataTransferObjects\PackageDrafts\ReadyPackageDraft;
 use App\DataTransferObjects\PrintRequest;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
+use App\Exceptions\PackageDraftIncompleteException;
+use App\Exceptions\PackageDraftInvalidException;
 use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Concerns\PrintsLabels;
-use App\Models\BoxSize;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\CacheService;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\LabelGenerationService;
-use App\Services\PackagingService;
 use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Pages\Page;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Session;
 use Saloon\Exceptions\Request\RequestException;
 use UnitEnum;
@@ -75,15 +80,25 @@ class Pack extends Page
             $this->shipment = Shipment::with('shipmentItems.product')
                 ->findOrFail($shipment_id);
 
+            $draft = app(PackageDraftWorkflow::class)->resumeForShipment($this->shipment);
+            $packedItems = collect($draft->items)->keyBy('shipmentItemId');
+
             foreach ($this->shipment->shipmentItems as $shipmentItem) {
+                $packedItem = $packedItems->get($shipmentItem->id);
                 $packingItem = $shipmentItem->toArray();
                 $packingItem['sku'] = $shipmentItem->product?->sku;
                 $packingItem['barcode'] = $shipmentItem->product?->barcode;
                 $packingItem['name'] = $shipmentItem->product?->name;
-                $packingItem['packed'] = 0;
-                $packingItem['transparency_codes'] = [];
+                $packingItem['packed'] = $packedItem?->quantity ?? 0;
+                $packingItem['transparency_codes'] = $packedItem?->transparencyCodes ?? [];
                 $this->packingItems[] = $packingItem;
             }
+
+            $this->boxSizeId = $draft->boxSizeId;
+            $this->weight = (string) ($draft->measurements->weight ?? '');
+            $this->height = (string) ($draft->measurements->height ?? '');
+            $this->width = (string) ($draft->measurements->width ?? '');
+            $this->length = (string) ($draft->measurements->length ?? '');
         }
     }
 
@@ -109,30 +124,32 @@ class Pack extends Page
             $autoShip = false;
         }
 
-        if (! $this->validatePackingData()) {
+        if (! $this->shipment) {
+            $this->notifyError('Invalid State', 'No shipment loaded.');
+
             return;
         }
 
-        if (! $this->isReadyToShip()) {
-            $this->notifyError('Not Ready', 'Please ensure all items are packed and all dimensions are filled.');
+        try {
+            $ready = $this->saveReadyPackageDraft();
+        } catch (PackageDraftIncompleteException|PackageDraftInvalidException $e) {
+            $this->notifyError('Not Ready', $e->getMessage());
 
             return;
         }
 
         if ($autoShip) {
-            $this->autoShip();
+            $this->autoShip($ready->package);
         } else {
-            $this->manualShip();
+            $this->manualShip($ready->package);
         }
     }
 
     /**
      * Manual ship - creates package and redirects to Ship page.
      */
-    private function manualShip(): void
+    private function manualShip(Package $package): void
     {
-        $package = $this->createPackage();
-        $this->trackInProgressPackage($package->id);
         $this->redirect('/ship/'.$package->id);
     }
 
@@ -140,15 +157,14 @@ class Pack extends Page
      * Auto ship - creates package, fetches rates, selects cheapest, ships, and prints label.
      * If any step fails after package creation, the package is deleted to prevent orphans.
      */
-    private function autoShip(): void
+    private function autoShip(Package $package): void
     {
-        $package = $this->createPackage();
-
         $result = app(LabelGenerationService::class)->autoShip(
             package: $package,
             labelFormat: $this->labelFormat,
             labelDpi: $this->labelDpi,
             userId: auth()->id(),
+            cleanupOnFailure: false,
         );
 
         if (! $result->success) {
@@ -167,83 +183,40 @@ class Pack extends Page
         $this->resetForNextShipment();
     }
 
-    /**
-     * Create a package from the current packing state.
-     * Cleans up any previous in-progress package from this session before creating.
-     *
-     * TODO: Review this orphan cleanup process. Deleting packages silently can be
-     * surprising. Consider reusing/updating the existing package instead of
-     * delete-and-recreate, or requiring explicit user confirmation before deleting.
-     */
-    private function createPackage(): Package
+    private function saveReadyPackageDraft(): ReadyPackageDraft
     {
-        return DB::transaction(function () {
-            $previousPackageId = Session::get('in_progress_package_id');
+        $options = new PackageDraftOptions(
+            requireCompletePackedItems: (bool) app(SettingsService::class)->get('packing_validation_enabled', true),
+        );
 
-            if ($previousPackageId) {
-                $orphan = Package::where('id', $previousPackageId)
-                    ->where('status', PackageStatus::Unshipped)
-                    ->first();
-
-                if ($orphan) {
-                    logger()->warning('Orphan package cleanup', [
-                        'deleted_package_id' => $orphan->id,
-                        'shipment_id' => $orphan->shipment_id,
-                        'new_shipment_id' => $this->shipment->id,
-                        'user_id' => auth()->id(),
-                    ]);
-                    $orphanId = $orphan->id;
-                    $orphan->packageItems()->delete();
-                    $orphan->delete();
-
-                    $this->notifyWarning('Package Replaced', "Unshipped package #{$orphanId} was deleted and replaced.");
-                }
-
-                Session::forget('in_progress_package_id');
-            }
-
-            return app(PackagingService::class)->createPackage(
-                shipment: $this->shipment,
-                weight: $this->weight,
-                height: $this->height,
-                width: $this->width,
-                length: $this->length,
+        $draft = app(PackageDraftWorkflow::class)->saveForShipment(
+            shipment: $this->shipment,
+            input: new PackageDraftInput(
+                measurements: new Measurements($this->weight, $this->height, $this->width, $this->length),
                 boxSizeId: $this->boxSizeId,
-                packingItems: $this->mapPackingItems(),
-            );
-        });
+                items: $this->mapPackingItems(),
+            ),
+            options: $options,
+        );
+
+        return app(PackageDraftWorkflow::class)->assertReadyToShip(
+            shipment: $this->shipment,
+            packageDraftId: $draft->packageDraftId,
+            options: $options,
+        );
     }
 
     /**
-     * Map client-submitted packing items to the format expected by PackagingService.
-     *
-     * @return array<int, array{shipment_item_id: int, product_id: int, quantity: int, transparency_codes: array<string>}>
+     * @return array<int, PackageDraftItemInput>
      */
     private function mapPackingItems(): array
     {
-        return array_map(fn (array $item) => [
-            'shipment_item_id' => $item['id'],
-            'product_id' => $item['product_id'],
-            'quantity' => $item['packed'],
-            'transparency_codes' => $item['transparency_codes'] ?? [],
-        ], $this->packingItems);
-    }
-
-    /**
-     * Track a package as in-progress for this session (for orphan cleanup).
-     * Called after createPackage() in manual ship flow.
-     */
-    private function trackInProgressPackage(int $packageId): void
-    {
-        Session::put('in_progress_package_id', $packageId);
-    }
-
-    /**
-     * Clear the in-progress package tracking (after ship or auto-ship completes).
-     */
-    private function clearInProgressPackage(): void
-    {
-        Session::forget('in_progress_package_id');
+        return array_map(fn (array $item) => new PackageDraftItemInput(
+            shipmentItemId: $item['id'],
+            productId: $item['product_id'],
+            quantity: (int) $item['packed'],
+            transparencyCodes: $item['transparency_codes'] ?? [],
+        ), $this->packingItems);
     }
 
     /**
@@ -277,100 +250,6 @@ class Pack extends Page
         }
 
         $this->redirect('/pack/'.$shipment->id);
-    }
-
-    /**
-     * Validate that packing data from the client is consistent with server state.
-     */
-    private function validatePackingData(): bool
-    {
-        if (! $this->shipment) {
-            $this->notifyError('Invalid State', 'No shipment loaded.');
-
-            return false;
-        }
-
-        // Validate box size exists if provided
-        if ($this->boxSizeId !== null && ! BoxSize::where('id', $this->boxSizeId)->exists()) {
-            $this->notifyError('Invalid Box Size', 'The selected box size does not exist.');
-
-            return false;
-        }
-
-        // Build a lookup of valid shipment item IDs and their product IDs for this shipment
-        $validItems = $this->shipment->shipmentItems()
-            ->pluck('product_id', 'id');
-
-        foreach ($this->packingItems as $packingItem) {
-            $itemId = $packingItem['id'] ?? null;
-            $productId = $packingItem['product_id'] ?? null;
-            $packed = $packingItem['packed'] ?? 0;
-
-            // Verify the shipment item belongs to this shipment
-            if (! $itemId || ! $validItems->has($itemId)) {
-                $this->notifyError('Invalid Item', 'One or more packing items do not belong to this shipment.');
-
-                return false;
-            }
-
-            // Verify the product ID matches
-            if ($productId != $validItems[$itemId]) {
-                $this->notifyError('Invalid Item', 'Product mismatch detected in packing items.');
-
-                return false;
-            }
-
-            // Verify quantity is a reasonable non-negative integer
-            if (! is_numeric($packed) || $packed < 0 || $packed > 10000) {
-                $this->notifyError('Invalid Quantity', 'Packed quantity is out of range.');
-
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private function isReadyToShip(): bool
-    {
-        if (! $this->shipment) {
-            return false;
-        }
-
-        // If packing validation is disabled, only check weight/dimensions
-        if (! app(SettingsService::class)->get('packing_validation_enabled', true)) {
-            return $this->hasValidDimensions();
-        }
-
-        // Check all items are packed
-        foreach ($this->packingItems as $packingItem) {
-            if ($packingItem['packed'] != $packingItem['quantity']) {
-                return false;
-            }
-        }
-
-        return $this->hasValidDimensions();
-    }
-
-    private function hasValidDimensions(): bool
-    {
-        if (empty($this->weight) || $this->weight <= 0) {
-            return false;
-        }
-
-        if (empty($this->height) || $this->height <= 0) {
-            return false;
-        }
-
-        if (empty($this->width) || $this->width <= 0) {
-            return false;
-        }
-
-        if (empty($this->length) || $this->length <= 0) {
-            return false;
-        }
-
-        return true;
     }
 
     /**
