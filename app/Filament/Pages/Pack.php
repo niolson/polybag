@@ -3,13 +3,13 @@
 namespace App\Filament\Pages;
 
 use App\Contracts\PackageDraftWorkflow;
+use App\Contracts\PackageLabelWorkflow;
 use App\DataTransferObjects\PackageDrafts\Measurements;
 use App\DataTransferObjects\PackageDrafts\PackageDraftInput;
 use App\DataTransferObjects\PackageDrafts\PackageDraftItemInput;
 use App\DataTransferObjects\PackageDrafts\PackageDraftOptions;
 use App\DataTransferObjects\PackageDrafts\ReadyPackageDraft;
 use App\DataTransferObjects\PrintRequest;
-use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Exceptions\PackageDraftIncompleteException;
 use App\Exceptions\PackageDraftInvalidException;
@@ -18,13 +18,11 @@ use App\Filament\Concerns\PrintsLabels;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\CacheService;
-use App\Services\Carriers\CarrierRegistry;
 use App\Services\LabelGenerationService;
 use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\Session;
-use Saloon\Exceptions\Request\RequestException;
 use UnitEnum;
 
 class Pack extends Page
@@ -267,21 +265,22 @@ class Pack extends Page
 
         $package = Package::find($packageId);
 
-        if (! $package || $package->status !== PackageStatus::Shipped || ! $package->label_data) {
+        if (! $package) {
             $this->notifyError('Label Not Available', 'The label for the last shipped package is not available.');
 
             return;
         }
 
-        // Verify the current user shipped this package or has elevated permissions
-        if (! $this->canAccessPackage($package)) {
-            $this->notifyError('Access Denied', 'You can only reprint labels for packages you shipped.');
+        $result = app(PackageLabelWorkflow::class)->labelForReprint($package, auth()->user());
+
+        if (! $result->success) {
+            $this->notifyError($result->title, $result->message);
 
             return;
         }
 
-        $this->dispatchPrint(PrintRequest::fromPackage($package));
-        $this->notifySuccess('Label Reprinted', "Reprinted label for tracking: {$package->tracking_number}");
+        $this->dispatchPrint($result->printRequest);
+        $this->notifySuccess($result->title, $result->message);
     }
 
     /**
@@ -299,46 +298,28 @@ class Pack extends Page
 
         $package = Package::with('shipment')->find($packageId);
 
-        if (! $package || $package->status !== PackageStatus::Shipped) {
+        if (! $package) {
             $this->notifyError('Package Not Found', 'The last shipped package could not be found.');
 
             return;
         }
 
-        // Verify the current user shipped this package or has elevated permissions
         if (! $this->canAccessPackage($package)) {
             $this->notifyError('Access Denied', 'You can only cancel labels for packages you shipped.');
 
             return;
         }
 
-        if (! $package->tracking_number || ! $package->carrier) {
-            $this->notifyError('Cannot Cancel', 'Package is missing tracking information.');
+        $result = app(PackageLabelWorkflow::class)->voidLabel($package);
+
+        if ($result->success) {
+            Session::forget('last_shipped_package_id');
+            $this->notifySuccess('Label Cancelled', $result->message);
 
             return;
         }
 
-        try {
-            $adapter = app(CarrierRegistry::class)->get($package->carrier);
-            $response = $adapter->cancelShipment($package->tracking_number, $package);
-
-            if ($response->success) {
-                $package->clearShipping();
-                Session::forget('last_shipped_package_id');
-                $this->notifySuccess('Label Cancelled', $response->message ?? 'The label has been voided.');
-            } else {
-                $this->notifyError('Cancel Failed', $response->message ?? 'Failed to cancel the label.');
-            }
-        } catch (\RuntimeException $e) {
-            // Optimistic locking failure
-            $this->notifyError('Package State Changed', $e->getMessage());
-        } catch (RequestException $e) {
-            logger()->error('Cancel label carrier error', ['error' => $e->getMessage()]);
-            $this->notifyError('Carrier Error', 'Unable to connect to carrier. Please try again.');
-        } catch (\Exception $e) {
-            logger()->error('Cancel label error', ['error' => $e->getMessage()]);
-            $this->notifyError('Cancel Error', 'An unexpected error occurred.');
-        }
+        $this->notifyError($result->title, $result->message);
     }
 
     /**

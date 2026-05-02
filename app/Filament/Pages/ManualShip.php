@@ -3,12 +3,12 @@
 namespace App\Filament\Pages;
 
 use App\Contracts\PackageDraftWorkflow;
+use App\Contracts\PackageLabelWorkflow;
 use App\DataTransferObjects\PackageDrafts\Measurements;
 use App\DataTransferObjects\PackageDrafts\PackageDraftInput;
 use App\DataTransferObjects\PackageDrafts\PackageDraftOptions;
 use App\DataTransferObjects\PrintRequest;
 use App\Enums\Deliverability;
-use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Exceptions\PackageDraftIncompleteException;
 use App\Exceptions\PackageDraftInvalidException;
@@ -336,20 +336,21 @@ class ManualShip extends Page implements HasForms
 
         $package = Package::find($packageId);
 
-        if (! $package || $package->status !== PackageStatus::Shipped || ! $package->label_data) {
+        if (! $package) {
             $this->notifyError('Label Not Available', 'The label for the last shipped package is not available.');
 
             return;
         }
 
-        $user = auth()->user();
-        if (! $user->role->isAtLeast(Role::Manager) && $package->shipped_by_user_id !== $user->id) {
-            $this->notifyError('Access Denied', 'You can only reprint labels for packages you shipped.');
+        $result = app(PackageLabelWorkflow::class)->labelForReprint($package, auth()->user());
+
+        if (! $result->success) {
+            $this->notifyError($result->title, $result->message);
 
             return;
         }
 
-        $this->dispatchPrint(PrintRequest::fromPackage($package));
-        $this->notifySuccess('Label Reprinted', "Reprinted label for tracking: {$package->tracking_number}");
+        $this->dispatchPrint($result->printRequest);
+        $this->notifySuccess($result->title, $result->message);
     }
 }

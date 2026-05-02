@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Contracts\PackageLabelWorkflow;
 use App\Enums\PackageStatus;
 use App\Enums\TrackingStatus;
 use App\Filament\Concerns\InteractsWithScoutSearch;
@@ -10,7 +11,6 @@ use App\Filament\Resources\PackageResource\RelationManagers\PackageItemsRelation
 use App\Filament\Support\CarrierLogoColumn;
 use App\Models\Location;
 use App\Models\Package;
-use App\Services\Carriers\CarrierRegistry;
 use App\Services\TrackingService;
 use BackedEnum;
 use Filament\Actions;
@@ -28,7 +28,6 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\HtmlString;
-use Saloon\Exceptions\Request\RequestException;
 
 class PackageResource extends Resource
 {
@@ -305,7 +304,21 @@ class PackageResource extends Resource
                     ->color('gray')
                     ->visible(fn (Package $record) => $record->status === PackageStatus::Shipped && $record->label_data)
                     ->action(function (Package $record, $livewire): void {
-                        $livewire->dispatch('print-label', label: $record->label_data, orientation: $record->label_orientation ?? 'portrait', format: $record->label_format ?? 'pdf', dpi: $record->label_dpi);
+                        $result = app(PackageLabelWorkflow::class)->labelForReprint($record, auth()->user());
+
+                        if (! $result->success) {
+                            Notification::make()->danger()->title($result->title)->body($result->message)->send();
+
+                            return;
+                        }
+
+                        $livewire->dispatch(
+                            'print-label',
+                            label: $result->printRequest->label,
+                            orientation: $result->printRequest->orientation,
+                            format: $result->printRequest->format,
+                            dpi: $result->printRequest->dpi,
+                        );
                     }),
                 Actions\Action::make('void')
                     ->label('Void Label')
@@ -316,21 +329,15 @@ class PackageResource extends Resource
                     ->modalDescription('This will cancel the label with the carrier. The package will be kept with its dimensions so it can be re-shipped.')
                     ->visible(fn (Package $record) => $record->status === PackageStatus::Shipped && $record->tracking_number && $record->carrier)
                     ->action(function (Package $record): void {
-                        try {
-                            $adapter = app(CarrierRegistry::class)->get($record->carrier);
-                            $response = $adapter->cancelShipment($record->tracking_number, $record);
+                        $result = app(PackageLabelWorkflow::class)->voidLabel($record);
 
-                            if ($response->success) {
-                                $record->clearShipping();
-                                Notification::make()->success()->title('Label voided')->body($response->message)->send();
-                            } else {
-                                Notification::make()->danger()->title('Void failed')->body($response->message)->send();
-                            }
-                        } catch (\RuntimeException $e) {
-                            Notification::make()->danger()->title('State Changed')->body($e->getMessage())->send();
-                        } catch (RequestException $e) {
-                            Notification::make()->danger()->title('Carrier Error')->body('Unable to connect to carrier. Please try again.')->send();
-                        }
+                        $notification = Notification::make()
+                            ->title($result->title)
+                            ->body($result->message);
+
+                        $result->success
+                            ? $notification->success()->send()
+                            : $notification->danger()->send();
                     }),
                 Actions\EditAction::make(),
             ]);

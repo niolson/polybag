@@ -2,11 +2,11 @@
 
 namespace App\Filament\Resources\PackageResource\Pages;
 
+use App\Contracts\PackageLabelWorkflow;
 use App\Enums\PackageStatus;
 use App\Filament\Resources\PackageResource;
 use App\Filament\Resources\ShipmentResource;
 use App\Models\Location;
-use App\Services\Carriers\CarrierRegistry;
 use Filament\Actions\Action;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
@@ -55,15 +55,15 @@ class ViewPackage extends ViewRecord
                 ->modalDescription('This will cancel the label with the carrier. The package will be kept with its dimensions so it can be re-shipped.')
                 ->visible(fn () => $this->record->status === PackageStatus::Shipped && $this->record->tracking_number && $this->record->carrier)
                 ->action(function (): void {
-                    $adapter = app(CarrierRegistry::class)->get($this->record->carrier);
-                    $response = $adapter->cancelShipment($this->record->tracking_number, $this->record);
+                    $result = app(PackageLabelWorkflow::class)->voidLabel($this->record);
 
-                    if ($response->success) {
-                        $this->record->clearShipping();
-                        Notification::make()->success()->title('Label voided')->body($response->message)->send();
-                    } else {
-                        Notification::make()->danger()->title('Void failed')->body($response->message)->send();
-                    }
+                    $notification = Notification::make()
+                        ->title($result->title)
+                        ->body($result->message);
+
+                    $result->success
+                        ? $notification->success()->send()
+                        : $notification->danger()->send();
                 }),
             Action::make('edit')
                 ->url(fn () => PackageResource::getUrl('edit', ['record' => $this->record])),
