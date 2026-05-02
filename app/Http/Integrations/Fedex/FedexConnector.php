@@ -6,13 +6,18 @@ use App\Http\Integrations\Concerns\HasCachedAuthentication;
 use App\Http\Integrations\Concerns\RetriesTransientErrors;
 use App\Services\FedexMfaAuditService;
 use App\Services\SettingsService;
+use DateInterval;
 use DateTimeImmutable;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Saloon\Contracts\OAuthAuthenticator;
+use Saloon\Exceptions\Request\FatalRequestException;
+use Saloon\Exceptions\Request\RequestException;
 use Saloon\Helpers\OAuth2\OAuthConfig;
 use Saloon\Http\Auth\AccessTokenAuthenticator;
 use Saloon\Http\Connector;
+use Saloon\Http\OAuth2\GetClientCredentialsTokenRequest;
 use Saloon\Http\Request;
 use Saloon\Http\Response;
 use Saloon\Traits\OAuth2\ClientCredentialsGrant;
@@ -23,7 +28,11 @@ class FedexConnector extends Connector
     use ClientCredentialsGrant;
     use HasCachedAuthentication;
     use HasTimeout;
-    use RetriesTransientErrors;
+    use RetriesTransientErrors {
+        handleRetry as handleTransientRetry;
+    }
+
+    private bool $retriedAfterUnauthorized = false;
 
     protected int $connectTimeout = 5;
 
@@ -46,6 +55,25 @@ class FedexConnector extends Connector
      * Use exponential backoff for retries.
      */
     public ?bool $useExponentialBackoff = true;
+
+    public function handleRetry(FatalRequestException|RequestException $exception, Request $request): bool
+    {
+        if (! $exception instanceof RequestException) {
+            return $this->handleTransientRetry($exception, $request);
+        }
+
+        if ($exception->getResponse()->status() !== 401) {
+            return $this->handleTransientRetry($exception, $request);
+        }
+
+        if ($this->retriedAfterUnauthorized || $request instanceof GetClientCredentialsTokenRequest) {
+            return false;
+        }
+
+        $this->retriedAfterUnauthorized = true;
+
+        return $this->refreshAuthenticatorAfterUnauthorized($request);
+    }
 
     public function resolveBaseUrl(): string
     {
@@ -141,6 +169,63 @@ class FedexConnector extends Connector
         $isSandbox = (bool) $settings->get('sandbox_mode', false);
 
         return $isSandbox ? 'fedex_authenticator_sandbox' : 'fedex_authenticator';
+    }
+
+    private function refreshAuthenticatorAfterUnauthorized(Request $request): bool
+    {
+        $cacheKey = static::getAuthenticatorCacheKey();
+
+        Cache::forget($cacheKey);
+
+        try {
+            $authenticator = $this->requestFreshAuthenticator();
+        } catch (\Throwable $exception) {
+            logger()->warning('FedEx returned 401 and token refresh failed', [
+                'request' => $request::class,
+                'cache_key' => $cacheKey,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return false;
+        }
+
+        Cache::put(
+            $cacheKey,
+            $authenticator,
+            $this->cacheUntilBeforeExpiry($authenticator),
+        );
+
+        $this->authenticate($authenticator);
+
+        logger()->warning('FedEx returned 401 with cached authenticator; refreshed token and retrying request', [
+            'request' => $request::class,
+            'cache_key' => $cacheKey,
+        ]);
+
+        return true;
+    }
+
+    private function requestFreshAuthenticator(): OAuthAuthenticator
+    {
+        $connector = new static;
+
+        if ($this->hasMockClient()) {
+            $connector->withMockClient($this->getMockClient());
+        }
+
+        $authenticator = $connector->getAccessToken();
+
+        if (! $authenticator instanceof OAuthAuthenticator) {
+            throw new \RuntimeException('FedEx token refresh did not return an OAuth authenticator.');
+        }
+
+        return $authenticator;
+    }
+
+    private function cacheUntilBeforeExpiry(OAuthAuthenticator $authenticator): DateTimeImmutable
+    {
+        return ($authenticator->getExpiresAt() ?? new DateTimeImmutable('+1 hour'))
+            ->sub(DateInterval::createFromDateString('10 minutes'));
     }
 
     /**

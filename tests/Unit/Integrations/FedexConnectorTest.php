@@ -10,10 +10,14 @@ use App\Http\Integrations\Fedex\Requests\UploadEtdImage;
 use App\Models\Setting;
 use App\Services\SettingsService;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Saloon\Http\Auth\AccessTokenAuthenticator;
 use Saloon\Http\Faking\MockClient;
 use Saloon\Http\Faking\MockResponse;
+use Saloon\Http\OAuth2\GetClientCredentialsTokenRequest;
 use Saloon\Http\PendingRequest;
 use Saloon\Laravel\Facades\Saloon;
 
@@ -148,6 +152,85 @@ it('builds correct rate request', function (): void {
             && $body['requestedShipment']['recipient']['address']['postalCode'] === '90210'
             && $body['requestedShipment']['requestedPackageLineItems'][0]['weight']['value'] === 5.0;
     });
+});
+
+it('refreshes the cached authenticator and retries once when FedEx rejects a valid-looking token', function (): void {
+    Storage::fake();
+    Log::shouldReceive('channel')->andReturnSelf();
+    Log::shouldReceive('info')->byDefault();
+    Log::shouldReceive('warning')
+        ->once()
+        ->with('FedEx returned 401 with cached authenticator; refreshed token and retrying request', Mockery::on(
+            fn (array $context): bool => $context['request'] === Rates::class
+                && $context['cache_key'] === 'fedex_authenticator_sandbox'
+        ));
+
+    config([
+        'services.fedex.sandbox_url' => 'https://apis-sandbox.fedex.com',
+        'services.fedex.sandbox_api_key' => 'sandbox-key',
+        'services.fedex.sandbox_api_secret' => 'sandbox-secret',
+    ]);
+
+    Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
+    app(SettingsService::class)->clearCache();
+
+    Cache::put(
+        'fedex_authenticator_sandbox',
+        new AccessTokenAuthenticator('stale-token', null, new DateTimeImmutable('+30 minutes')),
+        now()->addMinutes(20),
+    );
+
+    $sentRequests = [];
+
+    $mockClient = new MockClient([
+        function (PendingRequest $pendingRequest) use (&$sentRequests): MockResponse {
+            $sentRequests[] = [
+                'request' => $pendingRequest->getRequest()::class,
+                'authorization' => $pendingRequest->headers()->get('Authorization'),
+            ];
+
+            return MockResponse::make(['error' => 'invalid_token'], 401);
+        },
+        function (PendingRequest $pendingRequest) use (&$sentRequests): MockResponse {
+            $sentRequests[] = [
+                'request' => $pendingRequest->getRequest()::class,
+                'authorization' => $pendingRequest->headers()->get('Authorization'),
+            ];
+
+            return MockResponse::make([
+                'access_token' => 'fresh-token',
+                'token_type' => 'bearer',
+                'expires_in' => 3600,
+            ], 200);
+        },
+        function (PendingRequest $pendingRequest) use (&$sentRequests): MockResponse {
+            $sentRequests[] = [
+                'request' => $pendingRequest->getRequest()::class,
+                'authorization' => $pendingRequest->headers()->get('Authorization'),
+            ];
+
+            return MockResponse::make([
+                'output' => ['rateReplyDetails' => []],
+            ], 200);
+        },
+    ]);
+
+    $connector = new FedexConnector;
+    $connector
+        ->withMockClient($mockClient)
+        ->authenticate(Cache::get('fedex_authenticator_sandbox'));
+
+    $response = $connector->send(new Rates);
+
+    expect($response->status())->toBe(200)
+        ->and($sentRequests)->toHaveCount(3)
+        ->and($sentRequests[0]['request'])->toBe(Rates::class)
+        ->and($sentRequests[0]['authorization'])->toBe('Bearer stale-token')
+        ->and($sentRequests[1]['request'])->toBe(GetClientCredentialsTokenRequest::class)
+        ->and($sentRequests[1]['authorization'])->toBeNull()
+        ->and($sentRequests[2]['request'])->toBe(Rates::class)
+        ->and($sentRequests[2]['authorization'])->toBe('Bearer fresh-token')
+        ->and(Cache::get('fedex_authenticator_sandbox')->getAccessToken())->toBe('fresh-token');
 });
 
 it('builds correct create shipment request', function (): void {
