@@ -4,11 +4,13 @@ namespace App\Filament\Pages;
 
 use App\Contracts\PackageDraftWorkflow;
 use App\Contracts\PackageLabelWorkflow;
+use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\PackageDrafts\Measurements;
 use App\DataTransferObjects\PackageDrafts\PackageDraftInput;
 use App\DataTransferObjects\PackageDrafts\PackageDraftItemInput;
 use App\DataTransferObjects\PackageDrafts\PackageDraftOptions;
 use App\DataTransferObjects\PackageDrafts\ReadyPackageDraft;
+use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PrintRequest;
 use App\Enums\Role;
 use App\Exceptions\PackageDraftIncompleteException;
@@ -18,7 +20,6 @@ use App\Filament\Concerns\PrintsLabels;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\CacheService;
-use App\Services\LabelGenerationService;
 use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Pages\Page;
@@ -157,16 +158,18 @@ class Pack extends Page
      */
     private function autoShip(Package $package): void
     {
-        $result = app(LabelGenerationService::class)->autoShip(
-            package: $package,
-            labelFormat: $this->labelFormat,
-            labelDpi: $this->labelDpi,
-            userId: auth()->id(),
-            cleanupOnFailure: false,
+        $result = app(PackageShippingWorkflow::class)->autoShip(
+            $package,
+            new PackageAutoShippingRequest(
+                labelFormat: $this->labelFormat,
+                labelDpi: $this->labelDpi,
+                userId: auth()->id(),
+                cleanupOnFailure: false,
+            ),
         );
 
         if (! $result->success) {
-            $this->notifyError($result->errorTitle, $result->errorMessage);
+            $this->notifyError($result->title ?? 'Shipping Error', $result->message ?? 'Unable to ship package.');
 
             return;
         }

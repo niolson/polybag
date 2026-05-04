@@ -60,6 +60,7 @@ function registerMockAdapterForErrorTest(ShipResponse $response): void
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
     $adapter->shouldReceive('getCarrierName')->andReturn('USPS');
     $adapter->shouldReceive('isConfigured')->andReturn(true);
+    $adapter->shouldReceive('prepareRateRequest')->andReturnNull();
     $adapter->shouldReceive('getRates')->andReturn(collect());
     $adapter->shouldReceive('createShipment')->andReturn($response);
 
@@ -71,6 +72,7 @@ function registerThrowingAdapterForErrorTest(Throwable $exception): void
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
     $adapter->shouldReceive('getCarrierName')->andReturn('USPS');
     $adapter->shouldReceive('isConfigured')->andReturn(true);
+    $adapter->shouldReceive('prepareRateRequest')->andReturnNull();
     $adapter->shouldReceive('getRates')->andReturn(collect());
     $adapter->shouldReceive('createShipment')->andThrow($exception);
 

@@ -2,10 +2,11 @@
 
 namespace App\Jobs;
 
+use App\Contracts\PackageShippingWorkflow;
+use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
 use App\Models\LabelBatchItem;
-use App\Services\LabelGenerationService;
 use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -43,15 +44,17 @@ class GenerateLabelJob implements ShouldQueue
         $item->update(['status' => LabelBatchItemStatus::Processing]);
 
         try {
-            $result = app(LabelGenerationService::class)->generateLabel(
+            $result = app(PackageShippingWorkflow::class)->autoShip(
                 $item->package,
-                $this->labelFormat,
-                $this->labelDpi,
+                new PackageAutoShippingRequest(
+                    labelFormat: $this->labelFormat,
+                    labelDpi: $this->labelDpi,
+                    userId: $item->labelBatch->user_id,
+                    cleanupOnFailure: false,
+                ),
             );
 
-            if ($result->success) {
-                $item->package->markShipped($result->response, $item->labelBatch->user_id);
-
+            if ($result->success && $result->response) {
                 $item->update([
                     'status' => LabelBatchItemStatus::Success,
                     'tracking_number' => $result->response->trackingNumber,
@@ -63,7 +66,7 @@ class GenerateLabelJob implements ShouldQueue
                 $item->labelBatch->increment('successful_shipments');
                 $item->labelBatch->increment('total_cost', $result->response->cost ?? 0);
             } else {
-                $this->handleFailure($item, $result->errorMessage ?? 'Label generation failed.');
+                $this->handleFailure($item, $result->summaryMessage());
             }
         } catch (Throwable $e) {
             $this->handleFailure($item, $e->getMessage());

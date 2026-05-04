@@ -2,20 +2,14 @@
 
 namespace App\Filament\Pages;
 
-use App\DataTransferObjects\PrintRequest;
-use App\DataTransferObjects\Shipping\ClassifiedRate;
+use App\Contracts\PackageShippingWorkflow;
+use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
-use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Concerns\PrintsLabels;
 use App\Models\Package;
-use App\Services\Carriers\CarrierRegistry;
-use App\Services\RateQuoteLogger;
-use App\Services\RateSelector;
-use App\Services\RuleEvaluator;
-use App\Services\ShippingRateService;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Radio;
@@ -24,8 +18,6 @@ use Filament\Forms\Contracts\HasForms;
 use Filament\Pages\Page;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Session;
-use Saloon\Exceptions\Request\RequestException;
-use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 
 class Ship extends Page implements HasForms
 {
@@ -90,33 +82,20 @@ class Ship extends Page implements HasForms
             return;
         }
 
-        $rateService = app(ShippingRateService::class);
-        $rates = $rateService->getShippingRates($this->package->id);
+        $options = app(PackageShippingWorkflow::class)->prepareRates($this->package);
 
-        foreach ($rateService->getExclusions() as $exclusion) {
+        foreach ($options->exclusions as $exclusion) {
             $this->notifyWarning($exclusion['carrier'].' excluded', $exclusion['reason']);
         }
 
-        // Apply shipping rules (exclude services, etc.)
-        $ruleResult = app(RuleEvaluator::class)->evaluate($this->package->shipment);
-        if ($ruleResult->shouldFilterRates()) {
-            $rates = $rates->reject(
-                fn (RateResponse $rate) => in_array($rate->serviceCode, $ruleResult->excludedServiceCodes)
-            );
-        }
+        $this->rateOptions = $options->rateOptions;
+        $this->formRateOptionLabels = $options->rateOptionLabels;
+        $this->formRateOptionDescriptions = $options->rateOptionDescriptions;
+        $this->deliverByDate = $options->deliverByDate;
+        $this->allRatesLate = $options->allRatesLate;
 
-        $this->rateOptions = $rates->values()->map->toArray()->all();
-        $this->updateFormData();
-
-        // If a rule pre-selects a rate, auto-select the matching service in the form
-        if ($ruleResult->hasPreSelectedRate()) {
-            $preSelected = $ruleResult->preSelectedRate;
-            foreach ($this->rateOptions as $key => $rateArray) {
-                if ($rateArray['carrier'] === $preSelected->carrier && $rateArray['serviceCode'] === $preSelected->serviceCode) {
-                    $this->form->fill(['rateOptions' => $key]);
-                    break;
-                }
-            }
+        if ($options->selectedRateIndex !== null) {
+            $this->form->fill(['rateOptions' => $options->selectedRateIndex]);
         }
     }
 
@@ -152,36 +131,22 @@ class Ship extends Page implements HasForms
             ->statePath('data');
     }
 
-    public function updateFormData(): void
+    public function refreshRates(): void
     {
-        $deadline = $this->package?->shipment->getDeliverByDate();
-        $this->deliverByDate = $deadline?->format('D, M j');
-
-        $rates = collect($this->rateOptions)->map(fn (array $arr) => RateResponse::fromArray($arr));
-        $classified = app(RateSelector::class)->classify($rates, $deadline);
-
-        $labels = [];
-        $descriptions = [];
-        $options = [];
-
-        foreach ($classified as $key => $cr) {
-            $labels[$key] = $cr->rate->formLabel();
-            $description = $cr->rate->formDescription();
-            if (! $cr->isOnTime) {
-                $description .= ' — LATE';
-            }
-            $descriptions[$key] = $description;
-            $options[$key] = $cr->rate->toArray();
+        if (! $this->package) {
+            return;
         }
 
-        $this->rateOptions = $options;
-        $this->formRateOptionLabels = $labels;
-        $this->formRateOptionDescriptions = $descriptions;
-        $this->allRatesLate = $deadline !== null && $classified->isNotEmpty() && $classified->every(fn (ClassifiedRate $cr) => ! $cr->isOnTime);
+        $options = app(PackageShippingWorkflow::class)->prepareRates($this->package);
 
-        if ($classified->isNotEmpty()) {
-            // Index 0 is always the recommended rate: cheapest on-time, or cheapest overall if all late
-            $this->form->fill(['rateOptions' => 0]);
+        $this->rateOptions = $options->rateOptions;
+        $this->formRateOptionLabels = $options->rateOptionLabels;
+        $this->formRateOptionDescriptions = $options->rateOptionDescriptions;
+        $this->deliverByDate = $options->deliverByDate;
+        $this->allRatesLate = $options->allRatesLate;
+
+        if ($options->selectedRateIndex !== null) {
+            $this->form->fill(['rateOptions' => $options->selectedRateIndex]);
         }
     }
 
@@ -193,76 +158,37 @@ class Ship extends Page implements HasForms
 
         $selectedRate = RateResponse::fromArray($rate);
 
-        app(RateQuoteLogger::class)->markSelected($this->package->id, $selectedRate);
+        $result = app(PackageShippingWorkflow::class)->ship(
+            $this->package,
+            new PackageShippingRequest(
+                selectedRate: $selectedRate,
+                labelFormat: $this->labelFormat,
+                labelDpi: $this->labelDpi,
+                overrideCustomsWeights: $this->overrideCustomsWeights,
+                userId: auth()->id(),
+            ),
+        );
 
-        try {
-            $adapter = app(CarrierRegistry::class)->get($selectedRate->carrier);
+        if ($result->requiresCustomsWeightOverride) {
+            $this->dispatch('open-modal', id: 'customs-weight-override');
 
-            $shipRequest = ShipRequest::fromPackageAndRate($this->package, $selectedRate, $this->labelFormat, $this->labelDpi);
+            return;
+        }
 
-            // Check if customs item weights exceed package weight for international shipments
-            if (! $this->overrideCustomsWeights && $shipRequest->toAddress->country !== 'US' && ! empty($shipRequest->customsItems)) {
-                $totalCustomsWeight = collect($shipRequest->customsItems)->sum(fn ($item) => $item->weight * $item->quantity);
-                $packageWeight = $shipRequest->packageData->weight;
+        $this->overrideCustomsWeights = false;
 
-                if ($totalCustomsWeight > $packageWeight) {
-                    $this->dispatch('open-modal', id: 'customs-weight-override');
+        if (! $result->success) {
+            $this->notifyError($result->title ?? 'Shipping Error', $result->message ?? 'An unexpected error occurred. Please try again.');
 
-                    return;
-                }
-            }
+            return;
+        }
 
-            if ($this->overrideCustomsWeights) {
-                $shipRequest = $shipRequest->withScaledCustomsWeights();
-                $this->overrideCustomsWeights = false;
-            }
+        $this->notifySuccess($result->title ?? 'Package Shipped', $result->message ?? 'Package shipped.');
 
-            $response = $adapter->createShipment($shipRequest);
-
-            if (! $response->success) {
-                $this->notifyError('Shipping Error', $response->errorMessage ?? 'Failed to create shipment.');
-
-                return;
-            }
-
-            $this->package->markShipped($response, auth()->id());
-
-            $this->notifySuccess('Package Shipped', "Tracking: {$response->trackingNumber}");
-
-            if ($response->labelData) {
-                $this->dispatchPrint(PrintRequest::fromShipResponse($response), redirectTo: $this->returnUrl);
-            } else {
-                $this->redirect($this->returnUrl);
-            }
-
-        } catch (RequestTimeOutException $e) {
-            logger()->error('Carrier API timeout', [
-                'carrier' => $selectedRate->carrier,
-                'package_id' => $this->package->id,
-            ]);
-            $this->notifyError(
-                'Carrier Timeout',
-                "The {$selectedRate->carrier} API is not responding. Please try again in a few moments."
-            );
-        } catch (RequestException $e) {
-            logger()->error('Carrier API error', [
-                'carrier' => $selectedRate->carrier,
-                'package_id' => $this->package->id,
-                'error' => $e->getMessage(),
-            ]);
-            $this->notifyError(
-                'Carrier Error',
-                "Unable to connect to {$selectedRate->carrier}. Please check your connection and try again."
-            );
-        } catch (\RuntimeException $e) {
-            // Optimistic locking failure
-            $this->notifyError('Package State Changed', $e->getMessage());
-        } catch (\Exception $e) {
-            logger()->error('Shipping error', [
-                'package_id' => $this->package->id,
-                'error' => $e->getMessage(),
-            ]);
-            $this->notifyError('Shipping Error', 'An unexpected error occurred. Please try again.');
+        if ($result->printRequest) {
+            $this->dispatchPrint($result->printRequest, redirectTo: $this->returnUrl);
+        } else {
+            $this->redirect($this->returnUrl);
         }
     }
 

@@ -4,9 +4,11 @@ namespace App\Filament\Pages;
 
 use App\Contracts\PackageDraftWorkflow;
 use App\Contracts\PackageLabelWorkflow;
+use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\PackageDrafts\Measurements;
 use App\DataTransferObjects\PackageDrafts\PackageDraftInput;
 use App\DataTransferObjects\PackageDrafts\PackageDraftOptions;
+use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PrintRequest;
 use App\Enums\Deliverability;
 use App\Enums\Role;
@@ -21,7 +23,6 @@ use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Services\AddressValidationService;
-use App\Services\LabelGenerationService;
 use App\Services\PackagingService;
 use App\Services\SettingsService;
 use BackedEnum;
@@ -208,15 +209,17 @@ class ManualShip extends Page implements HasForms
     {
         ['shipment' => $shipment, 'package' => $package] = $this->createShipmentAndPackage($data);
 
-        $result = app(LabelGenerationService::class)->autoShip(
-            package: $package,
-            labelFormat: $this->labelFormat,
-            labelDpi: $this->labelDpi,
-            userId: auth()->id(),
+        $result = app(PackageShippingWorkflow::class)->autoShip(
+            $package,
+            new PackageAutoShippingRequest(
+                labelFormat: $this->labelFormat,
+                labelDpi: $this->labelDpi,
+                userId: auth()->id(),
+            ),
         );
 
         if (! $result->success) {
-            $this->notifyError($result->errorTitle, $result->errorMessage);
+            $this->notifyError($result->title ?? 'Shipping Error', $result->message ?? 'Unable to ship package.');
 
             return;
         }

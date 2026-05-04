@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Contracts\PackageDraftWorkflow;
 use App\Contracts\PackageLabelWorkflow;
+use App\Contracts\PackageShippingWorkflow;
 use App\Http\Integrations\Shopify\ShopifyOAuthProvider;
 use App\Http\Integrations\Ups\UpsOAuthProvider;
 use App\Http\Integrations\USPS\UspsOAuthProvider;
@@ -23,12 +24,12 @@ use App\Services\CacheService;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\FakeCarrierAdapter;
 use App\Services\FedexRegistrationService;
-use App\Services\LabelGenerationService;
 use App\Services\ManifestService;
 use App\Services\OAuthProviderRegistry;
 use App\Services\OAuthService;
 use App\Services\PackageDrafts\EloquentPackageDraftWorkflow;
 use App\Services\PackageLabels\EloquentPackageLabelWorkflow;
+use App\Services\PackageShipping\EloquentPackageShippingWorkflow;
 use App\Services\PickBatchService;
 use App\Services\RateQuoteLogger;
 use App\Services\RuleEvaluator;
@@ -52,7 +53,6 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(RuleEvaluator::class);
         $this->app->singleton(CarrierRegistry::class);
         $this->app->singleton(ShippingRateService::class);
-        $this->app->singleton(LabelGenerationService::class);
         $this->app->singleton(ManifestService::class);
         $this->app->singleton(PickBatchService::class);
         $this->app->singleton(OAuthProviderRegistry::class);
@@ -61,6 +61,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(RuntimeConfig::class);
         $this->app->singleton(PackageDraftWorkflow::class, EloquentPackageDraftWorkflow::class);
         $this->app->singleton(PackageLabelWorkflow::class, EloquentPackageLabelWorkflow::class);
+        $this->app->singleton(PackageShippingWorkflow::class, EloquentPackageShippingWorkflow::class);
 
         $this->app->singleton(AddressValidationService::class, function () {
             $validators = config('app.fake_carriers')
