@@ -22,8 +22,6 @@ class SettingsService
      */
     private ?array $resolved = null;
 
-    private ?array $resolvedGroups = null;
-
     /**
      * Get a setting value by key.
      */
@@ -82,31 +80,12 @@ class SettingsService
     }
 
     /**
-     * Get all settings in a group.
-     *
-     * @return array<string, mixed>
-     */
-    public function getGroup(string $group): array
-    {
-        $groupMap = $this->getGroupMapCached();
-        $settings = $this->getAllCached();
-
-        return collect($groupMap)
-            ->filter(fn ($settingGroup) => $settingGroup === $group)
-            ->intersectByKeys($settings)
-            ->map(fn ($settingGroup, $key) => $settings[$key])
-            ->all();
-    }
-
-    /**
      * Clear the settings cache.
      */
     public function clearCache(): void
     {
         Cache::forget(self::CACHE_KEY);
-        Cache::forget(self::CACHE_KEY.'_groups');
         $this->resolved = null;
-        $this->resolvedGroups = null;
     }
 
     /**
@@ -123,23 +102,6 @@ class SettingsService
         return $this->resolved = Cache::remember(self::CACHE_KEY, self::CACHE_TTL, function () {
             return Setting::all()
                 ->pluck('value', 'key')
-                ->all();
-        });
-    }
-
-    /**
-     * Get key => group mapping, cached alongside settings.
-     *
-     * @return array<string, string|null>
-     */
-    private function getGroupMapCached(): array
-    {
-        if ($this->resolvedGroups !== null) {
-            return $this->resolvedGroups;
-        }
-
-        return $this->resolvedGroups = Cache::remember(self::CACHE_KEY.'_groups', self::CACHE_TTL, function () {
-            return Setting::pluck('group', 'key')
                 ->all();
         });
     }

@@ -114,11 +114,6 @@ class SshTunnel
         $this->cleanupKnownHostsFile();
     }
 
-    public function getLocalPort(): ?int
-    {
-        return $this->localPort;
-    }
-
     public function __destruct()
     {
         $this->close();

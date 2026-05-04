@@ -35,9 +35,4 @@ class ImportResult
     {
         return count($this->errors) > 0;
     }
-
-    public function getTotalProcessed(): int
-    {
-        return $this->shipmentsCreated + $this->shipmentsUpdated;
-    }
 }

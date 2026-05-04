@@ -5,7 +5,6 @@ namespace App\Services;
 use CommerceGuys\Addressing\AddressFormat\AddressField;
 use CommerceGuys\Addressing\AddressFormat\AddressFormatRepository;
 use CommerceGuys\Addressing\Country\CountryRepository;
-use CommerceGuys\Addressing\Subdivision\Subdivision;
 use CommerceGuys\Addressing\Subdivision\SubdivisionRepository;
 use Illuminate\Support\Str;
 
@@ -35,8 +34,8 @@ class AddressReferenceService
     public function __construct()
     {
         $this->countryRepository = new CountryRepository('en');
-        $this->subdivisionRepository = new SubdivisionRepository();
-        $this->addressFormatRepository = new AddressFormatRepository();
+        $this->subdivisionRepository = new SubdivisionRepository;
+        $this->addressFormatRepository = new AddressFormatRepository;
     }
 
     /**
@@ -114,24 +113,6 @@ class AddressReferenceService
         $this->subdivisionLookup[$countryCode] = $lookup;
 
         return $this->subdivisionOptions[$countryCode] = $options;
-    }
-
-    /**
-     * @return array<string, array<string, string>>
-     */
-    public function getAllSubdivisionOptions(): array
-    {
-        $optionsByCountry = [];
-
-        foreach (array_keys($this->getCountryOptions()) as $countryCode) {
-            $options = $this->getSubdivisionOptions($countryCode);
-
-            if ($options !== []) {
-                $optionsByCountry[$countryCode] = $options;
-            }
-        }
-
-        return $optionsByCountry;
     }
 
     public function normalizeCountry(?string $value): ?string

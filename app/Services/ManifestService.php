@@ -10,7 +10,6 @@ use App\Http\Integrations\USPS\Requests\ScanForm;
 use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Manifest;
 use App\Models\Package;
-use App\Services\Carriers\CarrierRegistry;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -20,30 +19,6 @@ use Saloon\Http\Response;
 
 class ManifestService
 {
-    /**
-     * Get unmanifested package counts per carrier with manifest support info.
-     *
-     * @return Collection<int, array{carrier: string, count: int, supports_manifest: bool}>
-     */
-    public function getUnmanifestedSummary(): Collection
-    {
-        $registry = app(CarrierRegistry::class);
-
-        return Package::query()
-            ->selectRaw('carrier, count(*) as count')
-            ->whereNull('manifest_id')
-            ->where('status', PackageStatus::Shipped)
-            ->whereNotNull('tracking_number')
-            ->groupBy('carrier')
-            ->get()
-            ->map(fn ($row) => [
-                'carrier' => $row->carrier,
-                'count' => (int) $row->count,
-                'supports_manifest' => $registry->has($row->carrier)
-                    && $registry->get($row->carrier)->supportsManifest(),
-            ]);
-    }
-
     /**
      * Get unmanifested shipped packages grouped by carrier.
      *

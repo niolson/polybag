@@ -10,27 +10,6 @@ use Illuminate\Support\Facades\Log;
 class PackageExportService
 {
     /**
-     * Export a package and log any errors without throwing.
-     */
-    public function tryExportPackage(Package $package): void
-    {
-        try {
-            $result = $this->exportPackage($package);
-            if ($result->hasErrors()) {
-                logger()->warning('Package export partial failure', [
-                    'package_id' => $package->id,
-                    'errors' => $result->errors,
-                ]);
-            }
-        } catch (\Exception $e) {
-            logger()->error('Package export failed', [
-                'package_id' => $package->id,
-                'error' => $e->getMessage(),
-            ]);
-        }
-    }
-
-    /**
      * Export a shipped package's data to configured external destinations.
      */
     public function exportPackage(Package $package): ExportResult
