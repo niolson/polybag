@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\BoxSize;
+use App\Models\Carrier;
 use App\Models\CarrierService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -27,9 +28,11 @@ class CacheService
      */
     public function getBoxSizes(): Collection
     {
-        return Cache::remember(self::BOX_SIZES_KEY, self::BOX_SIZES_TTL, function () {
-            return BoxSize::orderBy('label')->get();
+        $rows = Cache::remember(self::BOX_SIZES_KEY, self::BOX_SIZES_TTL, function () {
+            return BoxSize::orderBy('label')->get()->map->getAttributes()->toArray();
         });
+
+        return collect($rows)->map(fn (array $attrs) => (new BoxSize)->newFromBuilder($attrs));
     }
 
     /**
@@ -58,12 +61,29 @@ class CacheService
      */
     public function getActiveCarrierServices(): Collection
     {
-        return Cache::remember(self::ACTIVE_CARRIER_SERVICES_KEY, self::CARRIER_SERVICES_TTL, function () {
+        $rows = Cache::remember(self::ACTIVE_CARRIER_SERVICES_KEY, self::CARRIER_SERVICES_TTL, function () {
             return CarrierService::active()
                 ->withActiveCarrier()
                 ->with('carrier')
                 ->orderBy('name')
-                ->get();
+                ->get()
+                ->map(function (CarrierService $service) {
+                    $attrs = $service->getAttributes();
+                    $attrs['_carrier'] = $service->carrier->getAttributes();
+
+                    return $attrs;
+                })
+                ->toArray();
+        });
+
+        return collect($rows)->map(function (array $attrs) {
+            $carrierAttrs = $attrs['_carrier'];
+            unset($attrs['_carrier']);
+
+            $service = (new CarrierService)->newFromBuilder($attrs);
+            $service->setRelation('carrier', (new Carrier)->newFromBuilder($carrierAttrs));
+
+            return $service;
         });
     }
 

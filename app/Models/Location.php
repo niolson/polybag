@@ -39,13 +39,11 @@ class Location extends Model
     ];
 
     /**
-     * Get the default location, cached for the request lifecycle.
+     * Get the default location, memoized for the request lifecycle.
      */
     public static function getDefault(): ?self
     {
-        return Cache::remember('location_default', 3600, function () {
-            return static::where('is_default', true)->first();
-        });
+        return once(fn () => static::where('is_default', true)->first());
     }
 
     /**
@@ -53,7 +51,9 @@ class Location extends Model
      */
     public static function timezone(): string
     {
-        return static::getDefault()?->timezone ?? 'America/New_York';
+        return Cache::remember('location_default_timezone', 3600, function () {
+            return static::where('is_default', true)->value('timezone') ?? 'America/New_York';
+        });
     }
 
     /**
@@ -61,7 +61,7 @@ class Location extends Model
      */
     public static function clearDefaultCache(): void
     {
-        Cache::forget('location_default');
+        Cache::forget('location_default_timezone');
     }
 
     /**

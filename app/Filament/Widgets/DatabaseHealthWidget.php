@@ -21,21 +21,21 @@ class DatabaseHealthWidget extends BaseWidget
 
     protected function getStats(): array
     {
-        return Cache::remember('widget:database_health', 3600, function () {
-            $counts = [
+        $counts = Cache::remember('widget:database_health', 3600, function () {
+            return [
                 'shipments' => DB::table('shipments')->count(),
                 'packages' => DB::table('packages')->count(),
                 'rate_quotes' => DB::table('rate_quotes')->count(),
                 'audit_logs' => DB::table('audit_logs')->count(),
             ];
-
-            return [
-                $this->buildStat('Shipments', $counts['shipments']),
-                $this->buildStat('Packages', $counts['packages']),
-                $this->buildStat('Rate Quotes', $counts['rate_quotes']),
-                $this->buildStat('Audit Logs', $counts['audit_logs']),
-            ];
         });
+
+        return [
+            $this->buildStat('Shipments', $counts['shipments']),
+            $this->buildStat('Packages', $counts['packages']),
+            $this->buildStat('Rate Quotes', $counts['rate_quotes']),
+            $this->buildStat('Audit Logs', $counts['audit_logs']),
+        ];
     }
 
     private function buildStat(string $label, int $count): Stat

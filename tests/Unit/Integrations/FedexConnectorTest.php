@@ -14,7 +14,6 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
-use Saloon\Http\Auth\AccessTokenAuthenticator;
 use Saloon\Http\Faking\MockClient;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\OAuth2\GetClientCredentialsTokenRequest;
@@ -176,7 +175,7 @@ it('refreshes the cached authenticator and retries once when FedEx rejects a val
 
     Cache::put(
         'fedex_authenticator_sandbox',
-        new AccessTokenAuthenticator('stale-token', null, new DateTimeImmutable('+30 minutes')),
+        ['access_token' => 'stale-token', 'refresh_token' => null, 'expires_at' => now()->addMinutes(30)->timestamp],
         now()->addMinutes(20),
     );
 
@@ -218,7 +217,7 @@ it('refreshes the cached authenticator and retries once when FedEx rejects a val
     $connector = new FedexConnector;
     $connector
         ->withMockClient($mockClient)
-        ->authenticate(Cache::get('fedex_authenticator_sandbox'));
+        ->authenticate(FedexConnector::deserializeAuthenticator(Cache::get('fedex_authenticator_sandbox')));
 
     $response = $connector->send(new Rates);
 
@@ -230,7 +229,7 @@ it('refreshes the cached authenticator and retries once when FedEx rejects a val
         ->and($sentRequests[1]['authorization'])->toBeNull()
         ->and($sentRequests[2]['request'])->toBe(Rates::class)
         ->and($sentRequests[2]['authorization'])->toBe('Bearer fresh-token')
-        ->and(Cache::get('fedex_authenticator_sandbox')->getAccessToken())->toBe('fresh-token');
+        ->and(Cache::get('fedex_authenticator_sandbox')['access_token'])->toBe('fresh-token');
 });
 
 it('builds correct create shipment request', function (): void {

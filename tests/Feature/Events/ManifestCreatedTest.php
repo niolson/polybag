@@ -8,7 +8,6 @@ use App\Models\Package;
 use App\Services\ManifestService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
-use Saloon\Http\Auth\AccessTokenAuthenticator;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
 
@@ -34,10 +33,11 @@ it('dispatches ManifestCreated after successful USPS manifest creation', functio
         ."{$pdfPart}\r\n"
         ."--{$boundary}--";
 
-    Cache::put('usps_authenticator', new AccessTokenAuthenticator(
-        accessToken: 'fake-test-token',
-        expiresAt: new DateTimeImmutable('+1 hour'),
-    ), 3600);
+    Cache::put('usps_authenticator', [
+        'access_token' => 'fake-test-token',
+        'refresh_token' => null,
+        'expires_at' => (new DateTimeImmutable('+1 hour'))->getTimestamp(),
+    ], 3600);
 
     Saloon::fake([
         ScanForm::class => MockResponse::make(

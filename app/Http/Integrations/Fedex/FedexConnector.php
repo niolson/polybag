@@ -191,7 +191,7 @@ class FedexConnector extends Connector
 
         Cache::put(
             $cacheKey,
-            $authenticator,
+            static::serializeAuthenticator($authenticator),
             $this->cacheUntilBeforeExpiry($authenticator),
         );
 

@@ -94,28 +94,29 @@ class UpsConnector extends Connector
         $connector = new static;
         $cacheKey = static::getAuthenticatorCacheKey();
 
-        $authenticator = Cache::get($cacheKey);
+        $cached = Cache::get($cacheKey);
 
-        if (! $authenticator) {
-            $authenticator = Cache::lock($cacheKey.':lock', 10)->block(5, function () use ($connector, $cacheKey) {
-                $cached = Cache::get($cacheKey);
-                if ($cached) {
-                    return $cached;
+        if (! is_array($cached)) {
+            $cached = Cache::lock($cacheKey.':lock', 10)->block(5, function () use ($connector, $cacheKey) {
+                $recached = Cache::get($cacheKey);
+                if (is_array($recached)) {
+                    return $recached;
                 }
 
                 $authenticator = $connector->getAccessToken();
+                $data = static::serializeAuthenticator($authenticator);
 
                 Cache::put(
                     $cacheKey,
-                    $authenticator,
+                    $data,
                     $authenticator->getExpiresAt()->sub(DateInterval::createFromDateString('10 minutes'))
                 );
 
-                return $authenticator;
+                return $data;
             });
         }
 
-        $connector->authenticate($authenticator);
+        $connector->authenticate(static::deserializeAuthenticator($cached));
 
         return $connector;
     }
