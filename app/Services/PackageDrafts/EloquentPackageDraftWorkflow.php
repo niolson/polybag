@@ -3,6 +3,7 @@
 namespace App\Services\PackageDrafts;
 
 use App\Contracts\PackageDraftWorkflow;
+use App\DataTransferObjects\PackageDrafts\BatchPackageDraftInput;
 use App\DataTransferObjects\PackageDrafts\Measurements;
 use App\DataTransferObjects\PackageDrafts\PackageDraftInput;
 use App\DataTransferObjects\PackageDrafts\PackageDraftItemInput;
@@ -82,6 +83,54 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
             throw new PackageDraftIncompleteException('Shipment has no active package draft.');
         }
 
+        return $this->buildReadyDraft($shipment, $package, $options);
+    }
+
+    public function createBatchReadyDraft(
+        Shipment $shipment,
+        BatchPackageDraftInput $input,
+    ): ReadyPackageDraft {
+        $shipment->loadMissing('shipmentItems.product');
+
+        $draftInput = $this->batchDraftInput($shipment, $input);
+        $options = new PackageDraftOptions(requireCompletePackedItems: true);
+
+        return DB::transaction(function () use ($shipment, $draftInput, $options): ReadyPackageDraft {
+            $lockedShipment = $this->lockShipment($shipment);
+
+            if ($this->activeDraftFor($lockedShipment, lock: true)) {
+                throw new PackageDraftInvalidException('Shipment already has an active package draft.');
+            }
+
+            $package = $this->createDraft($lockedShipment);
+
+            $package->update([
+                'box_size_id' => $draftInput->boxSizeId,
+                'weight' => $this->nullableDecimal($draftInput->measurements->weight),
+                'height' => $this->nullableDecimal($draftInput->measurements->height),
+                'width' => $this->nullableDecimal($draftInput->measurements->width),
+                'length' => $this->nullableDecimal($draftInput->measurements->length),
+            ]);
+
+            $package->packageItems()->createMany(
+                array_map(fn (PackageDraftItemInput $item): array => [
+                    'shipment_item_id' => $item->shipmentItemId,
+                    'product_id' => $item->productId,
+                    'quantity' => $item->quantity,
+                    'transparency_codes' => $item->transparencyCodes,
+                ], $draftInput->items)
+            );
+
+            $package->refresh();
+            $package->update(['weight_mismatch' => $package->computeWeightMismatch()]);
+            $package->refresh();
+
+            return $this->buildReadyDraft($lockedShipment, $package, $options);
+        });
+    }
+
+    private function buildReadyDraft(Shipment $shipment, Package $package, PackageDraftOptions $options): ReadyPackageDraft
+    {
         $snapshot = $this->snapshot($shipment, $package, $options);
 
         if (! $snapshot->measurements->hasPositiveValues()) {
@@ -239,5 +288,38 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
         }
 
         return true;
+    }
+
+    private function batchDraftInput(Shipment $shipment, BatchPackageDraftInput $input): PackageDraftInput
+    {
+        $items = [];
+        $itemsWeight = 0.0;
+
+        foreach ($shipment->shipmentItems as $shipmentItem) {
+            $product = $shipmentItem->product;
+
+            if (! $product || (float) $product->weight <= 0) {
+                throw new PackageDraftInvalidException('Batch package draft item is missing product weight.');
+            }
+
+            $quantity = (int) $shipmentItem->quantity;
+            $itemsWeight += $quantity * (float) $product->weight;
+            $items[] = new PackageDraftItemInput(
+                shipmentItemId: $shipmentItem->id,
+                productId: $shipmentItem->product_id,
+                quantity: $quantity,
+            );
+        }
+
+        return new PackageDraftInput(
+            measurements: new Measurements(
+                weight: (float) $input->boxSize->empty_weight + $itemsWeight,
+                height: $input->boxSize->height,
+                width: $input->boxSize->width,
+                length: $input->boxSize->length,
+            ),
+            boxSizeId: $input->boxSize->id,
+            items: $items,
+        );
     }
 }

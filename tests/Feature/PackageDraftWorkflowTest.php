@@ -1,6 +1,7 @@
 <?php
 
 use App\Contracts\PackageDraftWorkflow;
+use App\DataTransferObjects\PackageDrafts\BatchPackageDraftInput;
 use App\DataTransferObjects\PackageDrafts\Measurements;
 use App\DataTransferObjects\PackageDrafts\PackageDraftInput;
 use App\DataTransferObjects\PackageDrafts\PackageDraftItemInput;
@@ -248,3 +249,70 @@ it('returns a ready package draft when measurements and packed items are complet
     expect($ready->package->id)->toBe($snapshot->packageDraftId)
         ->and($ready->snapshot->readyToShip)->toBeTrue();
 });
+
+it('creates a ready batch package draft from all shipment items and box dimensions', function (): void {
+    $boxSize = BoxSize::factory()->create([
+        'empty_weight' => 0.50,
+        'height' => 4,
+        'width' => 6,
+        'length' => 8,
+    ]);
+    $firstProduct = Product::factory()->create(['weight' => 1.00]);
+    $secondProduct = Product::factory()->create(['weight' => 0.50]);
+    $shipment = Shipment::factory()->create();
+    $firstItem = ShipmentItem::factory()->create([
+        'shipment_id' => $shipment->id,
+        'product_id' => $firstProduct->id,
+        'quantity' => 2,
+    ]);
+    $secondItem = ShipmentItem::factory()->create([
+        'shipment_id' => $shipment->id,
+        'product_id' => $secondProduct->id,
+        'quantity' => 1,
+    ]);
+
+    Event::fake([PackageCreated::class]);
+
+    $ready = app(PackageDraftWorkflow::class)->createBatchReadyDraft(
+        $shipment,
+        new BatchPackageDraftInput($boxSize),
+    );
+
+    $package = $ready->package->fresh('packageItems');
+
+    expect($ready->snapshot->readyToShip)->toBeTrue()
+        ->and((float) $package->weight)->toBe(3.00)
+        ->and((float) $package->height)->toBe(4.00)
+        ->and((float) $package->width)->toBe(6.00)
+        ->and((float) $package->length)->toBe(8.00)
+        ->and($package->box_size_id)->toBe($boxSize->id)
+        ->and($package->packageItems)->toHaveCount(2)
+        ->and($package->packageItems->firstWhere('shipment_item_id', $firstItem->id)->quantity)->toBe(2)
+        ->and($package->packageItems->firstWhere('shipment_item_id', $secondItem->id)->quantity)->toBe(1);
+
+    Event::assertDispatched(PackageCreated::class, fn (PackageCreated $event): bool => $event->package->id === $package->id);
+});
+
+it('rejects batch package drafts when an active package draft already exists', function (): void {
+    $shipment = Shipment::factory()->create();
+    Package::factory()->for($shipment)->create(['status' => PackageStatus::Unshipped]);
+
+    app(PackageDraftWorkflow::class)->createBatchReadyDraft(
+        $shipment,
+        new BatchPackageDraftInput(BoxSize::factory()->create()),
+    );
+})->throws(PackageDraftInvalidException::class, 'already has an active package draft');
+
+it('rejects batch package drafts when a shipment item is missing product weight', function (): void {
+    $shipment = Shipment::factory()->create();
+    $product = Product::factory()->create(['weight' => 0]);
+    ShipmentItem::factory()->create([
+        'shipment_id' => $shipment->id,
+        'product_id' => $product->id,
+    ]);
+
+    app(PackageDraftWorkflow::class)->createBatchReadyDraft(
+        $shipment,
+        new BatchPackageDraftInput(BoxSize::factory()->create()),
+    );
+})->throws(PackageDraftInvalidException::class, 'missing product weight');

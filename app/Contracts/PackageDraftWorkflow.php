@@ -2,6 +2,7 @@
 
 namespace App\Contracts;
 
+use App\DataTransferObjects\PackageDrafts\BatchPackageDraftInput;
 use App\DataTransferObjects\PackageDrafts\PackageDraftInput;
 use App\DataTransferObjects\PackageDrafts\PackageDraftOptions;
 use App\DataTransferObjects\PackageDrafts\PackageDraftSnapshot;
@@ -22,5 +23,10 @@ interface PackageDraftWorkflow
         Shipment $shipment,
         ?int $packageDraftId = null,
         PackageDraftOptions $options = new PackageDraftOptions,
+    ): ReadyPackageDraft;
+
+    public function createBatchReadyDraft(
+        Shipment $shipment,
+        BatchPackageDraftInput $input,
     ): ReadyPackageDraft;
 }

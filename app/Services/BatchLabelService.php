@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use App\Contracts\PackageDraftWorkflow;
 use App\DataTransferObjects\BatchValidationResult;
+use App\DataTransferObjects\PackageDrafts\BatchPackageDraftInput;
 use App\Enums\AuditAction;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\LabelBatchStatus;
@@ -13,8 +15,6 @@ use App\Models\AuditLog;
 use App\Models\BoxSize;
 use App\Models\LabelBatch;
 use App\Models\LabelBatchItem;
-use App\Models\Package;
-use App\Models\PackageItem;
 use App\Models\Shipment;
 use App\Models\User;
 use App\Notifications\BatchLabelCompleted;
@@ -105,33 +105,15 @@ class BatchLabelService
             $jobs = [];
 
             foreach ($shipments as $shipment) {
-                $itemsWeight = $shipment->shipmentItems->sum(
-                    fn ($item) => $item->quantity * $item->product->weight
+                $readyDraft = app(PackageDraftWorkflow::class)->createBatchReadyDraft(
+                    $shipment,
+                    new BatchPackageDraftInput($boxSize),
                 );
-                $totalWeight = $boxSize->empty_weight + $itemsWeight;
-
-                $package = Package::create([
-                    'shipment_id' => $shipment->id,
-                    'box_size_id' => $boxSize->id,
-                    'weight' => $totalWeight,
-                    'height' => $boxSize->height,
-                    'width' => $boxSize->width,
-                    'length' => $boxSize->length,
-                ]);
-
-                foreach ($shipment->shipmentItems as $shipmentItem) {
-                    PackageItem::create([
-                        'package_id' => $package->id,
-                        'shipment_item_id' => $shipmentItem->id,
-                        'product_id' => $shipmentItem->product_id,
-                        'quantity' => $shipmentItem->quantity,
-                    ]);
-                }
 
                 $batchItem = LabelBatchItem::create([
                     'label_batch_id' => $batch->id,
                     'shipment_id' => $shipment->id,
-                    'package_id' => $package->id,
+                    'package_id' => $readyDraft->package->id,
                     'status' => LabelBatchItemStatus::Pending,
                 ]);
 
