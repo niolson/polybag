@@ -11,10 +11,13 @@ parameters:
         # Filament uses __get magic method for $this->form
         - '#Access to an undefined property .+::\$form#'
         # Pest uses $this bindings in beforeEach/test closures
-        - '#Access to an undefined property PHPUnit\\Framework\\TestCase::\$#'
+        -
+            identifier: property.notFound
+            message: '#Access to an undefined property Pest\\PendingCalls\\TestCall::\$#'
+        -
+            identifier: method.notFound
+            message: '#Call to an undefined method Pest\\PendingCalls\\TestCall::#'
         -
             identifier: variable.undefined
             message: '#Undefined variable: \$this#'
             reportUnmatched: false
-        # Pest's TestCase binding provides Laravel TestCase methods
-        - '#Call to an undefined method PHPUnit\\Framework\\TestCase::#'

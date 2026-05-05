@@ -207,7 +207,7 @@ class FedexConnector extends Connector
 
     private function requestFreshAuthenticator(): OAuthAuthenticator
     {
-        $connector = new static;
+        $connector = new self;
 
         if ($this->hasMockClient()) {
             $connector->withMockClient($this->getMockClient());

@@ -237,7 +237,7 @@ class SettingsSeeder extends Seeder
             ],
             [
                 'key' => 'suppress_printing',
-                'value' => env('FAKE_CARRIERS', false) ? '1' : '0',
+                'value' => config('app.fake_carriers', false) ? '1' : '0',
                 'type' => 'boolean',
                 'group' => 'testing',
             ],

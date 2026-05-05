@@ -372,7 +372,8 @@ class Settings extends Page
     {
         app(FedexRegistrationService::class)->activateChildCredentials($childKey, $childSecret);
         app(SettingsService::class)->set('fedex.account_number', $accountNumber, group: 'fedex');
-        $this->fedex_account_number = $accountNumber;
+        $this->data['fedex_account_number'] = $accountNumber;
+        $this->form->fill($this->data);
     }
 
     private function refreshMountedFedexAction(): void

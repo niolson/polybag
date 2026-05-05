@@ -120,8 +120,8 @@ return [
     |--------------------------------------------------------------------------
     |
     | This option allows you to specify which PHP classes may be unserialized
-    | when reading from the cache. Set to false to allow all classes, or
-    | provide an explicit list of allowed classes for security hardening.
+    | when reading from the cache. Set to false to allow no classes, null to
+    | allow all classes, or provide an explicit list of allowed classes.
     |
     */
 
