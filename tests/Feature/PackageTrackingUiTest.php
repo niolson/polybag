@@ -114,7 +114,7 @@ function trackingAdapter(): CarrierAdapterInterface
     };
 }
 
-it('shows track action on package list and view pages for shipped packages', function () {
+it('shows track action on package list and view pages for shipped packages', function (): void {
     $package = Package::factory()->fedex()->create();
 
     Livewire::test(ListPackages::class)
@@ -124,7 +124,7 @@ it('shows track action on package list and view pages for shipped packages', fun
         ->assertActionVisible('track');
 });
 
-it('opens the track action without refreshing tracking details', function () {
+it('opens the track action without refreshing tracking details', function (): void {
     $package = Package::factory()->fedex()->create([
         'tracking_status' => TrackingStatus::PreTransit,
         'tracking_details' => null,
@@ -141,7 +141,7 @@ it('opens the track action without refreshing tracking details', function () {
         ->and($package->tracking_details)->toBeNull();
 });
 
-it('refreshes tracking details when the track action is submitted', function () {
+it('refreshes tracking details when the track action is submitted', function (): void {
     $package = Package::factory()->fedex()->create([
         'tracking_status' => TrackingStatus::PreTransit,
         'tracking_details' => null,
@@ -159,7 +159,7 @@ it('refreshes tracking details when the track action is submitted', function () 
         ->and(data_get($package->tracking_details, 'events.0.description'))->toBe('Departed FedEx hub');
 });
 
-it('shows track action in the shipment packages relation manager', function () {
+it('shows track action in the shipment packages relation manager', function (): void {
     $shipment = Shipment::factory()->create();
     $package = Package::factory()->fedex()->for($shipment)->create();
 
@@ -169,7 +169,7 @@ it('shows track action in the shipment packages relation manager', function () {
     ])->assertActionVisible(TestAction::make('track')->table($package));
 });
 
-it('includes tracking counts in the exceptions widget', function () {
+it('includes tracking counts in the exceptions widget', function (): void {
     Package::factory()->shipped()->create([
         'tracking_status' => TrackingStatus::Exception,
     ]);

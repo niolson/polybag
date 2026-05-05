@@ -13,7 +13,7 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
-it('renders packing validation report page', function () {
+it('renders packing validation report page', function (): void {
     $user = User::factory()->create(['role' => Role::Manager]);
 
     Livewire::actingAs($user)
@@ -22,7 +22,7 @@ it('renders packing validation report page', function () {
         ->assertSee('Packing Validation');
 });
 
-it('defaults to weight mismatches section', function () {
+it('defaults to weight mismatches section', function (): void {
     $user = User::factory()->create(['role' => Role::Manager]);
 
     $component = Livewire::actingAs($user)
@@ -31,7 +31,7 @@ it('defaults to weight mismatches section', function () {
     expect($component->get('section'))->toBe('weight_mismatches');
 });
 
-it('switches to batch failures section', function () {
+it('switches to batch failures section', function (): void {
     $user = User::factory()->create(['role' => Role::Manager]);
 
     LabelBatchItem::factory()->create(['status' => LabelBatchItemStatus::Failed]);
@@ -42,7 +42,7 @@ it('switches to batch failures section', function () {
         ->assertOk();
 });
 
-it('switches to validation issues section', function () {
+it('switches to validation issues section', function (): void {
     $user = User::factory()->create(['role' => Role::Manager]);
 
     $shipment = Shipment::factory()->create(['deliverability' => Deliverability::No]);
@@ -57,7 +57,7 @@ it('switches to validation issues section', function () {
         ->assertOk();
 });
 
-it('counts batch failures', function () {
+it('counts batch failures', function (): void {
     $user = User::factory()->create(['role' => Role::Manager]);
 
     LabelBatchItem::factory()->count(3)->create(['status' => LabelBatchItemStatus::Failed]);
@@ -68,7 +68,7 @@ it('counts batch failures', function () {
     expect($component->instance()->getBatchFailureCount())->toBe(3);
 });
 
-it('restricts access to managers and above', function () {
+it('restricts access to managers and above', function (): void {
     $user = User::factory()->create(['role' => Role::User]);
     $this->actingAs($user);
 

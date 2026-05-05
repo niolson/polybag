@@ -2,7 +2,7 @@
 
 Streamlined, barcode-driven shipping workstation for packing and labeling shipments. Operators scan barcodes to select boxes, verify item contents, and validate packed quantities before purchasing postage and printing labels — all from a single browser tab connected to a local scale and label printer.
 
-Built with **Laravel 12**, **Filament 5**, and **Tailwind CSS 4**.
+Built with **Laravel 13**, **Filament 5**, and **Tailwind CSS 4**.
 
 ## Features
 
@@ -128,6 +128,14 @@ php artisan test tests/Feature/AuthorizationTest.php
 
 # Filter by test name
 php artisan test --filter="manager role access"
+```
+
+End-to-end tests use [Playwright](https://playwright.dev/) and require `FAKE_CARRIERS=true` in `.env`:
+
+```bash
+npm run test:e2e          # Run E2E tests headlessly
+npm run test:e2e:headed   # Run with a visible browser
+npm run test:e2e:ui       # Open the Playwright UI
 ```
 
 ## Code Style

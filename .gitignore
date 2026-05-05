@@ -16,7 +16,9 @@ ROADMAP.md
 /.zed
 /.cursor
 /.junie
+/.agents
 /.claude/settings.local.json
+/.claude/skills
 /auth.json
 nul
 null
@@ -28,6 +30,10 @@ null
 /storage/clockwork
 /storage/pail
 /vendor
+/_ide_helper.php
+/_ide_helper_methods.php
+/skills-lock.json
+/tmp
 Homestead.json
 Homestead.yaml
 Thumbs.db

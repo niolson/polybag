@@ -71,7 +71,7 @@ class PackagesRelationManager extends RelationManager
                 PackageResource::makeTrackAction(),
                 Actions\EditAction::make(),
                 Actions\DeleteAction::make()
-                    ->before(function (Actions\DeleteAction $action, $record) {
+                    ->before(function (Actions\DeleteAction $action, $record): void {
                         if ($record->status === PackageStatus::Shipped) {
                             Notification::make()
                                 ->title('Cannot delete package')

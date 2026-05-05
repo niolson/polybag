@@ -8,6 +8,7 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
+use App\Enums\ServiceCapability;
 use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\FedexAdapter;
@@ -134,9 +135,9 @@ it('allows registering custom adapters', function (): void {
             return $rate;
         }
 
-        public function serviceCapability(string $serviceCode): \App\Enums\ServiceCapability
+        public function serviceCapability(string $serviceCode): ServiceCapability
         {
-            return \App\Enums\ServiceCapability::NotImplemented;
+            return ServiceCapability::NotImplemented;
         }
     };
 

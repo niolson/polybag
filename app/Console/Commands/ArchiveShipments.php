@@ -82,7 +82,7 @@ class ArchiveShipments extends Command
                 break;
             }
 
-            DB::transaction(function () use ($chunkIds) {
+            DB::transaction(function () use ($chunkIds): void {
                 $packageIds = Package::whereIn('shipment_id', $chunkIds)->pluck('id');
 
                 if ($packageIds->isNotEmpty()) {
@@ -111,7 +111,7 @@ class ArchiveShipments extends Command
     {
         return Shipment::query()
             ->whereHas('packages')
-            ->whereDoesntHave('packages', function ($query) use ($cutoff) {
+            ->whereDoesntHave('packages', function ($query) use ($cutoff): void {
                 $query->where('status', '!=', PackageStatus::Shipped)
                     ->orWhere('shipped_at', '>=', $cutoff);
             });
@@ -129,7 +129,7 @@ class ArchiveShipments extends Command
         $this->eligibleQuery($cutoff)
             ->select(self::SHIPMENT_EXPORT_COLUMNS)
             ->orderBy('id')
-            ->chunk(1000, function ($shipments) use ($handle) {
+            ->chunk(1000, function ($shipments) use ($handle): void {
                 foreach ($shipments as $shipment) {
                     fputcsv($handle, array_map(fn ($v) => $v instanceof \BackedEnum ? $v->value : $v, $shipment->only(self::SHIPMENT_EXPORT_COLUMNS)));
                 }
@@ -146,7 +146,7 @@ class ArchiveShipments extends Command
         Package::whereIn('shipment_id', $this->eligibleQuery($cutoff)->select('id'))
             ->select(self::PACKAGE_EXPORT_COLUMNS)
             ->orderBy('id')
-            ->chunk(1000, function ($packages) use ($handle) {
+            ->chunk(1000, function ($packages) use ($handle): void {
                 foreach ($packages as $package) {
                     fputcsv($handle, array_map(fn ($v) => $v instanceof \BackedEnum ? $v->value : $v, $package->only(self::PACKAGE_EXPORT_COLUMNS)));
                 }

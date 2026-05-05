@@ -2,8 +2,8 @@
 
 namespace App\Console\Commands;
 
-use App\Services\OAuthService;
 use App\Services\OAuthProviderRegistry;
+use App\Services\OAuthService;
 use Illuminate\Console\Command;
 
 class RefreshOAuthTokens extends Command

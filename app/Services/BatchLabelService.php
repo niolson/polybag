@@ -122,13 +122,13 @@ class BatchLabelService
 
             $busBatch = Bus::batch($jobs)
                 ->allowFailures()
-                ->before(function () use ($batch) {
+                ->before(function () use ($batch): void {
                     $batch->update([
                         'status' => LabelBatchStatus::Processing,
                         'started_at' => now(),
                     ]);
                 })
-                ->finally(function () use ($batch) {
+                ->finally(function () use ($batch): void {
                     $batch->refresh();
 
                     $status = match (true) {

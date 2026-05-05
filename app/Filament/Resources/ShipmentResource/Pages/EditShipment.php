@@ -17,7 +17,7 @@ class EditShipment extends EditRecord
         return [
             Actions\ViewAction::make(),
             Actions\DeleteAction::make()
-                ->before(function (Actions\DeleteAction $action) {
+                ->before(function (Actions\DeleteAction $action): void {
                     if ($this->record->packages()->where('status', PackageStatus::Shipped)->exists()) {
                         Notification::make()
                             ->title('Cannot delete shipment')

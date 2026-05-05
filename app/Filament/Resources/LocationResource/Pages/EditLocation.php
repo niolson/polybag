@@ -18,7 +18,7 @@ class EditLocation extends EditRecord
     {
         return [
             Actions\DeleteAction::make()
-                ->before(function (Actions\DeleteAction $action) {
+                ->before(function (Actions\DeleteAction $action): void {
                     if (Package::where('location_id', $this->record->id)->exists()) {
                         Notification::make()
                             ->title('Cannot delete location')

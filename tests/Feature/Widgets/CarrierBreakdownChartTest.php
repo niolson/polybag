@@ -8,7 +8,7 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
-it('renders carrier breakdown chart', function () {
+it('renders carrier breakdown chart', function (): void {
     Package::factory()->usps()->create(['shipped_at' => now()]);
     Package::factory()->fedex()->create(['shipped_at' => now()]);
 
@@ -19,7 +19,7 @@ it('renders carrier breakdown chart', function () {
         ->assertSee('Carrier Breakdown');
 });
 
-it('supports week and month filters', function () {
+it('supports week and month filters', function (): void {
     $user = User::factory()->create();
 
     Livewire::actingAs($user)

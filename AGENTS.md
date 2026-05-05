@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-PolyBag is a Laravel 12 application with Filament 5 admin pages. Core PHP code lives in `app/`, including `Models/`, `Services/`, `Filament/`, `Http/`, and `DataTransferObjects/`. Blade views and frontend entrypoints live under `resources/views` and `resources/js`, with compiled assets handled by Vite. Database migrations, factories, and seeders live in `database/`. End-to-end coverage is in `e2e/`, while PHPUnit/Pest tests are grouped under `tests/Feature` and `tests/Unit`. Deployment and local infrastructure files are in `docker/`, `infra/`, and `scripts/`.
+PolyBag is a Laravel 13 application with Filament 5 admin pages for shipping, batch labels, carrier integrations, imports, and operational setup. Core PHP code lives in `app/`, including `Models/`, `Services/`, `Filament/`, `Http/Integrations/`, `Jobs/`, `Events/`, `Policies/`, `Data/`, and `DataTransferObjects/`. Blade views and frontend entrypoints live under `resources/views`, `resources/js`, and `resources/css`, with assets compiled by Vite and Tailwind CSS 4. Database migrations, factories, and seeders live in `database/`. Pest tests are grouped under `tests/Feature`, `tests/Unit`, and `tests/External` for carrier/reference flows. Browser coverage is in `e2e/`. Deployment and local infrastructure files are in `docker/`, `infra/`, and `scripts/`.
 
 ## Build, Test, and Development Commands
 Use the repo scripts instead of ad hoc commands when possible:
@@ -9,7 +9,9 @@ Use the repo scripts instead of ad hoc commands when possible:
 - `composer run setup` installs PHP and Node dependencies, creates `.env`, generates the app key, runs migrations, and builds assets.
 - `composer run dev` starts the Laravel server, queue worker, scheduler, and Vite dev server together.
 - `composer run test` clears config and runs the application test suite.
+- `composer run test:external` runs external integration/reference tests, and `composer run test:fedex-reference` narrows that suite to FedEx reference cases.
 - `npm run test:e2e` runs Playwright flows from `e2e/`.
+- `npm run test:e2e:ui` and `npm run test:e2e:headed` run the same Playwright wrapper in UI or headed mode.
 - `composer run format` runs Rector, PHPStan, and Pint in sequence.
 - `npm run build` creates production frontend assets.
 
@@ -17,7 +19,7 @@ Use the repo scripts instead of ad hoc commands when possible:
 Follow PSR-12 with 4-space indentation for PHP. Run `vendor/bin/pint` before opening a PR. Keep class names singular and descriptive (`ShipmentImportService`, `RateResponse`), and mirror Laravel conventions for models, migrations, and seeders. Use `PascalCase` for PHP classes, `camelCase` for methods, and kebab-case for Blade view filenames where appropriate. Prefer small service classes over controller-heavy logic.
 
 ## Testing Guidelines
-This repo uses Pest on top of PHPUnit. Add unit tests in `tests/Unit` for isolated services and DTOs, and feature tests in `tests/Feature` for Filament pages, jobs, events, and HTTP flows. Name test files with a `*Test.php` suffix. For browser workflows, add or update Playwright specs in `e2e/*.spec.ts`. Cover new behavior and regressions before merging.
+This repo uses Pest 4 on top of PHPUnit 12. Add unit tests in `tests/Unit` for isolated services, enums, factories, integrations, and DTOs, and feature tests in `tests/Feature` for Filament pages, jobs, events, middleware, API/HTTP flows, and service workflows. Use `tests/External` only for explicit external carrier/reference coverage. Name test files with a `*Test.php` suffix. For browser workflows, add or update Playwright specs in `e2e/*.spec.ts`. Cover new behavior and regressions before merging.
 
 ## Commit & Pull Request Guidelines
 Recent commits use short, imperative subjects such as `Add setup wizard for guided first-run configuration`. Keep commits focused and descriptive; avoid mixed-purpose changes. PRs should explain the user-visible impact, note schema or config changes, link related issues, and include screenshots for Filament/UI updates. Mention any required follow-up steps such as migrations, seeders, or workstation hardware setup.
@@ -39,22 +41,24 @@ The Laravel Boost guidelines are specifically curated by Laravel maintainers for
 This application is a Laravel application and its main Laravel ecosystems package & versions are below. You are an expert with them all. Ensure you abide by these specific packages & versions.
 
 - php - 8.4
-- filament/filament (FILAMENT) - v5
-- laravel/framework (LARAVEL) - v12
-- laravel/prompts (PROMPTS) - v0
-- laravel/scout (SCOUT) - v10
-- laravel/socialite (SOCIALITE) - v5
-- livewire/livewire (LIVEWIRE) - v4
-- larastan/larastan (LARASTAN) - v3
-- laravel/boost (BOOST) - v2
-- laravel/mcp (MCP) - v0
-- laravel/pail (PAIL) - v1
-- laravel/pint (PINT) - v1
-- laravel/sail (SAIL) - v1
-- pestphp/pest (PEST) - v4
-- phpunit/phpunit (PHPUNIT) - v12
-- rector/rector (RECTOR) - v2
-- tailwindcss (TAILWINDCSS) - v4
+- filament/filament (FILAMENT) - v5.6.2
+- laravel/framework (LARAVEL) - v13.7.0
+- laravel/prompts (PROMPTS) - v0.3.17
+- laravel/scout (SCOUT) - v10.25.0
+- laravel/socialite (SOCIALITE) - v5.27.0
+- livewire/livewire (LIVEWIRE) - v4.3.0
+- larastan/larastan (LARASTAN) - v3.9.6
+- laravel/boost (BOOST) - v2.4.6
+- laravel/mcp (MCP) - v0.7.0
+- laravel/pail (PAIL) - v1.2.6
+- laravel/pint (PINT) - v1.29.1
+- laravel/sail (SAIL) - v1.58.0
+- pestphp/pest (PEST) - v4.7.0
+- phpunit/phpunit (PHPUNIT) - v12.5.24
+- rector/rector (RECTOR) - v2.4.2
+- saloonphp/laravel-plugin (SALOON_LARAVEL) - v4.3.0
+- saloonphp/saloon (SALOON) - v4.0.0
+- tailwindcss (TAILWINDCSS) - v4.2.4
 
 ## Conventions
 
@@ -70,6 +74,9 @@ This application is a Laravel application and its main Laravel ecosystems packag
 
 - Stick to existing directory structure; don't create new base folders without approval.
 - Do not change the application's dependencies without approval.
+- Carrier API SDK code belongs in `app/Http/Integrations/` using Saloon v4 connectors, requests, responses, and shared concerns.
+- Business workflows belong in small service classes under `app/Services/`; keep Filament resources focused on UI configuration and orchestration.
+- Use typed DTOs from `app/DataTransferObjects/` or `app/Data/` for structured data crossing service and integration boundaries.
 
 ## Frontend Bundling
 
@@ -87,40 +94,10 @@ This application is a Laravel application and its main Laravel ecosystems packag
 
 # Laravel Boost
 
-## Tools
+## Artisan & Debugging
 
-- Laravel Boost is an MCP server with tools designed specifically for this application. Prefer Boost tools over manual alternatives like shell commands or file reads.
-- Use `database-query` to run read-only queries against the database instead of writing raw SQL in tinker.
-- Use `database-schema` to inspect table structure before writing migrations or models.
-- Use `get-absolute-url` to resolve the correct scheme, domain, and port for project URLs. Always use this before sharing a URL with the user.
-- Use `browser-logs` to read browser logs, errors, and exceptions. Only recent logs are useful, ignore old entries.
-
-## Searching Documentation (IMPORTANT)
-
-- Always use `search-docs` before making code changes. Do not skip this step. It returns version-specific docs based on installed packages automatically.
-- Pass a `packages` array to scope results when you know which packages are relevant.
-- Use multiple broad, topic-based queries: `['rate limiting', 'routing rate limiting', 'routing']`. Expect the most relevant results first.
-- Do not add package names to queries because package info is already shared. Use `test resource table`, not `filament 4 test resource table`.
-
-### Search Syntax
-
-1. Use words for auto-stemmed AND logic: `rate limit` matches both "rate" AND "limit".
-2. Use `"quoted phrases"` for exact position matching: `"infinite scroll"` requires adjacent words in order.
-3. Combine words and phrases for mixed queries: `middleware "rate limit"`.
-4. Use multiple queries for OR logic: `queries=["authentication", "middleware"]`.
-
-## Artisan
-
-- Run Artisan commands directly via the command line (e.g., `php artisan route:list`). Use `php artisan list` to discover available commands and `php artisan [command] --help` to check parameters.
-- Inspect routes with `php artisan route:list`. Filter with: `--method=GET`, `--name=users`, `--path=api`, `--except-vendor`, `--only-vendor`.
-- Read configuration values using dot notation: `php artisan config:show app.name`, `php artisan config:show database.default`. Or read config files directly from the `config/` directory.
-- To check environment variables, read the `.env` file directly.
-
-## Tinker
-
-- Execute PHP in app context for debugging and testing code. Do not create models without user approval, prefer tests with factories instead. Prefer existing Artisan commands over custom tinker code.
-- Always use single quotes to prevent shell expansion: `php artisan tinker --execute 'Your::code();'`
-  - Double quotes for PHP strings inside: `php artisan tinker --execute 'User::where("active", true)->count();'`
+- Use Artisan directly for framework introspection: `php artisan route:list`, `php artisan list`, `php artisan config:show app.name`, and `php artisan [command] --help`.
+- Prefer tests, Boost tools, and existing Artisan commands over ad hoc tinker snippets. If tinker is needed, wrap code in single quotes to avoid shell expansion.
 
 === php rules ===
 
@@ -144,13 +121,8 @@ This application is a Laravel application and its main Laravel ecosystems packag
 
 # Do Things the Laravel Way
 
-- Use `php artisan make:` commands to create new files (i.e. migrations, controllers, models, etc.). You can list available Artisan commands using `php artisan list` and check their parameters with `php artisan [command] --help`.
-- If you're creating a generic PHP class, use `php artisan make:class`.
-- Pass `--no-interaction` to all Artisan commands to ensure they work without user input. You should also pass the correct `--options` to ensure correct behavior.
-
-### Model Creation
-
-- When creating new models, create useful factories and seeders for them too. Ask the user if they need any other things, using `php artisan make:model --help` to check the available options.
+- Use `php artisan make:` commands for Laravel files, including `php artisan make:class` for generic PHP classes, and pass `--no-interaction`.
+- When creating models, create useful factories and seeders too.
 
 ## APIs & Eloquent Resources
 
@@ -162,38 +134,24 @@ This application is a Laravel application and its main Laravel ecosystems packag
 
 ## Testing
 
-- When creating models for tests, use the factories for the models. Check if the factory has custom states that can be used before manually setting up the model.
-- Faker: Use methods such as `$this->faker->word()` or `fake()->randomDigit()`. Follow existing conventions whether to use `$this->faker` or `fake()`.
-- When creating tests, make use of `php artisan make:test [options] {name}` to create a feature test, and pass `--unit` to create a unit test. Most tests should be feature tests.
+- Use model factories and their existing states in tests. Follow nearby Faker style (`fake()` or `$this->faker`).
+- Create tests with `php artisan make:test [options] {name}`; most tests should be feature tests unless the behavior is isolated.
 
 ## Vite Error
 
 - If you receive an "Illuminate\Foundation\ViteException: Unable to locate file in Vite manifest" error, you can run `npm run build` or ask the user to run `npm run dev` or `composer run dev`.
 
-=== laravel/v12 rules ===
+=== laravel/v13 rules ===
 
-# Laravel 12
+# Laravel 13
 
-- CRITICAL: ALWAYS use `search-docs` tool for version-specific Laravel documentation and updated code examples.
-- Since Laravel 11, Laravel has a new streamlined file structure which this project uses.
-
-## Laravel 12 Structure
-
-- In Laravel 12, middleware are no longer registered in `app/Http/Kernel.php`.
-- Middleware are configured declaratively in `bootstrap/app.php` using `Application::configure()->withMiddleware()`.
-- `bootstrap/app.php` is the file to register middleware, exceptions, and routing files.
-- `bootstrap/providers.php` contains application specific service providers.
-- The `app/Console/Kernel.php` file no longer exists; use `bootstrap/app.php` or `routes/console.php` for console configuration.
-- Console commands in `app/Console/Commands/` are automatically available and do not require manual registration.
-
-## Database
-
-- When modifying a column, the migration must include all of the attributes that were previously defined on the column. Otherwise, they will be dropped and lost.
-- Laravel 12 allows limiting eagerly loaded records natively, without external packages: `$query->latest()->limit(10);`.
-
-### Models
-
-- Casts can and likely should be set in a `casts()` method on a model rather than the `$casts` property. Follow existing conventions from other models.
+- CRITICAL: ALWAYS use `search-docs` for version-specific Laravel documentation and updated code examples before changing Laravel or Filament code.
+- Laravel 13 uses the streamlined application structure introduced in Laravel 11.
+- Middleware, exception handling, and routing configuration live in `bootstrap/app.php` via `Application::configure()`.
+- Application service providers are listed in `bootstrap/providers.php`.
+- Console routes live in `routes/console.php`; console commands in `app/Console/Commands/` are auto-discovered.
+- When modifying a column, the migration must include all previously defined attributes for that column so they are not dropped.
+- Prefer model `casts()` methods over `$casts` properties when that matches nearby models.
 
 === pint/core rules ===
 
@@ -207,6 +165,7 @@ This application is a Laravel application and its main Laravel ecosystems packag
 ## Pest
 
 - This project uses Pest for testing. Create tests: `php artisan make:test --pest {name}`.
+- The `{name}` argument should not include the test suite directory. Use `php artisan make:test --pest SomeFeatureTest` instead of `php artisan make:test --pest Feature/SomeFeatureTest`.
 - Run tests: `php artisan test --compact` or filter: `php artisan test --compact --filter=testName`.
 - Do NOT delete tests without approval.
 
@@ -214,161 +173,66 @@ This application is a Laravel application and its main Laravel ecosystems packag
 
 ## Filament
 
-- Filament is used by this application. Follow the existing conventions for how and where it is implemented.
-- Filament is a Server-Driven UI (SDUI) framework for Laravel that lets you define user interfaces in PHP using structured configuration objects. Built on Livewire, Alpine.js, and Tailwind CSS.
+- Filament is a Laravel UI framework built on Livewire, Alpine.js, and Tailwind CSS. UIs are defined in PHP via fluent, chainable components. Follow existing conventions in this app.
 - Use the `search-docs` tool for official documentation on Artisan commands, code examples, testing, relationships, and idiomatic practices. If `search-docs` is unavailable, refer to https://filamentphp.com/docs.
 
 ### Artisan
 
 - Always use Filament-specific Artisan commands to create files. Find available commands with the `list-artisan-commands` tool, or run `php artisan --help`.
-- Always inspect required options before running a command, and always pass `--no-interaction`.
+- Inspect required options before running, and always pass `--no-interaction`.
 
 ### Patterns
 
-Always use static `make()` methods to initialize components. Most configuration methods accept a `Closure` for dynamic values.
-
-Use `Get $get` to read other form field values for conditional logic:
-
-<code-snippet name="Conditional form field visibility" lang="php">
-use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
-use Filament\Schemas\Components\Utilities\Get;
-
-Select::make('type')
-    ->options(CompanyType::class)
-    ->required()
-    ->live(),
-
-TextInput::make('company_name')
-    ->required()
-    ->visible(fn (Get $get): bool => $get('type') === 'business'),
-
-</code-snippet>
-
-Use `state()` with a `Closure` to compute derived column values:
-
-<code-snippet name="Computed table column value" lang="php">
-use Filament\Tables\Columns\TextColumn;
-
-TextColumn::make('full_name')
-    ->state(fn (User $record): string => "{$record->first_name} {$record->last_name}"),
-
-</code-snippet>
-
-Actions encapsulate a button with an optional modal form and logic:
-
-<code-snippet name="Action with modal form" lang="php">
-use Filament\Actions\Action;
-use Filament\Forms\Components\TextInput;
-
-Action::make('updateEmail')
-    ->schema([
-        TextInput::make('email')
-            ->email()
-            ->required(),
-    ])
-    ->action(fn (array $data, User $record) => $record->update($data))
-
-</code-snippet>
+- Use static `make()` methods for components. Most configuration methods accept closures.
+- Use `Get $get` for conditional form state and `Set $set` inside `->afterStateUpdated()` for reactive updates. Prefer `->live(onBlur: true)` on text inputs.
+- Compose forms with `Section` and `Grid`; give children explicit `->columnSpan()` or `->columnSpanFull()` when layout matters.
+- Use `Repeater::make(...)->relationship()->schema([...])` for inline `HasMany` management.
+- Use `TextColumn::make(...)->state(fn (Model $record): mixed => ...)` for derived table values.
+- Use `SelectFilter` for enum or relationship filters and `Filter::make(...)->query(...)` for custom table filters.
+- Use `Filament\Actions\Action` for buttons with optional modal forms and behavior.
 
 ### Testing
 
-Always authenticate before testing panel functionality. Filament uses Livewire, so use `Livewire::test()` or `livewire()` (available when `pestphp/pest-plugin-livewire` is in `composer.json`):
+Testing setup:
 
-<code-snippet name="Table test" lang="php">
-use function Pest\Livewire\livewire;
-
-livewire(ListUsers::class)
-    ->assertCanSeeTableRecords($users)
-    ->searchTable($users->first()->name)
-    ->assertCanSeeTableRecords($users->take(1))
-    ->assertCanNotSeeTableRecords($users->skip(1));
-
-</code-snippet>
-
-<code-snippet name="Create resource test" lang="php">
-use function Pest\Laravel\assertDatabaseHas;
-use function Pest\Livewire\livewire;
-
-livewire(CreateUser::class)
-    ->fillForm([
-        'name' => 'Test',
-        'email' => 'test@example.com',
-    ])
-    ->call('create')
-    ->assertNotified()
-    ->assertRedirect();
-
-assertDatabaseHas(User::class, [
-    'name' => 'Test',
-    'email' => 'test@example.com',
-]);
-
-</code-snippet>
-
-<code-snippet name="Testing validation" lang="php">
-use function Pest\Livewire\livewire;
-
-livewire(CreateUser::class)
-    ->fillForm([
-        'name' => null,
-        'email' => 'invalid-email',
-    ])
-    ->call('create')
-    ->assertHasFormErrors([
-        'name' => 'required',
-        'email' => 'email',
-    ])
-    ->assertNotNotified();
-
-</code-snippet>
-
-<code-snippet name="Calling actions in pages" lang="php">
-use Filament\Actions\DeleteAction;
-use function Pest\Livewire\livewire;
-
-livewire(EditUser::class, ['record' => $user->id])
-    ->callAction(DeleteAction::class)
-    ->assertNotified()
-    ->assertRedirect();
-
-</code-snippet>
-
-<code-snippet name="Calling actions in tables" lang="php">
-use Filament\Actions\Testing\TestAction;
-use function Pest\Livewire\livewire;
-
-livewire(ListUsers::class)
-    ->callAction(TestAction::make('promote')->table($user), [
-        'role' => 'admin',
-    ])
-    ->assertNotified();
-
-</code-snippet>
+- Authenticate with `$this->actingAs(User::factory()->create())` before panel tests.
+- Use `livewire()` helpers for tables/forms, then assert table records, form errors, notifications, redirects, and database state as appropriate.
+- For create pages, call `create`; for edit pages, pass `['record' => $model->id]`, call `save`, and do not assert redirect.
+- Use `->callAction(DeleteAction::class)` for page actions and `TestAction::make('name')->table($record)` for table actions.
 
 ### Correct Namespaces
 
-- Form fields (`TextInput`, `Select`, etc.): `Filament\Forms\Components\`
+- Form fields (`TextInput`, `Select`, `Repeater`, etc.): `Filament\Forms\Components\`
 - Infolist entries (`TextEntry`, `IconEntry`, etc.): `Filament\Infolists\Components\`
 - Layout components (`Grid`, `Section`, `Fieldset`, `Tabs`, `Wizard`, etc.): `Filament\Schemas\Components\`
 - Schema utilities (`Get`, `Set`, etc.): `Filament\Schemas\Components\Utilities\`
+- Table columns (`TextColumn`, `IconColumn`, etc.): `Filament\Tables\Columns\`
+- Table filters (`SelectFilter`, `Filter`, etc.): `Filament\Tables\Filters\`
 - Actions (`DeleteAction`, `CreateAction`, etc.): `Filament\Actions\`. Never use `Filament\Tables\Actions\`, `Filament\Forms\Actions\`, or any other sub-namespace for actions.
 - Icons: `Filament\Support\Icons\Heroicon` enum (e.g., `Heroicon::PencilSquare`)
 
 ### Common Mistakes
 
 - **Never assume public file visibility.** File visibility is `private` by default. Always use `->visibility('public')` when public access is needed.
-- **Never assume full-width layout.** `Grid`, `Section`, and `Fieldset` do not span all columns by default. Explicitly set column spans when needed.
+- **Never assume full-width layout.** `Grid`, `Section`, `Fieldset`, and `Repeater` do not span all columns by default.
+- **Use `Select::make('author_id')->relationship('author', 'name')` for BelongsTo fields.** `BelongsToSelect` is not a Filament 5 component.
+- **`Repeater` uses `->schema()`, not `->fields()`.**
+- **Never add `->dehydrated(false)` to fields that need to be saved.** It strips the value from form state before `->action()` or the save handler runs. Only use it for helper/UI-only fields.
+- **Use correct property types when overriding `Page`, `Resource`, and `Widget` properties.** These properties have union types or changed modifiers that must be preserved:
+  - `$navigationIcon`: `protected static string | BackedEnum | null` (not `?string`)
+  - `$navigationGroup`: `protected static string | UnitEnum | null` (not `?string`)
+  - `$view`: `protected string` (not `protected static string`) on `Page` and `Widget` classes
 
 === saloonphp/laravel-plugin rules ===
 
 ## SaloonPHP
 
-- PHP library for building API integrations and SDKs.
+- This project uses Saloon v4 for carrier and marketplace API integrations under `app/Http/Integrations/`.
 - Documentation: https://docs.saloon.dev
-- Check `composer.json` for version (v2 or v3). Use `web-search` tool for latest docs before implementing.
-- Always use Artisan commands to generate SaloonPHP classes: `php artisan saloon:connector`, `php artisan saloon:request`, `php artisan saloon:response`, `php artisan php artisan saloon:plugin`, `php artisan saloon:auth`.- Documentation: `https://docs.saloon.dev`
-- IMPORTANT: Activate saloon-development skill when working with SaloonPHP-related tasks.
+- Check `composer.json` for the installed major version before implementing. Current dependencies are `saloonphp/saloon` v4 and `saloonphp/laravel-plugin` v4.
+- Use official Saloon v4 documentation before implementing new integration patterns.
+- Prefer existing connectors, request classes, response classes, OAuth providers, and concerns in `app/Http/Integrations/` before adding new abstractions.
+- Always use Artisan commands to generate SaloonPHP classes when available: `php artisan saloon:connector`, `php artisan saloon:request`, `php artisan saloon:response`, `php artisan saloon:plugin`, `php artisan saloon:auth`.
 
 </laravel-boost-guidelines>
 

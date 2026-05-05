@@ -101,7 +101,7 @@ class PickBatchService
             return;
         }
 
-        DB::transaction(function () use ($batch) {
+        DB::transaction(function () use ($batch): void {
             $shipmentIds = $batch->pickBatchShipments()->pluck('shipment_id');
 
             Shipment::whereIn('id', $shipmentIds)
@@ -116,7 +116,7 @@ class PickBatchService
      */
     public function complete(PickBatch $batch): void
     {
-        DB::transaction(function () use ($batch) {
+        DB::transaction(function () use ($batch): void {
             $now = now();
             $shipmentIds = $batch->pickBatchShipments()->pluck('shipment_id');
 

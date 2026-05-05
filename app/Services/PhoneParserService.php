@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use libphonenumber\NumberParseException;
+use libphonenumber\PhoneNumberFormat;
 use libphonenumber\PhoneNumberUtil;
 
 class PhoneParserService
@@ -25,7 +26,7 @@ class PhoneParserService
             }
 
             $nationalNumber = (string) $phoneNumber->getNationalNumber();
-            $e164 = $util->format($phoneNumber, \libphonenumber\PhoneNumberFormat::E164);
+            $e164 = $util->format($phoneNumber, PhoneNumberFormat::E164);
             $extension = $phoneNumber->getExtension();
 
             // Truncate extension to 6 chars (FedEx max)

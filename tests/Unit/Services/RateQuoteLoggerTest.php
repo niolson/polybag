@@ -8,7 +8,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
-it('logs rate quotes for a package', function () {
+it('logs rate quotes for a package', function (): void {
     $package = Package::factory()->create();
 
     $rates = collect([
@@ -28,7 +28,7 @@ it('logs rate quotes for a package', function () {
         ->and($uspsQuote->selected)->toBeFalse();
 });
 
-it('marks selected rate quote', function () {
+it('marks selected rate quote', function (): void {
     $package = Package::factory()->create();
 
     $rates = collect([
@@ -48,7 +48,7 @@ it('marks selected rate quote', function () {
         ->and($fedexQuote->selected)->toBeFalse();
 });
 
-it('handles empty rate collection', function () {
+it('handles empty rate collection', function (): void {
     $package = Package::factory()->create();
 
     app(RateQuoteLogger::class)->logRates($package->id, collect());
@@ -56,7 +56,7 @@ it('handles empty rate collection', function () {
     expect(RateQuote::where('package_id', $package->id)->count())->toBe(0);
 });
 
-it('handles duplicate markSelected calls', function () {
+it('handles duplicate markSelected calls', function (): void {
     $package = Package::factory()->create();
 
     $rates = collect([

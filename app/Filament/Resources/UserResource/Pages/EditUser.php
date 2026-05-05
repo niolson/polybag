@@ -17,7 +17,7 @@ class EditUser extends EditRecord
     {
         return [
             Actions\DeleteAction::make()
-                ->before(function (Actions\DeleteAction $action) {
+                ->before(function (Actions\DeleteAction $action): void {
                     $hasPackages = Package::where('shipped_by_user_id', $this->record->id)->exists();
                     $hasBatches = LabelBatch::where('user_id', $this->record->id)->exists();
 

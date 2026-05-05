@@ -17,7 +17,7 @@ Route::get('/up', function () {
 
 Route::post('/qz/sign', [QzSignController::class, 'sign'])->name('qz.sign')->middleware(['auth', 'throttle:60,1']);
 
-Route::middleware(['auth', 'manager'])->group(function () {
+Route::middleware(['auth', 'manager'])->group(function (): void {
     Route::get('/pick-batches/{pickBatch}/summary', [PickBatchController::class, 'summary'])
         ->name('pick-batches.summary');
     Route::get('/pick-batches/{pickBatch}/pack-slips', [PickBatchController::class, 'packSlips'])
@@ -31,7 +31,7 @@ Route::get('/oauth/{provider}/receive', [OAuthCallbackController::class, 'receiv
 Route::get('/auth/google/redirect', [GoogleController::class, 'redirect'])->name('auth.google.redirect');
 Route::get('/auth/google/callback', [GoogleController::class, 'callback'])->name('auth.google.callback');
 
-Route::prefix('api')->group(function () {
+Route::prefix('api')->group(function (): void {
     if (app()->environment(['local', 'testing'])) {
         Route::get('/health', HealthController::class);
     }

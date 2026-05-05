@@ -176,7 +176,7 @@ class SetupWizard extends Page
                     ])
                     ->columns(2),
             ])
-            ->afterValidation(function () {
+            ->afterValidation(function (): void {
                 $this->saveCompanyInfo();
                 $this->advanceStep(2);
             });
@@ -192,7 +192,7 @@ class SetupWizard extends Page
                 $this->carrierSection('FedEx', 'fedex'),
                 $this->carrierSection('UPS', 'ups'),
             ])
-            ->afterValidation(function () {
+            ->afterValidation(function (): void {
                 $this->saveCarriers();
                 $this->advanceStep(3);
             });
@@ -274,7 +274,7 @@ class SetupWizard extends Page
                     ->addActionLabel('Add Box Size')
                     ->reorderable(false),
             ])
-            ->afterValidation(function () {
+            ->afterValidation(function (): void {
                 $this->saveBoxSizes();
                 $this->advanceStep(4);
             });
@@ -385,7 +385,7 @@ class SetupWizard extends Page
                             ->reorderable(false),
                     ]),
             ])
-            ->afterValidation(function () {
+            ->afterValidation(function (): void {
                 $this->saveChannelsAndMethods();
                 $this->advanceStep(5);
             });
@@ -515,7 +515,7 @@ class SetupWizard extends Page
                             ->content('Amazon SP-API credentials can be configured in App Settings after setup.'),
                     ]),
             ])
-            ->afterValidation(function () {
+            ->afterValidation(function (): void {
                 $this->saveImportSource();
                 $this->advanceStep(6);
             });

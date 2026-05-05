@@ -16,7 +16,7 @@ class EditChannel extends EditRecord
     {
         return [
             Actions\DeleteAction::make()
-                ->before(function (Actions\DeleteAction $action) {
+                ->before(function (Actions\DeleteAction $action): void {
                     if (Shipment::where('channel_id', $this->record->id)->exists()) {
                         Notification::make()
                             ->title('Cannot delete channel')

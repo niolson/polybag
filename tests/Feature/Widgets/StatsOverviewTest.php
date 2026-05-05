@@ -10,7 +10,7 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
-it('shows pending shipments count', function () {
+it('shows pending shipments count', function (): void {
     Shipment::factory()->count(3)->create(['status' => ShipmentStatus::Open]);
     Shipment::factory()->count(2)->create(['status' => ShipmentStatus::Shipped]);
 
@@ -22,7 +22,7 @@ it('shows pending shipments count', function () {
         ->assertSee('3');
 });
 
-it('shows shipped today count', function () {
+it('shows shipped today count', function (): void {
     Package::factory()->shipped()->count(2)->create(['shipped_at' => now()]);
     Package::factory()->shipped()->create(['shipped_at' => now()->subDay()]);
 
@@ -34,7 +34,7 @@ it('shows shipped today count', function () {
         ->assertSee('2');
 });
 
-it('shows shipped this week count', function () {
+it('shows shipped this week count', function (): void {
     Package::factory()->shipped()->count(2)->create(['shipped_at' => now()]);
 
     $user = User::factory()->create();
@@ -44,7 +44,7 @@ it('shows shipped this week count', function () {
         ->assertSee('Shipped This Week');
 });
 
-it('shows shipped this month count', function () {
+it('shows shipped this month count', function (): void {
     Package::factory()->shipped()->count(3)->create(['shipped_at' => now()]);
 
     $user = User::factory()->create();

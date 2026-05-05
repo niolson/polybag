@@ -28,7 +28,7 @@ class BackfillWeightMismatch extends Command
         $bar->start();
 
         $query->with('packageItems.product')
-            ->chunkById(500, function ($packages) use (&$updated, $bar) {
+            ->chunkById(500, function ($packages) use (&$updated, $bar): void {
                 $mismatchIds = [];
 
                 foreach ($packages as $package) {

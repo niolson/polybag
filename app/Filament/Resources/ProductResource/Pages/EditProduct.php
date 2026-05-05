@@ -16,7 +16,7 @@ class EditProduct extends EditRecord
     {
         return [
             Actions\DeleteAction::make()
-                ->before(function (Actions\DeleteAction $action) {
+                ->before(function (Actions\DeleteAction $action): void {
                     if (ShipmentItem::where('product_id', $this->record->id)->exists()) {
                         Notification::make()
                             ->title('Cannot delete product')

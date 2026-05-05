@@ -10,7 +10,7 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
-it('renders rate comparison page', function () {
+it('renders rate comparison page', function (): void {
     $user = User::factory()->create(['role' => Role::Manager]);
 
     Livewire::actingAs($user)
@@ -19,7 +19,7 @@ it('renders rate comparison page', function () {
         ->assertSee('Rate Comparison');
 });
 
-it('shows packages with multiple rate quotes', function () {
+it('shows packages with multiple rate quotes', function (): void {
     $user = User::factory()->create(['role' => Role::Manager]);
 
     $package = Package::factory()->shipped()->create(['shipped_at' => now()]);
@@ -31,7 +31,7 @@ it('shows packages with multiple rate quotes', function () {
         ->assertOk();
 });
 
-it('calculates total potential savings', function () {
+it('calculates total potential savings', function (): void {
     $user = User::factory()->create(['role' => Role::Manager]);
 
     $package = Package::factory()->shipped()->create(['shipped_at' => now()]);
@@ -44,7 +44,7 @@ it('calculates total potential savings', function () {
     expect($component->instance()->getTotalPotentialSavings())->toBe(5.0);
 });
 
-it('restricts access to managers and above', function () {
+it('restricts access to managers and above', function (): void {
     $user = User::factory()->create(['role' => Role::User]);
     $this->actingAs($user);
 

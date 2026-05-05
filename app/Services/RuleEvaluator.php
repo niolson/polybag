@@ -16,7 +16,7 @@ class RuleEvaluator
     {
         $rules = ShippingRule::query()
             ->active()
-            ->where(function ($query) use ($shipment) {
+            ->where(function ($query) use ($shipment): void {
                 $query->whereNull('shipping_method_id')
                     ->orWhere('shipping_method_id', $shipment->shipping_method_id);
             })

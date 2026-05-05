@@ -69,7 +69,7 @@ class Location extends Model
      */
     protected static function booted(): void
     {
-        static::saving(function (Location $location) {
+        static::saving(function (Location $location): void {
             $addressReference = app(AddressReferenceService::class);
 
             $location->country = $addressReference->normalizeCountry($location->country) ?? ($location->country ? strtoupper(trim($location->country)) : null);
@@ -86,11 +86,11 @@ class Location extends Model
             }
         });
 
-        static::saved(function () {
+        static::saved(function (): void {
             static::clearDefaultCache();
         });
 
-        static::deleted(function () {
+        static::deleted(function (): void {
             static::clearDefaultCache();
         });
     }

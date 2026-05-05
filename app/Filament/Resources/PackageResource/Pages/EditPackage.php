@@ -16,7 +16,7 @@ class EditPackage extends EditRecord
     {
         return [
             Actions\DeleteAction::make()
-                ->before(function (Actions\DeleteAction $action) {
+                ->before(function (Actions\DeleteAction $action): void {
                     if ($this->record->status === PackageStatus::Shipped) {
                         Notification::make()
                             ->title('Cannot delete package')

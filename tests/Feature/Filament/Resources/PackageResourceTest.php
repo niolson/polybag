@@ -10,6 +10,7 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
+use App\Enums\ServiceCapability;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
 use App\Filament\Resources\PackageResource\Pages\ViewPackage;
 use App\Models\Package;
@@ -118,9 +119,9 @@ it('voids a label and clears shipping fields', function (): void {
             return $rate;
         }
 
-        public function serviceCapability(string $serviceCode): \App\Enums\ServiceCapability
+        public function serviceCapability(string $serviceCode): ServiceCapability
         {
-            return \App\Enums\ServiceCapability::NotImplemented;
+            return ServiceCapability::NotImplemented;
         }
     });
 

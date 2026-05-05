@@ -43,7 +43,7 @@ class User extends Authenticatable implements FilamentUser
      */
     protected static function booted(): void
     {
-        static::saving(function (User $user) {
+        static::saving(function (User $user): void {
             if ($user->isDirty('password') && $user->password !== null) {
                 $user->password_changed_at = now();
             }

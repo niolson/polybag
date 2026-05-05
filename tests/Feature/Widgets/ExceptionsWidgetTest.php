@@ -12,7 +12,7 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
-it('shows undeliverable shipments count', function () {
+it('shows undeliverable shipments count', function (): void {
     Shipment::factory()->count(2)->create([
         'status' => ShipmentStatus::Open,
         'deliverability' => Deliverability::No,
@@ -30,7 +30,7 @@ it('shows undeliverable shipments count', function () {
         ->assertSee('2');
 });
 
-it('shows failed batch items count', function () {
+it('shows failed batch items count', function (): void {
     LabelBatchItem::factory()->count(3)->create([
         'status' => LabelBatchItemStatus::Failed,
         'created_at' => now(),
@@ -49,7 +49,7 @@ it('shows failed batch items count', function () {
         ->assertSee('3');
 });
 
-it('shows unmapped shipping references count', function () {
+it('shows unmapped shipping references count', function (): void {
     Shipment::factory()->count(2)->create([
         'status' => ShipmentStatus::Open,
         'shipping_method_reference' => 'UNKNOWN_METHOD',

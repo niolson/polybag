@@ -298,7 +298,7 @@ class ShipmentResource extends Resource
                     ->modalHeading('Batch Ship')
                     ->modalDescription('Generate labels for all selected shipments using the same box size. Ineligible shipments will be skipped.')
                     ->modalSubmitActionLabel('Generate Labels')
-                    ->action(function (Collection $records, array $data) {
+                    ->action(function (Collection $records, array $data): void {
                         if ($records->count() > 100) {
                             Notification::make()
                                 ->title('Too many shipments selected')

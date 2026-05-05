@@ -3,6 +3,7 @@
         "claude_code",
         "codex"
     ],
+    "cloud": false,
     "guidelines": true,
     "packages": [
         "filament/filament",

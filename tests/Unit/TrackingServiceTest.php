@@ -10,6 +10,7 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackingEventData;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\Role;
+use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
 use App\Events\TrackingStatusUpdated;
 use App\Models\Package;
@@ -23,7 +24,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
 use Saloon\Http\Response;
 
-it('refreshes a package tracking snapshot and dispatches a status change event', function () {
+it('refreshes a package tracking snapshot and dispatches a status change event', function (): void {
     Event::fake([TrackingStatusUpdated::class]);
 
     $package = Package::factory()->fedex()->create([
@@ -107,9 +108,9 @@ it('refreshes a package tracking snapshot and dispatches a status change event',
             return $rate;
         }
 
-        public function serviceCapability(string $serviceCode): \App\Enums\ServiceCapability
+        public function serviceCapability(string $serviceCode): ServiceCapability
         {
-            return \App\Enums\ServiceCapability::NotImplemented;
+            return ServiceCapability::NotImplemented;
         }
     };
 
@@ -133,7 +134,7 @@ it('refreshes a package tracking snapshot and dispatches a status change event',
     });
 });
 
-it('returns unsupported tracking safely without changing status unexpectedly', function () {
+it('returns unsupported tracking safely without changing status unexpectedly', function (): void {
     $package = Package::factory()->shipped()->create([
         'carrier' => 'UPS',
         'tracking_status' => TrackingStatus::PreTransit,
@@ -201,9 +202,9 @@ it('returns unsupported tracking safely without changing status unexpectedly', f
             return $rate;
         }
 
-        public function serviceCapability(string $serviceCode): \App\Enums\ServiceCapability
+        public function serviceCapability(string $serviceCode): ServiceCapability
         {
-            return \App\Enums\ServiceCapability::NotImplemented;
+            return ServiceCapability::NotImplemented;
         }
     };
 
@@ -218,7 +219,7 @@ it('returns unsupported tracking safely without changing status unexpectedly', f
         ->and(data_get($package->tracking_details, 'supported'))->toBeFalse();
 });
 
-it('notifies operational users when a package enters exception or is stuck in pre-transit', function () {
+it('notifies operational users when a package enters exception or is stuck in pre-transit', function (): void {
     Notification::fake();
 
     $admin = User::factory()->create(['role' => Role::Admin, 'active' => true]);
@@ -297,9 +298,9 @@ it('notifies operational users when a package enters exception or is stuck in pr
             return $rate;
         }
 
-        public function serviceCapability(string $serviceCode): \App\Enums\ServiceCapability
+        public function serviceCapability(string $serviceCode): ServiceCapability
         {
-            return \App\Enums\ServiceCapability::NotImplemented;
+            return ServiceCapability::NotImplemented;
         }
     };
 

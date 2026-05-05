@@ -676,7 +676,7 @@ class Settings extends Page
                                 ->modalDescription(fn () => app(OAuthService::class)->isConnected('usps')
                                     ? 'This will replace the existing OAuth token with a new one. You will be redirected to USPS to re-authorize.'
                                     : 'You will be redirected to USPS to authorize access.')
-                                ->action(function () {
+                                ->action(function (): void {
                                     $url = app(OAuthService::class)->initiateAuthorization('usps');
                                     $this->redirect($url, navigate: false);
                                 }),
@@ -688,7 +688,7 @@ class Settings extends Page
                                 ->requiresConfirmation()
                                 ->modalHeading('Disconnect USPS OAuth')
                                 ->modalDescription('This will remove the OAuth access token. You can reconnect anytime, or the app will fall back to client credentials if configured.')
-                                ->action(function () {
+                                ->action(function (): void {
                                     app(OAuthService::class)->disconnect('usps');
                                     Notification::make()->success()->title('USPS disconnected.')->send();
                                 }),
@@ -772,7 +772,7 @@ class Settings extends Page
                                             Hidden::make('eula_accepted')
                                                 ->default(false),
                                         ])
-                                        ->afterValidation(function () {
+                                        ->afterValidation(function (): void {
                                             if (! $this->fedexEulaAccepted) {
                                                 $this->addError('fedexEulaAccepted', 'You must scroll to the bottom and accept the FedEx EULA to continue.');
 
@@ -829,7 +829,7 @@ class Settings extends Page
                                                 ->maxLength(10),
                                         ])
                                         ->columns(3)
-                                        ->afterValidation(function (Get $get) {
+                                        ->afterValidation(function (Get $get): void {
                                             try {
                                                 $result = app(FedexRegistrationService::class)->validateAddress(
                                                     accountNumber: $get('fedex_reg_account_number'),
@@ -882,7 +882,7 @@ class Settings extends Page
                                                 ->live()
                                                 ->columnSpanFull(),
                                         ])
-                                        ->afterValidation(function (Get $get) {
+                                        ->afterValidation(function (Get $get): void {
                                             $this->fedexFactor2Method = $get('fedex_factor2_method');
                                             $this->fedexSupportFallbackActive = false;
                                             $this->refreshMountedFedexAction();
@@ -967,7 +967,7 @@ class Settings extends Page
                                         })
                                         ->columns(2),
                                 ])
-                                ->action(function (array $data) {
+                                ->action(function (array $data): void {
                                     if ($this->fedexSupportFallbackActive) {
                                         return;
                                     }
@@ -1014,7 +1014,7 @@ class Settings extends Page
                                 ->requiresConfirmation()
                                 ->modalHeading('Disconnect FedEx Account')
                                 ->modalDescription('This will remove your FedEx credentials. You can reconnect your account anytime.')
-                                ->action(function () {
+                                ->action(function (): void {
                                     app(FedexRegistrationService::class)->removeChildCredentials();
                                     Notification::make()->success()->title('FedEx account disconnected.')->send();
                                 }),
@@ -1049,7 +1049,7 @@ class Settings extends Page
                                 ->modalDescription(fn () => app(OAuthService::class)->isConnected('ups')
                                     ? 'This will replace the existing OAuth token with a new one. You will be redirected to UPS to re-authorize.'
                                     : 'You will be redirected to UPS to authorize access.')
-                                ->action(function () {
+                                ->action(function (): void {
                                     $url = app(OAuthService::class)->initiateAuthorization('ups');
                                     $this->redirect($url, navigate: false);
                                 }),
@@ -1061,7 +1061,7 @@ class Settings extends Page
                                 ->requiresConfirmation()
                                 ->modalHeading('Disconnect UPS OAuth')
                                 ->modalDescription('This will remove the OAuth access token. You can reconnect anytime, or the app will fall back to client credentials if configured.')
-                                ->action(function () {
+                                ->action(function (): void {
                                     app(OAuthService::class)->disconnect('ups');
                                     Notification::make()->success()->title('UPS disconnected.')->send();
                                 }),
@@ -1117,7 +1117,7 @@ class Settings extends Page
                                 ->modalDescription(fn () => app(OAuthService::class)->isConnected('shopify')
                                     ? 'This will replace the existing OAuth token with a new one. You will be redirected to Shopify to re-authorize.'
                                     : 'You will be redirected to Shopify to authorize access. Make sure Shop Domain is saved first.')
-                                ->action(function () {
+                                ->action(function (): void {
                                     $url = app(OAuthService::class)->initiateAuthorization('shopify');
                                     $this->redirect($url, navigate: false);
                                 }),
@@ -1129,7 +1129,7 @@ class Settings extends Page
                                 ->requiresConfirmation()
                                 ->modalHeading('Disconnect Shopify OAuth')
                                 ->modalDescription('This will remove the OAuth access token. You can reconnect anytime, or the app will fall back to client credentials if configured.')
-                                ->action(function () {
+                                ->action(function (): void {
                                     app(OAuthService::class)->disconnect('shopify');
                                     Notification::make()->success()->title('Shopify disconnected.')->send();
                                 }),
@@ -1262,7 +1262,7 @@ class Settings extends Page
                             Action::make('test_import_connection')
                                 ->label('Test Connection')
                                 ->icon('heroicon-o-signal')
-                                ->action(function () {
+                                ->action(function (): void {
                                     $this->testImportConnection();
                                 }),
                         ]),

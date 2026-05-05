@@ -9,7 +9,7 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
-it('renders volume report page', function () {
+it('renders volume report page', function (): void {
     $user = User::factory()->create(['role' => Role::Manager]);
 
     Livewire::actingAs($user)
@@ -18,7 +18,7 @@ it('renders volume report page', function () {
         ->assertSee('Volume Report');
 });
 
-it('defaults to channel grouping', function () {
+it('defaults to channel grouping', function (): void {
     $user = User::factory()->create(['role' => Role::Manager]);
 
     $component = Livewire::actingAs($user)
@@ -27,7 +27,7 @@ it('defaults to channel grouping', function () {
     expect($component->get('groupBy'))->toBe('channel');
 });
 
-it('switches to shipping method grouping', function () {
+it('switches to shipping method grouping', function (): void {
     $user = User::factory()->create(['role' => Role::Manager]);
 
     Package::factory()->shipped()->create(['shipped_at' => now()]);
@@ -38,7 +38,7 @@ it('switches to shipping method grouping', function () {
         ->assertOk();
 });
 
-it('switches to period grouping', function () {
+it('switches to period grouping', function (): void {
     $user = User::factory()->create(['role' => Role::Manager]);
 
     Package::factory()->shipped()->create(['shipped_at' => now()]);
@@ -49,7 +49,7 @@ it('switches to period grouping', function () {
         ->assertOk();
 });
 
-it('restricts access to managers and above', function () {
+it('restricts access to managers and above', function (): void {
     $user = User::factory()->create(['role' => Role::User]);
     $this->actingAs($user);
 

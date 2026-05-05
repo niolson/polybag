@@ -9,11 +9,11 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
-beforeEach(function () {
+beforeEach(function (): void {
     Cache::flush();
 });
 
-it('shows shipping cost this week', function () {
+it('shows shipping cost this week', function (): void {
     // Summary stats for this week with costs matching the expected total
     DailyShippingStat::create([
         'date' => today()->toDateString(),
@@ -30,7 +30,7 @@ it('shows shipping cost this week', function () {
         ->assertSee('$25.75');
 });
 
-it('shows zero when no packages shipped this week', function () {
+it('shows zero when no packages shipped this week', function (): void {
     $user = User::factory()->create();
 
     Livewire::actingAs($user)
