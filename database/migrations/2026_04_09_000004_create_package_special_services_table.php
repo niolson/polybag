@@ -19,7 +19,6 @@ return new class extends Migration
             $table->timestamps();
 
             $table->unique(['package_id', 'special_service_id']);
-            $table->index('package_id');
         });
     }
 

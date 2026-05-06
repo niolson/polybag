@@ -17,6 +17,7 @@ return new class extends Migration
             $table->string('carrier')->nullable();
             $table->string('service')->nullable();
             $table->longText('metadata')->nullable();
+            $table->json('carrier_request_payload')->nullable();
             $table->longText('label_data')->nullable();
             $table->string('label_orientation')->nullable();
             $table->string('label_format', 10)->default('pdf');
@@ -24,6 +25,11 @@ return new class extends Migration
             $table->decimal('weight', 8, 2)->nullable();
             $table->boolean('weight_mismatch')->default(false);
             $table->string('status', 16)->default('unshipped');
+            $table->string('tracking_status')->nullable();
+            $table->timestamp('tracking_updated_at')->nullable();
+            $table->timestamp('delivered_at')->nullable();
+            $table->json('tracking_details')->nullable();
+            $table->timestamp('tracking_checked_at')->nullable();
             $table->decimal('height', 8, 2)->nullable();
             $table->decimal('width', 8, 2)->nullable();
             $table->decimal('length', 8, 2)->nullable();
@@ -39,6 +45,8 @@ return new class extends Migration
             $table->index('shipped_at');
             $table->index('carrier');
             $table->index('ship_date');
+            $table->index('tracking_status');
+            $table->index('tracking_checked_at');
             $table->index(['status', 'shipped_at'], 'packages_status_shipped_at_index');
             $table->index(['status', 'weight_mismatch', 'shipped_at'], 'packages_status_weight_mismatch_index');
         });

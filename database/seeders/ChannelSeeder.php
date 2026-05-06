@@ -28,7 +28,7 @@ class ChannelSeeder extends Seeder
         );
 
         Channel::firstOrCreate(
-            ['name' => 'Manual Entry'],
+            ['name' => 'Manual'],
             ['active' => true, 'icon' => 'heroicon-o-pencil-square'],
         );
     }

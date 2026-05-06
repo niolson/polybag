@@ -21,7 +21,9 @@ return new class extends Migration
             $table->string('postal_code');
             $table->string('country', 2)->default('US');
             $table->string('phone')->nullable();
+            $table->string('phone_e164')->nullable();
             $table->string('timezone', 50)->default('America/New_York');
+            $table->string('fedex_hub_id', 4)->nullable();
             $table->boolean('is_default')->default(false);
             $table->boolean('active')->default(true);
             $table->timestamps();

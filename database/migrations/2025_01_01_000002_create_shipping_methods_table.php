@@ -12,8 +12,8 @@ return new class extends Migration
             $table->id();
             $table->string('name');
             $table->integer('commitment_days')->nullable();
-            $table->boolean('saturday_delivery')->default(false);
             $table->boolean('active')->default(true);
+            $table->boolean('is_expedited')->default(false);
             $table->timestamps();
         });
     }

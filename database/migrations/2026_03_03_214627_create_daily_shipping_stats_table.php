@@ -22,8 +22,6 @@ return new class extends Migration
             $table->timestamps();
 
             $table->unique(['date', 'carrier', 'service', 'channel_id', 'shipping_method_id', 'location_id'], 'daily_stats_composite_unique');
-            $table->index('date');
-            $table->index(['date', 'carrier']);
             $table->index(['date', 'channel_id']);
         });
     }

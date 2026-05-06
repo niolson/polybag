@@ -13,6 +13,7 @@ return new class extends Migration
             $table->string('name');
             $table->string('icon')->nullable();
             $table->boolean('active')->default(true);
+            $table->unsignedSmallInteger('pii_retention_days')->nullable();
             $table->timestamps();
         });
     }
