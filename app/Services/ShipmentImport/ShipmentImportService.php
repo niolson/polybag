@@ -3,50 +3,25 @@
 namespace App\Services\ShipmentImport;
 
 use App\Contracts\ImportSourceInterface;
-use App\Enums\Role;
-use App\Events\ImportCompleted;
-use App\Events\ShipmentImported;
-use App\Events\ShipmentUpdated;
-use App\Models\Channel;
-use App\Models\ChannelAlias;
 use App\Models\ImportSource;
-use App\Models\Product;
 use App\Models\Shipment;
-use App\Models\ShipmentItem;
-use App\Models\ShippingMethod;
-use App\Models\ShippingMethodAlias;
-use App\Models\User;
-use App\Notifications\ImportCompleted as ImportCompletedNotification;
 use App\Services\AddressReferenceService;
-use App\Services\PhoneParserService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 class ShipmentImportService
 {
-    private ImportSourceInterface $source;
-
     private ImportSource $importSource;
 
-    private array $stats;
-
-    private array $errors;
-
-    /** @var array<string, int> */
-    private array $channelCache = [];
-
-    /** @var array<string, ?int> */
-    private array $shippingMethodCache = [];
-
-    /** @var array<string, int> */
-    private array $productCache = [];
-
-    public function __construct(ImportSourceInterface $source)
-    {
-        $this->source = $source;
-        $this->importSource = $this->resolveImportSource($source);
-        $this->resetStats();
+    public function __construct(
+        private readonly ImportSourceInterface $source,
+        private readonly ImportReferenceResolver $references,
+        private readonly ShipmentRowPreparer $rowPreparer,
+        private readonly ShipmentBatchWriter $batchWriter,
+        private readonly ShipmentItemImporter $itemImporter,
+        private readonly ImportRunRecorder $runRecorder,
+    ) {
+        $this->importSource = $this->references->importSourceFor($source);
     }
 
     /**
@@ -54,7 +29,16 @@ class ShipmentImportService
      */
     public static function forSource(ImportSourceInterface $source): self
     {
-        return new self($source);
+        $references = app(ImportReferenceResolver::class);
+
+        return new self(
+            source: $source,
+            references: $references,
+            rowPreparer: new ShipmentRowPreparer(app(AddressReferenceService::class), $references),
+            batchWriter: app(ShipmentBatchWriter::class),
+            itemImporter: new ShipmentItemImporter($references),
+            runRecorder: ImportRunRecorder::forSource($source),
+        );
     }
 
     /**
@@ -67,23 +51,14 @@ class ShipmentImportService
         try {
             $this->source->validateConfiguration();
         } catch (\Exception $e) {
-            $this->notifyAdmins(
-                new ImportCompletedNotification([], $this->source->getSourceName(), [$e->getMessage()])
-            );
-
-            return new ImportResult(
-                errors: [$e->getMessage()],
-                duration: microtime(true) - $startTime
-            );
+            return $this->runRecorder->configurationFailed($e->getMessage(), microtime(true) - $startTime);
         }
 
-        $this->warmCaches();
+        $this->references->warm();
 
         $shipments = $this->source->fetchShipments();
 
-        $this->log('info', "Starting import from {$this->source->getSourceName()}", [
-            'shipment_count' => $shipments->count(),
-        ]);
+        $this->runRecorder->started($shipments->count());
 
         $batchSize = config('shipment-import.behavior.batch_size', 100);
 
@@ -95,442 +70,64 @@ class ShipmentImportService
             });
         });
 
-        $duration = microtime(true) - $startTime;
-
-        $this->log('info', 'Import completed', array_merge($this->stats, ['duration' => $duration]));
-
-        ImportCompleted::dispatch($this->stats, $this->source->getSourceName());
-
-        $this->notifyAdmins(
-            new ImportCompletedNotification($this->stats, $this->source->getSourceName(), $this->errors)
-        );
-
-        return new ImportResult(
-            shipmentsCreated: $this->stats['shipments_created'],
-            shipmentsUpdated: $this->stats['shipments_updated'],
-            itemsCreated: $this->stats['items_created'],
-            itemsUpdated: $this->stats['items_updated'],
-            productsCreated: $this->stats['products_created'],
-            productsUpdated: $this->stats['products_updated'],
-            shipmentsExported: $this->stats['shipments_exported'],
-            errors: $this->errors,
-            duration: $duration
-        );
+        return $this->runRecorder->completed(microtime(true) - $startTime);
     }
 
-    /**
-     * Pre-load lookup tables into memory to avoid per-shipment queries.
-     */
-    private function warmCaches(): void
-    {
-        // Cache all channel aliases
-        ChannelAlias::all()->each(function (ChannelAlias $alias): void {
-            $this->channelCache[$alias->reference] = $alias->channel_id;
-        });
-
-        // Cache all channel IDs for numeric lookups
-        Channel::all()->each(function (Channel $channel): void {
-            $this->channelCache[(string) $channel->id] = $channel->id;
-        });
-
-        // Cache all shipping method aliases
-        ShippingMethodAlias::all()->each(function (ShippingMethodAlias $alias): void {
-            $this->shippingMethodCache[$alias->reference] = $alias->shipping_method_id;
-        });
-
-        // Cache shipping method IDs for numeric lookups
-        ShippingMethod::pluck('id')->each(function (int $id): void {
-            $this->shippingMethodCache[(string) $id] = $id;
-        });
-
-        // Cache all products by SKU
-        Product::pluck('id', 'sku')->each(function (int $id, string $sku): void {
-            $this->productCache[$sku] = $id;
-        });
-    }
-
-    /**
-     * Import a batch of shipments using bulk upsert.
-     */
     private function importBatch(Collection $batch): void
     {
-        $now = now();
         $preparedRows = [];
         $validDataBySourceRecord = [];
 
-        // Phase 1: Validate and prepare all shipment data as arrays
         foreach ($batch as $data) {
             try {
-                $prepared = $this->prepareShipmentData($data);
-                if ($prepared === null) {
+                $prepared = $this->rowPreparer->prepare($data, $this->importSource);
+
+                if (! $prepared->isValid()) {
+                    $this->runRecorder->addError("Validation errors for shipment {$data['shipment_reference']}: ".implode(', ', $prepared->errors));
+
                     continue;
                 }
 
-                $prepared['created_at'] = $now;
-                $prepared['updated_at'] = $now;
-                $preparedRows[] = $prepared;
-                $validDataBySourceRecord[$prepared['source_record_id']] = $data;
+                $preparedRows[] = $prepared->attributes;
+                $validDataBySourceRecord[$prepared->attributes['source_record_id']] = $data;
             } catch (\Exception $e) {
-                $this->errors[] = "Error importing shipment {$data['shipment_reference']}: ".$e->getMessage();
-
-                $this->log('error', 'Import error', [
-                    'shipment_reference' => $data['shipment_reference'] ?? 'unknown',
-                    'error' => $e->getMessage(),
-                ]);
+                $this->runRecorder->recordImportError($data, $e);
             }
         }
 
-        if (empty($preparedRows)) {
+        if ($preparedRows === []) {
             return;
         }
 
-        // Track which source record IDs already exist for event dispatching
-        $sourceRecordIds = array_column($preparedRows, 'source_record_id');
-        $existingSourceRecordIds = Shipment::where('import_source_id', $this->importSource->id)
-            ->whereIn('source_record_id', $sourceRecordIds)
-            ->pluck('source_record_id')
-            ->all();
+        $writeResult = $this->batchWriter->write($preparedRows, $this->importSource);
 
-        $updateColumns = [
-            'shipment_reference',
-            'first_name', 'last_name', 'company',
-            'address1', 'address2', 'city', 'state_or_province', 'postal_code', 'country',
-            'phone', 'phone_e164', 'phone_extension', 'email', 'value',
-            'validation_message', 'shipping_method_reference', 'shipping_method_id',
-            'channel_reference', 'deliver_by', 'metadata', 'updated_at',
-            'channel_id',
-        ];
+        $this->runRecorder->addStats([
+            'shipments_created' => $writeResult->shipmentsCreated,
+            'shipments_updated' => $writeResult->shipmentsUpdated,
+        ]);
 
-        Shipment::upsert($preparedRows, ['import_source_id', 'source_record_id'], $updateColumns);
-
-        $existingCount = count($existingSourceRecordIds);
-        $this->stats['shipments_created'] += count($preparedRows) - $existingCount;
-        $this->stats['shipments_updated'] += $existingCount;
-
-        // Phase 3: Fetch shipment IDs for item processing
-        $shipmentMap = Shipment::where('import_source_id', $this->importSource->id)
-            ->whereIn('source_record_id', $sourceRecordIds)
-            ->get()
-            ->keyBy('source_record_id');
-
-        // Phase 4: Import items and mark exported
         foreach ($validDataBySourceRecord as $sourceRecordId => $data) {
-            /** @var Shipment|null $shipment */
-            $shipment = $shipmentMap[$sourceRecordId] ?? null;
+            $shipment = $writeResult->shipmentsBySourceRecord[$sourceRecordId] ?? null;
+
             if (! $shipment) {
                 continue;
             }
 
-            $this->importShipmentItems($shipment->id, $sourceRecordId);
+            $this->runRecorder->addStats($this->itemImporter->import($shipment, $this->source));
+            $this->runRecorder->recordShipmentEvent($shipment, $writeResult->wasExisting($sourceRecordId));
 
-            if (in_array($sourceRecordId, $existingSourceRecordIds, true)) {
-                ShipmentUpdated::dispatch($shipment);
-            } else {
-                ShipmentImported::dispatch($shipment);
-            }
-
-            try {
-                if ($this->source->markExported($sourceRecordId)) {
-                    $this->stats['shipments_exported']++;
-                }
-            } catch (\Exception $e) {
-                $this->errors[] = "Error marking shipment {$sourceRecordId} as exported: ".$e->getMessage();
-
-                $this->log('warning', 'Failed to mark shipment as exported', [
-                    'shipment_reference' => $data['shipment_reference'] ?? $sourceRecordId,
-                    'source_record_id' => $sourceRecordId,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+            $this->markSourceRecordExported($sourceRecordId, $data);
         }
     }
 
-    /**
-     * Validate and prepare a single shipment's data for upsert.
-     *
-     * @return array<string, mixed>|null Prepared data array, or null if validation failed
-     */
-    private function prepareShipmentData(array $data): ?array
+    private function markSourceRecordExported(string $sourceRecordId, array $data): void
     {
-        $data = app(AddressReferenceService::class)->normalizeAddressFields($data);
-
-        ['errors' => $validationErrors, 'warnings' => $validationWarnings] = $this->validateShipmentData($data);
-        if (! empty($validationErrors)) {
-            $this->errors[] = "Validation errors for shipment {$data['shipment_reference']}: ".implode(', ', $validationErrors);
-
-            return null;
-        }
-
-        // Parse phone number using libphonenumber
-        $phoneExtension = $data['phone_extension'] ?? null;
-        $phoneE164 = null;
-        if (! empty($data['phone'])) {
-            $phoneResult = PhoneParserService::parse($data['phone'], $data['country'] ?? 'US');
-            if ($phoneResult->isValid()) {
-                $phoneE164 = $phoneResult->e164;
-                if ($phoneExtension === null && $phoneResult->extension !== null) {
-                    $phoneExtension = $phoneResult->extension;
-                }
-            } else {
-                $validationWarnings[] = "Invalid phone number could not be normalized: {$data['phone']}";
+        try {
+            if ($this->source->markExported($sourceRecordId)) {
+                $this->runRecorder->increment('shipments_exported');
             }
+        } catch (\Exception $e) {
+            $this->runRecorder->recordSourceExportFailure($sourceRecordId, $data, $e);
         }
-
-        // Clear invalid email
-        if (! empty($validationWarnings)) {
-            foreach ($validationWarnings as $warning) {
-                if (str_contains($warning, 'email')) {
-                    $data['email'] = null;
-                }
-            }
-        }
-
-        return [
-            'import_source_id' => $this->importSource->id,
-            'source_record_id' => $data['source_record_id'] ?? $data['shipment_reference'],
-            'shipment_reference' => $data['shipment_reference'],
-            'first_name' => $data['first_name'] ?? null,
-            'last_name' => $data['last_name'] ?? null,
-            'company' => $data['company'] ?? null,
-            'address1' => $data['address1'] ?? null,
-            'address2' => $data['address2'] ?? null,
-            'city' => $data['city'] ?? null,
-            'state_or_province' => $data['state_or_province'] ?? null,
-            'postal_code' => $data['postal_code'] ?? null,
-            'country' => $data['country'] ?? 'US',
-            'phone' => $data['phone'] ?? null,
-            'phone_e164' => $phoneE164,
-            'phone_extension' => $phoneExtension,
-            'email' => $data['email'] ?? null,
-            'value' => $data['value'] ?? null,
-            'validation_message' => ! empty($validationWarnings) ? implode('; ', $validationWarnings) : null,
-            'shipping_method_reference' => $data['shipping_method_id'] ?? null,
-            'shipping_method_id' => $this->resolveShippingMethodId($data),
-            'channel_reference' => $data['channel_id'] ?? null,
-            'channel_id' => $this->resolveChannelId($data),
-            'deliver_by' => $data['deliver_by'] ?? null,
-            'metadata' => isset($data['metadata']) ? json_encode($data['metadata']) : null,
-        ];
-    }
-
-    private function importShipmentItems(int $shipmentId, string $sourceRecordId): void
-    {
-        $items = $this->source->fetchShipmentItems($sourceRecordId);
-
-        foreach ($items as $itemData) {
-            $productId = $this->resolveProductId($itemData);
-
-            if (! $productId) {
-                continue;
-            }
-
-            $shipmentItem = ShipmentItem::updateOrCreate(
-                [
-                    'shipment_id' => $shipmentId,
-                    'product_id' => $productId,
-                ],
-                [
-                    'barcode' => $itemData['barcode'] ?? null,
-                    'quantity' => $itemData['quantity'] ?? 1,
-                    'value' => $itemData['value'] ?? null,
-                    'description' => $itemData['description'] ?? null,
-                    'transparency' => $itemData['transparency'] ?? false,
-                ]
-            );
-
-            if ($shipmentItem->wasRecentlyCreated) {
-                $this->stats['items_created']++;
-            } else {
-                $this->stats['items_updated']++;
-            }
-        }
-    }
-
-    private function resolveShippingMethodId(array $data): ?int
-    {
-        $reference = $data['shipping_method_id'] ?? null;
-
-        if (! $reference) {
-            return null;
-        }
-
-        return $this->shippingMethodCache[(string) $reference] ?? null;
-    }
-
-    private function resolveChannelId(array $data): ?int
-    {
-        $reference = $data['channel_id'] ?? null;
-
-        if (! $reference) {
-            return null;
-        }
-
-        return $this->channelCache[(string) $reference] ?? null;
-    }
-
-    private function resolveProductId(array $itemData): ?int
-    {
-        $sku = $itemData['sku'] ?? null;
-
-        if (! $sku) {
-            return null;
-        }
-
-        // Auto-create or update product if enabled
-        if (config('shipment-import.behavior.auto_update_products', true)) {
-            $updateData = array_filter([
-                'name' => $itemData['name'] ?? $sku,
-                'description' => $itemData['description'] ?? null,
-                'barcode' => $itemData['barcode'] ?? null,
-                'weight' => $itemData['weight'] ?? null,
-            ], fn ($value) => $value !== null);
-
-            $product = Product::updateOrCreate(
-                ['sku' => $sku],
-                array_merge($updateData, ['active' => true])
-            );
-
-            $this->productCache[$sku] = $product->id;
-
-            if ($product->wasRecentlyCreated) {
-                $this->stats['products_created']++;
-            } elseif ($product->wasChanged()) {
-                $this->stats['products_updated']++;
-            }
-
-            return $product->id;
-        }
-
-        // Return from cache if available (auto-update disabled)
-        if (isset($this->productCache[$sku])) {
-            return $this->productCache[$sku];
-        }
-
-        return null;
-    }
-
-    private function resetStats(): void
-    {
-        $this->stats = [
-            'shipments_created' => 0,
-            'shipments_updated' => 0,
-            'items_created' => 0,
-            'items_updated' => 0,
-            'products_created' => 0,
-            'products_updated' => 0,
-            'shipments_exported' => 0,
-        ];
-        $this->errors = [];
-    }
-
-    private function resolveImportSource(ImportSourceInterface $source): ImportSource
-    {
-        $configKey = $source->getSourceName();
-        $config = config("shipment-import.sources.{$configKey}", []);
-
-        return ImportSource::firstOrCreate(
-            ['config_key' => $configKey],
-            [
-                'name' => (string) ($config['name'] ?? str($configKey)->replace(['_', '-'], ' ')->title()),
-                'driver' => (string) ($config['driver'] ?? $source::class),
-                'active' => (bool) ($config['enabled'] ?? true),
-                'settings' => null,
-            ],
-        );
-    }
-
-    private function log(string $level, string $message, array $context = []): void
-    {
-        $channel = config('shipment-import.logging.channel', 'stack');
-        Log::channel($channel)->log($level, $message, $context);
-    }
-
-    private function notifyAdmins(ImportCompletedNotification $notification): void
-    {
-        User::where('role', Role::Admin)->where('active', true)->get()
-            ->each->notify($notification);
-    }
-
-    /**
-     * Validate shipment data before import.
-     *
-     * Returns blocking errors (prevent import) and warnings (import proceeds with note).
-     * Postal code and state/province checks are warnings, not errors, to allow
-     * international orders to import even with missing data.
-     *
-     * @return array{errors: array<string>, warnings: array<string>}
-     */
-    private function validateShipmentData(array $data): array
-    {
-        $errors = [];
-        $warnings = [];
-        $addressReference = app(AddressReferenceService::class);
-
-        // Required fields
-        if (empty($data['shipment_reference'])) {
-            $errors[] = 'Missing shipment reference';
-        }
-
-        if (empty($data['address1'])) {
-            $errors[] = 'Missing address line 1';
-        }
-
-        if (empty($data['city'])) {
-            $errors[] = 'Missing city';
-        }
-
-        $country = $addressReference->normalizeCountry($data['country'] ?? 'US') ?? ($data['country'] ?? 'US');
-
-        // Postal code: warn if missing for US, validate format if present
-        if (empty($data['postal_code'])) {
-            if ($country === 'US') {
-                $warnings[] = 'Missing postal code';
-            }
-        } elseif ($country === 'US') {
-            $zip = preg_replace('/[^0-9]/', '', $data['postal_code']);
-            if (strlen($zip) !== 5 && strlen($zip) !== 9) {
-                $warnings[] = 'Invalid US postal code format';
-            }
-        }
-
-        // State/province: warn if missing for US/CA, validate code if present for US
-        if (empty($data['state_or_province'])) {
-            if ($addressReference->isAdministrativeAreaRequired($country)) {
-                $warnings[] = 'Missing state/province';
-            }
-        } elseif ($country === 'US') {
-            $validStates = [
-                'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
-                'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
-                'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
-                'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
-                'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
-                'DC', 'PR', 'VI', 'GU', 'AS', 'MP', 'AA', 'AE', 'AP',
-            ];
-            $state = strtoupper(trim($data['state_or_province']));
-            if (strlen($state) === 2 && ! in_array($state, $validStates, true)) {
-                $warnings[] = "Invalid US state code: {$state}";
-            }
-        } elseif ($addressReference->usesAdministrativeArea($country)) {
-            $normalizedSubdivision = $addressReference->normalizeSubdivision($country, $data['state_or_province']);
-
-            if ($normalizedSubdivision !== null && $normalizedSubdivision !== trim($data['state_or_province'])) {
-                $data['state_or_province'] = $normalizedSubdivision;
-            }
-        }
-
-        // Validate email format if provided (warning only - does not block import)
-        if (! empty($data['email']) && ! filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
-            $warnings[] = "Invalid email removed: {$data['email']}";
-        }
-
-        // Validate value if provided
-        if (isset($data['value']) && $data['value'] !== null) {
-            if (! is_numeric($data['value']) || $data['value'] < 0) {
-                $errors[] = 'Invalid shipment value (must be a positive number)';
-            }
-        }
-
-        return ['errors' => $errors, 'warnings' => $warnings];
     }
 }

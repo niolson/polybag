@@ -850,3 +850,48 @@ it('imports shipment with no channel reference at all', function (): void {
     expect($shipment->channel_id)->toBeNull()
         ->and($shipment->channel_reference)->toBeNull();
 });
+
+it('can import shipments without fetching shipment items when item import is disabled for the source', function (): void {
+    config(['shipment-import.sources.test.shipment_items.enabled' => false]);
+
+    $source = new class(collect([['shipment_reference' => 'ORD-NO-ITEMS-001', 'first_name' => 'No', 'last_name' => 'Items', 'address1' => '100 Header Only Way', 'city' => 'Seattle', 'state_or_province' => 'WA', 'postal_code' => '98101', 'country' => 'US']])) implements ImportSourceInterface
+    {
+        public function __construct(
+            private Collection $shipments,
+        ) {}
+
+        public function getSourceName(): string
+        {
+            return 'test';
+        }
+
+        public function fetchShipments(): Collection
+        {
+            return $this->shipments;
+        }
+
+        public function fetchShipmentItems(string $sourceRecordId): Collection
+        {
+            throw new RuntimeException('Shipment item lookup should not run.');
+        }
+
+        public function validateConfiguration(): void {}
+
+        public function getFieldMapping(): array
+        {
+            return [];
+        }
+
+        public function markExported(string $sourceRecordId): bool
+        {
+            return false;
+        }
+    };
+
+    $result = ShipmentImportService::forSource($source)->import();
+
+    expect($result->shipmentsCreated)->toBe(1)
+        ->and($result->itemsCreated)->toBe(0)
+        ->and($result->hasErrors())->toBeFalse()
+        ->and(Shipment::where('shipment_reference', 'ORD-NO-ITEMS-001')->exists())->toBeTrue();
+});

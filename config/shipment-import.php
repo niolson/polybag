@@ -58,6 +58,11 @@ return [
             'shipments_query' => null,
             'shipment_items_query' => null,
 
+            // Sources that only provide shipment-level rows can disable item lookup.
+            'shipment_items' => [
+                'enabled' => env('SHIPMENT_IMPORT_SHIPMENT_ITEMS_ENABLED', true),
+            ],
+
             // Filter criteria for table-based queries
             'filters' => [
                 // 'status' => ['ready', 'pending'],
