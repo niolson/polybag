@@ -25,6 +25,11 @@ class FedexRegistrationProxyConnector extends Connector
         return rtrim(config('services.oauth.broker_url'), '/');
     }
 
+    protected function defaultHeaders(): array
+    {
+        return ['Accept' => 'application/json'];
+    }
+
     public function boot(PendingRequest $pendingRequest): void
     {
         $fedexPath = $pendingRequest->getRequest()->resolveEndpoint();
