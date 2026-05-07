@@ -17,6 +17,7 @@ class FedexRegistrationProxyConnector extends Connector
         '/registration/v2/customerkeys/pingeneration' => '/fedex/registration/send-pin',
         '/registration/v2/pin/keysgeneration' => '/fedex/registration/verify-pin',
         '/registration/v2/invoice/keysgeneration' => '/fedex/registration/verify-invoice',
+        '/track/v1/trackingnumbers' => '/fedex/track',
     ];
 
     public function resolveBaseUrl(): string

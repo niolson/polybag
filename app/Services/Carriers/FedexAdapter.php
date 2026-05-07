@@ -16,6 +16,7 @@ use App\Enums\FedexPackageType;
 use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
 use App\Http\Integrations\Fedex\FedexConnector;
+use App\Http\Integrations\Fedex\FedexRegistrationProxyConnector;
 use App\Http\Integrations\Fedex\Requests\CancelShipment as CancelShipmentRequest;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Http\Integrations\Fedex\Requests\Rates;
@@ -611,7 +612,12 @@ class FedexAdapter implements CarrierAdapterInterface
     public function trackShipment(Package $package): TrackShipmentResponse
     {
         try {
-            $connector = FedexConnector::getFedexConnector();
+            if (config('services.oauth.broker_url')) {
+                $connector = new FedexRegistrationProxyConnector;
+            } else {
+                $connector = FedexConnector::getFedexConnector();
+            }
+
             $trackRequest = new TrackShipment($package->tracking_number);
             $response = $connector->send($trackRequest);
 
