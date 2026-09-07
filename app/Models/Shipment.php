@@ -12,6 +12,7 @@ use App\Services\AddressValidationService;
 use App\Services\PhoneParserService;
 use App\Services\PickBatchService;
 use App\Services\SettingsService;
+use App\Services\ShipmentImport\Sources\AmazonSource;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -187,6 +188,19 @@ class Shipment extends Model
 
         return (bool) $settings->get('picking_enabled', false)
             && (bool) $settings->get('require_picking_before_shipping', false);
+    }
+
+    /**
+     * Whether Amazon fulfills this order itself (FBA) rather than the seller.
+     *
+     * An FBA order is picked, packed and shipped from an Amazon warehouse, so
+     * packing one here produces a duplicate physical shipment and a
+     * `confirmShipment` call Amazon rejects. These are excluded from import by
+     * default; this covers the ones that arrive when a source opts back in.
+     */
+    public function isAmazonFulfilled(): bool
+    {
+        return ($this->metadata['amazon_fulfilled_by'] ?? null) === AmazonSource::FULFILLED_BY_AMAZON;
     }
 
     /**

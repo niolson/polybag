@@ -110,6 +110,11 @@ class PackageExportService
                     // exactly where the behaviour is meant to be exercised.
                     $data['_amazon_shipment_id'] = AmazonBuyShippingAdapter::shipmentIdFor($package);
 
+                    // Also set in both worlds. An FBA order has nothing to
+                    // confirm in either, and the sandbox body is canned, so a
+                    // sandbox export would otherwise sail past the refusal.
+                    $data['_amazon_fulfilled_by'] = $package->shipment?->metadata['amazon_fulfilled_by'] ?? null;
+
                     if (! (bool) app(SettingsService::class)->get('sandbox_mode', false)) {
                         $data = array_merge($data, $this->buildAmazonExportContext($package));
                     }

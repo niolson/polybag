@@ -53,6 +53,10 @@ class BatchLabelService
             return 'Already shipped';
         }
 
+        if ($shipment->isAmazonFulfilled()) {
+            return 'Fulfilled by Amazon (FBA)';
+        }
+
         if ($shipment->isBlockedByPicking()) {
             return 'Not picked';
         }

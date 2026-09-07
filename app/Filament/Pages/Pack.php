@@ -113,6 +113,17 @@ class Pack extends Page
                 return;
             }
 
+            if ($this->shipment->isAmazonFulfilled()) {
+                $this->notifyWarning(
+                    'Fulfilled by Amazon',
+                    "Shipment {$this->shipment->shipment_reference} is an FBA order. Amazon picks, packs and ships it — packing it here would send a duplicate.",
+                );
+                $this->shipment = null;
+                $this->redirect('/pack');
+
+                return;
+            }
+
             if ($this->shipment->isBlockedByPicking()) {
                 $this->notifyWarning(
                     'Picking Required',

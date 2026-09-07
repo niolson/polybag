@@ -24,6 +24,7 @@ use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
 use App\Models\ShippingMethodAlias;
+use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\DataSourceFactory;
 use App\Services\ShipmentImport\PackageExportService;
@@ -1767,4 +1768,196 @@ it('fails validation when only per-source client_id but no client_secret and no 
     // client_secret is absent, so the source has no usable credentials.
     expect(fn () => $source->validateConfiguration())
         ->toThrow(InvalidArgumentException::class, 'client credentials');
+});
+
+// ── FBA (Amazon-fulfilled) orders ─────────────────────────────────────────────
+
+it('skips Amazon-fulfilled orders by default', function (): void {
+    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($c) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $c->id]));
+
+    $fba = sampleAmazonOrder('111-4444444-4444444');
+    $fba['fulfillment']['fulfilledBy'] = 'AMAZON';
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([sampleAmazonOrder(), $fba]),
+    ]);
+
+    $result = ShipmentImportService::forSource(amazonSourceForTest(), $this->dataSource)->import();
+
+    expect($result->shipmentsCreated)->toBe(1)
+        ->and($result->errors)->toBeEmpty()
+        ->and(Shipment::where('shipment_reference', '111-4444444-4444444')->exists())->toBeFalse()
+        ->and(Shipment::where('shipment_reference', '111-2222222-3333333')->exists())->toBeTrue();
+});
+
+it('imports Amazon-fulfilled orders when the source opts in, and marks them', function (): void {
+    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($c) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $c->id]));
+
+    $fba = sampleAmazonOrder('111-4444444-4444444');
+    $fba['fulfillment']['fulfilledBy'] = 'AMAZON';
+
+    Saloon::fake([SearchOrders::class => amazonOrdersResponse([$fba])]);
+
+    $result = ShipmentImportService::forSource(
+        amazonSourceForTest(['import_fba_orders' => true]),
+        $this->dataSource,
+    )->import();
+
+    expect($result->shipmentsCreated)->toBe(1);
+
+    $shipment = Shipment::where('shipment_reference', '111-4444444-4444444')->firstOrFail();
+
+    expect($shipment->metadata['amazon_fulfilled_by'])->toBe('AMAZON')
+        ->and($shipment->isAmazonFulfilled())->toBeTrue();
+});
+
+it('counts only imported orders against the historical max, not discarded FBA ones', function (): void {
+    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($c) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $c->id]));
+
+    // Two FBA orders sit in front of the merchant-fulfilled ones. If the cap
+    // counted fetched rather than kept orders it would fill up on the FBA pair
+    // and import almost nothing.
+    $orders = [];
+
+    foreach (['111-0000000-0000001', '111-0000000-0000002'] as $orderId) {
+        $order = sampleAmazonOrder($orderId);
+        $order['fulfillment']['fulfilledBy'] = 'AMAZON';
+        $orders[] = $order;
+    }
+
+    $orders[] = sampleAmazonOrder('111-0000000-0000003');
+    $orders[] = sampleAmazonOrder('111-0000000-0000004');
+    // A third merchant-fulfilled order, past the cap, so the cap is still
+    // proven to apply rather than the assertion just counting the non-FBA ones.
+    $orders[] = sampleAmazonOrder('111-0000000-0000005');
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse($orders),
+        SearchCatalogItems::class => amazonCatalogResponse([]),
+    ]);
+
+    $result = ShipmentImportService::forRecord($this->dataSource, [
+        '_historical_import' => true,
+        '_historical_created_after' => '2025-12-01T00:00:00Z',
+        '_historical_created_before' => '2025-12-08T23:59:59Z',
+        '_historical_max_orders' => 2,
+    ])->import();
+
+    expect($result->shipmentsCreated)->toBe(2)
+        ->and(Shipment::pluck('shipment_reference')->sort()->values()->all())
+        ->toBe(['111-0000000-0000003', '111-0000000-0000004']);
+});
+
+/**
+ * A shipped, unexported package on an FBA-flagged Amazon order, wired to an
+ * export destination. Returns the package.
+ */
+function amazonFbaPackageForExport(array $sourceSettings = []): Package
+{
+    $channel = Channel::factory()->create(['name' => 'Amazon']);
+
+    $exportSource = DataSource::factory()->create([
+        'source_type' => AmazonSource::class,
+        'name' => 'Amazon Export',
+        'settings' => array_merge([
+            'channel_name' => 'Amazon',
+            'marketplace_id' => 'ATVPDKIKX0DER',
+            'export_enabled' => true,
+            'export_field_mapping' => [
+                'tracking_number' => 'tracking_number',
+                'carrier' => 'carrier',
+                'shipment_reference' => 'shipment_reference',
+                'amazon_order_id' => 'amazon_order_id',
+            ],
+        ], $sourceSettings),
+        'secret_settings' => [
+            'client_id' => 'test-client-id',
+            'client_secret' => 'test-client-secret',
+            'refresh_token' => 'test-refresh-token',
+        ],
+    ]);
+
+    $shipment = Shipment::factory()->create([
+        'channel_id' => $channel->id,
+        'data_source_id' => $exportSource->id,
+        'shipment_reference' => '111-4444444-4444444',
+        'metadata' => [
+            'amazon_order_id' => '111-4444444-4444444',
+            'amazon_fulfilled_by' => 'AMAZON',
+        ],
+    ]);
+
+    $package = Package::factory()->shipped()->create([
+        'shipment_id' => $shipment->id,
+        'tracking_number' => 'TRACK-FBA',
+        'carrier' => 'USPS',
+        'service' => 'Priority Mail',
+        'exported' => false,
+        'shipped_at' => '2026-08-07 15:30:00',
+    ]);
+
+    $product = Product::factory()->create();
+    $shipmentItem = $shipment->shipmentItems()->create([
+        'product_id' => $product->id,
+        'source_item_id' => 'AMAZON-ITEM-FBA',
+        'quantity' => 1,
+    ]);
+    PackageItem::factory()->create([
+        'package_id' => $package->id,
+        'shipment_item_id' => $shipmentItem->id,
+        'product_id' => $product->id,
+        'quantity' => 1,
+    ]);
+
+    return $package;
+}
+
+it('refuses to confirm a shipment for an Amazon-fulfilled order', function (): void {
+    $package = amazonFbaPackageForExport();
+
+    Saloon::fake([ConfirmShipment::class => amazonConfirmShipmentResponse()]);
+
+    $result = (new PackageExportService)->exportPackage($package);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->errors[0])->toContain('fulfilled by Amazon (FBA)');
+
+    // Permanent, so it is not left to retry against an order Amazon will never accept.
+    expect($package->fresh()->exported)->toBeFalse();
+    Saloon::assertNotSent(ConfirmShipment::class);
+});
+
+it('refuses an FBA order permanently even when the source credentials are missing', function (): void {
+    // Credentials are absent, so validateExportConfiguration() would throw a
+    // retryable InvalidArgumentException. The FBA refusal has to win, or the
+    // export retries 32 times for a confirmation that can never be valid.
+    $package = amazonFbaPackageForExport();
+    $package->shipment->dataSource->update(['secret_settings' => []]);
+
+    $result = (new PackageExportService)->exportPackage($package);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->errors[0])->toContain('fulfilled by Amazon (FBA)')
+        ->and($result->errors[0])->not->toContain('credentials are not configured');
+
+    $export = PackageExport::where('package_id', $package->id)->firstOrFail();
+
+    expect($export->status)->toBe(PackageExportStatus::PermanentlyFailed);
+});
+
+it('refuses an FBA order rather than silently passing it as a Buy Shipping label', function (): void {
+    // Both flags set is a contradiction: Amazon does not fulfill an order we
+    // bought postage for. It must not be recorded as a successful export.
+    $package = amazonFbaPackageForExport();
+    $package->update([
+        'metadata' => array_merge($package->metadata ?? [], [
+            AmazonBuyShippingAdapter::SHIPMENT_ID_KEY => 'amzn-shipment-id',
+        ]),
+    ]);
+
+    $result = (new PackageExportService)->exportPackage($package);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->errors[0])->toContain('fulfilled by Amazon (FBA)')
+        ->and($package->fresh()->exported)->toBeFalse();
 });

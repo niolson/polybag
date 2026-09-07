@@ -685,3 +685,25 @@ it('allows packing an unpicked shipment when picking is not required before ship
         ->assertSet('shipment.id', $shipment->id)
         ->assertNoRedirect();
 });
+
+// --- FBA gate ---
+
+it('blocks packing an Amazon-fulfilled (FBA) shipment', function (): void {
+    $shipment = Shipment::factory()->create([
+        'metadata' => ['amazon_fulfilled_by' => 'AMAZON'],
+    ]);
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->assertSet('shipment', null)
+        ->assertRedirect('/pack')
+        ->assertNotified();
+});
+
+it('allows packing a merchant-fulfilled Amazon shipment', function (): void {
+    $shipment = Shipment::factory()->create([
+        'metadata' => ['amazon_fulfilled_by' => 'MERCHANT'],
+    ]);
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->assertSet('shipment.id', $shipment->id);
+});
