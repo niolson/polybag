@@ -26,6 +26,12 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
 {
     public const HISTORICAL_IMPORT_MAX_ORDERS = 1000;
 
+    /**
+     * `fulfillment.fulfilledBy` when Amazon ships the order from its own
+     * warehouse (FBA) rather than the seller shipping it (MFN).
+     */
+    public const FULFILLED_BY_AMAZON = 'AMAZON';
+
     private array $config;
 
     private AmazonSpApiConnector $connector;
@@ -126,6 +132,14 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
         $historicalImport = $this->isHistoricalImport();
         $maxOrders = $historicalImport ? (int) $this->config['_historical_max_orders'] : null;
 
+        // Filtered here rather than in the query: SearchOrders v2026-01-01 was
+        // not confirmed to accept a fulfillment-channel parameter, and sending
+        // an unrecognised one risks a 400 on every import. Discarding client
+        // side costs a little bandwidth but keeps `maxResultsPerPage` honest,
+        // because the cap below counts orders we keep, not orders we fetched.
+        $importFbaOrders = (bool) ($this->config['import_fba_orders'] ?? false);
+        $skippedFbaOrders = 0;
+
         do {
             $maxResultsPerPage = $maxOrders === null
                 ? self::SEARCH_ORDERS_PAGE_SIZE
@@ -184,6 +198,12 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
                     break;
                 }
 
+                if (! $importFbaOrders && $this->isFulfilledByAmazon($order)) {
+                    $skippedFbaOrders++;
+
+                    continue;
+                }
+
                 $rawOrders[] = $order;
             }
 
@@ -191,6 +211,13 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
                 $paginationToken = null;
             }
         } while ($paginationToken !== null);
+
+        if ($skippedFbaOrders > 0) {
+            Log::info('Skipped Amazon-fulfilled (FBA) orders during import', [
+                'skipped' => $skippedFbaOrders,
+                'imported' => count($rawOrders),
+            ]);
+        }
 
         if (! $sandbox && $historicalImport) {
             $this->catalogBarcodes = $this->fetchCatalogBarcodes($rawOrders, $marketplaceId);
@@ -202,6 +229,18 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
 
             return $mapped;
         });
+    }
+
+    /**
+     * Whether Amazon ships this order itself. The discriminator lives in the
+     * order-level fulfillment block, which is only present when FULFILLMENT is
+     * requested in `includedData` — every non-sandbox query above asks for it.
+     *
+     * @param  array<string, mixed>  $order
+     */
+    private function isFulfilledByAmazon(array $order): bool
+    {
+        return ($order['fulfillment']['fulfilledBy'] ?? null) === self::FULFILLED_BY_AMAZON;
     }
 
     public function fetchShipmentItems(string $sourceRecordId): Collection
@@ -253,6 +292,28 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
      */
     public function exportPackage(array $data): void
     {
+        $shipmentReference = filled($data['shipment_reference'] ?? null)
+            ? (string) $data['shipment_reference']
+            : 'package '.($data['_package_reference_id'] ?? 'unknown');
+
+        // First, ahead of both short-circuits below.
+        //
+        // Ahead of the credential check because the refusal has to be
+        // permanent to mean anything: `validateExportConfiguration()` throws
+        // `InvalidArgumentException`, which `PackageExportService` treats as
+        // retryable, so a misconfigured source would otherwise retry an FBA
+        // package 32 times for a confirmation that can never be valid.
+        //
+        // Ahead of the Buy Shipping check because both being set is a
+        // contradiction — Amazon does not ship an order we bought postage for —
+        // and recording that silently as a successful export hides it. Failing
+        // loudly surfaces the inconsistent metadata instead.
+        if (($data['_amazon_fulfilled_by'] ?? null) === self::FULFILLED_BY_AMAZON) {
+            throw new PermanentExportException(
+                "Cannot export package for shipment {$shipmentReference}: the order is fulfilled by Amazon (FBA), so Amazon ships it and there is no shipment to confirm."
+            );
+        }
+
         // Before the credential check, deliberately. There is nothing to send,
         // so there is nothing credentials are needed for — and a seller who
         // rotates or removes them after the label was bought would otherwise
@@ -270,9 +331,6 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
         $this->validateExportConfiguration();
 
         $amazonOrderId = $data['amazon_order_id'] ?? null;
-        $shipmentReference = filled($data['shipment_reference'] ?? null)
-            ? (string) $data['shipment_reference']
-            : 'package '.($data['_package_reference_id'] ?? 'unknown');
 
         if (empty($amazonOrderId)) {
             throw new InvalidArgumentException(

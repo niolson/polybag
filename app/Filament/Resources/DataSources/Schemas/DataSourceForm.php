@@ -276,6 +276,12 @@ class DataSourceForm
                     Toggle::make('settings.export_enabled')
                         ->label('Confirm Shipment Back to Amazon')
                         ->default(false),
+
+                    Toggle::make('settings.import_fba_orders')
+                        ->label('Import Amazon-Fulfilled (FBA) Orders')
+                        ->default(false)
+                        ->helperText('Off by default. Amazon picks, packs and ships FBA orders from its own warehouse, so packing one here creates a duplicate shipment and a confirmation Amazon rejects. Turn this on only if you want them visible for reference — imported FBA orders are badged and cannot be packed or exported.')
+                        ->columnSpanFull(),
                 ])
                 ->visible(fn (Get $get): bool => $get('source_type') === AmazonSource::class)
                 ->columns(2),

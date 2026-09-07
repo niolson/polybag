@@ -34,6 +34,19 @@ it('marks already-shipped shipments as ineligible', function (): void {
         ->and($result->ineligible->first()['reason'])->toBe('Already shipped');
 });
 
+it('marks Amazon-fulfilled (FBA) shipments as ineligible', function (): void {
+    $shipment = Shipment::factory()->create([
+        'metadata' => ['amazon_fulfilled_by' => 'AMAZON'],
+    ]);
+    ShipmentItem::factory()->create(['shipment_id' => $shipment->id]);
+
+    $result = $this->service->validateShipmentsForBatch(collect([$shipment]));
+
+    expect($result->eligible)->toBeEmpty()
+        ->and($result->ineligible)->toHaveCount(1)
+        ->and($result->ineligible->first()['reason'])->toBe('Fulfilled by Amazon (FBA)');
+});
+
 it('marks shipments without shipping method as ineligible', function (): void {
     $shipment = Shipment::factory()->withoutShippingMethod()->create();
     ShipmentItem::factory()->create(['shipment_id' => $shipment->id]);

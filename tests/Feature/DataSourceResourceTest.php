@@ -902,3 +902,16 @@ it('blocks saving an Amazon data source as active on edit when MFA is not requir
 
     expect($source->fresh()->active)->toBeFalse();
 });
+
+// ── FBA import toggle ─────────────────────────────────────────────────────────
+
+it('offers the FBA import toggle for Amazon sources only, defaulting off', function (): void {
+    $this->actingAs($this->admin);
+
+    Livewire::test(CreateDataSource::class)
+        ->fillForm(['source_type' => AmazonSource::class])
+        ->assertFormFieldVisible('settings.import_fba_orders')
+        ->assertFormSet(['settings.import_fba_orders' => false])
+        ->fillForm(['source_type' => DatabaseSource::class])
+        ->assertFormFieldHidden('settings.import_fba_orders');
+});

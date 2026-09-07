@@ -242,6 +242,12 @@ class ShipmentResource extends Resource
                 Tables\Columns\TextColumn::make('deliverability')
                     ->label('Deliverable')
                     ->badge(),
+                Tables\Columns\TextColumn::make('fulfilled_by')
+                    ->label('Fulfillment')
+                    ->badge()
+                    ->color('warning')
+                    ->state(fn (Shipment $record): ?string => $record->isAmazonFulfilled() ? 'FBA' : null)
+                    ->tooltip('Fulfilled by Amazon — Amazon ships this order. It cannot be packed here.'),
                 Tables\Columns\TextColumn::make('created_at')
                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->sortable()
@@ -462,6 +468,13 @@ class ShipmentResource extends Resource
                             ->iconPosition('after'),
                         TextEntry::make('status')
                             ->badge(),
+                        TextEntry::make('fulfilled_by')
+                            ->label('Fulfillment')
+                            ->badge()
+                            ->color('warning')
+                            ->state('Fulfilled by Amazon (FBA)')
+                            ->helperText('Amazon picks, packs and ships this order. It cannot be packed or confirmed from here.')
+                            ->visible(fn (Shipment $record): bool => $record->isAmazonFulfilled()),
                         TextEntry::make('picking_status')
                             ->badge()
                             ->visible(fn () => app(SettingsService::class)->get('picking_enabled', false)),
