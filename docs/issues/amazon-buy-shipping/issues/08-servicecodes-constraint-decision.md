@@ -30,5 +30,13 @@ agreed work, and it touches every adapter.
 
 ## Blocked by
 
-None, but do not act on it before `03-amazon-buy-shipping-adapter` shows whether post-quote
-filtering is actually awkward.
+Nothing any more. The gate below is discharged.
+
+~~None, but do not act on it before `03-amazon-buy-shipping-adapter` shows whether post-quote
+filtering is actually awkward.~~
+
+**2026-09-07:** `03` shipped 2026-09-05, and post-quote filtering — the option this issue
+names as the alternative to a constraint object — is what it shipped. The evidence this
+issue was waiting for therefore exists, and question 1 can be answered from the adapter as
+built rather than in the abstract. Still `needs-triage`: the answer may well be "leave it
+alone", and it touches every adapter.
