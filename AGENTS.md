@@ -132,7 +132,7 @@ Rate/label/track/cancel paths resolve carrier accounts via `CarrierAccount::reso
 Shipment import sources are configured as `DataSource` records in the database (Integrations nav group), not in `.env`. Each source can be assigned to a `Client` and has its own encrypted credentials and schedule.
 
 Supported drivers:
-- **Database** — Custom SQL queries against MySQL, SQL Server, or PostgreSQL
+- **Database** — Custom SQL queries against MySQL, SQL Server, PostgreSQL, or SQLite. Full reference: `docs/data-sources/database.md` — query contracts, field mapping, `RawSqlGuard`, `max_affected_rows`, and least-privilege `GRANT` examples
 - **Shopify** — Via Shopify Admin API with per-source OAuth
 - **Amazon** — Via SP-API with per-source client credentials + refresh token
 

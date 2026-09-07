@@ -50,6 +50,9 @@ class DataSourceForm
         AmazonSource::class => 'Amazon SP-API',
     ];
 
+    /** Reference guide for the Database driver — `docs/data-sources/database.md` in this repo. */
+    private const DATABASE_SOURCE_DOCS_URL = 'https://github.com/niolson/polybag/blob/main/docs/data-sources/database.md';
+
     private const CONNECTION_TEST_TIMEOUT_SECONDS = 5;
 
     private const QUERY_PREVIEW_ROWS = 5;
@@ -308,6 +311,11 @@ class DataSourceForm
                         ->default('mysql')
                         ->required()
                         ->live()
+                        ->helperText(new HtmlString(
+                            'Connection fields, query contracts, field mapping and least-privilege GRANT examples: '
+                            .'<a href="'.self::DATABASE_SOURCE_DOCS_URL.'" target="_blank" rel="noopener noreferrer" '
+                            .'class="text-primary-600 hover:underline font-medium">Database data source guide</a>.'
+                        ))
                         ->afterStateUpdated(fn (Set $set, ?string $state): mixed => $set(
                             'settings.db_port',
                             ImportConnectionConfig::defaultPort($state),
@@ -514,7 +522,14 @@ class DataSourceForm
                         ->nullable()
                         ->rows(3)
                         ->rule(RawSqlGuard::rule(RawSqlGuard::EXPORT, 'Export Query'))
-                        ->helperText('Available parameters: :tracking_number, :carrier, :service, :weight, :cost, :shipment_reference. ⚠️ Runs automatically for every shipped package against the configured database — must be a single INSERT or UPDATE statement.')
+                        // Every key PackageExportService's default
+                        // export_field_mapping supplies, and only those. A
+                        // parameter outside that set is never bound, and PDO then
+                        // rejects the statement with HY093 — so listing one here
+                        // breaks live exports. The last two are null unless the
+                        // package came from a Shopify/Amazon source, which a
+                        // global export destination does receive.
+                        ->helperText('Available parameters: :tracking_number, :carrier, :service, :weight, :shipment_reference, :fulfillment_order_id (Shopify), :amazon_order_id. ⚠️ Runs automatically for every shipped package against the configured database — must be a single INSERT or UPDATE statement.')
                         ->dehydrateStateUsing(fn (?string $state): ?string => $state ? str_replace("\u{00A0}", ' ', $state) : $state)
                         ->columnSpanFull()
                         ->visible(fn (Get $get): bool => (bool) $get('settings.export_enabled')),
