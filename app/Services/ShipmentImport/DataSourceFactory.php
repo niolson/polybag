@@ -39,9 +39,9 @@ class DataSourceFactory
     }
 
     /**
-     * Build a fully-structured DatabaseSource config from flat DataSource settings
-     * and register a per-source dynamic DB connection so multiple database sources
-     * can run concurrently without overwriting each other's connection config.
+     * Register a per-source dynamic DB connection — so multiple database sources
+     * can run concurrently without overwriting each other's connection config —
+     * and build the DatabaseSource config bound to it.
      *
      * @param  array<string, mixed>  $settings
      * @return array<string, mixed>
@@ -65,6 +65,20 @@ class DataSourceFactory
             DB::purge($connectionName);
         }
 
+        return self::databaseConfigFor($settings, $connectionName, $sourceId);
+    }
+
+    /**
+     * Build a fully-structured DatabaseSource config from flat DataSource settings
+     * against an already-registered connection. Split out so the query preview in
+     * the DataSource form can build the same config — including the field-mapping
+     * defaults — for an unsaved source over its own test connection.
+     *
+     * @param  array<string, mixed>  $settings
+     * @return array<string, mixed>
+     */
+    public static function databaseConfigFor(array $settings, string $connectionName, ?int $sourceId = null): array
+    {
         return [
             'connection' => $connectionName,
             'data_source_id' => $sourceId,

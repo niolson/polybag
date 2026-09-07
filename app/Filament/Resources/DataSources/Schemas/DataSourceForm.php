@@ -13,6 +13,7 @@ use App\Models\Location;
 use App\Models\ShippingMethod;
 use App\Services\OAuthService;
 use App\Services\SettingsService;
+use App\Services\ShipmentImport\DataSourceFactory;
 use App\Services\ShipmentImport\ImportConnectionConfig;
 use App\Services\ShipmentImport\RawSqlGuard;
 use App\Services\ShipmentImport\Sources\AmazonSource;
@@ -21,6 +22,7 @@ use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\SshTunnel;
 use Carbon\Carbon;
 use Filament\Actions\Action;
+use Filament\Actions\Contracts\HasActions;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
@@ -34,8 +36,11 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Contracts\View\View;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\HtmlString;
+use Illuminate\Support\Str;
 
 class DataSourceForm
 {
@@ -46,6 +51,12 @@ class DataSourceForm
     ];
 
     private const CONNECTION_TEST_TIMEOUT_SECONDS = 5;
+
+    private const QUERY_PREVIEW_ROWS = 5;
+
+    private const QUERY_PREVIEW_TTL_SECONDS = 300;
+
+    private const QUERY_PREVIEW_TIMEOUT_SECONDS = 10;
 
     public static function configure(Schema $schema): Schema
     {
@@ -453,74 +464,34 @@ class DataSourceForm
                 ])
                 ->footerActions([
                     Action::make('test_queries')
-                        ->label('Test Queries')
+                        ->label('Preview Queries')
                         ->icon(Heroicon::CheckCircle)
                         ->color('gray')
-                        ->action(function (Get $get, ?DataSource $record): void {
-                            $tunnel = null;
-                            $connName = null;
+                        ->modalHeading('Query preview')
+                        ->modalDescription('Runs the read queries against the configured database and shows the first rows, raw and mapped. The write queries are parse-checked only — a preview never writes.')
+                        ->modalWidth('7xl')
+                        ->modalSubmitAction(false)
+                        ->modalCancelActionLabel('Close')
+                        // Run the queries once, when the action is mounted. modalContent
+                        // is evaluated again on every Livewire render while the modal is
+                        // open — a field change, a poll — and re-running the operator's
+                        // SQL against a customer database, re-auditing it each time, is
+                        // not what one click asked for.
+                        ->mountUsing(function (HasActions $livewire, Get $get, ?DataSource $record): void {
+                            $token = Str::uuid()->toString();
 
-                            try {
-                                ['pdo' => $pdo, 'tunnel' => $tunnel, 'conn_name' => $connName] = self::openTestConnection($get, $record);
+                            Cache::put(
+                                self::queryPreviewCacheKey($token),
+                                self::buildQueryPreview($get, $record),
+                                self::QUERY_PREVIEW_TTL_SECONDS,
+                            );
 
-                                if (($get('settings.db_driver') ?? 'mysql') === 'mysql') {
-                                    $pdo->setAttribute(\PDO::ATTR_EMULATE_PREPARES, false);
-                                }
-
-                                $queries = array_filter([
-                                    'Shipments query' => $get('settings.shipments_query'),
-                                    'Items query' => $get('settings.shipment_items_query'),
-                                    'Mark exported query' => $get('settings.mark_exported_query'),
-                                    'Export query' => $get('settings.export_query'),
-                                ]);
-
-                                if (empty($queries)) {
-                                    Notification::make()->info()->title('No queries configured')->send();
-
-                                    return;
-                                }
-
-                                $errors = [];
-
-                                foreach ($queries as $label => $sql) {
-                                    try {
-                                        $pdo->prepare(str_replace("\u{00A0}", ' ', $sql));
-                                    } catch (\PDOException $e) {
-                                        $errors[$label] = $e->getMessage();
-                                    }
-                                }
-
-                                if (empty($errors)) {
-                                    Notification::make()
-                                        ->success()
-                                        ->title('All queries valid')
-                                        ->send();
-                                } else {
-                                    $body = implode("\n", array_map(
-                                        fn (string $label, string $msg): string => "{$label}: {$msg}",
-                                        array_keys($errors),
-                                        $errors,
-                                    ));
-
-                                    Notification::make()
-                                        ->danger()
-                                        ->title('Query validation failed')
-                                        ->body($body)
-                                        ->send();
-                                }
-                            } catch (\Throwable $e) {
-                                Notification::make()
-                                    ->danger()
-                                    ->title('Connection failed')
-                                    ->body($e->getMessage())
-                                    ->send();
-                            } finally {
-                                $tunnel?->close();
-                                if ($connName) {
-                                    DB::purge($connName);
-                                }
-                            }
-                        }),
+                            $livewire->mergeMountedActionArguments(['preview_token' => $token]);
+                        })
+                        ->modalContent(fn (Action $action): View => view(
+                            'filament.resources.data-sources.query-preview',
+                            self::queryPreview($action->getArguments()['preview_token'] ?? null),
+                        )),
                 ])
                 ->visible(fn (Get $get): bool => $get('source_type') === DatabaseSource::class)
                 ->columns(2),
@@ -686,6 +657,131 @@ class DataSourceForm
         }
 
         return $data;
+    }
+
+    /**
+     * The preview built when the action was mounted, addressed by the random
+     * token held in the mounted action's arguments. Previewed rows are customer
+     * order data, so they stay server-side and only the token travels in the
+     * Livewire snapshot; the key is scoped to the viewer as well, so a token
+     * lifted from one session buys nothing in another.
+     *
+     * A modal left open past the TTL asks for a fresh click rather than quietly
+     * running the operator's SQL again. Rebuilding here would put every later
+     * render of that modal back on the source database — the same defect the
+     * mount-time build exists to prevent, just deferred by the TTL.
+     *
+     * @return array<string, mixed>
+     */
+    private static function queryPreview(?string $token): array
+    {
+        $cached = filled($token) ? Cache::get(self::queryPreviewCacheKey($token)) : null;
+
+        if (is_array($cached)) {
+            return $cached;
+        }
+
+        return [
+            'preview' => null,
+            'writeChecks' => [],
+            'connectionError' => null,
+            'expired' => true,
+            'previewRows' => self::QUERY_PREVIEW_ROWS,
+        ];
+    }
+
+    private static function queryPreviewCacheKey(string $token): string
+    {
+        return 'data-source-query-preview:'.auth()->id().':'.$token;
+    }
+
+    /**
+     * Execute the read queries against the connection described by the current
+     * form state and build the preview modal's view data: a bounded sample of rows
+     * with the field mapping applied, plus a parse check for the write queries.
+     *
+     * @return array<string, mixed>
+     */
+    private static function buildQueryPreview(Get $get, ?DataSource $record): array
+    {
+        $tunnel = null;
+        $connName = null;
+
+        try {
+            ['pdo' => $pdo, 'tunnel' => $tunnel, 'conn_name' => $connName] = self::openTestConnection($get, $record);
+
+            // openTestConnection only bounds how long connecting may take. These
+            // queries then run inside the web request, so they need a bound of
+            // their own — the operator's SQL is arbitrary, and a lock or a bad
+            // plan would otherwise hold the worker until the proxy 504s.
+            ImportConnectionConfig::applyStatementTimeout(
+                $pdo,
+                config("database.connections.{$connName}.driver"),
+                self::QUERY_PREVIEW_TIMEOUT_SECONDS,
+            );
+
+            // The form exposes only a subset of the stored settings, so the saved
+            // record supplies the rest — notably field_mapping, which has no form
+            // field but decides what the mapped preview columns are.
+            $settings = array_merge($record->settings ?? [], (array) ($get('settings') ?? []));
+
+            $source = new DatabaseSource(
+                DataSourceFactory::databaseConfigFor($settings, $connName, $record?->id),
+            );
+
+            return [
+                'preview' => $source->preview(self::QUERY_PREVIEW_ROWS),
+                'writeChecks' => self::checkWriteQueries($pdo, $get),
+                'connectionError' => null,
+                'expired' => false,
+                'previewRows' => self::QUERY_PREVIEW_ROWS,
+            ];
+        } catch (\Throwable $e) {
+            return [
+                'preview' => null,
+                'writeChecks' => [],
+                'connectionError' => $e->getMessage(),
+                'expired' => false,
+                'previewRows' => self::QUERY_PREVIEW_ROWS,
+            ];
+        } finally {
+            $tunnel?->close();
+            if ($connName) {
+                DB::purge($connName);
+            }
+        }
+    }
+
+    /**
+     * Parse-check the write queries. A preview must never write to a customer
+     * database, so these are prepared and discarded rather than executed — which
+     * only means something with emulated prepares off, hence the MySQL attribute.
+     *
+     * @return array<string, string|null> Query label => error message, or null when it parses.
+     */
+    private static function checkWriteQueries(\PDO $pdo, Get $get): array
+    {
+        if (($get('settings.db_driver') ?? 'mysql') === 'mysql') {
+            $pdo->setAttribute(\PDO::ATTR_EMULATE_PREPARES, false);
+        }
+
+        $queries = array_filter([
+            'Mark exported query' => $get('settings.mark_exported_query'),
+            'Export query' => $get('settings.export_query'),
+        ]);
+
+        $results = [];
+
+        foreach ($queries as $label => $sql) {
+            try {
+                $pdo->prepare(str_replace("\u{00A0}", ' ', $sql));
+                $results[$label] = null;
+            } catch (\PDOException $e) {
+                $results[$label] = $e->getMessage();
+            }
+        }
+
+        return $results;
     }
 
     /**

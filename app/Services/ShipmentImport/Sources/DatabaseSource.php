@@ -4,12 +4,14 @@ namespace App\Services\ShipmentImport\Sources;
 
 use App\Contracts\DataSourceInterface;
 use App\Contracts\ExportDestinationInterface;
+use App\DataTransferObjects\QueryPreviewResult;
 use App\Enums\AuditAction;
 use App\Exceptions\PermanentExportException;
 use App\Models\AuditLog;
 use App\Services\ShipmentImport\FieldMapper;
 use App\Services\ShipmentImport\RawSqlGuard;
 use App\Services\SshTunnel;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -68,36 +70,32 @@ class DatabaseSource implements DataSourceInterface, ExportDestinationInterface
                 fn () => DB::connection($connection)->select($query),
             );
         } else {
-            $query = DB::connection($connection)
-                ->table($this->config['shipments_table']);
-
-            // Apply filters
-            foreach ($this->config['filters'] ?? [] as $field => $values) {
-                if (is_array($values)) {
-                    $query->whereIn($field, $values);
-                } else {
-                    $query->where($field, $values);
-                }
-            }
-
-            $results = $query->get();
+            $results = $this->shipmentsTableQuery()->get();
         }
 
-        $clientColumn = $this->config['client_column'] ?? null;
-
         // Map external fields to internal fields
-        return collect($results)->map(function ($row) use ($clientColumn): array {
-            $mapped = $this->fieldMapper->mapShipment($row);
+        return collect($results)->map(fn ($row): array => $this->mapShipmentRow($row));
+    }
 
-            // Carry over the raw client column value so the importer can resolve
-            // the correct Client for per-row multi-client database imports.
-            if ($clientColumn) {
-                $rawRow = (array) $row;
-                $mapped['_client_column_value'] = $rawRow[$clientColumn] ?? null;
-            }
+    /**
+     * Apply the configured field mapping to one raw source row. Shared with the
+     * preview so what an operator sees in the modal is exactly what an import
+     * would hand the importer.
+     *
+     * @return array<string, mixed>
+     */
+    private function mapShipmentRow(object|array $row): array
+    {
+        $mapped = $this->fieldMapper->mapShipment($row);
 
-            return $mapped;
-        });
+        // Carry over the raw client column value so the importer can resolve
+        // the correct Client for per-row multi-client database imports.
+        if ($clientColumn = $this->config['client_column'] ?? null) {
+            $rawRow = (array) $row;
+            $mapped['_client_column_value'] = $rawRow[$clientColumn] ?? null;
+        }
+
+        return $mapped;
     }
 
     public function fetchShipmentItems(string $sourceRecordId): Collection
@@ -131,6 +129,248 @@ class DatabaseSource implements DataSourceInterface, ExportDestinationInterface
     public function getFieldMapping(): array
     {
         return $this->config['field_mapping'] ?? [];
+    }
+
+    /**
+     * The table-based shipments query, used when no custom SQL is configured.
+     */
+    private function shipmentsTableQuery(): Builder
+    {
+        $query = DB::connection($this->config['connection'])
+            ->table($this->config['shipments_table']);
+
+        // Apply filters
+        foreach ($this->config['filters'] ?? [] as $field => $values) {
+            if (is_array($values)) {
+                $query->whereIn($field, $values);
+            } else {
+                $query->where($field, $values);
+            }
+        }
+
+        return $query;
+    }
+
+    /**
+     * Execute the read queries and return a bounded sample of what they return —
+     * each row as its raw source columns and as the internal fields the
+     * configured field mapping resolves them to, so a mismatched mapping shows up
+     * here rather than as a surprise mid-import.
+     *
+     * Only the read queries run. mark-exported and export are writes and are
+     * never previewed. Each query is guarded and audited exactly as a real import
+     * would guard and audit it; the returned rows are customer order data and are
+     * deliberately kept out of both the audit trail and the logs.
+     *
+     * A failing query is reported against its label rather than aborting the whole
+     * preview, so a broken items query still shows the shipment rows.
+     */
+    public function preview(int $limit = 5): QueryPreviewResult
+    {
+        $limit = max(1, $limit);
+
+        $shipments = [];
+        $items = [];
+        $itemsReference = null;
+        $errors = [];
+
+        try {
+            $shipments = $this->previewShipmentRows($limit);
+        } catch (\Throwable $e) {
+            $errors['Shipments query'] = $e->getMessage();
+        }
+
+        if ($shipments !== []) {
+            // Bind the items query the way the importer does: from the resolved
+            // source record ID of the shipment being previewed.
+            $reference = $this->sourceRecordIdFor($shipments[0]['mapped']);
+
+            $itemsConfigured = ! empty($this->config['shipment_items_query'])
+                || ! empty($this->config['shipment_items_table']);
+
+            if ($reference !== null && $itemsConfigured) {
+                $itemsReference = $reference;
+
+                try {
+                    $items = $this->previewItemRows($reference, $limit);
+                } catch (\Throwable $e) {
+                    $errors['Items query'] = $e->getMessage();
+                }
+            }
+        }
+
+        return new QueryPreviewResult($shipments, $items, $itemsReference, $errors);
+    }
+
+    /**
+     * @return list<array{raw: array<string, mixed>, mapped: array<string, mixed>}>
+     */
+    private function previewShipmentRows(int $limit): array
+    {
+        if (! empty($this->config['shipments_query'])) {
+            $query = $this->normalizeQuery($this->config['shipments_query']);
+            RawSqlGuard::assertStatementType($query, RawSqlGuard::READ, 'custom shipments query');
+
+            $rows = $this->executeLogged(
+                'preview_shipments',
+                $query,
+                [],
+                fn (): array => $this->fetchBoundedRows($query, [], $limit),
+                [],
+                fn (array $rows): array => ['preview_rows' => count($rows)],
+            );
+        } else {
+            $builder = $this->shipmentsTableQuery()->limit($limit);
+
+            $rows = $this->executeLogged(
+                'preview_shipments',
+                $builder->toSql(),
+                [],
+                fn (): array => $this->takeRows($builder->cursor(), $limit),
+                [],
+                fn (array $rows): array => ['preview_rows' => count($rows)],
+            );
+        }
+
+        return array_map(fn (array $row): array => [
+            'raw' => $row,
+            'mapped' => $this->mapShipmentRow($row),
+        ], $rows);
+    }
+
+    /**
+     * @return list<array{raw: array<string, mixed>, mapped: array<string, mixed>}>
+     */
+    private function previewItemRows(string $sourceRecordId, int $limit): array
+    {
+        if (! empty($this->config['shipment_items_query'])) {
+            $query = $this->normalizeQuery($this->config['shipment_items_query']);
+            RawSqlGuard::assertStatementType($query, RawSqlGuard::READ, 'custom items query');
+
+            // Unlike a real import, the bound reference is left out of the audit
+            // metadata: it is read from a previewed row, and previewed rows stay
+            // in the modal.
+            $rows = $this->executeLogged(
+                'preview_shipment_items',
+                $query,
+                ['shipment_reference'],
+                fn (): array => $this->fetchBoundedRows($query, ['shipment_reference' => $sourceRecordId], $limit),
+                [],
+                fn (array $rows): array => ['preview_rows' => count($rows)],
+            );
+        } else {
+            $builder = DB::connection($this->config['connection'])
+                ->table($this->config['shipment_items_table'])
+                ->where('shipment_id', $sourceRecordId)
+                ->limit($limit);
+
+            $rows = $this->executeLogged(
+                'preview_shipment_items',
+                $builder->toSql(),
+                ['shipment_id'],
+                fn (): array => $this->takeRows($builder->cursor(), $limit),
+                [],
+                fn (array $rows): array => ['preview_rows' => count($rows)],
+            );
+        }
+
+        return array_map(fn (array $row): array => [
+            'raw' => $row,
+            'mapped' => $this->fieldMapper->mapShipmentItem($row),
+        ], $rows);
+    }
+
+    /**
+     * Execute an admin-authored read query and take at most $limit rows.
+     *
+     * The statement runs verbatim — appending a LIMIT would rewrite it, and the
+     * three supported drivers spell the clause differently (LIMIT / TOP / FETCH
+     * FIRST) — so the bound is applied by stopping consumption instead.
+     *
+     * Stopping consumption is only half a bound on MySQL, which is why this drops
+     * to PDO rather than using the connection's `cursor()`: pdo_mysql buffers the
+     * entire result set into the worker's memory at execute() unless the handle
+     * is switched to unbuffered mode, so previewing an unfiltered table would
+     * hold all of it in memory before the first five rows were read — measured at
+     * ~15 MB per 100k rows, and it is the operator's query that decides how many
+     * there are. The same option passed to prepare() is ignored; it has to be set
+     * on the handle, and is restored afterwards because import connections
+     * outlive a preview. pdo_sqlsrv streams by default, and libpq offers PDO no
+     * equivalent short of a server-side cursor, which would mean rewriting the
+     * statement.
+     *
+     * @param  array<string, mixed>  $bindings
+     * @return list<array<string, mixed>>
+     */
+    private function fetchBoundedRows(string $query, array $bindings, int $limit): array
+    {
+        $connection = DB::connection($this->config['connection']);
+        $pdo = $connection->getPdo();
+
+        $unbuffered = $connection->getDriverName() === 'mysql'
+            && defined('PDO::MYSQL_ATTR_USE_BUFFERED_QUERY');
+
+        if ($unbuffered) {
+            $pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+        }
+
+        try {
+            $statement = $pdo->prepare($query);
+            $statement->execute($bindings);
+
+            $rows = [];
+
+            while (count($rows) < $limit && ($row = $statement->fetch(\PDO::FETCH_ASSOC)) !== false) {
+                $rows[] = $row;
+            }
+
+            // An unbuffered statement holds the connection until its result set
+            // is released, and the items preview runs on this connection next.
+            $statement->closeCursor();
+
+            return $rows;
+        } finally {
+            if ($unbuffered) {
+                $pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
+            }
+        }
+    }
+
+    /**
+     * Consume at most $limit rows from a lazy result set. Used for the
+     * table-based preview, where the query is ours and carries a real LIMIT — the
+     * bound here is only a guard against that changing.
+     *
+     * @param  iterable<mixed>  $rows
+     * @return list<array<string, mixed>>
+     */
+    private function takeRows(iterable $rows, int $limit): array
+    {
+        $collected = [];
+
+        foreach ($rows as $row) {
+            $collected[] = (array) $row;
+
+            if (count($collected) >= $limit) {
+                break;
+            }
+        }
+
+        return $collected;
+    }
+
+    /**
+     * The reference an import would key this shipment by, mirroring
+     * ShipmentRowPreparer: the mapped source record ID, falling back to the
+     * shipment reference.
+     *
+     * @param  array<string, mixed>  $mapped
+     */
+    private function sourceRecordIdFor(array $mapped): ?string
+    {
+        $reference = $mapped['source_record_id'] ?? $mapped['shipment_reference'] ?? null;
+
+        return filled($reference) ? (string) $reference : null;
     }
 
     public function markExported(string $sourceRecordId): bool

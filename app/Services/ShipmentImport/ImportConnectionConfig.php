@@ -74,6 +74,61 @@ class ImportConnectionConfig
     }
 
     /**
+     * Bound how long a single statement may run on the server, for a connection
+     * whose queries run inside a web request. A connect timeout does not cover
+     * this: a query that reaches the server can then block indefinitely on a lock
+     * or an unhelpful plan, holding a PHP worker until the reverse proxy gives up
+     * with a 504.
+     *
+     * Best effort by design — a server that rejects the cap should still be
+     * previewable, so a failure to set it is swallowed. SQL Server has no
+     * server-side statement timeout to SET; pdo_sqlsrv aborts the query from the
+     * client side instead, via an attribute on the PDO handle, and `LOCK_TIMEOUT`
+     * is not a substitute because it only covers time spent blocked.
+     */
+    public static function applyStatementTimeout(\PDO $pdo, ?string $driver, int $seconds): void
+    {
+        if ($driver === 'sqlsrv') {
+            if (defined('PDO::SQLSRV_ATTR_QUERY_TIMEOUT')) {
+                $pdo->setAttribute(\PDO::SQLSRV_ATTR_QUERY_TIMEOUT, $seconds);
+            }
+
+            return;
+        }
+
+        foreach (self::statementTimeoutStatements($driver, $seconds) as $statement) {
+            try {
+                $pdo->exec($statement);
+
+                return;
+            } catch (\PDOException) {
+                // Try the next spelling, if there is one.
+            }
+        }
+    }
+
+    /**
+     * Statements that cap server-side execution time, in the order to try them.
+     * More than one only because MySQL and MariaDB disagree: MySQL 5.7.8+ spells
+     * it `max_execution_time` in milliseconds, MariaDB spells it
+     * `max_statement_time` in seconds, and neither recognises the other's
+     * variable — so which one works identifies the server.
+     *
+     * @return list<string>
+     */
+    public static function statementTimeoutStatements(?string $driver, int $seconds): array
+    {
+        return match ($driver) {
+            'mysql' => [
+                'SET SESSION max_execution_time = '.($seconds * 1000),
+                'SET SESSION max_statement_time = '.$seconds,
+            ],
+            'pgsql' => ['SET statement_timeout = '.($seconds * 1000)],
+            default => [],
+        };
+    }
+
+    /**
      * @param  array<string, mixed>  $settings  Flat DataSource settings (`db_*` keys).
      * @param  string|null  $password  Resolved separately — it lives in the encrypted secrets.
      * @return array<string, mixed>

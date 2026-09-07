@@ -126,3 +126,36 @@ it('applies no connect timeout to a file-based driver', function (): void {
 
     expect(ImportConnectionConfig::withConnectTimeout($config, 10))->toBe($config);
 });
+
+// ── Statement timeout (query preview) ─────────────────────────────────────────
+
+it('caps MySQL statement time in milliseconds, with the MariaDB spelling as a fallback', function (): void {
+    // Neither server recognises the other's variable, so both are offered and
+    // whichever one is accepted identifies the server.
+    expect(ImportConnectionConfig::statementTimeoutStatements('mysql', 10))->toBe([
+        'SET SESSION max_execution_time = 10000',
+        'SET SESSION max_statement_time = 10',
+    ]);
+});
+
+it('caps PostgreSQL statement time in milliseconds', function (): void {
+    expect(ImportConnectionConfig::statementTimeoutStatements('pgsql', 10))
+        ->toBe(['SET statement_timeout = 10000']);
+});
+
+it('has no statement to run for SQL Server or a file-based driver', function (?string $driver): void {
+    // SQL Server is capped client-side through a PDO attribute instead, and
+    // sqlite has nothing equivalent to cap.
+    expect(ImportConnectionConfig::statementTimeoutStatements($driver, 10))->toBe([]);
+})->with(['sqlsrv', 'sqlite', null]);
+
+it('leaves a connection usable when the server rejects the cap', function (): void {
+    // sqlite understands none of these statements; a preview against a server
+    // that refuses the cap must still run rather than fail closed.
+    $pdo = new PDO('sqlite::memory:');
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+    ImportConnectionConfig::applyStatementTimeout($pdo, 'mysql', 10);
+
+    expect($pdo->query('SELECT 1')->fetchColumn())->toBe(1);
+});

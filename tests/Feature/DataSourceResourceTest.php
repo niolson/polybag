@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\AmazonMarketplace;
+use App\Enums\AuditAction;
 use App\Enums\Role;
 use App\Filament\Resources\DataSources\DataSourceResource;
 use App\Filament\Resources\DataSources\Pages\CreateDataSource;
@@ -8,6 +9,7 @@ use App\Filament\Resources\DataSources\Pages\EditDataSource;
 use App\Filament\Resources\DataSources\Pages\ListDataSources;
 use App\Http\Integrations\Amazon\Requests\GetMarketplaceParticipations;
 use App\Jobs\RunDataSourceImportJob;
+use App\Models\AuditLog;
 use App\Models\Channel;
 use App\Models\DataSource;
 use App\Models\DataSourceLocation;
@@ -21,10 +23,13 @@ use App\Services\ShipmentImport\Sources\DatabaseSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use Filament\Actions\Testing\TestAction;
 use Filament\Forms\Components\Select;
+use Illuminate\Contracts\Support\Htmlable;
+use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Queue;
+use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
@@ -321,6 +326,175 @@ it('shows the generated ssh public key on the edit form when ssh tunneling is en
             File::put($pubKeyPath, $existingPublicKey);
         }
     }
+});
+
+// ── Query preview ─────────────────────────────────────────────────────────────
+
+/**
+ * A throwaway sqlite file standing in for a customer database, so the preview can
+ * be driven end to end through the form without a live external connection.
+ */
+function previewSourceDatabase(): string
+{
+    $path = storage_path('framework/testing/preview_source.sqlite');
+
+    File::ensureDirectoryExists(dirname($path));
+    File::put($path, '');
+
+    config(['database.connections.preview_source_db' => ['driver' => 'sqlite', 'database' => $path]]);
+    DB::purge('preview_source_db');
+
+    DB::connection('preview_source_db')->statement('CREATE TABLE source_orders (order_no TEXT, ship_to TEXT)');
+    DB::connection('preview_source_db')->table('source_orders')->insert([
+        ['order_no' => 'A-1', 'ship_to' => 'Ada'],
+        ['order_no' => 'A-2', 'ship_to' => 'Grace'],
+    ]);
+
+    return $path;
+}
+
+/**
+ * The preview modal renders on the client, so its content is read off the mounted
+ * action rather than out of the component's HTML.
+ */
+function mountedModalHtml(Testable $component): string
+{
+    $page = $component->instance();
+
+    if (! $page instanceof EditDataSource) {
+        throw new RuntimeException('Expected the data source edit page.');
+    }
+
+    $content = $page->getMountedAction()?->getModalContent();
+
+    return match (true) {
+        $content instanceof View => $content->render(),
+        $content instanceof Htmlable => $content->toHtml(),
+        default => '',
+    };
+}
+
+function previewDataSource(array $settings): DataSource
+{
+    return DataSource::factory()->create([
+        'source_type' => DatabaseSource::class,
+        'settings' => array_merge([
+            'db_driver' => 'sqlite',
+            'db_database' => previewSourceDatabase(),
+        ], $settings),
+    ]);
+}
+
+it('previews sample rows and the mapping for the configured queries', function (): void {
+    $this->actingAs($this->admin);
+
+    $source = previewDataSource([
+        'shipments_query' => 'SELECT * FROM source_orders',
+        'field_mapping' => [
+            'shipment' => ['order_no' => 'shipment_reference', 'ship_to' => 'first_name'],
+        ],
+    ]);
+
+    $html = mountedModalHtml(
+        Livewire::test(EditDataSource::class, ['record' => $source->id])
+            ->mountAction(TestAction::make('test_queries')->schemaComponent('database_query')),
+    );
+
+    // Raw source columns and their values…
+    expect($html)->toContain('order_no')
+        ->toContain('Ada')
+        ->toContain('Grace')
+        // …alongside what the field mapping resolves them to.
+        ->toContain('shipment_reference')
+        ->toContain('first_name');
+
+    File::delete($source->settings['db_database']);
+});
+
+it('reports a failing preview query against its label', function (): void {
+    $this->actingAs($this->admin);
+
+    $source = previewDataSource(['shipments_query' => 'SELECT * FROM no_such_table']);
+
+    $html = mountedModalHtml(
+        Livewire::test(EditDataSource::class, ['record' => $source->id])
+            ->mountAction(TestAction::make('test_queries')->schemaComponent('database_query')),
+    );
+
+    expect($html)->toContain('Shipments query failed')
+        ->toContain('no_such_table');
+
+    File::delete($source->settings['db_database']);
+});
+
+it('parse-checks the write queries without executing them', function (): void {
+    $this->actingAs($this->admin);
+
+    $source = previewDataSource([
+        'shipments_query' => 'SELECT * FROM source_orders',
+        'mark_exported_enabled' => true,
+        'mark_exported_query' => "UPDATE source_orders SET ship_to = 'exported'",
+    ]);
+
+    $html = mountedModalHtml(
+        Livewire::test(EditDataSource::class, ['record' => $source->id])
+            ->mountAction(TestAction::make('test_queries')->schemaComponent('database_query')),
+    );
+
+    expect($html)->toContain('Mark exported query: valid');
+
+    // Parse-checked only — the write never ran against the source database.
+    expect(DB::connection('preview_source_db')->table('source_orders')->where('ship_to', 'Ada')->count())->toBe(1);
+
+    File::delete($source->settings['db_database']);
+});
+
+it('runs each previewed query once per click, not once per re-render', function (): void {
+    $this->actingAs($this->admin);
+
+    $source = previewDataSource(['shipments_query' => 'SELECT * FROM source_orders']);
+
+    $previewsRun = fn (): int => AuditLog::where('action', AuditAction::DataSourceQueryExecuted)->count();
+
+    $component = Livewire::test(EditDataSource::class, ['record' => $source->id])
+        ->mountAction(TestAction::make('test_queries')->schemaComponent('database_query'));
+
+    expect($previewsRun())->toBe(1);
+
+    // Every Livewire round trip re-renders the open modal. The rows must come
+    // from the preview the click produced, not from running the operator's SQL
+    // against the customer database again.
+    $component->call('$refresh')->set('data.name', 'Renamed while previewing');
+
+    expect($previewsRun())->toBe(1)
+        ->and(mountedModalHtml($component))->toContain('Ada');
+
+    // A fresh click is a fresh look at the source, though.
+    $component->unmountAction()
+        ->mountAction(TestAction::make('test_queries')->schemaComponent('database_query'));
+
+    expect($previewsRun())->toBe(2);
+
+    File::delete($source->settings['db_database']);
+});
+
+it('asks for a fresh click once a long-open preview has expired', function (): void {
+    $this->actingAs($this->admin);
+
+    $source = previewDataSource(['shipments_query' => 'SELECT * FROM source_orders']);
+
+    $component = Livewire::test(EditDataSource::class, ['record' => $source->id])
+        ->mountAction(TestAction::make('test_queries')->schemaComponent('database_query'));
+
+    $this->travel(6)->minutes();
+
+    // Rebuilding here would put every later render of this modal back on the
+    // customer database — the deferred form of the defect the mount-time build
+    // exists to prevent.
+    expect(mountedModalHtml($component->call('$refresh')))->toContain('This preview has expired')
+        ->and(AuditLog::where('action', AuditAction::DataSourceQueryExecuted)->count())->toBe(1);
+
+    File::delete($source->settings['db_database']);
 });
 
 it('can test the database connection before the source is created', function (): void {

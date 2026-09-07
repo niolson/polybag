@@ -1,6 +1,6 @@
 # "Test Queries" validates syntax but shows no rows
 
-Status: ready-for-agent
+Status: done
 
 ## Problem
 
@@ -72,3 +72,95 @@ Worth asserting:
 - `mark_exported_query` and `export_query` are not executed by the preview.
 - The row limit holds — a query matching 1,000 rows yields only the preview count.
 - An audit row is written, and it does not contain row data.
+
+## Comments
+
+**2026-09-07 (Claude):** Implemented. *Test Queries* is now *Preview Queries* and opens a
+modal instead of sending a notification.
+
+**Where the work lives.** `DatabaseSource::preview()` returns a `QueryPreviewResult`
+(shipments, items, the reference the items were bound to, and per-label errors). The
+Filament action is thin: it opens the same test connection the *Test Connection* button
+uses, builds a `DatabaseSource` config from the current form state, and renders the
+result. Putting it on the source rather than in the form is what makes the guard, the
+audit trail and the field mapping the *same* code an import runs, and lets the
+interesting assertions run against a sqlite connection with no Livewire involved.
+
+**Preview and import cannot drift on mapping.** `mapShipmentRow()` was extracted from
+`fetchShipments()` and is shared, `_client_column_value` included, so the mapped columns
+in the modal are literally what the importer would receive. `DataSourceFactory`'s config
+builder was split into a public `databaseConfigFor()` so the form gets the same
+field-mapping defaults for an unsaved source; the connection-registering half stays
+private, because the preview's connection is already registered (and, with an SSH tunnel,
+already repointed at the local end of it).
+
+**Row limiting.** No `LIMIT` is appended to operator SQL — the audit test asserts the
+recorded statement is byte-identical to what was configured, which is the guard against
+someone "fixing" this later with string concatenation that works on MySQL and breaks on
+SQL Server. `fetchBoundedRows()` prepares the statement and stops fetching at N.
+
+Stopping consumption turned out to be only half a bound, which is why this drops to PDO
+instead of the connection's `cursor()`. Measured against a 100k-row MySQL table: `cursor()`
+with a `break` after five rows still cost **+15–22 MB** and 181 ms, because pdo_mysql
+buffers the entire result set into the worker at `execute()` — the operator's query decides
+how many rows that is, and an unfiltered ERP table is the normal case here. Setting the
+unbuffered attribute on the *handle* (the same option passed to `prepare()` is silently
+ignored — also measured) brings the same preview to **+0.7 MB**. It is restored afterwards
+because import connections outlive a preview, and the statement's cursor is closed before
+the items query runs on the same connection.
+
+**Writes.** `mark_exported_query` and `export_query` are never executed. They keep the
+prepare-only check, reported in a *Write queries* section of the modal. The weaker
+`prepare()` semantics on `sqlsrv`/`pgsql` noted in the problem statement are unchanged —
+the reads no longer depend on that check being meaningful, which was the point, but the
+writes still do.
+
+**Audit.** Both previewed reads go through `executeLogged()`, as `preview_shipments` and
+`preview_shipment_items`, adding a `preview_rows` count. The bound `shipment_reference`
+value is deliberately *not* recorded, unlike `fetch_shipment_items` — it is read out of a
+previewed row, and previewed rows stay in the modal. A test greps every audited value out
+of the metadata and fails if a name, reference or SKU appears.
+
+**One click, one execution.** Filament evaluates `modalContent` on every render while the
+modal is open, so the queries must not live there. The preview is built in `mountUsing()`,
+which runs once when the action is mounted, and held server-side under a random token
+merged into the mounted action's arguments; only the token travels in the Livewire
+snapshot, and the cache key is scoped to the viewer as well. A later render reads the
+cached preview; a fresh click runs the queries again, which is what a person clicking
+*Preview Queries* a second time means. The test asserts one execution across a `$refresh`
+and a field change, and a second on a re-mount.
+
+Past the five-minute TTL the modal says so and asks for a fresh click. It deliberately does
+**not** rebuild: a rebuild that is not itself cached puts every later render of that modal
+back on the customer database, which is the same defect deferred by the length of the TTL,
+and re-caching instead would mean querying a customer database with nobody having clicked
+anything. Pinned by a test that travels past the TTL, re-renders, and asserts both the
+notice and that no second execution was audited.
+
+Two earlier attempts at this were wrong and are worth recording. `once()` does not memoize
+here at all — its hash includes the closure's captured variables and Filament's `Get` is a
+new object per render. Caching in `request()->attributes` looked right and was measured
+useless: every Livewire round trip is a new request, so an open modal re-ran and re-audited
+the customer queries on each one (1, 2, 3, 4 audit rows across a mount and two refreshes).
+The test that was supposed to cover this called `getModalContent()` twice inside a single
+test request and so never exercised the lifecycle it claimed to.
+
+**Statement timeout.** A connect timeout does not bound a query that reaches the server, so
+a lock or a bad plan on the operator's SQL would hold a PHP worker until the proxy returned
+a 504. `ImportConnectionConfig::applyStatementTimeout()` caps it at 10s on the preview
+connection, per driver: `max_execution_time` on MySQL, `statement_timeout` on PostgreSQL,
+`SQLSRV_ATTR_QUERY_TIMEOUT` on SQL Server (which has no server-side setting to `SET`, and
+`LOCK_TIMEOUT` only covers time spent blocked). MariaDB spells it `max_statement_time` and
+in seconds, so both spellings are tried and whichever is accepted identifies the server —
+not hypothetical, the local MariaDB rejects the MySQL one. Failure to set the cap is
+swallowed: a server that will not take it is still worth previewing. Verified against a
+real server, where a deliberately slow join aborted after 2.1s and surfaced through the
+existing per-label error path.
+
+The cap is not applied to the import runtime, only to the preview — imports run in queue
+workers, where a long query costs a worker rather than a web request and a 504.
+
+Verified end to end in the local app against a throwaway sqlite "ERP" database: three
+order rows and two line rows previewed raw and mapped, items bound to the first
+shipment's reference, `Mark exported query: valid`, source rows untouched afterwards, and
+exactly two audit entries carrying no row data.
