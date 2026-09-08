@@ -18,6 +18,14 @@ const IMPB_GROUND_ADVANTAGE = '9300199999999900000011';
 const IMPB_PRIORITY_MAIL = '9305599999999900000021';
 const IMPB_UNLISTED_STC = '9299999999999900000036';
 
+/**
+ * The 26-digit form, same construction. `IMPB_26_AMBIGUOUS` is built so that its
+ * own trailing 22 digits also carry a valid check digit — which is what makes a
+ * 420-prefixed 34-digit string readable two ways.
+ */
+const IMPB_26_GROUND_ADVANTAGE = '92001999999999000000000012';
+const IMPB_26_AMBIGUOUS = '92011999999999000000000011';
+
 function inferrer(): ServiceInferrer
 {
     return app(ServiceInferrer::class);
@@ -68,7 +76,7 @@ describe('IMpb validation', function (): void {
         expect(ImpbTrackingNumber::tryParse('9300199999999900000012'))->toBeNull();
     });
 
-    it('rejects anything that is not 22 digits', function (?string $candidate): void {
+    it('rejects a length USPS does not issue', function (?string $candidate): void {
         expect(ImpbTrackingNumber::tryParse($candidate))->toBeNull();
     })->with([
         '1Z999AA10123456784',
@@ -76,6 +84,37 @@ describe('IMpb validation', function (): void {
         '',
         null,
     ]);
+
+    it('parses the 26-digit form and reads its service type code', function (): void {
+        // Observed on the first Shopify Shipping label: USPS issues 26-digit
+        // numbers, and reading only 22 left the service null on a package whose
+        // service was sitting in its tracking number.
+        $impb = ImpbTrackingNumber::tryParse(IMPB_26_GROUND_ADVANTAGE);
+
+        expect($impb)->not->toBeNull()
+            ->and($impb->serviceTypeCode)->toBe('001');
+    });
+
+    it('rejects a 26-digit number whose check digit does not verify', function (): void {
+        expect(ImpbTrackingNumber::tryParse(substr(IMPB_26_GROUND_ADVANTAGE, 0, -1).'3'))->toBeNull();
+    });
+
+    it('strips the routing prefix from a 34-digit string with one valid reading', function (): void {
+        $impb = ImpbTrackingNumber::tryParse('42030024'.IMPB_26_GROUND_ADVANTAGE);
+
+        expect($impb)->not->toBeNull()
+            ->and($impb->digits)->toBe(IMPB_26_GROUND_ADVANTAGE);
+    });
+
+    it('declines a 34-digit string that reads as two different barcodes', function (): void {
+        // A 5-digit ZIP over 26 digits, and a ZIP+4 over 22 — both check out,
+        // and they put different digits in the service position.
+        $ambiguous = '42030024'.IMPB_26_AMBIGUOUS;
+
+        expect(ImpbTrackingNumber::tryParse(substr($ambiguous, 12)))->not->toBeNull()
+            ->and(ImpbTrackingNumber::tryParse(substr($ambiguous, 8)))->not->toBeNull()
+            ->and(ImpbTrackingNumber::tryParse($ambiguous))->toBeNull();
+    });
 });
 
 describe('rung 1 — tracking number', function (): void {
@@ -86,6 +125,14 @@ describe('rung 1 — tracking number', function (): void {
             ->and($inference->service)->toBe('USPS Ground Advantage')
             ->and($inference->method)->toBe(ServiceInferrer::METHOD_USPS_STC)
             ->and($inference->rulesetVersion)->not->toBeEmpty();
+    });
+
+    it('infers the service from a 26-digit number', function (): void {
+        $inference = inferrer()->infer(packageFor(['tracking_number' => IMPB_26_GROUND_ADVANTAGE]));
+
+        expect($inference->isResolved())->toBeTrue()
+            ->and($inference->service)->toBe('USPS Ground Advantage')
+            ->and($inference->method)->toBe(ServiceInferrer::METHOD_USPS_STC);
     });
 
     it('distinguishes service type codes within the same carrier', function (): void {

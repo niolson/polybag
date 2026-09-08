@@ -377,6 +377,45 @@ it('records the carrier Shopify actually picked, not the one that was asked for'
         ->and($package->metadata['shopify_shipping_label_id'])->toBe('gid://shopify/ShippingLabel/1');
 });
 
+it('translates the carrier code Shopify reports into a carrier name', function (): void {
+    seedShopifyCarrierServices();
+    $ups = Carrier::factory()->ups()->create();
+    $package = shopifyPackage();
+
+    Saloon::fake([
+        MockResponse::make(purchaseAccepted()),
+        // `trackingInfo.company` on a ShippingLabel is Shopify's own carrier
+        // code, not a carrier name. Recorded raw it reached a shipped package as
+        // `ups_shipping` and normalized to nothing, leaving a UPS parcel with no
+        // carrier of record.
+        MockResponse::make(purchasePurchased('PDF', 'ups_shipping')),
+    ]);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    $response = $this->adapter->createShipment(shopifyShipRequest($package));
+
+    expect($response->carrier)->toBe('UPS')
+        // The raw string stays in metadata: it is the record of what Shopify said.
+        ->and($response->metadata['shopify_tracking_company'])->toBe('ups_shipping');
+
+    $package->markShipped($response, $response->postageSource);
+
+    expect($package->refresh()->normalizedCarrier?->is($ups))->toBeTrue();
+});
+
+it('leaves a carrier Shopify names rather than codes alone', function (): void {
+    seedShopifyCarrierServices();
+    $package = shopifyPackage();
+
+    Saloon::fake([
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased('PDF', 'DHL eCommerce')),
+    ]);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    expect($this->adapter->createShipment(shopifyShipRequest($package))->carrier)->toBe('DHL eCommerce');
+});
+
 it('leaves the service unknown and keeps the selection as a requested preference', function (): void {
     seedShopifyCarrierServices();
     $package = shopifyPackage();

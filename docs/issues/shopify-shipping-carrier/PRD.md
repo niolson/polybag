@@ -25,7 +25,7 @@ Everything below follows from that being the whole surface.
 |---|---|
 | Rate quoting | **Does not exist** on any version. No rates query at all. |
 | Buying a label | `shippingLabelPurchase`, asynchronous — poll `node(id:)` until `PURCHASED` / `PURCHASE_FAILED` |
-| Label cost | Not on the label. Only via Shopify Payments balance transactions — see `05` |
+| Label cost | Not on the label. In the order's event stream as a prose string, and via Shopify Payments balance transactions — see `05` |
 | Voiding | **No mutation.** `cancellable` is readable; voiding happens in the Shopify admin |
 | PDF vs ZPL | **Reported, not requested.** Shopify picks from the shop's own admin setting |
 | FedEx | Not supported. Carrier codes are `usps`, `ups_shipping`, `dhl_express`, `canada_post` |
@@ -82,3 +82,8 @@ accepted. Purchase a shipping label through the Shopify admin first.
 
 Somebody has to buy one label in the **Shopify admin** before the API will ever sell
 one. That gate is `01`, and it holds up every remaining unknown.
+
+**Cleared 2026-09-08** with a UPS label bought in the admin. On a development store only
+UPS sells a label, and what it sells is a test label — free, but never a moving parcel.
+That leaves the CeC pricing this feature exists for unverified until a real store is
+available. See `01`.

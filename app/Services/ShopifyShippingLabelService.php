@@ -31,10 +31,22 @@ use Illuminate\Support\Facades\Http;
 class ShopifyShippingLabelService
 {
     /**
-     * Shopify's carrier codes for `preferredRateSelection`. FedEx is absent
-     * because Shopify refuses FedEx purchases through this API.
+     * Shopify's carrier codes for `preferredRateSelection`, and the carrier each
+     * one means. FedEx is absent because Shopify refuses FedEx purchases through
+     * this API.
+     *
+     * The names matter as much as the codes: `trackingInfo.company` on a
+     * `ShippingLabel` returns the *code*, not a carrier name, so the carrier of
+     * record has to be translated before anything tries to resolve it. USPS is
+     * the trap — its code and its name are the same string, so a USPS label
+     * resolves by coincidence and hides that the others do not.
      */
-    public const CARRIER_CODES = ['usps', 'ups_shipping', 'dhl_express', 'canada_post'];
+    public const CARRIER_NAMES = [
+        'usps' => 'USPS',
+        'ups_shipping' => 'UPS',
+        'dhl_express' => 'DHL Express',
+        'canada_post' => 'Canada Post',
+    ];
 
     /**
      * Scopes `shippingLabelPurchase` needs, on top of the import scopes in
