@@ -4,7 +4,8 @@ Status: ready-for-human
 
 Repo: `polybag`
 
-Blocked on `01` — the terms of service gate gets in the way of any purchase.
+Unblocked 2026-09-08. The terms of service gate is cleared and two labels have been
+bought through the API — see `01`.
 
 ## Problem
 
@@ -51,3 +52,25 @@ anything on experiments.
   `auto` as the only catalogued service, so nobody re-litigates it later.
 
 ## Comments
+
+### 2026-09-08 — unblocked, free, and now the gating experiment for the capture work
+
+The terms of service gate is gone and `01` bought two labels through the API. On a
+development store these are **test labels**: no postage is charged. So the "not urgent"
+framing above was written against a cost that no longer applies here.
+
+It moves to the front of the queue for a second reason. `auto` returned USPS on the first
+purchase and UPS on the second from identical inputs, so `auto` is not a usable instrument
+for gathering one label per carrier and service — which is exactly what `14` needs. Until
+we know whether `preferredRateSelection` is honoured, the capture work has no way to ask
+for a specific label.
+
+Two things to fold in while running it:
+
+- **The free probe first.** A deliberately invalid service code fails validation before
+  anything is bought, and tells "ignored" apart from "read". Do that before spending a
+  purchase on the real one.
+- **The CeC question `01` reopened.** `auto` sold USPS through the API on a store whose
+  admin refuses to sell USPS. An explicit `{carrierCode: "usps"}` purchase with an origin
+  address matching the Shopify location exactly is the cheap test — it changes one variable
+  where `01`'s comparison had two.

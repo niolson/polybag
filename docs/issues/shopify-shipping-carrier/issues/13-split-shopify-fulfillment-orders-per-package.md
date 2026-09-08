@@ -64,3 +64,13 @@ navigating back to the pack URL, unaided. Designing Shopify's split against that
 against an accident.
 
 ## Comments
+
+### 2026-09-08 — reviewed in the sequencing pass; still blocked, deliberately last
+
+Nothing about the label purchases in `01` changes this. The blocker is not Shopify's side —
+`fulfillmentOrderSplit` has been there all along — it is that PolyBag has no multi-package
+packing workflow to split *against*. That is unchanged.
+
+Left at `needs-triage` rather than scheduled: the question this issue asks cannot be
+answered before the packing workflow it depends on exists, and designing the Shopify half
+first would be designing against the accident described above.

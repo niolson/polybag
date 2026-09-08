@@ -55,3 +55,33 @@ Needs a decision from whoever owns billing, not a reporting default.
 ## Blocked by
 
 Nothing. `08` is done and did not change this path.
+
+## Comments
+
+### 2026-09-08 — first in the working order, and split in two
+
+Sequenced ahead of every other open issue in this directory, and it is the one that has
+nothing to do with Shopify. It is the only open item that is presently wrong in a way that
+moves money: `postage` is a term in `line_total`, so a null-cost package under-invoices the
+client by the whole postage amount while every other fee on the line charges normally. Each
+billing run that goes out is wrong by that much, and nothing on the invoice says so.
+
+Everything else here is exploration on a development store that costs nothing and harms
+nobody while it waits. This does not wait.
+
+**The split.** The four options above are not one decision:
+
+- **Flag lines with unpriced postage** so nobody exports an invoice without seeing them.
+  This is a *reporting* decision, not a billing one — it is the same treatment `08` gave
+  the dashboard, it charges nothing new, and it is safe to ship without the billing owner
+  in the room. Do this now.
+- **What to actually charge** — exclude the line, bill a fallback rate, or wait for real
+  costs — stays with whoever owns billing, and is better answered after `05`, which is
+  sequenced last of the substantive work for exactly this reason.
+
+Shipping the flag first is not a substitute for the second half. It converts a silent error
+into a visible one, which is worth doing on its own and is the precondition for anyone
+noticing how often the second half matters.
+
+**Left at `needs-triage`** because the charging half genuinely needs a decision from the
+billing owner. The flag half is specified enough to grab today.

@@ -11,8 +11,9 @@ shipping label through the **Shopify admin**, which is how a shop accepts the Sh
 Shipping terms of service. Until that happens the API answers every purchase with
 `TERMS_OF_SERVICE_NOT_ACCEPTED`, and no amount of code changes that.
 
-This is `ready-for-human` because it costs real postage, cannot be voided through the
-API, and needs someone with admin access to the shop.
+This is `ready-for-human` because it needs someone with admin access to the shop watching
+what comes back. It was originally so because it cost real postage; that turned out not to
+hold on a development store, where the labels are free test labels — see the comments.
 
 ## Before starting
 
@@ -27,8 +28,13 @@ API, and needs someone with admin access to the shop.
 
 ## What to answer
 
-Fold all of it into as few purchases as possible; each one costs money and can only be
-voided in the admin.
+**Questions 7, 8 and 10 moved to `17` on 2026-09-08.** They need a real store shipping a
+real parcel, which this issue no longer has any other dependency on. The numbering below is
+left intact — every comment in this file refers to these by number.
+
+The remaining questions are answerable on a development store for nothing, so the original
+instruction to fold them into as few purchases as possible no longer applies. Spend a
+purchase per question if it is clearer.
 
 1. **PDF or ZPL?** `ShippingObjectsShippingDocument.format` reports what the shop's
    admin setting produced. This is the single most-asked question about the feature.
@@ -52,47 +58,19 @@ voided in the admin.
    which is a valid terminal state but costs the ship-date cutoff and the export mapping.
 6. **Is a customs form returned for an international order**, and as a separate
    `CUSTOMS_FORM` document? See `07`.
-7. **Does `Fulfillment.events` return anything for a Shopify Shipping label?** Query
-   `events(first: 50)` once the parcel has actually moved. The only documented way events
-   are created is the `fulfillmentEventCreate` mutation, used by apps and fulfillment
-   services; nothing says Shopify writes them for shipments it tracks itself.
-   - Populated → read it as the event feed, with `displayStatus` as the summary; it is the
-     scan-level detail (`happenedAt`, city/province/zip, lat/long, `message`) that
-     `tracking_details['events']` wants and `displayStatus` cannot give.
-   - Empty → `displayStatus` plus `inTransitAt`/`deliveredAt`/`estimatedDeliveryAt` is the
-     whole feed, which is what shipped code already assumes.
-
-   The query already selects the field, and an empty connection is already tolerated as a
-   normal result rather than an error, so this is an observation to record, not a change to
-   make. From `postage-source-split/07`.
-8. **Does `displayStatus` advance past `LABEL_PURCHASED` at all?** Everything in
-   `ShopifyPostageSource`'s `FulfillmentDisplayStatus` → `TrackingStatus` mapping is
-   confirmed against Shopify's documentation and nothing else. If the status sits still in
-   practice, that slice's tracking is inert rather than wrong — but we would want to know.
-   From `postage-source-split/07`.
+7. **Moved to `17`.** Does `Fulfillment.events` carry scan-level movement? The connection
+   is not structurally empty — a purchase node was observed — but a test label never moves,
+   so the substance is unanswerable here.
+8. **Moved to `17`.** Does `displayStatus` advance? Its two endpoints are now observed and
+   the middle is not. Same blocker.
 9. **Does Shopify accept a midnight `shippingDatetime`?** After the 8 PM cutoff,
    `getShipDate()` returns a date at midnight and `ShopifyShippingLabelService` sends
    tomorrow at 00:00; before it, `now() + 5 minutes`. Confirm Shopify does something
    sensible with the midnight value rather than rejecting it or silently substituting.
    From `postage-source-split/06`.
-10. **Can a Shopify-bought USPS label go on a USPS SCAN form we create?** Only if the
-    opportunity arises cheaply — this is the one question here that needs a *second*
-    controlled purchase rather than an observation on the first, so it may be worth
-    splitting out once a label can be bought at all.
-
-    PolyBag currently excludes Shopify-bought postage from its manifests by provenance, and
-    that gate stays until this is settled. To test: do **not** add the label to a Shopify
-    manifest first; submit only that tracking number through PolyBag's existing USPS SCAN
-    request using the exact label ship date and origin ZIP; record the complete USPS status
-    and response body and whether the returned form includes the tracking number.
-
-    Regardless of the result, ask USPS API support whether the use is officially supported:
-    may a SCAN Forms v3 "Label Shipment" request include an IMpb created by a third-party PC
-    Postage provider under that provider's MID, when the authenticated API customer is the
-    physical mailer but is not the label-owner MID? EasyPost documents a stricter rule for
-    its own ScanForm API — all shipments on one form must belong to the same carrier account
-    (https://docs.easypost.com/docs/scan-form) — which may reflect a USPS constraint or an
-    EasyPost one. Useful evidence, not an answer. From `postage-source-split/02`.
+10. **Moved to `17`.** Can a Shopify-bought USPS label go on a USPS SCAN form we create?
+    Needs a real IMpb under Shopify's MID and a real answer from USPS. The manifest
+    provenance gate stays in place until it is settled, which is unchanged by the move.
 
 ## How to run it
 
@@ -315,3 +293,60 @@ That sharpens `14`'s first documentation item rather than softening it: bytes 9�
 can hold values a published service table will not list, and they come back from real
 labels that track. The table has to fall through on an unrecognised indicator and let rung
 2 answer, which is the discipline `11` already established for the USPS codes.
+
+### 2026-09-08 — what is left here, and a recommendation to split it
+
+Seven of the ten questions are answered above. The three that are not divide cleanly by
+*why* they are unanswered, and the division is worth acting on.
+
+**Still answerable on the development store, for nothing:**
+
+- **Question 2 (ZPL, and DPI).** Overlooked so far because both purchases came back PDF.
+  Format follows the **shop's own admin setting**, not the carrier — which is what the two
+  PDF answers across two carriers demonstrate. So flip this store's label format to ZPL and
+  buy one. The DPI half matters: PolyBag stores its own configured DPI on the package, and a
+  203/300 mismatch prints the wrong physical size.
+- **Question 9 (midnight `shippingDatetime`).** One purchase made after the 8 PM cutoff.
+  Both purchases so far were before it, so `buildPurchaseInput()` substituted
+  `now() + 5 minutes` and the midnight value has still never been sent.
+- **Question 6 (customs form).** Needs an international test order on this store, not a real
+  one. It is the confirming step `07` asks for before any of its options can be chosen.
+
+**Not answerable here at any price — questions 7, 8 and 10.** All three need a parcel that
+physically moves, or USPS's own behaviour as the subject: whether `Fulfillment.events` ever
+carries scan-level movement, whether `displayStatus` advances past its initial value, and
+whether a Shopify-bought USPS label is accepted on a SCAN form we create. A test label on a
+development store is evidence of nothing for any of them, and no amount of care here changes
+that.
+
+**Recommendation: close this issue once the three answerable questions are done, and spin 7,
+8 and 10 out into their own issue.** They share a blocker this issue no longer has — access
+to a real store shipping real parcels — and leaving them here keeps a "blocked on `01`" edge
+alive across `02`, `11` and `14` that has actually been dead since the terms were accepted.
+Not done unilaterally; it changes what other files point at.
+
+### 2026-09-08 — split performed: questions 7, 8 and 10 are now `17`
+
+The recommendation in the comment above was taken. `17` carries the three questions that
+need a real store shipping a real parcel, along with the observations from this file they
+build on — the `LABEL_PURCHASED` event node, the `FULFILLED` starting status, and the
+confirmed `LABEL_VOIDED` endpoint.
+
+**The numbering here was not changed.** Every comment in this file refers to these questions
+by number, and renumbering would silently break all of it. Items 7, 8 and 10 are stubs
+pointing at `17`.
+
+Two cross-references were repointed at the same time, both of which were the original source
+of a moved question: `postage-source-split/02` (question 10, the SCAN form) and
+`postage-source-split/07` (questions 7 and 8, `events` and `displayStatus`).
+
+**What is left here is three questions and a close.** All of them are answerable on a
+development store for nothing:
+
+- **2** — ZPL and its DPI. Flip the shop's label format setting; both purchases so far came
+  back PDF because that is what this store is set to.
+- **6** — the customs form, which needs an international test order and is the gate on `07`.
+- **9** — the midnight `shippingDatetime`, which needs a purchase made after the 8 PM cutoff.
+
+Close this issue when those three are answered. The manifest provenance gate that question 10
+guarded is unaffected by the move and stays in place.

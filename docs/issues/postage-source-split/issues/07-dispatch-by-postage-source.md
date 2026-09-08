@@ -69,9 +69,14 @@ two names. There is one branch now.
 
 ## Open question: check `Fulfillment.events` on a real Shopify Shipping fulfillment
 
-**Tracked as of 2026-09-04 in `shopify-shipping-carrier/01`, question 7**, alongside the
-related question of whether `displayStatus` advances at all (question 8). Both were pointed
-there when written but never recorded there, so they lived only in this closed issue.
+**Tracked as of 2026-09-04 in `shopify-shipping-carrier/01`, questions 7 and 8; moved
+2026-09-08 to `shopify-shipping-carrier/17`, which keeps the numbers.** Both were pointed at
+`01` when written but never recorded there, so they lived only in this closed issue; `01`
+then split out the questions needing a real store shipping a real parcel, and these are two
+of them. `01` did establish that the connection is not structurally empty — a purchase
+writes a `LABEL_PURCHASED` node — and that the lifecycle starts at `FULFILLED` rather than
+`LABEL_PURCHASED`, so the mapping's assumed starting point was wrong even though the stored
+status was right.
 
 `Fulfillment.events` would give the scan-level detail `displayStatus` cannot —
 `FulfillmentEvent` carries `happenedAt`, city/province/zip, latitude/longitude and a `message`,
