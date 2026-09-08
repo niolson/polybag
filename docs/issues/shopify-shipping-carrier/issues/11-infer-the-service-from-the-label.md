@@ -357,7 +357,10 @@ those labels happen to print.
 
 ## Remaining work
 
-Blocked on `01-verify-first-live-label-purchase` unless noted.
+~~Blocked on `01-verify-first-live-label-purchase` unless noted.~~ **Stale as of
+2026-09-08** — the terms of service gate is cleared and labels can be bought freely on a
+development store. All five items below are reachable; see the comment at the foot of this
+file for the order they should be done in.
 
 1. **Wire inference into the Shopify purchase path.** Deliberately not done.
    `ShopifyAdapter::createShipment()` still records `ServiceEvidence::Unknown`, and the
@@ -477,3 +480,34 @@ left after every one — and by confirming a process that throws mid-test still 
 
 Full suite stable across all five parallel runs: 2042 passed, 2 skipped, 5617 assertions,
 identical each time, with `resources/data/service-inference/` unmodified.
+
+### 2026-09-08 — unblocked, and item 1 moves ahead of the rest
+
+The blocker this issue was parked on is gone: `01` bought two labels through the API, and
+on a development store they are test labels that cost nothing. `15` and `16` — both closed
+the same day — are what make the ladder actually run against them. Rung 1 now reads the
+26-digit IMpb it was declining, and `ups_shipping` normalizes to UPS instead of leaving a
+package with no carrier of record, which the consolidator guard and the token table both
+depend on.
+
+**Reorder the remaining work.** Item 1 was written as "deliberately not done… it should not
+go in unvalidated". The way to validate it is now available, and the cheapest way to get it
+is to wire the hook in **before** `14`'s capture campaign rather than after. Then every
+capture purchase is also a test of the hook, at no extra cost, and it runs in the position
+it has to run in anyway — at purchase time, before `PurgePiiCommand` nulls `label_data`.
+Wiring it in with empty token tables is fine and is the point: it should stamp
+`ServiceEvidence::Unknown` honestly, and that is worth seeing on a real purchase.
+
+So: item 1, then `14`'s captures, then item 2 (tokens, from those captures), then item 3
+(the UPS 1Z rung), then item 4 (the coverage measurement, which is the last unticked
+acceptance criterion and needs the other three to mean anything).
+
+**Item 3 has a new constraint from `01`, and it sharpens rather than softens.** Both UPS
+labels from that store carried a non-numeric service indicator in bytes 9–10 — and UPS's own
+tracking recognised the number and followed it through a void. So those are values *we*
+cannot decode, not values UPS rejects, and the table has to fall through to rung 2 on an
+unrecognised indicator instead of treating it as a coverage gap. Same discipline the STC
+table already applies.
+
+**Item 5 (FedEx `IP`/`XQ`) is independent of all of this.** It needs FedEx documentation
+and our own existing labels, not a Shopify purchase, so it can be picked up at any point.

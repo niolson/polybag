@@ -1,6 +1,6 @@
 # Consider a FULFILLMENTS_UPDATE webhook instead of polling for voids
 
-Status: needs-triage
+Status: wontfix — 2026-09-08
 
 Repo: `polybag`
 
@@ -49,3 +49,17 @@ So nothing here is a correctness gap: the 15-minute poll finds voids. What a web
 is the window between the void and the next run, during which PolyBag believes a package
 is shipped and a packer could reprint a dead label. Triage this on how much that window
 actually costs, not on whether polling works.
+
+### 2026-09-08 — triaged: not now, and the trigger to reopen is named
+
+Closed as `wontfix` in the sequencing pass, taking the recommendation this issue already
+made rather than deciding anything new. Nothing here is a correctness gap: the poll is
+observed working end to end, so what a webhook buys is latency alone.
+
+The cost is the part that settles it. A webhook can only ever be a hosted-tenant feature,
+so it does not replace the poll — it adds a second path beside one that already works,
+with HMAC verification, registration and replay handling attached, for a window in which
+the only harm is a packer reprinting a label they themselves voided minutes earlier.
+
+**Reopen when** somebody reports the 15-minute window actually costing them something. That
+is a real trigger, not a formality — this is deferred, not judged worthless.

@@ -67,8 +67,10 @@ into the service column — ADR-0003 decision 5 owns fixing it.
 
 ## Follow-up — test cross-account USPS SCAN forms
 
-**Tracked as of 2026-09-04 in `shopify-shipping-carrier/01`, question 10.** It was pointed
-there when written but never recorded there, so it lived only in this closed issue. The
+**Tracked as of 2026-09-04 in `shopify-shipping-carrier/01`, question 10; moved 2026-09-08
+to `shopify-shipping-carrier/17`, which keeps the number.** It was pointed at `01` when
+written but never recorded there, so it lived only in this closed issue; `01` then split out
+the questions needing a real store shipping a real parcel, and this is one of them. The
 provenance gate below stays until that question is answered.
 
 It is not yet clear whether USPS SCAN Forms v3 can include a USPS label bought through

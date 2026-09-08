@@ -38,3 +38,19 @@ Confirm in `01` that an international purchase really does return a second docum
 what format it comes back in. Everything above assumes it does.
 
 ## Comments
+
+### 2026-09-08 — the confirming step is now free; fold it into the campaign
+
+"First: confirm in `01` that an international purchase really does return a second
+document" was written when a purchase cost real postage. It does not any more — on a
+development store these are test labels — so the precondition this issue has been waiting
+on is one international test order away.
+
+Both purchases in `01` so far were domestic, which is why nothing here has moved. Create an
+international test order on the same store, buy a label through PolyBag, and record whether
+a `CUSTOMS_FORM` document comes back and in what format. That is `01`'s question 6, and it
+is the whole gate on this issue.
+
+**Do not choose between the three options above before that observation exists.** Each one
+assumes a second document; the format it arrives in also decides whether the middle option
+is even reachable through QZ Tray. Sequenced after the campaign, not during it.

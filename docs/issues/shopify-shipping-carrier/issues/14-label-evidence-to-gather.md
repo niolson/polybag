@@ -152,6 +152,49 @@ answer is only ever a class.
 
 ## Blocked by
 
-- `01-verify-first-live-label-purchase` — for everything needing a Shopify label. The two
-  documentation items and the install-base question are not blocked and can start now
+- ~~`01-verify-first-live-label-purchase` — for everything needing a Shopify label.~~
+  **Cleared 2026-09-08.** Labels can be bought on a development store for nothing; see the
+  comment below. The two documentation items and the install-base question were never
+  blocked
 - `11-infer-the-service-from-the-label` — the ladder and tables these fill
+
+## Comments
+
+### 2026-09-08 — the US half is now free; capture it as one campaign
+
+`01` cleared the purchase blocker and established that labels bought on a development store
+are **test labels**: no postage charged, and both USPS and UPS sell through the API there
+even though the store's own admin flow will not. So the two carriers that matter most to
+this table are gatherable today at zero cost, which is a much better position than "one
+person needs access to nineteen carriers".
+
+**Run `02` first.** It is a prerequisite rather than a parallel track. `auto` returned USPS
+on one purchase and UPS on the next from identical inputs, so without a working
+`preferredRateSelection` there is no way to ask for a specific carrier and service — and
+"one label per service" is the whole capture protocol. If the selection turns out to be
+ignored, this issue's scope shrinks to whatever `auto` happens to hand back, and that is
+worth knowing before anyone starts.
+
+**Wire `11`'s purchase-time hook in before capturing**, not after. Then each capture is also
+a test of the inference path, for free.
+
+**Capture more than this issue asks for, while you are in there.** Two other open issues
+want evidence from the same purchases and would otherwise need their own campaign:
+
+- **`05`** wants `Order.events` after every purchase — the label price is in the order
+  timeline as prose. Repeated purchases and voids against one order are exactly the
+  ambiguous case it needs to characterise, and this campaign produces them anyway.
+- **`01`** wants a ZPL purchase (flip the shop's label format setting), a purchase made
+  after the 8 PM cutoff, and an international order. The ZPL one overlaps directly with this
+  issue's question 2 — one capture answers both.
+
+**Two caveats on reading dev-store captures.** A test label is registered with the carrier
+and tracks, so the tokens and the number families are real evidence. But UPS test numbers
+carry a service indicator we cannot decode, and a test label never moves — so nothing
+gathered here says anything about scan-level movement, and a missing token is not
+necessarily a gap in the published table.
+
+**The prioritised carrier list is still the open input**, and it is the acceptance criterion
+that gates the other fourteen carriers. It is a business question about our install base,
+not something this repository can answer. USPS and UPS are safe to gather ahead of it on the
+strength of being the two the feature was built for.

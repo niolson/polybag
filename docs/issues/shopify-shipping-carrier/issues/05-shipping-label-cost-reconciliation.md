@@ -91,3 +91,35 @@ currency code. Before this becomes the plan, settle:
    already handled honestly everywhere by `08` and `12`.
 
 A wrong number here is worse than no number: `12` invoices this figure to a client.
+
+### 2026-09-08 — sequenced last of the substantive work, but its evidence is gathered first
+
+Two separate things, and keeping them apart is the point of this note.
+
+**Build it last.** Everything else open in this directory either costs nothing or is
+already wrong; this one is a new subsystem whose shape depends on answers the earlier work
+produces. Nothing is blocked waiting for it — `08` and `12` both handle a null cost
+honestly today.
+
+**Gather its evidence first, because that part is free.** The four questions in the comment
+above are answerable from purchases that `02`, `01`'s remainder and `14` are going to make
+anyway. Pull `Order.events` after every one of them and record it, rather than running a
+separate campaign later:
+
+- **Locale and currency** — the parse's biggest risk, and the one thing a single-store
+  sample cannot settle. Record what this store renders; treat a second currency as still
+  open rather than assume the sentence generalises.
+- **Event-to-label identity** — `14`'s capture campaign deliberately buys several labels
+  against the same carriers, and voids them. That produces exactly the multi-purchase order
+  this issue is worried about, for free. Record whether `attributeToApp` separates our own
+  purchases from an admin's.
+- **A test label still carries a price**, already observed. So the dev store exercises the
+  parse without a real one.
+
+**What it unblocks.** `12`'s charging half — what a client is actually invoiced for
+unpriced postage — is the decision this feeds, and it is the reason this is worth building
+at all rather than merely interesting. Report back there.
+
+**The bar stays where the comment above set it.** A wrong number is worse than no number,
+because `12` invoices it. A parse that fails must leave cost null, which is a state
+everything downstream already handles.
