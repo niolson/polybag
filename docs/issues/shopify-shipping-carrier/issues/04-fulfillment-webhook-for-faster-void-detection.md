@@ -38,3 +38,14 @@ Recommendation: leave it until somebody complains about the 15-minute window. Th
 work in `05` is worth more, since it is the only route to real postage numbers.
 
 ## Comments
+
+### 2026-09-08 — the polling path is confirmed working, so this is latency only
+
+Two labels voided in the Shopify admin were detected by the scheduled
+`packages:sync-shopify-fulfillments` run and both packages returned to unshipped, twelve
+and sixteen minutes after the void. Details in `01`.
+
+So nothing here is a correctness gap: the 15-minute poll finds voids. What a webhook buys
+is the window between the void and the next run, during which PolyBag believes a package
+is shipped and a packer could reprint a dead label. Triage this on how much that window
+actually costs, not on whether polling works.

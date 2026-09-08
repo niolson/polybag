@@ -252,7 +252,7 @@ class ShopifyAdapter implements BlindPurchaseSource
             // ignore preferredRateSelection outright, and it can pick a carrier
             // PolyBag has no account with at all — DHL eCommerce, Canada Post —
             // so the carrier it reports is the only trustworthy record.
-            carrier: $label->trackingCompany ?? ($carrierCode === null ? null : Str::upper($carrierCode)),
+            carrier: self::carrierNameFor($label->trackingCompany ?? $carrierCode),
             // Shopify reports no purchased service, before or after the buy —
             // `ShippingLabel` has no service, service code, rate or price. What
             // was asked for is kept as the requested preference, which is audit
@@ -280,6 +280,25 @@ class ShopifyAdapter implements BlindPurchaseSource
                 'shopify_requested_service_code' => $offer->serviceCode,
             ], fn (?string $value): bool => filled($value)),
         );
+    }
+
+    /**
+     * The carrier a Shopify string names, as PolyBag spells it.
+     *
+     * `ShippingLabel.trackingInfo.company` returns Shopify's own carrier code —
+     * `ups_shipping`, not UPS — and that value becomes the package's carrier of
+     * record. Anything outside the known vocabulary passes through untouched:
+     * Shopify sells through nineteen carriers and reports the rest as names
+     * already, so translating only what is known to be a code leaves a real
+     * name alone rather than mangling it.
+     */
+    private static function carrierNameFor(?string $company): ?string
+    {
+        if (! filled($company)) {
+            return null;
+        }
+
+        return ShopifyShippingLabelService::CARRIER_NAMES[Str::lower($company)] ?? $company;
     }
 
     /**

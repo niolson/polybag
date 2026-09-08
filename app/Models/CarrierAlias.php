@@ -36,9 +36,21 @@ class CarrierAlias extends Model
         });
     }
 
+    /**
+     * The key a carrier name is matched on.
+     *
+     * Trademark signs are folded out because carriers print them in the names
+     * they send — Shopify returns UPS as `UPS®` — and they are decoration
+     * rather than identity. Folding them here rather than adding an alias row
+     * per marked name is the difference between fixing one string and fixing
+     * the class of them. Nothing else is stripped: punctuation may yet be the
+     * only thing separating two carriers we have not met.
+     */
     public static function lookupKey(?string $carrierName): string
     {
-        return Str::lower(Str::squish($carrierName ?? ''));
+        $unmarked = str_replace(['®', '™', '℠'], ' ', $carrierName ?? '');
+
+        return Str::lower(Str::squish($unmarked));
     }
 
     public static function conflictMessage(string $lookupKey, int $carrierId, ?int $ignoreId = null): ?string
