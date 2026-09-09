@@ -362,19 +362,22 @@ it('exports the unpriced package count in both CSVs', function (): void {
         'shipped_at' => lastMonth(),
     ]);
 
-    $page = Livewire::test(ClientBillingReport::class)->instance();
-
     ob_start();
-    $page->exportCsv()->sendContent();
+    Livewire::test(ClientBillingReport::class)
+        ->instance()
+        ->exportCsv()
+        ->sendContent();
     $summary = ob_get_clean();
 
     expect(explode("\n", trim($summary))[0])->toContain('Unpriced Packages');
 
-    $page->viewMode = 'detail';
-    $page->clientId = $client->id;
-
     ob_start();
-    $page->exportCsv()->sendContent();
+    Livewire::test(ClientBillingReport::class)
+        ->set('viewMode', 'detail')
+        ->set('clientId', $client->id)
+        ->instance()
+        ->exportCsv()
+        ->sendContent();
     $detail = ob_get_clean();
 
     $lines = explode("\n", trim($detail));

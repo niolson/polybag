@@ -1545,13 +1545,13 @@ parameters:
 		-
 			message: '#^Call to an undefined method Livewire\\Component\:\:exportCsv\(\)\.$#'
 			identifier: method.notFound
-			count: 2
+			count: 4
 			path: tests/Feature/Pages/Reports/ClientBillingReportTest.php
 
 		-
 			message: '#^Parameter \#1 \$page of function billingRow expects App\\Filament\\Pages\\Reports\\ClientBillingReport, Livewire\\Component given\.$#'
 			identifier: argument.type
-			count: 8
+			count: 10
 			path: tests/Feature/Pages/Reports/ClientBillingReportTest.php
 
 		-
