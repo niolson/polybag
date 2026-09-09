@@ -3,6 +3,7 @@
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\TrackingStatus;
+use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Models\AuditLog;
 use App\Models\Package;
 use App\Models\Product;
@@ -310,6 +311,39 @@ function orderFulfillmentOrders(array $orders, bool $hasNextPage = false): array
         ],
     ];
 }
+
+it('asks the order for its fulfillment orders in a shape Shopify accepts', function (): void {
+    // The one thing a faked response cannot check, and the one that broke:
+    // `includeClosed` belongs to the query-root `fulfillmentOrders` connection,
+    // not to `Order.fulfillmentOrders`, which rejects it outright. Every
+    // re-point after a void threw on it and fell into the warning branch, so
+    // shipments kept naming the fulfillment order the void had closed — and the
+    // whole of issue `18`'s fix never ran once against the live API. Mocks
+    // validate no arguments, so the query text is what has to be asserted.
+    $package = shopifyPackageWithOrderMetadata();
+
+    Saloon::fake([
+        MockResponse::make(fulfillmentState('LABEL_VOIDED')),
+        MockResponse::make(orderFulfillmentOrders([
+            ['id' => 'gid://shopify/FulfillmentOrder/54321'],
+        ])),
+    ]);
+
+    $this->synchronizer->sync();
+
+    Saloon::assertSent(function (GraphQL $request): bool {
+        $query = $request->body()->all()['query'];
+
+        if (! str_contains($query, 'ShopifyOrderFulfillmentOrders')) {
+            return true;
+        }
+
+        return ! str_contains($query, 'includeClosed')
+            // `supportedActions` is what separates the replacement from the
+            // husk once closed fulfillment orders come back with the rest.
+            && str_contains($query, 'supportedActions');
+    });
+});
 
 it('re-points the shipment at the fulfillment order that replaced the voided one', function (): void {
     $package = shopifyPackageWithOrderMetadata();

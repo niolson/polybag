@@ -66,8 +66,10 @@ same day are what make the inference path usable against them.
 campaign was the whole of the queue when it was sequenced, because nothing was known to be
 broken. Now something is: `19`, `20` and `21` are defects in shipped code, found by running
 it, and two of them are wrong on every purchase. They go ahead of the remaining evidence
-work, which is measurement and can wait. `20` closed the same day, and `21` with `18`
-shortly after; `19` is what remains of the three.
+work, which is measurement and can wait. `20` closed the same day, `21` with `18` shortly
+after, and `19` last. Verifying `19` against the live store then turned up `22` — `18`'s
+re-point query was invalid and had never once run outside the test suite — which is closed
+too. All four are done, and the campaign is what remains.
 
 Each issue file carries the reasoning for its own position; this is the order.
 

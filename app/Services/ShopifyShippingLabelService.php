@@ -173,31 +173,43 @@ class ShopifyShippingLabelService
      * The order's fulfillment orders, for finding the one that replaced a
      * fulfillment order a void closed.
      *
-     * `supportedActions` rather than status alone: `CREATE_FULFILLMENT` is the
+     * `supportedActions` carries the whole filter: `CREATE_FULFILLMENT` is the
      * honest test of whether a label can still be bought against a fulfillment
      * order, and it is what separates the replacement from the husk the void
-     * left behind. `includeClosed: false` drops most of those anyway, but a
-     * fulfillment order can be open and still unfulfillable — on hold, or
-     * assigned to a third-party fulfillment service.
+     * left behind. Status alone would not do it — a fulfillment order can be
+     * open and still unfulfillable, on hold or assigned to a third-party
+     * fulfillment service — and it does not need to, since a closed one carries
+     * no supported actions at all.
+     *
+     * **There is no `includeClosed` here.** That argument belongs to the
+     * query-root `fulfillmentOrders` connection, which the import uses;
+     * `Order.fulfillmentOrders` takes `displayable`, `reverse` and `query` and
+     * rejects `includeClosed` outright — *"Field 'fulfillmentOrders' doesn't
+     * accept argument 'includeClosed'"*. Sending it made this whole query throw,
+     * so every re-point after a void failed silently into
+     * `ShopifyFulfillmentSynchronizer`'s warning branch and left the shipment
+     * naming the dead fulfillment order. Closed fulfillment orders therefore
+     * come back and are filtered here, which is where the real test always was.
      *
      * The line items come too, because fulfillable and at the right location is
      * not enough to make one a replacement: an order split at a single location
      * has siblings that pass both tests and are somebody else's goods.
      *
-     * Page sizes match the import's proven query shape rather than the maximum,
-     * and **both** connections report whether they were truncated. Neither is
-     * paginated: an order carrying more than twenty fulfillment orders, or one
-     * of them more than forty line items, is far outside anything a void has to
-     * be resolved against, and a partial page cannot be told apart from a
-     * complete one by looking at it. `hasNextPage` is what stops it being read
-     * as complete — a truncated page is no answer rather than a wrong one, and
-     * the import, which does paginate, resolves it on the next run.
+     * Fifty fulfillment orders rather than the import's twenty, because closed
+     * ones now count toward the page and an order accumulates one on every
+     * void. Neither connection is paginated, and **both** report whether they
+     * were truncated: an order carrying more than fifty fulfillment orders, or
+     * one of them more than forty line items, is far outside anything a void
+     * has to be resolved against, and a partial page cannot be told apart from
+     * a complete one by looking at it. `hasNextPage` is what stops it being
+     * read as complete — a truncated page is no answer rather than a wrong one,
+     * and the import, which does paginate, resolves it on the next run.
      */
     private const ORDER_FULFILLMENT_ORDERS_QUERY = <<<'GRAPHQL'
         query ShopifyOrderFulfillmentOrders($id: ID!) {
           order(id: $id) {
             id
-            fulfillmentOrders(first: 20, includeClosed: false) {
+            fulfillmentOrders(first: 50) {
               pageInfo { hasNextPage }
               nodes {
                 id

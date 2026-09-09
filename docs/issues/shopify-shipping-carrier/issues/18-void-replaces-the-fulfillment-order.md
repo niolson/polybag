@@ -164,3 +164,15 @@ whose fingerprint matches what the shipment records and that no other shipment a
 names. See `21`'s last comment for the fingerprint itself. Where nothing matches, the branch
 this issue already specified applies unchanged: clear the stored ID, let the offer withdraw
 itself, and leave the import to re-point the shipment when it can see more.
+
+### 2026-09-09 — none of the above ran against the live API until `22`
+
+Everything this issue describes was correct and unreachable. The query behind it asked
+`Order.fulfillmentOrders` for `includeClosed: false`, which that connection does not accept,
+so `fulfillableFulfillmentOrders()` threw on every call and `repointFulfillmentOrder()`
+caught it, warned and returned. The re-point, the clear-when-nothing-is-fulfillable branch
+and the goods-fingerprint filter had all never executed outside the test suite, which fakes
+Shopify and therefore validates no arguments.
+
+Nothing user-visible broke, because the import-side re-point from `21` is a working backstop
+and this issue's own docblock already relies on it. See `22` for the fix and the evidence.
