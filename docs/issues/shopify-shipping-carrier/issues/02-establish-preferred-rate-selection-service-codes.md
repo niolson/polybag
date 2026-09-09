@@ -352,3 +352,39 @@ Air Early and `54` Worldwide Express Plus. Both UPS ones are toggled on in the a
 found no rate on any parcel or destination probed, domestic or international; the most
 likely reading is that a development account is not offered the premium tiers, which is the
 same class of limitation as the USPS international finding and equally unresolvable here.
+
+### 2026-09-09 — the USPS international gap is a vocabulary gap, and the admin proves the rates exist
+
+This issue closed noting that USPS international was the one real gap, and that a Canada
+destination missed on nine spellings while UPS and DHL matched on the same shipments — with
+the reading that the store is most likely not offered those rates at all, "indistinguishable
+from outside".
+
+**It is now distinguishable, and that reading was wrong.** The Shopify admin's own rate list
+for the same parcel — order #1240, package 207, US → Canada — offers three USPS
+international services:
+
+| Service as the admin names it | Price |
+|---|---|
+| USPS First Class Package International | $36.57 |
+| USPS Priority Mail International | $48.81 |
+| USPS Priority Mail Express International | $74.85 |
+
+Alongside UPS Standard $20.94, UPS Worldwide Express $46.69, Worldwide Expedited $36.05,
+Worldwide Saver $41.74, and DHL Express Worldwide $35.02.
+
+The free oracle run against that same fulfillment order matched `ups_shipping:11`, `07`, `08`
+and `65`, and `dhl_express:P` — and **no rate for any of the ten `usps:` spellings tried**.
+So the rates are there and the codes do not name them. The store *is* offered USPS
+international; the vocabulary is what is missing.
+
+That also narrows the search. The admin's strings are the carrier's own product names, and
+the pattern this issue established is that Shopify passes each carrier's own vocabulary
+through — so the codes are likely USPS's, in the PascalCase form USPS domestic already uses
+here (`GroundAdvantage`, `PriorityExpress`). None of `PriorityMailInternational`,
+`PriorityInternational`, `InternationalPriority`, `FirstClassPackageInternational` or
+`GroundAdvantageInternational` matched, so it is not the obvious concatenations.
+
+Cheap to continue: the oracle is free and an international fulfillment order now exists to
+run it against. Worth a second pass with USPS's published international product identifiers
+rather than guessed spellings — the same discipline that produced the domestic table.

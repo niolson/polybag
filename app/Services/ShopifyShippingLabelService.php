@@ -638,8 +638,14 @@ class ShopifyShippingLabelService
             trackingNumber: $label['trackingInfo']['number'] ?? null,
             trackingCompany: $label['trackingInfo']['company'] ?? null,
             labelData: $this->download($labelDocument['url'] ?? null),
-            // Shopify picks the format from the shop's admin setting; PDF is its
-            // default, and is what a label with no stated format has to be.
+            // Reported, never requested: `ShippingLabelPurchaseInput` has no
+            // format field. `ShippingEnumsFileFormat` is PDF or ZPL, but the
+            // shop's label format setting selects a paper size (Thermal 4x6,
+            // Letter, A4), all three are PDF, and it is applied when the admin
+            // renders for printing rather than to the document behind this URL.
+            // So nothing merchant-facing reaches the ZPL value, and what we
+            // download is a 4x6 PDF whatever that setting says. PDF is what a
+            // label with no stated format has to be.
             labelFormat: strtolower((string) ($labelDocument['format'] ?? 'pdf')),
             customsFormUrl: $customsDocument['url'] ?? null,
             labelDocumentUrl: $labelDocument['url'] ?? null,
