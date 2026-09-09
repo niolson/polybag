@@ -243,10 +243,16 @@ class ShopifyAdapter implements BlindPurchaseSource
      * Those markers are therefore disqualifying until something clears them,
      * and the only thing that clears them is
      * `ShopifyFulfillmentSynchronizer::applyVoid()`, on a confirmed
-     * Shopify-side void. That is also why `Void` status is not disqualifying:
-     * voiding reopens the fulfillment order and strips the markers in the same
-     * write, so a shipment whose only previous label was voided can buy
-     * another one.
+     * Shopify-side void. That is also why `Void` status is not disqualifying —
+     * though not for the reason first written here. Voiding does not reopen the
+     * fulfillment order: Shopify closes that one permanently and creates a
+     * replacement for the same line items, and a shipment left naming the
+     * closed one fails the eventual purchase with `FULFILLMENT_ORDER_INVALID`
+     * (issue `18`). What makes a voided shipment buyable again is that
+     * `applyVoid()` strips these markers *and* re-points the shipment at the
+     * replacement; when there is no replacement to take it clears the stored
+     * fulfillment order instead, and `canPurchaseFor()` withdraws the offer
+     * without this ever being asked.
      */
     private function shipmentAlreadyBoughtALabel(Package $package): bool
     {

@@ -4,16 +4,21 @@ namespace App\Services\ShipmentImport\Sources;
 
 use App\Contracts\DataSourceInterface;
 use App\Contracts\ExportDestinationInterface;
+use App\Contracts\ReconcilesSupersededRecords;
+use App\DataTransferObjects\ShipmentImport\ShopifyFulfillmentOrderIdentity;
 use App\Exceptions\PermanentExportException;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Http\Integrations\Shopify\ShopifyConnector;
+use App\Models\DataSource;
+use App\Services\ShipmentImport\ShopifyFulfillmentOrderRepointer;
+use App\Services\ShopifyGoodsFingerprint;
 use DomainException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 use RuntimeException;
 
-class ShopifySource implements DataSourceInterface, ExportDestinationInterface
+class ShopifySource implements DataSourceInterface, ExportDestinationInterface, ReconcilesSupersededRecords
 {
     private const ACCESS_SCOPES_QUERY = <<<'GRAPHQL'
         query AccessScopes {
@@ -40,6 +45,8 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface
     private array $config;
 
     private ShopifyConnector $connector;
+
+    private ShopifyGoodsFingerprint $goods;
 
     /** @var array<string, array> Cached order data keyed by source record ID */
     private array $orderCache = [];
@@ -121,6 +128,7 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface
     {
         $this->config = $config;
         $this->connector = ShopifyConnector::fromSettings($config);
+        $this->goods = app(ShopifyGoodsFingerprint::class);
     }
 
     public function validateConfiguration(): void
@@ -224,6 +232,30 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface
             ->filter(fn (array $item): bool => ($item['requiresShipping'] ?? false) && ($item['remainingQuantity'] ?? 0) > 0)
             ->map(fn (array $item): array => $this->mapFulfillmentOrderLineItem($item))
             ->values();
+    }
+
+    /**
+     * Re-point shipments whose fulfillment order Shopify has replaced.
+     *
+     * Delegated whole to {@see ShopifyFulfillmentOrderRepointer}: what belongs
+     * here is only the reading of Shopify's own shape into the identity that
+     * survives a replacement — the order, the assigned location, and the goods.
+     * All three are already on the mapped row, so recognising a replacement
+     * costs no extra request and does not depend on item import being on.
+     *
+     * @param  Collection<int, array<string, mixed>>  $shipments
+     */
+    public function reconcileSupersededRecords(DataSource $dataSource, Collection $shipments): int
+    {
+        return app(ShopifyFulfillmentOrderRepointer::class)->repoint(
+            $dataSource,
+            $shipments->map(fn (array $row): ShopifyFulfillmentOrderIdentity => new ShopifyFulfillmentOrderIdentity(
+                fulfillmentOrderId: (string) $row['source_record_id'],
+                orderId: $row['metadata']['shopify_order_id'] ?? null,
+                locationId: $row['metadata']['shopify_location_id'] ?? null,
+                goodsFingerprint: $row['metadata'][ShopifyGoodsFingerprint::METADATA_KEY] ?? null,
+            )),
+        );
     }
 
     private function fetchFulfillmentOrderShipments(): Collection
@@ -363,6 +395,12 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface
                 'shopify_order_id' => $order['id'] ?? null,
                 'shopify_fulfillment_order_id' => $fulfillmentOrder['id'],
                 'shopify_location_id' => $shopifyLocation['id'] ?? null,
+                // Recorded so a replacement fulfillment order can be told from
+                // a sibling later, when this one is closed and unreadable.
+                ShopifyGoodsFingerprint::METADATA_KEY => $this->goods->forLineItems(
+                    $fulfillmentOrder['lineItems'] ?? [],
+                    'remainingQuantity',
+                ),
             ],
         ];
     }
@@ -383,13 +421,11 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface
         }
 
         $variant = $item['variant'] ?? [];
-        $sku = $item['sku'] ?? null;
-        if (empty($sku) && ! empty($variant['id'])) {
-            $sku = 'SHOPIFY-V-'.preg_replace('/.*\//', '', $variant['id']);
-        }
 
         return [
-            'sku' => $sku,
+            // The same rule the goods fingerprint uses, so a fingerprint taken
+            // from a raw Shopify node names these items by the same strings.
+            'sku' => ShopifyGoodsFingerprint::skuFor($item),
             'name' => $item['productTitle'] ?? null,
             'quantity' => (int) ($item['remainingQuantity'] ?? 0),
             'value' => (float) data_get($item, 'lineItem.originalUnitPriceSet.shopMoney.amount', 0),

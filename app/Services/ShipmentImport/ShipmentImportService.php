@@ -3,6 +3,7 @@
 namespace App\Services\ShipmentImport;
 
 use App\Contracts\DataSourceInterface;
+use App\Contracts\ReconcilesSupersededRecords;
 use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Shipment;
@@ -89,6 +90,10 @@ class ShipmentImportService
 
         $this->runRecorder->started($shipments->count());
 
+        if ($this->source instanceof ReconcilesSupersededRecords) {
+            $this->reconcileSupersededRecords($this->source, $shipments);
+        }
+
         $batchSize = config('shipment-import.behavior.batch_size', 100);
 
         Shipment::withoutSyncingToSearch(function () use ($shipments, $batchSize): void {
@@ -100,6 +105,34 @@ class ShipmentImportService
         });
 
         return $this->runRecorder->completed(microtime(true) - $startTime);
+    }
+
+    /**
+     * Give a source that re-keys its records the chance to re-point the
+     * shipments it already owns, before the batch write keys off the new
+     * identifier and imports them a second time.
+     *
+     * Run against the whole fetched set, never a chunk: whether the record a
+     * shipment names is still on offer cannot be answered from part of it.
+     *
+     * A failure here is recorded and the import carries on. The cost of not
+     * reconciling is a duplicate shipment, which a packer can see and a person
+     * can void; the cost of abandoning the run is every other shipment in it.
+     *
+     * @param  Collection<int, array<string, mixed>>  $shipments
+     */
+    private function reconcileSupersededRecords(ReconcilesSupersededRecords $source, Collection $shipments): void
+    {
+        try {
+            // Deliberately not counted here. A re-pointed shipment is still in
+            // the fetched set, so the batch write below reports it as the
+            // update or skip it now is; counting it twice would overstate the run.
+            $source->reconcileSupersededRecords($this->importSource, $shipments);
+        } catch (\Exception $e) {
+            $this->runRecorder->addError(
+                'Could not check whether any imported record had been replaced upstream: '.$e->getMessage(),
+            );
+        }
     }
 
     private function importBatch(Collection $batch): void
