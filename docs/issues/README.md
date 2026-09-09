@@ -39,8 +39,10 @@ Each issue file carries the reasoning for its own position; this is the order.
 **First, and unrelated to Shopify — [`12`](shopify-shipping-carrier/issues/12-client-billing-invoices-unpriced-postage-as-zero.md).**
 The only open item that is presently wrong in a way that moves money: null-cost postage is a
 term in `line_total`, so every billing run under-invoices the client and the line looks
-complete. Ship the flag half now — a reporting decision, consistent with `08`, safe without
-the billing owner. The charging half waits for `05`.
+complete. **The flag half shipped 2026-09-08** — both views disclose the count, the billable
+event log filters down to those lines, and both CSVs carry it, so an invoice can be
+reconciled against the seller's billing data before it goes out. `line_total` still
+under-bills; the charging half waits for `05`.
 
 **Then the campaign.** One run of purchases on the development store, answering four issues
 at once because each label is free and the evidence overlaps:

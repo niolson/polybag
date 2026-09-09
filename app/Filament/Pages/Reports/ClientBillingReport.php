@@ -110,7 +110,9 @@ class ClientBillingReport extends Page implements HasTable
         $until = $filters['until'] ?? now()->endOfMonth()->format('Y-m-d');
 
         if ($this->viewMode === 'detail' && $this->clientId) {
-            return $this->streamDetailCsv($this->clientId, $from, $until);
+            $unpricedOnly = (bool) ($this->getTableFilterState('unpriced_postage')['isActive'] ?? false);
+
+            return $this->streamDetailCsv($this->clientId, $from, $until, $unpricedOnly);
         }
 
         return $this->streamSummaryCsv($from, $until);
@@ -135,6 +137,7 @@ class ClientBillingReport extends Page implements HasTable
                 Tables\Columns\TextColumn::make('total_postage')
                     ->label('Postage')
                     ->money('USD')
+                    ->description(fn (Model $record): ?string => $this->uncostedNote($record))
                     ->sortable(),
                 Tables\Columns\TextColumn::make('label_fees')
                     ->label('Label Fees')
@@ -201,7 +204,8 @@ class ClientBillingReport extends Page implements HasTable
                     ->label('Pkgs'),
                 Tables\Columns\TextColumn::make('postage')
                     ->label('Postage')
-                    ->money('USD'),
+                    ->money('USD')
+                    ->description(fn (Model $record): ?string => $this->uncostedNote($record)),
                 Tables\Columns\TextColumn::make('label_fee')
                     ->label('Label Fee')
                     ->money('USD'),
@@ -222,6 +226,11 @@ class ClientBillingReport extends Page implements HasTable
                     ->badge()
                     ->color('warning')
                     ->formatStateUsing(fn ($state): ?string => $state ? null : 'No item data'),
+                Tables\Columns\TextColumn::make('uncosted_package_count')
+                    ->label('')
+                    ->badge()
+                    ->color('danger')
+                    ->formatStateUsing(fn ($state): ?string => (int) $state > 0 ? 'Unpriced postage' : null),
                 Tables\Columns\TextColumn::make('line_total')
                     ->label('Line Total')
                     ->money('USD')
@@ -243,6 +252,10 @@ class ClientBillingReport extends Page implements HasTable
                         ->when($data['from'], fn ($q, $date) => $q->where('pkg.shipped_at', '>=', $date))
                         ->when($data['until'], fn ($q, $date) => $q->where('pkg.shipped_at', '<=', $date.' 23:59:59'))
                     ),
+                Tables\Filters\Filter::make('unpriced_postage')
+                    ->label('Unpriced postage only')
+                    ->toggle()
+                    ->query(fn ($query) => $query->where('pkg.uncosted_package_count', '>', 0)),
             ], layout: FiltersLayout::AboveContent)
             ->deferFilters(false)
             ->filtersFormColumns(2);
@@ -260,6 +273,7 @@ class ClientBillingReport extends Page implements HasTable
                 DB::raw('COUNT(billing.shipment_id) as order_count'),
                 DB::raw('COALESCE(SUM(billing.package_count), 0) as package_count'),
                 DB::raw('COALESCE(SUM(billing.postage), 0) as total_postage'),
+                DB::raw('COALESCE(SUM(billing.uncosted_package_count), 0) as uncosted_package_count'),
                 DB::raw('COALESCE(SUM(billing.label_fee), 0) as label_fees'),
                 DB::raw('COALESCE(SUM(billing.pick_fee_base + billing.pick_fee_extra), 0) as pick_fees'),
                 DB::raw('COALESCE(SUM(billing.materials), 0) as total_materials'),
@@ -286,6 +300,7 @@ class ClientBillingReport extends Page implements HasTable
                 'pkg.shipped_at',
                 'pkg.package_count',
                 'pkg.postage',
+                'pkg.uncosted_package_count',
                 'pkg.weight',
                 'pkg.materials',
                 DB::raw('CASE WHEN itm.shipment_id IS NOT NULL THEN 1 ELSE 0 END as has_items'),
@@ -314,10 +329,32 @@ class ClientBillingReport extends Page implements HasTable
                 DB::raw('MIN(p.shipped_at) as shipped_at'),
                 DB::raw('COUNT(p.id) as package_count'),
                 DB::raw('COALESCE(SUM(p.cost), 0) as postage'),
+                DB::raw('COUNT(p.id) - COUNT(p.cost) as uncosted_package_count'),
                 DB::raw('COALESCE(SUM(p.weight), 0) as weight'),
                 DB::raw('COALESCE(SUM(COALESCE(bs.materials_cost, 0)), 0) as materials'),
             ])
             ->groupBy('p.shipment_id');
+    }
+
+    /**
+     * Packages on the line that reported no postage.
+     *
+     * `packages.cost` is null when the seller reports no price — a Shopify
+     * Shipping label always, a manual ship or a failed cost write sometimes.
+     * The billing queries sum that as $0.00, so the line under-invoices the
+     * client by the whole postage amount while every other fee charges
+     * normally. Until the charging half of that is decided, the gap is at
+     * least visible on the row it is missing from.
+     */
+    private function uncostedNote(Model $record): ?string
+    {
+        $uncosted = (int) ($record->uncosted_package_count ?? 0);
+
+        if ($uncosted < 1) {
+            return null;
+        }
+
+        return number_format($uncosted).' billed at $0.00 — no reported postage';
     }
 
     private function buildItemSubquery(): \Illuminate\Database\Query\Builder
@@ -344,6 +381,7 @@ class ClientBillingReport extends Page implements HasTable
                 'pkg.shipped_at',
                 'pkg.package_count',
                 'pkg.postage',
+                'pkg.uncosted_package_count',
                 'pkg.materials',
                 DB::raw('COALESCE(itm.product_surcharges, 0) as product_surcharges'),
                 DB::raw('pkg.package_count * COALESCE(c.label_fee_per_package, 0) as label_fee'),
@@ -371,7 +409,7 @@ class ClientBillingReport extends Page implements HasTable
 
         return response()->streamDownload(function () use ($rows): void {
             $out = fopen('php://output', 'w');
-            fputcsv($out, ['Client', 'Orders', 'Packages', 'Postage', 'Label Fees', 'Pick Fees', 'Materials', 'Surcharges', 'Total Billable']);
+            fputcsv($out, ['Client', 'Orders', 'Packages', 'Postage', 'Unpriced Packages', 'Label Fees', 'Pick Fees', 'Materials', 'Surcharges', 'Total Billable']);
 
             foreach ($rows as $row) {
                 fputcsv($out, [
@@ -379,6 +417,7 @@ class ClientBillingReport extends Page implements HasTable
                     $row->order_count,
                     $row->package_count,
                     number_format((float) $row->total_postage, 2),
+                    (int) $row->uncosted_package_count,
                     number_format((float) $row->label_fees, 2),
                     number_format((float) $row->pick_fees, 2),
                     number_format((float) $row->total_materials, 2),
@@ -391,13 +430,14 @@ class ClientBillingReport extends Page implements HasTable
         }, $filename, ['Content-Type' => 'text/csv']);
     }
 
-    private function streamDetailCsv(int $clientId, string $from, string $until): StreamedResponse
+    private function streamDetailCsv(int $clientId, string $from, string $until, bool $unpricedOnly = false): StreamedResponse
     {
         $client = Client::find($clientId);
 
         $rows = $this->detailQuery($clientId, $client)
             ->when($from, fn ($q) => $q->where('pkg.shipped_at', '>=', $from))
             ->when($until, fn ($q) => $q->where('pkg.shipped_at', '<=', $until.' 23:59:59'))
+            ->when($unpricedOnly, fn ($q) => $q->where('pkg.uncosted_package_count', '>', 0))
             ->orderBy('pkg.shipped_at')
             ->get();
 
@@ -405,7 +445,7 @@ class ClientBillingReport extends Page implements HasTable
 
         return response()->streamDownload(function () use ($rows): void {
             $out = fopen('php://output', 'w');
-            fputcsv($out, ['Reference', 'Date', 'Packages', 'Postage', 'Label Fee', 'Pick Fee', 'Extra Items', 'Materials', 'Surcharges', 'No Item Data', 'Line Total']);
+            fputcsv($out, ['Reference', 'Date', 'Packages', 'Postage', 'Unpriced Packages', 'Label Fee', 'Pick Fee', 'Extra Items', 'Materials', 'Surcharges', 'No Item Data', 'Line Total']);
 
             foreach ($rows as $row) {
                 fputcsv($out, [
@@ -413,6 +453,7 @@ class ClientBillingReport extends Page implements HasTable
                     $row->shipped_at,
                     $row->package_count,
                     number_format((float) $row->postage, 2),
+                    (int) $row->uncosted_package_count,
                     number_format((float) $row->label_fee, 2),
                     number_format((float) $row->pick_fee_base, 2),
                     number_format((float) $row->pick_fee_extra, 2),

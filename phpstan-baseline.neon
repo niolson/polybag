@@ -415,6 +415,12 @@ parameters:
 			path: app/Filament/Pages/Reports/ClientBillingReport.php
 
 		-
+			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$uncosted_package_count\.$#'
+			identifier: property.notFound
+			count: 2
+			path: app/Filament/Pages/Reports/ClientBillingReport.php
+
+		-
 			message: '#^Using nullsafe property access "\?\-\>label_fee_per_package" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
 			identifier: nullsafe.neverNull
 			count: 1
