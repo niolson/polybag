@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\PackageExportStatus;
+use App\Enums\ShipmentStatus;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Models\Carrier;
 use App\Models\CarrierAlias;
@@ -12,6 +13,7 @@ use App\Models\Location;
 use App\Models\Package;
 use App\Models\PackageExport;
 use App\Models\Shipment;
+use App\Services\ShipmentImport\ImportResult;
 use App\Services\ShipmentImport\PackageExportService;
 use App\Services\ShipmentImport\ShipmentImportService;
 use App\Services\ShipmentImport\Sources\ShopifySource;
@@ -771,4 +773,162 @@ it('deduplicates shopify imports by fulfillment-order id instead of displayed or
         ->and($shipment->shipment_reference)->toBe('#1001-RENAMED')
         ->and($shipment->channel_id)->toBe($channel->id)
         ->and($shipment->data_source_id)->toBe($this->dataSource->id);
+});
+
+/**
+ * The fulfillment order Shopify creates when a label bought against another
+ * one is voided: a GID nothing has seen, describing the same order, the same
+ * location and the same goods as the one it replaced.
+ */
+function replacementFulfillmentOrder(string $id, string $replacing, string $locationId, int $quantity = 1): array
+{
+    $fulfillmentOrder = sampleFulfillmentOrder($replacing, $locationId, $quantity);
+    $fulfillmentOrder['id'] = "gid://shopify/FulfillmentOrder/{$id}";
+    $fulfillmentOrder['lineItems']['nodes'][0]['id'] = "gid://shopify/FulfillmentOrderLineItem/{$id}";
+
+    return $fulfillmentOrder;
+}
+
+/**
+ * @param  array<int, array<string, mixed>>  $nodes
+ */
+function importFulfillmentOrders(DataSource $dataSource, array $nodes): ImportResult
+{
+    Saloon::fake([GraphQL::class => MockResponse::make(['data' => ['fulfillmentOrders' => [
+        'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
+        'nodes' => $nodes,
+    ]]])]);
+
+    return ShipmentImportService::forSource(new ShopifySource([
+        'channel_name' => 'Shopify',
+        'shop_domain' => 'test-shop.myshopify.com',
+        'client_id' => 'test-client-id',
+        'client_secret' => 'test-client-secret',
+        'fulfillment_order_import_enabled' => true,
+    ]), $dataSource)->import();
+}
+
+function mapShopifyLocation(DataSource $dataSource, string $externalId = 'gid://shopify/Location/1'): Location
+{
+    tap(Channel::factory()->create(['name' => 'Shopify']), fn ($channel) => ChannelAlias::firstOrCreate([
+        'reference' => 'Shopify',
+    ], ['channel_id' => $channel->id]));
+
+    $location = Location::factory()->create();
+
+    DataSourceLocation::factory()->create([
+        'data_source_id' => $dataSource,
+        'external_id' => $externalId,
+        'location_id' => $location,
+    ]);
+
+    return $location;
+}
+
+it('re-points a shipment at the fulfillment order that replaced it rather than importing the order twice', function (): void {
+    mapShopifyLocation($this->dataSource);
+
+    importFulfillmentOrders($this->dataSource, [sampleFulfillmentOrder('4001', '1')]);
+
+    // The void closed 4001 for good; 4001 is gone from the import query and
+    // 4002 stands in its place, for the same order, location and goods.
+    $result = importFulfillmentOrders($this->dataSource, [
+        replacementFulfillmentOrder('4002', '4001', '1'),
+    ]);
+
+    $shipment = Shipment::sole();
+
+    expect($result->shipmentsCreated)->toBe(0)
+        ->and($shipment->source_record_id)->toBe('gid://shopify/FulfillmentOrder/4002')
+        ->and($shipment->metadata['shopify_fulfillment_order_id'])->toBe('gid://shopify/FulfillmentOrder/4002')
+        ->and($shipment->shipment_reference)->toBe('#4001');
+});
+
+it('leaves a sibling fulfillment order to import as its own shipment while the first is still on offer', function (): void {
+    mapShopifyLocation($this->dataSource);
+
+    importFulfillmentOrders($this->dataSource, [sampleFulfillmentOrder('4101', '1')]);
+
+    // Same order, same location, same goods — but 4101 is still offered, so
+    // 4102 is a split, not a replacement. Merging them would lose a parcel.
+    importFulfillmentOrders($this->dataSource, [
+        sampleFulfillmentOrder('4101', '1'),
+        replacementFulfillmentOrder('4102', '4101', '1'),
+    ]);
+
+    expect(Shipment::count())->toBe(2)
+        ->and(Shipment::where('source_record_id', 'gid://shopify/FulfillmentOrder/4101')->exists())->toBeTrue()
+        ->and(Shipment::where('source_record_id', 'gid://shopify/FulfillmentOrder/4102')->exists())->toBeTrue();
+});
+
+it('imports a fulfillment order for different goods as its own shipment', function (): void {
+    mapShopifyLocation($this->dataSource);
+
+    importFulfillmentOrders($this->dataSource, [sampleFulfillmentOrder('4201', '1')]);
+
+    // Everything a replacement has except the line items, which is what a
+    // split sibling that closed for its own reasons looks like.
+    $differentGoods = sampleFulfillmentOrder('4202', '1');
+    $differentGoods['order'] = ['id' => 'gid://shopify/Order/4201', 'name' => '#4201', 'email' => 'test@example.com'];
+
+    importFulfillmentOrders($this->dataSource, [$differentGoods]);
+
+    expect(Shipment::count())->toBe(2)
+        ->and(Shipment::where('source_record_id', 'gid://shopify/FulfillmentOrder/4201')->value('metadata'))
+        ->toMatchArray(['shopify_fulfillment_order_id' => 'gid://shopify/FulfillmentOrder/4201']);
+});
+
+it('never re-points a shipped shipment out from under its package', function (): void {
+    $location = mapShopifyLocation($this->dataSource);
+
+    importFulfillmentOrders($this->dataSource, [sampleFulfillmentOrder('4301', '1')]);
+
+    $shipment = Shipment::sole();
+    Package::factory()->shipped()->create(['shipment_id' => $shipment, 'location_id' => $location]);
+    $shipment->update(['status' => ShipmentStatus::Shipped]);
+
+    importFulfillmentOrders($this->dataSource, [
+        replacementFulfillmentOrder('4302', '4301', '1'),
+    ]);
+
+    // The duplicate is the lesser harm and it is temporary: the synchronizer
+    // un-ships the package when it reads the void, and the run after that finds
+    // an open shipment to re-point.
+    expect($shipment->refresh()->source_record_id)->toBe('gid://shopify/FulfillmentOrder/4301')
+        ->and(Shipment::count())->toBe(2);
+});
+
+it('re-points a replacement even when shipment item import is switched off', function (): void {
+    mapShopifyLocation($this->dataSource);
+    $settings = $this->dataSource->settings;
+    $settings['shipment_items_enabled'] = false;
+    $this->dataSource->update(['settings' => $settings]);
+
+    importFulfillmentOrders($this->dataSource, [sampleFulfillmentOrder('4401', '1')]);
+
+    expect(Shipment::sole()->shipmentItems)->toBeEmpty();
+
+    // The goods are recorded on the shipment at import time, so recognising a
+    // replacement never depends on there being items to compare.
+    importFulfillmentOrders($this->dataSource, [
+        replacementFulfillmentOrder('4402', '4401', '1'),
+    ]);
+
+    expect(Shipment::sole()->source_record_id)->toBe('gid://shopify/FulfillmentOrder/4402');
+});
+
+it('imports a fulfillment order for different goods as its own shipment with item import off', function (): void {
+    mapShopifyLocation($this->dataSource);
+    $settings = $this->dataSource->settings;
+    $settings['shipment_items_enabled'] = false;
+    $this->dataSource->update(['settings' => $settings]);
+
+    importFulfillmentOrders($this->dataSource, [sampleFulfillmentOrder('4501', '1')]);
+
+    $differentGoods = sampleFulfillmentOrder('4502', '1');
+    $differentGoods['order'] = ['id' => 'gid://shopify/Order/4501', 'name' => '#4501', 'email' => 'test@example.com'];
+
+    importFulfillmentOrders($this->dataSource, [$differentGoods]);
+
+    expect(Shipment::count())->toBe(2);
 });

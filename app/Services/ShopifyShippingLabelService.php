@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\DataTransferObjects\ShipmentImport\ShopifyFulfillmentOrderIdentity;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShopifyPurchasedLabel;
@@ -13,6 +14,7 @@ use App\Models\DataSource;
 use App\Models\Package;
 use App\Services\PostageSources\PostageSourceResolver;
 use App\Services\ShipmentImport\Sources\ShopifySource;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -61,6 +63,7 @@ class ShopifyShippingLabelService
 
     public function __construct(
         private readonly PostageSourceResolver $postageSourceResolver,
+        private readonly ShopifyGoodsFingerprint $goods,
     ) {}
 
     /**
@@ -146,6 +149,54 @@ class ShopifyShippingLabelService
                     province
                     zip
                     country
+                  }
+                }
+              }
+            }
+          }
+        }
+        GRAPHQL;
+
+    /**
+     * The order's fulfillment orders, for finding the one that replaced a
+     * fulfillment order a void closed.
+     *
+     * `supportedActions` rather than status alone: `CREATE_FULFILLMENT` is the
+     * honest test of whether a label can still be bought against a fulfillment
+     * order, and it is what separates the replacement from the husk the void
+     * left behind. `includeClosed: false` drops most of those anyway, but a
+     * fulfillment order can be open and still unfulfillable — on hold, or
+     * assigned to a third-party fulfillment service.
+     *
+     * The line items come too, because fulfillable and at the right location is
+     * not enough to make one a replacement: an order split at a single location
+     * has siblings that pass both tests and are somebody else's goods.
+     *
+     * Page sizes match the import's proven query shape rather than the maximum,
+     * and **both** connections report whether they were truncated. Neither is
+     * paginated: an order carrying more than twenty fulfillment orders, or one
+     * of them more than forty line items, is far outside anything a void has to
+     * be resolved against, and a partial page cannot be told apart from a
+     * complete one by looking at it. `hasNextPage` is what stops it being read
+     * as complete — a truncated page is no answer rather than a wrong one, and
+     * the import, which does paginate, resolves it on the next run.
+     */
+    private const ORDER_FULFILLMENT_ORDERS_QUERY = <<<'GRAPHQL'
+        query ShopifyOrderFulfillmentOrders($id: ID!) {
+          order(id: $id) {
+            id
+            fulfillmentOrders(first: 20, includeClosed: false) {
+              pageInfo { hasNextPage }
+              nodes {
+                id
+                status
+                supportedActions { action }
+                assignedLocation { location { id } }
+                lineItems(first: 40) {
+                  pageInfo { hasNextPage }
+                  nodes {
+                    sku remainingQuantity requiresShipping
+                    variant { id }
                   }
                 }
               }
@@ -316,6 +367,105 @@ class ShopifyShippingLabelService
 
         return in_array($fulfillment['displayStatus'] ?? '', self::VOIDED_STATES, true)
             || in_array($fulfillment['status'] ?? '', self::VOIDED_STATES, true);
+    }
+
+    /**
+     * The fulfillment orders this package's order could still have a label
+     * bought against, at the location the shipment was imported for, each with
+     * the goods it is for.
+     *
+     * Exists because a void does not reopen anything. Shopify closes the
+     * fulfillment order the voided label was bought against permanently and
+     * creates a replacement for the same line items, and there is no edge
+     * saying which replaced which — the order's own list of what is still
+     * fulfillable is the only way to find it.
+     *
+     * Deliberately stops at "could": which of these is *this shipment's* work
+     * is a question about the goods, and the caller answers it against what the
+     * shipment records. Returning identities rather than IDs is what makes that
+     * possible without a second request.
+     *
+     * `null` is "cannot ask" — not a Shopify shipment, no stored order, an order
+     * Shopify no longer returns, or one with more fulfillment orders than the
+     * query asked for — and must never be read as "none", per the same
+     * discipline {@see fulfillmentFor()} keeps. An empty list is a real answer:
+     * nothing on this order is fulfillable here any more.
+     *
+     * @return list<ShopifyFulfillmentOrderIdentity>|null
+     *
+     * @throws ShopifyLabelPurchaseException
+     */
+    public function fulfillableFulfillmentOrders(Package $package): ?array
+    {
+        $dataSource = $this->postageSourceFor($package);
+
+        $package->loadMissing('shipment');
+        $orderId = $package->shipment?->metadata['shopify_order_id'] ?? null;
+        $locationId = $package->shipment?->metadata['shopify_location_id'] ?? null;
+
+        if (! $dataSource || blank($orderId)) {
+            return null;
+        }
+
+        $connector = ShopifyConnector::fromSettings(
+            array_merge($dataSource->settings ?? [], $dataSource->secret_settings ?? [])
+        );
+
+        $json = $connector->send(
+            new GraphQL(self::ORDER_FULFILLMENT_ORDERS_QUERY, ['id' => (string) $orderId])
+        )->json();
+
+        $this->assertNoGraphQLErrors($json);
+
+        $order = $json['data']['order'] ?? null;
+
+        if ($order === null) {
+            return null;
+        }
+
+        // A page that did not hold the whole order is not a shorter answer, it
+        // is no answer: the replacement may be on the next one, and so may a
+        // second candidate that would have made this ambiguous.
+        if (data_get($order, 'fulfillmentOrders.pageInfo.hasNextPage', false)) {
+            return null;
+        }
+
+        return collect($order['fulfillmentOrders']['nodes'] ?? [])
+            ->filter(fn (array $node): bool => collect($node['supportedActions'] ?? [])->contains(
+                fn (mixed $action): bool => is_array($action) && ($action['action'] ?? null) === 'CREATE_FULFILLMENT',
+            ))
+            // A fulfillment order assigned somewhere else is somebody else's
+            // work, however fulfillable it is: this package is at the location
+            // the shipment was imported for.
+            ->when(
+                filled($locationId),
+                fn (Collection $nodes): Collection => $nodes->filter(
+                    fn (array $node): bool => data_get($node, 'assignedLocation.location.id') === $locationId,
+                ),
+            )
+            ->map(fn (array $node): ShopifyFulfillmentOrderIdentity => new ShopifyFulfillmentOrderIdentity(
+                fulfillmentOrderId: (string) $node['id'],
+                orderId: (string) $orderId,
+                locationId: data_get($node, 'assignedLocation.location.id'),
+                goodsFingerprint: $this->goodsFor($node),
+            ))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The goods a fulfillment order node is for, or null when they cannot be
+     * read in full — a line-item page that did not fit is evidence of nothing.
+     *
+     * @param  array<string, mixed>  $node
+     */
+    private function goodsFor(array $node): ?string
+    {
+        if (data_get($node, 'lineItems.pageInfo.hasNextPage', false)) {
+            return null;
+        }
+
+        return $this->goods->forLineItems(data_get($node, 'lineItems.nodes', []), 'remainingQuantity');
     }
 
     /**

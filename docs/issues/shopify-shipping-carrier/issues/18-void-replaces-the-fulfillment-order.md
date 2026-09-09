@@ -1,6 +1,6 @@
 # A Shopify-side void replaces the fulfillment order, and the shipment keeps the dead ID
 
-Status: ready-for-agent
+Status: done — 2026-09-09
 
 Repo: `polybag`
 
@@ -110,3 +110,57 @@ sufficient to restore purchasing.
 So: **read `21` before implementing either option here.** Fixing this issue alone is not
 wrong, but it is half a fix for one root cause, and the half that leaves a duplicate in the
 packing queue.
+
+### 2026-09-09 — done, with `21`, and both halves shipped
+
+Read `21` for the whole of it. What landed here:
+
+**Refreshing, not clearing** — the option this issue preferred, and the docblock's promise
+kept. `applyVoid()` now re-resolves the shipment's fulfillment order after it un-ships the
+package, from the order's own `fulfillmentOrders(includeClosed: false)`, keeping those
+whose `supportedActions` carry `CREATE_FULFILLMENT` and that are assigned to the shipment's
+location. `supportedActions` rather than status, exactly as this issue names it: a
+fulfillment order can be open and still unfulfillable, on hold or assigned to a third-party
+fulfillment service.
+
+Clearing is still the answer to one case — *no* fulfillable fulfillment order, which means
+the order cannot be shipped through Shopify at all. There the stored ID goes and
+`canPurchaseFor()` withdraws the offer on its own, which is the fail-closed behaviour this
+issue wanted from clearing without giving up the re-ship path in the case that has one.
+Several fulfillable fulfillment orders is no answer and the ID is left as it is. A failure
+to ask changes nothing: the void itself is already recorded, and the import-side re-point
+covers it on the next run.
+
+`source_record_id` moves with the metadata ID, which is the half that discharges this
+issue's reach into the import: left behind, it names the same dead fulfillment order and
+the next import reads the replacement as work it has never seen. It moves only when it
+still names the fulfillment order being replaced, and only when no other shipment of that
+source is already keyed on the replacement — `(data_source_id, source_record_id)` is
+unique.
+
+**The docblock is corrected.** `ShopifyAdapter::shipmentAlreadyBoughtALabel()` no longer
+says voiding reopens the fulfillment order. It says what happens: Shopify closes it and
+creates a replacement, and what makes a voided shipment buyable again is `applyVoid()`
+stripping the markers *and* re-pointing at that replacement — or clearing the stored ID
+when there is none, so the offer never reaches the packer.
+
+`null` keeps meaning "don't know". `fulfillableFulfillmentOrderIds()` returns `null` for a
+question that cannot be asked — not a Shopify shipment, no stored order ID, an order
+Shopify no longer returns — and an empty list only as a real answer.
+
+### 2026-09-09 — corrected after review: the replacement has to be the right goods
+
+The first implementation took the order's single fulfillable fulfillment order as the
+replacement, having filtered only on `supportedActions` and the assigned location. Those
+are the tests this issue named, and they are not sufficient: an order split at one location
+leaves siblings that pass both and are for different goods. Writing one of those into
+`metadata.shopify_fulfillment_order_id` points the purchase path at another shipment's work,
+which is a worse outcome than the stale ID this issue was filed about — a stale ID fails
+loudly with `FULFILLMENT_ORDER_INVALID`, where a sibling's ID buys a label and ships the
+wrong parcel.
+
+So the candidates now carry the goods they are for, and the synchronizer keeps only the ones
+whose fingerprint matches what the shipment records and that no other shipment already
+names. See `21`'s last comment for the fingerprint itself. Where nothing matches, the branch
+this issue already specified applies unchanged: clear the stored ID, let the offer withdraw
+itself, and leave the import to re-point the shipment when it can see more.
