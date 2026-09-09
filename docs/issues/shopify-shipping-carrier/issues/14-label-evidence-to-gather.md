@@ -198,3 +198,20 @@ necessarily a gap in the published table.
 that gates the other fourteen carriers. It is a business question about our install base,
 not something this repository can answer. USPS and UPS are safe to gather ahead of it on the
 strength of being the two the feature was built for.
+
+### 2026-09-09 — the instrument exists now
+
+`02` was the blocker named here: `auto` returned USPS on one purchase and UPS on the next
+from identical inputs, so there was no way to ask for one label per carrier and service.
+`preferredRateSelection` is now confirmed honoured, and twelve `carrier:service` pairs are
+seeded — four USPS and eight UPS — so the US half of the capture protocol can be run
+deliberately rather than by taking what Shopify happens to choose.
+
+Two things from that work bear directly on the capture:
+
+- **The free probe belongs in the protocol.** A pair sent with a ship date in the past
+  reports whether Shopify has a rate for it *without buying*, so every capture can be
+  confirmed available before a label is spent on it. The rig is in `.scratch/`.
+- **Availability is per shipment.** UPS `92` and `93` swap at the 1 lb SurePost boundary,
+  so a capture list has to name the parcel it applies to. A pair that finds no rate for
+  the parcel to hand is not a pair that does not exist.

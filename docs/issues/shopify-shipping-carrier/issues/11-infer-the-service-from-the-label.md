@@ -511,3 +511,24 @@ table already applies.
 
 **Item 5 (FedEx `IP`/`XQ`) is independent of all of this.** It needs FedEx documentation
 and our own existing labels, not a Shopify purchase, so it can be picked up at any point.
+
+### 2026-09-09 — an explicit selection is now better evidence than the ladder assumes
+
+`02` established that `preferredRateSelection` is honoured: a purchase asking for USPS
+Priority Mail Express came back priced as Priority Mail Express, an order of magnitude
+above what `auto` chose from the same inputs. `ShopifyAdapter` nonetheless records
+`service: null` and `ServiceEvidence::Unknown` for every Shopify purchase, `auto` and
+explicit alike, because Shopify still reports no purchased service on the label.
+
+That is the right default and probably not the right rule any more. A package bought with
+`usps:PriorityExpress` carries a *requested* service the seller is now observed to obey,
+which is a materially stronger claim than `auto` — where Shopify picked USPS once and UPS
+the next time from identical inputs — and the two are presently recorded identically.
+
+Not changed unilaterally, for two reasons. Four honoured purchases is not a rule, and the
+ladder's rung ordering is this issue's decision rather than the adapter's: whether an
+honoured selection outranks a decoded tracking number, or only fills in where the number
+declines, is exactly the sort of thing the coverage measurement here exists to settle.
+Worth deciding with the `14` captures in hand, since those are bought with explicit
+selections and so produce the paired evidence — requested service, decoded number, and
+label text — that the question needs.
