@@ -259,6 +259,28 @@ class ShopifyAdapter implements BlindPurchaseSource
             ->exists() ?? false;
     }
 
+    /**
+     * Shopify's shipping label ID for a package, or null when Shopify did not
+     * sell it.
+     *
+     * Static because the channel export reads it to decide whether Shopify has
+     * already fulfilled the order, and that path holds no adapter and wants no
+     * registry — the same reason
+     * {@see AmazonBuyShippingAdapter::shipmentIdFor()} is static.
+     *
+     * Reads the label ID rather than `postage_source` for two reasons. What
+     * matters is that *Shopify* bought this label, and the label ID is the only
+     * thing that says so. And it is cleared on a void: `applyVoid()` strips it
+     * along with the other three markers, so a package that was voided and then
+     * re-shipped on one of our own carrier accounts correctly exports again.
+     */
+    public static function shippingLabelIdFor(Package $package): ?string
+    {
+        $labelId = $package->metadata['shopify_shipping_label_id'] ?? null;
+
+        return filled($labelId) ? (string) $labelId : null;
+    }
+
     public function createShipment(ShipRequest $request): ShipResponse
     {
         $package = $request->packageId ? Package::with('shipment.dataSource')->find($request->packageId) : null;

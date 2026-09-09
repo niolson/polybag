@@ -1,6 +1,6 @@
 # Every Shopify-bought package lands a permanent export failure
 
-Status: ready-for-agent
+Status: done — 2026-09-09
 
 Repo: `polybag`
 
@@ -91,13 +91,13 @@ The third is the real fix and the first is a one-line stopgap; they are not excl
 
 ## Acceptance criteria
 
-- [ ] A Shopify-bought package whose fulfillment Shopify created does not record a
+- [x] A Shopify-bought package whose fulfillment Shopify created does not record a
       `permanently_failed` export
-- [ ] The package's `exported` state ends up truthful — either exported, or explicitly not
+- [x] The package's `exported` state ends up truthful — either exported, or explicitly not
       applicable, but not "failed"
-- [ ] A genuine export failure — bad credentials, a fulfillment order that is closed for some
+- [x] A genuine export failure — bad credentials, a fulfillment order that is closed for some
       other reason — still records as a failure
-- [ ] A test covers the exact `unfulfillable status= closed` message, and does not assert on
+- [x] A test covers the exact `unfulfillable status= closed` message, and does not assert on
       prose that Shopify controls where a code is available instead
 
 ## Blocked by
@@ -129,3 +129,52 @@ gets the answer it wanted for a reason nobody intended, which is worth knowing i
 fixed: **an option-one or option-two fix that makes `fulfillmentCreate` succeed would reopen
 the double-notification question**, because then both call sites would run with
 `notifyCustomer` true. Option three would not.
+
+### 2026-09-09 — fixed with option three, and option two turned out not to exist
+
+**Question 1 is answered no, and it is not a judgement call.** `fulfillmentCreate` returns
+`[UserError!]!` — the *base* `UserError` type, whose only two fields are `field: [String!]`
+and `message: String!`. There is no `code`, so option two was never available. Any guard on
+this mutation reads prose Shopify controls, which is exactly how the shipped one broke.
+
+That settles question 2 as well, in favour of option three. **The fix does not read the
+message at all.** `ShopifySource::exportPackage()` now returns early when the package carries
+a `shopify_shipping_label_id`, before the credential check — Shopify sold the label, Shopify
+created the fulfillment, there is nothing to tell it. Three small changes:
+
+- `ShopifyAdapter::shippingLabelIdFor()`, a static reader for the marker, mirroring
+  `AmazonBuyShippingAdapter::shipmentIdFor()`.
+- `PackageExportService` passes it as `_shopify_shipping_label_id` beside the
+  `_package_reference_id` it already sets for Shopify.
+- `ShopifySource::exportPackage()` skips on it, and says why in a docblock.
+
+This is the shape `AmazonSource::exportPackage()` has had all along for Buy Shipping labels.
+The Shopify path simply never got it, and the prose guard was standing in for it.
+
+**Option one was considered and rejected, not merely skipped.** Matching
+`unfulfillable status= closed` as well would be actively wrong, because that message is not
+unique to this cause. A package shipped on one of *our own* carrier accounts, whose stored
+fulfillment order has since been closed and replaced (`18`), gets the identical reply — and
+there the export has genuinely failed: Shopify has not been told what shipped. Swallowing on
+the message would convert that real failure into a silent success. The label ID separates the
+two cases exactly; the message cannot. There is a test for each.
+
+**Question 3 dissolves.** The skipped export records `Succeeded` and the package ends
+`exported = true`, so the operator sees an ordinary exported package rather than a failure
+needing attention. Recording it as success is honest here: the export exists to tell the
+channel what shipped, and the channel wrote the tracking number itself.
+
+**Gated on the label ID rather than `postage_source`, deliberately** — the same reasoning
+`AmazonSource` records. What matters is that *Shopify* bought this label. It also fails in the
+right direction on a void: `ShopifyFulfillmentSynchronizer::applyVoid()` strips the marker, so
+a package voided and then re-shipped on a carrier account correctly exports again.
+
+**Existing rows heal themselves.** `php artisan packages:export --retry-permanent` reopens a
+`permanently_failed` row, and the retry now hits the skip and lands `Succeeded`. Package 208
+and anything else already recorded needs that one command, not a migration.
+
+**One consequence to carry forward.** `01`'s question 4 — is the customer notified twice —
+was answered *no* only because this second call site could never succeed. Option three keeps
+that answer true for the right reason: the second call site is now never reached, so
+`notifyCustomer` fires once, at purchase. Had this been fixed with option one, the question
+would have reopened. It does not.

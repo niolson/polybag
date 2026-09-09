@@ -10,6 +10,7 @@ use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\PackageExport;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
+use App\Services\Carriers\ShopifyAdapter;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
@@ -101,6 +102,11 @@ class PackageExportService
 
                 if ($source->source_type === ShopifySource::class) {
                     $data['_package_reference_id'] = (string) $package->getKey();
+
+                    // What suppresses a second fulfillment. Shopify creates one
+                    // itself when it sells the label, and closes the fulfillment
+                    // order doing it, so the export has nothing left to tell it.
+                    $data['_shopify_shipping_label_id'] = ShopifyAdapter::shippingLabelIdFor($package);
                 }
 
                 if ($source->source_type === AmazonSource::class) {

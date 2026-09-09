@@ -48,16 +48,19 @@ purchase per question if it is clearer.
    - ~~`ShopifySource::exportPackage()` calls `fulfillmentCreate` and already swallows
      "already fulfilled" errors, so export degrades safely either way.~~ **Wrong, corrected
      2026-09-09 — it does not degrade safely.** Shopify says *"unfulfillable status= closed"*,
-     which the guard does not match, so every Shopify-bought package lands a
-     `permanently_failed` export row. Filed as `20`.
+     which the guard did not match, so every Shopify-bought package landed a
+     `permanently_failed` export row. Filed as `20`, and **fixed the same day**: the export
+     now skips `fulfillmentCreate` outright when Shopify sold the label.
    - `ShopifyFulfillmentSynchronizer` **reads fulfillments** to find `LABEL_VOIDED`. If
      Shopify creates no fulfillment and PolyBag's export creates it instead, confirm the
      display status still lands where the synchronizer looks. This is an untested
      assumption in shipped code.
 4. ~~**Is the customer notified twice?**~~ **Answered 2026-09-09 — no, one notification.**
-   Conditionally, though: the second call site never succeeds (`20`), so there was never a
-   second notification to send. **Fixing `20` in a way that makes `fulfillmentCreate` succeed
-   reopens this question.** The purchase also revealed that Shopify schedules the customer's
+   Conditionally when written: the second call site never succeeded (`20`), so there was never a
+   second notification to send. **That condition is now discharged** — `20` was fixed by
+   skipping the export entirely for a Shopify-sold label, so the second call site is never
+   reached rather than reached and failing, and the answer holds unconditionally. Only a
+   message-matching fix would have reopened it. The purchase also revealed that Shopify schedules the customer's
    email for the `shippingDatetime` PolyBag sends, which gives question 9 a consequence it was
    not written to expect.
 5. **What does `trackingInfo.company` actually read?** It becomes the package's **carrier
@@ -622,6 +625,12 @@ rather than assumed, and it does not do what the code's own docblock claims.
 **A note for whoever fixes `20`.** Making `fulfillmentCreate` succeed would **reopen question
 4**, because both call sites would then run with `notifyCustomer` true. The answer recorded
 here is conditional on the export failing.
+
+> **Discharged 2026-09-09.** `20` was fixed with its option three: the export returns early
+> for a package Shopify sold the label for, so `fulfillmentCreate` is never called rather
+> than called and failing. `notifyCustomer` fires once, at purchase. Question 4's answer is
+> no longer conditional. Had `20` been fixed by matching the error message instead, this
+> note would have applied.
 
 **What is left on this issue: question 9 alone.** It needs a purchase whose ship date is a
 future midnight. The cutoff is `pickup_cutoff_hour = 20` on carrier `Shopify` and location 1
