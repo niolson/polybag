@@ -14,6 +14,7 @@ use App\Models\Carrier;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\Carriers\ShopifyAdapter;
+use Database\Seeders\CarrierSeeder;
 use Illuminate\Support\Facades\Http;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
@@ -182,8 +183,65 @@ it('refuses to buy from a request that carries a rate instead of a blind purchas
         ->and($response->errorMessage)->toContain('blind purchase');
 });
 
+it('offers only the Ground Saver tier that matches the package weight', function (float $weight, array $expected): void {
+    // UPS quotes exactly one of 92/93 for a parcel, by weight. A blind offer has
+    // no rate to filter, so advertising both would show the packer two lines
+    // with nothing to choose between them, one certain to fail after the
+    // purchase is confirmed.
+    seedShopifyCarrierServices();
+    $package = shopifyPackage();
+    $package->update(['weight' => $weight]);
+    allowBlindPurchase($package);
+
+    $offers = $this->adapter->blindPurchaseOffers(
+        RateRequest::fromPackage($package->fresh()),
+        ['ups_shipping:92', 'ups_shipping:93', 'usps:GroundAdvantage'],
+    );
+
+    expect($offers->pluck('serviceCode')->all())->toBe($expected);
+})->with([
+    'under a pound' => [0.3, ['ups_shipping:92', 'usps:GroundAdvantage']],
+    'exactly a pound goes to the upper tier' => [1.0, ['ups_shipping:93', 'usps:GroundAdvantage']],
+    'over a pound' => [5.0, ['ups_shipping:93', 'usps:GroundAdvantage']],
+]);
+
+it('withdraws both Ground Saver tiers when the package has no weight', function (): void {
+    // Nothing can be bought without a weight — Shopify answers TOTAL_WEIGHT_ZERO
+    // — so guessing a tier would only move the failure later.
+    seedShopifyCarrierServices();
+    $package = shopifyPackage();
+    $package->update(['weight' => 0]);
+    allowBlindPurchase($package);
+
+    $offers = $this->adapter->blindPurchaseOffers(
+        RateRequest::fromPackage($package->fresh()),
+        ['ups_shipping:92', 'ups_shipping:93', 'usps:GroundAdvantage'],
+    );
+
+    expect($offers->pluck('serviceCode')->all())->toBe(['usps:GroundAdvantage']);
+});
+
+it('gives the two Ground Saver tiers labels a packer can tell apart', function (): void {
+    $this->seed(CarrierSeeder::class);
+
+    $names = Carrier::query()
+        ->where('name', ShopifyAdapter::CARRIER_NAME)
+        ->firstOrFail()
+        ->carrierServices()
+        ->whereIn('service_code', ['ups_shipping:92', 'ups_shipping:93'])
+        ->pluck('name', 'service_code');
+
+    expect($names->get('ups_shipping:92'))->not->toBe($names->get('ups_shipping:93'))
+        ->and($names->get('ups_shipping:92'))->toContain('under 1 lb')
+        ->and($names->get('ups_shipping:93'))->toContain('1 lb and over');
+});
+
 it('splits a service code into the parts Shopify selects a rate with', function (): void {
-    expect($this->adapter->splitServiceCode('usps:usps_ground_advantage'))->toBe(['usps', 'usps_ground_advantage'])
+    // Confirmed pairs, not invented ones: Shopify finds no rate for
+    // `usps_ground_advantage` and one for `GroundAdvantage`, and reads UPS's
+    // numeric codes as they stand.
+    expect($this->adapter->splitServiceCode('usps:GroundAdvantage'))->toBe(['usps', 'GroundAdvantage'])
+        ->and($this->adapter->splitServiceCode('ups_shipping:92'))->toBe(['ups_shipping', '92'])
         ->and($this->adapter->splitServiceCode('auto'))->toBe([null, null])
         ->and($this->adapter->splitServiceCode('usps:'))->toBe([null, null]);
 });
@@ -632,6 +690,9 @@ function seedShopifyCarrierServices(): void
     foreach ([
         'auto' => "Shopify's choice",
         'usps:usps_ground_advantage' => 'USPS Ground Advantage',
+        'usps:GroundAdvantage' => "Shopify's USPS Ground Advantage",
+        'ups_shipping:92' => "Shopify's UPS Ground Saver (under 1 lb)",
+        'ups_shipping:93' => "Shopify's UPS Ground Saver (1 lb and over)",
     ] as $code => $name) {
         $carrier->carrierServices()->firstOrCreate(['service_code' => $code], ['name' => $name]);
     }

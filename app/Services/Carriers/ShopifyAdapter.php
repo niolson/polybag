@@ -60,6 +60,30 @@ class ShopifyAdapter implements BlindPurchaseSource
     /** How the seller is named to a packer choosing an offer. */
     public const SOURCE_LABEL = 'Shopify Shipping';
 
+    /**
+     * Service codes Shopify only quotes inside a weight band, as
+     * `[minimum inclusive, maximum exclusive]` in pounds.
+     *
+     * UPS splits Ground Saver across two codes by weight and quotes exactly one
+     * of them for any given parcel — `92` under a pound, `93` at a pound or
+     * more. A rated carrier never has to know this: its rate response comes back
+     * carrying whichever tier applies, so the other simply is not there. A blind
+     * offer has no rate to filter, so both would be advertised from the catalog,
+     * and the packer would be shown two lines with nothing to choose between
+     * them — one of which is certain to fail with `RATES_NOT_FOUND` after the
+     * box is taped shut and the purchase confirmed. Withdrawing the ineligible
+     * one is the same discipline `shipmentAlreadyBoughtALabel()` applies to a
+     * fulfillment order that can no longer be bought against.
+     *
+     * Keyed on the full `carrier:service` code because the bare service code is
+     * only meaningful beside its carrier — `92` is UPS's, and another carrier
+     * could reuse the string for something else entirely.
+     */
+    private const WEIGHT_BANDED_SERVICES = [
+        'ups_shipping:92' => [0.0, 1.0],
+        'ups_shipping:93' => [1.0, null],
+    ];
+
     public function getCarrierName(): string
     {
         return self::CARRIER_NAME;
@@ -154,6 +178,7 @@ class ShopifyAdapter implements BlindPurchaseSource
 
         return collect($serviceCodes)
             ->filter(fn (string $code): bool => $names->has($code))
+            ->filter(fn (string $code): bool => $this->weightAllows($code, (float) $package->weight))
             ->map(fn (string $code): BlindPurchaseOffer => new BlindPurchaseOffer(
                 source: self::CARRIER_NAME,
                 sourceLabel: self::SOURCE_LABEL,
@@ -162,6 +187,36 @@ class ShopifyAdapter implements BlindPurchaseSource
                 postageDataSourceId: $dataSourceId,
             ))
             ->values();
+    }
+
+    /**
+     * Whether a weight-banded service can be sold for this package's weight.
+     *
+     * Unbanded codes always pass — most services have no weight rule, and one
+     * we have not recorded is not one to guess at.
+     *
+     * An unweighed package withdraws a banded offer rather than having a tier
+     * picked for it — `weight` is nullable and a `decimal:2` cast, so it arrives
+     * here as `0.0` when there is no answer. Nothing can be sold without a
+     * weight anyway: Shopify rejects the purchase with `TOTAL_WEIGHT_ZERO`, so
+     * offering a choice between two tiers of a service that cannot be bought at
+     * all would only move the failure later.
+     */
+    private function weightAllows(string $serviceCode, float $weight): bool
+    {
+        $band = self::WEIGHT_BANDED_SERVICES[$serviceCode] ?? null;
+
+        if ($band === null) {
+            return true;
+        }
+
+        if ($weight <= 0.0) {
+            return false;
+        }
+
+        [$minimum, $maximum] = $band;
+
+        return $weight >= $minimum && ($maximum === null || $weight < $maximum);
     }
 
     /**

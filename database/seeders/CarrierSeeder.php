@@ -110,11 +110,22 @@ class CarrierSeeder extends Seeder
         // `carrier:service` pairs Shopify's preferredRateSelection takes, or
         // `auto` to let Shopify choose the rate the way its admin would.
         //
-        // Only `auto` is seeded: Shopify publishes no list of service codes and
-        // has no API to enumerate them, so every explicit pair has to be
-        // confirmed against a real purchase before it is worth cataloguing.
-        // Add confirmed ones under Carrier Services.
-        // 8 PM, matching USPS. Shopify does not reveal which carrier it picked
+        // Shopify publishes no list of service codes and has no API to
+        // enumerate them, so the pairs below were established by probe rather
+        // than from documentation -- see the issue file for the method and the
+        // caveats. There is no single vocabulary here: each carrier keeps its
+        // own, and Shopify passes it through.
+        //
+        //   USPS  a PascalCase of Shopify's own -- `GroundAdvantage`, not the
+        //         `USPS_GROUND_ADVANTAGE` the USPS block above uses
+        //   UPS   UPS's own numeric codes, the same alphabet as the UPS block
+        //   DHL   DHL's own single-letter product codes, where `P` is Express
+        //         Worldwide
+        //
+        // All are matched case-sensitively: `priority` finds no rate where
+        // `Priority` does.
+        //
+        // The cutoff is 8 PM, matching USPS. Shopify does not reveal which carrier it picked
         // until after purchase, and `shippingDatetime` goes out *in* the purchase
         // mutation, so no carrier-derived cutoff can apply — see ADR-0002. The
         // cutoff lives on the row like every other carrier's rather than as a
@@ -134,6 +145,50 @@ class CarrierSeeder extends Seeder
                 'can_ship_to_military_addresses' => true,
             ],
         );
+
+        foreach ([
+            ['name' => "Shopify's USPS Ground Advantage", 'service_code' => 'usps:GroundAdvantage'],
+            ['name' => "Shopify's USPS Priority Mail", 'service_code' => 'usps:Priority'],
+            ['name' => "Shopify's USPS Priority Mail Express", 'service_code' => 'usps:PriorityExpress'],
+            ['name' => "Shopify's USPS Media Mail", 'service_code' => 'usps:MediaMail'],
+            ['name' => "Shopify's UPS Ground", 'service_code' => 'ups_shipping:03'],
+            ['name' => "Shopify's UPS 3 Day Select", 'service_code' => 'ups_shipping:12'],
+            ['name' => "Shopify's UPS 2nd Day Air", 'service_code' => 'ups_shipping:02'],
+            ['name' => "Shopify's UPS 2nd Day Air A.M.", 'service_code' => 'ups_shipping:59'],
+            ['name' => "Shopify's UPS Next Day Air Saver", 'service_code' => 'ups_shipping:13'],
+            ['name' => "Shopify's UPS Next Day Air", 'service_code' => 'ups_shipping:01'],
+            // Named apart, unlike the UPS block's pair. There the two rows only
+            // ever filter a rate response that already returned exactly one of
+            // them, so a packer never sees both; here they are advertised from
+            // the catalog and would otherwise be two identical lines on screen.
+            // The admin's own wording is the model.
+            ['name' => "Shopify's UPS Ground Saver (under 1 lb)", 'service_code' => 'ups_shipping:92'],
+            ['name' => "Shopify's UPS Ground Saver (1 lb and over)", 'service_code' => 'ups_shipping:93'],
+            ['name' => "Shopify's UPS Worldwide Express", 'service_code' => 'ups_shipping:07'],
+            ['name' => "Shopify's UPS Worldwide Expedited", 'service_code' => 'ups_shipping:08'],
+            ['name' => "Shopify's UPS Worldwide Saver", 'service_code' => 'ups_shipping:65'],
+            ['name' => "Shopify's UPS Standard", 'service_code' => 'ups_shipping:11'],
+            ['name' => "Shopify's DHL Express Worldwide", 'service_code' => 'dhl_express:P'],
+        ] as $service) {
+            // Same USPS-last-mile rule as the UPS block above, and the same
+            // 92/93 split by weight -- which Shopify reproduces exactly: a
+            // 0.3lb parcel finds a rate for 92 and none for 93, a 5lb parcel
+            // the reverse. That is worth stating because it is also the reason
+            // "no rate" cannot be read as "no such service": availability is
+            // per shipment, and a code is only ever disproved for the parcel it
+            // was probed with.
+            $isGroundSaver = in_array($service['service_code'], ['ups_shipping:92', 'ups_shipping:93'], true);
+            $isUsps = str_starts_with($service['service_code'], 'usps:');
+
+            $shopify->carrierServices()->firstOrCreate(
+                ['service_code' => $service['service_code']],
+                [
+                    'name' => $service['name'],
+                    'can_ship_to_po_boxes' => $isUsps || $isGroundSaver,
+                    'can_ship_to_military_addresses' => $isUsps || $isGroundSaver,
+                ],
+            );
+        }
 
         // Amazon Buy Shipping buys postage against the seller's own Amazon
         // order. Unlike every carrier above, its catalog is *discovered*: one
