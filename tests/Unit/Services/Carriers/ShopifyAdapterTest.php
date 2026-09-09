@@ -9,6 +9,7 @@ use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
+use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Models\Carrier;
 use App\Models\Package;
@@ -683,6 +684,209 @@ it('refuses to buy again when a bought label can no longer be read', function ()
         ->and($response->errorMessage)->toContain('Check the order in Shopify');
 });
 
+/**
+ * Shopify builds the customs declaration from its own catalogue and refuses a
+ * label whose `totalWeight` falls below the sum of it, reporting the refusal as
+ * `UNKNOWN_ERROR` after the box is taped shut. The numbers throughout are the
+ * ones from package 207: a 0.15 lb box against 1.76 + 0.53 lb of declared goods.
+ */
+it('withholds an international purchase whose box weighs less than Shopify declares', function (): void {
+    seedShopifyCarrierServices();
+    $package = internationalShopifyPackage(0.15);
+
+    Saloon::fake([MockResponse::make(declaredItemWeights([[1.76, 1], [0.53, 1]]))]);
+
+    $withheld = withheldPurchase(fn () => $this->adapter->createShipment(shopifyShipRequest($package)));
+
+    expect($withheld->declaredWeight)->toBe(2.29)
+        ->and($withheld->packageWeight)->toBe(0.15)
+        ->and($withheld->getMessage())->toContain('2.29 lb')
+        ->and($withheld->getMessage())->toContain('0.15 lb')
+        // The fix is somewhere else, and the message has to say where.
+        ->and($withheld->getMessage())->toContain('Shopify admin')
+        ->and($withheld->getMessage())->toContain('not from the scale');
+
+    // Withheld, not attempted: a purchase that fails closes the fulfillment
+    // order and forces a repoint (issue `18`), which is the cost of finding
+    // this out from Shopify instead.
+    Saloon::assertSent(fn (GraphQL $request): bool => ! str_contains($request->body()->all()['query'], 'shippingLabelPurchase'));
+});
+
+it('buys at the declared weight when the box falls short by less than the tolerance', function (): void {
+    // Physically a packed box outweighs its contents, so a hundredth of a pound
+    // the wrong way is the scale, not the catalogue — and Shopify will not take
+    // the reading either way.
+    seedShopifyCarrierServices();
+    $package = internationalShopifyPackage(2.28);
+
+    Saloon::fake([
+        MockResponse::make(declaredItemWeights([[1.76, 1], [0.53, 1]])),
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased()),
+    ]);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    expect($this->adapter->createShipment(shopifyShipRequest($package))->success)->toBeTrue();
+
+    Saloon::assertSent(fn (GraphQL $request): bool => sentTotalWeight($request) === 2.29);
+});
+
+it('sends the scale weight when the box outweighs what Shopify declares', function (): void {
+    // The relation is `>=`, not `==`, and it had to be — fragile goods carry a
+    // lot of packaging. Confirmed by purchase on shipment 6763: 6.11 lb of
+    // declared goods in an 8.5 lb box bought `PURCHASED` on the first attempt.
+    seedShopifyCarrierServices();
+    $package = internationalShopifyPackage(3.4);
+
+    Saloon::fake([
+        MockResponse::make(declaredItemWeights([[1.76, 1], [0.53, 1]])),
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased()),
+    ]);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    $this->adapter->createShipment(shopifyShipRequest($package));
+
+    Saloon::assertSent(fn (GraphQL $request): bool => sentTotalWeight($request) === 3.4);
+});
+
+it('multiplies the declared unit weight by the quantity being fulfilled', function (): void {
+    seedShopifyCarrierServices();
+    $package = internationalShopifyPackage(1.0);
+
+    Saloon::fake([MockResponse::make(declaredItemWeights([[0.5, 3]]))]);
+
+    expect(withheldPurchase(fn () => $this->adapter->createShipment(shopifyShipRequest($package)))->declaredWeight)
+        ->toBe(1.5);
+});
+
+it('sends the scale weight unchanged once the operator has insisted', function (): void {
+    // Nothing is over-declared by insisting. What it buys is the case PolyBag
+    // cannot see: a catalogue corrected between the refusal and the retry.
+    seedShopifyCarrierServices();
+    $package = internationalShopifyPackage(0.15);
+
+    Saloon::fake([
+        MockResponse::make(declaredItemWeights([[1.76, 1], [0.53, 1]])),
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased()),
+    ]);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    $request = shopifyShipRequest($package)->withDeclaredWeightOverride();
+
+    expect($this->adapter->createShipment($request)->success)->toBeTrue();
+
+    Saloon::assertSent(fn (GraphQL $r): bool => sentTotalWeight($r) === 0.15);
+});
+
+it('never asks what Shopify will declare for a domestic purchase', function (): void {
+    // No customs declaration, no item weights to contradict — which is why this
+    // went unseen until the first international label.
+    seedShopifyCarrierServices();
+    $package = shopifyPackage();
+    $package->update(['weight' => 0.15]);
+
+    Saloon::fake([
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased()),
+    ]);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    expect($this->adapter->createShipment(shopifyShipRequest($package->fresh()))->success)->toBeTrue();
+
+    Saloon::assertNotSent(fn (GraphQL $request): bool => str_contains($request->body()->all()['query'], 'ShopifyDeclaredItemWeight'));
+});
+
+it('does not withhold a purchase on the strength of a line-item page it could not finish reading', function (): void {
+    // A truncated page is no answer rather than a smaller sum. Grounding
+    // shipments over a paging limit would be a worse failure than the one this
+    // check exists to prevent.
+    seedShopifyCarrierServices();
+    $package = internationalShopifyPackage(0.15);
+
+    Saloon::fake([
+        MockResponse::make(declaredItemWeights([[1.76, 1]], hasNextPage: true)),
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased()),
+    ]);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    expect($this->adapter->createShipment(shopifyShipRequest($package))->success)->toBeTrue();
+
+    Saloon::assertSent(fn (GraphQL $r): bool => sentTotalWeight($r) === 0.15);
+});
+
+it('falls back to the order-time weight when the live catalogue is denied', function (): void {
+    // A token without `read_products` cannot traverse `lineItem.variant`, and
+    // Shopify nulls the field rather than the response. The snapshot rides on
+    // the same request precisely so the check survives that, degraded rather
+    // than gone.
+    seedShopifyCarrierServices();
+    $package = internationalShopifyPackage(0.15);
+
+    Saloon::fake([
+        MockResponse::make(declaredItemWeights([[1.76, 1], [0.53, 1]], deniedLive: true)),
+    ]);
+
+    expect(withheldPurchase(fn () => $this->adapter->createShipment(shopifyShipRequest($package)))->declaredWeight)
+        ->toBe(2.29);
+});
+
+it('never fails a purchase because it could not read what Shopify will declare', function (): void {
+    // This read decides whether to *withhold*, so a failure to make it must
+    // cost the check and nothing else. Throwing would turn a missing scope into
+    // a failed purchase on every international label — the same failure, in the
+    // same place, as the defect the check exists to prevent.
+    seedShopifyCarrierServices();
+    $package = internationalShopifyPackage(0.15);
+
+    Saloon::fake([
+        MockResponse::make(['errors' => [['message' => 'Throttled', 'extensions' => ['code' => 'THROTTLED']]]]),
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased()),
+    ]);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    expect($this->adapter->createShipment(shopifyShipRequest($package))->success)->toBeTrue();
+
+    Saloon::assertSent(fn (GraphQL $r): bool => sentTotalWeight($r) === 0.15);
+});
+
+it('prefers the live catalogue weight over the order-time snapshot', function (): void {
+    // The reason both are asked for. A merchant who corrects a product weight
+    // after a refusal has to be able to retry successfully, and the snapshot
+    // still names the weight the order was placed at.
+    seedShopifyCarrierServices();
+    $package = internationalShopifyPackage(3.0);
+
+    Saloon::fake([
+        // Catalogue corrected down to 1.0; the order still remembers 9.0.
+        MockResponse::make(declaredItemWeights([[1.0, 1]], snapshot: [9.0])),
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased()),
+    ]);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    expect($this->adapter->createShipment(shopifyShipRequest($package))->success)->toBeTrue();
+
+    Saloon::assertSent(fn (GraphQL $r): bool => sentTotalWeight($r) === 3.0);
+});
+
+it('counts a variant with no measured weight as declaring nothing', function (): void {
+    seedShopifyCarrierServices();
+    $package = internationalShopifyPackage(0.15);
+
+    Saloon::fake([
+        MockResponse::make(declaredItemWeights([[null, 1], [null, 2]])),
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased()),
+    ]);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    expect($this->adapter->createShipment(shopifyShipRequest($package))->success)->toBeTrue();
+});
+
 function seedShopifyCarrierServices(): void
 {
     $carrier = Carrier::firstOrCreate(['name' => 'Shopify']);
@@ -764,4 +968,98 @@ function purchasePurchased(string $format = 'PDF', ?string $company = 'USPS'): a
             ],
         ],
     ];
+}
+
+/**
+ * Run a purchase that should be withheld, and hand back the refusal so its
+ * numbers can be read. Fails loudly if the purchase went ahead.
+ */
+function withheldPurchase(Closure $attempt): ShopifyDeclaredWeightException
+{
+    try {
+        $attempt();
+    } catch (ShopifyDeclaredWeightException $e) {
+        return $e;
+    }
+
+    throw new RuntimeException('The purchase was not withheld.');
+}
+
+function internationalShopifyPackage(float $weight): Package
+{
+    $source = createShopifyDataSource([], ['oauth_access_token' => 'shpat_test_token']);
+
+    $shipment = Shipment::factory()->international()->create([
+        'data_source_id' => $source->id,
+        'country' => 'CA',
+        'metadata' => ['shopify_fulfillment_order_id' => 'gid://shopify/FulfillmentOrder/12345'],
+    ]);
+
+    return Package::factory()->create(['shipment_id' => $shipment->id, 'weight' => $weight]);
+}
+
+/**
+ * What Shopify will declare for a fulfillment order, as `[unit weight in
+ * pounds, quantity]` pairs. A null weight is a variant Shopify has never been
+ * told the weight of.
+ *
+ * `$snapshot` is the order-time `FulfillmentOrderLineItem.weight` for the same
+ * items, defaulting to whatever the live catalogue says. `$deniedLive` drops
+ * the `lineItem.variant` traversal the way a token without `read_products`
+ * does — nulled data beside an errors array, not a dead response.
+ *
+ * @param  list<array{0: float|null, 1: int}>  $items
+ * @param  list<float|null>|null  $snapshot
+ * @return array<string, mixed>
+ */
+function declaredItemWeights(
+    array $items,
+    bool $hasNextPage = false,
+    ?array $snapshot = null,
+    bool $deniedLive = false,
+): array {
+    $pounds = fn (?float $value): ?array => $value === null ? null : ['value' => $value, 'unit' => 'POUNDS'];
+
+    $payload = [
+        'data' => [
+            'fulfillmentOrder' => [
+                'id' => 'gid://shopify/FulfillmentOrder/12345',
+                'lineItems' => [
+                    'pageInfo' => ['hasNextPage' => $hasNextPage],
+                    'nodes' => array_map(fn (array $item, int $index): array => [
+                        'remainingQuantity' => $item[1],
+                        'weight' => $pounds($snapshot === null ? $item[0] : ($snapshot[$index] ?? null)),
+                        'lineItem' => $deniedLive ? null : [
+                            'variant' => [
+                                'inventoryItem' => [
+                                    'measurement' => ['weight' => $pounds($item[0])],
+                                ],
+                            ],
+                        ],
+                    ], $items, array_keys($items)),
+                ],
+            ],
+        ],
+    ];
+
+    if ($deniedLive) {
+        $payload['errors'] = [[
+            'message' => 'Access denied for variant field. Required access: `read_products` access scope.',
+            'extensions' => ['code' => 'ACCESS_DENIED'],
+        ]];
+    }
+
+    return $payload;
+}
+
+/** The `totalWeight` a purchase mutation carried, or null for any other request. */
+function sentTotalWeight(GraphQL $request): ?float
+{
+    $body = $request->body()->all();
+
+    if (! str_contains($body['query'], 'shippingLabelPurchase')) {
+        return null;
+    }
+
+    return $body['variables']['input']['totalWeight']['value'] ?? null;
 }

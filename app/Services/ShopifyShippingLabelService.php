@@ -8,6 +8,7 @@ use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShopifyPurchasedLabel;
 use App\Enums\PostageSource;
 use App\Exceptions\Carriers\ShopifyLabelPurchaseException;
+use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Http\Integrations\Shopify\ShopifyConnector;
 use App\Models\DataSource;
@@ -58,8 +59,19 @@ class ShopifyShippingLabelService
      *
      * The staff user also needs the `buy_shipping_labels` permission, which is
      * not an OAuth scope and cannot be checked through the API.
+     *
+     * `read_products` is here for {@see DECLARED_ITEM_WEIGHT_QUERY}, which
+     * traverses `lineItem.variant` to read what Shopify will declare in customs.
+     * It is deliberately *not* added to
+     * `ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES`: that list is
+     * enforced at activation and on every location sync, and promoting a
+     * label-purchase dependency into it would refuse location syncs to a source
+     * that only imports orders and never buys postage — the separation this
+     * constant exists for. Nothing enforces this list as a gate; it reaches the
+     * connect-time scope parameter, and the purchase path degrades rather than
+     * fails when the scope is absent.
      */
-    public const REQUIRED_SCOPES = ['write_orders', 'write_merchant_managed_fulfillment_orders'];
+    public const REQUIRED_SCOPES = ['write_orders', 'write_merchant_managed_fulfillment_orders', 'read_products'];
 
     public function __construct(
         private readonly PostageSourceResolver $postageSourceResolver,
@@ -205,6 +217,72 @@ class ShopifyShippingLabelService
         }
         GRAPHQL;
 
+    /**
+     * The weight Shopify will put on the customs form, item by item — asked for
+     * twice, because the better answer is the one that can be refused.
+     *
+     * `inventoryItem.measurement.weight` is the live catalogue value and the
+     * one preferred. `FulfillmentOrderLineItem.weight`, which the import
+     * already reads, is a snapshot taken when the order was placed. The two
+     * normally agree, and the difference is the whole point: the declaration is
+     * built at purchase time from the catalogue, so a merchant who corrects a
+     * product weight in response to a refusal has to be able to retry
+     * successfully, and the snapshot alone would keep refusing.
+     *
+     * **The live value carries a scope the snapshot does not.** Reaching it
+     * traverses `lineItem.variant`, which Shopify gates behind `read_products`
+     * — see {@see REQUIRED_SCOPES}. That scope is not in
+     * `ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES`, so a store
+     * activated before this shipped may not have granted it, and asking for it
+     * alone would turn a missing scope into a failed purchase on every
+     * international label. Both fields ride on one request precisely so the
+     * snapshot survives a denied traversal: the check degrades to order-time
+     * weights instead of disappearing, and {@see declaredItemWeight()} treats
+     * the errors as advisory rather than fatal.
+     *
+     * Forty line items, matching the import's proven page size, and
+     * `hasNextPage` is reported so a truncated page can be treated as no answer
+     * rather than as a smaller sum — under-counting here would let through
+     * exactly the purchase this exists to withhold.
+     */
+    private const DECLARED_ITEM_WEIGHT_QUERY = <<<'GRAPHQL'
+        query ShopifyDeclaredItemWeight($id: ID!) {
+          fulfillmentOrder(id: $id) {
+            id
+            lineItems(first: 40) {
+              pageInfo { hasNextPage }
+              nodes {
+                remainingQuantity
+                weight { value unit }
+                lineItem {
+                  variant {
+                    inventoryItem {
+                      measurement { weight { value unit } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        GRAPHQL;
+
+    /**
+     * How far below Shopify's declared weight a scale reading may fall before
+     * it stops being measurement and starts being a data defect, in pounds.
+     *
+     * Physically a packed box outweighs its contents, so any shortfall at all
+     * is somebody being imprecise. Within 0.1 lb — 1.6 oz — that somebody is
+     * the scale: the reading is rounded to two decimals, scales resolve to
+     * tenths of an ounce at best and twentieths of a pound at worst, and the
+     * carrier rounds up to the next ounce regardless, so declaring the sum
+     * instead of the reading costs nothing and says nothing meaningfully
+     * untrue. A wider gap than that is not the scale being imprecise, it is the
+     * catalogue describing goods that are not in the box, and no amount of
+     * arithmetic here makes that true.
+     */
+    public const DECLARED_WEIGHT_TOLERANCE = 0.1;
+
     /** Fulfillment states that mean the label PolyBag holds is no longer live. */
     private const VOIDED_STATES = ['LABEL_VOIDED', 'CANCELED', 'CANCELLED'];
 
@@ -215,6 +293,7 @@ class ShopifyShippingLabelService
      * @param  string|null  $serviceCode  Carrier-defined service code, required when $carrierCode is given
      *
      * @throws ShopifyLabelPurchaseException
+     * @throws ShopifyDeclaredWeightException
      */
     public function purchase(
         Package $package,
@@ -266,7 +345,9 @@ class ShopifyShippingLabelService
             return $this->awaitLabel($connector, (string) $pendingResultId, null, $package);
         }
 
-        $input = $this->buildPurchaseInput($fulfillmentOrderId, $request, $carrierCode, $serviceCode, $dataSource);
+        $totalWeight = $this->totalWeightFor($package, $request, $connector, $fulfillmentOrderId);
+
+        $input = $this->buildPurchaseInput($fulfillmentOrderId, $request, $carrierCode, $serviceCode, $dataSource, $totalWeight);
 
         $json = $connector->send(new GraphQL(self::PURCHASE_MUTATION, ['input' => $input]))->json();
 
@@ -535,6 +616,138 @@ class ShopifyShippingLabelService
     }
 
     /**
+     * The total weight to buy this label at, having reconciled the scale
+     * against what Shopify will declare in customs.
+     *
+     * Shopify requires `totalWeight` to be at least the sum of the item weights
+     * on its own customs declaration, and reports a violation as
+     * `UNKNOWN_ERROR` after the purchase has been enqueued — which also closes
+     * the fulfillment order and forces a repoint (issue `18`). So the
+     * comparison happens here, before the mutation, where a refusal costs
+     * nothing.
+     *
+     * Three outcomes, and only the middle one changes what is sent:
+     *
+     * - the box weighs at least as much as the goods, which is the normal case
+     *   and the physically expected one — send the scale reading;
+     * - it falls short by no more than {@see DECLARED_WEIGHT_TOLERANCE} — send
+     *   the declared sum, because the disagreement is measurement rather than
+     *   data, and Shopify will not take the reading;
+     * - it falls short by more than that — refuse, unless the operator has
+     *   already been shown both numbers and asked for the attempt anyway, in
+     *   which case the reading is sent unchanged and Shopify is left to say no.
+     *
+     * Domestic purchases never get here: no customs declaration means no item
+     * weights to contradict, which is why this went unseen until the first
+     * international label.
+     *
+     * @throws ShopifyDeclaredWeightException
+     */
+    private function totalWeightFor(
+        Package $package,
+        ShipRequest $request,
+        ShopifyConnector $connector,
+        string $fulfillmentOrderId,
+    ): float {
+        $scaleWeight = round($request->packageData->weight, 2);
+
+        if (! $request->toAddress->requiresCustomsDeclaration()) {
+            return $scaleWeight;
+        }
+
+        $declared = $this->declaredItemWeight($connector, $fulfillmentOrderId);
+
+        if ($declared === null || $declared <= $scaleWeight) {
+            return $scaleWeight;
+        }
+
+        if ($declared - $scaleWeight <= self::DECLARED_WEIGHT_TOLERANCE) {
+            // Rounded up, never to nearest: the two decimals Shopify is sent
+            // have to stay at or above the sum they are standing in for, and a
+            // sum reached through a unit conversion lands just under it as
+            // often as just over.
+            $nudged = ceil(round($declared * 100, 6)) / 100;
+
+            logger()->info('Buying a Shopify label at its declared item weight rather than the scale reading', [
+                'package_id' => $package->id,
+                'scale_weight' => $scaleWeight,
+                'declared_weight' => $nudged,
+            ]);
+
+            return $nudged;
+        }
+
+        if (! $request->overrideDeclaredWeight) {
+            throw new ShopifyDeclaredWeightException($declared, $scaleWeight);
+        }
+
+        logger()->warning('Attempting a Shopify purchase below its declared item weight at the operator\'s request', [
+            'package_id' => $package->id,
+            'scale_weight' => $scaleWeight,
+            'declared_weight' => $declared,
+        ]);
+
+        return $scaleWeight;
+    }
+
+    /**
+     * What Shopify's catalogue says this fulfillment order's goods weigh, in
+     * pounds, or null when that cannot be established.
+     *
+     * Null is "cannot ask", never "nothing" — a fulfillment order Shopify no
+     * longer returns, or a line-item page that did not fit — and the caller
+     * proceeds on it rather than withholding, keeping the same discipline
+     * {@see fulfillableFulfillmentOrders()} does. Refusing a purchase on the
+     * strength of an unread page would ground shipments over a paging limit.
+     *
+     * **Alone among this class's reads, this one does not throw on a GraphQL
+     * error.** Every other query here is load-bearing: without it there is no
+     * label, or no way to find one already bought. This one is advisory — it
+     * decides whether to *withhold* a purchase — so a failure to read it must
+     * cost at most the check itself. Throwing would turn a missing
+     * `read_products` grant, or a throttle, into a failed purchase on every
+     * international label: worse than the defect the check exists to prevent,
+     * and failing in the same place, after the box is taped shut. Errors are
+     * logged and whatever data came back is used, which for a denied
+     * `lineItem.variant` traversal is still the order-time snapshot.
+     *
+     * Per line item the live catalogue weight is preferred and the snapshot is
+     * the fallback. A line item with neither contributes nothing, which is what
+     * Shopify itself declares for it.
+     */
+    private function declaredItemWeight(ShopifyConnector $connector, string $fulfillmentOrderId): ?float
+    {
+        $json = $connector->send(
+            new GraphQL(self::DECLARED_ITEM_WEIGHT_QUERY, ['id' => $fulfillmentOrderId])
+        )->json();
+
+        if (! empty($json['errors'])) {
+            logger()->warning('Shopify would not fully report what it will declare in customs', [
+                'fulfillment_order_id' => $fulfillmentOrderId,
+                'errors' => $json['errors'],
+                'hint' => 'Reading the live catalogue weight needs the read_products scope; '
+                    .'without it the order-time snapshot is used instead.',
+            ]);
+        }
+
+        $lineItems = $json['data']['fulfillmentOrder']['lineItems'] ?? null;
+
+        if ($lineItems === null || data_get($lineItems, 'pageInfo.hasNextPage', false)) {
+            return null;
+        }
+
+        return collect($lineItems['nodes'] ?? [])->sum(function (array $node): float {
+            $live = ShopifySource::poundsFrom(
+                data_get($node, 'lineItem.variant.inventoryItem.measurement.weight')
+            );
+
+            $unitWeight = $live ?? ShopifySource::poundsFrom($node['weight'] ?? null);
+
+            return ($unitWeight ?? 0.0) * (int) ($node['remainingQuantity'] ?? 0);
+        });
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function buildPurchaseInput(
@@ -543,8 +756,10 @@ class ShopifyShippingLabelService
         ?string $carrierCode,
         ?string $serviceCode,
         DataSource $dataSource,
+        ?float $totalWeight = null,
     ): array {
         $package = $request->packageData;
+        $totalWeight ??= round($package->weight, 2);
 
         // Shopify rejects a shipping date in the past, and a date-only ship date
         // resolves to midnight — which is already past by the time packing starts.
@@ -571,7 +786,7 @@ class ShopifyShippingLabelService
                     'type' => 'BOX',
                 ],
             ],
-            'totalWeight' => ['value' => round($package->weight, 2), 'unit' => 'POUNDS'],
+            'totalWeight' => ['value' => $totalWeight, 'unit' => 'POUNDS'],
             'originAddress' => $this->mailingAddress($request->fromAddress),
         ];
 

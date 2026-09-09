@@ -103,11 +103,16 @@ practice the three bugs below are the next thing anyone can actually pick up.
    import time, and every ambiguity resolves toward importing a second shipment rather than
    merging two that are not the same — a duplicate is visible in the queue, a wrong merge
    loses goods.
-3. [`19`](shopify-shipping-carrier/issues/19-international-purchase-fails-when-the-box-weighs-less-than-its-contents.md)
-   — **next**, and narrower than the other two (international only, and Shopify postage is a per-client
-   opt-in), but it fails **after the box is taped shut** and reports `UNKNOWN_ERROR`, which
-   names nothing an operator can act on. Detect-and-withhold costs one field on a query
-   PolyBag already makes.
+3. ~~[`19`](shopify-shipping-carrier/issues/19-international-purchase-fails-when-the-box-weighs-less-than-its-contents.md)~~
+   — **done** 2026-09-09. Narrower than the other two (international only, and Shopify
+   postage is a per-client opt-in), but it failed **after the box is taped shut** and
+   reported `UNKNOWN_ERROR`, which names nothing an operator can act on. Detect-and-withhold,
+   as the issue proposed, plus a 0.1 lb band where the shortfall is the scale rather than the
+   catalogue and the declared sum is sent instead. The escape hatch retries at the scale
+   weight unchanged — nothing is over-declared to get a box out the door. It also found that
+   the existing customs-weight prompt *had* fired on the failing package and could not have
+   helped: the import writes Shopify's weights onto `Product`, so PolyBag was asking the
+   operator to confirm a scaling Shopify never sees.
 
 **Then the rest of the campaign**, which is now two live items rather than four. It was one
 run of purchases on the development store, answering four issues at once because each label

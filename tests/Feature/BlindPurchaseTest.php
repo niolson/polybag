@@ -15,12 +15,16 @@ use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
 use App\Enums\ServiceEvidence;
 use App\Enums\ShippingRuleAction;
+use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Filament\Pages\Ship;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\DataSource;
 use App\Models\Package;
+use App\Models\PackageItem;
+use App\Models\Product;
 use App\Models\Shipment;
+use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
 use App\Models\ShippingRule;
 use App\Models\SpecialService;
@@ -375,6 +379,100 @@ it('ignores a shipping rule that pre-selects a blind purchase', function (): voi
 
     expect($result->hasPreSelectedRate())->toBeFalse();
 });
+
+/**
+ * Shopify's version of the customs-weight problem runs the opposite way to
+ * PolyBag's own, and the withholding is the whole remedy — issue `19`.
+ */
+it('turns a withheld Shopify purchase into a prompt rather than a shipping error', function (): void {
+    $package = blindPurchasePackage();
+    allowBlindPurchase($package);
+    registerBlindSource()->shouldReceive('createShipment')->once()
+        ->andThrow(new ShopifyDeclaredWeightException(2.29, 0.15));
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(blindOffer: shopifyBlindOffer()),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->requiresDeclaredWeightOverride)->toBeTrue()
+        ->and($result->message)->toContain('2.29 lb')
+        ->and($result->message)->toContain('0.15 lb')
+        // Nothing was bought, and the fix is a product weight in somebody
+        // else's catalogue. Dissolving the packed box while they go and correct
+        // it would be the worst possible answer.
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});
+
+it('asks the packer before insisting, then buys at the scale weight', function (): void {
+    $package = blindPurchasePackage();
+    allowBlindPurchase($package);
+
+    $source = registerBlindSource();
+    $source->shouldReceive('createShipment')->once()
+        ->andThrow(new ShopifyDeclaredWeightException(2.29, 0.15))
+        ->ordered();
+    $source->shouldReceive('createShipment')->once()
+        ->andReturnUsing(function (ShipRequest $request): ShipResponse {
+            expect($request->overrideDeclaredWeight)->toBeTrue();
+
+            return blindShipResponse();
+        })
+        ->ordered();
+
+    Livewire::test(Ship::class, ['package_id' => $package->id])
+        ->set('selectedBlindOfferId', 'Shopify:auto')
+        ->call('confirmBlindPurchase')
+        ->assertDispatched('open-modal', id: 'declared-weight-override')
+        ->assertSet('overrideDeclaredWeight', false)
+        ->call('confirmDeclaredWeightOverride');
+
+    expect($package->fresh()->status)->toBe(PackageStatus::Shipped);
+});
+
+it('never offers to scale customs weights for a blind purchase', function (): void {
+    // The remedy behind that prompt rewrites the customs items PolyBag sends,
+    // and a blind purchase sends none: the seller builds the declaration from
+    // its own catalogue. Asking would put a confirmation in front of the packer
+    // that changes nothing, then fail for the reason they thought they had
+    // resolved.
+    $package = blindPurchasePackage();
+    allowBlindPurchase($package);
+    $package->shipment->update(['country' => 'CA']);
+    packHeavyProduct($package);
+
+    registerBlindSource();
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package->fresh(),
+        new PackageShippingRequest(blindOffer: shopifyBlindOffer()),
+    );
+
+    expect($result->requiresCustomsWeightOverride)->toBeFalse()
+        ->and($result->success)->toBeTrue();
+});
+
+/** A packed item whose product weighs far more than the box was weighed at. */
+function packHeavyProduct(Package $package): void
+{
+    $product = Product::factory()->create(['weight' => 9.0]);
+
+    $shipmentItem = ShipmentItem::factory()->create([
+        'shipment_id' => $package->shipment_id,
+        'product_id' => $product->id,
+        'quantity' => 1,
+    ]);
+
+    PackageItem::factory()->create([
+        'package_id' => $package->id,
+        'product_id' => $product->id,
+        'shipment_item_id' => $shipmentItem->id,
+        'quantity' => 1,
+    ]);
+
+    $package->update(['weight' => 0.5]);
+}
 
 function blindPurchasePackage(bool $withUspsRate = false): Package
 {

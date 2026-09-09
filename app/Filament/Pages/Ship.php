@@ -90,6 +90,17 @@ class Ship extends Page
 
     public bool $overrideCustomsWeights = false;
 
+    /**
+     * Whether the packer has been shown that the seller declares more weight
+     * for the goods than the box weighs, and asked for the purchase anyway.
+     * Reset after every attempt for the same reason the blind-purchase consent
+     * is: insisting once is not a setting.
+     */
+    public bool $overrideDeclaredWeight = false;
+
+    /** The refusal to show in that prompt — it is the only place both weights are named. */
+    public ?string $declaredWeightMessage = null;
+
     public function mount($package_id = null): void
     {
         $this->returnUrl = Session::pull('ship_return_url', '/pack');
@@ -339,6 +350,7 @@ class Ship extends Page
                 labelFormat: $this->labelFormat,
                 labelDpi: $this->labelDpi,
                 overrideCustomsWeights: $this->overrideCustomsWeights,
+                overrideDeclaredWeight: $this->overrideDeclaredWeight,
                 userId: auth()->id(),
                 blindOffer: $blindOffer,
             )
@@ -358,7 +370,16 @@ class Ship extends Page
             return;
         }
 
+        if ($result->requiresDeclaredWeightOverride) {
+            $this->declaredWeightMessage = $result->message;
+            $this->dispatch('open-modal', id: 'declared-weight-override');
+
+            return;
+        }
+
         $this->overrideCustomsWeights = false;
+        $this->overrideDeclaredWeight = false;
+        $this->declaredWeightMessage = null;
         $this->confirmedBlindPurchase = false;
 
         if (! $result->success) {
@@ -402,6 +423,21 @@ class Ship extends Page
     {
         $this->overrideCustomsWeights = true;
         $this->dispatch('close-modal', id: 'customs-weight-override');
+        $this->ship();
+    }
+
+    /**
+     * Buy at the weight on the scale, knowing the seller declares more.
+     *
+     * Sends nothing different — the refusal is waived, not the reading. What it
+     * buys is the case PolyBag cannot see: a catalogue corrected in the Shopify
+     * admin between the refusal and this click, which our own copy of the
+     * numbers would not know about.
+     */
+    public function confirmDeclaredWeightOverride(): void
+    {
+        $this->overrideDeclaredWeight = true;
+        $this->dispatch('close-modal', id: 'declared-weight-override');
         $this->ship();
     }
 }

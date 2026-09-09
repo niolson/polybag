@@ -20,6 +20,10 @@ readonly class PackageShippingRequest
         // Whether to pause and prompt the user when customs item weights exceed package weight.
         // Set false for batch/auto-ship flows that have no interactive prompt.
         public bool $requireCustomsWeightOverride = true,
+        // Whether the operator has already been shown that the seller declares
+        // more weight for the goods than the box weighs, and asked for the
+        // purchase to be attempted anyway at the scale weight.
+        public bool $overrideDeclaredWeight = false,
         public ?int $userId = null,
         public ?BlindPurchaseOffer $blindOffer = null,
     ) {

@@ -12,6 +12,7 @@ use App\Http\Integrations\Shopify\ShopifyConnector;
 use App\Models\DataSource;
 use App\Services\ShipmentImport\ShopifyFulfillmentOrderRepointer;
 use App\Services\ShopifyGoodsFingerprint;
+use App\Services\ShopifyShippingLabelService;
 use DomainException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -408,17 +409,7 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
     /** @return array<string, mixed> */
     private function mapFulfillmentOrderLineItem(array $item): array
     {
-        $weight = $item['weight'] ?? null;
-        $weightLbs = null;
-        if ($weight && ($weight['value'] ?? 0) > 0) {
-            $weightLbs = match ($weight['unit'] ?? '') {
-                'POUNDS' => $weight['value'],
-                'OUNCES' => $weight['value'] / 16,
-                'GRAMS' => $weight['value'] / 453.59237,
-                'KILOGRAMS' => $weight['value'] * 2.20462,
-                default => $weight['value'],
-            };
-        }
+        $weightLbs = self::poundsFrom($item['weight'] ?? null);
 
         $variant = $item['variant'] ?? [];
 
@@ -432,6 +423,37 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
             'barcode' => $variant['barcode'] ?? null,
             'weight' => $weightLbs,
         ];
+    }
+
+    /**
+     * A Shopify `Weight` in pounds, or null when there is no weight to read.
+     *
+     * Shared with {@see ShopifyShippingLabelService}, which reads the same
+     * measurement to decide whether Shopify will declare more weight in customs
+     * than the box was weighed at. One conversion table
+     * because two would eventually disagree, and a disagreement here reads as a
+     * catalogue defect rather than as a bug.
+     *
+     * An unrecognised unit passes its value through unconverted: Shopify's
+     * `WeightUnit` enum has four members and all four are handled, so a fifth
+     * would be a new one whose scale we do not know, and inventing a factor for
+     * it would be worse than taking the number at face value.
+     *
+     * @param  array<string, mixed>|null  $weight
+     */
+    public static function poundsFrom(?array $weight): ?float
+    {
+        if (! $weight || ($weight['value'] ?? 0) <= 0) {
+            return null;
+        }
+
+        return (float) match ($weight['unit'] ?? '') {
+            'POUNDS' => $weight['value'],
+            'OUNCES' => $weight['value'] / 16,
+            'GRAMS' => $weight['value'] / 453.59237,
+            'KILOGRAMS' => $weight['value'] * 2.20462,
+            default => $weight['value'],
+        };
     }
 
     public function getFieldMapping(): array
