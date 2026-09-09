@@ -1,6 +1,6 @@
 # An international Shopify purchase fails when the box weighs less than its contents
 
-Status: ready-for-agent
+Status: done — 2026-09-09
 
 Repo: `polybag`
 
@@ -94,14 +94,14 @@ probably an explicit operator confirmation if it happens at all.
 
 ## Acceptance criteria
 
-- [ ] An international Shopify purchase whose box weighs less than Shopify's declared item
+- [x] An international Shopify purchase whose box weighs less than Shopify's declared item
       weights fails **before** the offer is claimed, with a message naming the weights
-- [ ] The message states both numbers and where the item weights come from, so the operator
+- [x] The message states both numbers and where the item weights come from, so the operator
       knows the fix is in the Shopify catalogue and not on the scale
-- [ ] A domestic Shopify purchase is unaffected by the check
-- [ ] The existing customs-weight override prompt does not fire on the Shopify path, or fires
+- [x] A domestic Shopify purchase is unaffected by the check
+- [x] The existing customs-weight override prompt does not fire on the Shopify path, or fires
       only where it can do something
-- [ ] A test covers the failing relation with real numbers, against a faked fulfillment order
+- [x] A test covers the failing relation with real numbers, against a faked fulfillment order
 
 ## Blocked by
 
@@ -135,3 +135,146 @@ closes the fulfillment order and Shopify creates a replacement (`18`). Three acc
 this one order in an afternoon, and a stale stored ID turns every subsequent probe into
 `FULFILLMENT_ORDER_INVALID` — which reads exactly like a result and is not one. Re-read the
 open fulfillment order between attempts.
+
+### 2026-09-09 — done: detect and withhold, with a tolerance and an escape hatch
+
+**Option one, plus a band.** `ShopifyShippingLabelService::totalWeightFor()` runs before the
+mutation and resolves the total weight three ways:
+
+| Relation | What is sent |
+|---|---|
+| box ≥ declared | the scale reading — the normal case, and the physically expected one |
+| short by ≤ 0.1 lb | the declared sum, rounded up to two decimals |
+| short by > 0.1 lb | nothing — `ShopifyDeclaredWeightException`, before the mutation |
+
+The 0.1 lb band answers the question this issue did not ask and the review did. A packed box
+outweighs its contents, so *any* shortfall is somebody being imprecise; within 1.6 oz that
+somebody is the scale, and the nudge costs nothing real — the carrier rounds up to the next
+ounce regardless. Beyond it the catalogue is describing goods that are not in the box, and no
+arithmetic makes that true. Rounded **up**, never to nearest: two decimals standing in for a
+sum reached through a unit conversion have to stay at or above it.
+
+**The escape hatch sends the scale weight, unchanged.** `ShipRequest::withDeclaredWeightOverride()`
+waives the refusal, not the reading — nothing is over-declared by insisting, and no untrue
+weight reaches a customs form. What it buys is the case PolyBag cannot see: a catalogue
+corrected in the Shopify admin between the refusal and the retry. The alternative — raising
+`totalWeight` to the declared sum on the operator's confirmation — was considered and not
+built, for the reason this issue gives: for package 207 it means buying 2.29 lb of postage
+for a 0.15 lb parcel and printing 2.29 lb on the customs form.
+
+**Read live, not from the snapshot.** The sum comes from
+`lineItems.nodes.lineItem.variant.inventoryItem.measurement.weight`, as this issue proposed,
+and deliberately not from `FulfillmentOrderLineItem.weight`, which the import already asks
+for and which is a snapshot taken when the order was placed. The declaration is built at
+purchase time from the catalogue, so a merchant who corrects a weight in response to a
+refusal has to be able to retry successfully — the snapshot would keep refusing. The
+conversion table is now shared: `ShopifySource::poundsFrom()`, one copy for both readers.
+
+`null` keeps meaning "cannot ask". A fulfillment order Shopify no longer returns, or a
+line-item page that did not fit, proceeds at the scale weight rather than withholding —
+grounding shipments over a paging limit is a worse failure than the one this exists to
+prevent.
+
+## The three questions
+
+**1. `>=`. Confirmed by purchase, not inferred.** Shipment 6763, order #1236, a Canadian
+destination: 6.11 lb of declared goods (2.67 × 2 + 0.77, live catalogue and order snapshot
+agreeing exactly) shipped in an 8.5 lb box — **2.39 lb of packaging over the declaration** —
+bought `PURCHASED` on the first attempt as UPS Standard (`ups_shipping:11`), $29.07, tracking
+`1Z28X87G6824931242`, with a `CUSTOMS_FORM` returned. So a box heavier than its contents is
+accepted, which it had to be, and the tolerance in `totalWeightFor()` is only ever needed in
+the one direction.
+
+The free oracle from `02` could not have answered this: Shopify validates the ship date before
+it validates the weight, so a past-date probe returns `SHIPPING_DATE_IN_THE_PAST` whatever the
+weight is. It cost one real purchase, which on the development store is a test label.
+
+Fragile goods are the case that makes this matter — a lot of packaging around not much
+product is exactly the shape of parcel that would have been grounded by an `==` reading of
+the constraint.
+
+**2. Yes, it fired — and it fired on package 207.** The prompt was not bypassed; it was
+useless. `ImportReferenceResolver::productIdFor()` writes the imported weight onto the
+`Product`, so package 207's own products carry `weight` 1.76 and 0.53 — Shopify's exact
+numbers, put there by the same import that created the fulfillment order.
+`requiresCustomsWeightOverride()` saw 2.29 > 0.15 and asked; the operator confirmed;
+`withScaledCustomsWeights()` scaled an array nobody sends; Shopify still said
+`UNKNOWN_ERROR`. That is the worst version of this: a confirmation that changes nothing,
+followed by a failure for the reason the operator thought they had just resolved.
+`requiresCustomsWeightOverride()` now returns false for any blind purchase, since the seller
+builds the declaration from its own catalogue and there is nothing of ours to scale.
+
+**3. In `ShopifyShippingLabelService`, where the constraint lives** — the third option this
+issue did not list, and the one the cost decides. It has to be before the mutation, because a
+failed purchase closes the fulfillment order and forces a repoint (`18`); the connector is
+already open there, so the extra query is one request on a path that already makes several;
+and only an international destination pays for it at all. Nothing is claimed for a blind
+offer — `ShippingOffer` rows exist only behind quoted rates — so "before the offer is
+claimed" is satisfied by construction. The workflow's part is to catch the exception and turn
+it into a prompt rather than a shipping error, beside `MissingDeclaredValueException`, which
+is the same shape of thing: an operator-facing precondition, not a carrier failure.
+
+## What shipped
+
+- `app/Exceptions/ShopifyDeclaredWeightException.php` — carries both numbers and the message
+- `ShopifyShippingLabelService::totalWeightFor()` / `declaredItemWeight()`, `DECLARED_ITEM_WEIGHT_QUERY`, `DECLARED_WEIGHT_TOLERANCE`
+- `ShopifySource::poundsFrom()` — the conversion table, now shared
+- `ShipRequest::$overrideDeclaredWeight` / `withDeclaredWeightOverride()`
+- `EloquentPackageShippingWorkflow` — the blind-purchase guard on the customs prompt, and the catch
+- `PackageShippingResult::declaredWeightOverrideRequired()` — leaves the package intact
+- `Ship` page + `declared-weight-override` modal — "Try anyway at the scale weight"
+- 11 tests: eight against a faked fulfillment order in `ShopifyAdapterTest`, three through the
+  workflow and the Ship page in `BlindPurchaseTest`
+
+## Still open
+
+One thing this could not check: **PolyBag never sees a partial fulfillment.** The sum is over
+`remainingQuantity` on the whole fulfillment order, which is what Shopify declares — but `13`
+(one fulfillment order per package) would split that, and this comparison would need to split
+with it.
+
+### 2026-09-09 — after review: the weight read is advisory, and says so
+
+Review raised the live catalogue read as a P1: `lineItem.variant` is gated behind
+`read_products`, which is absent from
+`ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES`, and `activate()` returns early
+for a source already activated — so a store that predates this never re-checks and every
+international purchase would fail on a GraphQL access error.
+
+The dependency is real. The severity was the fix worth making, and it is not a scope gate.
+
+**The read now degrades instead of failing.** This is the only query in
+`ShopifyShippingLabelService` that does not throw on a GraphQL error, and the asymmetry is
+the point: every other one is load-bearing — without it there is no label, or no way to find
+one already bought — while this one only decides whether to *withhold*. Throwing turned a
+missing grant, or a throttle, into a failed purchase on every international label: the same
+failure, in the same place, after the box is taped shut, as the defect this issue was filed
+about. Errors are logged with the scope named, and whatever data came back is used.
+
+**Both weights ride on one request.** `FulfillmentOrderLineItem.weight` — the order-time
+snapshot, no product scope — is now asked for beside the live catalogue value, and used per
+line item when the live one is missing. Shopify nulls a denied field rather than the
+response, so a store without `read_products` keeps the check against order-time weights
+instead of losing it. Live is still preferred where it is readable, for the reason it was
+chosen: a merchant correcting a product weight after a refusal has to be able to retry
+successfully, and the snapshot still names the weight the order was placed at.
+
+**`read_products` is declared on `ShopifyShippingLabelService::REQUIRED_SCOPES`, not the
+activation list** — deliberately, against the letter of the review. The activation list is
+enforced at activation *and* on every location sync
+(`ShopifyLocationSynchronizer::synchronize()`, which re-asks Shopify live rather than
+trusting the cached `oauth_scopes`), so promoting a label-purchase dependency into it would
+start refusing location syncs to sources that only import orders and never buy postage. That
+separation is what the two constants are for, and the label list is what reaches the
+connect-time scope parameter.
+
+Three tests cover the degradation: a denied `variant` traversal falling back to the snapshot,
+a throttled read letting the purchase through at the scale weight, and the live value winning
+over a stale snapshot.
+
+**Worth knowing for anyone chasing this.** Shopify ignores the OAuth `scope` parameter for
+apps with declared scopes, so the Dev Dashboard is the authority and reconnecting does not by
+itself grant anything new. The Data Source screen shows `settings.oauth_scopes` cached at
+connect time, which on the development store is the empty string while the live token holds
+eight scopes including `read_products` — a display worth not trusting, and arguably worth
+replacing with the live answer `fetchAccessScopes()` already returns.

@@ -16,6 +16,7 @@ use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\UnattendedRateSelection;
 use App\Enums\PackageStatus;
 use App\Exceptions\MissingDeclaredValueException;
+use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Package;
@@ -313,6 +314,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 $shipRequest = $shipRequest->withScaledCustomsWeights();
             }
 
+            if ($request->overrideDeclaredWeight) {
+                $shipRequest = $shipRequest->withDeclaredWeightOverride();
+            }
+
             // The one-way door, immediately before the money is spent. The
             // inspection above was advisory; this is the claim that a
             // concurrent attempt loses.
@@ -348,6 +353,13 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             return PackageShippingResult::shipped($response, $selectedRate, $package);
         } catch (MissingDeclaredValueException $e) {
             return PackageShippingResult::failed('Declared Value Required', $e->getMessage());
+        } catch (ShopifyDeclaredWeightException $e) {
+            // Nothing was bought and nothing was claimed — the seller's own
+            // declaration would have made the purchase fail, and it was
+            // withheld before the mutation. The packer is shown both numbers
+            // and may insist; only they can, since the remedy is a catalogue
+            // PolyBag does not own.
+            return PackageShippingResult::declaredWeightOverrideRequired($e->getMessage());
         } catch (RequestTimeOutException) {
             $seller = $this->sellerName($request);
 
@@ -828,9 +840,25 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         return $rateOptions === [] ? null : 0;
     }
 
+    /**
+     * Whether the packer has to be asked before our customs declaration is
+     * scaled down to fit the box.
+     *
+     * Never for a blind purchase. The remedy behind this prompt is
+     * {@see ShipRequest::withScaledCustomsWeights()}, which rewrites the
+     * `customsItems` array — and a blind purchase does not send one: the seller
+     * builds the declaration from its own catalogue, so the scaling is applied
+     * to an array nobody reads. Asking anyway would put a confirmation in front
+     * of an operator that changes nothing, and then fail the purchase for the
+     * reason they thought they had just resolved. Shopify's version of this
+     * condition runs the other way — its declaration must not exceed the total
+     * weight we send — and is refused before the mutation instead, raising
+     * {@see ShopifyDeclaredWeightException}.
+     */
     private function requiresCustomsWeightOverride(ShipRequest $shipRequest, bool $overrideCustomsWeights): bool
     {
         if ($overrideCustomsWeights
+            || $shipRequest->blindOffer !== null
             || ! $shipRequest->toAddress->requiresCustomsDeclaration()
             || empty($shipRequest->customsItems)) {
             return false;

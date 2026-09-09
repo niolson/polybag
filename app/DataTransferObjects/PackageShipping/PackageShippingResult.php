@@ -6,6 +6,7 @@ use App\DataTransferObjects\PrintRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\OfferRejection;
+use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Models\Package;
 
 readonly class PackageShippingResult
@@ -18,6 +19,7 @@ readonly class PackageShippingResult
         public ?RateResponse $selectedRate = null,
         public ?PrintRequest $printRequest = null,
         public bool $requiresCustomsWeightOverride = false,
+        public bool $requiresDeclaredWeightOverride = false,
         public bool $leavePackageIntact = false,
         public bool $requiresRequote = false,
     ) {}
@@ -49,6 +51,28 @@ readonly class PackageShippingResult
             title: 'Customs Weight Mismatch',
             message: 'Customs item weights exceed the package weight. Please review and confirm before shipping.',
             requiresCustomsWeightOverride: true,
+        );
+    }
+
+    /**
+     * The seller declares more weight for the goods than the box was weighed
+     * at, so the purchase was withheld rather than attempted.
+     *
+     * Carries the message from {@see ShopifyDeclaredWeightException},
+     * which is the only place both numbers are known. Leaves the package intact
+     * for the same reason the offer failures do: nothing was bought, and the
+     * remedy — a product weight in the seller's catalogue — is somewhere else
+     * entirely. Dissolving the packed box while somebody goes to fix it would
+     * be the worst possible response.
+     */
+    public static function declaredWeightOverrideRequired(string $message): self
+    {
+        return new self(
+            success: false,
+            title: 'Declared Weight Exceeds Package Weight',
+            message: $message,
+            requiresDeclaredWeightOverride: true,
+            leavePackageIntact: true,
         );
     }
 

@@ -280,6 +280,21 @@
         </x-slot>
     </x-filament::modal>
 
+    <x-filament::modal id="declared-weight-override" width="md">
+        <x-slot name="heading">Declared Weight Exceeds Package Weight</x-slot>
+        <x-slot name="description">
+            {{ $declaredWeightMessage }}
+        </x-slot>
+        <x-slot name="footerActions">
+            <x-filament::button color="warning" wire:click="confirmDeclaredWeightOverride">
+                Try anyway at the scale weight
+            </x-filament::button>
+            <x-filament::button color="gray" x-on:click="$dispatch('close-modal', { id: 'declared-weight-override' })">
+                Cancel
+            </x-filament::button>
+        </x-slot>
+    </x-filament::modal>
+
     <x-filament::modal id="blind-purchase-confirm" width="md">
         <x-slot name="heading">Buy without a price or a service?</x-slot>
         <x-slot name="description">
