@@ -415,6 +415,12 @@ parameters:
 			path: app/Filament/Pages/Reports/ClientBillingReport.php
 
 		-
+			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$uncosted_package_count\.$#'
+			identifier: property.notFound
+			count: 2
+			path: app/Filament/Pages/Reports/ClientBillingReport.php
+
+		-
 			message: '#^Using nullsafe property access "\?\-\>label_fee_per_package" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
 			identifier: nullsafe.neverNull
 			count: 1
@@ -1539,13 +1545,13 @@ parameters:
 		-
 			message: '#^Call to an undefined method Livewire\\Component\:\:exportCsv\(\)\.$#'
 			identifier: method.notFound
-			count: 2
+			count: 4
 			path: tests/Feature/Pages/Reports/ClientBillingReportTest.php
 
 		-
 			message: '#^Parameter \#1 \$page of function billingRow expects App\\Filament\\Pages\\Reports\\ClientBillingReport, Livewire\\Component given\.$#'
 			identifier: argument.type
-			count: 8
+			count: 10
 			path: tests/Feature/Pages/Reports/ClientBillingReportTest.php
 
 		-

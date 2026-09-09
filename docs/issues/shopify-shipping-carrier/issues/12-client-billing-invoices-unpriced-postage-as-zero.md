@@ -1,6 +1,6 @@
 # Client billing invoices unpriced postage as $0.00
 
-Status: needs-triage
+Status: needs-triage — flag half shipped 2026-09-08; what to charge waits on `05`
 
 Repo: `polybag`
 
@@ -85,3 +85,42 @@ noticing how often the second half matters.
 
 **Left at `needs-triage`** because the charging half genuinely needs a decision from the
 billing owner. The flag half is specified enough to grab today.
+
+### 2026-09-08 — decision on the flag half, and what was built
+
+**Show the gap.** Of the four options, the report flags the lines and a human reconciles
+them against the seller's own billing data. The other three were not taken:
+
+- **Excluding the lines** withholds the label fee, pick fees, materials and surcharges on
+  that line too, all of which are correct and earned. It fixes an under-charge by dropping
+  a larger correct charge.
+- **A fallback postage rate** invents a number, which is what `08` refused to do to
+  `packages.cost`, and it would have to be unwound once the real cost arrives.
+- **Doing nothing until `05`** leaves each billing run silently wrong in the meantime.
+
+Deliberately small, because the expectation is that real label costs are recoverable —
+`05` for Shopify, and a null cost from any other source is a bug in the write path rather
+than a permanent unknown. This is disclosure to bridge that, not a billing mechanism.
+
+**What was built** — all of it in `ClientBillingReport`, no schema:
+
+- `buildPackageSubquery()` counts `COUNT(p.id) - COUNT(p.cost)` as
+  `uncosted_package_count`, the same name `VolumeReport` uses for the same quantity. It
+  describes the condition, not one cause of it: a manual ship or a failed cost write
+  reads the same as a Shopify label.
+- Both views disclose it under the postage figure — *"N billed at $0.00 — no reported
+  postage"* — and the detail line carries a `danger` badge beside the existing
+  *"No item data"* one.
+- **Unpriced postage only**, a toggle filter on the billable event log. This is the
+  reconciliation view: the lines to look up in the seller's billing export, and nothing
+  else.
+- Both CSVs gain an **Unpriced Packages** column, and the detail export honours the
+  toggle, so the exported file matches what was on screen.
+
+`line_total` is unchanged and still under-bills by the missing postage. That is the half
+this does not fix, and the badge is what stops it going out unnoticed.
+
+**Still open:** what to actually charge. Better answered after `05`, which is sequenced
+last of the substantive work — if it supplies real costs for most Shopify labels, the
+remaining population may be small enough that reconciling by hand is the whole answer and
+no billing rule is needed.

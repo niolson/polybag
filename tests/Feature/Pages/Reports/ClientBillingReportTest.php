@@ -9,8 +9,15 @@ use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\User;
 use App\Services\SettingsService;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
+
+/** A date inside the report's default filter window, which is last month. */
+function lastMonth(): Carbon
+{
+    return now()->subMonth()->startOfMonth()->addDay()->setTime(12, 0);
+}
 
 function billingRow(ClientBillingReport $page, int $clientId): ?object
 {
@@ -255,4 +262,126 @@ it('does not include another clients shipments in billing row', function (): voi
 
     expect((int) $rowA->package_count)->toBe(1)
         ->and((int) $rowB->package_count)->toBe(2);
+});
+
+it('counts packages that reported no postage on the summary row', function (): void {
+    $client = Client::factory()->create(['is_default' => false]);
+
+    $shipment = Shipment::factory()->create(['client_id' => $client->id]);
+    Package::factory()->shipped()->create(['shipment_id' => $shipment->id, 'cost' => '10.00']);
+    Package::factory()->shipped()->create(['shipment_id' => $shipment->id, 'cost' => null]);
+
+    $page = Livewire::test(ClientBillingReport::class)->instance();
+
+    $row = billingRow($page, $client->id);
+
+    expect((int) $row->uncosted_package_count)->toBe(1)
+        ->and((float) $row->total_postage)->toBe(10.00);
+});
+
+it('reports no gap when every package priced', function (): void {
+    $client = Client::factory()->create(['is_default' => false]);
+
+    $shipment = Shipment::factory()->create(['client_id' => $client->id]);
+    Package::factory()->shipped()->create(['shipment_id' => $shipment->id, 'cost' => '10.00']);
+
+    $page = Livewire::test(ClientBillingReport::class)->instance();
+
+    expect((int) billingRow($page, $client->id)->uncosted_package_count)->toBe(0);
+});
+
+it('flags a detail line whose postage is unpriced', function (): void {
+    $client = Client::factory()->create(['is_default' => false]);
+
+    $shipment = Shipment::factory()->create(['client_id' => $client->id]);
+    Package::factory()->shipped()->create([
+        'shipment_id' => $shipment->id,
+        'cost' => null,
+        'shipped_at' => lastMonth(),
+    ]);
+
+    Livewire::test(ClientBillingReport::class)
+        ->set('viewMode', 'detail')
+        ->set('clientId', $client->id)
+        ->assertOk()
+        ->assertSee('Unpriced postage')
+        ->assertSee('no reported postage');
+});
+
+it('does not flag a detail line whose postage is known', function (): void {
+    $client = Client::factory()->create(['is_default' => false]);
+
+    $shipment = Shipment::factory()->create(['client_id' => $client->id]);
+    Package::factory()->shipped()->create([
+        'shipment_id' => $shipment->id,
+        'cost' => '10.00',
+        'shipped_at' => lastMonth(),
+    ]);
+
+    Livewire::test(ClientBillingReport::class)
+        ->set('viewMode', 'detail')
+        ->set('clientId', $client->id)
+        ->assertOk()
+        // Not asserting on the badge text: the filter label contains it too.
+        ->assertDontSee('no reported postage');
+});
+
+it('filters the detail view down to lines with unpriced postage', function (): void {
+    $client = Client::factory()->create(['is_default' => false]);
+
+    $priced = Shipment::factory()->create(['client_id' => $client->id, 'shipment_reference' => 'ZZPRICED-1']);
+    Package::factory()->shipped()->create([
+        'shipment_id' => $priced->id,
+        'cost' => '10.00',
+        'shipped_at' => lastMonth(),
+    ]);
+
+    $unpriced = Shipment::factory()->create(['client_id' => $client->id, 'shipment_reference' => 'UNPRICED-1']);
+    Package::factory()->shipped()->create([
+        'shipment_id' => $unpriced->id,
+        'cost' => null,
+        'shipped_at' => lastMonth(),
+    ]);
+
+    Livewire::test(ClientBillingReport::class)
+        ->set('viewMode', 'detail')
+        ->set('clientId', $client->id)
+        ->assertSee('ZZPRICED-1')
+        ->set('tableFilters.unpriced_postage.isActive', true)
+        ->assertSee('UNPRICED-1')
+        ->assertDontSee('ZZPRICED-1');
+});
+
+it('exports the unpriced package count in both CSVs', function (): void {
+    $client = Client::factory()->create(['is_default' => false]);
+
+    $shipment = Shipment::factory()->create(['client_id' => $client->id]);
+    Package::factory()->shipped()->create([
+        'shipment_id' => $shipment->id,
+        'cost' => null,
+        'shipped_at' => lastMonth(),
+    ]);
+
+    ob_start();
+    Livewire::test(ClientBillingReport::class)
+        ->instance()
+        ->exportCsv()
+        ->sendContent();
+    $summary = ob_get_clean();
+
+    expect(explode("\n", trim($summary))[0])->toContain('Unpriced Packages');
+
+    ob_start();
+    Livewire::test(ClientBillingReport::class)
+        ->set('viewMode', 'detail')
+        ->set('clientId', $client->id)
+        ->instance()
+        ->exportCsv()
+        ->sendContent();
+    $detail = ob_get_clean();
+
+    $lines = explode("\n", trim($detail));
+
+    expect($lines[0])->toContain('Unpriced Packages')
+        ->and($lines[1])->toContain(',1,');
 });
