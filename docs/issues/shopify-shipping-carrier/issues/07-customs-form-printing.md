@@ -34,8 +34,10 @@ no way to print would waste the transfer and bloat the row for nothing.
 
 ## First
 
-Confirm in `01` that an international purchase really does return a second document, and
-what format it comes back in. Everything above assumes it does.
+~~Confirm in `01` that an international purchase really does return a second document, and
+what format it comes back in.~~ **Done 2026-09-09 — it does.** PDF, but three Letter pages
+rather than a 4×6 label. The gate on this issue is cleared and the options above are now
+decidable; see the comment of that date, which argues the format changes their relative cost.
 
 ## Comments
 
@@ -54,3 +56,40 @@ is the whole gate on this issue.
 **Do not choose between the three options above before that observation exists.** Each one
 assumes a second document; the format it arrives in also decides whether the middle option
 is even reachable through QZ Tray. Sequenced after the campaign, not during it.
+
+### 2026-09-09 — confirmed, and the format decides more than expected
+
+`01`'s question 6 is answered. An international purchase to a Canadian destination returned two documents,
+and the second one is not a label:
+
+| | `LABEL` | `CUSTOMS_FORM` |
+|---|---|---|
+| Format | PDF | PDF |
+| Pages | 1 | **3** |
+| Page size | 288 × 432 pts (4×6) | **612 × 792 pts (Letter)** |
+| Text layer | none — a bitmap | text-bearing, four embedded fonts |
+
+It is a UPS commercial invoice: waybill number, both parties with tax-ID and EORI fields,
+Incoterm `DDU`, reason for export `SALE`, and the line items.
+
+**This settles the middle option's real cost.** "Print it as a second document through QZ
+Tray" was written as a modelling question about multi-document labels. It is also a
+**hardware** question: three Letter pages cannot go to the 4×6 thermal printer the label goes
+to, so this needs a second printer configured per workstation, or a document printer that
+Device Settings does not currently model. That is a materially larger change than the framing
+above implies, and it is not Shopify-specific — a FedEx or USPS customs form has the same
+shape.
+
+**The cheapest option is now cheaper by comparison.** Surfacing the URL as a link in the
+package UI leaves the operator printing from a browser to whatever printer they already use
+for paper, which is the workflow the document actually wants.
+
+The third option — restrict Shopify Shipping to domestic — reads worse than it did. The
+international path works and returns a correct commercial invoice; withdrawing it would give
+up a working capability to avoid a printing problem that exists for our own carriers too.
+
+**A precondition worth recording here**, because it bites before any of this: an
+international Shopify purchase fails unless every variant has `harmonizedSystemCode` and
+`countryCodeOfOrigin` set in the Shopify catalogue, and those **cannot** be sent in the
+purchase — `ShippingLabelPurchaseInput` has no customs fields. It also fails when the box
+weighs less than Shopify's declared item weights, which is `19`. Both surface after packing.

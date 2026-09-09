@@ -26,8 +26,13 @@ questions no amount of reading resolves:
 
 1. **What service token does this carrier print?** The only way to know. Feeds
    `label-tokens.json`.
-2. **What format does Shopify hand back for this carrier?** PDF, ZPL, PNG. A PNG carrier is
-   rung-2-unreachable and belongs in the OCR argument in `11`, not in the token table.
+2. ~~**What format does Shopify hand back for this carrier?**~~ **Answered, and it was not a
+   per-carrier question.** `ShippingEnumsFileFormat` has exactly two values, `PDF` and `ZPL`,
+   and the shop's label format setting reaches only PDF — so every carrier reports PDF and no
+   carrier can report PNG through this API however its own label is drawn. See `01`,
+   2026-09-09. A carrier whose native label is PNG is therefore **not** rung-2-unreachable
+   here; whatever Shopify wraps it in is a PDF, and whether that PDF carries extractable text
+   or a bitmap is the real question, which is `11`'s OCR argument on different ground.
 3. **Is there a last-mile handoff?** A consolidator label says so on its face — the DHL
    sample prints `US Postage Paid`, `eVS` and `USPS TRACKING #`. This is what tells us
    whether `11`'s consolidator guard needs extending to a carrier we have not thought about.
@@ -42,7 +47,12 @@ carriers". Only two items on the list below are documentation work.
 A label on its own is not evidence — the point is the pairing of a label with what was
 actually bought. For each capture record, together:
 
-- the label bytes, unmodified, with the format Shopify reported
+- the label bytes, unmodified, with the format Shopify reported — **taken from
+  `shippingDocuments[].url`, never from the admin's print dialog.** The API document is always
+  4×6; the admin re-renders at whatever page size is chosen at print time, so a capture from
+  the dialog can misreport the size. **Record whether the PDF has a text layer** (`pdffonts`):
+  some carriers return a full-page bitmap, which is rung-2-unreadable and invisible in the
+  reported format. See the comments of 2026-09-09
 - the tracking number
 - `trackingInfo.company` exactly as Shopify returned it
 - the `preferredRateSelection` we requested, if any
@@ -66,8 +76,8 @@ admin actually offers. Confirm it there rather than from the help centre.
 
 | Carrier | Believed region | State |
 |---|---|---|
-| USPS | US | **Rung 1 done.** 342 service type codes, effective 2026-06-24. No label needed |
-| UPS | US, CA | 1Z table not built — see documentation work below. No label tokens |
+| USPS | US | **Rung 1 done.** 342 service type codes, effective 2026-06-24. No label needed. One token observed anyway: `PRIORITY MAIL EXPRESS®` |
+| UPS | US, CA | **Gathered and unreadable** — the API label is a full-page bitmap, so rung 2 cannot read it and `label-tokens.json` gains nothing from more UPS captures. 1Z table not built either, so these packages currently infer nothing. Token seen on the printed face: `UPS GROUND SAVER`; that label is a **consolidator** — USPS last mile, dual `1Z` + IMpb |
 | FedEx | US | Partial: domestic tokens from sandbox PDFs. International prints `IP`/`XQ` |
 | DHL | US, intl | One ZPL token from vendor docs. **Which DHL** — Express or eCommerce — is itself unconfirmed, and they are different carriers with different labels |
 | Canada Post | CA | Nothing. PDF or ZPL |
@@ -128,9 +138,13 @@ answer is only ever a class.
    S10 is a `wontfix` for rung 1 and those carriers are rung-2-only.
 3. **Which DHL does Shopify sell** — Express, eCommerce, or both by region? They are
    different carriers, different labels, and only one of them is the consolidator.
-4. **Does any carrier here return PNG through Shopify?** That is the OCR question from `11`
-   in its concrete form. A PNG-only carrier with meaningful volume is the only evidence that
-   would reopen OCR.
+4. ~~**Does any carrier here return PNG through Shopify?**~~ **No — the format enum cannot
+   express it** (see question 2 above). The concrete form of `11`'s OCR question is instead:
+   **does any carrier's API document come back as a PDF wrapping a full-page bitmap?** That is
+   rung-2-unreadable for the same reason a PNG would have been, and it is not visible from the
+   reported format, which says `PDF` either way. Check it per carrier with `pdffonts` on the
+   captured document — and on the document from `shippingDocuments[].url`, since the admin's
+   print render is rasterised for every carrier and answers this question wrongly.
 
 ## Acceptance criteria
 
@@ -184,9 +198,10 @@ want evidence from the same purchases and would otherwise need their own campaig
 - **`05`** wants `Order.events` after every purchase — the label price is in the order
   timeline as prose. Repeated purchases and voids against one order are exactly the
   ambiguous case it needs to characterise, and this campaign produces them anyway.
-- **`01`** wants a ZPL purchase (flip the shop's label format setting), a purchase made
-  after the 8 PM cutoff, and an international order. The ZPL one overlaps directly with this
-  issue's question 2 — one capture answers both.
+- **`01`** wants a purchase at each label format setting (to see whether the PDF's page size
+  follows it), a purchase made after the 8 PM cutoff, and an international order. The format
+  one overlaps with this issue's question 2, though not as originally written: there is no
+  ZPL setting to flip, and the captures here are PDF whatever the carrier.
 
 **Two caveats on reading dev-store captures.** A test label is registered with the carrier
 and tracks, so the tokens and the number families are real evidence. But UPS test numbers
@@ -215,3 +230,63 @@ Two things from that work bear directly on the capture:
 - **Availability is per shipment.** UPS `92` and `93` swap at the 1 lb SurePost boundary,
   so a capture list has to name the parcel it applies to. A pair that finds no rate for
   the parcel to hand is not a pair that does not exist.
+
+### 2026-09-09 — first two labels read; UPS Ground Saver is a consolidator and the capture protocol needs a source rule
+
+Two labels inspected — a UPS Ground Saver bought in the admin, and the USPS document still
+reachable on package 177. Against this issue's four questions:
+
+| | UPS Ground Saver | USPS |
+|---|---|---|
+| **1. Service token** | `UPS GROUND SAVER` | `PRIORITY MAIL EXPRESS®` |
+| **2. Format** | PDF, 4×6 | PDF, 4×6 |
+| **3. Last-mile handoff** | **Yes** — `US POSTAGE PAID / UPS / eVS`, `USPS PARCEL SELECT` | No |
+| **4. Number family** | `1Z000X00YW00000001` **and** a 26-digit IMpb, `9261 0000 0000 0000 0000 0000 01` | 26-digit IMpb, `9270 0000 0000 0000 0000 0000 02` |
+
+**Add a rule to the capture protocol: take the label from the API, not from the admin.** The
+same label exists in two forms. The admin's print dialog rasterises — no fonts, zero
+extractable text, one full-page bitmap — while the document at `shippingDocuments[].url` has
+embedded fonts and yields its service token to `pdftotext`. A capture taken from the print
+dialog is unreadable and will look like a carrier that prints nothing. Detail in `11`.
+
+**UPS Ground Saver is a consolidator label, and `auto` selects it unprompted.** The
+consolidator guard in `11` was reasoned about on a DHL eCommerce sample and treated as an
+edge case; it is on this seller's default path. A naive scan of that one face finds
+`UPS GROUND SAVER` and `USPS PARCEL SELECT` and has to prefer the right one.
+
+**Both tracking numbers are 26-digit IMpbs** — `15` confirmed twice more, and on the UPS
+label the IMpb sits alongside a `1Z`, so a package whose stored number is the `1Z` has a
+second, decodable number printed on its face that nothing reads.
+
+The UPS number carries `YW` in bytes 9–10 again, matching the earlier finding, so the
+non-numeric service indicator is consistent rather than a one-off — and the 1Z table's
+fall-through requirement stands.
+
+**The USPS document carries a `SAMPLE - DO NOT MAIL` watermark**, so Shopify's USPS test
+labels are USPS's own sample labels. Worth knowing before a dev-store capture is filed as
+representative artwork: the token is real, the surrounding label is a sample.
+
+### 2026-09-09 — correcting the capture rule: UPS labels are bitmaps wherever you get them
+
+The comment above added a rule — take the capture from `shippingDocuments[].url`, not from
+the admin's print dialog — on the reading that Shopify rasterises when it renders for
+printing. That reading was wrong, and it named its own confound at the time.
+
+An international UPS label taken from the API is **also** a full-page bitmap: no fonts, no
+extractable text, the same 1400×800 grayscale image. The difference is the **carrier**, not
+the source. USPS labels carry text; UPS labels do not.
+
+**The rule still stands, for a different reason.** The API document is always 4×6 while the
+admin re-renders at whatever page size is chosen at print time, so a capture from the print
+dialog can misreport the size. It just does not make a UPS label readable.
+
+**This is question 4's answer arriving early, and it is the bad one.** A carrier can return a
+`format: PDF` that is rung-2-unreadable, it is invisible in the reported format, and the first
+carrier we checked is one. Recording it in the table below as a distinct state from
+"not gathered": UPS is gathered and unreadable, which is a different fact from Canada Post,
+which is simply unknown.
+
+Practical consequence for this campaign: capturing more UPS labels yields tokens for a rung
+that cannot run on them. The UPS captures are still worth having for the tracking-number and
+consolidator questions — 1 and 3 and 4 — but not for `label-tokens.json`. Weight the
+prioritised carrier list accordingly when it arrives.

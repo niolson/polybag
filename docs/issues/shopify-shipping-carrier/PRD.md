@@ -27,7 +27,7 @@ Everything below follows from that being the whole surface.
 | Buying a label | `shippingLabelPurchase`, asynchronous — poll `node(id:)` until `PURCHASED` / `PURCHASE_FAILED` |
 | Label cost | Not on the label. In the order's event stream as a prose string, and via Shopify Payments balance transactions — see `05` |
 | Voiding | **No mutation.** `cancellable` is readable; voiding happens in the Shopify admin |
-| PDF vs ZPL | **Reported, not requested.** Shopify picks from the shop's own admin setting |
+| PDF vs ZPL | **Reported, not requested** — the purchase input has no format field. In practice **always PDF**: the shop's label format setting selects a paper size (Thermal 4×6, Letter, A4), all of them PDF, so nothing merchant-facing reaches the `ZPL` value. Verified against the live schema 2026-09-09, see `01` |
 | FedEx | Not supported. Carrier codes are `usps`, `ups_shipping`, `dhl_express`, `canada_post` |
 
 `ShippingLabel` has six fields and no price: `id`, `trackingInfo`, `shippingDocuments`,

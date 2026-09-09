@@ -472,6 +472,84 @@ it('treats an already fulfilled shopify response as idempotent success', functio
         ->and($package->fresh()->exported)->toBeTrue();
 });
 
+it('skips the shopify fulfillment for a package shopify sold the label for', function (): void {
+    $exportSource = DataSource::factory()->create([
+        'source_type' => ShopifySource::class,
+        'name' => 'Shopify Export',
+        'settings' => [
+            'shop_domain' => 'test-shop.myshopify.com',
+            'export_enabled' => true,
+        ],
+        'secret_settings' => ['client_id' => 'test-client-id', 'client_secret' => 'test-client-secret'],
+    ]);
+    $shipment = Shipment::factory()->create([
+        'data_source_id' => $exportSource->id,
+        'shipment_reference' => '#2010',
+        'metadata' => ['shopify_fulfillment_order_id' => 'gid://shopify/FulfillmentOrder/2010'],
+    ]);
+    $package = Package::factory()->shipped()->create([
+        'shipment_id' => $shipment->id,
+        'tracking_number' => 'TRACK-2010',
+        'carrier' => 'USPS',
+        'exported' => false,
+        'metadata' => ['shopify_shipping_label_id' => 'gid://shopify/ShippingLabel/2010'],
+    ]);
+
+    // Shopify closed the fulfillment order when it sold the label, so this is
+    // what the mutation would answer if it were sent at all.
+    Saloon::fake([GraphQL::class => fulfillmentUserErrorResponse(
+        'Fulfillment order 2010 has an unfulfillable status= closed.'
+    )]);
+
+    $result = (new PackageExportService)->exportPackage($package);
+    $export = PackageExport::query()->where('package_id', $package->id)->firstOrFail();
+
+    Saloon::assertNothingSent();
+
+    expect($result->success)->toBeTrue()
+        ->and($result->errors)->toBeEmpty()
+        ->and($export->status)->toBe(PackageExportStatus::Succeeded)
+        ->and($package->fresh()->exported)->toBeTrue();
+});
+
+it('permanently fails a closed fulfillment order for a package shopify did not sell', function (): void {
+    $exportSource = DataSource::factory()->create([
+        'source_type' => ShopifySource::class,
+        'name' => 'Shopify Export',
+        'settings' => [
+            'shop_domain' => 'test-shop.myshopify.com',
+            'export_enabled' => true,
+        ],
+        'secret_settings' => ['client_id' => 'test-client-id', 'client_secret' => 'test-client-secret'],
+    ]);
+    $shipment = Shipment::factory()->create([
+        'data_source_id' => $exportSource->id,
+        'shipment_reference' => '#2011',
+        'metadata' => ['shopify_fulfillment_order_id' => 'gid://shopify/FulfillmentOrder/2011'],
+    ]);
+    // No `shopify_shipping_label_id`: this label was bought on one of our own
+    // carrier accounts, and the stored fulfillment order has since been closed
+    // and replaced (issue `18`). Shopify has genuinely not been told what
+    // shipped, so the identical message must still fail.
+    $package = Package::factory()->shipped()->create([
+        'shipment_id' => $shipment->id,
+        'tracking_number' => 'TRACK-2011',
+        'carrier' => 'USPS',
+        'exported' => false,
+    ]);
+    Saloon::fake([GraphQL::class => fulfillmentUserErrorResponse(
+        'Fulfillment order 2011 has an unfulfillable status= closed.'
+    )]);
+
+    $result = (new PackageExportService)->exportPackage($package);
+    $export = PackageExport::query()->where('package_id', $package->id)->firstOrFail();
+
+    expect($result->success)->toBeFalse()
+        ->and($result->shouldRetry())->toBeFalse()
+        ->and($export->status)->toBe(PackageExportStatus::PermanentlyFailed)
+        ->and($package->fresh()->exported)->toBeFalse();
+});
+
 it('permanently fails shopify fulfillment user errors', function (): void {
     $exportSource = DataSource::factory()->create([
         'source_type' => ShopifySource::class,

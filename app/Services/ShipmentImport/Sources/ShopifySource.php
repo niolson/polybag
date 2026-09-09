@@ -9,6 +9,7 @@ use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Http\Integrations\Shopify\ShopifyConnector;
 use DomainException;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 use RuntimeException;
 
@@ -414,8 +415,43 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface
         return 'shopify';
     }
 
+    /**
+     * Write the tracking number back to Shopify as a fulfillment.
+     *
+     * Skipped outright for a label bought through Shopify Shipping. Buying the
+     * postage *is* the fulfillment: Shopify creates the fulfillment with the
+     * tracking information already on it and closes the fulfillment order in
+     * the same write, so `fulfillmentCreate` afterwards comes back with
+     * `Fulfillment order N has an unfulfillable status= closed` — and the
+     * export's job here was done before it ran.
+     *
+     * That closed-status reply is deliberately *not* swallowed further down.
+     * The same message reaches a package whose postage came from one of our own
+     * carrier accounts and whose stored fulfillment order has since been closed
+     * and replaced (see issue `18`), and that is a real export failure: Shopify
+     * has not been told what shipped, and recording it as success would hide
+     * that. The label ID is what separates the two, so it is what this gates on
+     * — not the message, which is prose Shopify controls. `fulfillmentCreate`
+     * returns the base `UserError` type, whose only fields are `field` and
+     * `message`, so there is no error code to key on instead.
+     *
+     * Checked before the credential check, deliberately, and for the reason
+     * {@see AmazonSource::exportPackage()} gives: there is nothing to send, so
+     * there is nothing credentials are needed for, and a seller who rotates
+     * them after the label was bought would otherwise fail an export that had
+     * already succeeded at purchase time.
+     */
     public function exportPackage(array $data): void
     {
+        if (filled($data['_shopify_shipping_label_id'] ?? null)) {
+            Log::info('Skipping Shopify fulfillment for a Shopify Shipping label', [
+                'shopify_shipping_label_id' => $data['_shopify_shipping_label_id'],
+                'package' => $data['_package_reference_id'] ?? null,
+            ]);
+
+            return;
+        }
+
         $this->validateExportConfiguration();
 
         $fulfillmentOrderId = $data['fulfillment_order_id'] ?? null;

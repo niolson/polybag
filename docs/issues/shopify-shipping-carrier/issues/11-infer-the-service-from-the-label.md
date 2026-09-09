@@ -532,3 +532,81 @@ declines, is exactly the sort of thing the coverage measurement here exists to s
 Worth deciding with the `14` captures in hand, since those are bought with explicit
 selections and so produce the paired evidence — requested service, decoded number, and
 label text — that the question needs.
+
+### 2026-09-09 — read the label from the API, never from the admin's print dialog
+
+A trap worth naming before anyone tests rung 2 against a real Shopify label. The same label
+exists in two forms and only one of them is readable.
+
+| Source | Fonts | `pdftotext` | Images |
+|---|---|---|---|
+| Shopify admin's print dialog | **none** | **0 bytes** | one full-page grayscale bitmap |
+| `shippingDocuments[].url` — what `ShopifyShippingLabelService` downloads | four embedded Arial/Consolas subsets | 308 bytes, service name included | three tiny indexed images, the barcodes |
+
+Shopify **rasterises when it renders for printing**. The document the API hands us is
+text-bearing, and `pdftotext` lifts `PRIORITY MAIL EXPRESS®` out of it directly.
+
+**This nearly produced a wrong architectural finding.** Measured on admin renders alone — the
+obvious thing to grab, since that is what a person has open when they print a label — rung 2
+is dead for every Shopify carrier and OCR is the only route, which would have reopened
+question 2 after it was settled `wontfix`. It is not dead. It works on the bytes that reach
+`packages.label_data`, which is the only file this rung ever sees.
+
+So question 1's answer holds and is now observed rather than reasoned: taking the PDF
+text-extraction dependency was right, and for Shopify labels it is the *only* rung-2 path —
+there is no ZPL alternative to fall back to, because Shopify's format setting selects a paper
+size and never reaches the `ZPL` value the API's enum can carry (`01`, same date).
+
+**One confound not cleared.** The text-bearing sample is USPS; the rasterised ones are UPS
+Ground Saver. "API is text, admin render is raster" fits the evidence and so does "USPS is
+text, UPS is raster". Clearing it needs a UPS label bought through PolyBag so its API
+document is captured — on `14`'s list, and it should be captured before anyone sizes the
+extraction work, because the second reading would halve rung 2's reach on this carrier.
+
+**A consolidator case arrives by default, not as an edge case.** The UPS Ground Saver label
+prints `UPS GROUND SAVER`, `USPS PARCEL SELECT` and `US POSTAGE PAID / UPS / eVS` on one
+face, and carries both a `1Z` and a 26-digit IMpb. That is exactly the wrong-answer path the
+DHL eCommerce sample exposed above, and Shopify's `auto` selection hands it over without
+being asked — so the consolidator guard is on the default path for this seller, not a corner
+of it.
+
+### 2026-09-09 — correcting the comment above: the split is by carrier, not by source
+
+The comment above says Shopify rasterises when it renders for printing and that the API's
+document is text-bearing. It states its own confound — text-bearing sample USPS, rasterised
+samples UPS — and the confound has since resolved **against** that reading.
+
+An international UPS label fetched from `shippingDocuments[].url`, the API and not the print
+dialog, has **zero fonts, zero extractable text, and the same 1400×800 grayscale bitmap** the
+admin renders had.
+
+So the axis is the carrier:
+
+| Carrier | API document | Rung 2 |
+|---|---|---|
+| USPS | embedded fonts, service name extractable | works |
+| UPS | one full-page bitmap, no text at all | **unreadable, from any source** |
+
+This is the branch the earlier comment named as the worse one. **Rung 2 cannot read a Shopify
+UPS label**, and no change of source fixes it — the admin-versus-API distinction was a wrong
+inference from comparing a UPS render against a USPS document.
+
+What survives of that comment: take captures from the API anyway, because the admin lets a
+person choose the page size at print time and the API document is always 4×6. That is a
+reason about size, not about text.
+
+**What this costs.** For Shopify UPS packages the ladder is rung 1 only — and rung 1 needs
+the UPS 1Z service-indicator table, which is not built, on numbers whose indicator bytes have
+so far been values no published table lists (`YW`, `YN`). So a Shopify UPS package currently
+infers nothing by either rung. That is the concrete coverage answer this issue exists to
+measure, arriving before the measurement.
+
+Two things follow, neither decided here:
+
+- The OCR question closed `wontfix` on the reasoning that a PNG-only carrier with real volume
+  would be the only thing to reopen it. A **bitmap-only carrier** is that thing, and UPS is
+  not a marginal carrier. Worth re-reading that decision with this in hand rather than
+  treating it as settled.
+- The honoured-`preferredRateSelection` idea in the comment above gains weight: where the
+  label cannot be read and the number cannot be decoded, an explicit selection Shopify is
+  observed to obey may be the only evidence available for a UPS purchase.

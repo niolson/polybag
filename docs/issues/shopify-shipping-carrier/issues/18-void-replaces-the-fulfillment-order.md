@@ -89,3 +89,24 @@ Re-pointing `shipment.metadata.shopify_fulfillment_order_id` at the open one res
 purchase path immediately, with no other change — which is the evidence that refreshing
 the ID is a sufficient fix, and that nothing else about the shipment is invalidated by a
 void.
+
+### 2026-09-09 — the churn also reaches the import, and that changes the fix
+
+Voiding a label and running the Shopify import again — an ordinary sequence, and what an
+operator does when a label was bought by mistake — **creates a duplicate shipment**. Filed as
+`21`.
+
+`ShopifySource` sets `source_record_id` to the fulfillment order GID and `ShipmentBatchWriter`
+dedupes on it, so the replacement this issue documents arrives as a record the import has
+never seen and is inserted as new work. Order #1241 now has shipments 6769 and 6771, same
+`shopify_order_id`, different fulfillment orders.
+
+**This should change what gets built here.** The options above both repair the purchase path
+and leave the import untouched, so the duplicate still appears. The import-side fix in `21` —
+recognise a replacement and repoint the existing shipment — covers both, because re-pointing
+`shipment.metadata.shopify_fulfillment_order_id` is exactly what the comment above found
+sufficient to restore purchasing.
+
+So: **read `21` before implementing either option here.** Fixing this issue alone is not
+wrong, but it is half a fix for one root cause, and the half that leaves a duplicate in the
+packing queue.
