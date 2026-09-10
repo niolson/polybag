@@ -392,6 +392,12 @@ class ShopifyAdapter implements BlindPurchaseSource
             labelOrientation: 'portrait',
             labelFormat: $label->labelFormat,
             labelDpi: $request->labelDpi,
+            // International only, and a separate document rather than pages
+            // appended to the label: three Letter pages of commercial invoice
+            // that go to the report printer while the label goes to the thermal
+            // one. Null where the download failed, which leaves
+            // `shopify_customs_form_url` below as the way to get at it.
+            customsFormData: $label->customsFormData,
             shipDate: $request->shipDate,
             // The postage was bought on the merchant's Shopify account, not on
             // one of ours — so the provenance is the data source the shipment

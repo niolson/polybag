@@ -1,6 +1,6 @@
 # International Shopify labels return a customs form PolyBag cannot print
 
-Status: ready-for-agent — decided 2026-09-10; the per-carrier gate half waits on `23`
+Status: ready-for-human — storage and printing implemented 2026-09-10; the pre-purchase gate waits on the per-carrier observations in `23`
 
 Repo: `polybag`
 
@@ -198,5 +198,72 @@ has been observed. **Split out as `23`** — the gate should be a per-carrier ca
 
 ## Status
 
-`needs-triage` → `ready-for-agent`. The three options are decided, the constraints are
-named, and nothing above needs a purchase to proceed.
+`needs-triage` → `ready-for-agent` → **partly implemented 2026-09-10**. Constraints 1 and 2
+are built and tested; 3 and 4 are not, because the gate they describe needs `23`. See the
+comment of that date.
+
+## Comment, 2026-09-10 — storage and printing are in; the gate is all that is left
+
+Constraints 1 and 2 shipped as specified, and nothing about the decision changed on contact.
+
+**`packages.customs_form_data`, carrier-neutral, beside `label_data`.** `ShipResponse` carries
+`customsFormData`; `markShipped()` writes it, `clearShipping()` nulls it on a void, and
+`PurgePiiCommand` nulls it in the same statement as `label_data`. Only Shopify fills it in so
+far — the column is the home the other three adapters were said to lack, not a claim they now
+use it. `23` is what establishes what they return before anything reads their responses for it.
+
+**Printing follows the established shape exactly.** `PrintRequest` gains `customsForm`;
+`print-label` prints the label through `printLabel()` and then the customs form through
+`printReport()`, and the batch listener interleaves each form after its own label rather than
+collecting them for the end of the run. No new hardware modelling, as the comment above
+predicted.
+
+Three things were decided in the implementation that the issue left open:
+
+**1. `printReport()` now returns whether it printed, rather than swallowing the outcome.** It
+still does not throw — a label that printed must not be lost to a failure on the paper half —
+but a silent `return` could not answer "label printed, customs form did not". The two callers
+that print paperwork on its own ignore the return value, so their behaviour is unchanged.
+
+**2. The redirect still happens when the customs form fails, carrying a warning.** As the
+issue argued: the postage is bought and the label is out, so stranding the operator on the
+ship page would be the worse failure. `printReport()` has already shown what went wrong;
+`showStatusAfterNavigation` carries "The label printed but its customs form did not" to the
+next page. A failed *label* still stays put, which is the existing behaviour — and a label on
+8.5×11 stock (the FedEx `report` orientation) now stays put too, where it used to redirect past
+its own error. That was the intent of the comment in the `catch`; it only ever worked for the
+throwing path.
+
+**3. A customs form Shopify will not hand over does not fail the purchase.** The label
+download stays fatal, because a purchase with no printable label is not a ship. The customs
+form is not: the label is bought and paid for, and the remedy — printing from the Shopify
+admin via `shopify_customs_form_url`, which is still recorded — is the workflow this replaces
+rather than a new problem. So a failed customs download logs a warning and leaves the column
+null.
+
+### A defect found on the way, and fixed: the PII purge has never run
+
+Constraint 2 says `PurgePiiCommand` must null the customs form "alongside `label_data`". It
+could not have: `shipments.city` is the only one of the command's PII fields that landed NOT
+NULL, and the command nulls them all in one `update()`. So every run threw an integrity
+violation on the first eligible shipment and **never reached the packages at all** — neither
+`label_data` nor anything else. The command is scheduled daily in `bootstrap/app.php`, so this
+has been failing quietly for as long as retention has existed, and a purge that cannot run is
+not a retention policy.
+
+Fixed here, because constraint 2 is otherwise notional: `city` is nullable at the database
+only — nothing relaxes about what an import must supply — and `tests/Feature/PurgePiiTest.php`
+covers both that the purge completes and that the customs form goes with the label. Recorded
+separately as [`pii-retention/01`](../../pii-retention/issues/01-purge-pii-has-always-failed-on-a-not-null-city.md),
+since it is not a Shopify issue and has an operational tail: retention has not been applied
+in any deployment yet, so the first run after this deploys will purge a backlog.
+
+### What is left
+
+Constraints 3 and 4 — requiring a report printer before buying a label that needs a customs
+declaration, pushing `reportPrinter` into Livewire state, and the batch skip reason. All of it
+is the gate, and the gate needs `23` to know which carriers return a separate document;
+gating on `requiresCustomsDeclaration()` today would refuse APO/FPO and territory labels on
+workstations that never needed a report printer. Until then a missing report printer stays
+soft: the form does not print and the operator is told so, which is strictly better than the
+status quo of the form not existing.

@@ -88,6 +88,10 @@ class ViewLabelBatch extends ViewRecord
                 'format' => $item->package->label_format ?? $this->record->label_format,
                 'dpi' => $item->package->label_dpi ?? $this->record->label_dpi,
                 'packageId' => $item->package->id,
+                // Printed to the report printer straight after its own label, so
+                // the paperwork stays with the parcel it belongs to rather than
+                // arriving as an unordered stack at the end of the run.
+                'customsForm' => $item->package->customs_form_data,
             ])
             ->values()
             ->toArray();

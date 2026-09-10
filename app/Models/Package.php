@@ -45,6 +45,7 @@ class Package extends Model
         'metadata',
         'carrier_request_payload',
         'label_data',
+        'customs_form_data',
         'label_orientation',
         'label_format',
         'label_dpi',
@@ -430,6 +431,11 @@ class Package extends Model
                     'service_inference_method' => $response->serviceInferenceMethod,
                     'service_ruleset_version' => $response->serviceRulesetVersion,
                     'label_data' => $response->labelData,
+                    // The separately-returned customs document, where the source
+                    // returned one. Stored beside the label rather than fetched on
+                    // demand from a carrier-hosted URL, so printing it does not
+                    // depend on that URL staying fetchable.
+                    'customs_form_data' => $response->customsFormData,
                     'label_orientation' => $response->labelOrientation ?? 'portrait',
                     'label_format' => $response->labelFormat ?? 'pdf',
                     'label_dpi' => $response->labelDpi,
@@ -631,6 +637,7 @@ class Package extends Model
                     'service_ruleset_version' => null,
                     'cost' => null,
                     'label_data' => null,
+                    'customs_form_data' => null,
                     'label_orientation' => null,
                     'label_format' => 'pdf',
                     'label_dpi' => null,
