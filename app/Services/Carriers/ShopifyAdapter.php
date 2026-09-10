@@ -5,6 +5,7 @@ namespace App\Services\Carriers;
 use App\Contracts\BlindPurchaseSource;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\RateRequest;
+use App\DataTransferObjects\Shipping\ServiceInference;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\PackageStatus;
@@ -15,6 +16,7 @@ use App\Exceptions\Carriers\ShopifyLabelPurchaseException;
 use App\Models\CarrierService;
 use App\Models\DataSource;
 use App\Models\Package;
+use App\Services\ServiceInference\ServiceInferrer;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\ShopifyShippingLabelService;
 use Illuminate\Database\Eloquent\Builder;
@@ -324,6 +326,45 @@ class ShopifyAdapter implements BlindPurchaseSource
             return ShipResponse::failure('Shopify bought the label but returned no tracking number.');
         }
 
+        $carrier = self::carrierNameFor($label->trackingCompany ?? $carrierCode);
+
+        // Shopify reports no service, so the only record of what it bought is
+        // the label it produced. Inferred here rather than lazily, because
+        // `PurgePiiCommand` nulls `label_data` after the retention period and
+        // rung 2 would have nothing left to read. Rung 1 survives that, so a
+        // package this leaves `unknown` can still be re-run later by
+        // `app:infer-package-services` under a newer ruleset.
+        //
+        // Inconclusive is an ordinary outcome rather than a fault. A Shopify UPS
+        // label is a wrapped raster with no text layer, so rung 2 cannot read it
+        // and rung 1 answers only where the 1Z service indicator is one the
+        // ruleset has evidence for; a consolidator handoff stops rung 1 outright,
+        // by design, rather than decoding the last mile.
+        //
+        // Wrapped because Shopify has already bought and charged for the label by
+        // this point. Everything below is our own bookkeeping about a purchase
+        // that succeeded, and the ladder is not throw-free -- the ruleset reads
+        // files and decodes JSON, and carrier resolution goes to the database. An
+        // exception escaping here would lose the ShipResponse and leave a package
+        // unshipped against a label the merchant has been billed for, so
+        // inference failing degrades to `unknown` exactly as inference concluding
+        // nothing does.
+        try {
+            $inference = app(ServiceInferrer::class)->inferFrom(
+                $carrier,
+                $label->trackingNumber,
+                $label->labelData,
+            );
+        } catch (\Throwable $e) {
+            logger()->error('Shopify label bought, but service inference failed', [
+                'package_id' => $package->id,
+                'carrier' => $carrier,
+                'error' => $e->getMessage(),
+            ]);
+
+            $inference = ServiceInference::inconclusive('inference failed');
+        }
+
         // Deliberately no cost: Shopify bills the merchant for the label and
         // exposes no price through the API, and a fabricated 0.00 would read as
         // a free label everywhere the cost is reported.
@@ -335,14 +376,18 @@ class ShopifyAdapter implements BlindPurchaseSource
             // ignore preferredRateSelection outright, and it can pick a carrier
             // PolyBag has no account with at all — DHL eCommerce, Canada Post —
             // so the carrier it reports is the only trustworthy record.
-            carrier: self::carrierNameFor($label->trackingCompany ?? $carrierCode),
+            carrier: $carrier,
             // Shopify reports no purchased service, before or after the buy —
             // `ShippingLabel` has no service, service code, rate or price. What
-            // was asked for is kept as the requested preference, which is audit
-            // metadata and not the service value. ADR-0003 decisions 5 and 7.
-            service: null,
+            // the ladder derives from the label is `inferred` and never
+            // `confirmed`; what was asked for is kept as the requested
+            // preference, which is audit metadata and not the service value,
+            // and stays recorded either way. ADR-0003 decisions 5 and 7.
+            service: $inference->service,
             requestedService: $serviceCode === null ? null : $offer->selectionLabel,
-            serviceEvidence: ServiceEvidence::Unknown,
+            serviceEvidence: $inference->isResolved() ? ServiceEvidence::Inferred : ServiceEvidence::Unknown,
+            serviceInferenceMethod: $inference->method,
+            serviceRulesetVersion: $inference->rulesetVersion,
             labelData: $label->labelData,
             labelOrientation: 'portrait',
             labelFormat: $label->labelFormat,

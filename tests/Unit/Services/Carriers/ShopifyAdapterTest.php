@@ -5,6 +5,7 @@ use App\Contracts\CarrierAdapterInterface;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\DataTransferObjects\Shipping\ServiceInference;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
@@ -15,10 +16,30 @@ use App\Models\Carrier;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\Carriers\ShopifyAdapter;
+use App\Services\ServiceInference\ServiceInferrer;
 use Database\Seeders\CarrierSeeder;
 use Illuminate\Support\Facades\Http;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
+
+/**
+ * Synthetic IMpbs, built the way `ServiceInferenceTest` builds them. Named apart
+ * from that file's constants deliberately: these are globals, and Paratest puts
+ * two test files in one worker process often enough that a shared name is a
+ * redeclaration error rather than a rare one.
+ * a real
+ * application identifier and service type code over an all-nines Mailer ID, with
+ * a genuine mod-10 check digit so the validation rung actually runs. STC 001 is
+ * USPS Ground Advantage in the June 2026 appendix; 999 names no product.
+ *
+ * `SHOPIFY_IMPB_UPS_GROUND_SAVER` is not synthetic -- it is the number off a real
+ * Shopify-bought UPS Ground Saver label, kept because the consolidator case
+ * arrives on Shopify's default selection rather than as an edge case.
+ */
+const SHOPIFY_IMPB_GROUND_ADVANTAGE = '9300199999999900000011';
+const SHOPIFY_IMPB_STC_NAMING_NO_PRODUCT = '9299999999999900000036';
+const SHOPIFY_IMPB_UPS_GROUND_SAVER = '92612903368162541515909494';
+const SHOPIFY_UPS_1Z_GROUND_SAVER = '1Z28X87GYW27798425';
 
 beforeEach(function (): void {
     $this->adapter = new ShopifyAdapter;
@@ -481,7 +502,9 @@ it('leaves the service unknown and keeps the selection as a requested preference
 
     Saloon::fake([
         MockResponse::make(purchaseAccepted()),
-        MockResponse::make(purchasePurchased()),
+        // A service type code naming no product, over label bytes with no text
+        // in them: both rungs run and neither concludes.
+        MockResponse::make(purchasePurchased(trackingNumber: SHOPIFY_IMPB_STC_NAMING_NO_PRODUCT)),
     ]);
     Http::fake(['*' => Http::response('LABEL-BYTES')]);
 
@@ -489,6 +512,8 @@ it('leaves the service unknown and keeps the selection as a requested preference
 
     expect($response->service)->toBeNull()
         ->and($response->serviceEvidence)->toBe(ServiceEvidence::Unknown)
+        ->and($response->serviceInferenceMethod)->toBeNull()
+        ->and($response->serviceRulesetVersion)->toBeNull()
         ->and($response->requestedService)->toBe('USPS Ground Advantage');
 
     $package->markShipped($response, $response->postageSource);
@@ -498,6 +523,165 @@ it('leaves the service unknown and keeps the selection as a requested preference
         ->and($package->requested_service)->toBe('USPS Ground Advantage')
         // Nothing to publish outward: a preference is not a purchase.
         ->and($package->confirmedService())->toBeNull();
+});
+
+it('infers the service from the label at purchase time, and records how it was inferred', function (): void {
+    seedShopifyCarrierServices();
+    $package = shopifyPackage();
+
+    Saloon::fake([
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased(trackingNumber: SHOPIFY_IMPB_GROUND_ADVANTAGE)),
+    ]);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    $response = $this->adapter->createShipment(shopifyShipRequest($package, 'usps:usps_ground_advantage'));
+
+    // Shopify reported no service; the IMpb's service type code did.
+    expect($response->service)->toBe('USPS Ground Advantage')
+        ->and($response->serviceEvidence)->toBe(ServiceEvidence::Inferred)
+        ->and($response->serviceInferenceMethod)->toBe('usps-impb-stc')
+        ->and($response->serviceRulesetVersion)->not->toBeEmpty()
+        // The preference survives beside the inference rather than being
+        // replaced by it: what was asked for and what was derived are different
+        // facts, and a selection Shopify ignored has to stay visible.
+        ->and($response->requestedService)->toBe('USPS Ground Advantage');
+
+    $package->markShipped($response, $response->postageSource);
+
+    expect($package->refresh()->service)->toBe('USPS Ground Advantage')
+        ->and($package->service_evidence)->toBe(ServiceEvidence::Inferred)
+        ->and($package->service_inference_method)->toBe('usps-impb-stc')
+        ->and($package->service_ruleset_version)->not->toBeEmpty()
+        // ADR-0003 decision 7: however good the inference, it is ours and never
+        // the postage source's, so nothing publishes it outward.
+        ->and($package->confirmedService())->toBeNull();
+});
+
+it('reads the label bytes at purchase time, before the retention period can null them', function (): void {
+    seedShopifyCarrierServices();
+    Carrier::firstOrCreate(['name' => 'DHL eCommerce'], ['active' => true]);
+    $package = shopifyPackage();
+
+    Saloon::fake([
+        MockResponse::make(purchaseAccepted()),
+        // A tracking number the first rung cannot read, so the label is the
+        // only thing left that can answer. The fixture stands in for label
+        // bytes carrying readable text -- what is under test is that the hook
+        // reads `label_data` during the purchase, not the label's format.
+        MockResponse::make(purchasePurchased(company: 'DHL eCommerce', trackingNumber: SHOPIFY_IMPB_STC_NAMING_NO_PRODUCT)),
+    ]);
+    Http::fake(['*' => Http::response(file_get_contents(__DIR__.'/../../../Fixtures/Labels/dhl-ecommerce-ground.zpl'))]);
+
+    $response = $this->adapter->createShipment(shopifyShipRequest($package));
+
+    expect($response->service)->toBe('DHL SmartMail Parcel Ground')
+        ->and($response->serviceEvidence)->toBe(ServiceEvidence::Inferred)
+        ->and($response->serviceInferenceMethod)->toStartWith('label-text');
+});
+
+it('declines the IMpb on a Shopify UPS label rather than decoding the last mile', function (): void {
+    seedShopifyCarrierServices();
+    Carrier::firstOrCreate(['name' => 'UPS'], ['active' => true]);
+    $package = shopifyPackage();
+
+    Saloon::fake([
+        MockResponse::make(purchaseAccepted()),
+        // The real Ground Saver label Shopify's `auto` selection bought: a
+        // genuine 26-digit IMpb whose service type code names the USPS last
+        // mile, not the UPS service the customer bought. Decoding it would be a
+        // validated wrong answer, so the consolidator guard stops rung 1.
+        MockResponse::make(purchasePurchased(company: 'UPS', trackingNumber: SHOPIFY_IMPB_UPS_GROUND_SAVER)),
+    ]);
+    // And rung 2 has nothing to read: UPS's API produces GIF or ZPL and never
+    // PDF, so a Shopify UPS label is a wrapped raster with no text layer at all.
+    Http::fake(['*' => Http::response('%PDF-1.4 no text layer')]);
+
+    $response = $this->adapter->createShipment(shopifyShipRequest($package));
+
+    expect($response->success)->toBeTrue()
+        ->and($response->service)->toBeNull()
+        ->and($response->serviceEvidence)->toBe(ServiceEvidence::Unknown)
+        ->and($response->serviceInferenceMethod)->toBeNull();
+});
+
+it('still returns the bought label when inference itself throws', function (): void {
+    // Shopify has already bought and charged for the label by the time the
+    // ladder runs. Losing the ShipResponse here would leave the package unshipped
+    // against postage the merchant has paid for, so a broken ruleset has to cost
+    // the service value and nothing else.
+    seedShopifyCarrierServices();
+    $package = shopifyPackage();
+
+    app()->bind(ServiceInferrer::class, fn () => new class extends ServiceInferrer
+    {
+        public function __construct() {}
+
+        public function inferFrom(?string $carrierName, ?string $trackingNumber, ?string $labelData): ServiceInference
+        {
+            throw new RuntimeException('ruleset table is missing');
+        }
+    });
+
+    Saloon::fake([
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased(trackingNumber: SHOPIFY_IMPB_GROUND_ADVANTAGE)),
+    ]);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    $response = $this->adapter->createShipment(shopifyShipRequest($package));
+
+    expect($response->success)->toBeTrue()
+        ->and($response->trackingNumber)->toBe(SHOPIFY_IMPB_GROUND_ADVANTAGE)
+        ->and($response->service)->toBeNull()
+        ->and($response->serviceEvidence)->toBe(ServiceEvidence::Unknown)
+        ->and($response->serviceInferenceMethod)->toBeNull();
+
+    // And the package still ships, which is the outcome that actually matters.
+    $package->markShipped($response, $response->postageSource);
+
+    expect($package->refresh()->status)->toBe(PackageStatus::Shipped)
+        ->and($package->tracking_number)->toBe(SHOPIFY_IMPB_GROUND_ADVANTAGE);
+});
+
+it('infers Ground Saver from the 1Z Shopify actually reports for a UPS label', function (): void {
+    seedShopifyCarrierServices();
+    Carrier::firstOrCreate(['name' => 'UPS'], ['active' => true]);
+    $package = shopifyPackage();
+
+    Saloon::fake([
+        MockResponse::make(purchaseAccepted()),
+        // `trackingInfo.number` carries the 1Z, not the IMpb also printed on the
+        // label -- so the rung that can answer is the one that gets the number.
+        MockResponse::make(purchasePurchased(company: 'UPS', trackingNumber: SHOPIFY_UPS_1Z_GROUND_SAVER)),
+    ]);
+    // Still a raster with no text in it. Rung 1 is the whole ladder here.
+    Http::fake(['*' => Http::response('%PDF-1.4 no text layer')]);
+
+    $response = $this->adapter->createShipment(shopifyShipRequest($package));
+
+    expect($response->service)->toBe('UPS Ground Saver')
+        ->and($response->serviceEvidence)->toBe(ServiceEvidence::Inferred)
+        ->and($response->serviceInferenceMethod)->toBe('ups-1z-service-indicator');
+});
+
+it('never lets an inference overwrite a service the postage source confirmed', function (): void {
+    // The ladder only ever runs where Shopify reported nothing. A package that
+    // already carries a confirmed service is one our own carrier account sold,
+    // and `Package::recordInferredService()` refuses it -- asserted here so the
+    // purchase-time hook cannot become a second way in.
+    $package = Package::factory()->create([
+        'service' => 'Priority Mail',
+        'service_evidence' => ServiceEvidence::Confirmed,
+    ]);
+
+    $changed = $package->recordInferredService(
+        ServiceInference::resolved('USPS Ground Advantage', 'usps-impb-stc', '2099-01-01')
+    );
+
+    expect($changed)->toBeFalse()
+        ->and($package->refresh()->service)->toBe('Priority Mail')
+        ->and($package->service_evidence)->toBe(ServiceEvidence::Confirmed);
 });
 
 it('records no requested preference when the rate was left to Shopify', function (): void {
@@ -943,7 +1127,7 @@ function purchaseAccepted(): array
 }
 
 /** @return array<string, mixed> */
-function purchasePurchased(string $format = 'PDF', ?string $company = 'USPS'): array
+function purchasePurchased(string $format = 'PDF', ?string $company = 'USPS', string $trackingNumber = '9400111899223197428490'): array
 {
     return [
         'data' => [
@@ -956,8 +1140,8 @@ function purchasePurchased(string $format = 'PDF', ?string $company = 'USPS'): a
                     'id' => 'gid://shopify/ShippingLabel/1',
                     'trackingInfo' => [
                         'company' => $company,
-                        'number' => '9400111899223197428490',
-                        'url' => 'https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223197428490',
+                        'number' => $trackingNumber,
+                        'url' => 'https://tools.usps.com/go/TrackConfirmAction?tLabels='.$trackingNumber,
                     ],
                     'shippingDocuments' => [[
                         'documentType' => 'LABEL',
