@@ -62,7 +62,7 @@ class ShippingMethodSeeder extends Seeder
         $internationalEconomy->carrierServices()->syncWithoutDetaching(
             CarrierService::whereIn('service_code', [
                 'PRIORITY_MAIL_INTERNATIONAL',
-                'FEDEX_INTERNATIONAL_ECONOMY',
+                'INTERNATIONAL_ECONOMY',
             ])->pluck('id')
         );
 

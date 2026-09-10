@@ -106,7 +106,7 @@ class CarrierServiceSpecialServiceSeeder extends Seeder
                     'FEDEX_2_DAY_AM' => null,
                     'FEDEX_EXPRESS_SAVER' => null,
                     'FEDEX_INTERNATIONAL_PRIORITY' => null,
-                    'FEDEX_INTERNATIONAL_ECONOMY' => null,
+                    'INTERNATIONAL_ECONOMY' => null,
                 ],
             ],
 
