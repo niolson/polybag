@@ -1,6 +1,6 @@
 # International Shopify labels return a customs form PolyBag cannot print
 
-Status: ready-for-human — storage and printing implemented 2026-09-10; the pre-purchase gate waits on the per-carrier observations in `23`
+Status: ready-for-human — storage and printing implemented 2026-09-10, now with two carriers feeding them; the pre-purchase gate waits on `23`'s FedEx and Amazon rows
 
 Repo: `polybag`
 
@@ -189,12 +189,33 @@ and the per-item counter to separate "label printed, invoice did not" from a fai
 
 ## What this does not settle
 
-`requiresCustomsDeclaration()` is a **superset** of "a separate document comes back". USPS
-is understood to fuse the customs form into the label PDF as extra pages rather than
-returning a second document; if so, gating purchase on the predicate would block APO/FPO
-and territory shipments that never needed a report printer at all. Only Shopify's behaviour
-has been observed. **Split out as `23`** — the gate should be a per-carrier capability, and
-`23` is what fills the capability in. Storage and printing do not wait on it.
+`requiresCustomsDeclaration()` is a **superset** of "a separate document comes back".
+**Split out as `23`** — the gate should be a per-carrier capability, and `23` is what fills
+the capability in. Storage and printing do not wait on it.
+
+`23` answered USPS on 2026-09-10, and it answered in the direction that makes this a real
+problem rather than a theoretical one: USPS fuses, in both label formats, so gating purchase
+on the predicate **would** block USPS international on a workstation with only a label
+printer — for three 4×6 pages that print on the thermal path it already has. The gate cannot
+be built on the predicate alone.
+
+The other three rows were checked the same day and reshape the gate further. For **UPS and
+FedEx no separate document came back because none was requested** — UPS's `InternationalForms`
+was sent at the wrong nesting level and ignored (`24`), and no FedEx request sends
+`shippingDocumentSpecification` at all. That observation had a short shelf life, exactly as
+predicted: **`24` was fixed the same day, and UPS immediately returned one.**
+
+So UPS is now the second carrier feeding this issue's storage and printing, and the first
+that is not Shopify: `ShipmentResults.Form.Image`, a PDF, `Code 01`, read into
+`customsFormData` and stored, printed and purged by the paths already built here. It also
+settles the question this issue was split over — USPS fuses and UPS does not, so the gate
+genuinely is per-carrier rather than one predicate.
+
+**Amazon** stays unobserved, though `labelFrom()` already selects `packageDocuments` by
+type, so reading a second type is small once a purchase exists. **FedEx** returns nothing
+until a request asks for it. The capability must still record *why* a carrier returns
+nothing, because FedEx's "nothing" is the kind that changes the day someone adds
+`shippingDocumentSpecification`.
 
 ## Status
 
