@@ -28,6 +28,8 @@ class ServiceInferrer
 {
     public const METHOD_USPS_STC = 'usps-impb-stc';
 
+    public const METHOD_UPS_1Z = 'ups-1z-service-indicator';
+
     public const METHOD_LABEL_TEXT = 'label-text';
 
     public function __construct(
@@ -37,23 +39,43 @@ class ServiceInferrer
     ) {}
 
     /**
-     * Run the ladder over a package without writing anything.
+     * Run the ladder over a saved package without writing anything.
      */
     public function infer(Package $package): ServiceInference
     {
-        $carrier = $this->canonicalCarrier($package);
+        return $this->inferFrom(
+            $package->carrierOfRecordName(),
+            $package->tracking_number,
+            $package->label_data,
+        );
+    }
+
+    /**
+     * The same ladder over the three values it actually reads, for a package
+     * that does not exist yet.
+     *
+     * A postage source that reports no service has to be inferred from at
+     * purchase time, before the ShipResponse is applied -- `PurgePiiCommand`
+     * nulls `label_data` after the retention period, so rung 2 has a shelf life
+     * and a package inferred later may have no label left to read. At that
+     * moment the label bytes and the tracking number exist only in the response,
+     * so the ladder has to be reachable without a persisted package.
+     */
+    public function inferFrom(?string $carrierName, ?string $trackingNumber, ?string $labelData): ServiceInference
+    {
+        $carrier = $this->canonicalCarrier($carrierName);
 
         if ($carrier === null) {
             return ServiceInference::inconclusive('no carrier of record');
         }
 
-        $fromTrackingNumber = $this->fromTrackingNumber($package, $carrier);
+        $fromTrackingNumber = $this->fromTrackingNumber($trackingNumber, $carrier);
 
         if ($fromTrackingNumber->isResolved()) {
             return $fromTrackingNumber;
         }
 
-        $fromLabel = $this->fromLabelText($package, $carrier);
+        $fromLabel = $this->fromLabelText($labelData, $carrier);
 
         if ($fromLabel->isResolved()) {
             return $fromLabel;
@@ -72,9 +94,51 @@ class ServiceInferrer
      * never touches `tracking_number`, so this is the only rung that can be
      * re-run over historical packages once a ruleset improves.
      */
-    private function fromTrackingNumber(Package $package, string $carrier): ServiceInference
+    private function fromTrackingNumber(?string $trackingNumber, string $carrier): ServiceInference
     {
-        $impb = ImpbTrackingNumber::tryParse($package->tracking_number);
+        $ups = Ups1zTrackingNumber::tryParse($trackingNumber);
+
+        if ($ups instanceof Ups1zTrackingNumber) {
+            return $this->fromUps1z($ups, $carrier);
+        }
+
+        return $this->fromImpb($trackingNumber, $carrier);
+    }
+
+    /**
+     * A UPS 1Z, whose service level indicator sits in bytes 9 and 10.
+     *
+     * The indicator table is deliberately partial -- it holds only pairs we have
+     * observed, so contract, regional and international codes miss and fall
+     * through. A miss is the expected outcome, not a defect.
+     */
+    private function fromUps1z(Ups1zTrackingNumber $ups, string $carrier): ServiceInference
+    {
+        // The same disagreement test rung 1 applies to an IMpb, in the other
+        // direction. A 1Z is UPS's own number, so a 1Z reported under a carrier
+        // that is not UPS is a number and a carrier of record that cannot both
+        // be right, and guessing which one is wrong is not this rung's job.
+        if (CarrierAlias::lookupKey($carrier) !== 'ups') {
+            return ServiceInference::inconclusive(
+                "1Z number under carrier {$carrier}: number and carrier of record disagree"
+            );
+        }
+
+        $service = $this->ruleset->upsServiceForServiceIndicator($ups->serviceIndicator);
+
+        if ($service === null) {
+            return ServiceInference::inconclusive("service indicator {$ups->serviceIndicator} names no service");
+        }
+
+        return ServiceInference::resolved($service, self::METHOD_UPS_1Z, $this->ruleset->version());
+    }
+
+    /**
+     * A USPS IMpb, whose Service Type Code names the mail class.
+     */
+    private function fromImpb(?string $trackingNumber, string $carrier): ServiceInference
+    {
+        $impb = ImpbTrackingNumber::tryParse($trackingNumber);
 
         if (! $impb instanceof ImpbTrackingNumber) {
             return ServiceInference::inconclusive('not a valid IMpb');
@@ -116,7 +180,7 @@ class ServiceInferrer
      * the first service-looking string is wrong in the same direction rung 1's
      * guard exists to prevent.
      */
-    private function fromLabelText(Package $package, string $carrier): ServiceInference
+    private function fromLabelText(?string $labelData, string $carrier): ServiceInference
     {
         $tokens = $this->ruleset->labelTokensFor($carrier);
 
@@ -124,8 +188,8 @@ class ServiceInferrer
             return ServiceInference::inconclusive("no label tokens for carrier {$carrier}");
         }
 
-        $format = $this->extractor->formatOf($package->label_data);
-        $fields = $this->extractor->extract($package->label_data);
+        $format = $this->extractor->formatOf($labelData);
+        $fields = $this->extractor->extract($labelData);
 
         if ($fields === []) {
             return ServiceInference::inconclusive('no readable label text');
@@ -174,10 +238,8 @@ class ServiceInferrer
      * Falls back to the raw value, because ADR-0003 decision 8 makes an unmapped
      * carrier a valid terminal state rather than a reason to stop.
      */
-    private function canonicalCarrier(Package $package): ?string
+    private function canonicalCarrier(?string $name): ?string
     {
-        $name = $package->carrierOfRecordName();
-
         if (blank($name)) {
             return null;
         }

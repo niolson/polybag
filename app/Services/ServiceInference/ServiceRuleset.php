@@ -59,6 +59,19 @@ class ServiceRuleset
     }
 
     /**
+     * The UPS service a 1Z service level indicator names, or null if it names none.
+     *
+     * Null is the common case rather than the exceptional one. The table holds only
+     * indicators backed by observed tracking-number/service pairs, so contract,
+     * regional and international codes fall through here and let rung 2 answer --
+     * which is the same discipline the USPS Service Type Codes follow.
+     */
+    public function upsServiceForServiceIndicator(string $indicator): ?string
+    {
+        return $this->table('ups-1z-service-indicator')['indicators'][strtoupper($indicator)] ?? null;
+    }
+
+    /**
      * Service tokens printed on a carrier's labels, keyed by the token as printed.
      *
      * Matched whole against a label field rather than searched for within one, so
@@ -87,7 +100,7 @@ class ServiceRuleset
 
             $directory = $this->directory ?? resource_path('data/service-inference');
 
-            foreach (['ruleset', 'usps-impb-stc', 'label-tokens'] as $table) {
+            foreach (['ruleset', 'usps-impb-stc', 'ups-1z-service-indicator', 'label-tokens'] as $table) {
                 $path = "{$directory}/{$table}.json";
 
                 $this->tables[$table] = json_decode(
