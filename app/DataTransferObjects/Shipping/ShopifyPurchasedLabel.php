@@ -17,9 +17,14 @@ readonly class ShopifyPurchasedLabel
         public ?string $trackingCompany,
         public ?string $labelData,
         public string $labelFormat,
-        // The customs form is a separate document Shopify hosts. PolyBag has
-        // nowhere to print a second document from, so the URL is kept for an
-        // operator to open rather than the file being downloaded and dropped.
+        // An international purchase returns the customs form as a second
+        // document — observed as a three-page Letter PDF commercial invoice,
+        // which is why it prints to the report printer and not to the 4x6
+        // thermal path the label takes.
+        public ?string $customsFormData = null,
+        // Kept beside the downloaded document, not instead of it: the operator
+        // can still print from the Shopify admin when the download failed, which
+        // is deliberately not treated as a failed purchase.
         public ?string $customsFormUrl = null,
         // Kept so a label that was bought but could not be downloaded is still
         // reachable — by a retry, or by hand from the Shopify admin.

@@ -14,6 +14,12 @@ readonly class PrintRequest
         public ?int $dpi,
         /** Package this label belongs to, so the browser can report the print back. */
         public ?int $packageId = null,
+        /**
+         * Base64 of a customs document to print after the label, where the source
+         * returned one separately. Letter-sized paper, so it goes to the report
+         * printer rather than through the 4x6 label path.
+         */
+        public ?string $customsForm = null,
     ) {}
 
     public static function fromShipResponse(ShipResponse $response, ?Package $package = null): self
@@ -24,6 +30,7 @@ readonly class PrintRequest
             format: $response->labelFormat ?? 'pdf',
             dpi: $response->labelDpi,
             packageId: $package?->id,
+            customsForm: $response->customsFormData,
         );
     }
 
@@ -35,6 +42,7 @@ readonly class PrintRequest
             format: $package->label_format ?? 'pdf',
             dpi: $package->label_dpi,
             packageId: $package->id,
+            customsForm: $package->customs_form_data,
         );
     }
 }

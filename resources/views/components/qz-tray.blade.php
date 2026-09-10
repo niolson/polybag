@@ -230,13 +230,17 @@
             }
         }
 
-        // Print report (8.5x11) via QZ Tray
+        // Print report (8.5x11) via QZ Tray.
+        // Returns whether it printed. Reports rather than throws, because the
+        // callers that print paperwork alongside a label must not lose the label
+        // print to a failure on the paper half — but they do have to be able to
+        // tell the difference, so the outcome cannot be silent either.
         async function printReport(base64Data, format = 'pdf') {
             const printer = getReportPrinter();
 
             if (!printer) {
                 showStatus('No report printer configured. Go to Device Settings.', 'error');
-                return;
+                return false;
             }
 
             try {
@@ -264,9 +268,13 @@
 
                 await qz.print(config, data);
                 statusBanner.classList.add('hidden');
+
+                return true;
             } catch (error) {
                 console.error('Report print error:', error);
                 showStatus(`Report print failed: ${error.message || 'Unknown error'}`, 'error');
+
+                return false;
             }
         }
 
@@ -306,25 +314,37 @@
         // Listen for print events from Livewire
         document.addEventListener('livewire:init', () => {
             Livewire.on('print-label', async (event) => {
+                // Survive the redirect below, which the ship flow always sets.
+                const warn = (message) => event.redirectTo
+                    ? showStatusAfterNavigation(message, 'warning')
+                    : showStatus(message, 'warning');
+
                 try {
                     if (event.orientation === 'report') {
-                        await printReport(event.label, event.format || 'pdf');
+                        // A label on 8.5x11 stock, which is the report printer's path already.
+                        if (!await printReport(event.label, event.format || 'pdf')) {
+                            return;
+                        }
                     } else {
                         await printLabel(event.label, event.orientation || 'portrait', event.format || 'pdf', event.dpi || null);
 
                         if (!await acknowledgePrint(event.packageId)) {
-                            const warning = 'Label printed, but recording it failed. It may still show as unprinted.';
-
-                            // Survive the redirect below, which the ship flow always sets.
-                            event.redirectTo
-                                ? showStatusAfterNavigation(warning, 'warning')
-                                : showStatus(warning, 'warning');
+                            warn('Label printed, but recording it failed. It may still show as unprinted.');
                         }
                     }
                 } catch (error) {
                     // printLabel/printReport already showed the error banner. Stay on the
                     // page so the operator sees it instead of following redirectTo.
                     return;
+                }
+
+                // The customs form follows the label it belongs to, onto paper. A
+                // failure here is deliberately not a failure of the print: the
+                // postage is bought and the label is out, so the redirect still
+                // happens and the warning travels with it. printReport has already
+                // shown what went wrong on this page.
+                if (event.customsForm && !await printReport(event.customsForm)) {
+                    warn('The label printed but its customs form did not. Reprint the package before the parcel leaves.');
                 }
 
                 if (event.redirectTo) {
@@ -345,6 +365,7 @@
                 let printed = 0;
                 let failed = 0;
                 let unrecorded = 0;
+                let customsFailed = 0;
 
                 for (const item of labels) {
                     try {
@@ -353,6 +374,15 @@
 
                         if (!await acknowledgePrint(item.packageId)) {
                             unrecorded++;
+                        }
+
+                        // Interleaved rather than collected for the end of the run, so
+                        // each parcel's paperwork comes off the printer beside its own
+                        // label. Counted apart from `failed`: this label did print, and
+                        // an operator reading the summary has to be able to tell the two
+                        // apart to know what to do about it.
+                        if (item.customsForm && !await printReport(item.customsForm)) {
+                            customsFailed++;
                         }
                     } catch (error) {
                         console.error('Batch print error:', error);
@@ -370,7 +400,11 @@
                     msg += `. ${unrecorded} could not be recorded as printed`;
                 }
 
-                showStatus(msg, (failed > 0 || unrecorded > 0) ? 'warning' : 'success');
+                if (customsFailed > 0) {
+                    msg += `. ${customsFailed} customs form${customsFailed === 1 ? '' : 's'} did not print`;
+                }
+
+                showStatus(msg, (failed > 0 || unrecorded > 0 || customsFailed > 0) ? 'warning' : 'success');
 
                 // Let the page pick up the printed counts recorded during the loop.
                 Livewire.dispatch('batch-print-finished');

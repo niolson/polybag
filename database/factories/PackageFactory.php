@@ -31,6 +31,7 @@ class PackageFactory extends Factory
             'service' => null,
             'metadata' => null,
             'label_data' => null,
+            'customs_form_data' => null,
             'weight' => fake()->randomFloat(2, 0.5, 50),
             'height' => fake()->randomFloat(2, 2, 20),
             'width' => fake()->randomFloat(2, 2, 20),
@@ -67,6 +68,19 @@ class PackageFactory extends Factory
             'shipped_at' => now(),
             'ship_date' => today(),
             'shipped_by_user_id' => User::factory(),
+        ]);
+    }
+
+    /**
+     * A shipped package whose purchase also returned a customs document.
+     *
+     * What an international purchase looks like once stored: the label on its own
+     * for the thermal printer, and a separate document for the report printer.
+     */
+    public function withCustomsForm(): static
+    {
+        return $this->shipped()->state(fn () => [
+            'customs_form_data' => base64_encode('mock-customs-form-pdf'),
         ]);
     }
 

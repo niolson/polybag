@@ -73,6 +73,12 @@ trait PrintsLabels
             'packageId' => $request->packageId,
         ];
 
+        // Only sent where there is one, so the listener can tell "no customs
+        // document" from "a customs document that did not print".
+        if ($request->customsForm !== null) {
+            $params['customsForm'] = $request->customsForm;
+        }
+
         if ($redirectTo !== null) {
             $params['redirectTo'] = $redirectTo;
         }

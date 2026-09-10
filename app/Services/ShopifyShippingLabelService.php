@@ -1024,9 +1024,37 @@ class ShopifyShippingLabelService
             // download is a 4x6 PDF whatever that setting says. PDF is what a
             // label with no stated format has to be.
             labelFormat: strtolower((string) ($labelDocument['format'] ?? 'pdf')),
+            customsFormData: $this->downloadCustomsForm($customsDocument['url'] ?? null),
             customsFormUrl: $customsDocument['url'] ?? null,
             labelDocumentUrl: $labelDocument['url'] ?? null,
         );
+    }
+
+    /**
+     * Download the customs form, or give up on it without losing the purchase.
+     *
+     * Unlike the label, a failure here is not fatal. The label is bought, paid
+     * for and in hand; refusing the purchase over the second document would
+     * leave a package unshipped against postage the merchant has been billed
+     * for, when the remedy — printing the form from the Shopify admin, which is
+     * what `shopify_customs_form_url` is kept for — is the workflow this
+     * replaces rather than a new problem.
+     */
+    private function downloadCustomsForm(?string $url): ?string
+    {
+        if (! $url) {
+            return null;
+        }
+
+        try {
+            return $this->download($url);
+        } catch (\Throwable $e) {
+            logger()->warning('Shopify label bought, but its customs form could not be downloaded', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
     }
 
     private function download(?string $url): ?string

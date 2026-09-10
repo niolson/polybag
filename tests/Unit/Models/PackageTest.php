@@ -120,6 +120,32 @@ it('records a direct purchase as bought on the carrier account', function (): vo
         ->and($package->postage_data_source_id)->toBeNull();
 });
 
+it('stores a customs document the purchase returned beside the label', function (): void {
+    $package = Package::factory()->create();
+
+    $package->markShipped(new ShipResponse(
+        success: true,
+        trackingNumber: '9400111899223456789012',
+        carrier: 'USPS',
+        service: 'USPS_GROUND_ADVANTAGE',
+        labelData: base64_encode('label'),
+        customsFormData: base64_encode('commercial-invoice'),
+    ), PostageSource::CarrierAccount);
+
+    expect(base64_decode($package->refresh()->customs_form_data))->toBe('commercial-invoice');
+});
+
+it('clears the customs document when the label is voided', function (): void {
+    // A commercial invoice names both parties and their tax IDs. A voided label
+    // must not leave one behind on a package that is going to be shipped again.
+    $package = Package::factory()->withCustomsForm()->create();
+
+    $package->clearShipping();
+
+    expect($package->refresh()->customs_form_data)->toBeNull()
+        ->and($package->label_data)->toBeNull();
+});
+
 it('records a sales-channel purchase against the data source that sold the postage', function (): void {
     $package = Package::factory()->create();
     $dataSource = DataSource::factory()->create();

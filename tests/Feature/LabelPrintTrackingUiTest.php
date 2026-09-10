@@ -144,6 +144,60 @@ it('includes the package id when printing a single label so the browser can repo
         );
 });
 
+it('sends the customs form alongside the label it belongs to', function (): void {
+    $package = Package::factory()->withCustomsForm()->create(['shipped_by_user_id' => auth()->id()]);
+
+    Livewire::test(ListPackages::class)
+        ->callAction(TestAction::make('reprint')->table($package))
+        ->assertDispatched(
+            'print-label',
+            fn (string $event, array $params): bool => $params['customsForm'] === $package->customs_form_data,
+        );
+});
+
+it('sends no customs form for a package that has none', function (): void {
+    // Absent rather than null, so the browser can tell "nothing to print" from
+    // "a customs form that failed to print".
+    $package = Package::factory()->shipped()->create(['shipped_by_user_id' => auth()->id()]);
+
+    Livewire::test(ListPackages::class)
+        ->callAction(TestAction::make('reprint')->table($package))
+        ->assertDispatched(
+            'print-label',
+            fn (string $event, array $params): bool => ! array_key_exists('customsForm', $params),
+        );
+});
+
+it('interleaves each customs form with its own label in a batch print', function (): void {
+    $batch = LabelBatch::factory()->create([
+        'status' => LabelBatchStatus::Completed,
+        'total_shipments' => 2,
+        'successful_shipments' => 2,
+    ]);
+
+    $domestic = Package::factory()->shipped()->create(['label_printed_at' => null]);
+    $international = Package::factory()->withCustomsForm()->create(['label_printed_at' => null]);
+
+    foreach ([$domestic, $international] as $package) {
+        LabelBatchItem::factory()->success()->create([
+            'label_batch_id' => $batch->id,
+            'package_id' => $package->id,
+        ]);
+    }
+
+    Livewire::test(ViewLabelBatch::class, ['record' => $batch->id])
+        ->callAction(TestAction::make('printUnprintedLabels'))
+        ->assertDispatched(
+            'print-batch-labels',
+            fn (string $event, array $params): bool => collect($params['labels'])
+                ->mapWithKeys(fn (array $label): array => [$label['packageId'] => $label['customsForm']])
+                ->all() === [
+                    $domestic->id => null,
+                    $international->id => $international->customs_form_data,
+                ],
+        );
+});
+
 it('refuses to print a label the user is not allowed to reprint', function (): void {
     $this->actingAs(User::factory()->create(['role' => Role::User]));
 

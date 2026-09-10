@@ -290,6 +290,70 @@ it('buys a label and reports the format Shopify chose', function (string $shopif
     'ZPL' => ['ZPL', 'zpl'],
 ]);
 
+it('downloads the customs form an international purchase returns as a second document', function (): void {
+    seedShopifyCarrierServices();
+    $package = shopifyPackage();
+
+    Saloon::fake([
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased(withCustomsForm: true)),
+    ]);
+    Http::fake([
+        '*/customs/*' => Http::response('COMMERCIAL-INVOICE'),
+        '*' => Http::response('LABEL-BYTES'),
+    ]);
+
+    $response = $this->adapter->createShipment(shopifyShipRequest($package));
+
+    // The document, not just a link to it: printing it must not depend on a
+    // Shopify-hosted URL staying fetchable.
+    expect(base64_decode($response->customsFormData))->toBe('COMMERCIAL-INVOICE')
+        ->and($response->metadata['shopify_customs_form_url'])->toBe('https://cdn.shopify.test/customs/1.pdf');
+
+    $package->markShipped($response, $response->postageSource);
+
+    expect(base64_decode($package->refresh()->customs_form_data))->toBe('COMMERCIAL-INVOICE');
+});
+
+it('keeps a purchase whose customs form could not be downloaded', function (): void {
+    seedShopifyCarrierServices();
+    $package = shopifyPackage();
+
+    Saloon::fake([
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased(withCustomsForm: true)),
+    ]);
+    Http::fake([
+        '*/customs/*' => Http::response('gone', 500),
+        '*' => Http::response('LABEL-BYTES'),
+    ]);
+
+    $response = $this->adapter->createShipment(shopifyShipRequest($package));
+
+    // Unlike the label, the paper half is not worth failing a purchase Shopify
+    // has already charged for — the URL stays recorded so the form can be
+    // printed from the Shopify admin instead.
+    expect($response->success)->toBeTrue()
+        ->and($response->customsFormData)->toBeNull()
+        ->and($response->metadata['shopify_customs_form_url'])->toBe('https://cdn.shopify.test/customs/1.pdf');
+});
+
+it('leaves the customs form empty for a purchase that returned no second document', function (): void {
+    seedShopifyCarrierServices();
+    $package = shopifyPackage();
+
+    Saloon::fake([
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased()),
+    ]);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    $response = $this->adapter->createShipment(shopifyShipRequest($package));
+
+    expect($response->success)->toBeTrue()
+        ->and($response->customsFormData)->toBeNull();
+});
+
 it('records no cost, because Shopify never reports what a label cost', function (): void {
     seedShopifyCarrierServices();
     $package = shopifyPackage();
@@ -1127,8 +1191,26 @@ function purchaseAccepted(): array
 }
 
 /** @return array<string, mixed> */
-function purchasePurchased(string $format = 'PDF', ?string $company = 'USPS', string $trackingNumber = '9400111899223197428490'): array
-{
+function purchasePurchased(
+    string $format = 'PDF',
+    ?string $company = 'USPS',
+    string $trackingNumber = '9400111899223197428490',
+    bool $withCustomsForm = false,
+): array {
+    $labelDocument = [
+        'documentType' => 'LABEL',
+        'format' => $format,
+        'url' => 'https://cdn.shopify.test/labels/1.'.strtolower($format),
+    ];
+
+    // An international purchase returns the customs form as a document of its
+    // own: a Letter-sized commercial invoice, not pages appended to the label.
+    $customsDocument = [
+        'documentType' => 'CUSTOMS_FORM',
+        'format' => 'PDF',
+        'url' => 'https://cdn.shopify.test/customs/1.pdf',
+    ];
+
     return [
         'data' => [
             'node' => [
@@ -1143,11 +1225,9 @@ function purchasePurchased(string $format = 'PDF', ?string $company = 'USPS', st
                         'number' => $trackingNumber,
                         'url' => 'https://tools.usps.com/go/TrackConfirmAction?tLabels='.$trackingNumber,
                     ],
-                    'shippingDocuments' => [[
-                        'documentType' => 'LABEL',
-                        'format' => $format,
-                        'url' => 'https://cdn.shopify.test/labels/1.'.strtolower($format),
-                    ]],
+                    'shippingDocuments' => $withCustomsForm
+                        ? [$labelDocument, $customsDocument]
+                        : [$labelDocument],
                 ]],
             ],
         ],

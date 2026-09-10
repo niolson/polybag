@@ -117,11 +117,14 @@ class PurgePiiCommand extends Command
 
         Shipment::whereIn('id', $shipmentIds)->update($nullFields);
 
-        // Null out label_data on associated packages (contains embedded PII)
+        // Null out the documents on associated packages (they carry embedded PII).
+        // The customs form goes with the label: a commercial invoice names both
+        // parties, their addresses, and their tax and EORI numbers, so keeping it
+        // after the label is gone would leave the purge half-done.
         DB::table('packages')
             ->whereIn('shipment_id', $shipmentIds)
-            ->whereNotNull('label_data')
-            ->update(['label_data' => null]);
+            ->where(fn ($q) => $q->whereNotNull('label_data')->orWhereNotNull('customs_form_data'))
+            ->update(['label_data' => null, 'customs_form_data' => null]);
 
         return $count;
     }
