@@ -58,6 +58,7 @@ readonly class ShipResponse
         ?CarbonImmutable $shipDate = null,
         array $appliedServices = [],
         ?int $carrierAccountId = null,
+        ?string $customsFormData = null,
     ): self {
         return new self(
             success: true,
@@ -72,6 +73,7 @@ readonly class ShipResponse
             shipDate: $shipDate,
             appliedServices: $appliedServices,
             carrierAccountId: $carrierAccountId,
+            customsFormData: $customsFormData,
         );
     }
 
