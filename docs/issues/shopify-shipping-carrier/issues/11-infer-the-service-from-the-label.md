@@ -126,9 +126,8 @@ example of "a guess". Two notes for whoever argues it:
 - [x] An inferred service is never written over a confirmed one, and never downgrades
 - [x] Re-running under a newer ruleset replaces the value and its version stamp together
 - [x] Nothing inferred reaches a channel export
-- [~] The STC and service-indicator tables are versioned data, not literals inline in a
-      service class — done for the USPS STC table; the UPS 1Z service-indicator rung is
-      not built (see Remaining work)
+- [x] The STC and service-indicator tables are versioned data, not literals inline in a
+      service class — both tables now exist under `resources/data/service-inference/`
 - [x] A tracking number failing format or check-digit validation infers nothing
 - [ ] Coverage against real Shopify packages is measured and reported — what fraction each
       rung resolved, and what was left `unknown`
@@ -362,24 +361,17 @@ those labels happen to print.
 development store. All five items below are reachable; see the comment at the foot of this
 file for the order they should be done in.
 
-1. **Wire inference into the Shopify purchase path.** Deliberately not done.
-   `ShopifyAdapter::createShipment()` still records `ServiceEvidence::Unknown`, and the
-   inferrer is reachable only through `app:infer-package-services`. Hooking it in is a few
-   lines, but it must run at purchase time — `PurgePiiCommand` nulls `label_data` after the
-   retention period — and there is no real Shopify label to validate the hook against. It
-   should not go in unvalidated.
+1. ~~**Wire inference into the Shopify purchase path.**~~ **Done 2026-09-09** — see the
+   comment at the foot of this file.
 2. **Populate `label-tokens.json` for Shopify's carriers.** Every entry there was
    transcribed from a label we hold: FedEx sandbox PDFs, and DHL eCommerce's documentation
    sample. Nothing covers a USPS or UPS label bought through Shopify, and — the open
    premise from the first comment — Shopify may render its own label rather than passing the
    carrier's through, so its tokens and layout are unknown. Do not add tokens from carrier
    documentation; what a carrier calls a service and what it prints routinely differ.
-3. **The UPS 1Z service-indicator rung is not built.** Rung 1 handles USPS only. UPS
-   documents a service level in bytes 9–10 of a 1Z number, and it needs the same treatment
-   the STC table got: sourced, versioned, generated, with contract and regional codes
-   falling through rather than guessing. Not blocked on `01` — it can be built against our
-   own UPS labels — but it wants a source at least as authoritative as the USPS appendix,
-   and the STC table sets that bar.
+3. ~~**The UPS 1Z service-indicator rung is not built.**~~ **Done 2026-09-09** — with the
+   authority bar deliberately lowered, and why recorded in the table's own provenance. See
+   the comment at the foot of this file.
 4. **The coverage measurement itself**, which is the last unticked acceptance criterion and
    the evidence base ADR-0003 asks for. `app:infer-package-services` produces it; it needs
    Shopify packages to run over.
@@ -610,3 +602,260 @@ Two things follow, neither decided here:
 - The honoured-`preferredRateSelection` idea in the comment above gains weight: where the
   label cannot be read and the number cannot be decoded, an explicit selection Shopify is
   observed to obey may be the only evidence available for a UPS purchase.
+
+### 2026-09-09 — the hook is in, and UPS's own API settles why its labels are unreadable
+
+**Remaining work item 1 is done.** `ShopifyAdapter::createShipment()` runs the ladder over
+the label it just bought and folds the result into the `ShipResponse`, so evidence is
+`inferred` with a method and a ruleset version where a rung concluded, and `unknown` where
+none did. It goes in through `markShipped()` and therefore through
+`assertServiceEvidenceIsConsistent()` — one transition, already validated — rather than a
+second write after the fact.
+
+The ladder previously read a saved `Package`, which at purchase time does not exist yet: the
+tracking number and the label bytes are still only in the response. So `ServiceInferrer` gains
+`inferFrom(?string $carrier, ?string $trackingNumber, ?string $labelData)` and `infer(Package)`
+delegates to it. No rung changed.
+
+**What it actually yields today, per carrier.** Worth stating plainly, because the answer is
+"less than the ladder is capable of" and the reasons are different on each side:
+
+| Carrier | Rung 1 | Rung 2 | Result |
+|---|---|---|---|
+| USPS | decodes the STC | no USPS tokens in `label-tokens.json` yet | inferred, rung 1 |
+| UPS | consolidator guard stops it | nothing to read | **`unknown`** |
+
+USPS rung 2 is idle only because the token table has no USPS entries — the table's own rule
+is that a token is transcribed from a label we hold, and that transcription is item 2 below,
+which belongs to `14`. The real Shopify USPS label *is* readable; nothing is being read off
+it yet.
+
+**The UPS half is not a gap, it is a ceiling, and UPS's API says so.** The open question in
+the comment above was whether a Shopify UPS label is a raster by rendering accident.
+It is not. `UpsAdapter::buildShipmentRequest()` sends `LabelImageFormat` as `ZPL` or `GIF`
+([`app/Services/Carriers/UpsAdapter.php:824`](../../../../app/Services/Carriers/UpsAdapter.php)) —
+those are the only two UPS offers, and **PDF is not among them**. A PDF from Shopify for a UPS
+label is therefore a wrapper around the GIF necessarily, not by choice, so no change of
+source, setting or capture method will ever produce a text layer.
+
+The two captured documents confirm the wrapping directly: the 4×6 and the 8.5×11 versions of
+the same label embed a **byte-identical** 1400×800 grayscale image (same md5, 34.6K), and at
+the recorded 233×200 ppi that image is exactly 6.0″×4.0″. The page-size setting changes the
+wrapper and nothing else.
+
+So for Shopify UPS packages the ladder is rung 1 or nothing, permanently — and rung 1 is the
+one that must decline. That is a real coverage answer, not a defect to fix, and it is the
+input the reopen-OCR question in the comment above was waiting on.
+
+**The consolidator guard turns out to be load-bearing on the default path.** The real Ground
+Saver label's 26-digit IMpb is genuine and parses clean, and its service type code `612`
+resolves to **Parcel Select** in the June 2026 appendix. Without the guard the purchase hook
+would have written "Parcel Select" onto a UPS Ground Saver package — a validated, confident,
+wrong answer, on the selection Shopify's `auto` makes by default. The regression test uses
+that real tracking number rather than a synthetic one, so the case cannot quietly stop being
+covered.
+
+**Tests.** Four in `ShopifyAdapterTest`: rung 1 inferring at purchase and surviving
+`markShipped()` with `confirmedService()` still null; rung 2 reading the label bytes during
+the purchase; the UPS label inferring nothing; and a confirmed service refusing to be
+overwritten, so the new hook cannot become a second way past that invariant. The existing
+"leaves the service unknown" test was passing for the wrong reason — its fake tracking number
+failed the check digit — and now uses a number that parses and names no product, so both rungs
+run and neither concludes.
+
+**No ruleset bump.** No table changed, and the version stamp has to keep meaning "the tables
+that produced this value".
+
+**Still unticked:** the coverage measurement. It needs Shopify packages in a database to run
+over, and this hook is what will start producing them.
+
+### 2026-09-09 — the UPS 1Z rung, and the authority bar it could not meet
+
+**Remaining work item 3 is done.** Rung 1 now dispatches on the barcode family: a valid 1Z
+goes to the UPS service level indicator table, anything else to the IMpb path as before. A
+Shopify UPS package went from inferring nothing by either rung to inferring on rung 1.
+
+**The bar this issue set could not be met, so it was lowered on purpose.** The text said the
+1Z rung "wants a source at least as authoritative as the USPS appendix". There is no such
+source: **UPS does not publish this table at all**, and the appendix bar is unreachable rather
+than merely unmet. The honest options were to leave the rung unbuilt indefinitely or to build
+it from observed pairs and say so, and the second is what `service_ruleset_version` exists to
+make revisable. `ups-1z-service-indicator.json` records `"source": "observed
+tracking-number/service pairs, not published by UPS"` rather than dressing the evidence up.
+
+**The evidence.** A 3PL's production shipment history, grouped by service against bytes 9–10:
+roughly 20 years of shipments, so the long tail carries hand-typed tracking numbers and
+hand-picked service labels and is *not* clean. That is why the table takes only the high-count
+pairs. `YW` was additionally checked in the other direction — the direction inference actually
+needs — and **10,495 shipments carry `YW`, every one of them SurePost**.
+
+**The finding worth more than the YW row: this is a fourth vocabulary.** The observed
+indicators agree with UPS's own API service codes on every domestic service and disagree on
+every international one:
+
+| Service | Tracking indicator | UPS API service code | |
+|---|---|---|---|
+| Ground | `03` | `03` | ✅ |
+| 2nd Day Air | `02` | `02` | ✅ |
+| 3 Day Select | `12` | `12` | ✅ |
+| Next Day Air Saver | `13` | `13` | ✅ |
+| Next Day Air | `01` | `01` | ✅ |
+| Worldwide Saver | `04` | `65` | ❌ |
+| Worldwide Express | `66` | `07` | ❌ |
+| Worldwide Expedited | `67` | `08` | ❌ |
+
+That partial overlap is the hazard, and it is worse than no overlap. A table built from UPS's
+published API codes — the obvious thing to reach for — looks confirmed on the five domestic
+services and is then silently wrong on international. **The international rows are therefore
+deliberately absent** rather than filled in: they rest on one noisy dataset and nothing
+corroborates them. The five domestic rows carry two independent sources precisely *because*
+the two vocabularies coincide there.
+
+This is the fourth vocabulary this campaign has hit, after Shopify's PascalCase USPS codes,
+DHL printing `GRD` for the product its API calls `GND`, and the label token table itself.
+
+**`YN` is not mapped**, and a `Y` prefix is not assumed to be a Ground Saver family. It was
+seen on a dev-store label whose service is not known, and guessing a family is the confident
+wrong answer this ladder exists to refuse.
+
+**One dev-store number is a placeholder, and it is the one bought by hand.**
+`01` recorded UPS's tracking page accepting `1Z000X00YW00000002` and following it through a
+void, which read as evidence the number is real. It tracks, but **its check digit does not
+compute**, so this rung declines it — correctly, since reading a service out of a number that
+fails validation is the confident wrong answer the ladder exists to refuse. That number came
+from a label bought by hand in the Shopify admin. Every label bought *through PolyBag* against
+the same store carries a well-formed number, which is where the check digit algorithm was
+verified.
+
+**The guard now runs in both directions.** An IMpb under a non-USPS carrier was already a
+stop; a 1Z under a non-UPS carrier is now one too, for the same reason — the number and the
+carrier of record cannot both be right, and picking one is not this rung's job.
+
+**Which number Shopify reports decides the answer**, and on a Ground Saver label the two
+disagree: the 1Z decodes to UPS Ground Saver, the IMpb printed beside it decodes to Parcel
+Select, the USPS product carrying the last mile. `01`'s record says Shopify reports the 1Z, so
+the rung that can answer is the one that gets the number — but both paths are pinned by test,
+because that is a fact about Shopify's behaviour rather than a guarantee.
+
+**Ruleset version bumped to `2026-09-09`.** A table changed, unlike the purchase-path hook
+earlier the same day.
+
+**One duplication removed on the way.** `ServiceRulesetTest`'s temporary-ruleset helper
+restated the table list that `ServiceRuleset` loads, so adding a table broke two unrelated
+tests instead of failing where the change was. It now reads the list off the committed
+directory.
+
+### 2026-09-09 — an international row earns its place, and the dev-store caveat was too broad
+
+Two corrections to the comment above, both from one Shopify test purchase.
+
+**`67` is confirmed twice, independently, so Worldwide Expedited is now mapped.** A
+Shopify-bought UPS Worldwide Expedited label came back as `1Z28X87G6713238443` — indicator
+`67`, the same value the production shipment history carries against the same service. Those
+are two unrelated sources: a 3PL's twenty-year history and a label bought this afternoon. The
+reason the international rows were held back was that each rested on one noisy source; that is
+no longer true of `67`.
+
+`68` is mapped too, on Shopify-bought **UPS Standard** labels to Canada. One source rather than
+two, but a controlled purchase whose service was known at the time — a different quality of
+evidence from the production history's hand-entered tail, and the distinction the table's
+provenance now records.
+
+**`04` and `66` stay out.** Each still rests on that hand-entered tail alone. Sitting next to a
+confirmed `67` is not evidence, and the apparent `66`/`67`/`68` contiguity is noted in the
+table precisely so nobody extrapolates from it.
+
+The divergence the previous comment described gets wider, not narrower: Worldwide Expedited is
+`67` against API code `08`, and Standard is `68` against `11`. Neither could have been guessed
+from UPS's documentation.
+
+**Correcting "the dev store's 1Z numbers are synthetic".** That was drawn from one number and
+generalised too far. Checked against the implementation:
+
+| Number | Origin | |
+|---|---|---|
+| `1Z28X87GYW27798425` | Ground Saver, bought through PolyBag | valid |
+| `1Z28X87G6713238443` | Worldwide Expedited, bought through PolyBag | valid |
+| `1Z000X00YW00000002` | bought by hand in the Shopify admin | **rejected** |
+
+The placeholder is the hand-bought one. Labels bought through the API carry well-formed
+numbers with a real shipper prefix, so **a development store can exercise this rung end to
+end** — the opposite of what the previous comment told `14` to expect, and better news for it.
+The narrower true statement is the one worth keeping: a number UPS agrees to track is not
+thereby a number that validates.
+
+### 2026-09-09 — the international block is complete, and it was never guessable
+
+Two more Shopify test purchases — Worldwide Express `1Z28X87G6604926058` and Worldwide Saver
+`1Z28X87G0411692869` — returned `66` and `04`, the two rows held back an hour earlier for
+resting on a hand-entered production tail with nothing corroborating. They are corroborated
+now, by the same method that settled `67`: read off the production history first, then
+returned independently by a controlled purchase whose service was known.
+
+**All four international indicators are confirmed twice, by unrelated systems decades apart:**
+
+| Service | Indicator | UPS API service code | Sources |
+|---|---|---|---|
+| Worldwide Saver | `04` | `65` | production history + Shopify label |
+| Worldwide Express | `66` | `07` | production history + Shopify label |
+| Worldwide Expedited | `67` | `08` | production history + Shopify label |
+| Standard | `68` | `11` | Shopify labels only |
+
+Not one of these could have been derived from UPS's documentation — every value differs from
+the API service code for the same service, and they are not a transposition or an offset of
+it. That is the strongest form the "fourth vocabulary" finding has taken: the two vocabularies
+are genuinely unrelated wherever they disagree, so the domestic coincidence is a coincidence
+and not a rule with exceptions.
+
+**A test now pins the mistake rather than only the behaviour.** `65`, `07`, `08` and `11` — the
+API codes for exactly these four services — must resolve to *nothing* as indicators. A table
+built from UPS's published codes would resolve them to the right service name from the wrong
+vocabulary, which is the failure this whole table exists to avoid, and it is now a red test
+rather than a paragraph.
+
+**`04` breaks the contiguity, which is useful.** `66`, `67` and `68` run consecutively and it
+was tempting to read the international block as a range; `04` sits nowhere near them. The
+fall-through cases are now `69` and `05` — the immediate neighbours on both sides of the
+observed block — so extrapolating along the sequence would turn a test red.
+
+`YN` is still unmapped, and `68` is still the only row resting on one source.
+
+**The table stands at ten indicators.** No ruleset version bump: `2026-09-09` was already
+today's stamp and no package has been inferred under the intermediate states.
+
+### 2026-09-10 — code review: inference must not be able to fail a purchase
+
+Two findings, both correct, both fixed.
+
+**1. The purchase-time hook was not best-effort, and that is a money bug.** By the time the
+ladder runs, Shopify has already bought the label and billed the merchant for it. Everything
+after that point is PolyBag's own bookkeeping about a purchase that succeeded — but an
+exception escaping the inference call would have lost the `ShipResponse` entirely, leaving the
+package **unshipped against postage already paid for**, with a live label nobody is holding.
+
+The ladder is not throw-free, which is easy to miss because its most obviously risky part is.
+`LabelTextExtractor` documents "never throws" and delivers it, so rung 2 reading a corrupt PDF
+is safe. What is not safe sits behind it: `ServiceRuleset::table()` reads files from disk and
+decodes JSON with `JSON_THROW_ON_ERROR`, so a table missing from a deploy or truncated in
+transit throws, and carrier resolution goes to the database. A bad deploy would have taken
+every Shopify purchase down with it, one paid label at a time.
+
+Inference now degrades to `unknown` on failure exactly as it does on concluding nothing, and
+logs. A regression test throws from a stubbed `ServiceInferrer` and asserts the label still
+comes back and the package still ships; removing the guard turns it red, which was checked
+rather than assumed.
+
+**2. A comment said the UPS 1Z rung did not exist**, written when that was true and left
+behind by the rung landing hours later in the same working session. Corrected to describe
+what actually happens: rung 2 cannot read a raster, rung 1 answers where the indicator is one
+the ruleset has evidence for, and a consolidator handoff stops rung 1 by design.
+
+Worth naming the pattern rather than just the line: this is the second stale-comment defect in
+two days on this path, after `20` found `ShopifySource::exportPackage()` swallowing an error
+message Shopify had stopped sending. Comments here describe a vendor's behaviour and our
+coverage of it, and both move.
+
+**Provenance confirmed for `68`.** The UPS Standard labels carrying it were all Shopify test
+purchases; the production history holds no Standard examples at all. So `68` stays the single
+source row and the table already said so — no change, but it is now confirmed rather than
+assumed.

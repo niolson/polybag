@@ -30,10 +30,17 @@ function temporaryRuleset(array $overrides = []): string
         @rmdir($directory);
     });
 
-    foreach (['ruleset', 'usps-impb-stc', 'label-tokens'] as $table) {
+    // Read the table list off the committed directory rather than restating it.
+    // `ServiceRuleset` loads every table together or not at all, so a hardcoded
+    // list here silently stops matching the moment a table is added -- and the
+    // failure lands in whichever test happens to use a temporary ruleset, not in
+    // the change that caused it.
+    foreach (glob("{$source}/*.json") ?: [] as $path) {
+        $table = basename($path, '.json');
+
         $contents = array_key_exists($table, $overrides)
             ? json_encode($overrides[$table], JSON_PRETTY_PRINT)
-            : (string) file_get_contents("{$source}/{$table}.json");
+            : (string) file_get_contents($path);
 
         file_put_contents("{$directory}/{$table}.json", $contents);
     }
@@ -58,6 +65,19 @@ it('resolves a service type code, and falls through on one that names no product
 // tables independently lets one outlive the other across a deploy, stamping a
 // value derived from old rules with a new version -- and the re-run path only
 // replaces stamps that are older, so that package is never re-derived.
+it('resolves a UPS service level indicator, and falls through on one it has no evidence for', function (): void {
+    $ruleset = new ServiceRuleset;
+
+    expect($ruleset->upsServiceForServiceIndicator('YW'))->toBe('UPS Ground Saver')
+        ->and($ruleset->upsServiceForServiceIndicator('03'))->toBe('UPS Ground')
+        // International, where the indicator and UPS's API service code diverge:
+        // Worldwide Express is 66 here and 07 in the API, so the API code must
+        // resolve to nothing rather than to the service it names elsewhere.
+        ->and($ruleset->upsServiceForServiceIndicator('66'))->toBe('UPS Worldwide Express')
+        ->and($ruleset->upsServiceForServiceIndicator('07'))->toBeNull()
+        ->and($ruleset->upsServiceForServiceIndicator('YN'))->toBeNull();
+});
+
 it('does not serve the version and the tables from independent caches', function (): void {
     (new ServiceRuleset)->version();
 

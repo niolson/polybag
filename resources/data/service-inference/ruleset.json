@@ -1,5 +1,5 @@
 {
-    "version": "2026-09-06",
+    "version": "2026-09-09",
     "notes": [
         "The version is the date this ruleset last changed, and it is what lands in",
         "packages.service_ruleset_version. Bump it whenever any table in this directory",
@@ -10,6 +10,7 @@
     ],
     "tables": {
         "usps-impb-stc.json": "USPS IMpb Service Type Codes, used by the tracking-number rung",
+        "ups-1z-service-indicator.json": "UPS service level indicators, used by the tracking-number rung",
         "label-tokens.json": "Service tokens printed on label plaintext, used by the label rung"
     }
 }

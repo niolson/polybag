@@ -7,6 +7,7 @@ use App\Models\Package;
 use App\Services\ServiceInference\ImpbTrackingNumber;
 use App\Services\ServiceInference\LabelTextExtractor;
 use App\Services\ServiceInference\ServiceInferrer;
+use App\Services\ServiceInference\Ups1zTrackingNumber;
 
 /**
  * Tracking numbers here are synthetic: a real application identifier and service
@@ -25,6 +26,26 @@ const IMPB_UNLISTED_STC = '9299999999999900000036';
  */
 const IMPB_26_GROUND_ADVANTAGE = '92001999999999000000000012';
 const IMPB_26_AMBIGUOUS = '92011999999999000000000011';
+
+/**
+ * A real UPS Ground Saver 1Z, off a Shopify-bought label that prints both this
+ * number and the plaintext `UPS GROUND SAVER`. Its check digit is genuine, which
+ * is what the check digit implementation was verified against.
+ */
+const UPS_1Z_GROUND_SAVER = '1Z28X87GYW27798425';
+
+/** The USPS IMpb printed on that same Ground Saver label, for the last mile. */
+const IMPB_ON_THE_GROUND_SAVER_LABEL = '92612903368162541515909494';
+
+/**
+ * Real Shopify-bought UPS international labels. Every one of these indicators was
+ * read off a production shipment history first and then returned independently by
+ * these purchases -- two unrelated systems agreeing on values that appear in no
+ * UPS documentation, which is why the international rows are mapped at all.
+ */
+const UPS_1Z_WORLDWIDE_SAVER = '1Z28X87G0411692869';
+const UPS_1Z_WORLDWIDE_EXPRESS = '1Z28X87G6604926058';
+const UPS_1Z_WORLDWIDE_EXPEDITED = '1Z28X87G6713238443';
 
 function inferrer(): ServiceInferrer
 {
@@ -322,3 +343,181 @@ describe('carrier aliasing', function (): void {
             ->and($inference->reason)->toContain('last-mile');
     });
 });
+
+describe('UPS 1Z validation', function (): void {
+    it('reads the service level indicator out of bytes 9 and 10', function (): void {
+        $ups = Ups1zTrackingNumber::tryParse(UPS_1Z_GROUND_SAVER);
+
+        expect($ups)->not->toBeNull()
+            ->and($ups->serviceIndicator)->toBe('YW');
+    });
+
+    it('tolerates the spacing a label prints and the case a person types', function (): void {
+        expect(Ups1zTrackingNumber::tryParse('1z 28x 87g yw 2779 8425')?->serviceIndicator)->toBe('YW');
+    });
+
+    it('rejects a number whose check digit does not compute', function (): void {
+        expect(Ups1zTrackingNumber::tryParse(substr(UPS_1Z_GROUND_SAVER, 0, -1).'4'))->toBeNull();
+    });
+
+    it('rejects a placeholder 1Z even though UPS tracks it', function (): void {
+        // UPS's own tracking page accepts this number and follows it through a
+        // void, so it is registered -- but its check digit does not compute, and
+        // reading a service out of a number that fails validation is the
+        // confident wrong answer the whole rung is built to refuse.
+        //
+        // This is not what a development store issues generally: it came from a
+        // label bought by hand in the Shopify admin, and every label bought
+        // through PolyBag against the same store carries a well-formed number.
+        expect(Ups1zTrackingNumber::tryParse('1Z000X00YW00000002'))->toBeNull();
+    });
+
+    it('accepts the numbers a development store issues through the API', function (string $number): void {
+        expect(Ups1zTrackingNumber::tryParse($number))->not->toBeNull();
+    })->with([
+        'ground saver' => UPS_1Z_GROUND_SAVER,
+        'worldwide expedited' => UPS_1Z_WORLDWIDE_EXPEDITED,
+    ]);
+
+    it('rejects anything that is not the 1Z shape', function (string $candidate): void {
+        expect(Ups1zTrackingNumber::tryParse($candidate))->toBeNull();
+    })->with([
+        'too short' => '1Z28X87GYW2779842',
+        'no 1Z prefix' => '2Z28X87GYW27798425',
+        'letters in the package number' => '1Z28X87GYWABCD8425',
+        'empty' => '',
+    ]);
+});
+
+describe('the UPS 1Z rung', function (): void {
+    it('infers Ground Saver from the YW service level indicator', function (): void {
+        $inference = inferrer()->infer(packageFor([
+            'carrier' => 'UPS',
+            'tracking_number' => UPS_1Z_GROUND_SAVER,
+        ]));
+
+        expect($inference->service)->toBe('UPS Ground Saver')
+            ->and($inference->method)->toBe(ServiceInferrer::METHOD_UPS_1Z)
+            ->and($inference->rulesetVersion)->not->toBeEmpty();
+    });
+
+    it('infers the domestic services whose indicator matches the API service code', function (string $indicator, string $service): void {
+        $number = ups1zWithIndicator($indicator);
+
+        expect(inferrer()->infer(packageFor(['carrier' => 'UPS', 'tracking_number' => $number]))->service)
+            ->toBe($service);
+    })->with([
+        ['01', 'UPS Next Day Air'],
+        ['02', 'UPS 2nd Day Air'],
+        ['03', 'UPS Ground'],
+        ['12', 'UPS 3 Day Select'],
+        ['13', 'UPS Next Day Air Saver'],
+    ]);
+
+    it('infers the international services from real labels', function (string $number, string $service): void {
+        expect(inferrer()->infer(packageFor(['carrier' => 'UPS', 'tracking_number' => $number]))->service)
+            ->toBe($service);
+    })->with([
+        [UPS_1Z_WORLDWIDE_SAVER, 'UPS Worldwide Saver'],
+        [UPS_1Z_WORLDWIDE_EXPRESS, 'UPS Worldwide Express'],
+        [UPS_1Z_WORLDWIDE_EXPEDITED, 'UPS Worldwide Expedited'],
+    ]);
+
+    it('infers UPS Standard, the one row resting on a single source', function (): void {
+        expect(inferrer()->infer(packageFor([
+            'carrier' => 'UPS',
+            'tracking_number' => ups1zWithIndicator('68'),
+        ]))->service)->toBe('UPS Standard');
+    });
+
+    it('does not read a UPS API service code as a service level indicator', function (string $apiCode, string $wouldHaveMeant): void {
+        // The two vocabularies diverge on every international service, so a table
+        // built from UPS's published API codes would resolve these -- to the right
+        // service name from the wrong vocabulary, on numbers that mean something
+        // else or nothing. Pinned so that mistake cannot be made quietly later.
+        $inference = inferrer()->infer(packageFor([
+            'carrier' => 'UPS',
+            'tracking_number' => ups1zWithIndicator($apiCode),
+        ]));
+
+        expect($inference->isResolved())->toBeFalse()
+            ->and($inference->service)->not->toBe($wouldHaveMeant);
+    })->with([
+        'Worldwide Saver is 04, not 65' => ['65', 'UPS Worldwide Saver'],
+        'Worldwide Express is 66, not 07' => ['07', 'UPS Worldwide Express'],
+        'Worldwide Expedited is 67, not 08' => ['08', 'UPS Worldwide Expedited'],
+        'Standard is 68, not 11' => ['11', 'UPS Standard'],
+    ]);
+
+    it('falls through on an indicator the table has no evidence for', function (string $indicator): void {
+        $inference = inferrer()->infer(packageFor([
+            'carrier' => 'UPS',
+            'tracking_number' => ups1zWithIndicator($indicator),
+        ]));
+
+        expect($inference->isResolved())->toBeFalse()
+            ->and($inference->reason)->toContain($indicator);
+    })->with([
+        // Seen on a label whose service is unknown. A Y prefix is not assumed to
+        // be a Ground Saver family.
+        'YN' => 'YN',
+        // Adjacent to the observed international block on both sides. Contiguity
+        // is not evidence, so neither is mapped.
+        '69' => '69',
+        '05' => '05',
+    ]);
+
+    it('declines a 1Z reported under a carrier that is not UPS', function (): void {
+        $inference = inferrer()->infer(packageFor([
+            'carrier' => 'USPS',
+            'tracking_number' => UPS_1Z_GROUND_SAVER,
+        ]));
+
+        expect($inference->isResolved())->toBeFalse()
+            ->and($inference->reason)->toContain('disagree');
+    });
+
+    it('reads the 1Z rather than the IMpb on a Ground Saver label, and gets a different answer', function (): void {
+        // Both numbers are printed on the one label. The IMpb is genuine and its
+        // service type code decodes to Parcel Select -- the USPS product carrying
+        // the last mile, not the service the customer bought. Which number the
+        // postage source happens to report therefore decides whether the answer
+        // is right, so both paths are pinned here.
+        $fromImpb = inferrer()->infer(packageFor([
+            'carrier' => 'UPS',
+            'tracking_number' => IMPB_ON_THE_GROUND_SAVER_LABEL,
+        ]));
+
+        expect($fromImpb->isResolved())->toBeFalse()
+            ->and($fromImpb->reason)->toContain('last-mile');
+
+        expect(inferrer()->infer(packageFor([
+            'carrier' => 'UPS',
+            'tracking_number' => UPS_1Z_GROUND_SAVER,
+        ]))->service)->toBe('UPS Ground Saver');
+    });
+});
+
+/**
+ * A valid 1Z carrying a given service level indicator, check digit recomputed so
+ * the number passes validation the way a real one does.
+ */
+function ups1zWithIndicator(string $indicator): string
+{
+    $body = '28X87G'.$indicator.'2779842';
+
+    $odd = 0;
+    $even = 0;
+
+    foreach (str_split($body) as $position => $character) {
+        $value = ctype_digit($character) ? (int) $character : (ord($character) - 63) % 10;
+
+        if ($position % 2 === 0) {
+            $odd += $value;
+        } else {
+            $even += $value;
+        }
+    }
+
+    return '1Z'.$body.((10 - ($odd + $even * 2) % 10) % 10);
+}
