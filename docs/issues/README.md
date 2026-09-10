@@ -153,11 +153,21 @@ reasoning they carry:
    fails its check digit was bought by hand in the Shopify admin; every label bought through
    PolyBag validates, so a development store *can* exercise the rung end to end — which is what
    `14` needs to know before it reads a coverage figure.
-3. [`14`](shopify-shipping-carrier/issues/14-label-evidence-to-gather.md), US half — USPS and
-   UPS, one label per service, each paired with the admin's record. **PDF only**: Shopify has
+3. ~~[`14`](shopify-shipping-carrier/issues/14-label-evidence-to-gather.md), US half~~ —
+   **descoped 2026-09-10, not done.** Both US carriers are finished as far as this issue can
+   take them, and neither wants more labels. Shopify turns out to pass USPS's label through
+   (proven on a Ground Advantage label bought both ways for one package: identical font subset
+   tags, image dimensions and page size; `Apache FOP` re-wrapped by `Ruby CombinePDF`), so a
+   USPS token *could* be sourced from our own sandbox labels — but should not be, because rung
+   1 resolves USPS domestic from the tracking number and rung 2 never even runs. UPS is closed
+   from the other side: its labels are bitmaps. The general rule this leaves is that **rung 2
+   earns its place only on carriers rung 1 cannot reach**. What remains of `14` is the other
+   seventeen carriers, gated on the install-base question. Original text follows.
+
+   ~~USPS and UPS, one label per service, each paired with the admin's record. **PDF only**: Shopify has
    no reachable ZPL setting (`01`, 2026-09-09), so rung 2 reads these through the PDF path or
    not at all — and each capture must be taken from `shippingDocuments[].url`, since the
-   admin's print dialog returns a rasterised page with no text to read. The other fourteen
+   admin's print dialog returns a rasterised page with no text to read.~~ The other fourteen
    carriers wait on the install-base question, which is a business input.
 4. ~~[`01`](shopify-shipping-carrier/issues/01-verify-first-live-label-purchase.md)~~ —
    **done 2026-09-09.** Questions 2, 4, 6 and 9 all closed that day, the last of them by
