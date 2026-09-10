@@ -365,10 +365,14 @@ file for the order they should be done in.
    comment at the foot of this file.
 2. **Populate `label-tokens.json` for Shopify's carriers.** Every entry there was
    transcribed from a label we hold: FedEx sandbox PDFs, and DHL eCommerce's documentation
-   sample. Nothing covers a USPS or UPS label bought through Shopify, and — the open
-   premise from the first comment — Shopify may render its own label rather than passing the
-   carrier's through, so its tokens and layout are unknown. Do not add tokens from carrier
-   documentation; what a carrier calls a service and what it prints routinely differ.
+   sample. Do not add tokens from carrier documentation; what a carrier calls a service and
+   what it prints routinely differ.
+
+   **The open premise is resolved and both US carriers are out of scope** (2026-09-10, below).
+   Shopify passes USPS's label through rather than rendering its own — so a USPS token could be
+   sourced from our own labels, but should not be, because rung 1 already resolves USPS
+   domestic and rung 2 has nothing left to add there. UPS is unreadable by rung 2 whatever we
+   do. What remains is the other seventeen carriers, gated on `14`'s install-base question.
 3. ~~**The UPS 1Z service-indicator rung is not built.**~~ **Done 2026-09-09** — with the
    authority bar deliberately lowered, and why recorded in the table's own provenance. See
    the comment at the foot of this file.
@@ -859,3 +863,49 @@ coverage of it, and both move.
 purchases; the production history holds no Standard examples at all. So `68` stays the single
 source row and the table already said so — no change, but it is now confirmed rather than
 assumed.
+
+### 2026-09-10 — Shopify is a passthrough for USPS, which closes rung 2 for that carrier
+
+The premise this issue carried from its first comment — "Shopify is plausibly the label
+*producer* rather than a passthrough, so layout and tokens could differ from anything tested
+here" — is settled. It is a passthrough.
+
+A first attempt at this compared a USPS *international* label against a Shopify domestic one
+and read the presence of Consolas in Shopify's font set as a structural difference. That was
+wrong twice over: USPS international labels are rotated, carry a CP72 customs declaration and
+run to three pages, so nothing about them is comparable; and Consolas turns out to be present
+on USPS's own domestic label too. The correct test is one service, both sources — a Ground
+Advantage label bought both ways for package 209:
+
+| | USPS API | Shopify |
+|---|---|---|
+| Producer | `Apache FOP … PDF Transcoder for Batik` | `Ruby CombinePDF 1.0.31 Library` |
+| Page | 288×432 pts | 288×432 pts |
+| Fonts | `EAAAAA+ArialMT`, `EAAAAB+Arial-BoldMT`, `EAAAAC+Arial-ItalicMT`, `EAAAAD+Consolas` | **identical, same order** |
+| Images | 254×50 + two 40×40 indexed | **identical** |
+| Service token | `USPS GROUND ADVANTAGE™` | **identical** |
+
+USPS generates with Apache FOP; Shopify re-wraps through a Ruby library without touching the
+content stream. The font **subset tags** are what make this conclusive rather than suggestive:
+those tags are assigned by the generating tool, so identical tags in identical order mean the
+same source document. Every difference in the extracted fields is content — sender name,
+address formatting, tracking number, order reference.
+
+**The consequence is that USPS rung 2 should not be populated.** Not "later" — at all. The STC
+table resolves USPS domestic from the tracking number, which costs nothing, needs no label,
+and is the only rung that survives `PurgePiiCommand`; rung 2 never ran on the label above
+because rung 1 had already answered. Rung 2's entire remaining value for USPS is the handful
+of STCs that are ambiguous or name no product, and falling through is the correct outcome for
+those. A token table for a carrier whose numbers already decode is work that buys nothing and
+adds a second thing to keep current.
+
+That is worth stating as a general rule rather than a USPS fact: **where rung 1 covers a
+carrier, rung 2 is redundant for it, and the ladder's ordering already says so.** Rung 2 earns
+its place on carriers rung 1 cannot reach — which, of the two we have evidence for, is neither.
+UPS is the opposite case and equally closed: its labels are bitmaps, so rung 2 cannot read
+them however much evidence we gather.
+
+**First live confirmation of the purchase-time hook.** The same purchase came back with
+`service = 'USPS Ground Advantage'`, `service_evidence = inferred`, `service_inference_method
+= 'usps-impb-stc'`, `service_ruleset_version = '2026-09-09'` — a real Shopify label rather
+than a test double, inferred inside the purchase and stamped.

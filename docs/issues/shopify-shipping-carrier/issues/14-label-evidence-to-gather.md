@@ -76,8 +76,8 @@ admin actually offers. Confirm it there rather than from the help centre.
 
 | Carrier | Believed region | State |
 |---|---|---|
-| USPS | US | **Rung 1 done.** 342 service type codes, effective 2026-06-24. No label needed. One token observed anyway: `PRIORITY MAIL EXPRESS®` |
-| UPS | US, CA | **Gathered and unreadable** — the API label is a full-page bitmap, so rung 2 cannot read it and `label-tokens.json` gains nothing from more UPS captures. 1Z table not built either, so these packages currently infer nothing. Token seen on the printed face: `UPS GROUND SAVER`; that label is a **consolidator** — USPS last mile, dual `1Z` + IMpb |
+| USPS | US | **Done, and rung 2 is closed as unnecessary.** 342 service type codes, effective 2026-06-24, resolve USPS domestic on the tracking number alone. No label needed, and no token work wanted either — see 2026-09-10 below |
+| UPS | US, CA | **Rung 1 done; rung 2 permanently closed.** The API label is a full-page bitmap — UPS offers ZPL or GIF and no PDF, so Shopify's PDF is a wrapped raster necessarily — and `label-tokens.json` gains nothing from more UPS captures. The 1Z service indicator table **is** built (`11`, 2026-09-09), so these packages now infer on rung 1. Token seen on the printed face: `UPS GROUND SAVER`; that label is a **consolidator** — USPS last mile, dual `1Z` + IMpb |
 | FedEx | US | Partial: domestic tokens from sandbox PDFs. International prints `IP`/`XQ` |
 | DHL | US, intl | One ZPL token from vendor docs. **Which DHL** — Express or eCommerce — is itself unconfirmed, and they are different carriers with different labels |
 | Canada Post | CA | Nothing. PDF or ZPL |
@@ -107,10 +107,17 @@ should be sourced and generated the way the USPS table was, not transcribed. `11
 `app:build-service-inference-ruleset` is the pattern: a committed generator, an upstream
 effective date recorded in the file, and codes that do not resolve falling through.
 
-**1. UPS 1Z service indicator.** Bytes 9–10 of a 1Z number. Already named as remaining work
-in `11`. Needs a source at least as authoritative as USPS's appendix; expect contract and
-regional codes the published table does not cover, which must fall through rather than be
-guessed at.
+~~**1. UPS 1Z service indicator.**~~ **Done 2026-09-09** in `11`, and the authority bar this
+item set turned out to be unreachable rather than merely unmet: **UPS does not publish this
+mapping at all.** The table is built from observed tracking-number/service pairs, with that
+recorded in its own provenance instead of the evidence being dressed up. Ten indicators, every
+row carrying two independent sources except UPS Standard. Contract and regional codes fall
+through as this item asked.
+
+The finding worth carrying forward: the indicators are a **fourth vocabulary**, agreeing with
+UPS's API service codes on every domestic service and diverging on every international one
+(`04`/`66`/`67`/`68` against `65`/`07`/`08`/`11`). Sourcing that table from UPS's published
+codes — the obvious move — looks confirmed domestically and is silently wrong abroad.
 
 **2. UPU S10 — worth investigating as a second decodable family.** International postal
 items carry a 13-character identifier: a 2-letter service indicator, an 8-digit serial, a
@@ -290,3 +297,49 @@ Practical consequence for this campaign: capturing more UPS labels yields tokens
 that cannot run on them. The UPS captures are still worth having for the tracking-number and
 consolidator questions — 1 and 3 and 4 — but not for `label-tokens.json`. Weight the
 prioritised carrier list accordingly when it arrives.
+
+## Comments
+
+### 2026-09-10 — Shopify passes USPS's label through, and USPS rung 2 is not worth gathering
+
+**The open premise is settled.** `11` recorded, on 2026-09-06, that "Shopify is plausibly the
+label *producer* rather than a passthrough, so layout and tokens could differ from anything
+tested here". It is a passthrough. Measured on a Ground Advantage label bought both ways for
+the same package (209), which is the like-for-like comparison an earlier attempt got wrong by
+holding a USPS *international* label against a Shopify domestic one:
+
+| | USPS API | Shopify |
+|---|---|---|
+| Producer | `Apache FOP … PDF Transcoder for Batik` | `Ruby CombinePDF 1.0.31 Library` |
+| Page | 288×432 pts | 288×432 pts |
+| Fonts | `EAAAAA+ArialMT`, `EAAAAB+Arial-BoldMT`, `EAAAAC+Arial-ItalicMT`, `EAAAAD+Consolas` | **identical, same order** |
+| Images | 254×50 + two 40×40 indexed | **identical** |
+
+USPS generates the label with Apache FOP and Shopify re-wraps it through a Ruby library
+without touching the content stream. The **font subset tags are the proof**: those tags are
+assigned by the generating tool, so identical tags in identical order mean the same source
+document rather than a similar one. Every difference in the extracted fields is content —
+sender name, address formatting, tracking number, order reference — and `USPS GROUND
+ADVANTAGE™` is byte-identical on both.
+
+**So a USPS token can be sourced from our own sandbox labels**, no Shopify order required.
+
+**But it should not be sourced at all, because USPS rung 2 has no work to do.** The STC table
+holds 342 codes, 338 of them naming a product, so USPS domestic resolves on the tracking
+number — which costs nothing, needs no label, and is the only rung that survives
+`PurgePiiCommand`. Rung 2 never even ran on the label above. Its entire marginal value for
+USPS is the handful of STCs that are ambiguous or name no product, and for those the correct
+outcome is falling through anyway.
+
+Gathering USPS tokens is therefore **descoped**, not deferred. The one token already recorded
+(`PRIORITY MAIL EXPRESS®`) can stay as an observation; nothing needs adding to
+`label-tokens.json` for this carrier.
+
+**What this leaves.** Both US carriers are now finished as far as this issue can take them —
+USPS on rung 1, UPS on rung 1 with rung 2 permanently shut. The remaining seventeen carriers
+are still gated on question 1, which is a business input this repository does not have.
+
+**Incidental, and the first live confirmation of `11`'s purchase-time hook:** package 209 came
+back from the Shopify purchase with `service = 'USPS Ground Advantage'`, `service_evidence =
+inferred`, `service_inference_method = 'usps-impb-stc'`, `service_ruleset_version =
+'2026-09-09'` — against a real label rather than a test double.
