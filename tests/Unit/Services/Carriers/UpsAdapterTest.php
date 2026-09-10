@@ -1,6 +1,7 @@
 <?php
 
 use App\DataTransferObjects\Shipping\AddressData;
+use App\DataTransferObjects\Shipping\CustomsItem;
 use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
@@ -470,8 +471,10 @@ function upsSpecialServiceShipRequest(array $codes, array $config = [], array $r
 
 /**
  * A ship request carrying a label reference, addressed to the given destination.
+ *
+ * @param  array<int, CustomsItem>  $customsItems
  */
-function upsShipRequestTo(AddressData $toAddress, string $reference = 'ORD-10042'): ShipRequest
+function upsShipRequestTo(AddressData $toAddress, string $reference = 'ORD-10042', array $customsItems = [], array $specialServiceCodes = []): ShipRequest
 {
     return new ShipRequest(
         fromAddress: new AddressData(
@@ -492,6 +495,42 @@ function upsShipRequestTo(AddressData $toAddress, string $reference = 'ORD-10042
             metadata: ['serviceCode' => '03'],
         ),
         references: [$reference],
+        customsItems: $customsItems,
+        specialServiceCodes: $specialServiceCodes,
+    );
+}
+
+/**
+ * The customs items an international ship request needs before UpsAdapter will
+ * build InternationalForms at all.
+ *
+ * @return array<int, CustomsItem>
+ */
+function upsCustomsItems(): array
+{
+    return [new CustomsItem(
+        description: 'Blue Widget',
+        quantity: 2,
+        unitValue: 19.99,
+        weight: 0.5,
+        hsTariffNumber: '9503.00.0090',
+        countryOfOrigin: 'US',
+    )];
+}
+
+/**
+ * A Canadian destination, for the international paths.
+ */
+function upsCanadianAddress(): AddressData
+{
+    return new AddressData(
+        firstName: 'Jean',
+        lastName: 'Tremblay',
+        streetAddress: '100 Queen St W',
+        city: 'Toronto',
+        stateOrProvince: 'ON',
+        postalCode: 'M5H 2N2',
+        country: 'CA',
     );
 }
 
@@ -1086,15 +1125,7 @@ it('builds a label request that conforms to the UPS Shipping schema', function (
 it('builds an international label request that conforms to the UPS Shipping schema', function (): void {
     fakeUpsShipEndpoints();
 
-    $request = upsShipRequestTo(new AddressData(
-        firstName: 'Jean',
-        lastName: 'Tremblay',
-        streetAddress: '100 Queen St W',
-        city: 'Toronto',
-        stateOrProvince: 'ON',
-        postalCode: 'M5H 2N2',
-        country: 'CA',
-    ));
+    $request = upsShipRequestTo(upsCanadianAddress(), customsItems: upsCustomsItems());
 
     expect($this->adapter->createShipment($request)->success)->toBeTrue();
 
@@ -1108,3 +1139,209 @@ it('builds an international label request that conforms to the UPS Shipping sche
         return true;
     });
 });
+
+/*
+| Schema conformance cannot catch this on its own. UPS's OpenAPI leaves
+| additionalProperties unset on ShipmentRequest_Shipment, so InternationalForms
+| sent one level too high validates clean and is then ignored by UPS — which is
+| how every international shipment went out without a commercial invoice being
+| requested at all. These assert the placement directly.
+*/
+
+it('nests InternationalForms inside ShipmentServiceOptions, where UPS defines it', function (): void {
+    fakeUpsShipEndpoints();
+
+    expect($this->adapter->createShipment(
+        upsShipRequestTo(upsCanadianAddress(), customsItems: upsCustomsItems())
+    )->success)->toBeTrue();
+
+    Saloon::assertSent(function ($request): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $shipment = $request->body()->all()['ShipmentRequest']['Shipment'];
+
+        expect($shipment)->not->toHaveKey('InternationalForms')
+            ->and($shipment['ShipmentServiceOptions']['InternationalForms']['FormType'])->toBe(['01'])
+            ->and($shipment['ShipmentServiceOptions']['InternationalForms']['Product'][0]['Description'])->toBe(['Blue Widget']);
+
+        return true;
+    });
+});
+
+it('names the buyer on the customs invoice, which UPS requires for an Invoice form', function (): void {
+    fakeUpsShipEndpoints();
+
+    expect($this->adapter->createShipment(
+        upsShipRequestTo(upsCanadianAddress(), customsItems: upsCustomsItems())
+    )->success)->toBeTrue();
+
+    Saloon::assertSent(function ($request): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $soldTo = $request->body()->all()['ShipmentRequest']['Shipment']['ShipmentServiceOptions']['InternationalForms']['Contacts']['SoldTo'];
+
+        // UPS answers a missing SoldTo with 9120800 "Missing contact information",
+        // and its own schema does not mark Contacts required, so only this catches it.
+        expect($soldTo['Name'])->toBe('Jean Tremblay')
+            ->and($soldTo['AttentionName'])->toBe('Jean Tremblay')
+            ->and($soldTo['Address']['City'])->toBe('Toronto')
+            ->and($soldTo['Address']['CountryCode'])->toBe('CA');
+
+        return true;
+    });
+});
+
+it('declares the invoice line total, which UPS requires beside an Invoice form', function (): void {
+    fakeUpsShipEndpoints();
+
+    expect($this->adapter->createShipment(
+        upsShipRequestTo(upsCanadianAddress(), customsItems: upsCustomsItems())
+    )->success)->toBeTrue();
+
+    Saloon::assertSent(function ($request): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $shipment = $request->body()->all()['ShipmentRequest']['Shipment'];
+
+        // Two Blue Widgets at 19.99. UPS refuses a zero or absent total with
+        // 120502, and cross-checks it against the invoice's own lines.
+        expect($shipment['InvoiceLineTotal'])->toBe([
+            'CurrencyCode' => 'USD',
+            'MonetaryValue' => '39.98',
+        ]);
+
+        return true;
+    });
+});
+
+it('prices a customs line per unit, not per line, so UPS totals it correctly', function (): void {
+    fakeUpsShipEndpoints();
+
+    expect($this->adapter->createShipment(
+        upsShipRequestTo(upsCanadianAddress(), customsItems: upsCustomsItems())
+    )->success)->toBeTrue();
+
+    Saloon::assertSent(function ($request): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $shipment = $request->body()->all()['ShipmentRequest']['Shipment'];
+        $unit = $shipment['ShipmentServiceOptions']['InternationalForms']['Product'][0]['Unit'];
+
+        // UPS prints Value as "Unit Value" and multiplies it by Number to get the
+        // line's Total Value. Sending the extended total here made a real invoice
+        // declare 2 x 39.98 = 79.96 for goods worth 39.98.
+        expect($unit['Number'])->toBe('2')
+            ->and($unit['Value'])->toBe('19.99');
+
+        // And UPS's own arithmetic over the lines has to land on the total we
+        // declare on the shipment, or the invoice contradicts itself.
+        $linesTotal = array_sum(array_map(
+            fn (array $product): float => (float) $product['Unit']['Number'] * (float) $product['Unit']['Value'],
+            $shipment['ShipmentServiceOptions']['InternationalForms']['Product'],
+        ));
+
+        expect(number_format($linesTotal, 2, '.', ''))->toBe($shipment['InvoiceLineTotal']['MonetaryValue']);
+
+        return true;
+    });
+});
+
+it('sends no invoice line total on a domestic label, which carries no invoice', function (): void {
+    fakeUpsShipEndpoints();
+
+    expect($this->adapter->createShipment(upsSpecialServiceShipRequest([]))->success)->toBeTrue();
+
+    Saloon::assertSent(function ($request): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        expect($request->body()->all()['ShipmentRequest']['Shipment'])->not->toHaveKey('InvoiceLineTotal');
+
+        return true;
+    });
+});
+
+it('keeps the customs document UPS returns beside the label', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => MockResponse::make([
+            'ShipmentResponse' => [
+                'ShipmentResults' => [
+                    'ShipmentIdentificationNumber' => '1Z9999999999999999',
+                    'ShipmentCharges' => ['TotalCharges' => ['MonetaryValue' => '11.00']],
+                    // UPS returns the invoice separately from the label, as its own
+                    // PDF, even when the label itself is a GIF.
+                    'Form' => [
+                        'Code' => '01',
+                        'Description' => 'All Requested International Forms',
+                        'Image' => [
+                            'ImageFormat' => ['Code' => 'PDF', 'Description' => 'PDF'],
+                            'GraphicImage' => base64_encode('customs-invoice-pdf'),
+                        ],
+                    ],
+                    'PackageResults' => [
+                        'TrackingNumber' => '1Z9999999999999999',
+                        'ShippingLabel' => ['GraphicImage' => base64_encode('label-bytes')],
+                    ],
+                ],
+            ],
+        ]),
+    ]);
+
+    $response = $this->adapter->createShipment(
+        upsShipRequestTo(upsCanadianAddress(), customsItems: upsCustomsItems())
+    );
+
+    expect($response->success)->toBeTrue()
+        ->and($response->customsFormData)->toBe(base64_encode('customs-invoice-pdf'));
+});
+
+it('leaves the customs document null when UPS returns no form', function (): void {
+    fakeUpsShipEndpoints();
+
+    $response = $this->adapter->createShipment(upsSpecialServiceShipRequest([]));
+
+    expect($response->success)->toBeTrue()
+        ->and($response->customsFormData)->toBeNull();
+});
+
+it('keeps the customs invoice when Saturday delivery is also requested', function (): void {
+    fakeUpsShipEndpoints();
+
+    expect($this->adapter->createShipment(upsShipRequestTo(
+        upsCanadianAddress(),
+        customsItems: upsCustomsItems(),
+        specialServiceCodes: ['saturday_delivery'],
+    ))->success)->toBeTrue();
+
+    Saloon::assertSent(function ($request): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $options = $request->body()->all()['ShipmentRequest']['Shipment']['ShipmentServiceOptions'];
+
+        expect($options)->toHaveKeys(['SaturdayDeliveryIndicator', 'InternationalForms']);
+
+        return true;
+    });
+});
+
+/*
+| A third test belongs here — that the Saturday-rejection retry drops only the
+| Saturday key and keeps the customs invoice — and it cannot be written. The
+| retry branch is unreachable: UpsConnector sets $tries = 3 and Saloon's
+| throwOnMaxTries defaults to true, so a UPS 4xx throws out of
+| sendCreateShipment() into the adapter's catch instead of returning a failed
+| response for the branch to inspect. Recorded as its own issue; the unset()
+| there is surgical anyway, so reviving the retry does not reintroduce the bug.
+*/

@@ -5,6 +5,7 @@ namespace App\Services\Carriers;
 use App\Contracts\DirectCarrierAdapter;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
+use App\DataTransferObjects\Shipping\CustomsItem;
 use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
@@ -638,12 +639,16 @@ class UpsAdapter implements DirectCarrierAdapter
             // Add Saturday delivery if requested
             $saturdayApplied = $request->hasSpecialService('saturday_delivery');
             if ($saturdayApplied) {
-                $shipment['ShipmentServiceOptions'] = ['SaturdayDeliveryIndicator' => ''];
+                $shipment['ShipmentServiceOptions']['SaturdayDeliveryIndicator'] = '';
             }
 
-            // Add international forms for non-US destinations
+            // Add international forms for non-US destinations. UPS defines
+            // InternationalForms on ShipmentServiceOptions, not on Shipment —
+            // sent a level higher it validates against the schema and is then
+            // silently ignored, so no customs invoice is ever generated.
             if ($request->toAddress->country !== 'US' && ! empty($request->customsItems)) {
-                $shipment['InternationalForms'] = $this->buildCustomsDetail($request);
+                $shipment['ShipmentServiceOptions']['InternationalForms'] = $this->buildCustomsDetail($request);
+                $shipment['InvoiceLineTotal'] = $this->buildShipInvoiceLineTotal($request);
             }
 
             $response = $this->sendCreateShipment($connector, $shipment, $request);
@@ -657,7 +662,12 @@ class UpsAdapter implements DirectCarrierAdapter
                         'body' => $responseData,
                     ]);
                     $saturdayApplied = false;
-                    unset($shipment['ShipmentServiceOptions']);
+                    // Drop only Saturday. ShipmentServiceOptions may also carry
+                    // the customs invoice, which the retry must not strip.
+                    unset($shipment['ShipmentServiceOptions']['SaturdayDeliveryIndicator']);
+                    if ($shipment['ShipmentServiceOptions'] === []) {
+                        unset($shipment['ShipmentServiceOptions']);
+                    }
                     $response = $this->sendCreateShipment($connector, $shipment, $request);
                     $responseData = $response->json();
                 }
@@ -718,6 +728,12 @@ class UpsAdapter implements DirectCarrierAdapter
                 $labelData = base64_encode($decoded);
             }
 
+            // UPS returns the international forms it was asked for as their own
+            // document, separately from the label and in their own format —
+            // observed as PDF beside a GIF label. It is stored for the report
+            // printer rather than the 4x6 label printer.
+            $customsFormData = $shipmentResults['Form']['Image']['GraphicImage'] ?? null;
+
             $totalCharge = (float) ($shipmentResults['ShipmentCharges']['TotalCharges']['MonetaryValue']
                 ?? $request->selectedRate->price);
 
@@ -728,6 +744,7 @@ class UpsAdapter implements DirectCarrierAdapter
                 cost: $totalCharge,
                 carrier: 'UPS',
                 service: $request->selectedRate->serviceName,
+                customsFormData: $customsFormData,
                 labelData: $labelData,
                 labelOrientation: $isZpl ? 'portrait' : 'landscape',
                 labelFormat: $isZpl ? 'zpl' : 'image',
@@ -987,6 +1004,28 @@ class UpsAdapter implements DirectCarrierAdapter
     }
 
     /**
+     * The declared value of the goods, which UPS requires on the shipment
+     * itself whenever an Invoice form is attached — without it the label is
+     * refused with 120502, "InvoiceLineTotal MonetaryValue must be greater than
+     * 0". It is summed from the same customs items the invoice lists rather
+     * than read off the shipment, so the two always agree.
+     *
+     * @return array<string, string>
+     */
+    private function buildShipInvoiceLineTotal(ShipRequest $request): array
+    {
+        $total = array_sum(array_map(
+            fn (CustomsItem $item): float => round($item->unitValue * $item->quantity, 2),
+            $request->customsItems,
+        ));
+
+        return [
+            'CurrencyCode' => 'USD',
+            'MonetaryValue' => number_format($total, 2, '.', ''),
+        ];
+    }
+
+    /**
      * Build UPS InternationalForms for international shipments.
      *
      * @return array<string, mixed>
@@ -996,16 +1035,19 @@ class UpsAdapter implements DirectCarrierAdapter
         $products = [];
 
         foreach ($request->customsItems as $item) {
-            $totalValue = round($item->unitValue * $item->quantity, 2);
-
             $product = [
-                'Description' => mb_substr($item->description, 0, 35),
+                // UPS takes the description as up to three lines of 35 characters.
+                'Description' => [mb_substr($item->description, 0, 35)],
                 'Unit' => [
                     'Number' => (string) $item->quantity,
                     'UnitOfMeasurement' => [
                         'Code' => 'PCS',
                     ],
-                    'Value' => (string) $totalValue,
+                    // The price of one, not the line. UPS prints this as "Unit
+                    // Value" and multiplies it by Number for the line's total, so
+                    // an extended total here declares the goods at quantity times
+                    // their worth.
+                    'Value' => (string) round($item->unitValue, 2),
                 ],
                 'OriginCountryCode' => $item->countryOfOrigin ?? 'US',
                 'ProductWeight' => [
@@ -1024,11 +1066,23 @@ class UpsAdapter implements DirectCarrierAdapter
         }
 
         return [
-            'FormType' => ['Code' => '01', 'Description' => 'Invoice'],
+            // A list of the forms requested, not a code/description pair. 01 is Invoice.
+            'FormType' => ['01'],
             'InvoiceDate' => now()->format('Ymd'),
             'ReasonForExport' => 'SALE',
             'CurrencyCode' => 'USD',
             'Product' => $products,
+            // The buyer the invoice is made out to. UPS refuses an Invoice form
+            // without it — 9120800, "Missing contact information" — even though
+            // its own schema leaves Contacts optional.
+            'Contacts' => [
+                'SoldTo' => [
+                    'Name' => $this->buildAttentionName($request->toAddress),
+                    'AttentionName' => $this->buildAttentionName($request->toAddress),
+                    ...$this->buildPhone($request->toAddress),
+                    'Address' => $this->buildAddress($request->toAddress),
+                ],
+            ],
         ];
     }
 
