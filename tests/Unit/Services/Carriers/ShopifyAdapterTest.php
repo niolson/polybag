@@ -613,7 +613,7 @@ it('still returns the bought label when inference itself throws', function (): v
     seedShopifyCarrierServices();
     $package = shopifyPackage();
 
-    app()->bind(ServiceInferrer::class, fn () => new class extends ServiceInferrer
+    app()->bind(ServiceInferrer::class, fn (): ServiceInferrer => new class extends ServiceInferrer
     {
         public function __construct() {}
 
