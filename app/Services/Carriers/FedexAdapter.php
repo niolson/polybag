@@ -222,6 +222,10 @@ class FedexAdapter implements DirectCarrierAdapter
 
     public function getRates(RateRequest $request, array $serviceCodes): Collection
     {
+        if ($this->quotesInternationalLocally($request)) {
+            return app(FedexSandboxInternationalRates::class)->ratesFor($request, $serviceCodes);
+        }
+
         $prepared = $this->prepareRateRequest($request, $serviceCodes);
 
         if (! $prepared) {
@@ -247,6 +251,12 @@ class FedexAdapter implements DirectCarrierAdapter
     public function prepareRateRequest(RateRequest $request, array $serviceCodes): ?PreparedRateRequest
     {
         if (empty($request->packages)) {
+            return null;
+        }
+
+        // Declining to prepare a request sends the caller back to getRates(),
+        // which answers a sandbox international quote without an API call.
+        if ($this->quotesInternationalLocally($request)) {
             return null;
         }
 
@@ -1354,5 +1364,18 @@ class FedexAdapter implements DirectCarrierAdapter
     private function isInternational(RateRequest $request): bool
     {
         return $request->originCountry !== $request->destinationCountry;
+    }
+
+    /**
+     * Whether this rate request has to be quoted locally rather than by FedEx.
+     *
+     * The sandbox rate API answers the canned domestic payload in
+     * {@see self::buildRateApiRequest()} whatever it is asked, so an
+     * international destination gets back domestic services and nothing
+     * selectable. {@see FedexSandboxInternationalRates} stands in for it.
+     */
+    private function quotesInternationalLocally(RateRequest $request): bool
+    {
+        return $this->isSandbox() && $this->isInternational($request);
     }
 }

@@ -16,6 +16,7 @@ use App\Http\Integrations\Fedex\Requests\TrackShipment;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierAccountScope;
+use App\Models\CarrierService;
 use App\Models\Client;
 use App\Models\Location;
 use App\Models\Package;
@@ -468,6 +469,146 @@ it('returns empty collection when API returns no rates', function (): void {
     $rates = $this->adapter->getRates($request, ['FEDEX_GROUND']);
 
     expect($rates)->toHaveCount(0);
+});
+
+it('stands in for international rates the FedEx sandbox cannot quote', function (): void {
+    app(SettingsService::class)->set('sandbox_mode', true);
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Rates::class => MockResponse::make(['output' => ['rateReplyDetails' => []]]),
+    ]);
+
+    $request = new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: 'M5H 2N2',
+        destinationCountry: 'CA',
+        packages: [new PackageData(weight: 5.0, length: 12, width: 10, height: 8)],
+        shipDate: CarbonImmutable::parse('2026-03-02'),
+    );
+
+    $rates = $this->adapter->getRates($request, ['FEDEX_INTERNATIONAL_PRIORITY', 'INTERNATIONAL_ECONOMY']);
+
+    expect($rates->pluck('serviceCode')->all())
+        ->toBe(['INTERNATIONAL_ECONOMY', 'FEDEX_INTERNATIONAL_PRIORITY']);
+
+    $priority = $rates->firstWhere('serviceCode', 'FEDEX_INTERNATIONAL_PRIORITY');
+    expect($priority->carrier)->toBe('FedEx')
+        ->and($priority->price)->toBeGreaterThan(0.0)
+        // createShipment reads the service type off the metadata, so a stubbed
+        // rate has to carry it exactly as a quoted one does.
+        ->and($priority->metadata['serviceType'])->toBe('FEDEX_INTERNATIONAL_PRIORITY')
+        ->and($priority->metadata['isSandboxStub'])->toBeTrue()
+        ->and($priority->deliveryDate)->toBe('2026-03-05');
+
+    // The sandbox rate API is never asked: it would answer domestic services.
+    Saloon::assertNotSent(Rates::class);
+});
+
+it('prices a sandbox international rate the same way every time it is quoted', function (): void {
+    app(SettingsService::class)->set('sandbox_mode', true);
+
+    $request = new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: 'M5H 2N2',
+        destinationCountry: 'CA',
+        packages: [new PackageData(weight: 5.0, length: 12, width: 10, height: 8)],
+    );
+
+    $first = $this->adapter->getRates($request, ['FEDEX_INTERNATIONAL_PRIORITY']);
+    $second = $this->adapter->getRates($request, ['FEDEX_INTERNATIONAL_PRIORITY']);
+
+    expect($second->first()->price)->toBe($first->first()->price);
+});
+
+it('names a sandbox international rate the way the service catalog does', function (): void {
+    app(SettingsService::class)->set('sandbox_mode', true);
+
+    CarrierService::create([
+        'carrier_id' => Carrier::where('name', 'FedEx')->value('id'),
+        'service_code' => 'FEDEX_INTERNATIONAL_PRIORITY',
+        'name' => 'FedEx International Priority®',
+    ]);
+
+    $request = new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: 'M5H 2N2',
+        destinationCountry: 'CA',
+        packages: [new PackageData(weight: 5.0, length: 12, width: 10, height: 8)],
+    );
+
+    $rates = $this->adapter->getRates($request, ['FEDEX_INTERNATIONAL_PRIORITY']);
+
+    expect($rates->first()->serviceName)->toBe('FedEx International Priority®');
+});
+
+it('quotes nothing in sandbox when no requested service ships internationally', function (): void {
+    app(SettingsService::class)->set('sandbox_mode', true);
+
+    $request = new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: 'M5H 2N2',
+        destinationCountry: 'CA',
+        packages: [new PackageData(weight: 5.0, length: 12, width: 10, height: 8)],
+    );
+
+    expect($this->adapter->getRates($request, ['FEDEX_GROUND']))->toBeEmpty();
+});
+
+it('leaves domestic sandbox rates to the FedEx sandbox API', function (): void {
+    app(SettingsService::class)->set('sandbox_mode', true);
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Rates::class => MockResponse::make(['output' => ['rateReplyDetails' => []]]),
+    ]);
+
+    $request = new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
+        packages: [new PackageData(weight: 5.0, length: 12, width: 10, height: 8)],
+    );
+
+    $this->adapter->getRates($request, ['FEDEX_GROUND']);
+
+    Saloon::assertSent(Rates::class);
+});
+
+it('asks FedEx for international rates outside sandbox mode', function (): void {
+    app(SettingsService::class)->set('sandbox_mode', false);
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Rates::class => MockResponse::make(['output' => ['rateReplyDetails' => []]]),
+    ]);
+
+    $request = new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: 'M5H 2N2',
+        destinationCountry: 'CA',
+        packages: [new PackageData(weight: 5.0, length: 12, width: 10, height: 8)],
+    );
+
+    $this->adapter->getRates($request, ['FEDEX_INTERNATIONAL_PRIORITY']);
+
+    Saloon::assertSent(Rates::class);
+});
+
+it('declines to prepare a sandbox international rate request so the stub answers it', function (): void {
+    app(SettingsService::class)->set('sandbox_mode', true);
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+    ]);
+
+    $request = new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: 'M5H 2N2',
+        destinationCountry: 'CA',
+        packages: [new PackageData(weight: 5.0, length: 12, width: 10, height: 8)],
+    );
+
+    expect($this->adapter->prepareRateRequest($request, ['FEDEX_INTERNATIONAL_PRIORITY']))->toBeNull();
 });
 
 it('creates shipment and returns tracking info', function (): void {

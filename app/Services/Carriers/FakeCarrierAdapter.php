@@ -28,22 +28,36 @@ class FakeCarrierAdapter implements DirectCarrierAdapter
         return ServiceCapability::Supported;
     }
 
-    /** @var array<string, array<int, array{code: string, name: string, price: float, transit: string, days: int}>> */
+    /**
+     * Every `code` here must be a real `CarrierService.service_code` as seeded
+     * by `CarrierSeeder`, because `ShippingRateService` hands
+     * {@see self::getRates()} the codes the shipping method allows and the
+     * filter below drops anything that does not match. A made-up code is
+     * not a harmless placeholder — it quotes only when no shipping method is
+     * assigned and silently vanishes the rest of the time, so fake mode shows
+     * fewer rates than it should with nothing to say why.
+     *
+     * The UPS codes are numeric on purpose. That is what UPS itself uses and
+     * what the catalog stores; spelling them `UPS_GROUND` reads better and
+     * matches nothing.
+     *
+     * @var array<string, array<int, array{code: string, name: string, price: float, transit: string, days: int}>>
+     */
     private const RATES = [
         'USPS' => [
             ['code' => 'USPS_GROUND_ADVANTAGE', 'name' => 'Ground Advantage', 'price' => 8.50, 'transit' => '2-5 Business Days', 'days' => 5],
-            ['code' => 'PRIORITY', 'name' => 'Priority Mail', 'price' => 12.75, 'transit' => '1-3 Business Days', 'days' => 3],
+            ['code' => 'PRIORITY_MAIL', 'name' => 'Priority Mail', 'price' => 12.75, 'transit' => '1-3 Business Days', 'days' => 3],
             ['code' => 'PRIORITY_MAIL_EXPRESS', 'name' => 'Priority Mail Express', 'price' => 28.40, 'transit' => '1-2 Days', 'days' => 1],
         ],
         'FedEx' => [
             ['code' => 'FEDEX_GROUND', 'name' => 'FedEx Ground', 'price' => 10.25, 'transit' => '1-5 Business Days', 'days' => 5],
             ['code' => 'FEDEX_EXPRESS_SAVER', 'name' => 'FedEx Express Saver', 'price' => 18.90, 'transit' => '3 Business Days', 'days' => 3],
-            ['code' => 'FEDEX_2DAY', 'name' => 'FedEx 2Day', 'price' => 24.50, 'transit' => '2 Business Days', 'days' => 2],
+            ['code' => 'FEDEX_2_DAY', 'name' => 'FedEx 2Day', 'price' => 24.50, 'transit' => '2 Business Days', 'days' => 2],
         ],
         'UPS' => [
-            ['code' => 'UPS_GROUND', 'name' => 'UPS Ground', 'price' => 11.00, 'transit' => '1-5 Business Days', 'days' => 5],
-            ['code' => 'UPS_3DAY_SELECT', 'name' => 'UPS 3 Day Select', 'price' => 19.75, 'transit' => '3 Business Days', 'days' => 3],
-            ['code' => 'UPS_2ND_DAY_AIR', 'name' => 'UPS 2nd Day Air', 'price' => 26.30, 'transit' => '2 Business Days', 'days' => 2],
+            ['code' => '03', 'name' => 'UPS Ground', 'price' => 11.00, 'transit' => '1-5 Business Days', 'days' => 5],
+            ['code' => '12', 'name' => 'UPS 3 Day Select', 'price' => 19.75, 'transit' => '3 Business Days', 'days' => 3],
+            ['code' => '02', 'name' => 'UPS 2nd Day Air', 'price' => 26.30, 'transit' => '2 Business Days', 'days' => 2],
         ],
     ];
 

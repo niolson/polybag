@@ -44,7 +44,7 @@ class CarrierSeeder extends Seeder
             ['name' => 'FedEx International Priority®', 'service_code' => 'FEDEX_INTERNATIONAL_PRIORITY'],
             ['name' => 'FedEx International Priority® Express', 'service_code' => 'FEDEX_INTERNATIONAL_PRIORITY_EXPRESS'],
             ['name' => 'FedEx International First®', 'service_code' => 'INTERNATIONAL_FIRST'],
-            ['name' => 'FedEx International Economy®', 'service_code' => 'FEDEX_INTERNATIONAL_ECONOMY'],
+            ['name' => 'FedEx International Economy®', 'service_code' => 'INTERNATIONAL_ECONOMY'],
             ['name' => 'FedEx International Connect Plus®', 'service_code' => 'FEDEX_INTERNATIONAL_CONNECT_PLUS'],
             ['name' => 'FedEx First Overnight®', 'service_code' => 'FIRST_OVERNIGHT'],
             ['name' => 'FedEx Priority Overnight®', 'service_code' => 'PRIORITY_OVERNIGHT'],

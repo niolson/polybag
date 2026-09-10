@@ -13,6 +13,13 @@ use Carbon\CarbonImmutable;
 readonly class ShipRequest
 {
     /**
+     * The smallest per-unit customs weight a carrier will accept. A commodity
+     * declared at zero weight is rejected outright, so scaling never takes an
+     * item below this even when the package weight cannot afford it.
+     */
+    private const MIN_CUSTOMS_UNIT_WEIGHT = 0.01;
+
+    /**
      * @param  RateResponse|null  $selectedRate  What was quoted and chosen — null for a blind purchase, which had no price or service to quote
      * @param  BlindPurchaseOffer|null  $blindOffer  The priceless offer being bought instead, when there is one. Exactly one of the two is set.
      * @param  array<int, CustomsItem>  $customsItems
@@ -89,7 +96,31 @@ readonly class ShipRequest
     }
 
     /**
-     * Scale customs item weights proportionally so their total matches the package weight.
+     * Scale customs item weights proportionally so their total fits inside the
+     * package weight.
+     *
+     * Every carrier declares a commodity as a per-unit weight and multiplies it
+     * by the quantity itself — `round($item->weight * $item->quantity, 2)` in
+     * both the FedEx and UPS adapters. That is why the scaled unit weight is
+     * floored to the hundredth rather than rounded: rounding a unit
+     * weight up spends a hundredth of a pound the package weight does not have,
+     * and the quantity then multiplies the overspend. A 0.15 lb package holding
+     * two items of two units each was rejected by FedEx with "Total commodities
+     * weight is greater than the package weight" over exactly that — 0.06 and
+     * 0.02 a unit, declared as 0.12 + 0.04 = 0.16.
+     *
+     * Flooring makes the declaration fit by construction: each unit weight is at
+     * or below its proportional share, and a two-decimal weight times an integer
+     * quantity is exact, so nothing rounds up again downstream. The cost is that
+     * the total lands slightly under the package weight, which no carrier
+     * objects to.
+     *
+     * One case cannot be made to fit: a package weighing less than
+     * {@see self::MIN_CUSTOMS_UNIT_WEIGHT} times the total number of units, where
+     * even the smallest declarable weight per unit overshoots. The floor still
+     * applies, and the carrier rejects the declaration — correctly, because at
+     * that point the recorded package weight, not the declaration, is what is
+     * wrong.
      */
     public function withScaledCustomsWeights(): self
     {
@@ -111,7 +142,7 @@ readonly class ShipRequest
                 description: $item->description,
                 quantity: $item->quantity,
                 unitValue: $item->unitValue,
-                weight: round($item->weight * $scale, 2),
+                weight: $this->floorToHundredth($item->weight * $scale),
                 hsTariffNumber: $item->hsTariffNumber,
                 countryOfOrigin: $item->countryOfOrigin,
             ),
@@ -166,6 +197,21 @@ readonly class ShipRequest
             blindOffer: $this->blindOffer,
             offer: $this->offer,
             overrideDeclaredWeight: true,
+        );
+    }
+
+    /**
+     * Floor a weight to the hundredth of a pound carriers declare in.
+     *
+     * The inner round() absorbs binary representation noise — 0.06 arriving as
+     * 0.059999999 would otherwise floor to 0.05 — without ever letting a value
+     * that is genuinely below a hundredth boundary climb over it.
+     */
+    private function floorToHundredth(float $weight): float
+    {
+        return max(
+            self::MIN_CUSTOMS_UNIT_WEIGHT,
+            floor(round($weight * 100, 6)) / 100,
         );
     }
 

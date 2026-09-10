@@ -31,7 +31,7 @@ it('seeds fedex carrier services with trademarked display names', function (): v
         ->and($fedex->carrierServices()->where('service_code', 'FEDEX_GROUND')->value('name'))->toBe('FedEx Ground®')
         ->and($fedex->carrierServices()->where('service_code', 'SMART_POST')->value('name'))->toBe('FedEx Ground® Economy')
         ->and($fedex->carrierServices()->where('service_code', 'FEDEX_INTERNATIONAL_PRIORITY')->value('name'))->toBe('FedEx International Priority®')
-        ->and($fedex->carrierServices()->where('service_code', 'FEDEX_INTERNATIONAL_ECONOMY')->value('name'))->toBe('FedEx International Economy®')
+        ->and($fedex->carrierServices()->where('service_code', 'INTERNATIONAL_ECONOMY')->value('name'))->toBe('FedEx International Economy®')
         ->and($fedex->carrierServices()->where('service_code', 'PRIORITY_OVERNIGHT')->value('name'))->toBe('FedEx Priority Overnight®')
         ->and($fedex->carrierServices()->where('service_code', 'STANDARD_OVERNIGHT')->value('name'))->toBe('FedEx Standard Overnight®')
         ->and($fedex->carrierServices()->where('service_code', 'FEDEX_2_DAY')->value('name'))->toBe('FedEx 2Day®')
