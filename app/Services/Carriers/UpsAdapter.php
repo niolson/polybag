@@ -642,11 +642,15 @@ class UpsAdapter implements DirectCarrierAdapter
                 $shipment['ShipmentServiceOptions']['SaturdayDeliveryIndicator'] = '';
             }
 
-            // Add international forms for non-US destinations. UPS defines
+            // Add international forms wherever the lane crosses a customs
+            // zone — asked of the address pair, so a Canadian account shipping
+            // into the US declares and one shipping within Canada does not,
+            // and so the workflow's weight reconciliation and this branch agree
+            // on which packages carry a declaration. UPS defines
             // InternationalForms on ShipmentServiceOptions, not on Shipment —
             // sent a level higher it validates against the schema and is then
             // silently ignored, so no customs invoice is ever generated.
-            if ($request->toAddress->country !== 'US' && ! empty($request->customsItems)) {
+            if (! $request->fromAddress->sharesCustomsZoneWith($request->toAddress) && ! empty($request->customsItems)) {
                 $shipment['ShipmentServiceOptions']['InternationalForms'] = $this->buildCustomsDetail($request);
                 $shipment['InvoiceLineTotal'] = $this->buildShipInvoiceLineTotal($request);
             }
