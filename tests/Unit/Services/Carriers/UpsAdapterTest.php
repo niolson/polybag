@@ -473,11 +473,12 @@ function upsSpecialServiceShipRequest(array $codes, array $config = [], array $r
  * A ship request carrying a label reference, addressed to the given destination.
  *
  * @param  array<int, CustomsItem>  $customsItems
+ * @param  AddressData|null  $fromAddress  Origin, a Seattle warehouse unless the lane under test needs another
  */
-function upsShipRequestTo(AddressData $toAddress, string $reference = 'ORD-10042', array $customsItems = [], array $specialServiceCodes = []): ShipRequest
+function upsShipRequestTo(AddressData $toAddress, string $reference = 'ORD-10042', array $customsItems = [], array $specialServiceCodes = [], ?AddressData $fromAddress = null): ShipRequest
 {
     return new ShipRequest(
-        fromAddress: new AddressData(
+        fromAddress: $fromAddress ?? new AddressData(
             firstName: 'Shipping',
             lastName: 'Center',
             streetAddress: '123 Warehouse St',
@@ -532,6 +533,42 @@ function upsCanadianAddress(): AddressData
         postalCode: 'M5H 2N2',
         country: 'CA',
     );
+}
+
+/**
+ * A Canadian origin, for lanes that do not start in the fifty states.
+ */
+function upsCanadianOrigin(): AddressData
+{
+    return new AddressData(
+        firstName: 'Shipping',
+        lastName: 'Centre',
+        streetAddress: '200 Bay St',
+        city: 'Toronto',
+        stateOrProvince: 'ON',
+        postalCode: 'M5J 2J2',
+        country: 'CA',
+    );
+}
+
+/**
+ * Whether the UPS ship request that was sent asked for a customs invoice.
+ */
+function upsSentInternationalForms(): bool
+{
+    $sent = null;
+
+    Saloon::assertSent(function ($request) use (&$sent): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $sent = $request->body()->all()['ShipmentRequest']['Shipment'];
+
+        return true;
+    });
+
+    return isset($sent['ShipmentServiceOptions']['InternationalForms']);
 }
 
 function fakeUpsShipEndpoints(): void
@@ -1168,6 +1205,41 @@ it('nests InternationalForms inside ShipmentServiceOptions, where UPS defines it
 
         return true;
     });
+});
+
+/*
+| Whether a declaration goes out is a question about the pair of addresses,
+| and the answer has to match the workflow's: it reconciles customs weights
+| for every cross-zone lane, and a lane it reconciles for but UPS then ships
+| without a declaration would buy a label that clears no customs. The mock
+| carrier in the workflow tests cannot see this, so it is pinned here.
+*/
+
+it('sends InternationalForms from a Canadian origin into the US, which the destination alone calls domestic', function (): void {
+    fakeUpsShipEndpoints();
+
+    $toPortland = new AddressData(
+        firstName: 'John',
+        lastName: 'Doe',
+        streetAddress: '456 Main St',
+        city: 'Portland',
+        stateOrProvince: 'OR',
+        postalCode: '97201',
+    );
+
+    expect($this->adapter->createShipment(
+        upsShipRequestTo($toPortland, customsItems: upsCustomsItems(), fromAddress: upsCanadianOrigin())
+    )->success)->toBeTrue()
+        ->and(upsSentInternationalForms())->toBeTrue();
+});
+
+it('sends no InternationalForms on a lane that stays inside Canada', function (): void {
+    fakeUpsShipEndpoints();
+
+    expect($this->adapter->createShipment(
+        upsShipRequestTo(upsCanadianAddress(), customsItems: upsCustomsItems(), fromAddress: upsCanadianOrigin())
+    )->success)->toBeTrue()
+        ->and(upsSentInternationalForms())->toBeFalse();
 });
 
 it('names the buyer on the customs invoice, which UPS requires for an Invoice form', function (): void {

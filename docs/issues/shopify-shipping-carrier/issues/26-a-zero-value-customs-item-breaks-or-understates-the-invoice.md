@@ -122,3 +122,13 @@ clean up anyway. Same as `MissingDeclaredValueException`.
 `requiresCustomsWeightOverride()` gated on the destination alone too, so a Canadian
 location would have been prompted over a Canadian parcel and not over one into the US.
 Switched to the same pair check in the same PR; two tests pin it.
+
+**2026-09-11 — `UpsAdapter` brought onto the same predicate.** Its ship path attached
+`InternationalForms` only for a non-US *destination*, so once the workflow reconciled
+weights for every cross-zone lane, a Canadian origin into the US would have been
+reconciled and then bought without a declaration. It now asks the address pair, like
+FedEx already did and like its own rate path's `crossesBorder()`. USPS is untouched: it
+never ships from outside the US. Side effect worth knowing: US→PR with customs items now
+sends `InternationalForms` from UPS, which it did not before — UPS requires a commercial
+invoice for Puerto Rico, and the rate path already sent `InvoiceLineTotal` for it, so this
+is the ship path catching up rather than a new position.
