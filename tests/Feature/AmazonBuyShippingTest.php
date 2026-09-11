@@ -88,6 +88,12 @@ function amazonEligibleRates(): array
  * Every rate in the production capture offered PDF twice — letter and 4x6 — plus
  * ZPL at 300 DPI and a PNG our print path cannot use.
  *
+ * The print options are the captured ones, not a simplification: file joining
+ * is offered as `[true]` only, and both PDF sizes make a `PACKSLIP` mandatory
+ * beside the `LABEL` (UPS's letter size says `RECEIPT` instead). A version of
+ * this fixture with `LABEL` alone let 22 tests pass against a purchase body
+ * Amazon refuses — `10`.
+ *
  * @return array<int, array<string, mixed>>
  */
 function amazonDocumentSpecifications(): array
@@ -96,7 +102,7 @@ function amazonDocumentSpecifications(): array
         [
             'format' => 'PDF',
             'size' => ['width' => 8.5, 'length' => 11.0, 'unit' => 'INCH'],
-            'printOptions' => [['supportedDPIs' => [], 'supportedPageLayouts' => ['LEFT'], 'supportedFileJoiningOptions' => [true], 'supportedDocumentDetails' => [['name' => 'LABEL', 'isMandatory' => true]]]],
+            'printOptions' => [['supportedDPIs' => [], 'supportedPageLayouts' => ['LEFT', 'RIGHT'], 'supportedFileJoiningOptions' => [true], 'supportedDocumentDetails' => [['name' => 'PACKSLIP', 'isMandatory' => true], ['name' => 'LABEL', 'isMandatory' => true]]]],
         ],
         [
             'format' => 'ZPL',
@@ -111,8 +117,41 @@ function amazonDocumentSpecifications(): array
         [
             'format' => 'PDF',
             'size' => ['width' => 4.0, 'length' => 6.0, 'unit' => 'INCH'],
-            'printOptions' => [['supportedDPIs' => [], 'supportedPageLayouts' => ['LEFT'], 'supportedFileJoiningOptions' => [true], 'supportedDocumentDetails' => [['name' => 'LABEL', 'isMandatory' => true]]]],
+            'printOptions' => [['supportedDPIs' => [], 'supportedPageLayouts' => ['LEFT'], 'supportedFileJoiningOptions' => [true], 'supportedDocumentDetails' => [['name' => 'PACKSLIP', 'isMandatory' => true], ['name' => 'LABEL', 'isMandatory' => true]]]],
         ],
+    ];
+}
+
+/**
+ * A USPS offer as captured on 2026-09-11 for a Guam order: the Confirmation
+ * group is required, and it offers no `NO_CONFIRMATION` — its free option is
+ * `DELIVERY_CONFIRMATION`. The vocabulary UPS's group uses for "nothing" does
+ * not exist here, which is what the first live purchase found (`10`).
+ *
+ * @param  array<int, array<string, mixed>>|null  $confirmationOptions
+ * @return array<string, mixed>
+ */
+function amazonUspsRate(?array $confirmationOptions = null): array
+{
+    return [
+        'rateId' => '7c0e4b2a-3d1f-4e7b-9a8c-2f6d5e4c3b2a',
+        'carrierId' => 'USPS',
+        'carrierName' => 'USPS',
+        'serviceId' => 'USPS_PTP_GAH',
+        'serviceName' => 'USPS Ground Advantage (1 - 70 lb)',
+        'totalCharge' => ['unit' => 'USD', 'value' => 10.05],
+        'requiresAdditionalInputs' => false,
+        'promise' => ['deliveryWindow' => ['start' => '2026-09-18T06:59:59Z', 'end' => '2026-09-20T06:59:59Z']],
+        'availableValueAddedServiceGroups' => [[
+            'groupId' => 'VAS_GROUP_ID_CONFIRMATION',
+            'groupDescription' => 'Confirmation',
+            'isRequired' => true,
+            'valueAddedServices' => $confirmationOptions ?? [
+                ['id' => 'SIGNATURE_CONFIRMATION', 'name' => 'Signature confirmation', 'cost' => ['unit' => 'USD', 'value' => 4.15]],
+                ['id' => 'DELIVERY_CONFIRMATION', 'name' => 'Delivery confirmation', 'cost' => ['unit' => 'USD', 'value' => 0]],
+            ],
+        ]],
+        'supportedDocumentSpecifications' => amazonDocumentSpecifications(),
     ];
 }
 
@@ -418,6 +457,10 @@ it('buys the offer that was chosen and records what Amazon called the shipment',
             && $body['requestedDocumentSpecification']['format'] === 'ZPL'
             && $body['requestedDocumentSpecification']['size'] === ['width' => 4.0, 'length' => 6.0, 'unit' => 'INCH']
             && $body['requestedDocumentSpecification']['dpi'] === 300
+            // ZPL carries the label alone, and joining is the only option
+            // the rate published — `false` is refused (`10`).
+            && $body['requestedDocumentSpecification']['requestedDocumentTypes'] === ['LABEL']
+            && $body['requestedDocumentSpecification']['needFileJoining'] === true
             // The idempotency key is the offer, which is what lets an
             // unanswered purchase be asked about instead of repeated.
             && $request->headers()->get('x-amzn-IdempotencyKey') === $rate->offerId;
@@ -443,8 +486,60 @@ it('asks for a 4x6 label even where the rate also offers letter size', function 
         return $spec['format'] === 'PDF'
             && $spec['size'] === ['width' => 4.0, 'length' => 6.0, 'unit' => 'INCH']
             // PDF is offered with no DPI list, so none is asked for.
-            && ! array_key_exists('dpi', $spec);
+            && ! array_key_exists('dpi', $spec)
+            // Every PDF print option makes the pack slip mandatory, and a
+            // request naming the label alone is refused — so it is asked
+            // for, joined, which is the only joining option published.
+            && $spec['requestedDocumentTypes'] === ['PACKSLIP', 'LABEL']
+            && $spec['needFileJoining'] === true;
     });
+});
+
+it('does not take a lone document that Amazon did not call a label', function (): void {
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse(),
+        PurchaseShipment::class => MockResponse::make(['payload' => [
+            'shipmentId' => 'amzn1.sid.packsliponly',
+            'packageDocumentDetails' => [[
+                'packageClientReferenceId' => '1',
+                'trackingId' => 'D10012345678901',
+                'packageDocuments' => [['type' => 'PACKSLIP', 'format' => 'PDF', 'contents' => base64_encode('PACKSLIP-BYTES')]],
+            ]],
+        ]]),
+    ]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->first();
+
+    $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(
+        selectedRate: $rate,
+        labelFormat: 'pdf',
+    ));
+
+    // Paid for, so the failure names the shipment that can void it — but a
+    // pack slip is never recorded and printed as the label.
+    expect($result->success)->toBeFalse()
+        ->and($result->message)->toContain('amzn1.sid.packsliponly')
+        ->and($this->package->fresh()->label_data)->toBeNull()
+        ->and(ShippingOffer::where('public_id', $rate->offerId)->value('purchase_reference'))->toBe('amzn1.sid.packsliponly');
+});
+
+it('leaves a document unjoined only where the rate allows it', function (): void {
+    $unjoined = amazonEligibleRates();
+    $unjoined[0]['supportedDocumentSpecifications'][3]['printOptions'][0]['supportedFileJoiningOptions'] = [false, true];
+
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse($unjoined),
+        PurchaseShipment::class => amazonPurchaseResponse(format: 'PDF'),
+    ]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->first();
+
+    app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(
+        selectedRate: $rate,
+        labelFormat: 'pdf',
+    ));
+
+    Saloon::assertSent(fn (PurchaseShipment $request): bool => $request->body()->all()['requestedDocumentSpecification']['needFileJoining'] === false);
 });
 
 it('buys the confirmation a shipment requires, and an explicit refusal when it requires none', function (): void {
@@ -465,6 +560,85 @@ it('buys the confirmation a shipment requires, and an explicit refusal when it r
     // honest and cheapest answer is the explicit "no".
     Saloon::assertSent(fn (PurchaseShipment $request): bool => $request->body()->all()['requestedValueAddedServices']
         === [['id' => 'NO_CONFIRMATION']]);
+});
+
+it('answers a required group with its cheapest option when it offers no refusal', function (): void {
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse([amazonUspsRate()]),
+        PurchaseShipment::class => amazonPurchaseResponse(),
+    ]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->first();
+
+    expect($rate)->not->toBeNull();
+
+    app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(
+        selectedRate: $rate,
+        labelFormat: 'zpl',
+    ));
+
+    // USPS's group has no NO_CONFIRMATION; leaving it unanswered, or naming an
+    // option it does not offer, is refused by Amazon. Delivery confirmation is
+    // free, so it is what "nothing asked for" buys here.
+    Saloon::assertSent(function (PurchaseShipment $request): bool {
+        $body = $request->body()->all();
+
+        assertMatchesSpApiSchema($body, 'PurchaseShipmentRequest', 'shippingV2');
+
+        return $body['requestedValueAddedServices'] === [['id' => 'DELIVERY_CONFIRMATION']];
+    });
+});
+
+it('prefers the least demanding option when a required group offers several for free', function (): void {
+    // Priority Mail Express, as captured: a signature at $0 listed first.
+    $expressLike = amazonUspsRate([
+        ['id' => 'SIGNATURE_CONFIRMATION', 'name' => 'Signature confirmation', 'cost' => ['unit' => 'USD', 'value' => 0]],
+        ['id' => 'DELIVERY_CONFIRMATION', 'name' => 'Delivery confirmation', 'cost' => ['unit' => 'USD', 'value' => 0]],
+    ]);
+
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse([$expressLike]),
+        PurchaseShipment::class => amazonPurchaseResponse(),
+    ]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->first();
+
+    app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(
+        selectedRate: $rate,
+        labelFormat: 'zpl',
+    ));
+
+    // Free is not harmless: a signature nobody asked for is a parcel that
+    // comes back when nobody is home.
+    Saloon::assertSent(fn (PurchaseShipment $request): bool => $request->body()->all()['requestedValueAddedServices']
+        === [['id' => 'DELIVERY_CONFIRMATION']]);
+});
+
+it('drops an offer whose required group can only be answered with a surcharge nobody asked for', function (): void {
+    $paidOnly = amazonUspsRate([
+        ['id' => 'SIGNATURE_CONFIRMATION', 'name' => 'Signature confirmation', 'cost' => ['unit' => 'USD', 'value' => 4.15]],
+        ['id' => 'ADULT_SIGNATURE_CONFIRMATION', 'name' => 'Adult signature confirmation', 'cost' => ['unit' => 'USD', 'value' => 9.35]],
+    ]);
+
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse([...amazonEligibleRates(), $paidOnly])]);
+
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), []);
+
+    // Buying it would have meant a $4.15 signature the quoted price did not
+    // include; the offers beside it are unaffected.
+    expect($rates->pluck('carrier')->all())->toBe(['OnTrac', 'UPS']);
+});
+
+it('keeps a paid-only required group when the shipment asked for that service', function (): void {
+    $paidOnly = amazonUspsRate([
+        ['id' => 'SIGNATURE_CONFIRMATION', 'name' => 'Signature confirmation', 'cost' => ['unit' => 'USD', 'value' => 4.15]],
+    ]);
+
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse([$paidOnly])]);
+
+    $request = RateRequest::fromPackage($this->package)->withSpecialServiceCodes(['signature_required']);
+
+    expect(amazonAdapter()->getRates($request, [])->pluck('carrier')->all())->toBe(['USPS']);
 });
 
 it('records the resolution Amazon generated, not the one the device asked for', function (): void {

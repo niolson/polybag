@@ -48,8 +48,9 @@ Notes that predate `01` and survived it unchanged:
 ## Acceptance criteria
 
 - [x] Rates appear alongside direct-carrier rates with the real carrier per offer
-- [~] Purchase, void and tracking work end to end against a real order — built and covered
-      against captured production shapes; **not yet run against a live order**, see below
+- [ ] Purchase, void and tracking work end to end against a real order — built and covered
+      against captured production shapes; **run live 2026-09-11 and refused**, see below
+      and `10`
 - [x] The channel export does not double-confirm a Buy Shipping shipment
 - [x] Request bodies validate against the vendored Shipping v2 schema, following the pattern
       in `tests/Fixtures/Schemas/`
@@ -222,10 +223,18 @@ example of the case.
 
 ### Still open
 
-- **No live run.** Everything is exercised against captured production shapes; the account
-  has no fresh order (`01`'s caveat), and a purchase spends real money. The remaining
-  acceptance criterion is one attended purchase, void and tracking check against a real
-  order in production.
+- **No successful live run — and the first attempt found the body invalid.** On 2026-09-11
+  `purchaseShipment` was sent live for the first time (`09`) and Amazon refused the
+  document specification and then the value-added services before looking at the order:
+  `needFileJoining` is hard-coded `false` where every rate offers only `true`,
+  `requestedDocumentTypes` omits the `PACKSLIP` every PDF spec marks mandatory, and USPS's
+  required Confirmation group has no `NO_CONFIRMATION` to answer with. Both are in the two
+  fields the schema README said the schema cannot catch. Spun out as
+  [`10`](10-purchase-body-is-refused-by-amazon.md) with the rules established by oracle.
+  `10` was fixed the same day and the adapter's body now passes Amazon's validation. With a
+  valid body the purchase was refused because the order had already shipped ("doesn't exist
+  in Rigel"), so the remaining criterion — one attended purchase, void and tracking check —
+  needs an **unshipped** order.
 - **`accountNoLongerResolves()` is still a comparison rather than plumbing.** `ShipRequest`
   now carries the offer, so the account *could* be named — but making adapters honour it
   means touching `ResolvesCarrierAccount` in all three direct adapters, which is a
