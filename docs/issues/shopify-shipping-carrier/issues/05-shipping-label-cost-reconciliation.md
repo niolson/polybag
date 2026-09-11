@@ -1,125 +1,83 @@
-# Recover Shopify Shipping postage costs from balance transactions
+# Recover Shopify Shipping postage costs
 
-Status: needs-triage
+Status: needs-triage — sequenced last of the substantive work; its evidence is gathered first
 
 Repo: `polybag`
 
 ## Problem
 
-Nothing in the label purchase reports a price, so `packages.cost` is null for every
-Shopify Shipping label. That is deliberate — see the PRD — but it means postage spend on
-these packages is invisible to PolyBag.
+Nothing in the label purchase reports a price, so `packages.cost` is null for every Shopify
+Shipping label. That is deliberate (see the PRD), and it means postage spend on these
+packages is invisible to PolyBag — displayed as a gap by `08`, and **invoiced as zero** by
+`12`.
 
-## The one route that exists
+## Two routes, and the second is the one the PRD got wrong
 
-Verified 2026-08-31 by introspection: `ShopifyPaymentsTransactionType` includes a
-**`SHIPPING_LABEL`** value, so postage charges surface as financial transactions:
-
-```graphql
-shopifyPaymentsAccount {
-  balanceTransactions(first: 50) {
-    nodes { id type amount { amount currencyCode } transactionDate associatedOrder { id name } }
-  }
-}
-```
-
-The query path is real. It is gated:
-
-```
-ACCESS_DENIED — requires `read_shopify_payments` or `read_shopify_payments_accounts`
-```
-
-## Four caveats that shape the design
-
-1. **Shopify Payments only.** A shop billing postage another way has no such feed.
-2. **New scopes**, neither currently granted. Declared scopes live in the Shopify Dev
-   Dashboard, so widening them makes every connected store re-approve the app — this
-   inherits that whole re-consent problem.
-3. **It links to an order, not a label.** An order with a voided-then-rebought label
-   produces several `SHIPPING_LABEL` transactions with nothing distinguishing them.
-   Matching is heuristic — order plus timestamp — not exact.
-4. **It settles later**, so cost arrives well after the package ships. This can never be
-   shown to a packer at ship time.
-
-## Shape if built
-
-A periodic job pulling `SHIPPING_LABEL` transactions and attaching them to shipments at
-**order granularity**, surfaced as a cost-reconciliation report kept *separate* from
-`packages.cost`.
-
-Do not backfill `packages.cost` from it. That column is exact for carrier-account labels
-and populating it with an order-level approximation would quietly corrupt a number other
-reports treat as precise. See `08`.
-
-## Worth it when
-
-Postage spend needs to land in client billing. Not worth it merely to compare Shopify
-Shipping against your own USPS account — the Shopify admin already shows that.
-
-## Comments
-
-### 2026-09-08 — the price is in the order's event stream
-
-Found while verifying `01`, not looked for. Shopify writes the label price into the
-order timeline, and the timeline is readable through the Admin API as
-`Order.events` — no Shopify Payments balance transaction involved:
+**1. `Order.events`** — the label price is written into the order timeline as prose, and
+the timeline is readable through the Admin API with no payments scope and no reconciliation
+job:
 
 ```
 2026-09-08T20:52:42Z  BasicEvent  "PolyBag purchased a shipping label for $5.68."
 2026-09-08T19:08:35Z  BasicEvent  "Nick Olson voided a $5.69 shipping label."
-2026-09-08T19:08:19Z  BasicEvent  "Nick Olson purchased a shipping label for $5.69."
 ```
 
-So the PRD's "cost is only available via Shopify Payments balance transactions" is wrong,
-and this issue has a second option that needs no payments scope and no reconciliation job.
+Found while verifying `01`, not looked for. **It is a prose string, and that is the whole
+problem with it**: a localized human sentence with a currency glyph rather than an amount
+and a currency code.
 
-**It is a prose string, and that is the whole problem with it.** What is on offer is a
-localized, human-readable sentence with a currency glyph rather than an amount and a
-currency code. Before this becomes the plan, settle:
+**2. Shopify Payments balance transactions** — `ShopifyPaymentsTransactionType` includes
+`SHIPPING_LABEL`, so postage charges surface as financial transactions. Verified by
+introspection 2026-08-31, and gated on `read_shopify_payments` /
+`read_shopify_payments_accounts`, neither granted.
+
+## What has to be settled before either becomes the plan
+
+For the timeline route:
 
 1. **What does it read in another locale or currency?** `$` is not a currency. A shop
-   billing in CAD or EUR, or an admin in another language, may render a sentence this
-   parse does not recognise — and a regex that quietly matches nothing writes null cost,
-   which is the state we already have.
-2. **How is an event tied to a label?** The event is on the order, not the label. This
-   order alone carries two purchases and a void, and `06` allows several packages per
-   shipment. Timestamp proximity is the obvious correlation and is not an identity.
-3. **Does the app attribution help?** The purchase we made reads `PolyBag purchased…`
-   where the manual one reads a person's name. `attributeToApp` is selectable alongside
-   the message and may narrow it to our own purchases.
-4. **What does a failed parse do?** It must leave cost null rather than guess. Null is
-   already handled honestly everywhere by `08` and `12`.
+   billing in CAD or EUR, or an admin in another language, may render a sentence the parse
+   does not recognise — and a regex that quietly matches nothing writes null cost, which is
+   the state we already have.
+2. **How is an event tied to a label?** The event is on the order, not the label. One order
+   can carry several purchases and a void, and `06` allows several packages per shipment.
+   Timestamp proximity is correlation, not identity. Does `attributeToApp` narrow it to our
+   own purchases — ours reads `PolyBag purchased…` where a manual one reads a person's name?
+3. **What does a failed parse do?** It must leave cost null rather than guess.
 
-A wrong number here is worse than no number: `12` invoices this figure to a client.
+For the balance-transaction route, four caveats shape any design: **Shopify Payments only**;
+**new scopes**, which live in the Dev Dashboard so widening them makes every connected store
+re-approve the app; it **links to an order, not a label**, so matching is heuristic; and it
+**settles later**, so cost arrives well after the package ships and can never be shown to a
+packer at ship time.
 
-### 2026-09-08 — sequenced last of the substantive work, but its evidence is gathered first
+## Shape if built
 
-Two separate things, and keeping them apart is the point of this note.
+A periodic job attaching costs at **order granularity**, surfaced as a cost-reconciliation
+report kept *separate* from `packages.cost`. **Do not backfill `packages.cost` from it** —
+that column is exact for carrier-account labels, and populating it with an order-level
+approximation would quietly corrupt a number other reports treat as precise (`08`).
 
-**Build it last.** Everything else open in this directory either costs nothing or is
-already wrong; this one is a new subsystem whose shape depends on answers the earlier work
-produces. Nothing is blocked waiting for it — `08` and `12` both handle a null cost
-honestly today.
+**The bar: a wrong number here is worse than no number**, because `12` invoices it. A parse
+that fails must leave cost null, which everything downstream already handles honestly.
 
-**Gather its evidence first, because that part is free.** The four questions in the comment
-above are answerable from purchases that `02`, `01`'s remainder and `14` are going to make
-anyway. Pull `Order.events` after every one of them and record it, rather than running a
-separate campaign later:
+## Sequencing — build last, gather first
 
-- **Locale and currency** — the parse's biggest risk, and the one thing a single-store
-  sample cannot settle. Record what this store renders; treat a second currency as still
-  open rather than assume the sentence generalises.
-- **Event-to-label identity** — `14`'s capture campaign deliberately buys several labels
-  against the same carriers, and voids them. That produces exactly the multi-purchase order
-  this issue is worried about, for free. Record whether `attributeToApp` separates our own
-  purchases from an admin's.
-- **A test label still carries a price**, already observed. So the dev store exercises the
-  parse without a real one.
+**Build it last.** Everything else open here either costs nothing or is already wrong; this
+is a new subsystem whose shape depends on answers the earlier work produces, and nothing is
+blocked waiting for it.
 
-**What it unblocks.** `12`'s charging half — what a client is actually invoiced for
-unpriced postage — is the decision this feeds, and it is the reason this is worth building
-at all rather than merely interesting. Report back there.
+**Gather its evidence first, because that part is free.** The questions above are
+answerable from purchases other issues make anyway — pull `Order.events` after every one
+rather than running a separate campaign later. `14`'s captures deliberately buy several
+labels against one order and void them, which is exactly the multi-purchase case question 2
+needs. A test label still carries a price, so the development store exercises the parse.
 
-**The bar stays where the comment above set it.** A wrong number is worse than no number,
-because `12` invoices it. A parse that fails must leave cost null, which is a state
-everything downstream already handles.
+**What it unblocks:** `12`'s charging half, which is the reason this is worth building
+rather than merely interesting. Report back there.
+
+## Comments
+
+- **2026-08-31** — balance transactions verified by introspection, and found to be gated.
+- **2026-09-08** — the timeline price found while verifying `01`, correcting the PRD's claim
+  that cost is reachable only through Shopify Payments.
