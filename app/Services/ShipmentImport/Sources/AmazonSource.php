@@ -10,7 +10,10 @@ use App\Http\Integrations\Amazon\AmazonSpApiConnector;
 use App\Http\Integrations\Amazon\Requests\ConfirmShipment;
 use App\Http\Integrations\Amazon\Requests\SearchCatalogItems;
 use App\Http\Integrations\Amazon\Requests\SearchOrders;
+use App\Models\DataSource;
 use App\Models\Location;
+use App\Models\Product;
+use App\Services\ClientContext;
 use App\Services\SettingsService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -219,8 +222,16 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
             ]);
         }
 
-        if (! $sandbox && $historicalImport) {
-            $this->catalogBarcodes = $this->fetchCatalogBarcodes($rawOrders, $marketplaceId);
+        // Barcodes come from the catalog, not the order, and only for products
+        // that do not have one yet — a packer scans the product, and a product
+        // imported without a barcode cannot be scanned. Every import does this,
+        // not just the historical one: the first live Buy Shipping order arrived
+        // through the scheduled import with no barcode and had to be packed by
+        // hand. The lookup is skipped for products already carrying a barcode,
+        // so a scheduled run over open orders costs a catalog call only for
+        // what is new; the sandbox catalog has nothing to say either way.
+        if (! $sandbox) {
+            $this->catalogBarcodes = $this->fetchCatalogBarcodes($this->asinsNeedingBarcodes($rawOrders), $marketplaceId);
         }
 
         return collect($rawOrders)->map(function (array $order): array {
@@ -613,18 +624,72 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
     }
 
     /**
+     * The ASINs in these orders for which some product has no barcode on file.
+     *
+     * Products are filed by seller SKU (`ImportReferenceResolver::productIdFor()`),
+     * and several SKUs can list under one ASIN, so an ASIN is looked up when
+     * *any* of its SKUs lacks a barcode — one SKU already carrying the barcode
+     * must not hide the lookup from another. An item with no SKU can never be
+     * matched to a product, so its ASIN is looked up regardless.
+     *
      * @param  array<int, array<string, mixed>>  $orders
+     * @return Collection<int, string>
+     */
+    private function asinsNeedingBarcodes(array $orders): Collection
+    {
+        /** @var array<string, array<int, string|null>> $skusByAsin */
+        $skusByAsin = [];
+
+        foreach ($orders as $order) {
+            foreach ($order['orderItems'] ?? [] as $item) {
+                $asin = is_array($item) ? ($item['product']['asin'] ?? null) : null;
+
+                if (! is_string($asin) || $asin === '') {
+                    continue;
+                }
+
+                $sku = is_string($item['product']['sellerSku'] ?? null) ? $item['product']['sellerSku'] : null;
+                $skusByAsin[$asin] = array_values(array_unique([...($skusByAsin[$asin] ?? []), $sku]));
+            }
+        }
+
+        $skus = collect($skusByAsin)->flatten()->filter()->unique()->values();
+
+        $skusWithBarcodes = $skus->isEmpty()
+            ? collect()
+            : Product::query()
+                ->where('client_id', $this->importClientId())
+                ->whereIn('sku', $skus)
+                ->whereNotNull('barcode')
+                ->where('barcode', '!=', '')
+                ->pluck('sku');
+
+        return collect($skusByAsin)
+            ->filter(fn (array $skus): bool => collect($skus)->contains(
+                fn (?string $sku): bool => $sku === null || ! $skusWithBarcodes->contains($sku)
+            ))
+            ->keys()
+            ->values();
+    }
+
+    /**
+     * The client this source imports for, which is the client its products
+     * are filed under.
+     */
+    private function importClientId(): int
+    {
+        $sourceId = $this->config['_data_source_id'] ?? null;
+        $clientId = $sourceId ? DataSource::query()->whereKey($sourceId)->value('client_id') : null;
+
+        return (int) ($clientId ?? app(ClientContext::class)->default()->id);
+    }
+
+    /**
+     * @param  Collection<int, string>  $asins
      * @return array<string, string>
      */
-    private function fetchCatalogBarcodes(array $orders, string $marketplaceId): array
+    private function fetchCatalogBarcodes(Collection $asins, string $marketplaceId): array
     {
-        $asins = collect($orders)
-            ->flatMap(fn (array $order): array => $order['orderItems'] ?? [])
-            ->map(fn (array $item): mixed => $item['product']['asin'] ?? null)
-            ->filter(fn (mixed $asin): bool => is_string($asin) && $asin !== '')
-            ->unique()
-            ->values();
-
         $barcodes = [];
 
         foreach ($asins->chunk(20) as $asinChunk) {
