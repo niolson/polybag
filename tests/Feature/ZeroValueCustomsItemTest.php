@@ -240,3 +240,45 @@ it('withholds a zero-value item shipped into the US from abroad, which the desti
     expect($result->success)->toBeFalse()
         ->and($result->title)->toBe('Customs Value Required');
 });
+
+/**
+ * The customs-weight prompt asks the same question of the same pair. A box
+ * lighter than its declared contents is only a problem where a declaration
+ * is sent.
+ */
+it('does not prompt for a customs weight on a shipment that stays inside a non-US origin country', function (): void {
+    $package = packageWithItemValues([12.50], [
+        'city' => 'Vancouver',
+        'state_or_province' => 'BC',
+        'postal_code' => 'V6B 1A1',
+        'country' => 'CA',
+    ], canadianLocation());
+    $package->update(['weight' => 0.1]);
+    carrierThatSells();
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: mockCarrierRate(), requireCustomsWeightOverride: true),
+    );
+
+    expect($result->requiresCustomsWeightOverride)->toBeFalse()
+        ->and($result->success)->toBeTrue();
+});
+
+it('prompts for a customs weight on a shipment into the US from abroad', function (): void {
+    $package = packageWithItemValues([12.50], [
+        'city' => 'Portland',
+        'state_or_province' => 'OR',
+        'postal_code' => '97201',
+        'country' => 'US',
+    ], canadianLocation());
+    $package->update(['weight' => 0.1]);
+    carrierThatMustNotBeAsked();
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: mockCarrierRate(), requireCustomsWeightOverride: true),
+    );
+
+    expect($result->requiresCustomsWeightOverride)->toBeTrue();
+});

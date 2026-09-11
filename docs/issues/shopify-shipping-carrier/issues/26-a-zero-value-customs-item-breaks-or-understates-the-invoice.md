@@ -117,3 +117,8 @@ The `?? 1` fallback for a null value is untouched; the test pins that.
 Not `leavePackageIntact`: on Manual Ship the package was built from the form and the
 operator fixes the value there, so cleaning it up is right, and the attended paths never
 clean up anyway. Same as `MissingDeclaredValueException`.
+
+**2026-09-11 — the customs-weight prompt had the same blind spot.**
+`requiresCustomsWeightOverride()` gated on the destination alone too, so a Canadian
+location would have been prompted over a Canadian parcel and not over one into the US.
+Switched to the same pair check in the same PR; two tests pin it.

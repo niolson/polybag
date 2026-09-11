@@ -870,7 +870,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
     {
         if ($overrideCustomsWeights
             || $shipRequest->blindOffer !== null
-            || ! $shipRequest->toAddress->requiresCustomsDeclaration()
+            || $shipRequest->fromAddress->sharesCustomsZoneWith($shipRequest->toAddress)
             || empty($shipRequest->customsItems)) {
             return false;
         }
