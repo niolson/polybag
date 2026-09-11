@@ -1,6 +1,6 @@
 # A zero-value customs item fails the purchase, or quietly understates the declaration
 
-Status: needs-triage
+Status: done — 2026-09-11
 
 Repo: `polybag`
 
@@ -85,3 +85,35 @@ and never sees ours (`19`).
   allowed through on a positive sum
 - The null and missing-row cases still fall back to `1` — that fallback predates this
 - Whatever the operator sees names the offending item, not the carrier's field name
+
+## Comments
+
+**2026-09-11 — option 1, withheld before the purchase.** `ShipRequest::zeroValueCustomsItems()`
+returns the lines at `unitValue <= 0`, and `EloquentPackageShippingWorkflow::ship()` throws
+`ZeroValueCustomsItemException` on any of them, caught into a `Customs Value Required`
+result the way `MissingDeclaredValueException` is. The message names the offending lines by
+their customs description and says to set the value on the shipment item; the carrier's
+field name never appears.
+
+Where it sits and why:
+
+- **Ahead of the customs-weight prompt**, not after it. There is no override for a missing
+  value, so confirming a weight and then being refused anyway would be the worse order.
+- **Ahead of the offer claim**, with everything else that can fail locally, so the offer
+  stays spendable for the retry.
+- **Only where a declaration is sent**, asked of the address *pair*
+  (`sharesCustomsZoneWith`), not the destination alone — a Canadian location shipping
+  into Canada declares nothing and one shipping into Oregon declares everything, which
+  `requiresCustomsDeclaration()` gets backwards from a non-US origin. A blind purchase
+  sends none of ours, so the check is skipped rather than refusing over an array nobody
+  reads (same reasoning as the weight override in `19`).
+- **Per line, not on the sum**, so the quiet understatement is refused along with the
+  loud `120502`.
+- **In front of the adapters**, so USPS and FedEx are covered without ever finding out what
+  they do with a zero.
+
+The `?? 1` fallback for a null value is untouched; the test pins that.
+
+Not `leavePackageIntact`: on Manual Ship the package was built from the form and the
+operator fixes the value there, so cleaning it up is right, and the attended paths never
+clean up anyway. Same as `MissingDeclaredValueException`.

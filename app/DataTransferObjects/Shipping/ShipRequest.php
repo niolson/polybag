@@ -96,6 +96,33 @@ readonly class ShipRequest
     }
 
     /**
+     * The customs items this request would declare at no value.
+     *
+     * Only asked where a declaration is actually sent: a label that stays
+     * inside one customs zone carries no form — asked of the pair of
+     * addresses, since a Canadian location shipping into Canada declares
+     * nothing and one shipping into Pennsylvania declares everything — and a
+     * blind purchase sends none of ours, the seller building its own from its
+     * own catalogue, so a zero here would be refused on an array nobody reads.
+     * Everywhere else, a line at `$0.00` is either refused by the carrier after
+     * the box is closed or printed as an understated declaration, so the answer
+     * is checked before the purchase.
+     *
+     * @return list<CustomsItem>
+     */
+    public function zeroValueCustomsItems(): array
+    {
+        if ($this->blindOffer !== null || $this->fromAddress->sharesCustomsZoneWith($this->toAddress)) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            $this->customsItems,
+            fn (CustomsItem $item): bool => $item->unitValue <= 0,
+        ));
+    }
+
+    /**
      * Scale customs item weights proportionally so their total fits inside the
      * package weight.
      *

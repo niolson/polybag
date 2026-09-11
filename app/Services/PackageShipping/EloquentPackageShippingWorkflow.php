@@ -17,6 +17,7 @@ use App\DataTransferObjects\Shipping\UnattendedRateSelection;
 use App\Enums\PackageStatus;
 use App\Exceptions\MissingDeclaredValueException;
 use App\Exceptions\ShopifyDeclaredWeightException;
+use App\Exceptions\ZeroValueCustomsItemException;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Package;
@@ -306,6 +307,14 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             // claimed. A customs-weight prompt is a round trip through the
             // operator, and consuming the offer on the way out would leave the
             // confirmed retry with nothing to buy.
+            //
+            // A zero-value customs line is refused first, and outright: there
+            // is no override for it, so asking the operator to confirm a weight
+            // and then refusing anyway would be the worse order.
+            if (($zeroValued = $shipRequest->zeroValueCustomsItems()) !== []) {
+                throw new ZeroValueCustomsItemException($zeroValued);
+            }
+
             if ($request->requireCustomsWeightOverride && $this->requiresCustomsWeightOverride($shipRequest, $request->overrideCustomsWeights)) {
                 return PackageShippingResult::customsWeightOverrideRequired();
             }
@@ -353,6 +362,8 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             return PackageShippingResult::shipped($response, $selectedRate, $package);
         } catch (MissingDeclaredValueException $e) {
             return PackageShippingResult::failed('Declared Value Required', $e->getMessage());
+        } catch (ZeroValueCustomsItemException $e) {
+            return PackageShippingResult::failed('Customs Value Required', $e->getMessage());
         } catch (ShopifyDeclaredWeightException $e) {
             // Nothing was bought and nothing was claimed — the seller's own
             // declaration would have made the purchase fail, and it was
