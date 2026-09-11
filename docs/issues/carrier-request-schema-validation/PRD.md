@@ -17,7 +17,7 @@ against a named schema, handling both Swagger 2.0 (`definitions`) and OpenAPI 3
 | Amazon `confirmShipment` | 3 body shapes | polybag#144 |
 | UPS `CreateShipment` | 2 body shapes | polybag#145 |
 | UPS `Rate` | written, skipped — spec over-specifies vs. the live API | polybag#145 |
-| USPS | none | this directory, `01` |
+| USPS `Label` / `InternationalLabel` | hand-written schema, 7 body shapes | this directory, `01` |
 | FedEx | none | this directory, `02` |
 
 ## Why it is worth extending

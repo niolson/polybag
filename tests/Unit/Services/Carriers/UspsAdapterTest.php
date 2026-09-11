@@ -1109,6 +1109,8 @@ it('asks USPS to print the label reference', function (): void {
             return false;
         }
 
+        assertMatchesUspsSchema($request->body()->all(), 'LabelRequest');
+
         return ($request->body()->all()['packageDescription']['customerReference'] ?? null) === [
             ['referenceNumber' => 'ORD-10042', 'printReferenceNumber' => true],
         ];
@@ -1147,6 +1149,65 @@ it('cuts the label reference down to what USPS will print', function (): void {
     });
 });
 
+it('builds a ZPL label request for a business address that conforms to our USPS schema', function (): void {
+    fakeUspsLabelEndpoints();
+
+    $request = new ShipRequest(
+        fromAddress: new AddressData(
+            firstName: 'Shipping',
+            lastName: 'Center',
+            streetAddress: '123 Warehouse St',
+            streetAddress2: 'Dock 4',
+            city: 'Seattle',
+            stateOrProvince: 'WA',
+            postalCode: '98072-1234',
+            company: 'PolyBag Fulfillment',
+        ),
+        toAddress: new AddressData(
+            firstName: '',
+            lastName: 'Receiving',
+            streetAddress: '456 Main St',
+            city: 'Los Angeles',
+            stateOrProvince: 'CA',
+            postalCode: '90210',
+        ),
+        packageData: new PackageData(weight: 2.0, length: 10, width: 8, height: 4),
+        selectedRate: new RateResponse(
+            carrier: 'USPS',
+            serviceCode: 'PRIORITY_MAIL',
+            serviceName: 'Priority Mail',
+            price: 12.75,
+            metadata: [
+                'mailClass' => 'PRIORITY_MAIL',
+                'processingCategory' => 'MACHINABLE',
+                'rateIndicator' => 'SP',
+                'destinationEntryFacilityType' => 'NONE',
+            ],
+        ),
+        labelFormat: 'zpl',
+        labelDpi: 300,
+    );
+
+    expect($this->adapter->createShipment($request)->success)->toBeTrue();
+
+    Saloon::assertSent(function ($request): bool {
+        if (! $request instanceof Label) {
+            return false;
+        }
+
+        $body = $request->body()->all();
+
+        assertMatchesUspsSchema($body, 'LabelRequest');
+
+        // A lone last name is sent as the firm; the ZIP+4 is cut to five digits.
+        return ($body['toAddress']['firm'] ?? null) === 'Receiving'
+            && ! isset($body['toAddress']['lastName'])
+            && $body['fromAddress']['ZIPCode'] === '98072'
+            && $body['fromAddress']['firm'] === 'PolyBag Fulfillment'
+            && $body['imageInfo']['imageType'] === 'ZPL300DPI';
+    });
+});
+
 it('maps signature and declared value into the domestic label request', function (): void {
     fakeUspsLabelEndpoints();
 
@@ -1162,6 +1223,8 @@ it('maps signature and declared value into the domestic label request', function
         if (! $request instanceof Label) {
             return false;
         }
+
+        assertMatchesUspsSchema($request->body()->all(), 'LabelRequest');
 
         $description = $request->body()->all()['packageDescription'] ?? [];
         $options = $description['packageOptions'] ?? [];
@@ -1209,6 +1272,8 @@ it('maps battery codes with hazmat content type into the domestic label request'
         if (! $request instanceof Label) {
             return false;
         }
+
+        assertMatchesUspsSchema($request->body()->all(), 'LabelRequest');
 
         $description = $request->body()->all()['packageDescription'] ?? [];
 
@@ -1370,6 +1435,8 @@ it('attaches a customs form to domestic military destinations', function (): voi
 
         $body = $request->body()->all();
 
+        assertMatchesUspsSchema($body, 'LabelRequest');
+
         return isset($body['customsForm'])
             && $body['customsForm']['contents'][0]['itemDescription'] === 'Blue Widget'
             && $body['customsForm']['contents'][0]['itemTotalValue'] === 39.98;
@@ -1434,6 +1501,8 @@ it('repeats the label reference as the customs form invoice number, which is wha
 
         $body = $request->body()->all();
 
+        assertMatchesUspsSchema($body, 'InternationalLabelRequest');
+
         // Still sent as a customer reference too — USPS files that in the
         // Shipping Services File even though it never reaches the label.
         return ($body['customsForm']['invoiceNumber'] ?? null) === 'ORD-10042'
@@ -1495,6 +1564,8 @@ it('leaves the invoice number off the customs form when no reference is printed'
         if (! $request instanceof InternationalLabel) {
             return false;
         }
+
+        assertMatchesUspsSchema($request->body()->all(), 'InternationalLabelRequest');
 
         return ! array_key_exists('invoiceNumber', $request->body()->all()['customsForm']);
     });
