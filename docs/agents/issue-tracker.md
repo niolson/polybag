@@ -27,6 +27,15 @@ captures that carry customer addresses.
 - Implementation issues are `docs/issues/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`
 - Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
+- **A long comment history may be compressed**, and `shopify-shipping-carrier` has been.
+  Findings that still constrain future work move up into the body — where the current
+  state of a thing belongs — and the comments collapse to dated entries of a line or
+  three. A self-correction folds into the corrected statement rather than surviving as
+  both halves of an argument. What must not be lost is a reason a decision went the way
+  it did, a rejected option and why, or a defect that a later change could reintroduce
+- A file that is getting hard to read from the top is the signal to compress it. An issue
+  is read by someone deciding what to do next, and a narrative of how the answer was
+  reached buries the answer
 - **Resolved issues stay in place.** Set `Status: done` and leave the file where it is —
   the implementation record under `## Comments` is why the file is kept. Nothing is
   deleted or moved to an archive; `README.md` in `docs/issues/` is the index of what is
