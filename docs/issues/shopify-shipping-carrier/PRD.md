@@ -74,22 +74,21 @@ has sold USPS repeatedly since.
 timeline, registered with the carrier and trackable, but never a moving parcel. USPS test
 labels come back as USPS's own `SAMPLE - DO NOT MAIL` artwork.
 
-**The pricing is evidenced, by comparison rather than by a production purchase.** The label
-prices in the order timeline come in below USPS list commercial rates, and match what Pirate
-Ship and Veeqo quote for the same parcels — two independent resellers on the same discounted
-tier. That is the economic claim this feature rests on, and it holds: a shop reaches rates
-here that it could not reach on its own account without an NSA.
+**The pricing premise holds.** The label prices in the order timeline come in below USPS
+list commercial rates and match what Pirate Ship and Veeqo quote for the same parcels — two
+independent resellers on the same discounted tier. That is the economic claim this feature
+rests on: a shop reaches rates here it could not reach on its own account without an NSA.
 
-Two things that comparison does not settle, kept separate because they fail differently:
+**Which USPS programme is behind that discount is not worth chasing.** CeC is the working
+assumption and the prices are consistent with it; nothing about the integration changes if
+it turns out to be another commercial tier those platforms also reach. The rates are the
+rates, and they can be documented precisely if a reason ever appears.
 
-- **Whether the tier is specifically USPS Connect eCommerce**, or another commercial tier
-  those platforms also reach. A naming question rather than a money one — the discount is
-  the same either way — but the PRD's "Why" should not harden into a claim about which USPS
-  programme is behind it.
-- **Whether a production store is priced identically to a development store.** Unlikely:
-  nothing suggests Shopify's rate engine varies by store type, and this store already sells
-  USPS through the API where its own admin refuses to. Unfalsified until someone buys a real
-  label, and cheap to confirm when one is bought for any other reason.
+**One caveat left, and it is cheap to close.** Every price observed so far is from a
+development store. Nothing suggests Shopify's rate engine varies by store type — and this
+store already sells USPS through the API where its own admin refuses to — but the first
+label bought on a production store settles it for the cost of reading the order timeline.
+`17` asks for that.
 
 What still waits on a real store is **everything that needs a parcel to physically move** —
 scan events, whether `displayStatus` advances, and whether USPS accepts a Shopify-bought

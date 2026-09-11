@@ -136,7 +136,10 @@ falling through is the correct outcome if the answer is only ever a class.
       guard, and a test says so
 - [ ] Carriers whose document rung 2 cannot read are recorded as such rather than left
       looking un-gathered
-- [x] The UPS 1Z question resolved — table generated from a named source
+- [x] The UPS 1Z question resolved — **from observed pairs, because no authoritative
+      source exists.** UPS publishes no mapping at all, so the criterion's first
+      option was unreachable rather than merely unmet; the table records that in its
+      own provenance instead of dressing the evidence up
 - [ ] The UPU S10 question resolved: table generated, or `wontfix` with the class-versus-
       service reasoning recorded
 - [ ] `app:infer-package-services` re-run and coverage reported after each carrier lands, so
