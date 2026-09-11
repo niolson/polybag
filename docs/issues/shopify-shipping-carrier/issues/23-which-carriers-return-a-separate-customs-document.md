@@ -27,7 +27,7 @@ storage and printing do not wait on it; only the pre-purchase gate does.
 | UPS | **Yes** | `ShipmentResults.Form.Image`, PDF, `Code 01` — even when the label itself is a GIF. Three Letter pages, and **read into `customs_form_data` and printed** since 2026-09-10 |
 | FedEx | **No — not requested** | `documentRequirements` names an invoice *and* an air waybill; only the AWB comes back, as pages 2–4 of a 4×6 label. No `shippingDocumentSpecification`, no ETD, so the invoice is never generated |
 | Shopify | **Yes** | Separate `CUSTOMS_FORM`, PDF, three Letter pages — a commercial invoice |
-| Amazon | **Unknown** | No international purchase exists. `AmazonBuyShippingService::labelFrom()` filters `packageDocuments` to `type === 'LABEL'`, so a `CUSTOMS_FORM` would be dropped by an explicit filter rather than never fetched — a small change once there is a purchase to see |
+| Amazon | **Unknown abroad; domestic for every territory** | No cross-border purchase exists. Quoted 2026-09-11 for PR, GU, MP and AS: only plain domestic USPS offered, `requiresAdditionalInputs: false` throughout, every `(Customs)` variant and every USPS International service refused — including for GU/MP/AS, which USPS itself wants a declaration for. `requiresCustomsDeclaration()` is true for all four. The over-block, observed four times. `AmazonBuyShippingService::labelFrom()` filters `packageDocuments` to `type === 'LABEL'`, so a `CUSTOM_FORM` (the schema's spelling) would be dropped rather than never fetched — and it is never requested either. Owned by [`amazon-buy-shipping/09`](../../amazon-buy-shipping/issues/09-international-purchase-and-customs.md), blocked on a real foreign order |
 
 **The paper cost of the gate is three Letter sheets per international parcel, per package**,
 for both UPS and Shopify. That is what makes "is a report printer configured" a materially
@@ -82,6 +82,9 @@ short a document FedEx itself listed as required.
 
 **Amazon.** Buy one international label and read `packageDocuments` by type. The cheapest of
 the remaining rows, and `03` records that nothing has run against a live Amazon order at all.
+Moved to [`amazon-buy-shipping/09`](../../amazon-buy-shipping/issues/09-international-purchase-and-customs.md)
+2026-09-11: the row is an observation, but three things in the adapter's purchase path are
+unbuilt for a cross-border parcel, so the work lives with the adapter.
 
 **FedEx, if the invoice is ever wanted:** either `shippingDocumentSpecification` on the ship
 request — which should return it in `shipmentDocuments`, though that is now an expectation and

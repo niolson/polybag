@@ -381,6 +381,14 @@ class AmazonBuyShippingService
      * naive "first PDF" would print letter-size labels on a 4x6 printer; 4x6
      * INCH is preferred explicitly and anything else is a fallback.
      *
+     * The whole specification has to match what the rate published, not just
+     * the format and size — the first live purchase (`10`) was refused with
+     * "an invalid documentation specification was provided" for a body that
+     * asked for `LABEL` alone, unjoined. Every print option seen offers file
+     * joining as `[true]` only, and every PDF one marks a `PACKSLIP` mandatory
+     * beside the `LABEL`; ZPL and PNG carry the label alone. So the joining
+     * flag and the document types are read off the chosen print option too.
+     *
      * @param  array<int, array<string, mixed>>  $supported  The rate's own `supportedDocumentSpecifications`
      * @return array<string, mixed>
      *
@@ -411,6 +419,10 @@ class AmazonBuyShippingService
         $printOption = $spec['printOptions'][0] ?? [];
         $dpis = array_values(array_filter((array) ($printOption['supportedDPIs'] ?? []), 'is_numeric'));
         $layouts = array_values(array_filter((array) ($printOption['supportedPageLayouts'] ?? []), 'is_string'));
+        $joining = array_values(array_filter((array) ($printOption['supportedFileJoiningOptions'] ?? []), 'is_bool'));
+        $mandatory = collect($printOption['supportedDocumentDetails'] ?? [])
+            ->filter(fn (mixed $detail): bool => is_array($detail) && ($detail['isMandatory'] ?? false) && is_string($detail['name'] ?? null))
+            ->pluck('name');
 
         return array_filter([
             'format' => $format,
@@ -425,8 +437,12 @@ class AmazonBuyShippingService
             // taken and the printer scales.
             'dpi' => $dpis === [] ? null : (in_array($labelDpi, $dpis, true) ? $labelDpi : (int) $dpis[0]),
             'pageLayout' => $layouts[0] ?? null,
-            'needFileJoining' => false,
-            'requestedDocumentTypes' => ['LABEL'],
+            // Unjoined when the rate allows it, otherwise whatever it does
+            // allow; a value it did not publish fails the purchase.
+            'needFileJoining' => in_array(false, $joining, true) ? false : ($joining[0] ?? false),
+            // Every document the print option makes mandatory, and the label
+            // regardless — Amazon refuses a request that leaves one out.
+            'requestedDocumentTypes' => $mandatory->push('LABEL')->unique()->values()->all(),
         ], fn (mixed $value): bool => $value !== null);
     }
 
@@ -455,9 +471,14 @@ class AmazonBuyShippingService
      * ADR-0002 decision 8 puts this at the offer seam, and Amazon's data is why:
      * `availableValueAddedServiceGroups` is per rate, and `01` found the
      * Confirmation group marked `isRequired` on every UPS and USPS offer and
-     * absent entirely from OnTrac's. A required group has to be answered — with
-     * `NO_CONFIRMATION` when nothing was asked for — or the purchase is
-     * incomplete; a group that is not offered cannot be answered at all.
+     * absent entirely from OnTrac's. A required group has to be answered with
+     * an option *that group offers* — Amazon refuses a purchase that leaves it
+     * unanswered, and one that names an option it does not list (`10`). The
+     * groups do not share a vocabulary for "nothing": UPS offers
+     * `NO_CONFIRMATION`, USPS offers `DELIVERY_CONFIRMATION` at $0 and no
+     * refusal at all. So when nothing was asked for, the answer is the
+     * cheapest option the group has, whatever it is called. A group that is
+     * not offered cannot be answered at all.
      *
      * @param  array<string, mixed>  $metadata  the offer's stored rate metadata
      * @return list<array{id: string}>
@@ -487,13 +508,46 @@ class AmazonBuyShippingService
             }
 
             // Nothing was asked for, and the group insists on an answer. The
-            // cheapest honest one is the explicit "no".
-            if (($group['isRequired'] ?? false) && $available->contains('NO_CONFIRMATION')) {
-                $requested[] = ['id' => 'NO_CONFIRMATION'];
+            // cheapest option it offers is the honest one — a refusal where
+            // the group has one, delivery confirmation where USPS charges
+            // nothing for it. A group whose cheapest answer costs money was
+            // dropped at quote time by the adapter, so this never buys a
+            // surcharge nobody chose.
+            if ($group['isRequired'] ?? false) {
+                $requested[] = ['id' => (string) self::cheapestOption($group)['id']];
             }
         }
 
         return $requested;
+    }
+
+    /**
+     * The option a value-added service group offers for the least money — and,
+     * at the same price, the one that asks the least of the delivery.
+     *
+     * Priority Mail Express lists `SIGNATURE_CONFIRMATION` at $0 beside its
+     * other options. Free is not the same as harmless: a signature nobody
+     * asked for is a parcel that comes back when nobody is home. So a tie on
+     * price goes to the refusal, then plain delivery confirmation, before
+     * anything that names a signature.
+     *
+     * Shared with the adapter, which drops a rate at quote time when a required
+     * group's cheapest option still costs something and nothing asked for it.
+     *
+     * @param  array<string, mixed>  $group  one of the rate's `availableValueAddedServiceGroups`
+     * @return array{id: string, cost?: array{value?: mixed}}|null
+     */
+    public static function cheapestOption(array $group): ?array
+    {
+        $leastDemanding = ['NO_CONFIRMATION' => 0, 'DELIVERY_CONFIRMATION' => 1];
+
+        return collect($group['valueAddedServices'] ?? [])
+            ->filter(fn (mixed $option): bool => is_array($option) && is_string($option['id'] ?? null) && $option['id'] !== '')
+            ->sortBy([
+                fn (array $a, array $b): int => ((float) ($a['cost']['value'] ?? PHP_FLOAT_MAX)) <=> ((float) ($b['cost']['value'] ?? PHP_FLOAT_MAX)),
+                fn (array $a, array $b): int => ($leastDemanding[$a['id']] ?? 2) <=> ($leastDemanding[$b['id']] ?? 2),
+            ])
+            ->first();
     }
 
     /**
@@ -519,8 +573,18 @@ class AmazonBuyShippingService
     {
         $shipmentId = (string) $payload['shipmentId'];
         $detail = collect($payload['packageDocumentDetails'] ?? [])->first() ?? [];
+
+        // ASSUMPTION, unverified by any real purchase: the label arrives as a
+        // document typed `LABEL`, and its bytes are printable as-is. A PDF
+        // purchase is necessarily *joined* with the `PACKSLIP` the rate makes
+        // mandatory (`10`), and nothing has yet shown whether that comes back
+        // as two documents or one file with a pack slip page in front of the
+        // label — in which case these bytes are wrong for a label printer.
+        // The first successful purchase has to look at them. Only a document
+        // Amazon calls a label is taken: a lone PACKSLIP or CUSTOM_FORM must
+        // fail here, loudly, rather than be recorded and printed as the label.
         $document = collect($detail['packageDocuments'] ?? [])
-            ->first(fn (array $doc): bool => ($doc['type'] ?? null) === 'LABEL');
+            ->first(fn (mixed $doc): bool => is_array($doc) && ($doc['type'] ?? null) === 'LABEL');
 
         if (! $document || blank($document['contents'] ?? null)) {
             // The shipment exists and has been paid for, so this is never a

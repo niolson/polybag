@@ -533,7 +533,9 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
      */
     private function isBuyable(array $rate, RateRequest $request): bool
     {
-        return $this->hasPrintableDocument($rate) && $this->honoursRequiredServices($rate, $request);
+        return $this->hasPrintableDocument($rate)
+            && $this->honoursRequiredServices($rate, $request)
+            && $this->answersRequiredGroupsForFree($rate, $request);
     }
 
     /**
@@ -576,6 +578,46 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
             }
 
             if (! $offered->contains($vas)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Drop an offer whose required value-added service group can only be
+     * answered with a surcharge nobody asked for.
+     *
+     * A required group must be answered with an option it offers (`10`), and
+     * {@see AmazonBuyShippingService::valueAddedServicesFor()} answers with the
+     * cheapest one when nothing was requested. Every group seen so far has a
+     * free option — UPS's `NO_CONFIRMATION`, USPS's `DELIVERY_CONFIRMATION` —
+     * but a group that had none would make that answer a paid signature the
+     * quoted price did not include. That rate is dropped here, unless the
+     * shipment asked for one of the paid options, in which case it is paying
+     * for it knowingly.
+     */
+    private function answersRequiredGroupsForFree(array $rate, RateRequest $request): bool
+    {
+        $wanted = collect($request->specialServiceCodes)
+            ->map(fn (string $code): ?string => self::SUPPORTED_SERVICES[$code] ?? null)
+            ->filter();
+
+        foreach ($rate['availableValueAddedServiceGroups'] ?? [] as $group) {
+            if (! ($group['isRequired'] ?? false)) {
+                continue;
+            }
+
+            $offered = collect($group['valueAddedServices'] ?? [])->pluck('id');
+
+            if ($wanted->intersect($offered)->isNotEmpty()) {
+                continue;
+            }
+
+            $cheapest = AmazonBuyShippingService::cheapestOption($group);
+
+            if ($cheapest === null || (float) ($cheapest['cost']['value'] ?? 0) > 0) {
                 return false;
             }
         }
