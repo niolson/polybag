@@ -1,0 +1,428 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "FedEx ship request body as built by App\\Services\\Carriers\\FedexAdapter",
+  "description": "Hand-written from our own adapter code, not from FedEx's published spec, which cannot be vendored — see README.md. Each definition names the adapter method that builds it. Every object closes with additionalProperties:false, so a renamed or newly added key fails here until this file is updated to match; that is the point.",
+  "definitions": {
+    "CreateShipmentRequest": {
+      "description": "Body of App\\Http\\Integrations\\Fedex\\Requests\\CreateShipment (POST /ship/v1/shipments), assembled by FedexAdapter::sendCreateShipment() around the requestedShipment that createShipment() builds. The account number is repeated inside requestedShipment as the payor.",
+      "type": "object",
+      "required": ["labelResponseOptions", "accountNumber", "requestedShipment"],
+      "additionalProperties": false,
+      "properties": {
+        "labelResponseOptions": { "type": "string", "enum": ["LABEL"] },
+        "accountNumber": { "$ref": "#/definitions/AccountNumber" },
+        "requestedShipment": { "$ref": "#/definitions/RequestedShipment" }
+      }
+    },
+    "RequestedShipment": {
+      "description": "FedexAdapter::createShipment(). One recipient and one package line item, always. shipDateStamp is sent only when the request carries a ship date. smartPostInfoDetail appears only for the SMART_POST service, and only when the origin location has a hub ID; customsClearanceDetail only when the destination does not share a customs zone with the origin — which includes Puerto Rico and military post offices under country US; shipmentSpecialServices only when One Rate or Saturday delivery applies.",
+      "type": "object",
+      "required": [
+        "shipper",
+        "recipients",
+        "pickupType",
+        "serviceType",
+        "packagingType",
+        "shippingChargesPayment",
+        "labelSpecification",
+        "requestedPackageLineItems"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "shipper": { "$ref": "#/definitions/Party" },
+        "recipients": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "$ref": "#/definitions/Party" }
+        },
+        "shipDateStamp": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "pickupType": { "type": "string", "enum": ["USE_SCHEDULED_PICKUP"] },
+        "serviceType": { "type": "string", "minLength": 1 },
+        "packagingType": {
+          "description": "YOUR_PACKAGING unless the selected rate is a One Rate quote, in which case the FedEx packaging the quote was for. The values are App\\Enums\\FedexPackageType.",
+          "type": "string",
+          "enum": [
+            "YOUR_PACKAGING",
+            "FEDEX_ENVELOPE",
+            "FEDEX_BOX",
+            "FEDEX_EXTRA_SMALL_BOX",
+            "FEDEX_SMALL_BOX",
+            "FEDEX_MEDIUM_BOX",
+            "FEDEX_LARGE_BOX",
+            "FEDEX_EXTRA_LARGE_BOX",
+            "FEDEX_10KG_BOX",
+            "FEDEX_25KG_BOX",
+            "FEDEX_PAK",
+            "FEDEX_TUBE"
+          ]
+        },
+        "shippingChargesPayment": { "$ref": "#/definitions/ShippingChargesPayment" },
+        "labelSpecification": { "$ref": "#/definitions/LabelSpecification" },
+        "requestedPackageLineItems": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "$ref": "#/definitions/PackageLineItem" }
+        },
+        "smartPostInfoDetail": { "$ref": "#/definitions/SmartPostInfoDetail" },
+        "customsClearanceDetail": { "$ref": "#/definitions/CustomsClearanceDetail" },
+        "shipmentSpecialServices": { "$ref": "#/definitions/ShipmentSpecialServices" }
+      }
+    },
+    "AccountNumber": {
+      "description": "The FedEx account number from the resolved CarrierAccount's credentials. The adapter does not check that one is configured; an account without one would send null here.",
+      "type": "object",
+      "required": ["value"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "string", "minLength": 1 }
+      }
+    },
+    "Party": {
+      "description": "FedexAdapter::buildContact(), used for both the shipper and the single recipient.",
+      "type": "object",
+      "required": ["contact", "address"],
+      "additionalProperties": false,
+      "properties": {
+        "contact": { "$ref": "#/definitions/Contact" },
+        "address": { "$ref": "#/definitions/Address" }
+      }
+    },
+    "Contact": {
+      "description": "buildContact() filters out empty values, so each key is either a non-empty string or absent. personName is the first and last name joined; a party with neither a name nor a company would send an empty contact. The recipient's phoneNumber falls back to the shipper's on a domestic shipment, but is left out when the recipient has none and customs applies.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "personName": { "type": "string", "minLength": 1 },
+        "companyName": { "type": "string", "minLength": 1 },
+        "phoneNumber": { "type": "string", "minLength": 1 },
+        "phoneExtension": { "type": "string", "minLength": 1 }
+      },
+      "anyOf": [
+        { "required": ["personName"] },
+        { "required": ["companyName"] }
+      ]
+    },
+    "Address": {
+      "description": "buildContact(). streetLines carries the first and, when present, second address line, each cut to 35 characters. city, stateOrProvinceCode and postalCode are passed through from AddressData untouched — an address with no state or postal code would send null for it, which no test constructs.",
+      "type": "object",
+      "required": ["streetLines", "city", "stateOrProvinceCode", "postalCode", "countryCode"],
+      "additionalProperties": false,
+      "properties": {
+        "streetLines": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": { "type": "string", "minLength": 1, "maxLength": 35 }
+        },
+        "city": { "type": "string", "minLength": 1 },
+        "stateOrProvinceCode": { "type": "string", "minLength": 1 },
+        "postalCode": { "type": "string", "minLength": 1 },
+        "countryCode": { "type": "string", "pattern": "^[A-Z]{2}$" }
+      }
+    },
+    "ShippingChargesPayment": {
+      "description": "createShipment(). Always billed to the sender's own account.",
+      "type": "object",
+      "required": ["paymentType", "payor"],
+      "additionalProperties": false,
+      "properties": {
+        "paymentType": { "type": "string", "enum": ["SENDER"] },
+        "payor": {
+          "type": "object",
+          "required": ["responsibleParty"],
+          "additionalProperties": false,
+          "properties": {
+            "responsibleParty": {
+              "type": "object",
+              "required": ["accountNumber"],
+              "additionalProperties": false,
+              "properties": {
+                "accountNumber": { "$ref": "#/definitions/AccountNumber" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "LabelSpecification": {
+      "description": "createShipment(). Always a 4x6 COMMON2D label. imageType is ZPLII for ZPL output and PDF otherwise; resolution is sent with ZPLII only, and is 300 when the request asks for 300 DPI and 200 for anything else.",
+      "type": "object",
+      "required": ["labelFormatType", "imageType", "labelStockType"],
+      "additionalProperties": false,
+      "properties": {
+        "labelFormatType": { "type": "string", "enum": ["COMMON2D"] },
+        "imageType": { "type": "string", "enum": ["PDF", "ZPLII"] },
+        "labelStockType": { "type": "string", "enum": ["STOCK_4X6"] },
+        "resolution": { "type": "integer", "enum": [200, 300] }
+      },
+      "anyOf": [
+        { "properties": { "imageType": { "enum": ["PDF"] } } },
+        { "required": ["resolution"] }
+      ],
+      "dependencies": {
+        "resolution": { "properties": { "imageType": { "enum": ["ZPLII"] } } }
+      }
+    },
+    "PackageLineItem": {
+      "description": "createShipment(). Weight is a number in pounds; dimensions are cast to whole inches, so a side under an inch would reach FedEx as 0. customerReferences comes from buildCustomerReferences(), packageSpecialServices and declaredValue from buildPackageSpecialServices(), and each is omitted rather than sent empty.",
+      "type": "object",
+      "required": ["weight", "dimensions"],
+      "additionalProperties": false,
+      "properties": {
+        "weight": {
+          "type": "object",
+          "required": ["units", "value"],
+          "additionalProperties": false,
+          "properties": {
+            "units": { "type": "string", "enum": ["LB"] },
+            "value": { "type": "number", "minimum": 0, "exclusiveMinimum": true }
+          }
+        },
+        "dimensions": {
+          "type": "object",
+          "required": ["length", "width", "height", "units"],
+          "additionalProperties": false,
+          "properties": {
+            "length": { "type": "integer", "minimum": 1 },
+            "width": { "type": "integer", "minimum": 1 },
+            "height": { "type": "integer", "minimum": 1 },
+            "units": { "type": "string", "enum": ["IN"] }
+          }
+        },
+        "customerReferences": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": { "$ref": "#/definitions/CustomerReference" }
+        },
+        "packageSpecialServices": { "$ref": "#/definitions/PackageSpecialServices" },
+        "declaredValue": { "$ref": "#/definitions/DeclaredValue" }
+      }
+    },
+    "CustomerReference": {
+      "description": "One entry of buildCustomerReferences(). FedEx prints the value on the label after \"REF:\"; it is cut to 40 characters and the label has room for three.",
+      "type": "object",
+      "required": ["customerReferenceType", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "customerReferenceType": { "type": "string", "enum": ["CUSTOMER_REFERENCE"] },
+        "value": { "type": "string", "minLength": 1, "maxLength": 40 }
+      }
+    },
+    "PackageSpecialServices": {
+      "description": "buildPackageSpecialServices(). Sent only when at least one service applies. Each entry in specialServiceTypes is paired with its detail: SIGNATURE_OPTION with signatureOptionType, ALCOHOL with alcoholDetail, BATTERY with batteryDetails — and the detail is absent when its service is not requested. A battery declaration is only built for express services; ground requests never carry one.",
+      "type": "object",
+      "required": ["specialServiceTypes"],
+      "additionalProperties": false,
+      "properties": {
+        "specialServiceTypes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "enum": ["SIGNATURE_OPTION", "ALCOHOL", "BATTERY"] }
+        },
+        "signatureOptionType": { "type": "string", "enum": ["ADULT", "DIRECT"] },
+        "alcoholDetail": {
+          "type": "object",
+          "required": ["alcoholRecipientType"],
+          "additionalProperties": false,
+          "properties": {
+            "alcoholRecipientType": { "type": "string", "enum": ["CONSUMER"] }
+          }
+        },
+        "batteryDetails": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["batteryPackingType", "batteryMaterialType"],
+            "additionalProperties": false,
+            "properties": {
+              "batteryPackingType": { "type": "string", "enum": ["CONTAINED_IN_EQUIPMENT"] },
+              "batteryMaterialType": { "type": "string", "enum": ["LITHIUM_ION"] }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "description": "SIGNATURE_OPTION requires signatureOptionType.",
+          "anyOf": [
+            { "properties": { "specialServiceTypes": { "items": { "not": { "enum": ["SIGNATURE_OPTION"] } } } } },
+            { "required": ["signatureOptionType"] }
+          ]
+        },
+        {
+          "description": "ALCOHOL requires alcoholDetail.",
+          "anyOf": [
+            { "properties": { "specialServiceTypes": { "items": { "not": { "enum": ["ALCOHOL"] } } } } },
+            { "required": ["alcoholDetail"] }
+          ]
+        },
+        {
+          "description": "BATTERY requires batteryDetails.",
+          "anyOf": [
+            { "properties": { "specialServiceTypes": { "items": { "not": { "enum": ["BATTERY"] } } } } },
+            { "required": ["batteryDetails"] }
+          ]
+        }
+      ],
+      "dependencies": {
+        "signatureOptionType": { "properties": { "specialServiceTypes": { "not": { "items": { "not": { "enum": ["SIGNATURE_OPTION"] } } } } } },
+        "alcoholDetail": { "properties": { "specialServiceTypes": { "not": { "items": { "not": { "enum": ["ALCOHOL"] } } } } } },
+        "batteryDetails": { "properties": { "specialServiceTypes": { "not": { "items": { "not": { "enum": ["BATTERY"] } } } } } }
+      }
+    },
+    "DeclaredValue": {
+      "description": "buildPackageSpecialServices(). Sent only when declared value is requested with a positive amount, rounded to cents. A number, unlike the customs amounts below.",
+      "type": "object",
+      "required": ["amount", "currency"],
+      "additionalProperties": false,
+      "properties": {
+        "amount": { "type": "number", "minimum": 0, "exclusiveMinimum": true },
+        "currency": { "type": "string", "enum": ["USD"] }
+      }
+    },
+    "SmartPostInfoDetail": {
+      "description": "buildShipmentSmartPostInfoDetail(). hubId is the origin location's fedex_hub_id, a four-character column. Under a pound the indicia is PRESORTED_STANDARD with an ADDRESS_CORRECTION endorsement; from a pound up it is PARCEL_SELECT with no endorsement.",
+      "type": "object",
+      "required": ["hubId", "indicia"],
+      "additionalProperties": false,
+      "properties": {
+        "hubId": { "type": "string", "pattern": "^[0-9]{1,4}$" },
+        "indicia": { "type": "string", "enum": ["PRESORTED_STANDARD", "PARCEL_SELECT"] },
+        "ancillaryEndorsement": { "type": "string", "enum": ["ADDRESS_CORRECTION"] }
+      },
+      "oneOf": [
+        {
+          "properties": { "indicia": { "enum": ["PRESORTED_STANDARD"] } },
+          "required": ["ancillaryEndorsement"]
+        },
+        {
+          "properties": { "indicia": { "enum": ["PARCEL_SELECT"] } },
+          "not": { "required": ["ancillaryEndorsement"] }
+        }
+      ]
+    },
+    "CustomsClearanceDetail": {
+      "description": "buildCustomsClearanceDetail(). Goods are always declared as sold, with duties billed to the sender's account in the ship-from country. createShipment() refuses to send a customs shipment with no items, so commodities is never empty.",
+      "type": "object",
+      "required": ["commercialInvoice", "dutiesPayment", "commodities"],
+      "additionalProperties": false,
+      "properties": {
+        "commercialInvoice": {
+          "type": "object",
+          "required": ["shipmentPurpose"],
+          "additionalProperties": false,
+          "properties": {
+            "shipmentPurpose": { "type": "string", "enum": ["SOLD"] }
+          }
+        },
+        "dutiesPayment": {
+          "type": "object",
+          "required": ["paymentType", "payor"],
+          "additionalProperties": false,
+          "properties": {
+            "paymentType": { "type": "string", "enum": ["SENDER"] },
+            "payor": {
+              "type": "object",
+              "required": ["responsibleParty"],
+              "additionalProperties": false,
+              "properties": {
+                "responsibleParty": {
+                  "type": "object",
+                  "required": ["address", "accountNumber"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "address": {
+                      "type": "object",
+                      "required": ["countryCode"],
+                      "additionalProperties": false,
+                      "properties": {
+                        "countryCode": { "type": "string", "pattern": "^[A-Z]{2}$" }
+                      }
+                    },
+                    "accountNumber": { "$ref": "#/definitions/AccountNumber" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "commodities": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/Commodity" }
+        }
+      }
+    },
+    "Commodity": {
+      "description": "One customs item from buildCustomsClearanceDetail(). name is the description cut to 35 characters and description the same cut to 450. Unlike the package weight and declared value, every number here is sent as a decimal string: quantity and numberOfPieces are the item count, unitPrice is the per-unit value, customsValue and weight are line totals. countryOfManufacture defaults to US when the item has no origin. harmonizedCode is omitted when the item has no HS tariff number.",
+      "type": "object",
+      "required": [
+        "name",
+        "description",
+        "countryOfManufacture",
+        "quantity",
+        "quantityUnits",
+        "numberOfPieces",
+        "unitPrice",
+        "customsValue",
+        "weight"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 35 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 450 },
+        "countryOfManufacture": { "type": "string", "pattern": "^[A-Z]{2}$" },
+        "quantity": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+        "quantityUnits": { "type": "string", "enum": ["PCS"] },
+        "numberOfPieces": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+        "unitPrice": { "$ref": "#/definitions/CustomsMoney" },
+        "customsValue": { "$ref": "#/definitions/CustomsMoney" },
+        "weight": {
+          "type": "object",
+          "required": ["units", "value"],
+          "additionalProperties": false,
+          "properties": {
+            "units": { "type": "string", "enum": ["LB"] },
+            "value": { "$ref": "#/definitions/DecimalString" }
+          }
+        },
+        "harmonizedCode": { "type": "string", "minLength": 1 }
+      }
+    },
+    "CustomsMoney": {
+      "description": "A customs amount as buildCustomsClearanceDetail() sends it: a decimal string, always in USD.",
+      "type": "object",
+      "required": ["amount", "currency"],
+      "additionalProperties": false,
+      "properties": {
+        "amount": { "$ref": "#/definitions/DecimalString" },
+        "currency": { "type": "string", "enum": ["USD"] }
+      }
+    },
+    "DecimalString": {
+      "description": "A non-negative number cast to a string by PHP: digits with an optional fractional part, never exponent notation.",
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)?$"
+    },
+    "ShipmentSpecialServices": {
+      "description": "createShipment(). FEDEX_ONE_RATE when the selected rate is a One Rate quote, SATURDAY_DELIVERY when it was requested. Sent only when at least one applies; SATURDAY_DELIVERY is dropped and the request retried when FedEx rejects it.",
+      "type": "object",
+      "required": ["specialServiceTypes"],
+      "additionalProperties": false,
+      "properties": {
+        "specialServiceTypes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "enum": ["FEDEX_ONE_RATE", "SATURDAY_DELIVERY"] }
+        }
+      }
+    }
+  }
+}

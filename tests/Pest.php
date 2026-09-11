@@ -398,3 +398,17 @@ function assertMatchesUspsSchema(array $body, string $schema): void
 {
     assertMatchesApiSchema($body, $schema, 'uspsLabel');
 }
+
+/**
+ * Validate a body against our hand-written FedEx ship schema.
+ *
+ * FedEx's own spec cannot be vendored, so tests/Fixtures/Schemas/fedexShip.json
+ * describes the body FedexAdapter builds for CreateShipment —
+ * "CreateShipmentRequest" — and the parts it is assembled from.
+ *
+ * @param  array<string, mixed>  $body
+ */
+function assertMatchesFedexSchema(array $body, string $schema): void
+{
+    assertMatchesApiSchema($body, $schema, 'fedexShip');
+}
