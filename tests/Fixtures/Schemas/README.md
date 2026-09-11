@@ -10,6 +10,7 @@ golden array we wrote by hand at the same time as the code that builds it.
 | `shippingV2.json` | [`amzn/selling-partner-api-models`](https://github.com/amzn/selling-partner-api-models) — `models/shipping-api-model/shippingV2.json` | Apache-2.0 |
 | `upsRating.json` | [`UPS-API/api-documentation`](https://github.com/UPS-API/api-documentation) — `Rating.yaml` | MIT |
 | `upsShipping.json` | [`UPS-API/api-documentation`](https://github.com/UPS-API/api-documentation) — `Shipping.yaml` | MIT |
+| `uspsLabel.json` | **Hand-written here**, off `UspsAdapter` — see below | Ours |
 
 ## Licenses and attribution
 
@@ -72,6 +73,26 @@ For those two, write a schema by hand describing the payload *we* build, read of
 adapter code. It is our work product describing our own output, and it still catches the
 failure that actually bit us — USPS rejecting a label with
 `[Path '/toAddress'] Instance failed to match all required schemas`.
+
+## `uspsLabel.json` is hand-written
+
+It describes the two bodies `UspsAdapter` builds: `LabelRequest` for
+`POST /labels/v3/label` and `InternationalLabelRequest` for
+`POST /international-labels/v3/international-label`. Every definition names the adapter
+method it was read off, and every object is `additionalProperties: false`, so **adding or
+renaming a field in the adapter fails the suite until this file is updated to match**.
+That is deliberate — the file is a golden description of our output, kept honest by the
+adapter tests on one side and `tests/Unit/Integrations/UspsSchemaValidationTest.php` on
+the other.
+
+What it pins that a golden array does not: the name rule (`firstName` + `lastName`
+together, or `firm`), `ZIPCode` as a five-digit *string*, weights and dimensions as
+numbers, `extraServices` as integers, `itemQuantity` as an integer, and that an
+international body always carries `customsForm`. It says nothing about which mail classes,
+rate indicators or facility types are valid — those come from the rate response and are
+the carrier's business to reject.
+
+There is no refresh step. When the adapter changes, change the schema in the same commit.
 
 ## The UPS specs need a conversion step
 

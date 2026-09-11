@@ -1,0 +1,180 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "USPS label request bodies as built by App\\Services\\Carriers\\UspsAdapter",
+  "description": "Hand-written from our own adapter code, not from USPS's published spec, which cannot be vendored — see README.md. Each definition names the adapter method that builds it. Every object closes with additionalProperties:false, so a renamed or newly added key fails here until this file is updated to match; that is the point.",
+  "definitions": {
+    "LabelRequest": {
+      "description": "Body of App\\Http\\Integrations\\USPS\\Requests\\Label (POST /labels/v3/label), built by UspsAdapter::createDomesticShipment(). customsForm appears only for APO/FPO/DPO destinations, which cross a customs boundary on a domestic label.",
+      "type": "object",
+      "required": ["toAddress", "fromAddress", "packageDescription", "imageInfo"],
+      "additionalProperties": false,
+      "properties": {
+        "toAddress": { "$ref": "#/definitions/DomesticAddress" },
+        "fromAddress": { "$ref": "#/definitions/DomesticAddress" },
+        "packageDescription": { "$ref": "#/definitions/PackageDescription" },
+        "customsForm": { "$ref": "#/definitions/CustomsForm" },
+        "imageInfo": { "$ref": "#/definitions/ImageInfo" }
+      }
+    },
+    "InternationalLabelRequest": {
+      "description": "Body of App\\Http\\Integrations\\USPS\\Requests\\InternationalLabel (POST /international-labels/v3/international-label), built by UspsAdapter::createInternationalShipment(). The destination is an international address; the origin stays domestic. A customs form is always sent.",
+      "type": "object",
+      "required": ["toAddress", "fromAddress", "packageDescription", "customsForm", "imageInfo"],
+      "additionalProperties": false,
+      "properties": {
+        "toAddress": { "$ref": "#/definitions/InternationalAddress" },
+        "fromAddress": { "$ref": "#/definitions/DomesticAddress" },
+        "packageDescription": { "$ref": "#/definitions/PackageDescription" },
+        "customsForm": { "$ref": "#/definitions/CustomsForm" },
+        "imageInfo": { "$ref": "#/definitions/ImageInfo" }
+      }
+    },
+    "DomesticAddress": {
+      "description": "UspsAdapter::buildDomesticAddress(). ZIPCode is the first five characters of the postal code and is a string, never a number. The party is named either by firstName and lastName together or by firm; addNameFields() folds a lone first or last name into firm.",
+      "type": "object",
+      "required": ["streetAddress", "city", "state", "ZIPCode"],
+      "additionalProperties": false,
+      "properties": {
+        "streetAddress": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "secondaryAddress": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "city": { "type": "string", "minLength": 1, "maxLength": 28 },
+        "state": { "type": "string", "minLength": 2, "maxLength": 2 },
+        "ZIPCode": { "type": "string", "pattern": "^[0-9]{5}$" },
+        "firstName": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "lastName": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "firm": { "type": "string", "minLength": 1, "maxLength": 38 }
+      },
+      "anyOf": [
+        { "required": ["firstName", "lastName"] },
+        { "required": ["firm"] }
+      ]
+    },
+    "InternationalAddress": {
+      "description": "UspsAdapter::buildInternationalAddress(). country and countryISOAlpha2Code both carry the same two-letter code. province and postalCode are sent only when the address has them. Names follow the same rule as DomesticAddress.",
+      "type": "object",
+      "required": ["streetAddress", "city", "country", "countryISOAlpha2Code"],
+      "additionalProperties": false,
+      "properties": {
+        "streetAddress": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "secondaryAddress": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "city": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "province": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "postalCode": { "type": "string", "minLength": 1, "maxLength": 12 },
+        "country": { "type": "string", "pattern": "^[A-Z]{2}$" },
+        "countryISOAlpha2Code": { "type": "string", "pattern": "^[A-Z]{2}$" },
+        "firstName": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "lastName": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "firm": { "type": "string", "minLength": 1, "maxLength": 38 }
+      },
+      "anyOf": [
+        { "required": ["firstName", "lastName"] },
+        { "required": ["firm"] }
+      ]
+    },
+    "PackageDescription": {
+      "description": "Shared by both label bodies. mailClass, rateIndicator and processingCategory are copied from the selected rate's metadata; weight and dimensions are numbers in pounds and inches; extraServices is a list of USPS numeric service codes from mapExtraServices(). customerReference comes from buildCustomerReference(), packageOptions and contentType from mapExtraServices(), and each is omitted rather than sent empty.",
+      "type": "object",
+      "required": [
+        "mailClass",
+        "rateIndicator",
+        "weightUOM",
+        "weight",
+        "dimensionsUOM",
+        "length",
+        "height",
+        "width",
+        "processingCategory",
+        "mailingDate",
+        "extraServices",
+        "destinationEntryFacilityType"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mailClass": { "type": "string", "minLength": 1 },
+        "rateIndicator": { "type": "string", "minLength": 1 },
+        "weightUOM": { "type": "string", "enum": ["lb"] },
+        "weight": { "type": "number", "minimum": 0, "exclusiveMinimum": true },
+        "dimensionsUOM": { "type": "string", "enum": ["in"] },
+        "length": { "type": "number", "minimum": 0, "exclusiveMinimum": true },
+        "height": { "type": "number", "minimum": 0, "exclusiveMinimum": true },
+        "width": { "type": "number", "minimum": 0, "exclusiveMinimum": true },
+        "processingCategory": { "type": "string", "minLength": 1 },
+        "mailingDate": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "extraServices": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "destinationEntryFacilityType": { "type": "string", "minLength": 1 },
+        "customerReference": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": { "$ref": "#/definitions/CustomerReference" }
+        },
+        "packageOptions": { "$ref": "#/definitions/PackageOptions" },
+        "contentType": { "type": "string", "enum": ["HAZMAT"] }
+      }
+    },
+    "CustomerReference": {
+      "description": "One entry of UspsAdapter::buildCustomerReference(). The reference is cut to 30 characters and always asked to print.",
+      "type": "object",
+      "required": ["referenceNumber", "printReferenceNumber"],
+      "additionalProperties": false,
+      "properties": {
+        "referenceNumber": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "printReferenceNumber": { "type": "boolean" }
+      }
+    },
+    "PackageOptions": {
+      "description": "UspsAdapter::mapExtraServices(). packageValue accompanies insurance (930/931); physicalSignatureRequired accompanies a signature or high-value insurance service (921/922/931). Sent only when at least one applies.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "packageValue": { "type": "number", "minimum": 0 },
+        "physicalSignatureRequired": { "type": "boolean" }
+      }
+    },
+    "CustomsForm": {
+      "description": "UspsAdapter::buildCustomsForm(). invoiceNumber repeats the first label reference, since that is what USPS prints on the form. Item values and weights are totals for the line, not per unit.",
+      "type": "object",
+      "required": ["AESITN", "customsContentType", "contents"],
+      "additionalProperties": false,
+      "properties": {
+        "AESITN": { "type": "string", "minLength": 1 },
+        "customsContentType": { "type": "string", "enum": ["MERCHANDISE"] },
+        "invoiceNumber": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "contents": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/CustomsContentItem" }
+        }
+      }
+    },
+    "CustomsContentItem": {
+      "description": "One line of the customs form. itemQuantity is an integer; HSTariffNumber is a string and is omitted when the item has none. Note the field is spelled countryofOrigin, with a lower-case 'of'.",
+      "type": "object",
+      "required": ["itemDescription", "itemQuantity", "itemTotalValue", "weightUOM", "itemTotalWeight", "countryofOrigin"],
+      "additionalProperties": false,
+      "properties": {
+        "itemDescription": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "itemQuantity": { "type": "integer", "minimum": 1 },
+        "itemTotalValue": { "type": "number", "minimum": 0 },
+        "weightUOM": { "type": "string", "enum": ["lb"] },
+        "itemTotalWeight": { "type": "number", "minimum": 0 },
+        "countryofOrigin": { "type": "string", "pattern": "^[A-Z]{2}$" },
+        "HSTariffNumber": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ImageInfo": {
+      "description": "UspsAdapter::createDomesticShipment() / createInternationalShipment(). imageType is sent only for ZPL output; PDF is the API's default and is requested by leaving it out.",
+      "type": "object",
+      "required": ["receiptOption"],
+      "additionalProperties": false,
+      "properties": {
+        "receiptOption": { "type": "string", "enum": ["NONE"] },
+        "imageType": { "type": "string", "enum": ["ZPL203DPI", "ZPL300DPI"] }
+      }
+    }
+  }
+}

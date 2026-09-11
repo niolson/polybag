@@ -384,3 +384,17 @@ function assertMatchesUpsSchema(array $body, string $schema, string $document): 
 {
     assertMatchesApiSchema($body, $schema, $document);
 }
+
+/**
+ * Validate a body against our hand-written USPS label schema.
+ *
+ * USPS's own spec cannot be vendored, so tests/Fixtures/Schemas/uspsLabel.json
+ * describes the bodies UspsAdapter builds — "LabelRequest" for the domestic
+ * label API and "InternationalLabelRequest" for the international one.
+ *
+ * @param  array<string, mixed>  $body
+ */
+function assertMatchesUspsSchema(array $body, string $schema): void
+{
+    assertMatchesApiSchema($body, $schema, 'uspsLabel');
+}
