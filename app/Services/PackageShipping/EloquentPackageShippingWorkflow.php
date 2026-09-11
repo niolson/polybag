@@ -222,6 +222,19 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
     private function buyPostage(Package $package, PackageShippingRequest $request): PackageShippingResult
     {
+        // Read from the database, not the instance: the Ship page keeps its
+        // package loaded from before the purchase, and stays open when the
+        // label it bought could not be printed. A second Ship on that page,
+        // with a different rate selected, would otherwise pay for a second
+        // label on a package that already has one.
+        if (($stored = Package::query()->find($package->id)) && $stored->status === PackageStatus::Shipped) {
+            return PackageShippingResult::stateConflict(
+                'This package already has a label'
+                .(filled($stored->tracking_number) ? " ({$stored->tracking_number})" : '')
+                .'. Reprint it, or void it first, from the Packages page.'
+            );
+        }
+
         // Nothing is spent on a package that already has a purchase nobody can
         // account for. An offer consumed without the source either confirming
         // or declining may have bought a label we never recorded, and a second

@@ -137,6 +137,11 @@ it('refuses a second purchase against an offer already spent', function (): void
     $workflow = app(PackageShippingWorkflow::class);
 
     $workflow->ship($package, new PackageShippingRequest(selectedRate: $rate));
+
+    // A shipped package is refused before the offer is even looked at, so
+    // this is the label voided in between: the package can be bought for
+    // again, but not with the offer that already paid for it once.
+    $package->fresh()->update(['status' => PackageStatus::Unshipped]);
     $second = $workflow->ship($package->fresh(), new PackageShippingRequest(selectedRate: $rate));
 
     expect($second->success)->toBeFalse()

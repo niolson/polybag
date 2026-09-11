@@ -115,6 +115,29 @@
 
             <!-- Rate Selection -->
             <div>
+                @if($this->isShipped())
+                    {{-- Reached only when the label was bought but could not be
+                         printed: the print handler keeps the page open so the
+                         error banner is seen. Nothing here may buy again. --}}
+                    <x-filament::section>
+                        <x-slot name="heading">Label Purchased</x-slot>
+                        <div class="flex items-start gap-3">
+                            <x-filament::icon icon="heroicon-o-check-circle" class="w-6 h-6 text-success-500 flex-shrink-0" />
+                            <div class="text-sm text-gray-700 dark:text-gray-300 space-y-1">
+                                <p class="font-medium text-gray-900 dark:text-white">
+                                    {{ $package->carrier }} {{ $package->service }}
+                                    @if($package->cost !== null) — ${{ number_format((float) $package->cost, 2) }} @endif
+                                </p>
+                                @if($package->tracking_number)
+                                    <p>Tracking <span class="font-mono">{{ $package->tracking_number }}</span></p>
+                                @endif
+                                <p class="text-gray-500 dark:text-gray-400">
+                                    The label is bought and stored on the package. If it did not print, fix the printer in Device Settings and use <strong>Print again</strong>, or reprint it later from the Packages page. Buying another label for this package is not possible here.
+                                </p>
+                            </div>
+                        </div>
+                    </x-filament::section>
+                @else
                 <x-filament::section>
                     <x-slot name="heading">Select Shipping Rate</x-slot>
 
@@ -174,6 +197,18 @@
                                                 <span>{{ $rate['carrier'] }}</span>
                                             @endif
                                             <span>{{ $rate['serviceName'] }}</span>
+                                            @php
+                                                $resoldVia = match($rate['observedService']['source'] ?? null) {
+                                                    'amazon' => 'via Amazon',
+                                                    'shopify' => 'via Shopify',
+                                                    default => null,
+                                                };
+                                            @endphp
+                                            @if($resoldVia)
+                                                {{-- The carrier shown is the one carrying the parcel; the
+                                                     postage is bought from the channel, not on our account. --}}
+                                                <x-filament::badge color="gray" size="sm">{{ $resoldVia }}</x-filament::badge>
+                                            @endif
                                         </div>
                                         @if(!empty($formRateOptionDescriptions[$index]))
                                             <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $formRateOptionDescriptions[$index] }}</div>
@@ -245,6 +280,7 @@
                         </div>
                     @endif
                 </x-filament::section>
+                @endif
             </div>
         </div>
     @else
