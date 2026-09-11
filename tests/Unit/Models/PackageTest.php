@@ -172,10 +172,23 @@ it('identifies Shopify-bought postage by its source rather than its carrier', fu
         'carrier' => 'USPS',
         'carrier_account_id' => null,
         'postage_source' => PostageSource::PostageDataSource,
-        'postage_data_source_id' => DataSource::factory(),
+        'postage_data_source_id' => DataSource::factory()->shopify(),
     ]);
 
-    expect($package->isShopifyShipped())->toBeTrue();
+    expect($package->isShopifyShipped())->toBeTrue()
+        ->and($package->isAmazonShipped())->toBeFalse();
+});
+
+it('does not mistake an Amazon Buy Shipping label for a Shopify one', function (): void {
+    $package = Package::factory()->shipped()->create([
+        'carrier' => 'Amazon Shipping',
+        'carrier_account_id' => null,
+        'postage_source' => PostageSource::PostageDataSource,
+        'postage_data_source_id' => DataSource::factory()->amazon(),
+    ]);
+
+    expect($package->isAmazonShipped())->toBeTrue()
+        ->and($package->isShopifyShipped())->toBeFalse();
 });
 
 it('does not identify a direct purchase as Shopify-bought from its legacy carrier value', function (): void {

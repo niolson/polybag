@@ -14,6 +14,7 @@ use App\Enums\Role;
 use App\Enums\ServiceCapability;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
 use App\Filament\Resources\PackageResource\Pages\ViewPackage;
+use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\User;
@@ -72,6 +73,39 @@ it('filters Shopify Shipping packages by postage source rather than carrier text
         ->filterTable('carrier', 'shopify_shipping')
         ->assertCanSeeTableRecords([$shopifyPackage])
         ->assertCanNotSeeTableRecords([$directPackage]);
+});
+
+it('does not give an Amazon Buy Shipping label the Shopify void guidance', function (): void {
+    $package = Package::factory()->shipped()->create([
+        'carrier' => 'Amazon Shipping',
+        'postage_source' => PostageSource::PostageDataSource,
+        'postage_data_source_id' => DataSource::factory()->amazon(),
+    ]);
+
+    Livewire::test(ListPackages::class)
+        ->assertActionVisible(TestAction::make('void')->table($package))
+        ->assertActionEnabled(TestAction::make('void')->table($package))
+        ->assertSee('via Amazon Buy Shipping')
+        ->assertDontSee('via Shopify Shipping');
+});
+
+it('filters Amazon Buy Shipping packages by postage source rather than carrier text', function (): void {
+    $amazonPackage = Package::factory()->shipped()->create([
+        'carrier' => 'UPS',
+        'postage_source' => PostageSource::PostageDataSource,
+        'postage_data_source_id' => DataSource::factory()->amazon(),
+    ]);
+    $shopifyPackage = Package::factory()->shipped()->create([
+        'carrier' => 'UPS',
+        'postage_source' => PostageSource::PostageDataSource,
+        'postage_data_source_id' => createShopifyDataSource()->id,
+    ]);
+    $directPackage = Package::factory()->create(['carrier' => 'UPS']);
+
+    Livewire::test(ListPackages::class)
+        ->filterTable('carrier', 'amazon_buy_shipping')
+        ->assertCanSeeTableRecords([$amazonPackage])
+        ->assertCanNotSeeTableRecords([$shopifyPackage, $directPackage]);
 });
 
 it('voids a label and clears shipping fields', function (): void {
@@ -202,4 +236,18 @@ it('hides void action on view page for unshipped packages', function (): void {
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
         ->assertActionHidden('void');
+});
+
+it('labels an Amazon Buy Shipping package on the view page without the Shopify notice', function (): void {
+    $package = Package::factory()->shipped()->create([
+        'carrier' => 'Amazon Shipping',
+        'cost' => 4.76,
+        'postage_source' => PostageSource::PostageDataSource,
+        'postage_data_source_id' => DataSource::factory()->amazon(),
+    ]);
+
+    Livewire::test(ViewPackage::class, ['record' => $package->id])
+        ->assertSee('Carrier (via Amazon Buy Shipping)')
+        ->assertDontSee('chosen by Shopify')
+        ->assertDontSee('Bought through Shopify Shipping');
 });

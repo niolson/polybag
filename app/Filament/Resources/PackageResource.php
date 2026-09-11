@@ -14,6 +14,7 @@ use App\Models\Client;
 use App\Models\Location;
 use App\Models\Package;
 use App\Services\SettingsService;
+use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\TrackingService;
 use BackedEnum;
@@ -161,6 +162,7 @@ class PackageResource extends Resource
         return $table
             ->modifyQueryUsing(fn (Builder $query) => $query->with(array_filter([
                 'shipment',
+                'postageDataSource',
                 app(SettingsService::class)->get('multi_client_enabled', false) ? 'shipment.client' : null,
                 app(SettingsService::class)->get('multi_location_enabled', false) ? 'location' : null,
             ])))
@@ -200,9 +202,11 @@ class PackageResource extends Resource
                     ->placeholder('—'),
                 CarrierLogoColumn::make('carrier')
                     ->placeholder('—')
-                    ->description(fn (Package $record): ?string => $record->isShopifyShipped()
-                        ? 'via Shopify Shipping'
-                        : null),
+                    ->description(fn (Package $record): ?string => match (true) {
+                        $record->isShopifyShipped() => 'via Shopify Shipping',
+                        $record->isAmazonShipped() => 'via Amazon Buy Shipping',
+                        default => null,
+                    }),
                 Tables\Columns\TextColumn::make('service')
                     ->placeholder('—')
                     // A blank service is a fact, not missing data: Shopify never
@@ -265,16 +269,23 @@ class PackageResource extends Resource
                         'FedEx' => 'FedEx',
                         'UPS' => 'UPS',
                         'shopify_shipping' => 'Shopify Shipping',
+                        'amazon_buy_shipping' => 'Amazon Buy Shipping',
                     ])
                     ->query(function (Builder $query, array $data): Builder {
                         $value = $data['value'] ?? null;
 
-                        if ($value === 'shopify_shipping') {
+                        $postageSourceType = match ($value) {
+                            'shopify_shipping' => ShopifySource::class,
+                            'amazon_buy_shipping' => AmazonSource::class,
+                            default => null,
+                        };
+
+                        if ($postageSourceType !== null) {
                             return $query
                                 ->where('postage_source', PostageSource::PostageDataSource)
                                 ->whereHas(
                                     'postageDataSource',
-                                    fn (Builder $query): Builder => $query->where('source_type', ShopifySource::class),
+                                    fn (Builder $query): Builder => $query->where('source_type', $postageSourceType),
                                 );
                         }
 
@@ -316,6 +327,7 @@ class PackageResource extends Resource
                     ->options([
                         'pdf' => 'PDF',
                         'zpl' => 'ZPL',
+                        'image' => 'Image',
                     ]),
                 Tables\Filters\Filter::make('shipped_at')
                     ->form([
