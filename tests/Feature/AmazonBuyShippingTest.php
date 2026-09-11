@@ -1,5 +1,6 @@
 <?php
 
+use App\Contracts\PackageLabelWorkflow;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
@@ -86,7 +87,8 @@ function amazonEligibleRates(): array
 
 /**
  * Every rate in the production capture offered PDF twice — letter and 4x6 — plus
- * ZPL at 300 DPI and a PNG our print path cannot use.
+ * ZPL at 300 DPI and a PNG, which carries the label alone and is what the adapter
+ * prefers for a raster workstation (`03`'s live run).
  *
  * The print options are the captured ones, not a simplification: file joining
  * is offered as `[true]` only, and both PDF sizes make a `PACKSLIP` mandatory
@@ -397,14 +399,14 @@ it('drops an offer that cannot honour a hard-required signature, and keeps the o
 });
 
 it('drops an offer it could not print, before any money is spent', function (): void {
-    $pngOnly = amazonEligibleRates();
-    $pngOnly[0]['supportedDocumentSpecifications'] = [[
-        'format' => 'PNG',
+    $unprintable = amazonEligibleRates();
+    $unprintable[0]['supportedDocumentSpecifications'] = [[
+        'format' => 'EPL',
         'size' => ['width' => 4.0, 'length' => 6.0, 'unit' => 'INCH'],
         'printOptions' => [['supportedDPIs' => [], 'supportedPageLayouts' => ['LEFT'], 'supportedFileJoiningOptions' => [true], 'supportedDocumentDetails' => [['name' => 'LABEL', 'isMandatory' => true]]]],
     ]];
 
-    Saloon::fake([GetShippingRates::class => amazonRatesResponse($pngOnly)]);
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse($unprintable)]);
 
     $rates = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), []);
 
@@ -467,9 +469,44 @@ it('buys the offer that was chosen and records what Amazon called the shipment',
     });
 });
 
-it('asks for a 4x6 label even where the rate also offers letter size', function (): void {
+it('buys the label alone as a PNG for a PDF workstation, never the joined pack slip', function (): void {
     Saloon::fake([
         GetShippingRates::class => amazonRatesResponse(),
+        PurchaseShipment::class => amazonPurchaseResponse(format: 'PNG'),
+    ]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->first();
+
+    // The joined PDF is two 4x6 pages, label then pack slip, and the second
+    // live purchase printed both on the label printer. PNG carries the label
+    // alone and prints through the same pixel path as a PDF would.
+    $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(
+        selectedRate: $rate,
+        labelFormat: 'pdf',
+    ));
+
+    expect($result->success)->toBeTrue()
+        ->and($this->package->fresh()->label_format)->toBe('image');
+
+    Saloon::assertSent(function (PurchaseShipment $request): bool {
+        $spec = $request->body()->all()['requestedDocumentSpecification'];
+
+        return $spec['format'] === 'PNG'
+            && $spec['size'] === ['width' => 4.0, 'length' => 6.0, 'unit' => 'INCH']
+            && ! array_key_exists('dpi', $spec)
+            && $spec['requestedDocumentTypes'] === ['LABEL']
+            && $spec['needFileJoining'] === true;
+    });
+});
+
+it('asks for a 4x6 PDF, joined with its pack slip, only when nothing label-only is offered', function (): void {
+    $pdfOnly = array_merge(amazonEligibleRates()[0], ['supportedDocumentSpecifications' => array_values(array_filter(
+        amazonDocumentSpecifications(),
+        fn (array $spec): bool => $spec['format'] === 'PDF',
+    ))]);
+
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse([$pdfOnly]),
         PurchaseShipment::class => amazonPurchaseResponse(format: 'PDF'),
     ]);
 
@@ -525,11 +562,12 @@ it('does not take a lone document that Amazon did not call a label', function ()
 
 it('leaves a document unjoined only where the rate allows it', function (): void {
     $unjoined = amazonEligibleRates();
-    $unjoined[0]['supportedDocumentSpecifications'][3]['printOptions'][0]['supportedFileJoiningOptions'] = [false, true];
+    // Index 2 is the PNG, which is what a PDF workstation is bought.
+    $unjoined[0]['supportedDocumentSpecifications'][2]['printOptions'][0]['supportedFileJoiningOptions'] = [false, true];
 
     Saloon::fake([
         GetShippingRates::class => amazonRatesResponse($unjoined),
-        PurchaseShipment::class => amazonPurchaseResponse(format: 'PDF'),
+        PurchaseShipment::class => amazonPurchaseResponse(format: 'PNG'),
     ]);
 
     $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->first();
@@ -641,26 +679,90 @@ it('keeps a paid-only required group when the shipment asked for that service', 
     expect(amazonAdapter()->getRates($request, [])->pluck('carrier')->all())->toBe(['USPS']);
 });
 
-it('records the resolution Amazon generated, not the one the device asked for', function (): void {
+it('buys a PNG when the rate does not publish ZPL at the resolution the device prints', function (): void {
     Saloon::fake([
         GetShippingRates::class => amazonRatesResponse(),
-        PurchaseShipment::class => amazonPurchaseResponse(),
+        PurchaseShipment::class => amazonPurchaseResponse(format: 'PNG'),
     ]);
 
     $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->first();
 
-    // The device prints at 203; this rate publishes ZPL at 300 and nothing else.
-    app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(
+    // The device prints ZPL at 203; this rate publishes ZPL at 300 and nothing
+    // else. A 300 DPI ZPL is unprintable there — the first live purchase
+    // bought one and the print path refused it — while a PNG rasterizes for
+    // any printer and, unlike the PDF, carries no pack slip.
+    $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(
         selectedRate: $rate,
         labelFormat: 'zpl',
         labelDpi: 203,
     ));
 
-    // Recording 203 against 300 DPI bytes would print the label at the wrong
-    // physical size, and the package is what a reprint reads.
-    expect($this->package->fresh()->label_dpi)->toBe(300);
+    expect($result->success)->toBeTrue()
+        ->and($this->package->fresh()->label_format)->toBe('image');
 
-    Saloon::assertSent(fn (PurchaseShipment $request): bool => $request->body()->all()['requestedDocumentSpecification']['dpi'] === 300);
+    Saloon::assertSent(function (PurchaseShipment $request): bool {
+        $spec = $request->body()->all()['requestedDocumentSpecification'];
+
+        return $spec['format'] === 'PNG'
+            && ! array_key_exists('dpi', $spec)
+            && $spec['requestedDocumentTypes'] === ['LABEL'];
+    });
+});
+
+it('refuses to buy ZPL at a resolution the device cannot print when nothing else is offered', function (): void {
+    $zplOnly = array_merge(amazonEligibleRates()[0], ['supportedDocumentSpecifications' => array_values(array_filter(
+        amazonDocumentSpecifications(),
+        fn (array $spec): bool => $spec['format'] === 'ZPL',
+    ))]);
+
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse([$zplOnly]),
+        PurchaseShipment::class => amazonPurchaseResponse(),
+    ]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->first();
+
+    // Raw 300 DPI ZPL on a 203 DPI head prints at two-thirds size, and the
+    // workstation print path refuses it outright — buying it is paying for
+    // a label nobody can print.
+    $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(
+        selectedRate: $rate,
+        labelFormat: 'zpl',
+        labelDpi: 203,
+    ));
+
+    expect($result->success)->toBeFalse()
+        ->and($result->message)->toContain('zpl at 203 DPI')
+        ->and($this->package->fresh()->status)->toBe(PackageStatus::Unshipped);
+
+    Saloon::assertNotSent(PurchaseShipment::class);
+});
+
+it('refuses to buy a second label for a package that already has one', function (): void {
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse(),
+        PurchaseShipment::class => amazonPurchaseResponse(),
+    ]);
+
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), []);
+    $workflow = app(EloquentPackageShippingWorkflow::class);
+
+    expect($workflow->ship($this->package, new PackageShippingRequest(selectedRate: $rates->first()))->success)->toBeTrue();
+
+    // The Ship page keeps the package it loaded before the purchase, and stays
+    // open when the label could not be printed. Shipping again from it, with
+    // another rate selected, must not pay for a second label.
+    $stale = $this->package;
+    $stale->status = PackageStatus::Unshipped;
+
+    $second = $workflow->ship($stale, new PackageShippingRequest(selectedRate: $rates->last()));
+
+    expect($second->success)->toBeFalse()
+        ->and($second->title)->toBe('Package State Changed')
+        ->and($second->message)->toContain('already has a label')
+        ->and($second->message)->toContain('D10012345678901');
+
+    Saloon::assertSentCount(2);
 });
 
 it('buys on the Amazon account that quoted the offer, not the one the shipment now points at', function (): void {
@@ -850,6 +952,28 @@ it('voids through Amazon with the shipment id Amazon issued', function (): void 
 
     Saloon::assertSent(fn (CancelAmazonShipment $request): bool => $request->resolveEndpoint()
         === '/shipping/v2/shipments/amzn1.sid.abc123/cancel');
+});
+
+it('forgets the Amazon shipment once its label is voided, so a re-ship confirms the order', function (): void {
+    Saloon::fake([CancelAmazonShipment::class => MockResponse::make(['payload' => []])]);
+
+    $package = amazonShippedPackage($this->source, [
+        'metadata' => [
+            AmazonBuyShippingAdapter::SHIPMENT_ID_KEY => 'amzn1.sid.abc123',
+            AmazonBuyShippingAdapter::CARRIER_ID_KEY => 'ONTRAC',
+            AmazonBuyShippingAdapter::SERVICE_ID_KEY => 'ONTRAC_MFN_GROUND',
+            'unrelated' => 'kept',
+        ],
+    ]);
+
+    // The first live void left the shipment ID behind (`03`), and the
+    // channel export reads it as "Amazon already confirmed this order".
+    $result = app(PackageLabelWorkflow::class)->voidLabel($package);
+
+    expect($result->success)->toBeTrue()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped)
+        ->and($package->fresh()->metadata)->toBe(['unrelated' => 'kept'])
+        ->and(AmazonBuyShippingAdapter::shipmentIdFor($package->fresh()))->toBeNull();
 });
 
 it('tracks through Amazon with the carrier identifier it recorded', function (): void {

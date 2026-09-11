@@ -94,6 +94,8 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
 
     public const CARRIER_ID_KEY = 'amazon_carrier_id';
 
+    public const SERVICE_ID_KEY = 'amazon_service_id';
+
     /**
      * Amazon's confirmation value-added services, and the special-service codes
      * they answer. Anything absent is `NotImplemented`: the request proceeds
@@ -389,7 +391,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
                 // `getTracking` takes it, and a courier we hold no row for has
                 // no other handle.
                 self::CARRIER_ID_KEY => $metadata['amazonCarrierId'] ?? null,
-                'amazon_service_id' => $metadata['amazonServiceId'] ?? null,
+                self::SERVICE_ID_KEY => $metadata['amazonServiceId'] ?? null,
             ], fn (?string $value): bool => filled($value)),
         );
     }
@@ -539,14 +541,14 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
     }
 
     /**
-     * PNG is offered by every rate observed so far and is not a format our
-     * printing path can send to QZ Tray. A rate offering nothing else is
-     * unbuyable and is dropped here rather than at purchase time.
+     * A rate offering none of the formats the print path can send to QZ Tray
+     * — ZPL raw, PNG and PDF through the pixel path — is unbuyable and is
+     * dropped here rather than at purchase time.
      */
     private function hasPrintableDocument(array $rate): bool
     {
         return collect($rate['supportedDocumentSpecifications'] ?? [])
-            ->contains(fn (array $spec): bool => in_array($spec['format'] ?? null, ['PDF', 'ZPL'], true));
+            ->contains(fn (array $spec): bool => in_array($spec['format'] ?? null, ['PDF', 'ZPL', 'PNG'], true));
     }
 
     /**
