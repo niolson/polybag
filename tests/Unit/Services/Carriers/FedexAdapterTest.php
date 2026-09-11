@@ -689,7 +689,21 @@ it('creates shipment and returns tracking info', function (): void {
         ->and($response->service)->toBe('FedEx Ground')
         ->and($response->labelData)->toBe('JVBERi0xLjQKYmFzZTY0bGFiZWxkYXRh');
 
-    Saloon::assertSent(CreateShipment::class);
+    Saloon::assertSent(function ($request): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $body = $request->body()->all();
+
+        assertMatchesFedexSchema($body, 'CreateShipmentRequest');
+
+        return ($body['requestedShipment']['serviceType'] ?? null) === 'FEDEX_GROUND'
+            && ($body['requestedShipment']['packagingType'] ?? null) === 'YOUR_PACKAGING'
+            && ! isset($body['requestedShipment']['customsClearanceDetail'])
+            && ! isset($body['requestedShipment']['smartPostInfoDetail'])
+            && ! isset($body['requestedShipment']['shipmentSpecialServices']);
+    });
 });
 
 it('uses the ship-from country for FedEx customs duties payment', function (): void {
@@ -779,6 +793,8 @@ it('uses the ship-from country for FedEx customs duties payment', function (): v
             return false;
         }
 
+        assertMatchesFedexSchema($request->body()->all(), 'CreateShipmentRequest');
+
         $body = $request->body()->all();
 
         return ($body['requestedShipment']['customsClearanceDetail']['dutiesPayment']['payor']['responsibleParty']['address']['countryCode'] ?? null) === 'CA';
@@ -863,6 +879,8 @@ it('includes smart post info detail in create shipment requests for smart post s
         if (! $request instanceof CreateShipment) {
             return false;
         }
+
+        assertMatchesFedexSchema($request->body()->all(), 'CreateShipmentRequest');
 
         $body = $request->body()->all();
         $detail = $body['requestedShipment']['smartPostInfoDetail'] ?? [];
@@ -1163,6 +1181,8 @@ it('maps package-level special services and declared value into the ship request
             return false;
         }
 
+        assertMatchesFedexSchema($request->body()->all(), 'CreateShipmentRequest');
+
         $lineItem = $request->body()->all()['requestedShipment']['requestedPackageLineItems'][0] ?? [];
         $special = $lineItem['packageSpecialServices'] ?? [];
 
@@ -1237,6 +1257,8 @@ it('omits battery fields from ground ship requests', function (): void {
             return false;
         }
 
+        assertMatchesFedexSchema($request->body()->all(), 'CreateShipmentRequest');
+
         $lineItem = $request->body()->all()['requestedShipment']['requestedPackageLineItems'][0] ?? [];
 
         return ! array_key_exists('packageSpecialServices', $lineItem);
@@ -1305,6 +1327,8 @@ it('maps battery details into express ship requests', function (): void {
             return false;
         }
 
+        assertMatchesFedexSchema($request->body()->all(), 'CreateShipmentRequest');
+
         $special = $request->body()->all()['requestedShipment']['requestedPackageLineItems'][0]['packageSpecialServices'] ?? [];
 
         // Exact combination the production availability API enumerates (UN3481, PI967)
@@ -1359,6 +1383,8 @@ it('prints the client-selected reference on the label', function (LabelReference
         if (! $request instanceof CreateShipment) {
             return false;
         }
+
+        assertMatchesFedexSchema($request->body()->all(), 'CreateShipmentRequest');
 
         $lineItem = $request->body()->all()['requestedShipment']['requestedPackageLineItems'][0];
 
@@ -1431,6 +1457,8 @@ it('sends a recipient phone number stored before its area code was recognized', 
             return false;
         }
 
+        assertMatchesFedexSchema($request->body()->all(), 'CreateShipmentRequest');
+
         $contact = $request->body()->all()['requestedShipment']['recipients'][0]['contact'] ?? [];
 
         return ($contact['phoneNumber'] ?? null) === '3705797375';
@@ -1494,6 +1522,8 @@ it('uses the shipper phone when the recipient has no usable phone number', funct
         if (! $request instanceof CreateShipment) {
             return false;
         }
+
+        assertMatchesFedexSchema($request->body()->all(), 'CreateShipmentRequest');
 
         $contact = $request->body()->all()['requestedShipment']['recipients'][0]['contact'] ?? [];
 
@@ -1562,6 +1592,8 @@ it('does not stand in the shipper phone when the recipient clears customs', func
         if (! $request instanceof CreateShipment) {
             return false;
         }
+
+        assertMatchesFedexSchema($request->body()->all(), 'CreateShipmentRequest');
 
         $contact = $request->body()->all()['requestedShipment']['recipients'][0]['contact'] ?? [];
 
@@ -1636,6 +1668,8 @@ it('declares customs for a Puerto Rico destination that shares the US country co
             return false;
         }
 
+        assertMatchesFedexSchema($request->body()->all(), 'CreateShipmentRequest');
+
         $commodity = $request->body()->all()['requestedShipment']['customsClearanceDetail']['commodities'][0] ?? [];
 
         return ($commodity['customsValue']['amount'] ?? null) === '50.47'
@@ -1684,4 +1718,177 @@ it('fails before calling FedEx when customs applies but nothing can be declared'
         ->and($response->errorMessage)->toContain('customs declaration');
 
     Saloon::assertNotSent(CreateShipment::class);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Request schema conformance
+|--------------------------------------------------------------------------
+|
+| Every CreateShipment closure above validates the whole body against our
+| hand-written schema in tests/Fixtures/Schemas/fedexShip.json. These two
+| exercise the branches nothing above reaches at ship level: the sub-pound
+| SmartPost indicia, and a ZPL One Rate label with Saturday delivery.
+|
+*/
+
+function fakeFedexShipEndpoints(): void
+{
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => MockResponse::make([
+            'output' => [
+                'transactionShipments' => [
+                    [
+                        'masterTrackingNumber' => '794644790138',
+                        'completedShipmentDetail' => [
+                            'shipmentRating' => ['shipmentRateDetails' => [['totalNetCharge' => 12.75]]],
+                        ],
+                        'pieceResponses' => [
+                            [
+                                'trackingNumber' => '794644790138',
+                                'packageDocuments' => [['encodedLabel' => 'JVBERi0xLjQKYmFzZTY0bGFiZWxkYXRh']],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]),
+    ]);
+}
+
+it('builds a sub-pound SmartPost ship request that conforms to our FedEx schema', function (): void {
+    $location = Location::factory()->create(['fedex_hub_id' => '5983']);
+
+    fakeFedexShipEndpoints();
+
+    $request = new ShipRequest(
+        fromAddress: new AddressData(
+            firstName: 'Shipping',
+            lastName: 'Center',
+            streetAddress: '123 Warehouse St',
+            city: 'Seattle',
+            stateOrProvince: 'WA',
+            postalCode: '98072',
+            phone: '5551234567',
+        ),
+        toAddress: new AddressData(
+            firstName: 'John',
+            lastName: 'Doe',
+            streetAddress: '456 Main St',
+            city: 'Los Angeles',
+            stateOrProvince: 'CA',
+            postalCode: '90210',
+            phone: '5559876543',
+        ),
+        packageData: new PackageData(weight: 0.6, length: 10, width: 8, height: 2),
+        selectedRate: new RateResponse(
+            carrier: 'FedEx',
+            serviceCode: 'SMART_POST',
+            serviceName: 'FedEx Ground Economy',
+            price: 8.10,
+            metadata: ['serviceType' => 'SMART_POST'],
+        ),
+        locationId: $location->id,
+    );
+
+    expect($this->adapter->createShipment($request)->success)->toBeTrue();
+
+    Saloon::assertSent(function ($request): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $body = $request->body()->all();
+
+        assertMatchesFedexSchema($body, 'CreateShipmentRequest');
+
+        return ($body['requestedShipment']['smartPostInfoDetail'] ?? null) === [
+            'hubId' => '5983',
+            'indicia' => 'PRESORTED_STANDARD',
+            'ancillaryEndorsement' => 'ADDRESS_CORRECTION',
+        ];
+    });
+});
+
+it('builds a ZPL One Rate ship request with Saturday delivery that conforms to our FedEx schema', function (): void {
+    fakeFedexShipEndpoints();
+
+    $request = new ShipRequest(
+        fromAddress: new AddressData(
+            firstName: 'Shipping',
+            lastName: 'Center',
+            streetAddress: '123 Warehouse St',
+            streetAddress2: 'Dock 4',
+            city: 'Seattle',
+            stateOrProvince: 'WA',
+            postalCode: '98072',
+            company: 'Test Company',
+            phone: '5551234567',
+        ),
+        toAddress: new AddressData(
+            firstName: '',
+            lastName: '',
+            streetAddress: '456 Main St',
+            city: 'Los Angeles',
+            stateOrProvince: 'CA',
+            postalCode: '90210',
+            company: 'Acme Corp',
+            phone: '5559876543',
+            phoneExtension: '12',
+        ),
+        packageData: new PackageData(weight: 2.0, length: 12, width: 10, height: 8, fedexPackageType: FedexPackageType::FEDEX_SMALL_BOX),
+        selectedRate: new RateResponse(
+            carrier: 'FedEx',
+            serviceCode: 'PRIORITY_OVERNIGHT',
+            serviceName: 'FedEx Priority Overnight',
+            price: 42.10,
+            metadata: [
+                'serviceType' => 'PRIORITY_OVERNIGHT',
+                'isOneRate' => true,
+                'fedexPackageType' => 'FEDEX_SMALL_BOX',
+            ],
+        ),
+        labelFormat: 'zpl',
+        labelDpi: 300,
+        specialServiceCodes: ['saturday_delivery'],
+        shipDate: CarbonImmutable::parse('2026-09-11'),
+        references: ['ORD-10042'],
+    );
+
+    $response = $this->adapter->createShipment($request);
+
+    expect($response->success)->toBeTrue()
+        ->and($response->appliedServices)->toBe(['saturday_delivery']);
+
+    Saloon::assertSent(function ($request): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $body = $request->body()->all();
+
+        assertMatchesFedexSchema($body, 'CreateShipmentRequest');
+
+        $shipment = $body['requestedShipment'];
+
+        // A recipient with no person name is sent by company alone; the
+        // shipper's second address line rides in streetLines.
+        return $shipment['shipDateStamp'] === '2026-09-11'
+            && $shipment['packagingType'] === 'FEDEX_SMALL_BOX'
+            && $shipment['labelSpecification'] === [
+                'labelFormatType' => 'COMMON2D',
+                'imageType' => 'ZPLII',
+                'labelStockType' => 'STOCK_4X6',
+                'resolution' => 300,
+            ]
+            && $shipment['shipmentSpecialServices'] === ['specialServiceTypes' => ['FEDEX_ONE_RATE', 'SATURDAY_DELIVERY']]
+            && $shipment['shipper']['address']['streetLines'] === ['123 Warehouse St', 'Dock 4']
+            && ! isset($shipment['recipients'][0]['contact']['personName'])
+            && $shipment['recipients'][0]['contact']['companyName'] === 'Acme Corp'
+            && $shipment['recipients'][0]['contact']['phoneExtension'] === '12'
+            && $shipment['requestedPackageLineItems'][0]['customerReferences'] === [
+                ['customerReferenceType' => 'CUSTOMER_REFERENCE', 'value' => 'ORD-10042'],
+            ];
+    });
 });

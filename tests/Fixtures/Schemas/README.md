@@ -11,6 +11,7 @@ golden array we wrote by hand at the same time as the code that builds it.
 | `upsRating.json` | [`UPS-API/api-documentation`](https://github.com/UPS-API/api-documentation) — `Rating.yaml` | MIT |
 | `upsShipping.json` | [`UPS-API/api-documentation`](https://github.com/UPS-API/api-documentation) — `Shipping.yaml` | MIT |
 | `uspsLabel.json` | **Hand-written here**, off `UspsAdapter` — see below | Ours |
+| `fedexShip.json` | **Hand-written here**, off `FedexAdapter` — see below | Ours |
 
 ## Licenses and attribution
 
@@ -93,6 +94,29 @@ rate indicators or facility types are valid — those come from the rate respons
 the carrier's business to reject.
 
 There is no refresh step. When the adapter changes, change the schema in the same commit.
+
+## `fedexShip.json` is hand-written
+
+Same approach, for the one body `FedexAdapter` builds for `POST /ship/v1/shipments`:
+`CreateShipmentRequest`, assembled by `sendCreateShipment()` around the
+`requestedShipment` that `createShipment()` builds. Every definition names the adapter
+method it was read off, every object is `additionalProperties: false`, and
+`tests/Unit/Integrations/FedexSchemaValidationTest.php` guards the schema itself.
+
+What it pins beyond field names and types: exactly one recipient and one package line
+item; `resolution` sent with `ZPLII` and never with `PDF`; each package special service
+paired with its detail (`SIGNATURE_OPTION` ↔ `signatureOptionType`, `ALCOHOL` ↔
+`alcoholDetail`, `BATTERY` ↔ `batteryDetails`) in both directions; the SmartPost
+indicia paired with its endorsement (`PRESORTED_STANDARD` carries
+`ADDRESS_CORRECTION`, `PARCEL_SELECT` does not); package weight and declared value as
+numbers, dimensions as whole inches, and — deliberately, because that is what the
+adapter sends and FedEx accepts — every customs amount, quantity and weight as a
+decimal *string*. `packagingType` is enumerated because the values are our own
+`FedexPackageType` enum. `serviceType` is a non-empty string only: it is copied from
+the rate response, and enumerating it would mean transcribing FedEx's vocabulary.
+
+Only `CreateShipment` is covered. `Rates` fails soft — a malformed rate request drops
+FedEx from the comparison, where a malformed ship request means no label at the bench.
 
 ## The UPS specs need a conversion step
 
