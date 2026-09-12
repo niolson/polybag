@@ -12,6 +12,8 @@ use App\Enums\TrackingStatus;
 use App\Events\PackageCancelled;
 use App\Events\PackageShipped;
 use App\Services\CarrierNormalizer;
+use App\Services\ShipmentImport\Sources\AmazonSource;
+use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\SpecialServiceResolver;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -245,10 +247,36 @@ class Package extends Model
      * be voided or refunded in the Shopify admin, so several parts of the UI
      * have to treat them differently from a label bought on our own carrier
      * account.
+     *
+     * Checked against the source that sold the label, not merely the postage
+     * kind: Amazon Buy Shipping buys through a data source too, and its labels
+     * are voidable here, priced, and carried by whoever the packer chose.
      */
     public function isShopifyShipped(): bool
     {
-        return $this->postage_source === PostageSource::PostageDataSource;
+        return $this->boughtThroughDataSourceOfType(ShopifySource::class);
+    }
+
+    /**
+     * Whether this package's postage was bought through Amazon Buy Shipping.
+     */
+    public function isAmazonShipped(): bool
+    {
+        return $this->boughtThroughDataSourceOfType(AmazonSource::class);
+    }
+
+    /**
+     * @param  class-string  $sourceType
+     */
+    private function boughtThroughDataSourceOfType(string $sourceType): bool
+    {
+        if ($this->postage_source !== PostageSource::PostageDataSource) {
+            return false;
+        }
+
+        $this->loadMissing('postageDataSource');
+
+        return $this->postageDataSource?->source_type === $sourceType;
     }
 
     /**

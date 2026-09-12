@@ -1096,6 +1096,96 @@ it('imports a bounded historical shipped-order sample with full quantities', fun
     });
 });
 
+it('fills a new product\'s barcode from the catalog on a regular import', function (): void {
+    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($channel) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $channel->id]));
+
+    // The first live Buy Shipping order came in through the scheduled import
+    // with no barcode, because only the historical import asked the catalog.
+    $order = sampleAmazonOrder();
+    $order['orderItems'][0]['product']['asin'] = 'B000TEST01';
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([$order]),
+        SearchCatalogItems::class => amazonCatalogResponse([[
+            'asin' => 'B000TEST01',
+            'identifiers' => [[
+                'marketplaceId' => 'ATVPDKIKX0DER',
+                'identifiers' => [
+                    ['identifierType' => 'UPC', 'identifier' => '012345678905'],
+                ],
+            ]],
+        ]]),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource)->import();
+
+    expect(Product::where('sku', 'SKU-100')->firstOrFail()->barcode)->toBe('012345678905')
+        ->and(Product::where('sku', 'SKU-200')->firstOrFail()->barcode)->toBeNull();
+
+    Saloon::assertSent(fn (SearchCatalogItems $request): bool => $request->query()->all()['identifiers'] === 'B000TEST01');
+});
+
+it('does not ask the catalog about a product that already has a barcode', function (): void {
+    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($channel) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $channel->id]));
+
+    Product::factory()->create([
+        'client_id' => $this->dataSource->client_id,
+        'sku' => 'SKU-100',
+        'barcode' => '012345678905',
+    ]);
+
+    // A scheduled import sees the same open orders run after run; looking
+    // every ASIN up each time would spend the catalog rate limit on nothing.
+    $order = sampleAmazonOrder();
+    $order['orderItems'][0]['product']['asin'] = 'B000TEST01';
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([$order]),
+        SearchCatalogItems::class => amazonCatalogResponse(),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource)->import();
+
+    expect(Product::where('sku', 'SKU-100')->firstOrFail()->barcode)->toBe('012345678905');
+
+    Saloon::assertNotSent(SearchCatalogItems::class);
+});
+
+it('still looks an ASIN up when one of its SKUs lacks a barcode and another has one', function (): void {
+    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($channel) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $channel->id]));
+
+    Product::factory()->create([
+        'client_id' => $this->dataSource->client_id,
+        'sku' => 'SKU-100',
+        'barcode' => '012345678905',
+    ]);
+
+    // Two seller SKUs listed under the same ASIN, in one order. The first
+    // already has its barcode; the second is new and needs the lookup.
+    $order = sampleAmazonOrder();
+    $order['orderItems'][0]['product']['asin'] = 'B000TEST01';
+    $order['orderItems'][1]['product']['asin'] = 'B000TEST01';
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([$order]),
+        SearchCatalogItems::class => amazonCatalogResponse([[
+            'asin' => 'B000TEST01',
+            'identifiers' => [[
+                'marketplaceId' => 'ATVPDKIKX0DER',
+                'identifiers' => [
+                    ['identifierType' => 'UPC', 'identifier' => '012345678905'],
+                ],
+            ]],
+        ]]),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource)->import();
+
+    expect(Product::where('sku', 'SKU-200')->firstOrFail()->barcode)->toBe('012345678905');
+
+    Saloon::assertSent(fn (SearchCatalogItems $request): bool => $request->query()->all()['identifiers'] === 'B000TEST01');
+});
+
 it('does not replace a manually assigned product barcode during catalog enrichment', function (): void {
     tap(Channel::factory()->create(['name' => 'Amazon']), fn ($channel) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $channel->id]));
 

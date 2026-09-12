@@ -113,7 +113,11 @@ class ViewPackage extends ViewRecord
                             ->iconPosition('after')
                             ->copyable(),
                         TextEntry::make('carrier')
-                            ->label(fn ($record): string => $record->isShopifyShipped() ? 'Carrier (chosen by Shopify)' : 'Carrier'),
+                            ->label(fn ($record): string => match (true) {
+                                $record->isShopifyShipped() => 'Carrier (chosen by Shopify)',
+                                $record->isAmazonShipped() => 'Carrier (via Amazon Buy Shipping)',
+                                default => 'Carrier',
+                            }),
                         TextEntry::make('service'),
                         TextEntry::make('cost')
                             ->money('USD')

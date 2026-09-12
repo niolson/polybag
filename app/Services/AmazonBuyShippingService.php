@@ -62,16 +62,25 @@ class AmazonBuyShippingService
     public const BUSINESS_ID = 'AmazonShipping_US';
 
     /**
-     * The label formats our printing path can actually use.
+     * The formats to ask Amazon for, per workstation label format, in order.
      *
-     * PNG is offered by every rate `01` observed and is deliberately absent:
-     * QZ Tray prints PDF and ZPL, and a format mismatch fails the *purchase*
-     * rather than the quote, so an unusable format has to be excluded before
-     * money is spent, not after.
+     * ZPL and PNG carry the label alone; the PDF is joined with a pack slip
+     * and comes last. See {@see documentSpecification()}.
+     *
+     * @var array<string, array<int, string>>
+     */
+    private const FORMAT_PREFERENCE = [
+        'zpl' => ['ZPL', 'PNG', 'PDF'],
+        'pdf' => ['PNG', 'PDF'],
+    ];
+
+    /**
+     * What a document Amazon returns is recorded as, in the vocabulary the
+     * print path speaks: raster labels are `image`, as UPS's GIFs already are.
      *
      * @var array<string, string>
      */
-    private const DOCUMENT_FORMATS = ['pdf' => 'PDF', 'zpl' => 'ZPL'];
+    private const LABEL_FORMATS = ['pdf' => 'pdf', 'zpl' => 'zpl', 'png' => 'image'];
 
     public function __construct(
         private readonly PostageSourceResolver $postageSourceResolver,
@@ -253,6 +262,25 @@ class AmazonBuyShippingService
         // fills a blank.
         $this->offers->recordPurchase($offer, (string) $shipmentId);
 
+        // The shape of what came back, without the bytes. Which documents a
+        // purchase returns — one joined file or several, and of what type —
+        // is what `labelFrom()` below has to assume about, and this is the
+        // only record of it once the label has been stored.
+        logger()->info('Amazon Buy Shipping purchase documents', [
+            'package_id' => $package->id,
+            'amazon_shipment_id' => $shipmentId,
+            'requested' => $payload['requestedDocumentSpecification'] ?? null,
+            'details' => collect($result['packageDocumentDetails'] ?? [])->map(fn (array $detail): array => [
+                'package_client_reference_id' => $detail['packageClientReferenceId'] ?? null,
+                'tracking_id' => $detail['trackingId'] ?? null,
+                'documents' => collect($detail['packageDocuments'] ?? [])->map(fn (array $document): array => [
+                    'type' => $document['type'] ?? null,
+                    'format' => $document['format'] ?? null,
+                    'bytes' => strlen((string) ($document['contents'] ?? '')),
+                ])->all(),
+            ])->all(),
+        ]);
+
         // The resolution Amazon was *asked* for, not the one Device Settings
         // prefers. They differ whenever the chosen rate did not publish the
         // configured DPI, and the label bytes are whatever Amazon generated —
@@ -389,6 +417,18 @@ class AmazonBuyShippingService
      * beside the `LABEL`; ZPL and PNG carry the label alone. So the joining
      * flag and the document types are read off the chosen print option too.
      *
+     * Which format to ask for is decided by what the workstation can print
+     * *and* by what comes back. The joined PDF is what it says: one file, the
+     * label on page one and Amazon's pack slip on page two, both 4x6 — the
+     * second live purchase sent both pages to the label printer. There is no
+     * way to ask Amazon for the PDF without the pack slip, and nothing in this
+     * stack splits a PDF, so the PDF is the last resort behind the two formats
+     * that carry the label alone: ZPL, where the rate publishes it at the
+     * resolution the device prints, and PNG, which the pixel path rasterizes
+     * for any printer. ZPL at any other resolution is never bought: raw ZPL
+     * comes out the wrong size and the print path refuses it, which is a
+     * label paid for that nobody can print.
+     *
      * @param  array<int, array<string, mixed>>  $supported  The rate's own `supportedDocumentSpecifications`
      * @return array<string, mixed>
      *
@@ -396,28 +436,49 @@ class AmazonBuyShippingService
      */
     public function documentSpecification(array $supported, string $labelFormat, ?int $labelDpi): array
     {
-        $format = self::DOCUMENT_FORMATS[strtolower($labelFormat)] ?? null;
+        $preference = self::FORMAT_PREFERENCE[strtolower($labelFormat)] ?? null;
 
-        if ($format === null) {
+        if ($preference === null) {
             throw new AmazonLabelPurchaseException(
                 "Amazon Buy Shipping cannot produce a {$labelFormat} label. Choose PDF or ZPL in Device Settings."
             );
         }
 
-        $candidates = array_values(array_filter(
-            $supported,
-            fn (array $spec): bool => ($spec['format'] ?? null) === $format,
-        ));
+        $chosen = null;
 
-        if ($candidates === []) {
+        foreach ($preference as $format) {
+            $candidates = array_values(array_filter(
+                $supported,
+                fn (array $spec): bool => ($spec['format'] ?? null) === $format,
+            ));
+
+            if ($candidates === []) {
+                continue;
+            }
+
+            $spec = $this->preferFourBySix($candidates);
+            $dpis = $this->supportedDpis($spec);
+
+            if ($format === 'ZPL' && $labelDpi !== null && $dpis !== [] && ! in_array($labelDpi, $dpis, true)) {
+                continue;
+            }
+
+            $chosen = $spec;
+
+            break;
+        }
+
+        if ($chosen === null) {
             throw new AmazonLabelPurchaseException(
-                "Amazon did not offer this rate in {$format}. Get rates again, or choose another label format in Device Settings."
+                'Amazon did not offer this rate in a format this workstation can print'
+                .($labelDpi !== null ? " ({$labelFormat} at {$labelDpi} DPI)" : " ({$labelFormat})")
+                .'. Get rates again, or choose another label format in Device Settings.'
             );
         }
 
-        $spec = $this->preferFourBySix($candidates);
-        $printOption = $spec['printOptions'][0] ?? [];
-        $dpis = array_values(array_filter((array) ($printOption['supportedDPIs'] ?? []), 'is_numeric'));
+        $format = (string) $chosen['format'];
+        $printOption = $chosen['printOptions'][0] ?? [];
+        $dpis = $this->supportedDpis($chosen);
         $layouts = array_values(array_filter((array) ($printOption['supportedPageLayouts'] ?? []), 'is_string'));
         $joining = array_values(array_filter((array) ($printOption['supportedFileJoiningOptions'] ?? []), 'is_bool'));
         $mandatory = collect($printOption['supportedDocumentDetails'] ?? [])
@@ -427,14 +488,15 @@ class AmazonBuyShippingService
         return array_filter([
             'format' => $format,
             'size' => [
-                'width' => (float) ($spec['size']['width'] ?? 4),
-                'length' => (float) ($spec['size']['length'] ?? 6),
-                'unit' => (string) ($spec['size']['unit'] ?? 'INCH'),
+                'width' => (float) ($chosen['size']['width'] ?? 4),
+                'length' => (float) ($chosen['size']['length'] ?? 6),
+                'unit' => (string) ($chosen['size']['unit'] ?? 'INCH'),
             ],
             // Only the DPIs this rate published are on offer; asking for 203
             // where only 300 is supported fails the purchase. The requested
-            // resolution wins when it is among them, otherwise the first is
-            // taken and the printer scales.
+            // resolution wins when it is among them; otherwise the first is
+            // taken — which, after the ZPL check above, only happens for the
+            // raster formats the pixel path prints at any resolution.
             'dpi' => $dpis === [] ? null : (in_array($labelDpi, $dpis, true) ? $labelDpi : (int) $dpis[0]),
             'pageLayout' => $layouts[0] ?? null,
             // Unjoined when the rate allows it, otherwise whatever it does
@@ -444,6 +506,15 @@ class AmazonBuyShippingService
             // regardless — Amazon refuses a request that leaves one out.
             'requestedDocumentTypes' => $mandatory->push('LABEL')->unique()->values()->all(),
         ], fn (mixed $value): bool => $value !== null);
+    }
+
+    /**
+     * @param  array<string, mixed>  $spec
+     * @return array<int, int|float>
+     */
+    private function supportedDpis(array $spec): array
+    {
+        return array_values(array_filter((array) ($spec['printOptions'][0]['supportedDPIs'] ?? []), 'is_numeric'));
     }
 
     /**
@@ -574,15 +645,14 @@ class AmazonBuyShippingService
         $shipmentId = (string) $payload['shipmentId'];
         $detail = collect($payload['packageDocumentDetails'] ?? [])->first() ?? [];
 
-        // ASSUMPTION, unverified by any real purchase: the label arrives as a
-        // document typed `LABEL`, and its bytes are printable as-is. A PDF
-        // purchase is necessarily *joined* with the `PACKSLIP` the rate makes
-        // mandatory (`10`), and nothing has yet shown whether that comes back
-        // as two documents or one file with a pack slip page in front of the
-        // label — in which case these bytes are wrong for a label printer.
-        // The first successful purchase has to look at them. Only a document
-        // Amazon calls a label is taken: a lone PACKSLIP or CUSTOM_FORM must
-        // fail here, loudly, rather than be recorded and printed as the label.
+        // Observed on the first live purchases (`03`, `10`): the label arrives
+        // as one document typed `LABEL`. ZPL is the label alone. The joined
+        // PDF is one file of two 4x6 pages — the label first, then Amazon's
+        // pack slip — and every page of it goes to the label printer, which
+        // is why {@see documentSpecification()} asks for a PDF last. Only a
+        // document Amazon calls a label is taken: a lone PACKSLIP or
+        // CUSTOM_FORM must fail here, loudly, rather than be recorded and
+        // printed as the label.
         $document = collect($detail['packageDocuments'] ?? [])
             ->first(fn (mixed $doc): bool => is_array($doc) && ($doc['type'] ?? null) === 'LABEL');
 
@@ -601,7 +671,7 @@ class AmazonBuyShippingService
             shipmentId: $shipmentId,
             trackingId: filled($detail['trackingId'] ?? null) ? (string) $detail['trackingId'] : null,
             labelData: (string) $document['contents'],
-            labelFormat: array_key_exists($format, self::DOCUMENT_FORMATS) ? $format : 'pdf',
+            labelFormat: self::LABEL_FORMATS[$format] ?? 'pdf',
             labelDpi: $labelDpi,
         );
     }

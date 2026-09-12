@@ -48,9 +48,8 @@ Notes that predate `01` and survived it unchanged:
 ## Acceptance criteria
 
 - [x] Rates appear alongside direct-carrier rates with the real carrier per offer
-- [ ] Purchase, void and tracking work end to end against a real order — built and covered
-      against captured production shapes; **run live 2026-09-11 and refused**, see below
-      and `10`
+- [x] Purchase, void and tracking work end to end against a real order — three purchases,
+      two voids and a `pre_transit` tracking read on 2026-09-11, see the comment below
 - [x] The channel export does not double-confirm a Buy Shipping shipment
 - [x] Request bodies validate against the vendored Shipping v2 schema, following the pattern
       in `tests/Fixtures/Schemas/`
@@ -221,6 +220,61 @@ rate, required VAS groups) because both fail the purchase rather than the quote.
 `AmazonSource` as its stand-in and now uses `DatabaseSource` — Amazon stopped being an
 example of the case.
 
+### 2026-09-11 — live run on a fresh order: purchase, void and tracking all work
+
+An unshipped order was placed in the seller account (the store was taken out of vacation
+mode for the evening) and run through the app end to end. Three purchases, two voids —
+identifiers in `.scratch/amazon-shipping-v2/live-run-2026-09-11.md`.
+
+**The fresh-order quote is nothing like the old-order ones.** 32 eligible offers across
+four carriers — OnTrac, USPS, UPS and, for the first time, **FedEx** — with ground services
+qualifying: OnTrac Ground $5.53, USPS Ground Advantage $5.68, GA Cubic $6.48, UPS Ground
+$7.42. `01`'s Express-only skew was the expired promise, as suspected.
+
+| # | Offer | Format asked | What came back | Void |
+|---|---|---|---|---|
+| 1 | OnTrac Ground $5.53 | ZPL @300 (device is 203; rate offers 300 only) | one `LABEL`, ZPL, 1056 bytes — tracking, "Ship To:", "ONTRAC", barcode, **no address block** | `cancelShipment` OK |
+| 2 | OnTrac Ground $5.53 | PDF 4×6 (`PACKSLIP`+`LABEL`, joined) | one `LABEL`, PDF, **two 4×6 pages: page 1 blank, page 2 the pack slip** | `cancelShipment` OK |
+| 3 | USPS Ground Advantage $5.68 | PNG 4×6 | one `LABEL`, PNG 1200×1800, complete — from, to, barcode | kept |
+
+Findings, each of which changed the adapter the same day:
+
+1. **The joined PDF is one file, label page first, pack slip page second, both 4×6.** Both
+   pages go to the label printer. There is no way to ask for the PDF without the pack
+   slip (every spec offers joining as `[true]` only, `10`), and nothing in this stack
+   splits a PDF. So PDF is now the *last* format asked for. PNG carries the label alone,
+   has no DPI list, and prints through the pixel path UPS's GIF labels already use — the
+   "PNG is not supported by our print path" note in this file was wrong. Order is now
+   ZPL-at-device-DPI → PNG → PDF for a ZPL workstation, PNG → PDF for a PDF one.
+   Recorded as `label_format = image`.
+2. **Raw ZPL at a resolution the device does not print is unprintable**, not "scaled by
+   the printer" as the code said: the workstation print path refuses the job, and the
+   package sat shipped with a label nobody could print. Purchase 1 was that. The
+   fallback above is what fixes it; a rate offering only ZPL at the wrong resolution is
+   refused at purchase, before any money is spent, rather than bought.
+3. **OnTrac labels come back without content**, in both formats, and Seller Central's own
+   reprint shows the same blank PDF. USPS from the same order rendered fully. Amazon-side,
+   for this account at least. Spun out as [`11`](11-ontrac-labels-via-amazon-are-blank.md).
+4. **A void left `amazon_shipment_id` on the package.** `clearShipping()` does not touch
+   metadata, and that key is what the channel export reads as "already confirmed, skip".
+   A re-ship on a direct account would have skipped the confirmation.
+   `AmazonPostageSource::voidLabel()` now strips the Amazon identifiers on success, the
+   way Shopify's void sync strips its label IDs.
+5. **A print failure left the Ship page open with the rate list and Ship button live**, on
+   a package already shipped, and nothing refused a second purchase. Confirmed by test
+   that a second Ship with another rate would have bought a second label. The workflow
+   now refuses a shipped package from the database, and the page renders a "Label
+   Purchased" panel with a Print again action instead of the rates.
+6. **The scheduled import never filled barcodes** — only the historical import asked the
+   catalog. The order's product arrived with none and had to be packed by hand. Every
+   import now looks up barcodes, for products that lack one.
+7. `getShipmentDocuments` refuses `format`/`dpi` for on-Amazon shipments ("same options
+   selected in Purchase call will be applied") — it only ever returns what was bought,
+   so it is a reprint source, not a way to get another format.
+
+Not exercised: the channel export's confirm-skip (`export_enabled` was off on the local
+source). It stays covered by test; the order was confirmed by the purchase regardless.
+
 ### Still open
 
 - **No successful live run — and the first attempt found the body invalid.** On 2026-09-11
@@ -233,8 +287,7 @@ example of the case.
   [`10`](10-purchase-body-is-refused-by-amazon.md) with the rules established by oracle.
   `10` was fixed the same day and the adapter's body now passes Amazon's validation. With a
   valid body the purchase was refused because the order had already shipped ("doesn't exist
-  in Rigel"), so the remaining criterion — one attended purchase, void and tracking check —
-  needs an **unshipped** order.
+  in Rigel"). *Superseded the same evening by the live run above.*
 - **`accountNoLongerResolves()` is still a comparison rather than plumbing.** `ShipRequest`
   now carries the offer, so the account *could* be named — but making adapters honour it
   means touching `ResolvesCarrierAccount` in all three direct adapters, which is a

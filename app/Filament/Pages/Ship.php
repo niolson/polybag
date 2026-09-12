@@ -158,16 +158,30 @@ class Ship extends Page
         }
 
         return [
+            // Once the label is bought this page has nothing left to sell. It
+            // stays open only when the label could not be printed, and the
+            // one thing to offer then is another attempt at printing it.
             Action::make('Ship')
                 ->action(fn () => $this->ship())
                 ->icon('heroicon-o-printer')
                 ->keybindings(['f12'])
+                ->hidden(fn (): bool => $this->isShipped())
                 ->disabled(fn (): bool => $this->selectedRateIndex === null && $this->selectedBlindOfferId === null),
+            Action::make('Print again')
+                ->action(fn () => $this->printStoredPackageLabel($this->package->id))
+                ->icon('heroicon-o-printer')
+                ->keybindings(['f12'])
+                ->visible(fn (): bool => $this->isShipped()),
             Action::make('Back')
                 ->action(fn () => $this->redirect($this->returnUrl))
                 ->icon('heroicon-o-arrow-left')
                 ->color('gray'),
         ];
+    }
+
+    public function isShipped(): bool
+    {
+        return $this->package?->status === PackageStatus::Shipped;
     }
 
     public function refreshRates(): void
@@ -317,6 +331,14 @@ class Ship extends Page
             return;
         }
 
+        // The workflow refuses this too, from the database. Refusing here as
+        // well keeps a stale page from re-quoting carriers on its way there.
+        if ($this->package->refresh()->status === PackageStatus::Shipped) {
+            $this->notifyWarning('Already Shipped', 'This package already has a label. Print it again, or void it from the Packages page.');
+
+            return;
+        }
+
         $this->package->shipment->refresh()->load('location');
         $locationError = app(ShipmentLocationGuard::class)->errorFor($this->package->shipment, auth()->user());
         if ($locationError !== null) {
@@ -399,6 +421,11 @@ class Ship extends Page
         }
 
         $this->notifySuccess($result->title ?? 'Package Shipped', $result->message ?? 'Package shipped.');
+
+        // The page re-renders in this same request, and if the print below
+        // fails the browser stays here. What it shows must be the shipped
+        // package, not the rate list it was bought from.
+        $this->package->refresh();
 
         if ($result->printRequest) {
             $this->dispatchPrint($result->printRequest, redirectTo: $this->returnUrl);

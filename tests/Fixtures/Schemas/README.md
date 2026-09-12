@@ -201,7 +201,7 @@ quote — so they are covered by tests of their own instead:
 - `requestedDocumentSpecification` has to match one of the chosen rate's
   `supportedDocumentSpecifications`. The spec types it as a free-standing object, and
   what makes a value legal is the rate, not the schema. A production `getRates` offered
-  PDF at both 8.5x11 and 4x6, ZPL only at 4x6/300 DPI, and PNG we cannot print at all.
+  PDF at both 8.5x11 and 4x6, ZPL only at 4x6/300 DPI, and PNG at 4x6 with no DPI list.
 - A value-added-service group marked `isRequired` has to be answered. Nothing in the
   schema says so, and the groups vary per rate.
 

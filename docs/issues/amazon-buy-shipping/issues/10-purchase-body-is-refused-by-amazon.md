@@ -1,6 +1,6 @@
 # The purchase body the adapter sends has never been valid
 
-Status: done — fixed 2026-09-11 and confirmed against the oracle; the shape of the joined document Amazon returns is still unobserved and `labelFrom()` says so
+Status: done — fixed 2026-09-11 and confirmed against the oracle; the joined document was observed the same evening (two pages, label then pack slip) and the adapter now avoids it
 
 Repo: `polybag`
 
@@ -103,7 +103,7 @@ it needs an order that has not shipped yet.
 - [x] A required group with no free option drops the rate at quote time — silently, like the
       no-printable-format drop beside it; the offers beside it are unaffected
 - [x] `labelFrom()` documents the assumption it makes about a joined document
-- [ ] The first real purchase checks that assumption — waits on an unshipped order (`09`)
+- [x] The first real purchase checks that assumption — see the comment below
 
 ## Related
 
@@ -162,3 +162,19 @@ is home — so `cheapestOption()` now breaks a price tie toward the least demand
 an empty schema — `{"title": "Additional Inputs", "properties": {}, "type": "object"}` —
 rather than an error. The request class `09` will need can be called unconditionally;
 "required" means the schema has properties.
+
+### 2026-09-11 — the joined document, observed
+
+A PDF 4×6 purchase (OnTrac, `PACKSLIP`+`LABEL`, joined) returned **one `packageDocuments`
+entry typed `LABEL`, a PDF of two 4×6 pages: the label page first, Amazon's pack slip
+second.** `labelFrom()`'s assumption — take the `LABEL` document's bytes as the label — was
+therefore half right: they are the label, plus a page. The whole file went to the label
+printer and a pack slip came out.
+
+ZPL is the label alone (one `^XA` block behind a `^MCY` prefix). PNG is the label alone.
+So the adapter now asks for PDF last, behind ZPL at the device's resolution and PNG —
+details in `03`'s live-run comment. `labelFrom()`'s comment now records the observation
+instead of the assumption.
+
+Unrelated to the body but found on the same purchase: the OnTrac label page was blank in
+every format, [`11`](11-ontrac-labels-via-amazon-are-blank.md).
