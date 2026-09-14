@@ -2,6 +2,7 @@
 
 namespace App\Events;
 
+use App\DataTransferObjects\PackageLabels\VoidedLabel;
 use App\Models\Package;
 use App\Models\Shipment;
 use Illuminate\Foundation\Events\Dispatchable;
@@ -14,5 +15,6 @@ class PackageCancelled
     public function __construct(
         public Package $package,
         public Shipment $shipment,
+        public VoidedLabel $voidedLabel,
     ) {}
 }

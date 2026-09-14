@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\DataTransferObjects\PackageLabels\VoidedLabel;
 use App\DataTransferObjects\Shipping\ServiceInference;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\PackageStatus;
@@ -646,7 +647,20 @@ class Package extends Model
      */
     public function clearShipping(): void
     {
-        DB::transaction(function (): void {
+        $voidedLabel = DB::transaction(function (): VoidedLabel {
+            // Snapshot the row under its own lock rather than trusting $this: the
+            // instance may predate a print acknowledgement or a tracking refresh.
+            $row = DB::table('packages')
+                ->where('id', $this->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($row === null) {
+                throw new \RuntimeException('Package no longer exists.');
+            }
+
+            $voidedLabel = VoidedLabel::fromRow($row);
+
             // Optimistic locking - ensure package is still shipped
             $updated = DB::table('packages')
                 ->where('id', $this->id)
@@ -690,11 +704,13 @@ class Package extends Model
 
             // Refresh the model to get the updated state
             $this->refresh();
+
+            return $voidedLabel;
         });
 
         $this->load('shipment.shipmentItems');
         $this->shipment->updateShippedStatus();
 
-        PackageCancelled::dispatch($this, $this->shipment);
+        PackageCancelled::dispatch($this, $this->shipment, $voidedLabel);
     }
 }

@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\AuditAction;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\TrackingStatus;
@@ -45,6 +46,28 @@ it('records why the package was un-shipped', function (): void {
     expect($audit)->not->toBeNull()
         ->and($audit->metadata['reason'])->toBe('Label voided in Shopify')
         ->and($audit->metadata['tracking_number'])->toBe('9400111899223197428490');
+});
+
+it('keeps the voided label in old_values on the event-driven audit row', function (): void {
+    $package = shippedShopifyPackage(['cost' => 7.5]);
+
+    Saloon::fake([MockResponse::make(fulfillmentState('LABEL_VOIDED'))]);
+
+    $this->synchronizer->sync();
+
+    $audits = AuditLog::where('auditable_id', $package->id)
+        ->where('action', AuditAction::PackageCancelled)
+        ->orderBy('id')
+        ->get();
+
+    // The PackageCancelled listener writes first; the synchronizer's own reason row follows.
+    expect($audits)->toHaveCount(2)
+        ->and($audits[0]->old_values['tracking_number'])->toBe('9400111899223197428490')
+        ->and($audits[0]->old_values['carrier'])->toBe('USPS')
+        ->and($audits[0]->old_values['service'])->toBe('Ground Advantage')
+        ->and($audits[0]->old_values['cost'])->toBe('7.50')
+        ->and($audits[0]->old_values['postage_source'])->toBe(PostageSource::PostageDataSource->value)
+        ->and($audits[1]->metadata['reason'])->toBe('Label voided in Shopify');
 });
 
 it('drops the label identifiers so a re-ship buys a new label', function (): void {

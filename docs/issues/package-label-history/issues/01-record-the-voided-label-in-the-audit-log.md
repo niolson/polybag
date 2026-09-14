@@ -1,6 +1,6 @@
 # Record the voided label in the audit log
 
-Status: ready-for-agent
+Status: done
 
 Repo: `polybag`
 
@@ -52,18 +52,32 @@ event, for free.
 
 ## Acceptance criteria
 
-- [ ] A void records the pre-void tracking number, carrier, service, cost and print
+- [x] A void records the pre-void tracking number, carrier, service, cost and print
       state in `old_values` on the `PackageCancelled` audit row
-- [ ] A test asserts those values are non-null and equal to what the Package held before
+- [x] A test asserts those values are non-null and equal to what the Package held before
       the void — the test that should have existed
-- [ ] A test sets `label_printed_at` on the database row *after* loading the model
+- [x] A test sets `label_printed_at` on the database row *after* loading the model
       instance and before voiding, and asserts the audit row shows it printed — the
       staleness case
-- [ ] The Shopify-voided path still records its `reason` metadata and now also records
+- [x] The Shopify-voided path still records its `reason` metadata and now also records
       non-null `old_values` via the event
-- [ ] `PackageCancelledTest` continues to pass unchanged
+- [x] `PackageCancelledTest` continues to pass unchanged
 
 ## Blocked by
 
 None. Ships first, on its own, before ADR-0004 is accepted — it is the only history any
 void gets until `02` lands.
+
+## Comments
+
+- **2026-09-14** — Done. `Package::clearShipping()` now opens its transaction with
+  `SELECT … FOR UPDATE` on the package row and builds a `VoidedLabel` DTO
+  (`app/DataTransferObjects/PackageLabels/VoidedLabel.php`) from that row before the
+  conditional `UPDATE`; the DTO rides on `PackageCancelled` as `$voidedLabel` and
+  `AuditLogListener::handlePackageCancelled()` writes `old_values` from
+  `VoidedLabel::toArray()` — all ten fields named above, timestamps as ISO 8601, cost as
+  a two-decimal string to match what the `decimal:2` cast on `Package` reports. The
+  listener no longer reads the model. Tests: `tests/Feature/AuditPackageCancelledTest.php`
+  (the values test and the stale-instance test) and one new case in
+  `ShopifyFulfillmentSynchronizerTest` asserting the event row carries the label and the
+  synchronizer's reason row still follows it. `PackageCancelledTest` is untouched.
