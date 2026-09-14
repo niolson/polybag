@@ -61,6 +61,30 @@ approximation would quietly corrupt a number other reports treat as precise (`08
 **The bar: a wrong number here is worse than no number**, because `12` invoices it. A parse
 that fails must leave cost null, which everything downstream already handles honestly.
 
+## The refund side, for every source
+
+Absorbed from `package-label-history/06` on 2026-09-14 so there is one reconciliation
+plan, not two. Carriers bill a label at purchase and refund it after a void — USPS on a
+schedule of its own, UPS and FedEx on the next invoice, Shopify to the store's shipping
+balance, Amazon to the seller account. Until ADR-0004's `package_labels` lands, a voided
+label's cost survives only in an audit row (and only once `package-label-history/01`
+ships), so there is nothing queryable to reconcile a refund against; after it, every
+voided label is a row with a cost and a void time.
+
+What to do with that row is the same question as above, from the other direction:
+
+- Is the surface a report ("voided labels awaiting refund, by postage source, older than
+  N days") or a status on the row (`refund_confirmed_at`)? A report needs no new writes;
+  a status needs a source of truth for the refund, which only some carriers expose.
+- Which sources expose it? `package-label-history/04` is the per-source table of what a
+  void response actually contains; UPS and FedEx may carry nothing, and Shopify's
+  `Order.events` is the same timeline this issue already reads.
+- Client billing: `12` bills a client for postage. A voided label's cost must not reach
+  an invoice, and a label voided *after* invoicing is a credit. Does the billing owner
+  want that automated or flagged?
+
+Blocked on `package-label-history/02` (the row) and `04` (what each source returns).
+
 ## Sequencing — build last, gather first
 
 **Build it last.** Everything else open here either costs nothing or is already wrong; this
@@ -81,3 +105,5 @@ rather than merely interesting. Report back there.
 - **2026-08-31** — balance transactions verified by introspection, and found to be gated.
 - **2026-09-08** — the timeline price found while verifying `01`, correcting the PRD's claim
   that cost is reachable only through Shopify Payments.
+- **2026-09-14** — `package-label-history/06` (a voided label with a cost is a refund to
+  expect) folded in as the section above rather than kept as a second plan.
