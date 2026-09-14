@@ -6,6 +6,7 @@ use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
 use App\Enums\ShipmentStatus;
 use App\Enums\SpecialServiceSource;
+use App\Enums\VoidReason;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierAlias;
@@ -140,7 +141,7 @@ it('clears the customs document when the label is voided', function (): void {
     // must not leave one behind on a package that is going to be shipped again.
     $package = Package::factory()->withCustomsForm()->create();
 
-    $package->clearShipping();
+    $package->clearShipping(VoidReason::Operator);
 
     expect($package->refresh()->customs_form_data)->toBeNull()
         ->and($package->label_data)->toBeNull();
@@ -371,7 +372,7 @@ it('gives a voided package its service evidence back to unknown', function (): v
         'service_ruleset_version' => '2026.09.1',
     ]);
 
-    $package->clearShipping();
+    $package->clearShipping(VoidReason::Operator);
 
     expect($package->refresh()->service)->toBeNull()
         ->and($package->service_evidence)->toBe(ServiceEvidence::Unknown)
@@ -385,7 +386,7 @@ it('gives a voided package its provenance back to nothing', function (): void {
         'carrier_account_id' => CarrierAccount::factory(),
     ]);
 
-    $package->clearShipping();
+    $package->clearShipping(VoidReason::Operator);
 
     expect($package->refresh()->postage_source)->toBeNull()
         ->and($package->postage_data_source_id)->toBeNull()
@@ -398,7 +399,7 @@ it('clears all shipping fields', function (): void {
         'carrier_account_id' => CarrierAccount::factory(),
     ]);
 
-    $package->clearShipping();
+    $package->clearShipping(VoidReason::Operator);
     $package->refresh();
 
     expect($package->tracking_number)->toBeNull()
@@ -444,7 +445,7 @@ it('preserves dimension fields when clearing shipping', function (): void {
         'length' => 6.00,
     ]);
 
-    $package->clearShipping();
+    $package->clearShipping(VoidReason::Operator);
     $package->refresh();
 
     expect((float) $package->weight)->toBe(5.00)

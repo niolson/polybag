@@ -284,7 +284,8 @@ it('buys a label and reports the format Shopify chose', function (string $shopif
         ->and($response->trackingNumber)->toBe('9400111899223197428490')
         ->and($response->labelFormat)->toBe($expectedFormat)
         ->and(base64_decode($response->labelData))->toBe('LABEL-BYTES')
-        ->and($response->carrier)->toBe('USPS');
+        ->and($response->carrier)->toBe('USPS')
+        ->and($response->sourceLabelReference)->toBe($response->metadata['shopify_shipping_label_id']);
 })->with([
     'PDF' => ['PDF', 'pdf'],
     'ZPL' => ['ZPL', 'zpl'],

@@ -6,6 +6,7 @@ use App\DataTransferObjects\Shipping\CancelResponse;
 use App\Enums\AuditAction;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
+use App\Enums\VoidReason;
 use App\Models\AuditLog;
 use App\Models\Package;
 use App\Models\User;
@@ -43,6 +44,27 @@ it('voids a shipped package label and clears shipping data', function (): void {
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped)
         ->and($package->fresh()->tracking_number)->toBeNull()
         ->and($package->fresh()->label_data)->toBeNull();
+});
+
+it('records the operator who voided the label on the label record', function (): void {
+    $operator = User::factory()->create();
+    $this->actingAs($operator);
+    $package = Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'tracking_number' => '9400111899223456789012',
+    ]);
+
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('cancelShipment')->once()->andReturn(CancelResponse::success('Label voided successfully.'));
+    app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
+
+    app(PackageLabelWorkflow::class)->voidLabel($package);
+
+    $label = $package->labels()->sole();
+
+    expect($label->void_reason)->toBe(VoidReason::Operator)
+        ->and($label->voided_by_user_id)->toBe($operator->id)
+        ->and($label->tracking_number)->toBe('9400111899223456789012');
 });
 
 it('returns a failure result when carrier label voiding fails', function (): void {

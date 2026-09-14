@@ -2,11 +2,16 @@
 
 ## Status
 
-Proposed — 2026-09-13. Revised under review 2026-09-13/14, then cut back on 2026-09-14 to
+Accepted — 2026-09-14. Amends ADR-0002: the carrier-of-record, service-evidence and
+postage-source columns on `packages` gain a second home, and this document says which is
+authoritative.
+
+Proposed 2026-09-13. Revised under review 2026-09-13/14, then cut back on 2026-09-14 to
 the domain decisions: an earlier draft had turned every edge the review found into a
-first-class commitment, and the mechanics now live in the implementing issues. Would amend
-ADR-0002: the carrier-of-record, service-evidence and postage-source columns on
-`packages` gain a second home, and this document says which is authoritative.
+first-class commitment, and the mechanics now live in the implementing issues. Accepted
+after a last pass over the relationships a label could have other than one-to-one with a
+Package — recorded under "Foreseen, not decided" so the schema is shaped for them without
+committing to any.
 
 ## Context
 
@@ -117,12 +122,52 @@ the schema.
 
 ### Terminology
 
-**Label** — one purchased instance of postage for a Package: its tracking number, cost,
-and the carrier of record it was bought as. A Package has at most one active Label; a
-voided Label stays as history. *Avoid*: shipping label (ambiguous with the Shopify
-product), label data (the document, which lives on the Package).
+**Label** — one purchased instance of *outbound* postage for a Package: its tracking
+number, cost, and the carrier of record it was bought as. A Package has at most one
+active Label; a voided Label stays as history. A return label is not a Label in this
+sense (see below). *Avoid*: shipping label (ambiguous with the Shopify product), label
+data (the document, which lives on the Package).
 
 Added to `CONTEXT.md` in the implementing slice.
+
+### Foreseen, not decided
+
+The one-to-one between a label and a Package was checked against the shapes a label can
+take elsewhere before accepting. None changes the decisions above; three are worth
+naming so that the first person to meet them does not bend the table to fit.
+
+**Multi-piece and consolidated shipments.** FedEx MPS, UPS shipment-level shipping and
+FedEx consolidation all still put one label with its own tracking number on each
+physical piece, so one row per Package holds. What they add is a *group*: one carrier
+transaction covers several Packages, they share a master or shipment identifier, cost is
+quoted for the group and only allocated per piece, and void semantics differ by carrier
+— FedEx voids the whole shipment when the master is voided, UPS can void a single piece.
+That is a nullable group identifier on the label row and rules in `clearShipping()`, not
+a different shape. It is also a new purchase mode — today each Package ships as its own
+carrier transaction — so most of the work is on the writer, not the schema.
+
+**Return labels.** A return label printed into the box gives a Package two live labels at
+once, and the return one does not make the Package `Shipped`. Recorded naively in
+`package_labels` it would break both the unique index and the `Shipped` ⇔ one-active-label
+invariant. The terminology therefore says a Label is outbound postage. If return labels
+are ever recorded here, they are a distinct kind that sits outside the uniqueness
+expression — one migration to redefine the generated column — and are not to be squeezed
+into the same rows. No `kind` column is added now.
+
+**Freight.** An LTL label goes on the handling unit — the pallet — and the shipment has a
+BOL and PRO number rather than per-carton tracking. Whether a pallet is a large Package
+or a new parent that owns Packages depends on where packing happens, and is a question
+for freight, not for this record: the label row's foreign key points at whatever carries
+the tracking number. The FedEx freight request in the repository serves the certification
+test cases only and is not a product path.
+
+Two things that are children of a label rather than other relationships, noted because
+they are reasons the row is the right anchor: tracking events belong to a tracking number
+— after a void and re-ship the dead number can still receive scans — and carrier invoice
+adjustments (dimensional-weight audits, address-correction surcharges, the void refund)
+are per label, with `cost` on the row being the price at purchase. Both would hang off
+`package_labels` when they get tables of their own. Customs forms and commercial invoices
+are documents, not labels, and stay out under decision 6.
 
 ## Options considered
 

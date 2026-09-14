@@ -4,12 +4,11 @@
 
 Accepted — 2026-09-01. Amended 2026-09-02: the discriminator takes **two** values, not three.
 
-Would be amended by ADR-0004 (proposed 2026-09-13, not yet accepted): the
-carrier-of-record, service-evidence and postage-source columns this decision placed on
-`packages` would gain a second home on a per-purchase `package_labels` row, and the
-`packages` copy would become the projection of the active label. Nothing below changes
-in meaning; where the two rows disagree, the label row would be authoritative. See
-`0004-package-label-as-a-record.md`.
+Amended by ADR-0004 (accepted 2026-09-14): the carrier-of-record, service-evidence and
+postage-source columns this decision placed on `packages` gain a second home on a
+per-purchase `package_labels` row, and the `packages` copy becomes the projection of the
+active label. Nothing below changes in meaning; where the two rows disagree, the label
+row is authoritative. See `0004-package-label-as-a-record.md`.
 
 `legacy_unknown` was specified below for packages shipped before the split, on the
 assumption that some of them had unrecoverable provenance. None do. Shopify Shipping bought

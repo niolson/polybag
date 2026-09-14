@@ -2,12 +2,14 @@
 
 namespace Database\Factories;
 
+use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
 use App\Models\BoxSize;
 use App\Models\Location;
 use App\Models\Manifest;
 use App\Models\Package;
+use App\Models\PackageLabel;
 use App\Models\Shipment;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -18,6 +20,22 @@ use Illuminate\Database\Eloquent\Factories\Factory;
 class PackageFactory extends Factory
 {
     protected $model = Package::class;
+
+    /**
+     * A shipped fixture gets the label row a shipped package has to have,
+     * built from its own projected columns — keyed on the created row's
+     * status rather than on the `shipped()` state, because a bare
+     * `'status' => Shipped` override is a shipped fixture too, however it was
+     * built (ADR-0004 decision 4).
+     */
+    public function configure(): static
+    {
+        return $this->afterCreating(function (Package $package): void {
+            if ($package->status === PackageStatus::Shipped) {
+                PackageLabel::createFromPackage($package);
+            }
+        });
+    }
 
     public function definition(): array
     {

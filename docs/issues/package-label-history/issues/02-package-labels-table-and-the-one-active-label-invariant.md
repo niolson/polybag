@@ -1,6 +1,6 @@
 # `package_labels` table and the one-active-label invariant
 
-Status: ready-for-agent — once ADR-0004 is accepted
+Status: done
 
 Repo: `polybag`
 
@@ -290,3 +290,16 @@ builds on lands there.
   Shopify's nullable carrier of record), added the relation manager's unguarded bulk
   delete, the new-worker half of the deploy race, and a one-row assertion in
   `markLabelPrinted()`.
+- **2026-09-14** — Done, on `feat/package-labels-table`. Two departures from the text
+  above, both deliberate. (1) The backfill is its own migration
+  (`2026_09_14_000100_backfill_package_labels`) rather than part of the create-table
+  one: the two run back to back in the same `migrate`, it matches how `postage_source`
+  and `service_evidence` landed, and it is what lets the backfill be tested on MySQL —
+  a DDL statement inside a MySQL test transaction commits implicitly and would leak
+  rows into the rest of the `mysql` group. (2) `recordInferredService()` asserts that
+  the label's conditional update touched exactly the row the package's did, rather than
+  only the structural rule: the two are equal by construction, so a difference is drift
+  and the write rolls back rather than widening it. Verified: the migration and the
+  four `mysql`-group tests against MySQL 8.4 on a scratch database, and the full suite
+  (2390) on SQLite. The hosted deploy script (private repo) still needs the
+  stop-workers-then-migrate step from `docs/self-hosting.md`'s new Upgrading section.

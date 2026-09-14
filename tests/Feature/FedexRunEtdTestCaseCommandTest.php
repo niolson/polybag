@@ -117,5 +117,8 @@ it('creates package records for a successful US09 variant A run', function (): v
     expect(Shipment::count())->toBe(1)
         ->and(Package::count())->toBe(1)
         ->and(Package::query()->first()?->tracking_number)->toBe('794804131756')
-        ->and(Package::query()->first()?->label_format)->toBe('pdf');
+        ->and(Package::query()->first()?->label_format)->toBe('pdf')
+        // Inserted shipped without markShipped(), so the runner records the
+        // label row itself.
+        ->and(Package::query()->first()?->activeLabel?->tracking_number)->toBe('794804131756');
 });

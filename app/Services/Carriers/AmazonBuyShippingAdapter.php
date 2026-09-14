@@ -385,6 +385,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
             postageSource: PostageSource::PostageDataSource,
             postageDataSourceId: $offer->postage_data_source_id
                 ?? app(AmazonBuyShippingService::class)->postageSourceFor($package)?->id,
+            sourceLabelReference: $label->shipmentId,
             metadata: array_filter([
                 self::SHIPMENT_ID_KEY => $label->shipmentId,
                 // Amazon's own carrier identifier, not our `Carrier` row's name.

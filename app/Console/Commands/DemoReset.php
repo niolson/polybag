@@ -13,6 +13,7 @@ use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\Manifest;
 use App\Models\Package;
+use App\Models\PackageLabel;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\ShippingMethodAlias;
@@ -44,6 +45,10 @@ class DemoReset extends Command
     protected $description = '[Internal] Reset demo data: wipe transactional tables, re-seed history from a Database data source, fabricate shipped packages, and rebuild stats';
 
     private const TRANSACTIONAL_TABLES = [
+        // Before `packages`: the truncate runs with foreign-key checks off, so
+        // nothing cascades, and an orphaned active label would collide on the
+        // unique index once refabricated packages reuse their IDs.
+        'package_labels',
         'package_exports',
         'package_items',
         'package_special_services',
@@ -401,10 +406,9 @@ class DemoReset extends Command
             $weight = round(mt_rand(50, 300) / 100, 2);
         }
 
-        $packageId = DB::table('packages')->insertGetId([
-            'shipment_id' => $shipment->id,
-            'location_id' => $locationId,
-            'box_size_id' => $boxSizeIds === [] ? null : $boxSizeIds[array_rand($boxSizeIds)],
+        // The facts the package and its label row share, built once so the
+        // two inserts cannot disagree.
+        $projected = [
             'tracking_number' => $this->generateTrackingNumber($carrier),
             'carrier' => $carrier,
             'service' => $service['name'],
@@ -412,19 +416,31 @@ class DemoReset extends Command
             'label_orientation' => 'portrait',
             'label_format' => 'pdf',
             'label_dpi' => 203,
-            'weight' => $weight,
-            'height' => round(mt_rand(200, 1200) / 100, 2),
-            'width' => round(mt_rand(400, 1400) / 100, 2),
-            'length' => round(mt_rand(600, 1800) / 100, 2),
             'cost' => round(mt_rand((int) ($service['costMin'] * 100), (int) ($service['costMax'] * 100)) / 100, 2),
-            'status' => PackageStatus::Shipped->value,
             'postage_source' => PostageSource::CarrierAccount->value,
             'ship_date' => $shipDate,
             'shipped_at' => $shippedAt->format('Y-m-d H:i:s'),
             'shipped_by_user_id' => $userIds === [] ? null : $userIds[array_rand($userIds)],
+        ];
+
+        $packageId = DB::table('packages')->insertGetId($projected + [
+            'shipment_id' => $shipment->id,
+            'location_id' => $locationId,
+            'box_size_id' => $boxSizeIds === [] ? null : $boxSizeIds[array_rand($boxSizeIds)],
+            'weight' => $weight,
+            'height' => round(mt_rand(200, 1200) / 100, 2),
+            'width' => round(mt_rand(400, 1400) / 100, 2),
+            'length' => round(mt_rand(600, 1800) / 100, 2),
+            'status' => PackageStatus::Shipped->value,
             'exported' => false,
             'manifest_id' => $this->manifestIdFor($manifests, $carrier, $shipDate, $locationId),
             'created_at' => $createdAt->format('Y-m-d H:i:s'),
+            'updated_at' => $shippedAt->format('Y-m-d H:i:s'),
+        ]);
+
+        DB::table('package_labels')->insert(PackageLabel::projectionFrom($projected) + [
+            'package_id' => $packageId,
+            'created_at' => $shippedAt->format('Y-m-d H:i:s'),
             'updated_at' => $shippedAt->format('Y-m-d H:i:s'),
         ]);
 

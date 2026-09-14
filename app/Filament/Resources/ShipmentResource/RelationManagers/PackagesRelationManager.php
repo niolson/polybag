@@ -4,6 +4,7 @@ namespace App\Filament\Resources\ShipmentResource\RelationManagers;
 
 use App\Enums\PackageStatus;
 use App\Filament\Resources\PackageResource;
+use App\Models\Package;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Notifications\Notification;
@@ -11,6 +12,7 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Support\Collection;
 
 class PackagesRelationManager extends RelationManager
 {
@@ -20,8 +22,9 @@ class PackagesRelationManager extends RelationManager
     {
         return $form
             ->schema([
-                Forms\Components\TextInput::make('tracking_number')
-                    ->maxLength(255),
+                // No tracking number, cost or status: those are the projection
+                // of the package's active label and only the label writers set
+                // them (ADR-0004 decision 3).
                 Forms\Components\TextInput::make('shipping_method')
                     ->maxLength(255),
                 Forms\Components\TextInput::make('weight')
@@ -32,11 +35,6 @@ class PackagesRelationManager extends RelationManager
                     ->numeric(),
                 Forms\Components\TextInput::make('length')
                     ->numeric(),
-                Forms\Components\TextInput::make('cost')
-                    ->numeric()
-                    ->prefix('$'),
-                Forms\Components\Select::make('status')
-                    ->options(PackageStatus::class),
                 Forms\Components\Toggle::make('exported')
                     ->default(false),
             ]);
@@ -84,7 +82,21 @@ class PackagesRelationManager extends RelationManager
                     }),
             ])
             ->groupedBulkActions([
-                Actions\DeleteBulkAction::make(),
+                // The same guard as the row action: a shipped package has a live
+                // label at the carrier and an active label record that would
+                // cascade with it.
+                Actions\DeleteBulkAction::make()
+                    ->before(function (Actions\DeleteBulkAction $action, Collection $records): void {
+                        if ($records->contains(fn (Package $record): bool => $record->status === PackageStatus::Shipped)) {
+                            Notification::make()
+                                ->title('Cannot delete packages')
+                                ->body('At least one selected package has been shipped. Void its label first before deleting.')
+                                ->danger()
+                                ->send();
+
+                            $action->cancel();
+                        }
+                    }),
             ]);
     }
 }

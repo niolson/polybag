@@ -443,6 +443,9 @@ it('buys the offer that was chosen and records what Amazon called the shipment',
         ->and($package->carrier_account_id)->toBeNull()
         ->and($package->label_format)->toBe('zpl')
         ->and($package->metadata['amazon_shipment_id'])->toBe('amzn1.sid.abc123')
+        // And on the label record, where it outlives the void that strips it
+        // from the package.
+        ->and($package->activeLabel->source_label_reference)->toBe('amzn1.sid.abc123')
         ->and($package->metadata['amazon_carrier_id'])->toBe('ONTRAC')
         // The offer is spent and settled against Amazon's own identifier, not
         // against the weaker tracking-number backstop.

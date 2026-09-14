@@ -7,6 +7,7 @@ use App\Enums\AuditAction;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\TrackingStatus;
+use App\Enums\VoidReason;
 use App\Models\AuditLog;
 use App\Models\Package;
 use App\Models\Shipment;
@@ -153,7 +154,8 @@ class ShopifyFulfillmentSynchronizer
             ->all();
         $package->save();
 
-        $package->clearShipping();
+        // Nobody in PolyBag asked for this void; Shopify reported it done.
+        $package->clearShipping(VoidReason::VoidedUpstream);
 
         AuditLog::record(
             action: AuditAction::PackageCancelled,

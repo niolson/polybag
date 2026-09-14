@@ -12,6 +12,7 @@ use App\Http\Integrations\Fedex\Requests\UploadEtdImage;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Package;
+use App\Models\PackageLabel;
 use App\Models\Shipment;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -371,6 +372,10 @@ class FedexRunEtdTestCase extends Command
                 'shipped_at' => now(),
                 'carrier_request_payload' => $shipPayload,
             ]);
+
+            // Inserted shipped rather than shipped through markShipped(), so the
+            // label row a shipped package has to have is recorded here.
+            PackageLabel::createFromPackage($package);
 
             return [
                 'package_id' => $package->id,

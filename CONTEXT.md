@@ -39,6 +39,13 @@ A durable service identity seen in a postage source's response, not part of the 
 becomes a `CarrierService` only when a human authors one; discovery never creates one.
 _Avoid_: Discovered service, carrier service
 
+**Label**:
+One purchased instance of *outbound* postage for a Package: its tracking number, cost, and
+the carrier of record it was bought as. A Package has at most one active Label; a voided
+Label stays as history. A return label is not a Label in this sense.
+_Avoid_: Shipping label (ambiguous with the Shopify product), label data (the document,
+which lives on the Package)
+
 **Blind purchase**:
 Buying postage where the price and service are not known until after the fact — and, for
 Shopify, never. It is not something we can compare or rank.
@@ -56,6 +63,8 @@ _Avoid_: Rate, quote
 - A **carrier of record** and a **postage source** are independent: postage bought from one can move on a parcel carried by any carrier.
 - When the postage source is Shopify, the **carrier of record** is not known until after purchase — so nothing that has to be decided before purchase can depend on it.
 - A **Package** with no **postage source** recorded has not been shipped; there is no state for a shipped Package whose postage source is unknown.
+- A **Package** has at most one active **Label**; it is shipped exactly when it has one. A voided **Label** stays, and the Package's shipping columns are the projection of the active one.
+- A void marks the **Label** voided and returns the **Package** to unshipped; re-shipping buys a new **Label** for the same Package.
 - A **service class** is satisfied by one or more concrete carrier services; a **blind purchase** satisfies none, because no service is offered.
 - An **observed service** is normalized onto an existing `CarrierService`, or promoted by authoring one. Nothing promotes itself.
 - A **blind purchase** is not an **Offer** — with no price it can never win a comparison, so it never enters one.

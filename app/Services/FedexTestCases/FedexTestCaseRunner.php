@@ -10,6 +10,7 @@ use App\Http\Integrations\Fedex\FedexConnector;
 use App\Http\Integrations\Fedex\Requests\CreateFreightShipment;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Models\Package;
+use App\Models\PackageLabel;
 use App\Models\Shipment;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -169,6 +170,10 @@ class FedexTestCaseRunner
                 'shipped_at' => now(),
                 'carrier_request_payload' => $payload,
             ]);
+
+            // Inserted shipped rather than shipped through markShipped(), so the
+            // label row a shipped package has to have is recorded here.
+            PackageLabel::createFromPackage($package);
 
             return [
                 'package_id' => $package->id,

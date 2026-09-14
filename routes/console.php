@@ -47,6 +47,13 @@ Schedule::command('packages:sync-shopify-fulfillments')
     ->withoutOverlapping()
     ->runInBackground();
 
+// Detection, not prevention: the writers keep each package and its label
+// record consistent by construction, and this names anything that slipped
+// past them. Report only — the repair is a person's decision (ADR-0004).
+Schedule::command('app:verify-label-integrity')
+    ->daily()
+    ->withoutOverlapping();
+
 // appendOutputTo has no built-in rotation, so prune dated import-*.log /
 // validate-*.log files after 14 days, matching the other log channels.
 Schedule::call(function (): void {

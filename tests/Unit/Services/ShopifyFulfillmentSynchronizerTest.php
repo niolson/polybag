@@ -4,6 +4,7 @@ use App\Enums\AuditAction;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\TrackingStatus;
+use App\Enums\VoidReason;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Models\AuditLog;
 use App\Models\Package;
@@ -91,6 +92,21 @@ it('drops the label identifiers so a re-ship buys a new label', function (): voi
     expect($metadata)->not->toHaveKey('shopify_purchase_result_id');
     expect($metadata)->not->toHaveKey('shopify_label_document_url');
     expect($metadata)->toHaveKey('packed_by_station', 'bench-3');
+});
+
+it('records the upstream void on the label record, with no user', function (): void {
+    $package = shippedShopifyPackage();
+
+    Saloon::fake([MockResponse::make(fulfillmentState('LABEL_VOIDED'))]);
+
+    $this->synchronizer->sync();
+
+    $label = $package->labels()->sole();
+
+    expect($label->isVoided())->toBeTrue()
+        ->and($label->void_reason)->toBe(VoidReason::VoidedUpstream)
+        ->and($label->voided_by_user_id)->toBeNull()
+        ->and($label->tracking_number)->toBe('9400111899223197428490');
 });
 
 it('leaves a package alone while its label is still live', function (): void {
