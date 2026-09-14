@@ -192,6 +192,8 @@ services:
       - ./.env:/var/www/html/.env
     entrypoint: ["sh", "-c", "php artisan config:cache && php artisan queue:work --queue=default,low --tries=3"]
     depends_on:
+      app:
+        condition: service_healthy
       mysql:
         condition: service_healthy
         required: false
@@ -218,6 +220,8 @@ services:
       - ./.env:/var/www/html/.env
     entrypoint: ["sh", "-c", "php artisan config:cache && php artisan queue:work imports --queue=imports --tries=3"]
     depends_on:
+      app:
+        condition: service_healthy
       mysql:
         condition: service_healthy
         required: false
@@ -244,6 +248,8 @@ services:
       - ./.env:/var/www/html/.env
     entrypoint: ["sh", "-c", "php artisan config:cache && php artisan schedule:work"]
     depends_on:
+      app:
+        condition: service_healthy
       mysql:
         condition: service_healthy
         required: false
