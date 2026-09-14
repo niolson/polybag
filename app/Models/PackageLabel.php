@@ -6,6 +6,8 @@ use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
 use App\Enums\VoidReason;
+use App\Services\Carriers\AmazonBuyShippingAdapter;
+use App\Services\Carriers\ShopifyAdapter;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -119,8 +121,9 @@ class PackageLabel extends Model
      *
      * For the paths that put a shipped Package in the database without going
      * through `markShipped()` — the factory, the FedEx certification runners,
-     * the integrity command's repair. Not for a purchase, which knows more than
-     * the projection does (the postage source's own label identifier).
+     * the integrity command's repair. The postage source's own label identifier
+     * is read from the package's metadata while it is still there: a repair
+     * runs before any void, and a void strips the identifier for good.
      */
     public static function createFromPackage(Package $package): self
     {
@@ -128,7 +131,11 @@ class PackageLabel extends Model
             throw new \InvalidArgumentException('Only a shipped package describes a label to record.');
         }
 
-        return self::create(['package_id' => $package->id] + self::projectionFrom($package->getAttributes()));
+        return self::create([
+            'package_id' => $package->id,
+            'source_label_reference' => ShopifyAdapter::shippingLabelIdFor($package)
+                ?? AmazonBuyShippingAdapter::shipmentIdFor($package),
+        ] + self::projectionFrom($package->getAttributes()));
     }
 
     /**

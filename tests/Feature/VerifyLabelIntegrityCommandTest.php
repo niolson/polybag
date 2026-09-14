@@ -33,6 +33,24 @@ it('reports a shipped package with no label, an unshipped package with an active
         ->assertFailed();
 });
 
+it('keeps the postage source\'s label identifier when repairing a sales-channel purchase', function (): void {
+    // The repair exists for a purchase an old worker finished after the
+    // backfill; for Shopify and Amazon the identifier is still in the
+    // package's metadata at that point and is gone once the label is voided.
+    $shopify = Package::factory()->shipped()->create([
+        'metadata' => ['shopify_shipping_label_id' => 'gid://shopify/ShippingLabel/9'],
+    ]);
+    $amazon = Package::factory()->shipped()->create([
+        'metadata' => ['amazon_shipment_id' => 'amzn1.sid.repair'],
+    ]);
+    PackageLabel::query()->delete();
+
+    $this->artisan('app:verify-label-integrity', ['--repair' => true])->assertSuccessful();
+
+    expect($shopify->activeLabel->source_label_reference)->toBe('gid://shopify/ShippingLabel/9')
+        ->and($amazon->activeLabel->source_label_reference)->toBe('amzn1.sid.repair');
+});
+
 it('names the renamed pair when the print timestamp drifts', function (): void {
     $package = Package::factory()->shipped()->create(['label_printed_at' => now()]);
     DB::table('package_labels')->where('package_id', $package->id)->update(['last_printed_at' => null]);
