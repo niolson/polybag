@@ -87,7 +87,7 @@ services:
   # truncates an existing keyring — losing it makes encrypted data
   # unrecoverable — it only creates the file when absent and fixes ownership.
   mysql-keyring-init:
-    image: mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
+    image: mysql:8.4@sha256:85b9bf2e29cf836ecb8c2a15a935d4ba0c606631dff1dd79531a11983c638f2a
     profiles: [standalone]
     restart: "no"
     user: root
@@ -134,7 +134,7 @@ services:
         chown 999:999 "$$DIR" "$$KEYFILE"
 
   mysql:
-    image: mysql:8.4@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
+    image: mysql:8.4@sha256:85b9bf2e29cf836ecb8c2a15a935d4ba0c606631dff1dd79531a11983c638f2a
     restart: unless-stopped
     profiles: [standalone]
     depends_on:
