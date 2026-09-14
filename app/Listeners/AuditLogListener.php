@@ -50,15 +50,12 @@ class AuditLogListener
 
     public function handlePackageCancelled(PackageCancelled $event): void
     {
+        // The package has already been cleared by the time this runs; the event
+        // carries the pre-void snapshot so the audit row has something to keep.
         AuditLog::record(
             AuditAction::PackageCancelled,
             $event->package,
-            oldValues: [
-                'tracking_number' => $event->package->tracking_number,
-                'carrier' => $event->package->carrier,
-                'service' => $event->package->service,
-                'cost' => $event->package->cost,
-            ],
+            oldValues: $event->voidedLabel->toArray(),
         );
     }
 
