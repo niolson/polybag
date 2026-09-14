@@ -18,6 +18,7 @@ readonly class ShipResponse
      * @param  ServiceEvidence  $serviceEvidence  How well $service is known. Defaults to the direct-carrier case, which reports what it sold.
      * @param  string|null  $serviceInferenceMethod  How $service was derived, required when $serviceEvidence is Inferred
      * @param  string|null  $serviceRulesetVersion  Which ruleset derived it, required when $serviceEvidence is Inferred
+     * @param  string|null  $sourceLabelReference  The postage source's own identifier for the label (Shopify label ID, Amazon shipment ID), kept on the label record past the void that strips it from the package
      */
     public function __construct(
         public bool $success,
@@ -41,6 +42,7 @@ readonly class ShipResponse
         public ServiceEvidence $serviceEvidence = ServiceEvidence::Confirmed,
         public ?string $serviceInferenceMethod = null,
         public ?string $serviceRulesetVersion = null,
+        public ?string $sourceLabelReference = null,
     ) {}
 
     /**

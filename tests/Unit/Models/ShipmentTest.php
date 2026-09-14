@@ -2,6 +2,7 @@
 
 use App\Enums\PackageStatus;
 use App\Enums\ShipmentStatus;
+use App\Enums\VoidReason;
 use App\Models\Package;
 use App\Models\PackageItem;
 use App\Models\Product;
@@ -95,7 +96,7 @@ it('reverts shipped status when package shipping is cleared', function (): void 
 
     expect($shipment->fresh()->status)->toBe(ShipmentStatus::Shipped);
 
-    $package->clearShipping();
+    $package->clearShipping(VoidReason::Operator);
 
     expect($shipment->fresh()->status)->toBe(ShipmentStatus::Open);
 });

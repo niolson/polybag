@@ -242,6 +242,29 @@ The app refuses to activate an Amazon source until **Require MFA** is enabled in
 Settings. That is deliberate — these sources expose customer PII — and it is another
 reason to get mail working first.
 
+## Upgrading
+
+The `app` container's entrypoint runs `php artisan migrate` before it starts php-fpm,
+and the `queue`, `import-queue` and `scheduler` containers wait for `app` to report
+healthy — which is after the migration — before they start. What that does not cover is
+a worker from the *previous* image that is still running when the migration starts: a
+label purchase it finishes after a data migration has swept the table is invisible to
+that migration.
+
+So a release is three steps, not one:
+
+```bash
+COMPOSE="docker compose --profile standalone -f docker-compose.yml -f docker-compose.onprem.yml"
+
+$COMPOSE stop queue import-queue scheduler
+$COMPOSE up -d --build app            # migrates, then reports healthy
+$COMPOSE up -d --build                # the workers start against the migrated schema
+```
+
+If a purchase did slip through, `php artisan app:verify-label-integrity` names it, and
+`--repair` records the label row it is missing from the package's own columns. The
+report runs nightly on the scheduler; the repair is yours to run.
+
 ## Internal tooling
 
 Some things in this repo exist for our own deployment and will not be useful to you.

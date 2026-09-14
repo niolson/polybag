@@ -3,6 +3,7 @@
 use App\Enums\AuditAction;
 use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
+use App\Enums\VoidReason;
 use App\Models\AuditLog;
 use App\Models\Carrier;
 use App\Models\Package;
@@ -43,7 +44,7 @@ it('records the pre-void label in old_values when a label is voided', function (
 
     $before = $package->replicate();
 
-    $package->clearShipping();
+    $package->clearShipping(VoidReason::Operator);
 
     $old = voidedPackageAudit($package)->old_values;
 
@@ -80,7 +81,7 @@ it('captures print state from the database row, not the stale model instance', f
     $printedAt = now()->subMinute()->startOfSecond();
     Package::query()->whereKey($package->id)->update(['label_printed_at' => $printedAt]);
 
-    $package->clearShipping();
+    $package->clearShipping(VoidReason::Operator);
 
     $old = voidedPackageAudit($package)->old_values;
 

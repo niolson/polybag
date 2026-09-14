@@ -404,6 +404,7 @@ class ShopifyAdapter implements BlindPurchaseSource
             // came from, which purchasing has just proved resolves.
             postageSource: PostageSource::PostageDataSource,
             postageDataSourceId: $labelService->dataSourceFor($package)?->id,
+            sourceLabelReference: $label->shippingLabelId,
             metadata: array_filter([
                 'shopify_shipping_label_id' => $label->shippingLabelId,
                 'shopify_tracking_company' => $label->trackingCompany,

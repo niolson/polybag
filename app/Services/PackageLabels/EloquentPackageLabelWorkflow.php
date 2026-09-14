@@ -8,10 +8,12 @@ use App\DataTransferObjects\PackageLabels\LabelVoidResult;
 use App\DataTransferObjects\PrintRequest;
 use App\Enums\AuditAction;
 use App\Enums\PackageStatus;
+use App\Enums\VoidReason;
 use App\Models\AuditLog;
 use App\Models\Package;
 use App\Models\User;
 use App\Services\PostageSources\PostageSourceDispatcher;
+use Illuminate\Support\Facades\DB;
 use Saloon\Exceptions\Request\RequestException;
 
 class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
@@ -41,7 +43,10 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
                 return LabelVoidResult::failure('Void failed', $response->message ?? 'Failed to cancel the label.');
             }
 
-            $package->clearShipping();
+            // The operator asking for the void is whoever is signed in. Resolved
+            // here rather than passed by the caller because the contract's
+            // `voidLabel(Package)` takes no user and its callers are Filament pages.
+            $package->clearShipping(VoidReason::Operator, auth()->id());
 
             return LabelVoidResult::success($response->message);
         } catch (\RuntimeException $e) {
@@ -86,7 +91,28 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
     {
         $isReprint = $package->label_printed_at !== null;
 
-        $package->forceFill(['label_printed_at' => now()])->save();
+        DB::transaction(function () use ($package): void {
+            $printedAt = now();
+
+            // Package row first, then its label: the lock order every writer
+            // keeps, so a print acknowledgement racing a void cannot deadlock.
+            $package->forceFill(['label_printed_at' => $printedAt])->save();
+
+            // Exactly one, thrown rather than skipped: the structural assertion
+            // below would pass an unshipped package with no label, and the only
+            // caller refuses those before reaching here, so a zero-row stamp is
+            // a broken invariant and not a case to paper over.
+            $stamped = DB::table('package_labels')
+                ->where('package_id', $package->id)
+                ->whereNull('voided_at')
+                ->update(['last_printed_at' => $printedAt, 'updated_at' => $printedAt]);
+
+            if ($stamped !== 1) {
+                throw new \LogicException("Package {$package->id} has no active label to record the print on.");
+            }
+
+            $package->assertLabelStateIsConsistent();
+        });
 
         AuditLog::record(
             AuditAction::LabelPrinted,

@@ -10,6 +10,7 @@ use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
 use App\Enums\SpecialServiceSource;
 use App\Enums\TrackingStatus;
+use App\Enums\VoidReason;
 use App\Events\PackageCancelled;
 use App\Events\PackageShipped;
 use App\Services\CarrierNormalizer;
@@ -21,6 +22,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
 use Laravel\Scout\Attributes\SearchUsingPrefix;
@@ -209,6 +211,26 @@ class Package extends Model
     }
 
     /**
+     * Every label ever bought for this package, voided ones included. ADR-0004.
+     *
+     * @return HasMany<PackageLabel, $this>
+     */
+    public function labels(): HasMany
+    {
+        return $this->hasMany(PackageLabel::class);
+    }
+
+    /**
+     * The one unvoided label, whose facts the shipping columns here project.
+     *
+     * @return HasOne<PackageLabel, $this>
+     */
+    public function activeLabel(): HasOne
+    {
+        return $this->hasOne(PackageLabel::class)->whereNull('voided_at');
+    }
+
+    /**
      * Packages whose label can still be sent to a printer.
      *
      * Voiding a label after the fact clears both the label data and the printed
@@ -345,28 +367,58 @@ class Package extends Model
             return false;
         }
 
-        $updated = DB::table('packages')
-            ->where('id', $this->id)
-            ->where(function (QueryBuilder $query) use ($inference): void {
-                $query
-                    ->where('service_evidence', ServiceEvidence::Unknown->value)
-                    ->orWhere(function (QueryBuilder $query) use ($inference): void {
-                        $query
-                            ->where('service_evidence', ServiceEvidence::Inferred->value)
-                            ->where(function (QueryBuilder $query) use ($inference): void {
-                                $query
-                                    ->whereNull('service_ruleset_version')
-                                    ->orWhere('service_ruleset_version', '<', $inference->rulesetVersion);
-                            });
-                    });
-            })
-            ->update([
-                'service' => $inference->service,
-                'service_evidence' => ServiceEvidence::Inferred->value,
-                'service_inference_method' => $inference->method,
-                'service_ruleset_version' => $inference->rulesetVersion,
-                'updated_at' => now(),
-            ]);
+        $projected = [
+            'service' => $inference->service,
+            'service_evidence' => ServiceEvidence::Inferred->value,
+            'service_inference_method' => $inference->method,
+            'service_ruleset_version' => $inference->rulesetVersion,
+        ];
+
+        $upgradable = function (QueryBuilder $query) use ($inference): void {
+            $query
+                ->where('service_evidence', ServiceEvidence::Unknown->value)
+                ->orWhere(function (QueryBuilder $query) use ($inference): void {
+                    $query
+                        ->where('service_evidence', ServiceEvidence::Inferred->value)
+                        ->where(function (QueryBuilder $query) use ($inference): void {
+                            $query
+                                ->whereNull('service_ruleset_version')
+                                ->orWhere('service_ruleset_version', '<', $inference->rulesetVersion);
+                        });
+                });
+        };
+
+        $updated = DB::transaction(function () use ($projected, $upgradable): int {
+            // Package row first, then its label — the lock order every writer
+            // keeps, so this cannot deadlock against a void or a print
+            // acknowledgement. Only a shipped package has a label to keep in
+            // step; the inference command does not filter by status.
+            $updated = DB::table('packages')
+                ->where('id', $this->id)
+                ->where('status', PackageStatus::Shipped->value)
+                ->where($upgradable)
+                ->update($projected + ['updated_at' => now()]);
+
+            if ($updated === 0) {
+                return 0;
+            }
+
+            $labelUpdated = DB::table('package_labels')
+                ->where('package_id', $this->id)
+                ->whereNull('voided_at')
+                ->where($upgradable)
+                ->update(PackageLabel::projectionFrom($projected) + ['updated_at' => now()]);
+
+            if ($labelUpdated !== 1) {
+                throw new \LogicException(
+                    "Package {$this->id} accepted an inferred service its active label did not; the projection and the label have drifted."
+                );
+            }
+
+            $this->assertLabelStateIsConsistent();
+
+            return $updated;
+        });
 
         if ($updated === 0) {
             return false;
@@ -442,49 +494,68 @@ class Package extends Model
                 $metadata = ['metadata' => json_encode(array_merge($stored, $response->metadata))];
             }
 
+            $now = now();
+
+            // The facts the label record and the package share, built once so
+            // the two writes below cannot disagree (ADR-0004 decision 3).
+            $projected = [
+                'tracking_number' => $response->trackingNumber,
+                'carrier_account_id' => $response->carrierAccountId,
+                'postage_data_source_id' => $response->postageDataSourceId,
+                'postage_source' => $postageSource->value,
+                'cost' => $response->cost,
+                'carrier' => $response->carrier,
+                'normalized_carrier_id' => $normalizedCarrierId,
+                'service' => $response->service,
+                'requested_service' => $response->requestedService,
+                'service_evidence' => $response->serviceEvidence->value,
+                'service_inference_method' => $response->serviceInferenceMethod,
+                'service_ruleset_version' => $response->serviceRulesetVersion,
+                'label_orientation' => $response->labelOrientation ?? 'portrait',
+                'label_format' => $response->labelFormat ?? 'pdf',
+                'label_dpi' => $response->labelDpi,
+                'label_printed_at' => null,
+                'shipped_at' => $now,
+                'ship_date' => $response->shipDate?->format('Y-m-d'),
+                'shipped_by_user_id' => $shippedByUserId,
+            ];
+
             // Optimistic locking - ensure package hasn't been shipped already
             $updated = DB::table('packages')
                 ->where('id', $this->id)
                 ->where('status', PackageStatus::Unshipped->value)
-                ->update($metadata + [
-                    'tracking_number' => $response->trackingNumber,
-                    'carrier_account_id' => $response->carrierAccountId,
-                    'postage_data_source_id' => $response->postageDataSourceId,
-                    'postage_source' => $postageSource->value,
-                    'cost' => $response->cost,
-                    'carrier' => $response->carrier,
-                    'normalized_carrier_id' => $normalizedCarrierId,
-                    'service' => $response->service,
-                    'requested_service' => $response->requestedService,
-                    'service_evidence' => $response->serviceEvidence->value,
-                    'service_inference_method' => $response->serviceInferenceMethod,
-                    'service_ruleset_version' => $response->serviceRulesetVersion,
+                ->update($metadata + $projected + [
                     'label_data' => $response->labelData,
                     // The separately-returned customs document, where the source
                     // returned one. Stored beside the label rather than fetched on
                     // demand from a carrier-hosted URL, so printing it does not
                     // depend on that URL staying fetchable.
                     'customs_form_data' => $response->customsFormData,
-                    'label_orientation' => $response->labelOrientation ?? 'portrait',
-                    'label_format' => $response->labelFormat ?? 'pdf',
-                    'label_dpi' => $response->labelDpi,
-                    'label_printed_at' => null,
                     'status' => PackageStatus::Shipped->value,
-                    'shipped_at' => now(),
-                    'ship_date' => $response->shipDate?->format('Y-m-d'),
-                    'shipped_by_user_id' => $shippedByUserId,
                     'tracking_status' => TrackingStatus::PreTransit->value,
                     'tracking_updated_at' => null,
                     'delivered_at' => null,
                     'tracking_details' => null,
                     'tracking_checked_at' => null,
                     'exported' => false,
-                    'updated_at' => now(),
+                    'updated_at' => $now,
                 ]);
 
             if ($updated === 0) {
                 throw new \RuntimeException('Package has already been shipped or was modified by another process.');
             }
+
+            // The label record itself. After the guard above, so a lost race
+            // inserts nothing; inside the transaction, so a purchase is never
+            // recorded on the package without its row.
+            DB::table('package_labels')->insert(PackageLabel::projectionFrom($projected) + [
+                'package_id' => $this->id,
+                'source_label_reference' => $response->sourceLabelReference,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+
+            $this->assertLabelStateIsConsistent();
 
             // Refresh the model to get the updated state
             $this->refresh();
@@ -587,6 +658,36 @@ class Package extends Model
     }
 
     /**
+     * `Shipped` ⇔ exactly one unvoided label; any other status ⇔ none.
+     *
+     * A post-condition run inside each writing transaction before commit, so a
+     * violation rolls the write back — unlike `assertProvenanceIsConsistent()`,
+     * which is a precondition run before the transaction. Read from the
+     * database, not from this instance, because the writers update through
+     * the query builder. Structural only: whether the projected columns agree
+     * with the label's is the integrity command's job, and checking it here
+     * would fail every test that hand-edits a shipped fixture before calling a
+     * writer.
+     *
+     * @throws \LogicException
+     */
+    public function assertLabelStateIsConsistent(): void
+    {
+        $status = DB::table('packages')->where('id', $this->id)->value('status');
+        $activeLabels = DB::table('package_labels')
+            ->where('package_id', $this->id)
+            ->whereNull('voided_at')
+            ->count();
+        $expected = $status === PackageStatus::Shipped->value ? 1 : 0;
+
+        if ($activeLabels !== $expected) {
+            throw new \LogicException(
+                "Package {$this->id} is {$status} with {$activeLabels} active label(s); expected {$expected}."
+            );
+        }
+    }
+
+    /**
      * Record which special services were actually applied when this package was shipped.
      *
      * @param  array<string>  $appliedServiceCodes  Service codes confirmed sent to the carrier
@@ -643,11 +744,15 @@ class Package extends Model
     /**
      * Clear shipping data from this package (void label).
      *
+     * The label record is marked voided, with who and why, and stays; the
+     * package's own columns are nulled and it returns to Unshipped, ready to
+     * ship again with its items and measurements (ADR-0004 decision 2).
+     *
      * @throws \RuntimeException If the package state changed (optimistic locking)
      */
-    public function clearShipping(): void
+    public function clearShipping(VoidReason $reason, ?int $voidedByUserId = null): void
     {
-        $voidedLabel = DB::transaction(function (): VoidedLabel {
+        $voidedLabel = DB::transaction(function () use ($reason, $voidedByUserId): VoidedLabel {
             // Snapshot the row under its own lock rather than trusting $this: the
             // instance may predate a print acknowledgement or a tracking refresh.
             $row = DB::table('packages')
@@ -686,6 +791,7 @@ class Package extends Model
                     'label_printed_at' => null,
                     'status' => PackageStatus::Unshipped->value,
                     'shipped_at' => null,
+                    'ship_date' => null,
                     'shipped_by_user_id' => null,
                     'tracking_status' => null,
                     'tracking_updated_at' => null,
@@ -699,6 +805,26 @@ class Package extends Model
             if ($updated === 0) {
                 throw new \RuntimeException('Package shipping state has changed. It may have already been voided.');
             }
+
+            // Package row first, then its label: the lock order every writer
+            // keeps. A shipped package with no active label is a broken
+            // invariant, not a void — `app:verify-label-integrity --repair`
+            // is what puts the row back.
+            $voided = DB::table('package_labels')
+                ->where('package_id', $this->id)
+                ->whereNull('voided_at')
+                ->update([
+                    'voided_at' => now(),
+                    'voided_by_user_id' => $voidedByUserId,
+                    'void_reason' => $reason->value,
+                    'updated_at' => now(),
+                ]);
+
+            if ($voided !== 1) {
+                throw new \LogicException("Package {$this->id} is shipped but has no active label to void.");
+            }
+
+            $this->assertLabelStateIsConsistent();
 
             PackageExport::query()->where('package_id', $this->id)->delete();
 

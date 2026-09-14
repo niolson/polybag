@@ -8,6 +8,7 @@ use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\Package;
+use App\Models\PackageLabel;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\User;
@@ -162,8 +163,15 @@ it('resets demo data end to end', function (): void {
             ->and($package->tracking_number)->not->toBeNull()
             ->and($package->cost)->not->toBeNull()
             ->and($package->manifest_id)->not->toBeNull()
-            ->and($package->packageItems)->toHaveCount(1);
+            ->and($package->packageItems)->toHaveCount(1)
+            // Fabricated shipped, so the label row a shipped package has to
+            // have is fabricated with it, from the same facts.
+            ->and($package->activeLabel?->tracking_number)->toBe($package->tracking_number)
+            ->and((float) $package->activeLabel?->cost)->toBe((float) $package->cost);
     }
+
+    // The leftover package's label went with it: nothing orphaned an active row.
+    expect(PackageLabel::count())->toBe(Package::where('status', PackageStatus::Shipped)->count());
 
     // The recent shipment stays open for the live demo
     $recent = Shipment::where('shipment_reference', 'D00NEW0001')->firstOrFail();
@@ -208,6 +216,10 @@ it('clears package export claims before package IDs are reused', function (): vo
 
     expect(DB::connection($connection)->table('shipments')->where('id', 'D00REPEAT01')->value('tracking_number'))
         ->not->toBeNull();
+
+    // Package IDs were reused; had the first reset's label rows survived the
+    // truncate, the second would have died on the unique index.
+    expect(PackageLabel::count())->toBe(Package::where('status', PackageStatus::Shipped)->count());
 });
 
 it('does not duplicate shipments when the live import runs after a reset', function (): void {

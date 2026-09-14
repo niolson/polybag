@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\VoidReason;
 use App\Events\PackageCancelled;
 use App\Models\Package;
 use App\Models\Shipment;
@@ -13,7 +14,7 @@ it('dispatches PackageCancelled when clearShipping is called', function (): void
     ShipmentItem::factory()->create(['shipment_id' => $shipment->id]);
     $package = Package::factory()->shipped()->create(['shipment_id' => $shipment->id]);
 
-    $package->clearShipping();
+    $package->clearShipping(VoidReason::Operator);
 
     Event::assertDispatched(PackageCancelled::class, function (PackageCancelled $event) use ($package, $shipment): bool {
         return $event->package->id === $package->id

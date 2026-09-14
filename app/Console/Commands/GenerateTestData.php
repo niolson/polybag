@@ -2,7 +2,9 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
+use App\Models\PackageLabel;
 use App\Models\Shipment;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -174,6 +176,8 @@ class GenerateTestData extends Command
         foreach ($shipmentIds->chunk(5000) as $chunk) {
             $packageIds = DB::table('packages')->whereIn('shipment_id', $chunk)->pluck('id');
 
+            // Before `packages`, by ID: the cleanup does not lean on the cascade.
+            DB::table('package_labels')->whereIn('package_id', $packageIds)->delete();
             DB::table('rate_quotes')->whereIn('package_id', $packageIds)->delete();
             $bar->advance();
 
@@ -440,27 +444,33 @@ class GenerateTestData extends Command
                 $carrier = $meta['carrier'];
                 $service = $meta['service'];
 
-                $packageRows[] = [
-                    'shipment_id' => $shipmentIds[$idx],
-                    'box_size_id' => $this->boxSizeIds[array_rand($this->boxSizeIds)],
+                // The facts a shipped package shares with its label row, built
+                // once so the two inserts cannot disagree.
+                $projected = [
                     'tracking_number' => $pkgShipped ? $this->generateTrackingNumber($carrier) : null,
                     'carrier' => $pkgShipped ? $carrier : null,
                     'service' => $pkgShipped ? $service['code'] : null,
                     'service_evidence' => ($pkgShipped ? ServiceEvidence::Confirmed : ServiceEvidence::Unknown)->value,
-                    'metadata' => null,
-                    'label_data' => null,
+                    'postage_source' => $pkgShipped ? PostageSource::CarrierAccount->value : null,
                     'label_orientation' => 'portrait',
                     'label_format' => 'pdf',
                     'label_dpi' => 203,
+                    'cost' => $pkgShipped ? round(mt_rand((int) ($service['costMin'] * 100), (int) ($service['costMax'] * 100)) / 100, 2) : null,
+                    'ship_date' => $pkgShipped ? substr($shippedAt, 0, 10) : null,
+                    'shipped_at' => $shippedAt,
+                    'shipped_by_user_id' => $pkgShipped ? $this->userIds[array_rand($this->userIds)] : null,
+                ];
+
+                $packageRows[] = $projected + [
+                    'shipment_id' => $shipmentIds[$idx],
+                    'box_size_id' => $this->boxSizeIds[array_rand($this->boxSizeIds)],
+                    'metadata' => null,
+                    'label_data' => null,
                     'weight' => round(mt_rand(50, 5000) / 100, 2),
                     'height' => round(mt_rand(200, 2000) / 100, 2),
                     'width' => round(mt_rand(200, 2000) / 100, 2),
                     'length' => round(mt_rand(200, 2000) / 100, 2),
-                    'cost' => $pkgShipped ? round(mt_rand((int) ($service['costMin'] * 100), (int) ($service['costMax'] * 100)) / 100, 2) : null,
                     'status' => $pkgShipped ? 'shipped' : 'unshipped',
-                    'ship_date' => $pkgShipped ? substr($shippedAt, 0, 10) : null,
-                    'shipped_at' => $shippedAt,
-                    'shipped_by_user_id' => $pkgShipped ? $this->userIds[array_rand($this->userIds)] : null,
                     'exported' => $pkgShipped && mt_rand(1, 2) === 1,
                     'manifest_id' => null,
                     'created_at' => $meta['createdAt']->format('Y-m-d H:i:s'),
@@ -474,6 +484,7 @@ class GenerateTestData extends Command
                     'carrier' => $carrier,
                     'service' => $service,
                     'createdAt' => $meta['createdAt'],
+                    'label' => $pkgShipped ? PackageLabel::projectionFrom($projected) : null,
                 ];
             }
         }
@@ -490,6 +501,26 @@ class GenerateTestData extends Command
             ->value('id');
         $packageIds = range($firstPkgId, $firstPkgId + $totalPackages - 1);
         unset($packageRows);
+
+        // --- Build label rows (for shipped packages only) ---
+        $labelRows = [];
+
+        foreach ($packageMeta as $pkgMetaIdx => $pm) {
+            if ($pm['label'] === null) {
+                continue;
+            }
+
+            $labelRows[] = $pm['label'] + [
+                'package_id' => $packageIds[$pkgMetaIdx],
+                'created_at' => $pm['label']['purchased_at'],
+                'updated_at' => $pm['label']['purchased_at'],
+            ];
+        }
+
+        foreach (array_chunk($labelRows, 2000) as $subChunk) {
+            DB::table('package_labels')->insert($subChunk);
+        }
+        unset($labelRows);
 
         // --- Build package items ---
         $packageItemRows = [];

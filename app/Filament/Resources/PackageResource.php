@@ -90,8 +90,9 @@ class PackageResource extends Resource
                             ->searchable()
                             ->required()
                             ->disabled(fn (string $operation): bool => $operation === 'edit'),
-                        TextInput::make('tracking_number')
-                            ->maxLength(255),
+                        // No tracking number, cost or status: those are the
+                        // projection of the package's active label and only the
+                        // label writers set them (ADR-0004 decision 3).
                         TextInput::make('shipping_method')
                             ->maxLength(255),
                         Components\Fieldset::make('Dimensions')->schema([
@@ -116,11 +117,6 @@ class PackageResource extends Resource
                                 ->maxValue(150)
                                 ->suffix('lbs'),
                         ]),
-                        TextInput::make('cost')
-                            ->numeric()
-                            ->prefix('$'),
-                        Forms\Components\Select::make('status')
-                            ->options(PackageStatus::class),
                         Forms\Components\Toggle::make('exported'),
                     ]),
 

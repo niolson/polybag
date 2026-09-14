@@ -6,6 +6,7 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\PackageExportStatus;
 use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
+use App\Enums\VoidReason;
 use App\Exceptions\PermanentExportException;
 use App\Models\Carrier;
 use App\Models\CarrierAlias;
@@ -330,7 +331,7 @@ it('invalidates export state when a package is voided and exports new tracking a
     $service = new PackageExportService;
 
     $service->exportPackage($package);
-    $package->clearShipping();
+    $package->clearShipping(VoidReason::Operator);
 
     expect($package->exported)->toBeFalse()
         ->and($package->packageExports()->count())->toBe(0);
