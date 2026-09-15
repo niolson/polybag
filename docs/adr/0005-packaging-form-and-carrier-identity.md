@@ -8,6 +8,17 @@ off the observed service). Gives `amazon-buy-shipping/08` its answer.
 Proposed 2026-09-15 and accepted the same day after four review passes, each of which is
 recorded below and under "Options considered" so that the rejected shapes stay rejected.
 
+Amended 2026-09-15, while slicing into `docs/issues/packaging-form-and-carrier-identity/`,
+on one point of decision 3: the accepted text had FedEx set a rate's requirement from
+whether it came back from the One Rate request. Reading the adapter showed the ordinary
+rate request sends no `packagingType` and the ship body labels every non-One-Rate rate as
+`YOUR_PACKAGING`, so under that wording a Package in a FedEx Pak would have every
+weight-based FedEx rate filtered out and keep only One Rate — a behaviour change nobody
+wanted, since FedEx packaging ships at weight-based prices too. FedEx now follows the rule
+the same sentence already gave UPS: the adapter sends the packaging and stamps what it
+sent. The slicing also added Priority Mail Express flat-rate envelopes as their own
+`CarrierPackaging` cases, since a packer holding one uses the service printed on it.
+
 Written after the 2026-09-11 Amazon live run listed thirteen offers — flat-rate envelopes,
 flat-rate boxes and FedEx One Rate — for a parcel in the packer's own 4×6×6 box. The narrow
 fix for that is `amazon-buy-shipping/12`; this document is about why the fix is a fourth
@@ -52,7 +63,7 @@ than anything else:
 
 | Source | Packaging expressed as | Service identity |
 |---|---|---|
-| USPS direct | `rateIndicator` on each rate, `processingCategory` on the request | `mailClass` — *one* service (`PRIORITY_MAIL`) covers own packaging and all five flat-rate packagings |
+| USPS direct | `rateIndicator` and `processingCategory` on each rate in the response; the request *may* name a `processingCategory`, and ours does not | `mailClass` — *one* service (`PRIORITY_MAIL`) covers own packaging and all five flat-rate packagings |
 | FedEx direct | `packagingType` on the request; One Rate is a special-service flag | `serviceType` — the same service in own or FedEx packaging |
 | UPS direct | `PackagingType` code on the request | `Service.Code` — same |
 | Amazon Buy Shipping | **baked into the serviceId** — `USPS_PTP_PRI` and `USPS_PTP_PRI_FRE` are different services; `FEDEX_PTP_..._ONE_RATE` likewise | per serviceId |
@@ -108,11 +119,15 @@ forced by the data: a USPS serviceId names one envelope or box, but Amazon's
 requirement is `anyOf(FedexEnvelope, FedexPak, FedexSmallBox, …)`, while the direct FedEx
 One Rate rate, which came back from a request that named the packaging, is `exactly(…)`.
 The adapter that produced the rate sets the requirement, in its own vocabulary, because it
-is the only party that knows: USPS from `rateIndicator`, FedEx from whether the rate came
-back from the One Rate request, UPS from the `PackagingType` it sent, Amazon from the
-serviceId. A service sold both in the shipper's packaging and in the carrier's is not one
-rate with two answers; it is two rates — FedEx Express Saver and FedEx Express Saver One
-Rate — each with one.
+is the only party that knows: USPS from `mailClass` and `rateIndicator`, FedEx and UPS
+from the packaging code they sent on the request, Amazon from the serviceId. For FedEx
+that means every rate from a request that named FedEx packaging — the ordinary rates,
+Saturday and One Rate alike — is `exactly(…)`, and every rate from a `YOUR_PACKAGING`
+request is `shipperPackaging()`; a Package in a FedEx Pak keeps its weight-based rates,
+each honestly quoted and labelled for the Pak. A service sold both in the shipper's
+packaging and in the carrier's is not one rate with two answers; it is two rates — FedEx
+Express Saver quoted for the packer's box and FedEx Express Saver quoted for the Pak —
+each with one.
 
 **4. One filter, shared, for carrier identity only — applied to every collection of rates an
 adapter returns, not at one call site.** A rate is kept only when
@@ -149,13 +164,24 @@ rate that was never quoted for that packaging.
 requirement on the rate would be a second axis on `RateResponse` that nothing outside USPS
 needs yet. What the adapters *stop* doing is excluding carrier-packaging services: the
 flat-rate `rateIndicator`s USPS discards today become `exactly(…)` requirements and survive
-to the shared filter, and `isOneRateEligible()` reads `carrierPackaging` in place of
-`fedexPackageType` but is otherwise unchanged.
+to the shared filter; both FedEx rate requests and the ship body send `packagingType`
+mapped from `carrierPackaging`, where today only the One Rate request names it; and
+`isOneRateEligible()` reads `carrierPackaging` in place of `fedexPackageType` but is
+otherwise unchanged.
 
 **5. An Amazon offer's requirement is read off its serviceId.** The pattern list that
 `amazon-buy-shipping/12` ships as a *filter* becomes the *classifier* that sets the
-`packagingRequirement` on each Amazon rate; the filter in decision 4 then does the dropping.
-Nothing else about `12` changes shape. Whether that classification should later become
+`packagingRequirement` on each Amazon rate. **The Amazon adapter applies the shared
+predicate itself, before it issues an offer** — one exception to "the filter runs where
+rates are collected", forced by a side effect: `ratesFrom()` issues a `ShippingOffer`,
+which under ADR-0002 is purchase authority, for every rate it returns, and a rate the
+shared filter would later hide must never hold one. So `isBuyable()` asks
+`packagingRequirementFor($serviceId)->accepts($package->carrierPackaging)` — the same
+`accepts()` decision 4's filter runs, one step earlier — and the collection-site filter is
+then a no-op for Amazon rates. Any future source that issues purchase authority at quote
+time does the same. Observations are still recorded for every rate before the predicate
+runs, so the catalog learns a service exists even when nothing can buy it. Nothing else
+about `12` changes shape. Whether that classification should later become
 editable data on the *Map Carrier Services* page (`amazon-buy-shipping/05`), pre-filled from
 the pattern and overridable per observed service, is a follow-on; the pattern list is
 sufficient for every serviceId Amazon has returned to date.
@@ -163,9 +189,13 @@ sufficient for every serviceId Amazon has returned to date.
 **What this buys immediately.** A `BoxSize` declared as `UspsMediumFlatRateBox` makes
 Amazon's `USPS_PTP_PRI_MFRB` offer buyable for a parcel scanned into it, with **no direct
 USPS adapter work** — Amazon already rates it; the Amazon classifier is the only code
-between the declaration and the offer. Rating that same box through the direct USPS account needs `UspsAdapter` to send a
-flat-rate `processingCategory` and keep the flat-rate `rateIndicator` it discards today,
-and is deferred.
+between the declaration and the offer. Rating that same box through the direct USPS
+account needs `UspsAdapter` to keep the flat-rate `rateIndicator`s it discards today, and
+to send a flat-rate `processingCategory` on the rate request **only if** an `ALL_OUTBOUND`
+search turns out not to return those variants unprompted — the adapter sends none today
+and already receives flat-rate indicators, which is why it has code to discard them, so
+the request may not need to change at all. That is settled from sandbox evidence in the
+implementing issue, and is deferred.
 
 ### Terminology
 
@@ -268,8 +298,9 @@ more than an operator typing a packaging name no adapter understands.
 
 The real cost is deferred rather than avoided: rating a declared USPS flat-rate box through
 the *direct* USPS account means changing a working filter in the busiest adapter, keeping
-rates it discards today, and it wants `carrier-request-schema-validation`'s USPS schema in
-place first. This decision makes that a mapping change rather than a design change, and
+rates it discards today — and possibly, if the search does not volunteer them, naming a
+`processingCategory` on a request that sends none today — and it wants
+`carrier-request-schema-validation`'s USPS schema in place first. This decision makes that a mapping change rather than a design change, and
 leaves it for its own issue.
 
 ## Consequences
@@ -292,7 +323,10 @@ leaves it for its own issue.
   requirement that does not survive it would let a rate chosen from the page be bought
   without the check that hid its siblings.
 - `FedexAdapter::isOneRateEligible()` reads `carrierPackaging` instead of `fedexPackageType`
-  and is otherwise unchanged.
+  and is otherwise unchanged. The ordinary FedEx rate request gains a `packagingType`, and
+  a weight-based label for a Package in FedEx packaging declares that packaging instead
+  of `YOUR_PACKAGING` — a correction for existing FedEx-packaging box sizes, worth a line
+  in the release notes beside the pre-selection one.
 - `CarrierAdapterInterface::resolvePreSelectedRate()` changes return type to `?RateResponse`;
   five implementations and `selectedRateForAutoShip()` change with it. A rule that
   pre-selects a service the Package's packaging cannot use now rate-shops instead of buying,
@@ -303,9 +337,9 @@ leaves it for its own issue.
 
 ## Implementation
 
-Not yet sliced. When this ADR is accepted, issues go under
-`docs/issues/packaging-form-and-carrier-identity/`, ordered so that `RateResponse` and the
-shared filter ship first, wired at both sites, with every adapter returning
-`shipperPackaging()` (no behaviour change), then the `BoxSize` column and the FedEx migration, then the Amazon classifier
-replacing `12`'s filter, and last the direct USPS mapping. This document records the decision
-and why; it is not a checklist and does not get updated as work lands.
+Tracked as issues under `docs/issues/packaging-form-and-carrier-identity/`, ordered so
+that `RateResponse` and the shared filter ship first, wired at both sites, with every
+adapter returning `shipperPackaging()` (no behaviour change), then the `BoxSize` column and
+the FedEx migration, then the Amazon classifier replacing `12`'s filter, and last the direct
+USPS mapping. This document records the decision and why; it is not a checklist and does
+not get updated as work lands.
