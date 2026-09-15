@@ -2,6 +2,8 @@
 
 namespace App\Enums;
 
+use Filament\Support\Contracts\HasLabel;
+
 /**
  * Why a label was voided, as far as PolyBag can tell at the moment it happens.
  *
@@ -11,11 +13,19 @@ namespace App\Enums;
  * the Shopify admin. What the carrier said back is a different question, kept
  * off this enum on purpose (package-label-history/04).
  */
-enum VoidReason: string
+enum VoidReason: string implements HasLabel
 {
     /** An operator voided the label through PolyBag. */
     case Operator = 'operator';
 
     /** The postage source reported the label voided outside PolyBag. */
     case VoidedUpstream = 'voided_upstream';
+
+    public function getLabel(): string
+    {
+        return match ($this) {
+            self::Operator => 'Operator',
+            self::VoidedUpstream => 'Reported by postage source',
+        };
+    }
 }

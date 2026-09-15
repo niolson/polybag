@@ -10,9 +10,11 @@ use App\Filament\Resources\PackageResource;
 use App\Filament\Resources\ShipmentResource;
 use App\Models\Location;
 use App\Models\Package;
+use App\Models\PackageLabel;
 use App\Services\SettingsService;
 use Filament\Actions\Action;
 use Filament\Infolists\Components\RepeatableEntry;
+use Filament\Infolists\Components\RepeatableEntry\TableColumn;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
@@ -223,6 +225,64 @@ class ViewPackage extends ViewRecord
                             ]),
                     ]),
 
+                // Every label ever bought for this package, voided ones
+                // included (ADR-0004). Read-only on purpose: only the label
+                // writers on Package touch these rows, so there is nothing to
+                // create, edit or delete here.
+                Section::make('Labels')
+                    ->columnSpanFull()
+                    ->visible(fn (Package $record): bool => $record->labels->isNotEmpty())
+                    ->schema([
+                        RepeatableEntry::make('labels')
+                            ->hiddenLabel()
+                            ->state(fn (Package $record): array => $record->labels
+                                ->loadMissing(['purchasedBy', 'voidedBy'])
+                                ->sortBy([['purchased_at', 'desc'], ['id', 'desc']])
+                                ->values()
+                                ->all())
+                            ->table([
+                                TableColumn::make('Status'),
+                                TableColumn::make('Purchased'),
+                                TableColumn::make('Carrier'),
+                                TableColumn::make('Tracking Number'),
+                                TableColumn::make('Cost'),
+                                TableColumn::make('Printed'),
+                                TableColumn::make('Voided'),
+                            ])
+                            ->schema([
+                                TextEntry::make('state')
+                                    ->badge()
+                                    ->state(fn (PackageLabel $record): string => $record->isVoided() ? 'Voided' : 'Active')
+                                    ->color(fn (PackageLabel $record): string => $record->isVoided() ? 'gray' : 'success'),
+                                TextEntry::make('purchased_at')
+                                    ->dateTime('M j, Y g:i A', timezone: Location::timezone())
+                                    ->placeholder('—')
+                                    ->helperText(fn (PackageLabel $record): ?string => $record->purchasedBy?->name),
+                                TextEntry::make('carrier')
+                                    ->placeholder('—')
+                                    ->helperText(fn (PackageLabel $record): ?string => $record->service),
+                                TextEntry::make('tracking_number')
+                                    ->fontFamily('mono')
+                                    ->size('sm')
+                                    ->copyable()
+                                    ->placeholder('—'),
+                                TextEntry::make('cost')
+                                    ->money('USD')
+                                    ->placeholder('—'),
+                                TextEntry::make('last_printed_at')
+                                    ->dateTime('M j, Y g:i A', timezone: Location::timezone())
+                                    ->placeholder('Not printed'),
+                                TextEntry::make('voided_at')
+                                    ->dateTime('M j, Y g:i A', timezone: Location::timezone())
+                                    ->placeholder('—')
+                                    ->helperText(fn (PackageLabel $record): ?string => $record->isVoided()
+                                        ? implode(' · ', array_filter([
+                                            $record->void_reason?->getLabel(),
+                                            $record->voidedBy?->name,
+                                        ]))
+                                        : null),
+                            ]),
+                    ]),
             ]);
     }
 }
