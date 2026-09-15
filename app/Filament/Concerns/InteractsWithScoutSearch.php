@@ -19,7 +19,6 @@ trait InteractsWithScoutSearch
     protected static function applyGlobalSearchAttributeConstraints(Builder $query, string $search): void
     {
         $model = new (static::getModel());
-        $table = $model->getTable();
         $columns = array_keys($model->toSearchableArray());
 
         $prefixColumns = [];
@@ -27,7 +26,31 @@ trait InteractsWithScoutSearch
             $prefixColumns = array_merge($prefixColumns, Arr::wrap($attribute->getArguments()[0]));
         }
 
-        $terms = preg_split('/\s+/', trim($search), -1, PREG_SPLIT_NO_EMPTY);
+        static::applyGlobalSearchTerms($query, $search, $model->getTable(), $columns, $prefixColumns);
+    }
+
+    /**
+     * The words of a search, as the constraints below match them.
+     *
+     * @return array<int, string>
+     */
+    protected static function globalSearchTerms(string $search): array
+    {
+        return preg_split('/\s+/', trim($search), -1, PREG_SPLIT_NO_EMPTY);
+    }
+
+    /**
+     * Require every word of the search to match at least one of the columns.
+     *
+     * The same rules for any table: a resource that also searches a related
+     * table applies them there with that table's columns.
+     *
+     * @param  array<int, string>  $columns
+     * @param  array<int, string>  $prefixColumns
+     */
+    protected static function applyGlobalSearchTerms(Builder $query, string $search, string $table, array $columns, array $prefixColumns): void
+    {
+        $terms = static::globalSearchTerms($search);
 
         if (empty($terms)) {
             $query->whereRaw('0 = 1');
