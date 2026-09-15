@@ -40,3 +40,18 @@ names as the alternative to a constraint object — is what it shipped. The evid
 issue was waiting for therefore exists, and question 1 can be answered from the adapter as
 built rather than in the abstract. Still `needs-triage`: the answer may well be "leave it
 alone", and it touches every adapter.
+
+## Comments
+
+### 2026-09-15 — a proposed answer, in ADR-0005
+
+`12` found the concrete case this question was abstract about: Amazon offered thirteen
+services valid only in carrier-supplied packaging, and the only place to say so is after the
+quote. [ADR-0005](../../../adr/0005-packaging-form-and-carrier-identity.md) (Accepted 2026-09-15)
+answers this issue without changing the signature — packaging travels on `PackageData`,
+adapters whose API takes packaging shape their request from it, every adapter stamps the
+packaging a rate requires on the `RateResponse`, and one shared post-quote filter enforces it. If that ADR
+is accepted, this issue closes as "leave the signature; the constraint travels on the
+package". Accepted the same day, so this issue can close when the first implementing
+slice of ADR-0005 lands; left `needs-triage` until then so the decision is not recorded as
+done before any code reflects it.
