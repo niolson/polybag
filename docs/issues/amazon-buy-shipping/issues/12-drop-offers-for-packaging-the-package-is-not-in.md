@@ -1,6 +1,6 @@
 # Drop Amazon offers for packaging the Package is not in, and for content it does not carry
 
-Status: ready-for-agent
+Status: done — shipped 2026-09-15 as `fitsThePackaging()` in the Amazon adapter
 
 Repo: `polybag`
 
@@ -123,14 +123,27 @@ Run `php artisan test --compact tests/Feature/AmazonBuyShippingTest.php`, then
 
 ## Acceptance criteria
 
-- [ ] `isBuyable()` gains `fitsThePackaging()` with the three rules above and a docblock that
+- [x] `isBuyable()` gains `fitsThePackaging()` with the three rules above and a docblock that
       names ADR-0005 as what replaces it
-- [ ] The seven tests above pass; the existing 36 in the file still pass
-- [ ] Observations are still recorded for dropped offers
-- [ ] No change outside `AmazonBuyShippingAdapter` and its test file
+- [x] The seven tests above pass; the existing 36 in the file still pass
+- [x] Observations are still recorded for dropped offers
+- [x] No change outside `AmazonBuyShippingAdapter` and its test file
 
 ## Blocked by
 
 None.
 
 ## Comments
+
+### 2026-09-15 — done
+
+`AmazonBuyShippingAdapter::isBuyable()` gained `fitsThePackaging()` as its fourth
+predicate, after the observations are recorded. Rule 1 is
+`preg_match('/_(?:[LP]?FRE|[SML]FRB)(?:_|$)/')` on the serviceId; rule 2 reads
+`fedexPackageType` off the request's first `PackageData` with the same null-or-`YOUR_PACKAGING`
+test as `FedexAdapter::isOneRateEligible()`; rule 3 is a `CONTENT_RESTRICTED_SERVICES`
+constant of the four exact ids. The docblock names ADR-0005 as what replaces rules 1 and 2.
+
+Seven tests added beside *drops an offer it could not print*; 43 pass in the file. One thing
+the tests had to allow for: `PackageFactory` assigns `box_size_id` at random, so the
+no-box-size case sets it null explicitly rather than trusting the helper's default.

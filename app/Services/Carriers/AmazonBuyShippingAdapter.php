@@ -14,6 +14,7 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\FedexPackageType;
 use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
 use App\Enums\ServiceEvidence;
@@ -107,6 +108,21 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
         'signature_required' => 'SIGNATURE_CONFIRMATION',
         'adult_signature_required' => 'ADULT_SIGNATURE_CONFIRMATION',
         'declared_value' => 'DECLARED_VALUE',
+    ];
+
+    /**
+     * Services valid only for specific contents — Media Mail and Bound Printed
+     * Matter — which nothing on a Package can yet vouch for. Misdeclared Media
+     * Mail is a postal offence, so these are dropped outright by
+     * {@see fitsThePackaging()}.
+     *
+     * @var list<string>
+     */
+    private const CONTENT_RESTRICTED_SERVICES = [
+        'USPS_PTP_MM',
+        'USPS_PTP_BPM',
+        'UPS_PTP_SUREPOST_MEDIA',
+        'UPS_PTP_SUREPOST_BPM',
     ];
 
     public function getCarrierName(): string
@@ -530,15 +546,17 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
     /**
      * Whether this offer could actually be bought and printed.
      *
-     * Two filters, both of which would otherwise fail the *purchase* rather
-     * than the quote — after the packer has committed and, for the second one,
-     * after the offer has been spent.
+     * Three filters that would otherwise fail the *purchase* rather than the
+     * quote — after the packer has committed and, for the second one, after
+     * the offer has been spent — and a fourth that would fail at the carrier's
+     * acceptance counter, after the label is on the parcel.
      */
     private function isBuyable(array $rate, RateRequest $request): bool
     {
         return $this->hasPrintableDocument($rate)
             && $this->honoursRequiredServices($rate, $request)
-            && $this->answersRequiredGroupsForFree($rate, $request);
+            && $this->answersRequiredGroupsForFree($rate, $request)
+            && $this->fitsThePackaging($rate, $request);
     }
 
     /**
@@ -626,6 +644,59 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
         }
 
         return true;
+    }
+
+    /**
+     * Drop an offer for packaging the Package is not in, or for content it
+     * does not carry.
+     *
+     * `getRates` is given dimensions and a weight and rates every service those
+     * fit, so a 4x6x6 box was offered thirteen services valid only in the
+     * carrier's own packaging — flat-rate envelopes and boxes, FedEx One Rate
+     * (`amazon-buy-shipping/12`). The direct adapters never show these:
+     * {@see UspsAdapter::isValidRateIndicator()} picks the flat-rate indicator
+     * from the box size, and {@see FedexAdapter::isOneRateEligible()} asks for
+     * One Rate only when the box size says FedEx packaging. This is the Amazon
+     * equivalent, read off the serviceId because that is all Amazon gives.
+     *
+     * It is a denylist, because a discovered catalog cannot be allowlisted
+     * (ADR-0003): a serviceId matching none of the rules is kept.
+     *
+     * 1. USPS-supplied packaging — the flat-rate envelope (`_FRE`, `_LFRE`,
+     *    `_PFRE`) and flat-rate box (`_SFRB`, `_MFRB`, `_LFRB`) tokens, as
+     *    path segments so `_INTL` and `_CUSTOMS` variants are caught and
+     *    `USPS_PTP_FC` is not. Always dropped: nothing in the app can yet say a
+     *    box size *is* USPS packaging.
+     * 2. FedEx One Rate (`_ONE_RATE`) unless the box size says FedEx packaging,
+     *    exactly as {@see FedexAdapter::isOneRateEligible()} decides it.
+     * 3. Content-restricted services — Media Mail and Bound Printed Matter —
+     *    always, until the app can say a Package's contents qualify.
+     *
+     * Rules 1 and 2 are the narrow fix for what ADR-0005 solves generally: a
+     * box size with a physical form and, independently, a carrier-supplied
+     * identity, and every rate declaring the packaging it requires. When that
+     * lands, this classifier stamps a `PackagingRequirement` on each Amazon
+     * rate instead of filtering. Rule 3 outlives it — content classes are
+     * deferred to a later ADR.
+     */
+    private function fitsThePackaging(array $rate, RateRequest $request): bool
+    {
+        $serviceId = (string) ($rate['serviceId'] ?? '');
+        $package = $request->packages[0] ?? null;
+
+        if (preg_match('/_(?:[LP]?FRE|[SML]FRB)(?:_|$)/', $serviceId) === 1) {
+            return false;
+        }
+
+        if (str_contains($serviceId, '_ONE_RATE')) {
+            $fedexType = $package?->fedexPackageType;
+
+            if (! $fedexType || $fedexType === FedexPackageType::YOUR_PACKAGING) {
+                return false;
+            }
+        }
+
+        return ! in_array($serviceId, self::CONTENT_RESTRICTED_SERVICES, true);
     }
 
     /**
