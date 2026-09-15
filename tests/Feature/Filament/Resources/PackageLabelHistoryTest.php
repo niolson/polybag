@@ -41,6 +41,8 @@ function packageWithVoidedLabels(): array
     $second = PackageLabel::factory()->for($package)->create([
         'tracking_number' => '9400200000000000000003',
         'carrier' => 'FedEx',
+        'cost' => 11.08,
+        'last_printed_at' => null,
         'purchased_at' => now()->subDay(),
         'voided_at' => now()->subDay()->addHour(),
         'void_reason' => VoidReason::VoidedUpstream,
@@ -63,10 +65,18 @@ it('lists every label on the package newest first with the active one distinguis
             $second->tracking_number,
             $first->tracking_number,
         ])
-        // The active badge first, then a voided one per voided label.
-        ->assertSeeInOrder(['Active', 'Voided', 'Voided'])
+        // The active badge first, then a voided one per voided label. The
+        // badge markup is matched, not the word: "Voided" is also a column.
+        ->assertSeeHtmlInOrder([
+            'fi-color-success', 'Active',
+            'fi-badge fi-size-sm">', 'Voided',
+            'fi-badge fi-size-sm">', 'Voided',
+        ])
         ->assertSee($second->voidedBy->name)
-        ->assertSee('Reported by postage source');
+        ->assertSee('Reported by postage source')
+        ->assertSee($active->purchasedBy->name)
+        ->assertSee('$11.08')
+        ->assertSee('Not printed');
 });
 
 it('does not show the labels section for a package that never shipped', function (): void {
@@ -179,6 +189,25 @@ it('prefers the active title when a prefix matches the active and voided labels 
     expect(packageSearchTitles('9400'))->toBe([
         $package->tracking_number => $package->id,
     ]);
+});
+
+it('keeps the active title for a package matched on its own column with no label rows', function (): void {
+    // A package shipped before package_labels existed, whose backfill row
+    // was lost — nothing to title from but the package itself.
+    [$package] = packageWithVoidedLabels();
+    PackageLabel::where('package_id', $package->id)->delete();
+
+    expect(packageSearchTitles($package->tracking_number))->toBe([
+        $package->tracking_number => $package->id,
+    ]);
+});
+
+it('requires every word of the search to match, on either table', function (): void {
+    [$package, , $second] = packageWithVoidedLabels();
+
+    expect(packageSearchTitles('94002 '.$second->tracking_number))->toHaveCount(1)
+        ->and(packageSearchTitles('94002 '.$package->tracking_number))->toBe([])
+        ->and(packageSearchTitles('   '))->toBe([]);
 });
 
 it('reaches the package through the global search component', function (): void {

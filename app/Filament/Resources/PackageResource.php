@@ -101,11 +101,23 @@ class PackageResource extends Resource
             static::applyGlobalSearchTerms($labels, $search, (new PackageLabel)->getTable(), ['tracking_number'], ['tracking_number']);
         };
 
+        // Resolved as a separate indexed lookup rather than an `orWhereHas`:
+        // MySQL cannot use the index on `packages.tracking_number` for one
+        // side of an OR whose other side is an EXISTS subquery, and that
+        // would turn every keystroke in the search box into a table scan.
+        $packageIdsWithMatchingLabel = PackageLabel::query()
+            ->tap($matchLabels)
+            ->orderByDesc('purchased_at')
+            ->limit(static::getGlobalSearchResultsLimit())
+            ->pluck('package_id')
+            ->unique()
+            ->all();
+
         $query = static::getGlobalSearchEloquentQuery()
-            ->where(function (Builder $query) use ($search, $matchLabels): void {
+            ->where(function (Builder $query) use ($search, $packageIdsWithMatchingLabel): void {
                 $query
                     ->where(fn (Builder $query) => static::applyGlobalSearchAttributeConstraints($query, $search))
-                    ->orWhereHas('labels', $matchLabels);
+                    ->when($packageIdsWithMatchingLabel, fn (Builder $query, array $ids) => $query->orWhereIn('packages.id', $ids));
             })
             ->with(['labels' => function (Relation $labels) use ($matchLabels): void {
                 $matchLabels($labels->getQuery());
@@ -130,7 +142,7 @@ class PackageResource extends Resource
                 return new GlobalSearchResult(
                     title: $voidedMatch === null
                         ? static::getGlobalSearchResultTitle($record)
-                        : "Package #{$record->id} — label voided ".$voidedMatch->voided_at->tz(Location::timezone())->format('M j, Y'),
+                        : "Package #{$record->id} — label voided ".$voidedMatch->voided_at->copy()->tz(Location::timezone())->format('M j, Y'),
                     url: $url,
                     details: $voidedMatch === null
                         ? static::getGlobalSearchResultDetails($record)
@@ -155,7 +167,9 @@ class PackageResource extends Resource
      * The package's own tracking number is its active label's, so a package
      * whose active label matched — or that matched on its own column with no
      * label row to show for it — is titled as today. Only a package reached
-     * solely through voided labels is titled from the newest of them.
+     * solely through voided labels is titled from the newest of them. Should
+     * the projection ever disagree with the label rows, the rows decide
+     * (ADR-0004 decision 3); the integrity command is what reports that.
      */
     private static function voidedLabelMatchedBy(Package $record): ?PackageLabel
     {

@@ -251,28 +251,35 @@ class ViewPackage extends ViewRecord
                             ])
                             ->schema([
                                 TextEntry::make('state')
+                                    ->label('Status')
                                     ->badge()
                                     ->state(fn (PackageLabel $record): string => $record->isVoided() ? 'Voided' : 'Active')
                                     ->color(fn (PackageLabel $record): string => $record->isVoided() ? 'gray' : 'success'),
                                 TextEntry::make('purchased_at')
+                                    ->label('Purchased')
                                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                                     ->placeholder('—')
                                     ->helperText(fn (PackageLabel $record): ?string => $record->purchasedBy?->name),
                                 TextEntry::make('carrier')
+                                    ->label('Carrier')
                                     ->placeholder('—')
                                     ->helperText(fn (PackageLabel $record): ?string => $record->service),
                                 TextEntry::make('tracking_number')
+                                    ->label('Tracking Number')
                                     ->fontFamily('mono')
                                     ->size('sm')
                                     ->copyable()
                                     ->placeholder('—'),
                                 TextEntry::make('cost')
+                                    ->label('Cost')
                                     ->money('USD')
                                     ->placeholder('—'),
                                 TextEntry::make('last_printed_at')
+                                    ->label('Printed')
                                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                                     ->placeholder('Not printed'),
                                 TextEntry::make('voided_at')
+                                    ->label('Voided')
                                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                                     ->placeholder('—')
                                     ->helperText(fn (PackageLabel $record): ?string => $record->isVoided()
