@@ -13,6 +13,7 @@ use App\Filament\Support\CarrierLogoColumn;
 use App\Models\Client;
 use App\Models\Location;
 use App\Models\Package;
+use App\Models\PackageLabel;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
@@ -22,6 +23,7 @@ use Filament\Actions;
 use Filament\Forms;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\TextInput;
+use Filament\GlobalSearch\GlobalSearchResult;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components;
@@ -32,6 +34,8 @@ use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Support\Collection;
 use Illuminate\Support\HtmlString;
 
 class PackageResource extends Resource
@@ -74,6 +78,108 @@ class PackageResource extends Resource
     public static function getGlobalSearchEloquentQuery(): Builder
     {
         return parent::getGlobalSearchEloquentQuery()->with('shipment');
+    }
+
+    /**
+     * Find a package by any tracking number it has ever carried.
+     *
+     * `packages.tracking_number` is the active label only: a void clears it, so
+     * the parcel still on the bench with a dead label on it would otherwise be
+     * unfindable. The same term rules are applied to `package_labels`, and the
+     * labels that matched ride along so the title can say which one did — the
+     * active label (today's title) or, failing that, the newest voided one.
+     *
+     * @return Collection<int, GlobalSearchResult>
+     */
+    public static function getGlobalSearchResults(string $search): Collection
+    {
+        if (empty(static::globalSearchTerms($search))) {
+            return collect();
+        }
+
+        $matchLabels = function (Builder $labels) use ($search): void {
+            static::applyGlobalSearchTerms($labels, $search, (new PackageLabel)->getTable(), ['tracking_number'], ['tracking_number']);
+        };
+
+        // Resolved as a separate indexed lookup rather than an `orWhereHas`:
+        // MySQL cannot use the index on `packages.tracking_number` for one
+        // side of an OR whose other side is an EXISTS subquery, and that
+        // would turn every keystroke in the search box into a table scan.
+        $packageIdsWithMatchingLabel = PackageLabel::query()
+            ->tap($matchLabels)
+            ->orderByDesc('purchased_at')
+            ->limit(static::getGlobalSearchResultsLimit())
+            ->pluck('package_id')
+            ->unique()
+            ->all();
+
+        $query = static::getGlobalSearchEloquentQuery()
+            ->where(function (Builder $query) use ($search, $packageIdsWithMatchingLabel): void {
+                $query
+                    ->where(fn (Builder $query) => static::applyGlobalSearchAttributeConstraints($query, $search))
+                    ->when($packageIdsWithMatchingLabel, fn (Builder $query, array $ids) => $query->orWhereIn('packages.id', $ids));
+            })
+            ->with(['labels' => function (Relation $labels) use ($matchLabels): void {
+                $matchLabels($labels->getQuery());
+                $labels->getQuery()->orderByDesc('purchased_at')->orderByDesc('id');
+            }]);
+
+        static::modifyGlobalSearchQuery($query, $search);
+
+        return $query
+            ->limit(static::getGlobalSearchResultsLimit())
+            ->get()
+            ->map(function (Model $record): ?GlobalSearchResult {
+                /** @var Package $record */
+                $url = static::getGlobalSearchResultUrl($record);
+
+                if (blank($url)) {
+                    return null;
+                }
+
+                $voidedMatch = self::voidedLabelMatchedBy($record);
+
+                return new GlobalSearchResult(
+                    title: $voidedMatch === null
+                        ? static::getGlobalSearchResultTitle($record)
+                        : "Package #{$record->id} — label voided ".$voidedMatch->voided_at->copy()->tz(Location::timezone())->format('M j, Y'),
+                    url: $url,
+                    details: $voidedMatch === null
+                        ? static::getGlobalSearchResultDetails($record)
+                        : array_filter([
+                            'Voided label' => $voidedMatch->tracking_number,
+                            'Carrier' => $voidedMatch->carrier,
+                            'Shipment' => $record->shipment?->shipment_reference,
+                        ]),
+                    actions: array_map(
+                        fn (Actions\Action $action): Actions\Action => $action->hasRecord() ? $action : $action->record($record),
+                        static::getGlobalSearchResultActions($record),
+                    ),
+                );
+            })
+            ->filter();
+    }
+
+    /**
+     * The voided label a search result should be titled from, if the package
+     * was found only through one.
+     *
+     * The package's own tracking number is its active label's, so a package
+     * whose active label matched — or that matched on its own column with no
+     * label row to show for it — is titled as today. Only a package reached
+     * solely through voided labels is titled from the newest of them. Should
+     * the projection ever disagree with the label rows, the rows decide
+     * (ADR-0004 decision 3); the integrity command is what reports that.
+     */
+    private static function voidedLabelMatchedBy(Package $record): ?PackageLabel
+    {
+        $matched = $record->labels;
+
+        if ($matched->isEmpty() || $matched->contains(fn (PackageLabel $label): bool => ! $label->isVoided())) {
+            return null;
+        }
+
+        return $matched->first();
     }
 
     public static function form(Schema $form): Schema
