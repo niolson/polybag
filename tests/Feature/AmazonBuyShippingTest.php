@@ -26,6 +26,7 @@ use App\Models\PackageItem;
 use App\Models\Product;
 use App\Models\Setting;
 use App\Models\Shipment;
+use App\Models\ShippingMethod;
 use App\Models\ShippingOffer;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\PackageShipping\EloquentPackageShippingWorkflow;
@@ -35,6 +36,7 @@ use App\Services\PostageSources\PostageSourceDispatcher;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\PackageExportService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
+use App\Services\ShippingRateService;
 use App\Services\TrackingService;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Faking\MockResponse;
@@ -334,8 +336,8 @@ it('keeps the tokens that can spend money out of the rate and in the offer', fun
 it('stores the packaging requirement with the offer, so the purchase restores it from there', function (): void {
     // ADR-0005: every rate says which packaging it requires, and an Amazon
     // rate's requirement travels in the offer's rate metadata rather than in a
-    // column. Everything `isBuyable()` lets through today is rated for the
-    // packer's own packaging; the classifier is packaging-form-and-carrier-identity/04.
+    // column. OnTrac Ground and UPS Next Day Air Saver are shipper-packaging
+    // rates; the carrier-packaging cases are below.
     Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
 
     $rates = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), []);
@@ -511,7 +513,8 @@ it('drops a flat-rate box offer even when the parcel is a box', function (): voi
 
     $rates = amazonAdapter()->getRates(RateRequest::fromPackage($package), []);
 
-    // A box is not *that* box: nothing on a box size can yet say it is USPS's.
+    // A box is not *that* box: `USPS_PTP_PRI_MFRB` is `exactly(UspsMediumFlatRateBox)`,
+    // and this box size declares no carrier packaging.
     expect($rates->pluck('serviceCode')->all())->toBe(['ONTRAC_MFN_GROUND', 'UPS_PTP_NEXT_DAY_AIR_SAVER']);
 });
 
@@ -526,7 +529,13 @@ it('drops FedEx One Rate for the packer\'s own box and keeps it for FedEx packag
 
     $rates = amazonAdapter()->getRates(RateRequest::fromPackage($fedexPak), []);
 
-    expect($rates->pluck('serviceCode')->all())->toBe(['FEDEX_PTP_EXPRESS_SAVER_ONE_RATE']);
+    // One Rate says FedEx-supplied and never which, so the requirement is
+    // every FedEx packaging and a Pak meets it.
+    expect($rates->pluck('serviceCode')->all())->toBe(['FEDEX_PTP_EXPRESS_SAVER_ONE_RATE'])
+        ->and($rates->first()->packagingRequirement->accepts(CarrierPackaging::FedexPak))->toBeTrue()
+        ->and($rates->first()->packagingRequirement->accepts(CarrierPackaging::Fedex25kgBox))->toBeTrue()
+        ->and($rates->first()->packagingRequirement->accepts(CarrierPackaging::UspsFlatRateEnvelope))->toBeFalse()
+        ->and($rates->first()->packagingRequirement->accepts(null))->toBeFalse();
 });
 
 it('drops Media Mail and Bound Printed Matter offers', function (): void {
@@ -557,9 +566,10 @@ it('keeps Ground Advantage, Priority Mail and Priority Mail Cubic', function ():
     $rates = amazonAdapter()->getRates(RateRequest::fromPackage($package), []);
 
     // `USPS_PTP_FC` in particular: the flat-rate envelope token must match a
-    // whole path segment, not any `F`.
+    // whole path segment, not any `F`. All four are the packer's own packaging.
     expect($rates->pluck('serviceCode')->all())
-        ->toBe(['USPS_PTP_GAH', 'USPS_PTP_PRI', 'USPS_PTP_PRI_CUBIC', 'USPS_PTP_FC']);
+        ->toBe(['USPS_PTP_GAH', 'USPS_PTP_PRI', 'USPS_PTP_PRI_CUBIC', 'USPS_PTP_FC'])
+        ->and($rates->every(fn (RateResponse $rate): bool => $rate->packagingRequirement->isShipperPackaging()))->toBeTrue();
 });
 
 it('still records an observation for a dropped offer', function (): void {
@@ -571,9 +581,9 @@ it('still records an observation for a dropped offer', function (): void {
 
     $rates = amazonAdapter()->getRates(RateRequest::fromPackage($package), []);
 
-    // The catalog learns the service exists so that an operator can one day
-    // map it to a flat-rate-envelope service; the filter only decides what the
-    // packer is shown today.
+    // The catalog learns the service exists so that an operator can map it to
+    // a flat-rate-envelope service; the predicate only decides what the packer
+    // is shown for the packaging this parcel is in.
     expect($rates)->toBeEmpty()
         ->and(ObservedService::where('external_service_id', 'USPS_PTP_PRI_FRE')->exists())->toBeTrue()
         ->and(ObservedService::where('external_service_id', 'USPS_PTP_PRI_FRE')->value('last_eligible_at'))->not->toBeNull();
@@ -591,6 +601,222 @@ it('drops carrier-packaging offers for a manual-ship package with no box size', 
     $rates = amazonAdapter()->getRates(RateRequest::fromPackage($package), []);
 
     expect($rates->pluck('serviceCode')->all())->toBe(['ONTRAC_MFN_GROUND', 'UPS_PTP_NEXT_DAY_AIR_SAVER']);
+});
+
+/**
+ * The Amazon fixture a flat-rate-box parcel is quoted against: the offer for
+ * that box, the envelope offers beside it, and the shipper-packaging ones.
+ *
+ * @return array<int, array<string, mixed>>
+ */
+function amazonCarrierPackagingCatalog(): array
+{
+    return [
+        amazonUspsRateFor('USPS_PTP_GAH', 'USPS Ground Advantage (1 - 70 lb)'),
+        amazonUspsRateFor('USPS_PTP_PRI_FRE', 'USPS Priority Mail Flat Rate Envelope'),
+        amazonUspsRateFor('USPS_PTP_EXP_FRE', 'USPS Priority Mail Express Flat Rate Envelope'),
+        amazonUspsRateFor('USPS_PTP_PRI_MFRB', 'USPS Priority Mail Medium Flat Rate Box'),
+        amazonFedexOneRate(),
+    ];
+}
+
+/**
+ * Put the Package's shipment on a shipping method that asks Amazon, so that
+ * {@see ShippingRateService::getShippingRates()} — and its shared
+ * {@see PackagingFilter} — is what quotes it. The one seeded catalog row is
+ * the hook; the rates come back under whichever carrier Amazon names.
+ */
+function amazonShippingMethodFor(Package $package): void
+{
+    $amazon = Carrier::firstOrCreate(['name' => AmazonBuyShippingAdapter::SOURCE_NAME], ['active' => true]);
+    $catalog = $amazon->carrierServices()->create([
+        'name' => 'Amazon Buy Shipping rates',
+        'service_code' => AmazonBuyShippingAdapter::CATALOG_SERVICE_CODE,
+        'active' => true,
+    ]);
+    $method = ShippingMethod::factory()->create();
+    $method->carrierServices()->attach($catalog->id);
+
+    $package->shipment->update(['shipping_method_id' => $method->id]);
+}
+
+it('classifies a flat-rate serviceId to the packaging it names', function (string $serviceId, CarrierPackaging $packaging): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse([amazonUspsRateFor($serviceId, $serviceId)])]);
+
+    $package = amazonPackageIn($this->package, BoxSizeType::BOX, $packaging);
+
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($package), []);
+
+    // `exactly()` that one packaging: the rate is kept for a Package in it and
+    // its requirement admits nothing else, the packer's own included.
+    expect($rates->pluck('serviceCode')->all())->toBe([$serviceId])
+        ->and($rates->first()->packagingRequirement->toArray())
+        ->toBe(PackagingRequirement::exactly($packaging)->toArray());
+})->with([
+    'Priority Mail envelope' => ['USPS_PTP_PRI_FRE', CarrierPackaging::UspsFlatRateEnvelope],
+    'Priority Mail legal envelope' => ['USPS_PTP_PRI_LFRE', CarrierPackaging::UspsLegalFlatRateEnvelope],
+    'Priority Mail padded envelope' => ['USPS_PTP_PRI_PFRE', CarrierPackaging::UspsPaddedFlatRateEnvelope],
+    'Priority Mail Express envelope' => ['USPS_PTP_EXP_FRE', CarrierPackaging::UspsExpressFlatRateEnvelope],
+    'Priority Mail Express legal envelope' => ['USPS_PTP_EXP_LFRE', CarrierPackaging::UspsExpressLegalFlatRateEnvelope],
+    'Priority Mail Express padded envelope' => ['USPS_PTP_EXP_PFRE', CarrierPackaging::UspsExpressPaddedFlatRateEnvelope],
+    'international padded envelope' => ['USPS_PTP_EXP_PFRE_INTL', CarrierPackaging::UspsExpressPaddedFlatRateEnvelope],
+    'small flat-rate box' => ['USPS_PTP_PRI_SFRB', CarrierPackaging::UspsSmallFlatRateBox],
+    'medium flat-rate box' => ['USPS_PTP_PRI_MFRB', CarrierPackaging::UspsMediumFlatRateBox],
+    'large flat-rate box' => ['USPS_PTP_PRI_LFRB', CarrierPackaging::UspsLargeFlatRateBox],
+    'customs variant of a flat-rate box' => ['USPS_PTP_PRI_MFRB_CUSTOMS', CarrierPackaging::UspsMediumFlatRateBox],
+]);
+
+it('keeps a flat-rate envelope token off the packer\'s packaging even under a mail class it has not seen', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse([
+        amazonUspsRateFor('USPS_PTP_NEW_PFRE', 'USPS Something Padded Flat Rate Envelope'),
+    ])]);
+
+    // Neither `PRI` nor `EXP` in the id. `12` dropped every `_FRE` token for a
+    // plain box, and the classifier keeps that promise: the requirement is one
+    // of the two padded envelopes, never the packer's own.
+    expect(amazonAdapter()->getRates(RateRequest::fromPackage(amazonPackageIn($this->package, BoxSizeType::BOX)), []))
+        ->toBeEmpty();
+
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage(
+        amazonPackageIn($this->package, BoxSizeType::PADDED_MAILER, CarrierPackaging::UspsExpressPaddedFlatRateEnvelope),
+    ), []);
+
+    expect($rates->pluck('serviceCode')->all())->toBe(['USPS_PTP_NEW_PFRE'])
+        ->and($rates->first()->packagingRequirement->accepts(CarrierPackaging::UspsPaddedFlatRateEnvelope))->toBeTrue()
+        ->and($rates->first()->packagingRequirement->accepts(CarrierPackaging::UspsFlatRateEnvelope))->toBeFalse();
+});
+
+it('tells a Priority Mail envelope from a Priority Mail Express one', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse([
+        amazonUspsRateFor('USPS_PTP_PRI_FRE', 'USPS Priority Mail Flat Rate Envelope'),
+        amazonUspsRateFor('USPS_PTP_EXP_FRE', 'USPS Priority Mail Express Flat Rate Envelope'),
+    ])]);
+
+    // A packer uses the service printed on the envelope: an Express envelope
+    // gets the Express offer and not the Priority one, and the reverse.
+    $express = amazonPackageIn($this->package, BoxSizeType::PADDED_MAILER, CarrierPackaging::UspsExpressFlatRateEnvelope);
+
+    expect(amazonAdapter()->getRates(RateRequest::fromPackage($express), [])->pluck('serviceCode')->all())
+        ->toBe(['USPS_PTP_EXP_FRE']);
+
+    $priority = amazonPackageIn($this->package, BoxSizeType::PADDED_MAILER, CarrierPackaging::UspsFlatRateEnvelope);
+
+    expect(amazonAdapter()->getRates(RateRequest::fromPackage($priority), [])->pluck('serviceCode')->all())
+        ->toBe(['USPS_PTP_PRI_FRE']);
+});
+
+it('quotes a parcel in a Medium Flat Rate Box that box\'s offer through rate shopping, and nothing else', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse(amazonCarrierPackagingCatalog())]);
+
+    $package = amazonPackageIn($this->package, BoxSizeType::BOX, CarrierPackaging::UspsMediumFlatRateBox);
+    amazonShippingMethodFor($package);
+
+    $rates = app(ShippingRateService::class)->getShippingRates($package->id);
+
+    // The first thing an operator can buy because of ADR-0005: the box size
+    // says it is USPS's medium box, and Amazon's offer for that box is the one
+    // rate shown — not the envelopes, not the shipper-packaging services.
+    expect($rates->pluck('serviceCode')->all())->toBe(['USPS_PTP_PRI_MFRB'])
+        ->and($rates->first()->carrier)->toBe('USPS')
+        ->and($rates->first()->packagingRequirement->toArray())
+        ->toBe(PackagingRequirement::exactly(CarrierPackaging::UspsMediumFlatRateBox)->toArray());
+});
+
+it('quotes a parcel in a FedEx Pak the One Rate offers through rate shopping, and nothing else', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse(amazonCarrierPackagingCatalog())]);
+
+    $package = amazonPackageIn($this->package, BoxSizeType::PADDED_MAILER, CarrierPackaging::FedexPak);
+    amazonShippingMethodFor($package);
+
+    $rates = app(ShippingRateService::class)->getShippingRates($package->id);
+
+    expect($rates->pluck('serviceCode')->all())->toBe(['FEDEX_PTP_EXPRESS_SAVER_ONE_RATE']);
+});
+
+it('issues an offer only for a rate it returns, so a hidden rate never holds purchase authority', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse(amazonCarrierPackagingCatalog())]);
+
+    // At the adapter, not through ShippingRateService: the shared filter there
+    // would hide the same rates, but only after the adapter had issued an
+    // offer row for each. The predicate has to run before the side effect.
+    $box = amazonPackageIn($this->package, BoxSizeType::BOX);
+
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($box), []);
+
+    $dropped = ['USPS_PTP_PRI_FRE', 'USPS_PTP_EXP_FRE', 'USPS_PTP_PRI_MFRB', 'FEDEX_PTP_EXPRESS_SAVER_ONE_RATE'];
+
+    expect($rates->pluck('serviceCode')->all())->toBe(['USPS_PTP_GAH'])
+        ->and(ShippingOffer::count())->toBe(1)
+        ->and(ShippingOffer::pluck('service_code')->all())->toBe(['USPS_PTP_GAH']);
+
+    foreach ($dropped as $serviceId) {
+        expect(ShippingOffer::where('service_code', $serviceId)->exists())->toBeFalse()
+            ->and(ObservedService::where('external_service_id', $serviceId)->exists())->toBeTrue();
+    }
+
+    // The same quote for the flat-rate box: one row, and it is the box's.
+    ShippingOffer::query()->delete();
+    $flatRateBox = amazonPackageIn($this->package, BoxSizeType::BOX, CarrierPackaging::UspsMediumFlatRateBox);
+
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($flatRateBox), []);
+
+    expect($rates->pluck('serviceCode')->all())->toBe(['USPS_PTP_PRI_MFRB'])
+        ->and(ShippingOffer::count())->toBe(1)
+        ->and(ShippingOffer::sole()->service_code)->toBe('USPS_PTP_PRI_MFRB')
+        ->and(ShippingOffer::sole()->public_id)->toBe($rates->first()->offerId);
+});
+
+it('buys a flat-rate box offer for the box it was quoted for, and refuses it once the parcel is in something else', function (): void {
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse(amazonCarrierPackagingCatalog()),
+        PurchaseShipment::class => amazonPurchaseResponse(),
+    ]);
+
+    $package = amazonPackageIn($this->package, BoxSizeType::BOX, CarrierPackaging::UspsMediumFlatRateBox);
+    $quoted = amazonAdapter()->getRates(RateRequest::fromPackage($package), [])->first();
+
+    // The Livewire round-trip, and the offer store behind it: `exactly()` is
+    // intact on both sides.
+    $selected = RateResponse::fromArray($quoted->toArray());
+    $offer = ShippingOffer::where('public_id', $selected->offerId)->firstOrFail();
+    $required = PackagingRequirement::exactly(CarrierPackaging::UspsMediumFlatRateBox)->toArray();
+
+    expect($selected->packagingRequirement->toArray())->toBe($required)
+        ->and(PackagingRequirement::fromRateMetadata($offer->rate_metadata)->toArray())->toBe($required);
+
+    // Re-scanned into a plain box after the quote: the purchase re-check —
+    // `01`'s, reachable now that a rate can say `exactly()` — refuses it.
+    $rescanned = amazonPackageIn($package, BoxSizeType::BOX);
+
+    $refused = app(EloquentPackageShippingWorkflow::class)->ship($rescanned, new PackageShippingRequest(
+        selectedRate: $selected,
+        labelFormat: 'zpl',
+        labelDpi: 300,
+    ));
+
+    expect($refused->success)->toBeFalse()
+        ->and($refused->title)->toBe('Packaging Mismatch')
+        ->and($refused->message)->toContain('USPS Medium Flat Rate Box')
+        ->and($refused->requiresRequote)->toBeTrue()
+        ->and($offer->fresh()->consumed_at)->toBeNull()
+        ->and($rescanned->fresh()->status)->not->toBe(PackageStatus::Shipped);
+
+    Saloon::assertNotSent(PurchaseShipment::class);
+
+    // Back in the box it was quoted for, the same offer buys.
+    $inTheBox = amazonPackageIn($package, BoxSizeType::BOX, CarrierPackaging::UspsMediumFlatRateBox);
+
+    $result = app(EloquentPackageShippingWorkflow::class)->ship($inTheBox, new PackageShippingRequest(
+        selectedRate: $selected,
+        labelFormat: 'zpl',
+        labelDpi: 300,
+    ));
+
+    expect($result->success)->toBeTrue()
+        ->and($inTheBox->fresh()->status)->toBe(PackageStatus::Shipped)
+        ->and($inTheBox->fresh()->service)->toBe('USPS Priority Mail Medium Flat Rate Box');
+
+    Saloon::assertSent(fn (PurchaseShipment $request): bool => $request->body()->all()['rateId'] === 'rate-usps_ptp_pri_mfrb');
 });
 
 it('buys the offer that was chosen and records what Amazon called the shipment', function (): void {
