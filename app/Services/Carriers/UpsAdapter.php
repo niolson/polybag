@@ -32,7 +32,6 @@ use App\Services\Carriers\Concerns\BuildsCustomerReferences;
 use App\Services\Carriers\Concerns\ConsultsCarrierPolicyForOffers;
 use App\Services\Carriers\Concerns\DecodesJsonResponses;
 use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
-use App\Services\Carriers\Concerns\HasSaturdayDelivery;
 use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
 use App\Services\Shipping\PackagingFilter;
@@ -49,7 +48,6 @@ class UpsAdapter implements DirectCarrierAdapter
     use ConsultsCarrierPolicyForOffers;
     use DecodesJsonResponses;
     use HasDefaultServiceCapabilities;
-    use HasSaturdayDelivery;
     use ResolvesCarrierAccount;
     use ResolvesDeliveredAt;
 
@@ -202,27 +200,6 @@ class UpsAdapter implements DirectCarrierAdapter
         '14' => 'UPS Next Day Air Early',
     ];
 
-    /**
-     * Map UPS service codes to the day of week when Saturday delivery applies.
-     * dayOfWeek values: 3=Wednesday, 4=Thursday, 5=Friday
-     * Ground (03) excluded — variable transit times make day mapping impractical.
-     */
-    private const SATURDAY_DELIVERY_DAY_MAP = [
-        '14' => 5,  // Next Day Air Early — Friday → Saturday
-        '01' => 5,  // Next Day Air — Friday → Saturday
-        '13' => 5,  // Next Day Air Saver — Friday → Saturday
-        '02' => 4,  // 2nd Day Air — Thursday → Saturday
-        '12' => 3,  // 3 Day Select — Wednesday → Saturday
-    ];
-
-    /**
-     * @return array<int|string, int>
-     */
-    protected function saturdayDeliveryDayMap(): array
-    {
-        return self::SATURDAY_DELIVERY_DAY_MAP;
-    }
-
     public function getCarrierName(): string
     {
         return 'UPS';
@@ -240,10 +217,8 @@ class UpsAdapter implements DirectCarrierAdapter
             $connector = $this->resolveConnector(
                 $this->resolveAccount($request->locationId, $request->clientId)
             );
-            $apiRequest = $this->buildRateApiRequest($this->adjustRequestForSaturday($request, $serviceCodes));
-            $response = $connector->send($apiRequest);
+            $response = $connector->send($this->buildRateApiRequest($request));
 
-            // Pass original $request so parseRateResponse knows Saturday was requested
             return $this->parseRateResponse($response, $request, $serviceCodes);
         } catch (\Exception $e) {
             throw new CarrierRateFetchException('UPS', $e);
@@ -259,8 +234,7 @@ class UpsAdapter implements DirectCarrierAdapter
         $connector = $this->resolveConnector(
             $this->resolveAccount($request->locationId, $request->clientId)
         );
-        $apiRequest = $this->buildRateApiRequest($this->adjustRequestForSaturday($request, $serviceCodes));
-        $pendingRequest = $connector->createPendingRequest($apiRequest);
+        $pendingRequest = $connector->createPendingRequest($this->buildRateApiRequest($request));
 
         return new PreparedRateRequest(
             pendingRequest: $pendingRequest,
@@ -284,41 +258,12 @@ class UpsAdapter implements DirectCarrierAdapter
             'body' => $response->json(),
         ]);
 
-        $packagingCode = $this->packagingCodeFor($request->packages[0]->carrierPackaging);
-        $results = $this->extractRateDetails($response, $serviceCodes, $packagingCode);
-
-        // Mixed Saturday: initial request was sent without Saturday, now send
-        // a follow-up with Saturday for eligible services and merge results
-        if ($request->hasSpecialService('saturday_delivery') && $this->classifySaturdayEligibility($serviceCodes, $request) === 'mixed') {
-            try {
-                $connector = $this->resolveConnector(
-                    $this->resolveAccount($request->locationId, $request->clientId)
-                );
-                $saturdayApiRequest = $this->buildRateApiRequest($request);
-                $saturdayResponse = $connector->send($saturdayApiRequest);
-
-                if ($saturdayResponse->successful()) {
-                    $saturdayRates = $this->extractRateDetails($saturdayResponse, $serviceCodes, $packagingCode);
-
-                    if ($saturdayRates->isNotEmpty()) {
-                        $saturdayServiceCodes = $saturdayRates->pluck('serviceCode')->unique()->all();
-                        $results = $results->reject(
-                            fn ($rate): bool => in_array($rate->serviceCode, $saturdayServiceCodes)
-                        );
-                        $results = $results->merge($saturdayRates);
-                    }
-                } else {
-                    Log::channel('ups-validation')->warning('UPS Saturday delivery rate request failed', [
-                        'status' => $saturdayResponse->status(),
-                        'errors' => $saturdayResponse->json(),
-                    ]);
-                }
-            } catch (\Exception $e) {
-                logger()->warning('UPS Saturday delivery rate request error', ['error' => $e->getMessage()]);
-            }
-        }
-
-        return $results;
+        return $this->extractRateDetails(
+            $response,
+            $serviceCodes,
+            $this->packagingCodeFor($request->packages[0]->carrierPackaging),
+            $request->hasSpecialService('saturday_delivery'),
+        );
     }
 
     public function supportsTracking(): bool
@@ -428,10 +373,20 @@ class UpsAdapter implements DirectCarrierAdapter
      * with the packaging code the request that produced it sent — the one fact
      * {@see classifyPackaging()} reads.
      *
+     * A shop response lists a service twice when it can reach Saturday from the
+     * ship date: the weekday row and a Saturday row, told apart only by
+     * `TimeInTransit.ServiceSummary.SaturdayDelivery`. Without Saturday requested
+     * the Saturday rows go, or the Ship page shows the same service at two
+     * prices with nothing to tell them apart. With it requested UPS already
+     * returns only the Saturday rows (the indicator is a filter, not an error),
+     * so anything else is dropped and each kept rate is tagged, which is what
+     * {@see CreateShipment()} reads to send the indicator the quote was priced with.
+     *
      * @param  array<int, string>  $serviceCodes
      * @param  string  $packagingCode  A UPS packaging code, {@see packagingCodeFor()}
+     * @param  bool  $saturdayRequested  Whether the request that produced this response carried `SaturdayDeliveryIndicator`
      */
-    private function extractRateDetails(Response $response, array $serviceCodes, string $packagingCode): Collection
+    private function extractRateDetails(Response $response, array $serviceCodes, string $packagingCode, bool $saturdayRequested): Collection
     {
         $ratedShipments = $response->json('RateResponse.RatedShipment', []);
 
@@ -467,6 +422,12 @@ class UpsAdapter implements DirectCarrierAdapter
                 continue;
             }
 
+            $saturdayRow = ($shipment['TimeInTransit']['ServiceSummary']['SaturdayDelivery'] ?? '0') === '1';
+
+            if ($saturdayRow !== $saturdayRequested) {
+                continue;
+            }
+
             $totalCharges = (float) ($shipment['TotalCharges']['MonetaryValue'] ?? 0);
             $serviceName = self::SERVICE_NAMES[$serviceCode] ?? ('UPS Service '.$serviceCode);
 
@@ -489,6 +450,7 @@ class UpsAdapter implements DirectCarrierAdapter
             $metadata = [
                 'serviceCode' => $serviceCode,
                 'packagingCode' => $packagingCode,
+                ...($saturdayRow ? ['saturday_delivery' => true] : []),
             ];
 
             $results->push(new RateResponse(
@@ -656,8 +618,10 @@ class UpsAdapter implements DirectCarrierAdapter
                 ],
             ];
 
-            // Add Saturday delivery if requested
-            $saturdayApplied = $request->hasSpecialService('saturday_delivery');
+            // Saturday delivery follows the quote the operator chose, not the
+            // request flag: extractRateDetails() tags a rate only when UPS
+            // priced it for Saturday, so the label matches what was quoted.
+            $saturdayApplied = (bool) ($request->selectedRate->metadata['saturday_delivery'] ?? false);
             if ($saturdayApplied) {
                 $shipment['ShipmentServiceOptions']['SaturdayDeliveryIndicator'] = '';
             }
@@ -675,39 +639,10 @@ class UpsAdapter implements DirectCarrierAdapter
                 $shipment['InvoiceLineTotal'] = $this->buildShipInvoiceLineTotal($request);
             }
 
-            $response = $this->sendCreateShipment($connector, $shipment, $request);
-            $responseData = $response->json();
-
-            // If Saturday delivery was rejected, retry without it
-            if ($saturdayApplied && ! $response->successful()) {
-                $errorJson = json_encode($responseData);
-                if (str_contains(strtolower($errorJson), 'saturday')) {
-                    Log::channel('ups-validation')->info('UPS Saturday delivery rejected, retrying without', [
-                        'body' => $responseData,
-                    ]);
-                    $saturdayApplied = false;
-                    // Drop only Saturday. ShipmentServiceOptions may also carry
-                    // the customs invoice, which the retry must not strip.
-                    unset($shipment['ShipmentServiceOptions']['SaturdayDeliveryIndicator']);
-                    if ($shipment['ShipmentServiceOptions'] === []) {
-                        unset($shipment['ShipmentServiceOptions']);
-                    }
-                    $response = $this->sendCreateShipment($connector, $shipment, $request);
-                    $responseData = $response->json();
-                }
-            }
-
-            if (! $response->successful()) {
-                $errorMessage = $responseData['response']['errors'][0]['message']
-                    ?? $responseData['errors'][0]['message']
-                    ?? 'UPS API error';
-                Log::channel('ups-validation')->error('UPS createShipment API error', [
-                    'status' => $response->status(),
-                    'body' => $responseData,
-                ]);
-
-                return ShipResponse::failure($errorMessage);
-            }
+            // A UPS refusal never comes back as a failed response: the
+            // connector retries and throws, so the RequestException catch
+            // below is the one place an error body is read.
+            $responseData = $this->sendCreateShipment($connector, $shipment, $request)->json();
 
             $shipmentResults = $responseData['ShipmentResponse']['ShipmentResults'] ?? null;
 
@@ -779,6 +714,19 @@ class UpsAdapter implements DirectCarrierAdapter
                     ...$mapped['appliedCodes'],
                 ],
                 carrierAccountId: $account?->id,
+            );
+        } catch (RequestException $e) {
+            $rawResponse = $this->decodeJsonSafely($e->getResponse());
+
+            Log::channel('ups-validation')->error('UPS createShipment API error', [
+                'status' => $e->getResponse()->status(),
+                'body' => $rawResponse,
+            ]);
+
+            return ShipResponse::failure(
+                data_get($rawResponse, 'response.errors.0.message')
+                    ?? data_get($rawResponse, 'errors.0.message')
+                    ?? $e->getMessage()
             );
         } catch (\Exception $e) {
             Log::channel('ups-validation')->error('UPS createShipment error', [
