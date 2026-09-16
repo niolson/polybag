@@ -538,6 +538,21 @@ it('drops FedEx One Rate for the packer\'s own box and keeps it for FedEx packag
         ->and($rates->first()->packagingRequirement->accepts(null))->toBeFalse();
 });
 
+it('offers nothing for a Package in UPS packaging, which Amazon never quotes for', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse([
+        ...amazonEligibleRates(),
+        amazonUspsRateFor('USPS_PTP_PRI_MFRB', 'USPS Priority Mail Medium Flat Rate Box'),
+        amazonFedexOneRate(),
+    ])]);
+
+    // Every Amazon offer is the shipper's packaging, a USPS flat-rate
+    // packaging or FedEx packaging; none of them is `exactly(UpsPak)`, so a
+    // Package in one sees no Amazon offers and only direct UPS rates it.
+    $upsPak = amazonPackageIn($this->package, BoxSizeType::PADDED_MAILER, CarrierPackaging::UpsPak);
+
+    expect(amazonAdapter()->getRates(RateRequest::fromPackage($upsPak), []))->toBeEmpty();
+});
+
 it('drops Media Mail and Bound Printed Matter offers', function (): void {
     Saloon::fake([GetShippingRates::class => amazonRatesResponse([
         amazonUspsRateFor('USPS_PTP_MM', 'USPS Media Mail'),

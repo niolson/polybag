@@ -917,6 +917,61 @@ it('offers only the medium-flat-rate-box rate for a Package in a USPS Medium Fla
         ->and(RateQuote::where('package_id', $package->id)->count())->toBe(1);
 });
 
+it('offers only UPS rates for a Package in a UPS Pak', function (): void {
+    // ADR-0005 decision 3, the UPS half: the adapter sends the Pak's code on
+    // the rate request and stamps every rate `exactly(UpsPak)`; USPS and FedEx
+    // rate the same parcel as the shipper's packaging, which the shared filter
+    // drops for a Package that says it is in UPS packaging.
+    $upsCarrier = Carrier::factory()->ups()->create();
+    createUpsAccount();
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        ShippingOptions::class => fakeUspsGroundAdvantageRate(8.50),
+        FedexRates::class => MockResponse::make(['output' => ['rateReplyDetails' => [[
+            'serviceType' => 'FEDEX_GROUND',
+            'serviceName' => 'FedEx Ground',
+            'ratedShipmentDetails' => [['totalNetCharge' => 11.50]],
+        ]]]]),
+        UpsRate::class => MockResponse::make(['RateResponse' => ['RatedShipment' => [
+            ['Service' => ['Code' => '03'], 'TotalCharges' => ['MonetaryValue' => '12.40']],
+            ['Service' => ['Code' => '01'], 'TotalCharges' => ['MonetaryValue' => '48.10']],
+        ]]]),
+    ]);
+
+    $shippingMethod = ShippingMethod::factory()->create();
+    $shippingMethod->carrierServices()->attach([
+        CarrierService::factory()->uspsGroundAdvantage()->for($this->uspsCarrier)->create()->id,
+        CarrierService::factory()->fedexGround()->for($this->fedexCarrier)->create()->id,
+        CarrierService::factory()->upsGround()->for($upsCarrier)->create()->id,
+        CarrierService::factory()->upsNextDay()->for($upsCarrier)->create()->id,
+    ]);
+
+    $shipment = Shipment::factory()->for($shippingMethod)->create(['postal_code' => '90210']);
+    $package = Package::factory()->for($shipment)->create([
+        'box_size_id' => BoxSize::factory()->carrierPackaging(CarrierPackaging::UpsPak)->create()->id,
+        'weight' => 2.0,
+        'height' => 1,
+        'width' => 12,
+        'length' => 15,
+    ]);
+
+    $rates = app(ShippingRateService::class)->getShippingRates($package->id);
+
+    expect($rates->pluck('carrier')->unique()->all())->toBe(['UPS'])
+        ->and($rates->pluck('serviceCode')->sort()->values()->all())->toBe(['01', '03'])
+        ->and($rates->pluck('metadata.packagingCode')->unique()->all())->toBe(['04'])
+        ->and($rates->every(fn (RateResponse $rate): bool => $rate->packagingRequirement->accepts(CarrierPackaging::UpsPak)))->toBeTrue()
+        ->and(RateQuote::where('package_id', $package->id)->pluck('carrier')->unique()->all())->toBe(['UPS']);
+
+    Saloon::assertSent(function ($request): bool {
+        return $request instanceof UpsRate
+            && $request->body()->all()['RateRequest']['Shipment']['Package']['PackagingType']['Code'] === '04';
+    });
+    Saloon::assertSent(ShippingOptions::class);
+    Saloon::assertSent(FedexRates::class);
+});
+
 /*
 |--------------------------------------------------------------------------
 | Special service capability + carrier-service scope filtering

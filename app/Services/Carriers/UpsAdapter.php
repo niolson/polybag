@@ -15,9 +15,11 @@ use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackingEventData;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
+use App\Enums\CarrierPackaging;
 use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
 use App\Exceptions\Carriers\CarrierRateFetchException;
+use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Http\Integrations\Ups\Requests\CreateShipment;
 use App\Http\Integrations\Ups\Requests\Rate;
 use App\Http\Integrations\Ups\Requests\TrackShipment;
@@ -177,6 +179,12 @@ class UpsAdapter implements DirectCarrierAdapter
     }
 
     /**
+     * UPS's packaging code for the shipper's own packaging, the same on the
+     * rate body (`PackagingType`) and the ship body (`Packaging`).
+     */
+    private const CUSTOMER_SUPPLIED_PACKAGE = '02';
+
+    /**
      * UPS service code to human-readable name mapping.
      *
      * @var array<string, string>
@@ -275,7 +283,8 @@ class UpsAdapter implements DirectCarrierAdapter
             'body' => $response->json(),
         ]);
 
-        $results = $this->extractRateDetails($response, $serviceCodes);
+        $packagingCode = $this->packagingCodeFor($request->packages[0]->carrierPackaging);
+        $results = $this->extractRateDetails($response, $serviceCodes, $packagingCode);
 
         // Mixed Saturday: initial request was sent without Saturday, now send
         // a follow-up with Saturday for eligible services and merge results
@@ -288,7 +297,7 @@ class UpsAdapter implements DirectCarrierAdapter
                 $saturdayResponse = $connector->send($saturdayApiRequest);
 
                 if ($saturdayResponse->successful()) {
-                    $saturdayRates = $this->extractRateDetails($saturdayResponse, $serviceCodes);
+                    $saturdayRates = $this->extractRateDetails($saturdayResponse, $serviceCodes, $packagingCode);
 
                     if ($saturdayRates->isNotEmpty()) {
                         $saturdayServiceCodes = $saturdayRates->pluck('serviceCode')->unique()->all();
@@ -414,9 +423,14 @@ class UpsAdapter implements DirectCarrierAdapter
     }
 
     /**
-     * Extract rate details from a successful UPS rate response.
+     * Extract rate details from a successful UPS rate response, each stamped
+     * with the packaging code the request that produced it sent — the one fact
+     * {@see classifyPackaging()} reads.
+     *
+     * @param  array<int, string>  $serviceCodes
+     * @param  string  $packagingCode  A UPS packaging code, {@see packagingCodeFor()}
      */
-    private function extractRateDetails(Response $response, array $serviceCodes): Collection
+    private function extractRateDetails(Response $response, array $serviceCodes, string $packagingCode): Collection
     {
         $ratedShipments = $response->json('RateResponse.RatedShipment', []);
 
@@ -473,6 +487,7 @@ class UpsAdapter implements DirectCarrierAdapter
 
             $metadata = [
                 'serviceCode' => $serviceCode,
+                'packagingCode' => $packagingCode,
             ];
 
             $results->push(new RateResponse(
@@ -529,10 +544,7 @@ class UpsAdapter implements DirectCarrierAdapter
                     ...$this->buildRateShipmentTotalWeight($request),
                     ...$this->buildRateInvoiceLineTotal($request),
                     'Package' => [
-                        'PackagingType' => [
-                            'Code' => '02',
-                            'Description' => 'Customer Supplied Package',
-                        ],
+                        'PackagingType' => $this->buildPackaging($package->carrierPackaging),
                         'PackageWeight' => [
                             'UnitOfMeasurement' => [
                                 'Code' => 'LBS',
@@ -615,10 +627,7 @@ class UpsAdapter implements DirectCarrierAdapter
                 ...$shipmentLevelReferences,
                 'Package' => [
                     [
-                        'Packaging' => [
-                            'Code' => '02',
-                            'Description' => 'Customer Supplied Package',
-                        ],
+                        'Packaging' => $this->buildPackaging($request->packageData->carrierPackaging),
                         'PackageWeight' => [
                             'UnitOfMeasurement' => [
                                 'Code' => 'LBS',
@@ -830,18 +839,113 @@ class UpsAdapter implements DirectCarrierAdapter
     }
 
     /**
-     * Which packaging a UPS rate is valid in.
+     * Which packaging a UPS rate is valid in — ADR-0005 decision 3: the
+     * adapter stamps the packaging it sent. UPS puts packaging on the request,
+     * so every rate carries the `PackagingType` code its request named under
+     * `packagingCode`: a UPS packaging code is `exactly(…)` the packaging it
+     * stands for, and `02` is the shipper's own.
      *
-     * The rate request hard-codes the "customer supplied package" packaging
-     * code, so every rate it returns is the shipper's own packaging. Sending a
-     * Letter, Pak or Express Box and reading it back here is
-     * packaging-form-and-carrier-identity/07.
+     * A rate quoted before the code was stamped has no key and was quoted as
+     * `02`, so it is the shipper's packaging. A code this adapter never sends —
+     * which can only arrive restated by a browser — is refused rather than
+     * defaulted, the invariant `05` set for USPS.
      *
      * @param  array<string, mixed>  $metadata
+     *
+     * @throws UnclassifiablePackagingException when the code is not one this adapter maps a packaging to
      */
     private function classifyPackaging(array $metadata): PackagingRequirement
     {
-        return PackagingRequirement::shipperPackaging();
+        $sent = $metadata['packagingCode'] ?? self::CUSTOMER_SUPPLIED_PACKAGE;
+
+        if ($sent === self::CUSTOMER_SUPPLIED_PACKAGE) {
+            return PackagingRequirement::shipperPackaging();
+        }
+
+        $packaging = array_find(
+            CarrierPackaging::cases(),
+            fn (CarrierPackaging $candidate): bool => $this->packagingCodeFor($candidate) === $sent,
+        );
+
+        if ($packaging === null) {
+            throw new UnclassifiablePackagingException('UPS', "UPS packaging code {$sent} is not one PolyBag can place in a packaging.");
+        }
+
+        return PackagingRequirement::exactly($packaging);
+    }
+
+    /**
+     * The `PackagingType` / `Packaging` container both bodies send. The
+     * description is optional and unvalidated; it is the name the vendored
+     * specs give each code.
+     *
+     * @return array{Code: string, Description: string}
+     */
+    private function buildPackaging(?CarrierPackaging $packaging): array
+    {
+        $code = $this->packagingCodeFor($packaging);
+
+        return [
+            'Code' => $code,
+            'Description' => match ($code) {
+                '01' => 'UPS Letter',
+                '03' => 'Tube',
+                '04' => 'PAK',
+                '21' => 'UPS Express Box',
+                '2a' => 'Small Express Box',
+                '2b' => 'Medium Express Box',
+                '2c' => 'Large Express Box',
+                default => 'Customer Supplied Package',
+            },
+        ];
+    }
+
+    /**
+     * The UPS packaging code for a Package's carrier packaging — the one place
+     * `CarrierPackaging` meets UPS's wire enum, used by the rate body, the ship
+     * body and the classifier's reverse lookup. Codes per the vendored
+     * Rating and Shipping specs; UPS's 10 kg and 25 kg boxes (`25` / `24`) are
+     * enum additions when someone stocks them.
+     *
+     * Another carrier's packaging — a USPS flat-rate box — is `02`: UPS rates
+     * the parcel as customer packaging, every rate that comes back is stamped
+     * `shipperPackaging()`, and the shared filter drops all of them for a
+     * Package that says it is in USPS packaging. That is the right outcome —
+     * UPS cannot carry a USPS flat-rate box at a USPS flat rate — and it needs
+     * no special case here.
+     */
+    private function packagingCodeFor(?CarrierPackaging $packaging): string
+    {
+        return match ($packaging) {
+            CarrierPackaging::UpsLetter => '01',
+            CarrierPackaging::UpsTube => '03',
+            CarrierPackaging::UpsPak => '04',
+            CarrierPackaging::UpsExpressBox => '21',
+            CarrierPackaging::UpsExpressBoxSmall => '2a',
+            CarrierPackaging::UpsExpressBoxMedium => '2b',
+            CarrierPackaging::UpsExpressBoxLarge => '2c',
+            null,
+            CarrierPackaging::UspsFlatRateEnvelope,
+            CarrierPackaging::UspsLegalFlatRateEnvelope,
+            CarrierPackaging::UspsPaddedFlatRateEnvelope,
+            CarrierPackaging::UspsSmallFlatRateBox,
+            CarrierPackaging::UspsMediumFlatRateBox,
+            CarrierPackaging::UspsLargeFlatRateBox,
+            CarrierPackaging::UspsExpressFlatRateEnvelope,
+            CarrierPackaging::UspsExpressLegalFlatRateEnvelope,
+            CarrierPackaging::UspsExpressPaddedFlatRateEnvelope,
+            CarrierPackaging::FedexEnvelope,
+            CarrierPackaging::FedexPak,
+            CarrierPackaging::FedexTube,
+            CarrierPackaging::FedexBox,
+            CarrierPackaging::FedexExtraSmallBox,
+            CarrierPackaging::FedexSmallBox,
+            CarrierPackaging::FedexMediumBox,
+            CarrierPackaging::FedexLargeBox,
+            CarrierPackaging::FedexExtraLargeBox,
+            CarrierPackaging::Fedex10kgBox,
+            CarrierPackaging::Fedex25kgBox => self::CUSTOMER_SUPPLIED_PACKAGE,
+        };
     }
 
     /**
