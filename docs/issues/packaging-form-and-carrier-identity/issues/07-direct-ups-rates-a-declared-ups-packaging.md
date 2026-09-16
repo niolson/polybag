@@ -136,9 +136,12 @@ skipped); Pint and PHPStan clean.
   `resolvePreSelectedRate()` keeping a Pak-quoted rate and dropping a rule's `02` rate for
   a Package in a Pak. `ShippingRateServiceTest` runs USPS, FedEx and UPS for real against
   a Pak and gets only UPS; `AmazonBuyShippingTest` gets nothing for a Pak.
-- **Not done here**: UPS Letter still gets `Dimensions` on the ship body, which UPS
-  documents as "not applicable" to a Letter; the sandbox did not object for a Pak and no
-  Letter was bought. `24`/`25` stay out of the enum until someone stocks them.
+- **Review, same day**: the ship body sent `Dimensions` for a Letter too, which UPS
+  documents as not applicable to a Letter — a quoted Letter could have failed at the
+  label over a field it never needed. Now omitted for `UpsLetter` only, tested against the
+  Shipping schema for a Letter, a Pak and the packer's own box. No Letter has been bought
+  in the sandbox; the Pak purchase above carried dimensions and was accepted.
+- **Not done here**: `24`/`25` stay out of the enum until someone stocks them.
 
 ## Sandbox rate-and-buy (added 2026-09-16)
 

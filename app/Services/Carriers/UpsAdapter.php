@@ -634,14 +634,19 @@ class UpsAdapter implements DirectCarrierAdapter
                             ],
                             'Weight' => (string) $request->packageData->weight,
                         ],
-                        'Dimensions' => [
-                            'UnitOfMeasurement' => [
-                                'Code' => 'IN',
+                        // UPS documents Dimensions as not applicable to a
+                        // Letter, whose size is UPS's own; a quoted Letter must
+                        // not fail at the label over a field it never needed.
+                        ...($request->packageData->carrierPackaging === CarrierPackaging::UpsLetter ? [] : [
+                            'Dimensions' => [
+                                'UnitOfMeasurement' => [
+                                    'Code' => 'IN',
+                                ],
+                                'Length' => (string) (int) $request->packageData->length,
+                                'Width' => (string) (int) $request->packageData->width,
+                                'Height' => (string) (int) $request->packageData->height,
                             ],
-                            'Length' => (string) (int) $request->packageData->length,
-                            'Width' => (string) (int) $request->packageData->width,
-                            'Height' => (string) (int) $request->packageData->height,
-                        ],
+                        ]),
                         ...$packageLevelReferences,
                         ...($mapped['options'] !== [] ? [
                             'PackageServiceOptions' => $mapped['options'],

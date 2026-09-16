@@ -1520,6 +1520,28 @@ it('names the packaging on the ship request', function (?CarrierPackaging $packa
     });
 })->with('ups packaging codes');
 
+it('sends dimensions for every packaging except a UPS Letter, whose size is UPS\'s own', function (?CarrierPackaging $packaging, bool $expectsDimensions): void {
+    fakeUpsShipEndpoints();
+
+    expect($this->adapter->createShipment(upsShipRequestIn($packaging))->success)->toBeTrue();
+
+    Saloon::assertSent(function ($request) use ($expectsDimensions): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $body = $request->body()->all();
+
+        assertMatchesUpsSchema($body, 'SHIPRequestWrapper', 'upsShipping');
+
+        return array_key_exists('Dimensions', $body['ShipmentRequest']['Shipment']['Package'][0]) === $expectsDimensions;
+    });
+})->with([
+    'a UPS Letter' => [CarrierPackaging::UpsLetter, false],
+    'a UPS Pak' => [CarrierPackaging::UpsPak, true],
+    'the packer\'s own box' => [null, true],
+]);
+
 it('sends the same packaging code on the Saturday follow-up rate request', function (): void {
     fakeUpsRateEndpointsQuoting([
         ['Service' => ['Code' => '03'], 'TotalCharges' => ['MonetaryValue' => '11.00']],
