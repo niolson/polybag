@@ -11,6 +11,7 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CarrierPackaging;
 use App\Enums\PackageStatus;
 use App\Enums\ShippingRuleAction;
+use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\NoActiveCarrierServicesException;
 use App\Models\BoxSize;
 use App\Models\Carrier;
@@ -226,6 +227,39 @@ it('asks the adapter which packaging the rate needs, so the browser cannot switc
         ->and($result->success)->toBeFalse()
         ->and($result->title)->toBe('Packaging Mismatch')
         ->and($result->message)->toContain('USPS Medium Flat Rate Box')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});
+
+it('refuses a rate whose packaging the adapter cannot classify, rather than buying it as the shipper\'s own', function (): void {
+    // The classifier invariant (ADR-0005 decision 3): an indicator the adapter
+    // does not recognise is refused, never defaulted. The real USPS adapter
+    // throws for it; the workflow turns that into a mismatch, not a 500.
+    $this->actingAs($user = User::factory()->create());
+    $package = createWorkflowPackage();
+    $rate = new RateResponse(
+        carrier: 'MockCarrier',
+        serviceCode: 'PRIORITY_MAIL',
+        serviceName: 'Priority Mail',
+        price: 29.59,
+        metadata: ['mailClass' => 'PRIORITY_MAIL', 'rateIndicator' => 'PM'],
+    );
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')
+        ->once()
+        ->andThrow(new UnclassifiablePackagingException('MockCarrier', 'PM is not one PolyBag can place in a packaging.'));
+    $adapter->shouldNotReceive('createShipment');
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: $rate, userId: $user->id),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Packaging Mismatch')
+        ->and($result->message)->toContain('cannot match to a packaging')
+        ->and($result->requiresRequote)->toBeTrue()
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 

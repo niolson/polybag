@@ -1,6 +1,6 @@
 # Direct USPS rates a declared flat-rate packaging
 
-Status: ready-for-human
+Status: done — shipped 2026-09-16; direct USPS keeps the flat-rate indicators as `exactly(…)` requirements, and a box size declared a USPS flat-rate envelope or box rates and buys at the flat-rate price — proved by a sandbox purchase
 
 Repo: `polybag`
 
@@ -79,23 +79,23 @@ back and the label's rate indicator in a comment here.
 
 ## Acceptance criteria
 
-- [ ] Whether the flat-rate variants need a `processingCategory` in the request is
+- [x] Whether the flat-rate variants need a `processingCategory` in the request is
       answered from two sandbox responses, recorded here; the request builder changes
-      only if they do
-- [ ] The (mailClass, rateIndicator) → `CarrierPackaging` table is recorded in a comment
+      only if they do — they do not; unchanged
+- [x] The (mailClass, rateIndicator) → `CarrierPackaging` table is recorded in a comment
       on this file with its source, and the classifier takes both
-- [ ] `UspsAdapterTest`: a fixture with `SP`, `CP`, the flat-rate envelope and medium
+- [x] `UspsAdapterTest`: a fixture with `SP`, `CP`, the flat-rate envelope and medium
       flat-rate box indicators for a `BOX` package returns `SP` and `CP` as
       `shipperPackaging()` and the two flat-rate ones as `exactly(…)`; the same envelope
       indicator under `PRIORITY_MAIL_EXPRESS` is `exactly(UspsExpressFlatRateEnvelope)`;
       the soft-pack tiers are still dropped for a `BOX` and kept for a `POLYBAG`
-- [ ] `ShippingRateService` test: the same fixture for a Package in a
+- [x] `ShippingRateService` test: the same fixture for a Package in a
       `UspsMediumFlatRateBox` box size yields only the medium-flat-rate-box rate
-- [ ] `resolvePreSelectedRate()` for that Package returns the flat-rate variant, not the
+- [x] `resolvePreSelectedRate()` for that Package returns the flat-rate variant, not the
       cheapest `SP`
-- [ ] The label body for a flat-rate rate validates against `uspsLabel.json`
-- [ ] One sandbox rate-and-buy for a declared flat-rate box, recorded here
-- [ ] `vendor/bin/pint --dirty --format agent` clean
+- [x] The label body for a flat-rate rate validates against `uspsLabel.json`
+- [x] One sandbox rate-and-buy for a declared flat-rate box, recorded here
+- [x] `vendor/bin/pint --dirty --format agent` clean
 
 ## Classifier invariant (added 2026-09-16)
 
@@ -113,3 +113,102 @@ this issue.
 - [`02`](02-pre-selection-filters-before-it-chooses.md) — the USPS variant choice must
   filter first, or an automated rule buys the flat-rate envelope for a plain box
 - [`03`](03-box-size-carrier-packaging-replaces-fedex-package-type.md) — the column
+
+## Sandbox findings (added 2026-09-16)
+
+Source: `POST /shipments/v3/options/search` against `apis-tem.usps.com` (sandbox mode,
+EPS `CONTRACT` pricing), plus two weeks of the same call in
+`storage/logs/usps-validation-*.log`. Package 8 × 5 × 1.5 in, 1 lb, 90210 → 10001,
+`mailClass: ALL_OUTBOUND`.
+
+### `processingCategory` in the request changes nothing
+
+Three searches — no `processingCategory`, `MACHINABLE`, `FLATS` — returned byte-identical
+rate lists. The flat-rate variants arrive unprompted from `ALL_OUTBOUND`; the request
+builder stays as it is. The ADR's conditional is resolved on the "unchanged" branch.
+
+### (mailClass, rateIndicator) → packaging, as USPS returns it
+
+| mailClass | rateIndicator | processingCategory | description | classify as |
+|---|---|---|---|---|
+| `PRIORITY_MAIL` | `FE` | `FLATS` | Flat Rate Envelope | `exactly(UspsFlatRateEnvelope)` |
+| `PRIORITY_MAIL` | `FA` | `FLATS` | Legal Flat Rate Envelope | `exactly(UspsLegalFlatRateEnvelope)` |
+| `PRIORITY_MAIL` | `FP` | `FLATS` | Padded Flat Rate Envelope | `exactly(UspsPaddedFlatRateEnvelope)` |
+| `PRIORITY_MAIL` | `FS` | `MACHINABLE` | Small Flat Rate Box | `exactly(UspsSmallFlatRateBox)` |
+| `PRIORITY_MAIL` | `FB` | `MACHINABLE` | Medium Flat Rate Box | `exactly(UspsMediumFlatRateBox)` |
+| `PRIORITY_MAIL` | `PL` | `MACHINABLE` | Large Flat Rate Box | `exactly(UspsLargeFlatRateBox)` |
+| `PRIORITY_MAIL` | `PM` | `MACHINABLE` | Large Flat Rate Box APO/FPO/DPO | **drop** — see below |
+| `PRIORITY_MAIL_EXPRESS` | `E4` | `FLATS` | Express Flat Rate Envelope | `exactly(UspsExpressFlatRateEnvelope)` |
+| `PRIORITY_MAIL_EXPRESS` | `E6` | `FLATS` | Express Legal Flat Rate Envelope | `exactly(UspsExpressLegalFlatRateEnvelope)` |
+| `PRIORITY_MAIL_EXPRESS` | `E7` | `FLATS` | Express Legal Flat Rate Envelope Holiday Delivery | **drop** — see below |
+| `PRIORITY_MAIL_EXPRESS` | `FP` | `FLATS` | Express Padded Flat Rate Envelope | `exactly(UspsExpressPaddedFlatRateEnvelope)` |
+| `PRIORITY_MAIL` / `PRIORITY_MAIL_EXPRESS` / `USPS_GROUND_ADVANTAGE` | `SP`, `PA`, `CP`, `P5`–`Q0` | `MACHINABLE` | Single-piece / cubic tiers | `shipperPackaging()` |
+
+International mirrors it with `INTERNATIONAL_SERVICE_CENTER` entry: `PRIORITY_MAIL_INTERNATIONAL`
+returns `FE`/`FA`/`FP`/`FB`/`PL` and `PRIORITY_MAIL_EXPRESS_INTERNATIONAL` returns
+`E4`/`E6`/`FP`/`PA`, same packaging per indicator. `FS` was absent from every logged
+search until this one — USPS omits it when the package does not fit the small box, so a
+fixture for it needs small dimensions.
+
+Things the issue text did not anticipate:
+
+- **`FP` is shared** between Priority Mail and Priority Mail Express (padded envelope),
+  exactly the case the two-input classifier was designed for. The plain and legal
+  envelopes are *not* shared: `FE`/`FA` for Priority Mail, `E4`/`E6` for Express.
+- **The envelopes come back as `processingCategory: FLATS`**, and `isValidRate()` drops
+  `FLATS` before the indicator check runs. The `FLATS` filter must let the six flat-rate
+  envelope indicators through (only those — `PRIORITY_MAIL_INTERNATIONAL` `SP`/`FLATS`
+  "Single-piece Large Envelope" is a real flat and should stay dropped).
+- **`PM`** (large flat rate box, APO/FPO/DPO price, $29.59 vs `PL` $31.00) is returned
+  for a non-military destination. If it classified as `UspsLargeFlatRateBox` it would
+  win the cheapest-variant pick for every large flat rate box. Drop it in
+  `isValidRate()` until a military-destination check exists.
+- **`E7`** is the Express legal envelope priced for Sunday/holiday delivery. Same
+  packaging as `E6`, different product; drop it rather than offer two prices for one
+  envelope. Neither `PM` nor `E7` may fall through to `shipperPackaging()` — the
+  classifier invariant above.
+- `PA` is Priority Mail Express's single-piece indicator (its `SP`), not a universal one.
+  It is shipper packaging; `UNIVERSAL_RATE_INDICATORS` is right about the form, wrong
+  about the name.
+
+## Sandbox rate-and-buy (added 2026-09-16)
+
+Through the real `UspsAdapter`, sandbox, EPS contract pricing. `PackageData` 11 × 8.5 ×
+5.5 in, 2 lb, `BOX`, `carrierPackaging: UspsMediumFlatRateBox`, warehouse ZIP to a residential ZIP in the same state (both from an earlier successful sandbox label — USPS rejected two made-up addresses first).
+
+`getRates()` for `PRIORITY_MAIL` kept five variants — `FP` $11.99 (padded envelope),
+`FB` $21.17 (medium box), `PL` $31.00 (large box), `SP` $9.10 and `CP` $9.45 (cubic
+tier 3, shipper packaging). `FE`/`FA`/`FS` were not quoted: USPS omits them when the
+dimensions cannot fit. `PackagingFilter::keepCompatible()` for the medium box left only
+`FB`.
+
+`createShipment()` with that rate — label body `mailClass: PRIORITY_MAIL`,
+`rateIndicator: FB`, `processingCategory: MACHINABLE`, nothing else changed —
+succeeded: a tracking number came back, postage **$21.17** (the flat-rate quote,
+not the $9.10 single-piece price), `zone: "00"`, SKU `DPFB1XXXXC00700` — the `FB` in
+the SKU is USPS echoing the indicator back. `uspsLabel.json` needed no extension.
+
+## Implementation notes (added 2026-09-16)
+
+- The classifier refuses an unknown pair by throwing
+  `UnclassifiablePackagingException`; `EloquentPackageShippingWorkflow::packagingRefused()`
+  catches it and returns `packagingMismatch()`, so a browser restating `PM` or `E7` gets
+  "get rates again", not a 500. At rate shopping it cannot throw: `isValidRate()` keeps
+  exactly the pairs the classifier knows.
+- Review (same day, two passes): the shipper-packaging branch is pair-based too. A
+  browser-restated `MEDIA_MAIL`/`SP` used to classify as `shipperPackaging()` because
+  `SP` is, and a first fix with separate class and indicator allow-lists still let
+  `USPS_GROUND_ADVANTAGE`/`PA` and `PRIORITY_MAIL_EXPRESS`/`CP` through as a Cartesian
+  product. Now `SHIPPER_PACKAGING_INDICATORS` is mailClass → indicators, read off every
+  logged response: Ground Advantage and Priority Mail get `SP` and both cubic tables,
+  Express (domestic and international) gets `PA` only, Parcel Select and the
+  international parcel classes `SP` only; Global Express Guaranteed has never appeared
+  and is absent. `isValidRate()` and `isValidRateIndicator()` read the same table
+  (replacing the Library/Media deny-list), so the filter never keeps a pair the
+  classifier would refuse. One existing test had fabricated a Ground Advantage/`PA`
+  row; its fixture now says Express. Whether a restated mail class is *authorised* is
+  still `postage-source-split/14`; this only stops it being *classified*.
+- `isValidRate()`'s `FLATS` exemption is by indicator (`FE`, `FA`, `FP`, `E4`, `E6`),
+  so `PRIORITY_MAIL_INTERNATIONAL` `SP`/`FLATS` — a real large envelope — stays dropped.
+- Not in this slice: offering `PM` to APO/FPO/DPO destinations. It needs a
+  military-destination check the adapter does not have; today those addresses get `PL`.

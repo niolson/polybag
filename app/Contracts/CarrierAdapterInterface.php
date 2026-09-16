@@ -5,6 +5,7 @@ namespace App\Contracts;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Models\Package;
 use Illuminate\Support\Collection;
 
@@ -76,9 +77,12 @@ interface CarrierAdapterInterface extends PostageOfferSource
      * sends and nothing else, so that no metadata can classify as the
      * shipper's packaging while buying the carrier's. An indicator or code the
      * classifier does not recognise must not fall through to
-     * `shipperPackaging()`. Authority — the quoted rate restored server-side
+     * `shipperPackaging()` — it throws instead, and the purchase path turns
+     * that into a refusal. Authority — the quoted rate restored server-side
      * behind an opaque identifier, as an offer already is — is
      * `postage-source-split/14`.
+     *
+     * @throws UnclassifiablePackagingException when the metadata names a product the adapter cannot place in any packaging
      */
     public function packagingRequirementFor(RateResponse $rate): PackagingRequirement;
 }

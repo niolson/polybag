@@ -18,6 +18,7 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\UnattendedRateSelection;
 use App\Enums\PackageStatus;
+use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\MissingDeclaredValueException;
 use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Exceptions\ZeroValueCustomsItemException;
@@ -802,8 +803,24 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             return null;
         }
 
-        $required = $seller->packagingRequirementFor($rate);
         $packaging = PackageData::fromPackage($package)->carrierPackaging;
+
+        try {
+            $required = $seller->packagingRequirementFor($rate);
+        } catch (UnclassifiablePackagingException $e) {
+            logger()->warning('Refused a rate whose packaging the adapter could not classify', [
+                'package_id' => $package->id,
+                'carrier' => $rate->carrier,
+                'service_code' => $rate->serviceCode,
+                'metadata' => $rate->metadata,
+                'reason' => $e->getMessage(),
+            ]);
+
+            return PackageShippingResult::packagingMismatch(
+                'This rate names a '.$rate->carrier.' product PolyBag cannot match to a packaging. '
+                .'Get rates again and choose one quoted for this package.',
+            );
+        }
 
         if ($required->accepts($packaging)) {
             return null;

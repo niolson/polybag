@@ -5,6 +5,7 @@ use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\CarrierPackaging;
+use App\Http\Integrations\USPS\Requests\ShippingOptions;
 use App\Models\BoxSize;
 use App\Models\Package;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
@@ -13,6 +14,8 @@ use App\Services\Carriers\FedexAdapter;
 use App\Services\Carriers\UpsAdapter;
 use App\Services\Carriers\UspsAdapter;
 use Illuminate\Support\Collection;
+use Saloon\Http\Faking\MockResponse;
+use Saloon\Laravel\Facades\Saloon;
 
 /**
  * ADR-0005 decision 4, the pre-selection site: a rule's chosen service reaches
@@ -112,6 +115,57 @@ it('filters the rule rate itself when USPS quotes no variant at all', function (
 
     expect(uspsAdapterQuoting([])->resolvePreSelectedRate($rate, packageIn(null)))->toBe($rate)
         ->and(uspsAdapterQuoting([])->resolvePreSelectedRate($rate, packageIn(CarrierPackaging::UspsSmallFlatRateBox)))->toBeNull();
+});
+
+it('pre-selects the flat-rate variant for a Package in a flat-rate box, through the real classifier', function (): void {
+    // A rule says "Priority Mail"; USPS quotes the single-piece, cubic and
+    // flat-rate variants; the Package is in a medium flat rate box. The
+    // cheapest outright is the envelope, the cheapest shipper-packaging is
+    // SP — and neither is the answer.
+    $rate = fn (string $indicator, string $category, float $price): array => [
+        'totalBasePrice' => $price,
+        'rates' => [[
+            'mailClass' => 'PRIORITY_MAIL',
+            'processingCategory' => $category,
+            'rateIndicator' => $indicator,
+            'destinationEntryFacilityType' => 'NONE',
+            'description' => "Priority Mail {$indicator}",
+        ]],
+    ];
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        ShippingOptions::class => MockResponse::make([
+            'pricingOptions' => [[
+                'shippingOptions' => [[
+                    'rateOptions' => [
+                        $rate('SP', 'MACHINABLE', 15.22),
+                        $rate('CP', 'MACHINABLE', 15.51),
+                        $rate('FE', 'FLATS', 11.12),
+                        $rate('FB', 'MACHINABLE', 21.17),
+                        $rate('PL', 'MACHINABLE', 31.00),
+                    ],
+                ]],
+            ]],
+        ]),
+    ]);
+
+    createUspsAccount();
+
+    $package = packageIn(CarrierPackaging::UspsMediumFlatRateBox);
+    $package->shipment->update(['postal_code' => '10001', 'validated_postal_code' => '10001']);
+
+    $resolved = (new UspsAdapter)->resolvePreSelectedRate(new RateResponse(
+        carrier: 'USPS',
+        serviceCode: 'PRIORITY_MAIL',
+        serviceName: 'Priority Mail',
+        price: 0.0,
+        packagingRequirement: PackagingRequirement::shipperPackaging(),
+    ), $package);
+
+    expect($resolved)->not->toBeNull()
+        ->and($resolved->metadata['rateIndicator'])->toBe('FB')
+        ->and($resolved->price)->toBe(21.17);
 });
 
 dataset('pass-through adapters', [
