@@ -51,6 +51,7 @@ class Package extends Model
         'carrier_request_payload',
         'label_data',
         'customs_form_data',
+        'customs_form_format',
         'label_orientation',
         'label_format',
         'label_dpi',
@@ -531,6 +532,7 @@ class Package extends Model
                     // demand from a carrier-hosted URL, so printing it does not
                     // depend on that URL staying fetchable.
                     'customs_form_data' => $response->customsFormData,
+                    'customs_form_format' => $response->customsFormFormat ?? 'pdf',
                     'status' => PackageStatus::Shipped->value,
                     'tracking_status' => TrackingStatus::PreTransit->value,
                     'tracking_updated_at' => null,
@@ -785,6 +787,7 @@ class Package extends Model
                     'cost' => null,
                     'label_data' => null,
                     'customs_form_data' => null,
+                    'customs_form_format' => 'pdf',
                     'label_orientation' => null,
                     'label_format' => 'pdf',
                     'label_dpi' => null,

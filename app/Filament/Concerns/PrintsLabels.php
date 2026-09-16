@@ -65,24 +65,19 @@ trait PrintsLabels
             return;
         }
 
-        $params = [
+        // The customs form and the redirect are only sent where there is one,
+        // so the listener can tell "no customs document" from "a customs
+        // document that did not print".
+        $this->dispatch('print-label', ...array_filter([
             'label' => $request->label,
             'orientation' => $request->orientation,
             'format' => $request->format,
             'dpi' => $request->dpi,
             'packageId' => $request->packageId,
-        ];
-
-        // Only sent where there is one, so the listener can tell "no customs
-        // document" from "a customs document that did not print".
-        if ($request->customsForm !== null) {
-            $params['customsForm'] = $request->customsForm;
-        }
-
-        if ($redirectTo !== null) {
-            $params['redirectTo'] = $redirectTo;
-        }
-
-        $this->dispatch('print-label', ...$params);
+            'customsForm' => $request->customsForm,
+            'customsFormFormat' => $request->customsForm === null ? null : ($request->customsFormFormat ?? 'pdf'),
+            'redirectTo' => $redirectTo,
+        ], fn (mixed $value, string $key): bool => $value !== null
+            || ! in_array($key, ['customsForm', 'customsFormFormat', 'redirectTo'], true), ARRAY_FILTER_USE_BOTH));
     }
 }

@@ -25,5 +25,12 @@ readonly class AmazonPurchasedLabel
         public ?string $labelData = null,
         public string $labelFormat = 'pdf',
         public ?int $labelDpi = null,
+        // The customs declaration, where the offering declared one and Amazon
+        // returned it — a separate `CUSTOM_FORM` package document, never fused
+        // into the label (per Amazon support, 2026-09-16). Its format travels
+        // with it because Amazon reports one per document and the print path
+        // cannot assume PDF the way it can for UPS and Shopify.
+        public ?string $customsFormData = null,
+        public ?string $customsFormFormat = null,
     ) {}
 }

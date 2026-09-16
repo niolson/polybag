@@ -133,7 +133,25 @@ it('stores a customs document the purchase returned beside the label', function 
         customsFormData: base64_encode('commercial-invoice'),
     ), PostageSource::CarrierAccount);
 
-    expect(base64_decode($package->refresh()->customs_form_data))->toBe('commercial-invoice');
+    expect(base64_decode($package->refresh()->customs_form_data))->toBe('commercial-invoice')
+        // Not stated, so the PDF every source observed so far returns.
+        ->and($package->customs_form_format)->toBe('pdf');
+});
+
+it('stores the format of a customs document the source stated', function (): void {
+    $package = Package::factory()->create();
+
+    $package->markShipped(new ShipResponse(
+        success: true,
+        trackingNumber: 'LZ123456789US',
+        carrier: 'USPS',
+        service: 'USPS_PTP_PRI_INTL',
+        labelData: base64_encode('label'),
+        customsFormData: base64_encode('customs-form-png'),
+        customsFormFormat: 'image',
+    ), PostageSource::CarrierAccount);
+
+    expect($package->refresh()->customs_form_format)->toBe('image');
 });
 
 it('clears the customs document when the label is voided', function (): void {
@@ -144,6 +162,7 @@ it('clears the customs document when the label is voided', function (): void {
     $package->clearShipping(VoidReason::Operator);
 
     expect($package->refresh()->customs_form_data)->toBeNull()
+        ->and($package->customs_form_format)->toBe('pdf')
         ->and($package->label_data)->toBeNull();
 });
 

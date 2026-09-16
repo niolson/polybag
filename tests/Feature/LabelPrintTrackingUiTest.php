@@ -151,7 +151,24 @@ it('sends the customs form alongside the label it belongs to', function (): void
         ->callAction(TestAction::make('reprint')->table($package))
         ->assertDispatched(
             'print-label',
-            fn (string $event, array $params): bool => $params['customsForm'] === $package->customs_form_data,
+            fn (string $event, array $params): bool => $params['customsForm'] === $package->customs_form_data
+                && $params['customsFormFormat'] === 'pdf',
+        );
+});
+
+it('tells the report printer what kind of document the customs form is', function (): void {
+    // Amazon states a format per document, and a PNG rendered as a PDF prints
+    // nothing — so the format travels with the bytes.
+    $package = Package::factory()->withCustomsForm()->create([
+        'shipped_by_user_id' => auth()->id(),
+        'customs_form_format' => 'image',
+    ]);
+
+    Livewire::test(ListPackages::class)
+        ->callAction(TestAction::make('reprint')->table($package))
+        ->assertDispatched(
+            'print-label',
+            fn (string $event, array $params): bool => $params['customsFormFormat'] === 'image',
         );
 });
 
@@ -190,10 +207,10 @@ it('interleaves each customs form with its own label in a batch print', function
         ->assertDispatched(
             'print-batch-labels',
             fn (string $event, array $params): bool => collect($params['labels'])
-                ->mapWithKeys(fn (array $label): array => [$label['packageId'] => $label['customsForm']])
+                ->mapWithKeys(fn (array $label): array => [$label['packageId'] => [$label['customsForm'], $label['customsFormFormat']]])
                 ->all() === [
-                    $domestic->id => null,
-                    $international->id => $international->customs_form_data,
+                    $domestic->id => [null, 'pdf'],
+                    $international->id => [$international->customs_form_data, 'pdf'],
                 ],
         );
 });

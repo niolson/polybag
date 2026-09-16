@@ -12,6 +12,7 @@ use App\Exceptions\Carriers\AmazonLabelPurchaseException;
 use App\Exceptions\MissingAmazonOrderItemsException;
 use App\Http\Integrations\Amazon\AmazonSpApiConnector;
 use App\Http\Integrations\Amazon\Requests\CancelAmazonShipment;
+use App\Http\Integrations\Amazon\Requests\GetAdditionalInputsSchema;
 use App\Http\Integrations\Amazon\Requests\GetShipmentTracking;
 use App\Http\Integrations\Amazon\Requests\GetShippingRates;
 use App\Http\Integrations\Amazon\Requests\PurchaseShipment;
@@ -81,6 +82,15 @@ class AmazonBuyShippingService
      * @var array<string, string>
      */
     private const LABEL_FORMATS = ['pdf' => 'pdf', 'zpl' => 'zpl', 'png' => 'image'];
+
+    /**
+     * The `DocumentType` Amazon returns a customs declaration under — singular
+     * `CUSTOM_FORM`, the schema's spelling, not the `CUSTOMS_FORM` Shopify uses.
+     * Per Amazon support (2026-09-16), always a separate package document,
+     * never fused into the label, and offered only where the rate's own print
+     * option declares it.
+     */
+    public const CUSTOMS_DOCUMENT_TYPE = 'CUSTOM_FORM';
 
     public function __construct(
         private readonly PostageSourceResolver $postageSourceResolver,
@@ -184,6 +194,55 @@ class AmazonBuyShippingService
         }
 
         return AmazonShippingQuote::fromPayload($response->json('payload', []));
+    }
+
+    /**
+     * The JSON schema a purchase of this rate would have to satisfy.
+     *
+     * Asked of every rate that sets `requiresAdditionalInputs`, at quote time,
+     * because it is the only place the vocabulary exists (`13`): Amazon
+     * publishes no schema, the sandbox has no case that returns one, and the
+     * account has never been quoted a rate that asks. The answer carries no
+     * order data — it is a schema, not a form — so the adapter records it
+     * against the service for whoever builds the `additionalInputs` payload
+     * later, and drops the rate in the meantime.
+     *
+     * Null on any failure. A schema that could not be fetched changes nothing
+     * about the quote: the rate is dropped either way, and the next quote asks
+     * again.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function additionalInputsSchema(DataSource $source, string $requestToken, string $rateId): ?array
+    {
+        try {
+            $response = $this->connectorFor($source)->send(
+                new GetAdditionalInputsSchema($requestToken, $rateId, self::BUSINESS_ID)
+            );
+        } catch (\Throwable $e) {
+            // A transport failure or a credential problem, neither of which
+            // may cost the packer the rest of the quote.
+            logger()->warning('Amazon getAdditionalInputs failed', [
+                'rate_id' => $rateId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        if (! $response->successful()) {
+            logger()->warning('Amazon getAdditionalInputs failed', [
+                'rate_id' => $rateId,
+                'status' => $response->status(),
+                'errors' => $this->describeErrors($response),
+            ]);
+
+            return null;
+        }
+
+        $schema = $response->json('payload');
+
+        return is_array($schema) ? $schema : null;
     }
 
     /**
@@ -481,8 +540,16 @@ class AmazonBuyShippingService
         $dpis = $this->supportedDpis($chosen);
         $layouts = array_values(array_filter((array) ($printOption['supportedPageLayouts'] ?? []), 'is_string'));
         $joining = array_values(array_filter((array) ($printOption['supportedFileJoiningOptions'] ?? []), 'is_bool'));
-        $mandatory = collect($printOption['supportedDocumentDetails'] ?? [])
-            ->filter(fn (mixed $detail): bool => is_array($detail) && ($detail['isMandatory'] ?? false) && is_string($detail['name'] ?? null))
+        $details = collect($printOption['supportedDocumentDetails'] ?? [])
+            ->filter(fn (mixed $detail): bool => is_array($detail) && is_string($detail['name'] ?? null));
+        $requested = $details
+            ->filter(fn (array $detail): bool => ($detail['isMandatory'] ?? false)
+                // The customs form whenever the option declares it, mandatory
+                // or not: it is the declaration the parcel crosses the border
+                // on, and it comes back as a document of its own (`13`).
+                // Never when absent — Amazon refuses a specification naming a
+                // document the offering did not publish.
+                || $detail['name'] === self::CUSTOMS_DOCUMENT_TYPE)
             ->pluck('name');
 
         return array_filter([
@@ -504,8 +571,36 @@ class AmazonBuyShippingService
             'needFileJoining' => in_array(false, $joining, true) ? false : ($joining[0] ?? false),
             // Every document the print option makes mandatory, and the label
             // regardless — Amazon refuses a request that leaves one out.
-            'requestedDocumentTypes' => $mandatory->push('LABEL')->unique()->values()->all(),
+            'requestedDocumentTypes' => $requested->push('LABEL')->unique()->values()->all(),
         ], fn (mixed $value): bool => $value !== null);
+    }
+
+    /**
+     * Whether buying this rate returns a customs document beside the label.
+     *
+     * Read off the offering, not off the address: Amazon declares the documents
+     * a purchase returns in each print option's `supportedDocumentDetails`, and
+     * a `CUSTOM_FORM` there is the only thing that says a second document is
+     * coming. `AddressData::requiresCustomsDeclaration()` is the wrong
+     * predicate here — it is true for Puerto Rico, Guam, the Northern Marianas
+     * and American Samoa, and Amazon quoted all four as plain domestic USPS
+     * with no `CUSTOM_FORM` anywhere (`09`). A gate on the address would refuse
+     * those purchases for want of a report printer that would print nothing.
+     *
+     * Answered over every print option the rate published rather than the one
+     * {@see documentSpecification()} will pick, because at quote time the
+     * workstation's label format is not known yet; the purchase re-derives
+     * the same answer from the same stored array, so the Ship page and the
+     * purchase check cannot disagree.
+     *
+     * @param  array<int, array<string, mixed>>  $supported  The rate's `supportedDocumentSpecifications`
+     */
+    public static function declaresCustomsForm(array $supported): bool
+    {
+        return collect($supported)
+            ->flatMap(fn (array $spec): array => (array) ($spec['printOptions'] ?? []))
+            ->flatMap(fn (mixed $option): array => is_array($option) ? (array) ($option['supportedDocumentDetails'] ?? []) : [])
+            ->contains(fn (mixed $detail): bool => is_array($detail) && ($detail['name'] ?? null) === self::CUSTOMS_DOCUMENT_TYPE);
     }
 
     /**
@@ -667,12 +762,27 @@ class AmazonBuyShippingService
 
         $format = strtolower((string) ($document['format'] ?? ''));
 
+        // The customs declaration, where one came back. Read beside the label
+        // rather than by widening the filter above: a CUSTOM_FORM with no LABEL
+        // still fails loudly, and a CUSTOM_FORM that arrives unrequested is
+        // still kept — Amazon is the authority on what it sends back. Its
+        // format is carried with it: the storage default of PDF is an
+        // observation about Shopify and UPS, not about this.
+        $customsForm = collect($detail['packageDocuments'] ?? [])
+            ->first(fn (mixed $doc): bool => is_array($doc)
+                && ($doc['type'] ?? null) === self::CUSTOMS_DOCUMENT_TYPE
+                && filled($doc['contents'] ?? null));
+
         return new AmazonPurchasedLabel(
             shipmentId: $shipmentId,
             trackingId: filled($detail['trackingId'] ?? null) ? (string) $detail['trackingId'] : null,
             labelData: (string) $document['contents'],
             labelFormat: self::LABEL_FORMATS[$format] ?? 'pdf',
             labelDpi: $labelDpi,
+            customsFormData: $customsForm === null ? null : (string) $customsForm['contents'],
+            customsFormFormat: $customsForm === null
+                ? null
+                : self::LABEL_FORMATS[strtolower((string) ($customsForm['format'] ?? ''))] ?? 'pdf',
         );
     }
 

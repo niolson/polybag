@@ -1,6 +1,6 @@
 # International labels return a customs form PolyBag could not print
 
-Status: ready-for-human — storage and printing shipped 2026-09-10 with two carriers feeding them; the pre-purchase gate's Amazon half is `amazon-buy-shipping/13` (from the offering's document details, per Amazon support 2026-09-16); the FedEx row of `23` still waits
+Status: ready-for-human — storage and printing shipped 2026-09-10 with two carriers feeding them; the pre-purchase gate's Amazon predicate shipped 2026-09-16 in `amazon-buy-shipping/13` (`AmazonBuyShippingAdapter::returnsSeparateCustomsDocument()`, from the offering's document details) and Amazon now feeds `customs_form_data` with its format carried; the gate itself (constraints 3 and 4) and the FedEx row of `23` still wait
 
 Repo: `polybag`
 
@@ -104,6 +104,12 @@ Three things decided in the implementation:
 **UPS is now the second carrier feeding this, and the first that is not Shopify** (`23`,
 `24`): `ShipmentResults.Form.Image` read into `customsFormData` and stored, printed and
 purged by these paths.
+
+**Amazon is the third** (`amazon-buy-shipping/13`, 2026-09-16): a `CUSTOM_FORM` package
+document is requested when the offering declares it and read into `customsFormData`. It
+also brought the format along — `packages.customs_form_format`, `ShipResponse::customsFormFormat`,
+`PrintRequest::customsFormFormat`, through to `printReport()` — because Amazon states a
+format per document and `23` had flagged that the storage assumed PDF.
 
 ## A defect found on the way: the PII purge had never run
 

@@ -36,6 +36,11 @@ use Illuminate\Support\Carbon;
  * @property Carbon $first_seen_at
  * @property Carbon $last_seen_at
  * @property Carbon|null $last_eligible_at
+ * @property array<string, mixed>|null $additional_inputs_schema the JSON schema
+ *                                                               a purchase of this service must satisfy in `additionalInputs`, recorded
+ *                                                               the first time a rate for it said it required them. Null until then —
+ *                                                               which, for every service seen so far, is still.
+ * @property Carbon|null $additional_inputs_schema_seen_at
  * @property-read int|null $environment_approvals_count how many clients have
  *     approved this service for automated spending, in the world this row was
  *     seen in. Not a column and not a relation — approvals are keyed on the
@@ -84,6 +89,8 @@ class ObservedService extends Model
         'last_seen_at',
         'last_eligible_at',
         'observation_count',
+        'additional_inputs_schema',
+        'additional_inputs_schema_seen_at',
     ];
 
     protected function casts(): array
@@ -94,6 +101,8 @@ class ObservedService extends Model
             'last_seen_at' => 'datetime',
             'last_eligible_at' => 'datetime',
             'observation_count' => 'integer',
+            'additional_inputs_schema' => 'array',
+            'additional_inputs_schema_seen_at' => 'datetime',
         ];
     }
 
