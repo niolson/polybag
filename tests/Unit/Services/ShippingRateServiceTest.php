@@ -18,6 +18,7 @@ use App\Exceptions\NoActiveCarrierServicesException;
 use App\Http\Integrations\Fedex\Requests\Rates as FedexRates;
 use App\Http\Integrations\Ups\Requests\Rate as UpsRate;
 use App\Http\Integrations\USPS\Requests\ShippingOptions;
+use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierService;
@@ -812,6 +813,53 @@ it('drops rates whose packaging requirement the package does not meet, before th
     expect($rates)->toHaveCount(1)
         ->and($rates[0]->serviceCode)->toBe('GROUND')
         ->and(RateQuote::where('package_id', $package->id)->pluck('service_code')->all())->toBe(['GROUND']);
+});
+
+it('keeps both the weight-based and One Rate FedEx rates for a Package in a FedEx Pak', function (): void {
+    // ADR-0005 decision 3 as amended: FedEx stamps the packaging it sent, so a
+    // weight-based rate quoted for a Pak is `exactly(FedexPak)` just like its
+    // One Rate variant, and the shared filter keeps both for a Package in one.
+    $expressSaver = [
+        'serviceType' => 'EXPRESS_SAVER',
+        'serviceName' => 'FedEx Express Saver',
+        'ratedShipmentDetails' => [['totalNetCharge' => 21.40]],
+    ];
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        FedexRates::class => function (PendingRequest $pendingRequest) use ($expressSaver): MockResponse {
+            $isOneRate = in_array('FEDEX_ONE_RATE', data_get($pendingRequest->body()->all(), 'requestedShipment.shipmentSpecialServices.specialServiceTypes', []), true);
+
+            return MockResponse::make(['output' => ['rateReplyDetails' => [
+                $isOneRate ? ['ratedShipmentDetails' => [['totalNetCharge' => 14.95]]] + $expressSaver : $expressSaver,
+            ]]]);
+        },
+    ]);
+
+    $shippingMethod = ShippingMethod::factory()->create();
+    $expressSaverService = CarrierService::factory()
+        ->for($this->fedexCarrier)
+        ->create(['name' => 'FedEx Express Saver', 'service_code' => 'EXPRESS_SAVER']);
+    $shippingMethod->carrierServices()->attach($expressSaverService);
+
+    $shipment = Shipment::factory()->for($shippingMethod)->create(['postal_code' => '90210']);
+    $package = Package::factory()->for($shipment)->create([
+        'box_size_id' => BoxSize::factory()->carrierPackaging(CarrierPackaging::FedexPak)->create()->id,
+        'weight' => 2.0,
+        'height' => 1,
+        'width' => 12,
+        'length' => 15,
+    ]);
+
+    $rates = app(ShippingRateService::class)->getShippingRates($package->id);
+
+    expect($rates->pluck('serviceCode')->all())->toBe(['EXPRESS_SAVER', 'EXPRESS_SAVER'])
+        ->and($rates->pluck('price')->all())->toBe([21.40, 14.95])
+        ->and($rates->map(fn ($rate): bool => (bool) ($rate->metadata['isOneRate'] ?? false))->all())->toBe([false, true]);
+
+    foreach ($rates as $rate) {
+        expect($rate->packagingRequirement->accepts(CarrierPackaging::FedexPak))->toBeTrue();
+    }
 });
 
 /*

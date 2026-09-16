@@ -4,14 +4,10 @@ namespace App\Models;
 
 use App\Enums\BoxSizeType;
 use App\Enums\CarrierPackaging;
-use App\Enums\FedexPackageType;
 use App\Services\CacheService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-/**
- * @property CarrierPackaging|null $carrier_packaging Whose packaging this is when it is not the packer's own — ADR-0005's second axis. The column and its cast arrive in packaging-form-and-carrier-identity/03; until then it reads null unless a test sets it by hand.
- */
 class BoxSize extends Model
 {
     use HasFactory;
@@ -31,7 +27,7 @@ class BoxSize extends Model
         'label',
         'code',
         'type',
-        'fedex_package_type',
+        'carrier_packaging',
         'materials_cost',
     ];
 
@@ -42,7 +38,7 @@ class BoxSize extends Model
         'max_weight' => 'decimal:2',
         'empty_weight' => 'decimal:2',
         'type' => BoxSizeType::class,
-        'fedex_package_type' => FedexPackageType::class,
+        'carrier_packaging' => CarrierPackaging::class,
         'materials_cost' => 'decimal:2',
     ];
 }

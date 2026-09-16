@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\CarrierPackaging;
 use App\Filament\Pages\SetupWizard;
 use App\Models\BoxSize;
 use App\Models\Channel;
@@ -44,6 +45,40 @@ it('prepopulates starter box sizes when selected', function (): void {
     expect(BoxSize::count())->toBeGreaterThan(0)
         ->and(BoxSize::where('code', '01')->exists())->toBeTrue()
         ->and(BoxSize::where('label', 'USPS Flat Rate Padded Envelope')->exists())->toBeTrue();
+});
+
+it('creates box sizes with and without carrier packaging', function (): void {
+    $component = Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
+        ->set('data.box_sizes', [
+            [
+                'label' => 'FedEx Pak',
+                'code' => 'PAK',
+                'type' => 'PADDED_MAILER',
+                'height' => 1,
+                'width' => 11.75,
+                'length' => 14.75,
+                'max_weight' => 35,
+                'empty_weight' => 0.1,
+                'carrier_packaging' => CarrierPackaging::FedexPak->value,
+            ],
+            [
+                'label' => '6x6x6',
+                'code' => 'CUBE',
+                'type' => 'BOX',
+                'height' => 6,
+                'width' => 6,
+                'length' => 6,
+                'max_weight' => 35,
+                'empty_weight' => 0.2,
+                'carrier_packaging' => null,
+            ],
+        ]);
+
+    invokePrivateMethod($component->instance(), 'saveBoxSizes');
+
+    expect(BoxSize::where('code', 'PAK')->sole()->carrier_packaging)->toBe(CarrierPackaging::FedexPak)
+        ->and(BoxSize::where('code', 'CUBE')->sole()->carrier_packaging)->toBeNull();
 });
 
 it('prepopulates starter shipping methods when selected', function (): void {
