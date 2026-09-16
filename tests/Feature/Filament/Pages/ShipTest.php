@@ -6,6 +6,7 @@ use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingOptions;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingResult;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\PackageStatus;
 use App\Filament\Pages\Ship;
@@ -61,6 +62,7 @@ function createShippablePackage(): Package
 function registerMockAdapter(ShipResponse $response): void
 {
     $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('getCarrierName')->andReturn('USPS');
     $adapter->shouldReceive('isConfigured')->andReturn(true);
     $adapter->shouldReceive('prepareRateRequest')->andReturnNull();

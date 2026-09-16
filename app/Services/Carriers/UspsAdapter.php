@@ -5,6 +5,7 @@ namespace App\Services\Carriers;
 use App\Contracts\DirectCarrierAdapter;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
@@ -349,6 +350,13 @@ class UspsAdapter implements DirectCarrierAdapter
                     continue;
                 }
 
+                $metadata = [
+                    'mailClass' => $rate['mailClass'],
+                    'processingCategory' => $rate['processingCategory'],
+                    'rateIndicator' => $rate['rateIndicator'],
+                    'destinationEntryFacilityType' => $rate['destinationEntryFacilityType'],
+                ];
+
                 $results->push(new RateResponse(
                     carrier: 'USPS',
                     serviceCode: $rate['mailClass'],
@@ -356,12 +364,8 @@ class UspsAdapter implements DirectCarrierAdapter
                     price: (float) ($rateOption['totalBasePrice'] ?? 0),
                     deliveryCommitment: $rateOption['commitment']['name'] ?? null,
                     deliveryDate: $rateOption['commitment']['scheduleDeliveryDate'] ?? null,
-                    metadata: [
-                        'mailClass' => $rate['mailClass'],
-                        'processingCategory' => $rate['processingCategory'],
-                        'rateIndicator' => $rate['rateIndicator'],
-                        'destinationEntryFacilityType' => $rate['destinationEntryFacilityType'],
-                    ],
+                    metadata: $metadata,
+                    packagingRequirement: $this->classifyPackaging($metadata),
                 ));
             }
         }
@@ -939,6 +943,26 @@ class UspsAdapter implements DirectCarrierAdapter
         }
 
         return $rates->sortBy('price')->first();
+    }
+
+    public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
+    {
+        return $this->classifyPackaging($rate->metadata);
+    }
+
+    /**
+     * Which packaging a USPS rate is valid in, read off the same `mailClass`
+     * and `rateIndicator` the purchase sends.
+     *
+     * Every indicator that survives {@see isValidRate()} today is priced for
+     * the packer's own packaging; the flat-rate indicators it discards become
+     * `exactly(…)` requirements here in packaging-form-and-carrier-identity/05.
+     *
+     * @param  array<string, mixed>  $metadata
+     */
+    private function classifyPackaging(array $metadata): PackagingRequirement
+    {
+        return PackagingRequirement::shipperPackaging();
     }
 
     /**

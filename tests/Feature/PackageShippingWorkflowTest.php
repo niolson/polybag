@@ -5,8 +5,10 @@ use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\CarrierPackaging;
 use App\Enums\PackageStatus;
 use App\Enums\ShippingRuleAction;
 use App\Exceptions\NoActiveCarrierServicesException;
@@ -81,6 +83,7 @@ it('prepares sorted rate options for a package', function (): void {
     $package = createWorkflowPackage();
 
     $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('isConfigured')->once()->andReturnTrue();
     $adapter->shouldReceive('prepareRateRequest')->once()->andReturnNull();
     $adapter->shouldReceive('getRates')->once()->andReturn(collect([
@@ -125,6 +128,7 @@ it('ships a package with the selected rate and marks it shipped', function (): v
     $rate = new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days');
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('createShipment')->once()->andReturn(
         ShipResponse::success(
             trackingNumber: 'TRACK123',
@@ -149,11 +153,87 @@ it('ships a package with the selected rate and marks it shipped', function (): v
         ->and($package->fresh()->shipped_by_user_id)->toBe($user->id);
 });
 
+it('refuses a rate that requires carrier packaging the package is not in', function (): void {
+    // ADR-0005 decision 4, the purchase re-check. Today it can never fail from
+    // a real quote — every adapter classifies shipperPackaging() and every
+    // Package is in the packer's own packaging — so it is proved with an
+    // adapter that classifies the rate as needing a flat-rate box.
+    $this->actingAs($user = User::factory()->create());
+    $package = createWorkflowPackage();
+    $rate = new RateResponse(
+        carrier: 'MockCarrier',
+        serviceCode: 'GROUND',
+        serviceName: 'Ground',
+        price: 7.25,
+        packagingRequirement: PackagingRequirement::exactly(CarrierPackaging::UspsMediumFlatRateBox),
+    );
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')
+        ->once()
+        ->andReturn(PackagingRequirement::exactly(CarrierPackaging::UspsMediumFlatRateBox));
+    $adapter->shouldNotReceive('createShipment');
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: $rate, userId: $user->id),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Packaging Mismatch')
+        ->and($result->message)->toContain('USPS Medium Flat Rate Box')
+        ->and($result->leavePackageIntact)->toBeTrue()
+        ->and($result->requiresRequote)->toBeTrue()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped)
+        ->and($package->fresh()->tracking_number)->toBeNull();
+});
+
+it('asks the adapter which packaging the rate needs, so the browser cannot switch the check off', function (): void {
+    // A direct-carrier rate reaches the purchase rebuilt from Livewire state,
+    // so its stamped requirement is whatever the browser sent. Here it says
+    // shipper packaging — exactly what a tampered request would say — and the
+    // adapter, classifying from the rate's own metadata, says otherwise.
+    $this->actingAs($user = User::factory()->create());
+    $package = createWorkflowPackage();
+    $browserRate = RateResponse::fromArray([
+        'carrier' => 'MockCarrier',
+        'serviceCode' => 'PRIORITY_MAIL',
+        'serviceName' => 'Priority Mail',
+        'price' => 9.65,
+        'deliveryCommitment' => null,
+        'deliveryDate' => null,
+        'transitTime' => null,
+        'metadata' => ['mailClass' => 'PRIORITY_MAIL', 'rateIndicator' => 'FB'],
+        'packagingRequirement' => PackagingRequirement::shipperPackaging()->toArray(),
+    ]);
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')
+        ->once()
+        ->withArgs(fn (RateResponse $rate): bool => $rate->metadata['rateIndicator'] === 'FB')
+        ->andReturn(PackagingRequirement::exactly(CarrierPackaging::UspsMediumFlatRateBox));
+    $adapter->shouldNotReceive('createShipment');
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: $browserRate, userId: $user->id),
+    );
+
+    expect($browserRate->packagingRequirement->isShipperPackaging())->toBeTrue()
+        ->and($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Packaging Mismatch')
+        ->and($result->message)->toContain('USPS Medium Flat Rate Box')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});
+
 it('returns a failure result when the carrier rejects the shipment', function (): void {
     $package = createWorkflowPackage();
     $rate = new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days');
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('createShipment')->once()->andReturn(
         ShipResponse::failure('Rate unavailable for this destination.')
     );
@@ -176,6 +256,7 @@ it('reports a carrier timeout when shipping times out', function (): void {
     $rate = new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days');
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('createShipment')
         ->once()
         ->andThrow(new RequestTimeOutException(Mockery::mock(Response::class), 'timed out'));
@@ -197,6 +278,7 @@ it('reports a carrier error when shipping raises a request exception', function 
     $rate = new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days');
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('createShipment')
         ->once()
         ->andThrow(new RequestException(Mockery::mock(Response::class), 'bad request'));
@@ -218,6 +300,7 @@ it('reports a state conflict when shipping raises a runtime exception', function
     $rate = new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days');
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('createShipment')
         ->once()
         ->andThrow(new RuntimeException('Package was modified by another user.'));
@@ -239,6 +322,7 @@ it('reports a generic error when shipping raises an unexpected exception', funct
     $rate = new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days');
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('createShipment')
         ->once()
         ->andThrow(new Exception('boom'));
@@ -260,6 +344,7 @@ it('auto ships through a rule preselected rate', function (): void {
     $package = createWorkflowPackage();
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn (RateResponse $rate): RateResponse => $rate);
     $adapter->shouldReceive('createShipment')->once()->andReturn(
         ShipResponse::success(
@@ -287,6 +372,7 @@ it('passes label format and dpi into auto ship requests', function (): void {
     $package = createWorkflowPackage();
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn (RateResponse $rate): RateResponse => $rate);
     $adapter->shouldReceive('createShipment')
         ->once()
@@ -316,6 +402,7 @@ it('can preserve an unshipped package when auto ship fails', function (): void {
     $package = createWorkflowPackage();
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn (RateResponse $rate): RateResponse => $rate);
     $adapter->shouldReceive('createShipment')->once()->andReturn(
         ShipResponse::failure('Address validation failed')
@@ -338,6 +425,7 @@ it('cleans up an unshipped package when auto ship fails by default', function ()
     $package = createWorkflowPackage();
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn (RateResponse $rate): RateResponse => $rate);
     $adapter->shouldReceive('createShipment')->once()->andReturn(
         ShipResponse::failure('Address validation failed')
@@ -367,6 +455,7 @@ it('prompts for a customs weight override when a military destination is overwei
     ]);
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     // A concrete return value, even though the call is not expected: Mockery
     // cannot synthesize one for the readonly ShipResponse, and a regression
     // should fail this test rather than fatal out of the whole suite.
@@ -405,6 +494,7 @@ it('scales customs weights for a military destination once the override is confi
     ]);
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('createShipment')->once()->andReturnUsing(
         function ($shipRequest): ShipResponse {
             $total = collect($shipRequest->customsItems)
@@ -448,6 +538,7 @@ it('does not prompt for a customs override on an ordinary domestic destination',
     ]);
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('createShipment')->once()->andReturn(
         ShipResponse::success(
             trackingNumber: 'TRACK123',

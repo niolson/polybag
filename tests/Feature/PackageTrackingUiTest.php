@@ -2,6 +2,7 @@
 
 use App\Contracts\DirectCarrierAdapter;
 use App\DataTransferObjects\Shipping\CancelResponse;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
@@ -108,6 +109,11 @@ function trackingAdapter(): DirectCarrierAdapter
         public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
         {
             return $rate;
+        }
+
+        public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
+        {
+            return PackagingRequirement::shipperPackaging();
         }
 
         public function serviceCapability(string $serviceCode): ServiceCapability

@@ -8,6 +8,7 @@ use App\Contracts\CarrierAdapterInterface;
 use App\Contracts\PostageOfferSource;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
+use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
@@ -20,6 +21,7 @@ use App\Models\Package;
 use App\Models\ShippingMethod;
 use App\Models\SpecialService;
 use App\Services\Carriers\CarrierRegistry;
+use App\Services\Shipping\PackagingFilter;
 use GuzzleHttp\Promise\Utils as PromiseUtils;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -90,7 +92,12 @@ class ShippingRateService
         $rateRequest = RateRequest::fromPackage($package);
         $carrierTasks = $this->buildCarrierTasks($package, $rateRequest);
 
-        $rateOptions = $this->fetchRatesConcurrently($carrierTasks, $rateRequest);
+        // Before the quote log: a rate the package's packaging rules out was
+        // never offered, and must not be logged as one (ADR-0005 decision 4).
+        $rateOptions = PackagingFilter::keepCompatible(
+            $this->fetchRatesConcurrently($carrierTasks, $rateRequest),
+            PackageData::fromPackage($package)->carrierPackaging,
+        );
 
         try {
             app(RateQuoteLogger::class)->logRates($packageId, $rateOptions);

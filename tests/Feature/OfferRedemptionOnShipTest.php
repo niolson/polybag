@@ -3,9 +3,11 @@
 use App\Contracts\CarrierAdapterInterface;
 use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\CarrierPackaging;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Models\Package;
@@ -79,6 +81,7 @@ function internationalPackageNeedingOverride(): Package
 function mockShippingAdapter(?ShipResponse $response = null): void
 {
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('createShipment')->andReturn(
         $response ?? ShipResponse::success(
             trackingNumber: 'TRACK123',
@@ -113,6 +116,7 @@ it('refuses to buy against an expired offer and never reaches the carrier', func
     $offer = ShippingOffer::factory()->expired()->for($package)->create(['carrier' => 'MockCarrier', 'postage_source' => PostageSource::CarrierAccount]);
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldNotReceive('createShipment');
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
 
@@ -172,6 +176,7 @@ it('leaves an offer unresolved when the carrier never answers', function (): voi
     $offer = ShippingOffer::factory()->for($package)->create(['carrier' => 'MockCarrier', 'postage_source' => PostageSource::CarrierAccount]);
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('createShipment')
         ->andThrow(new RequestTimeOutException(Mockery::mock(Response::class), 'timed out'));
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
@@ -191,6 +196,7 @@ it('refuses to buy while an earlier purchase is unaccounted for', function (): v
     ShippingOffer::factory()->awaitingConfirmation()->for($package)->create();
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldNotReceive('createShipment');
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
 
@@ -237,6 +243,7 @@ it('buys what the offer says, not what the browser sent back', function (): void
 
     $bought = null;
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('createShipment')
         ->once()
         ->andReturnUsing(function (ShipRequest $request) use (&$bought): ShipResponse {
@@ -336,6 +343,7 @@ it('refuses a channel offer no purchase path can dispatch yet', function (): voi
     ]);
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldNotReceive('createShipment');
     app(CarrierRegistry::class)->registerInstance('OnTrac', $adapter);
 
@@ -357,6 +365,7 @@ it('refuses an offer quoted before sandbox mode was switched', function (): void
     ]);
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldNotReceive('createShipment');
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
 
@@ -383,6 +392,7 @@ it('refuses to start a second purchase while one is in flight for the package', 
     // the first purchase is at the carrier, which is exactly the window where
     // two different valid offers would otherwise each buy a label.
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('createShipment')
         ->once()
         ->andReturnUsing(function () use (&$second, $package): ShipResponse {
@@ -444,6 +454,7 @@ it('carries the quote metadata an adapter cannot buy without', function (): void
 
     $bought = null;
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('createShipment')
         ->once()
         ->andReturnUsing(function (ShipRequest $request) use (&$bought): ShipResponse {
@@ -496,6 +507,7 @@ it('refuses an offer quoted on a carrier account that no longer applies', functi
     $account->update(['active' => false]);
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldNotReceive('createShipment');
     app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 
@@ -520,6 +532,7 @@ it('buys on the account that quoted the offer', function (): void {
     ]);
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('createShipment')->once()->andReturn(
         ShipResponse::success(
             trackingNumber: 'TRACK123',
@@ -537,4 +550,112 @@ it('buys on the account that quoted the offer', function (): void {
     );
 
     expect($result->success)->toBeTrue();
+});
+
+// ADR-0005 decision 3, round-trip 2: the requirement is stored with the offer
+// and the purchase asks the adapter to classify the rate the server rebuilt
+// from that offer, so the check runs on what the source said.
+
+it('restores the packaging requirement from the offer, not the browser, and refuses a package that cannot meet it', function (PackagingRequirement $requirement, string $named): void {
+    $package = Package::factory()->create(['status' => PackageStatus::Unshipped]);
+    $offer = ShippingOffer::factory()->for($package)->create([
+        'carrier' => 'MockCarrier',
+        'postage_source' => PostageSource::CarrierAccount,
+        'rate_metadata' => [
+            'serviceType' => 'FEDEX_2_DAY',
+            PackagingRequirement::RATE_METADATA_KEY => $requirement->toArray(),
+        ],
+    ]);
+
+    // Classifies the way the Amazon adapter does: from the metadata on the rate
+    // it is handed, which the workflow rebuilt from the stored offer.
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')
+        ->once()
+        ->andReturnUsing(fn (RateResponse $rate): PackagingRequirement => PackagingRequirement::fromRateMetadata($rate->metadata));
+    $adapter->shouldNotReceive('createShipment');
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    // The browser's copy says shipper packaging, which the package would meet.
+    // It is the offer's requirement that runs, and this package — no box size,
+    // so the packer's own packaging — cannot meet that one.
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: rateForOffer($offer)),
+    );
+
+    expect(rateForOffer($offer)->packagingRequirement->isShipperPackaging())->toBeTrue()
+        ->and($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Packaging Mismatch')
+        ->and($result->message)->toContain($named)
+        ->and($result->message)->toContain('your own packaging')
+        ->and($result->requiresRequote)->toBeTrue()
+        ->and($result->leavePackageIntact)->toBeTrue()
+        ->and($offer->fresh()->consumed_at)->toBeNull()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+})->with([
+    'exactly' => [
+        fn (): PackagingRequirement => PackagingRequirement::exactly(CarrierPackaging::UspsSmallFlatRateBox),
+        'USPS Small Flat Rate Box',
+    ],
+    'anyOf' => [
+        fn (): PackagingRequirement => PackagingRequirement::anyOf(CarrierPackaging::FedexEnvelope, CarrierPackaging::FedexPak),
+        'one of FedEx Envelope, FedEx Pak',
+    ],
+]);
+
+it('hands the adapter the requirement the offer stored', function (): void {
+    $package = Package::factory()->create(['status' => PackageStatus::Unshipped]);
+    $offer = ShippingOffer::factory()->for($package)->create([
+        'carrier' => 'MockCarrier',
+        'postage_source' => PostageSource::CarrierAccount,
+        'rate_metadata' => [
+            PackagingRequirement::RATE_METADATA_KEY => PackagingRequirement::shipperPackaging()->toArray(),
+        ],
+    ]);
+
+    $bought = null;
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('createShipment')
+        ->once()
+        ->andReturnUsing(function (ShipRequest $request) use (&$bought): ShipResponse {
+            $bought = $request;
+
+            return ShipResponse::success(
+                trackingNumber: 'TRACK123',
+                cost: 7.25,
+                carrier: 'MockCarrier',
+                service: 'Ground',
+                labelData: base64_encode('label'),
+            );
+        });
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: rateForOffer($offer)),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($bought->selectedRate->packagingRequirement->toArray())
+        ->toBe(PackagingRequirement::shipperPackaging()->toArray());
+});
+
+it('reads an offer stored before the requirement existed as shipper packaging', function (): void {
+    $package = Package::factory()->create(['status' => PackageStatus::Unshipped]);
+    $offer = ShippingOffer::factory()->for($package)->create([
+        'carrier' => 'MockCarrier',
+        'postage_source' => PostageSource::CarrierAccount,
+        'rate_metadata' => ['serviceType' => 'FEDEX_GROUND'],
+    ]);
+    mockShippingAdapter();
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: rateForOffer($offer)),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($offer->fresh()->consumed_at)->not->toBeNull();
 });

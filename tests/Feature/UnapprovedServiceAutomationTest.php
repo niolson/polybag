@@ -5,6 +5,7 @@ use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
 use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\LabelBatchItemStatus;
@@ -114,6 +115,7 @@ function packageForDiscoveredQuote(): Package
 function registerQuotingAdapter(array $rates, ?ShipResponse $shipResponse = null): void
 {
     $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('isConfigured')->andReturnTrue();
     $adapter->shouldReceive('prepareRateRequest')->andReturnNull();
     $adapter->shouldReceive('getRates')->andReturn(collect($rates));

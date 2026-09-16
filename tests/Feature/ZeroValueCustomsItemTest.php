@@ -5,6 +5,7 @@ use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\CustomsItem;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
@@ -75,6 +76,7 @@ function packageWithItemValues(array $values, array $address = [], ?Location $fr
 function carrierThatMustNotBeAsked(): void
 {
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldNotReceive('createShipment');
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
 }
@@ -82,6 +84,7 @@ function carrierThatMustNotBeAsked(): void
 function carrierThatSells(): void
 {
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('createShipment')->once()->andReturn(ShipResponse::success(
         trackingNumber: 'TRACK123',
         cost: 7.25,

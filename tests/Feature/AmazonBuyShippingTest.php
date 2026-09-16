@@ -2,6 +2,7 @@
 
 use App\Contracts\PackageLabelWorkflow;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\BoxSizeType;
@@ -328,6 +329,25 @@ it('keeps the tokens that can spend money out of the rate and in the offer', fun
         // The one field that can buy a label never reaches browser state.
         ->and($rates->first()->toArray())->not->toHaveKey('purchase_context')
         ->and($offer->toArray())->not->toHaveKey('purchase_context');
+});
+
+it('stores the packaging requirement with the offer, so the purchase restores it from there', function (): void {
+    // ADR-0005: every rate says which packaging it requires, and an Amazon
+    // rate's requirement travels in the offer's rate metadata rather than in a
+    // column. Everything `isBuyable()` lets through today is rated for the
+    // packer's own packaging; the classifier is packaging-form-and-carrier-identity/04.
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), []);
+    $offer = ShippingOffer::where('public_id', $rates->first()->offerId)->firstOrFail();
+
+    expect($rates->first()->packagingRequirement->isShipperPackaging())->toBeTrue()
+        ->and($offer->rate_metadata[PackagingRequirement::RATE_METADATA_KEY])
+        ->toBe(PackagingRequirement::shipperPackaging()->toArray())
+        ->and(PackagingRequirement::fromRateMetadata($offer->rate_metadata)->isShipperPackaging())->toBeTrue()
+        // What the purchase asks: the same classifier, run on the same serviceId.
+        ->and(amazonAdapter()->packagingRequirementFor($rates->first())->toArray())
+        ->toBe($rates->first()->packagingRequirement->toArray());
 });
 
 it('tags every rate with the discovered service it is an offer of', function (): void {

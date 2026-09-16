@@ -97,6 +97,24 @@ readonly class PackageShippingResult
         );
     }
 
+    /**
+     * The selected rate is not valid in the packaging this Package is in.
+     *
+     * Nothing was bought, and the remedy is a fresh quote: the shared filter
+     * at rate shopping will not offer this rate again for this packaging, so
+     * the Ship page re-quotes on the spot rather than asking for it.
+     */
+    public static function packagingMismatch(string $message): self
+    {
+        return new self(
+            success: false,
+            title: 'Packaging Mismatch',
+            message: $message,
+            leavePackageIntact: true,
+            requiresRequote: true,
+        );
+    }
+
     public static function stateConflict(string $message): self
     {
         return new self(success: false, title: 'Package State Changed', message: $message, leavePackageIntact: true);
