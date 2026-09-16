@@ -15,8 +15,10 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackingEventData;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\BoxSizeType;
+use App\Enums\CarrierPackaging;
 use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
+use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Http\Integrations\USPS\Requests\CancelInternationalLabel;
 use App\Http\Integrations\USPS\Requests\CancelLabel;
 use App\Http\Integrations\USPS\Requests\InternationalLabel;
@@ -956,21 +958,130 @@ class UspsAdapter implements DirectCarrierAdapter
 
     /**
      * Which packaging a USPS rate is valid in, read off the same `mailClass`
-     * and `rateIndicator` the purchase sends.
+     * and `rateIndicator` the purchase sends — ADR-0005 decision 3.
      *
-     * Every indicator that survives {@see isValidRate()} today is priced for
-     * the packer's own packaging; the flat-rate indicators it discards become
-     * `exactly(…)` requirements here in packaging-form-and-carrier-identity/05.
+     * A flat-rate pair is `exactly(…)` the envelope or box USPS priced it for;
+     * the single-piece and cubic indicators are the packer's own packaging.
+     * Both inputs are needed because `FP` is the padded flat-rate envelope
+     * under Priority Mail *and* Priority Mail Express, which are different
+     * envelopes. The table is exhaustive over what {@see isValidRate()} keeps,
+     * so a pair outside it is either browser-restated metadata or a USPS
+     * product this code has never seen — and it is refused rather than
+     * defaulted, since a default to `shipperPackaging()` would be a check the
+     * browser could switch off.
      *
      * @param  array<string, mixed>  $metadata
+     *
+     * @throws UnclassifiablePackagingException when the pair is not one USPS returns for a mail class this adapter sells
      */
     private function classifyPackaging(array $metadata): PackagingRequirement
     {
-        return PackagingRequirement::shipperPackaging();
+        $mailClass = (string) ($metadata['mailClass'] ?? '');
+        $rateIndicator = (string) ($metadata['rateIndicator'] ?? '');
+
+        $flatRate = self::FLAT_RATE_PACKAGING[$mailClass][$rateIndicator] ?? null;
+
+        if ($flatRate instanceof CarrierPackaging) {
+            return PackagingRequirement::exactly($flatRate);
+        }
+
+        if (in_array($rateIndicator, self::SHIPPER_PACKAGING_INDICATORS[$mailClass] ?? [], true)) {
+            return PackagingRequirement::shipperPackaging();
+        }
+
+        throw new UnclassifiablePackagingException('USPS', "USPS rate indicator {$rateIndicator} under {$mailClass} is not one PolyBag can place in a packaging.");
     }
 
     /**
-     * Rate indicators valid for all package types.
+     * mailClass → the rate indicators USPS prices for the packer's own
+     * packaging on that class. The other half of the classifier's table
+     * beside {@see FLAT_RATE_PACKAGING}, and the mail-class allow-list
+     * {@see isValidRate()} applies, so the filter and the classifier read one
+     * table and cannot disagree.
+     *
+     * Read off every logged sandbox `search` response (packaging-form-and-
+     * carrier-identity/05): Ground Advantage and Priority Mail price
+     * single-piece and both cubic tables; Priority Mail Express, domestic and
+     * international, prices single-piece under `PA` and has no cubic tier;
+     * Parcel Select and the international parcel classes are single-piece
+     * only. Media Mail and Library Mail are parcels too, but content-
+     * restricted, and are deliberately absent; the presort classes never
+     * carry a single-piece indicator. Global Express Guaranteed has never
+     * appeared in a response and is absent until it does.
+     *
+     * @var array<string, list<string>>
+     */
+    private const SHIPPER_PACKAGING_INDICATORS = [
+        'USPS_GROUND_ADVANTAGE' => self::DOMESTIC_PARCEL_INDICATORS,
+        'PRIORITY_MAIL' => self::DOMESTIC_PARCEL_INDICATORS,
+        'PRIORITY_MAIL_EXPRESS' => ['PA'],
+        'PARCEL_SELECT' => ['SP'],
+        'FIRST-CLASS_PACKAGE_INTERNATIONAL_SERVICE' => ['SP'],
+        'PRIORITY_MAIL_INTERNATIONAL' => ['SP'],
+        'PRIORITY_MAIL_EXPRESS_INTERNATIONAL' => ['PA'],
+    ];
+
+    /**
+     * @var list<string>
+     */
+    private const DOMESTIC_PARCEL_INDICATORS = [
+        'SP',
+        ...self::BOX_RATE_INDICATORS,
+        ...self::SOFT_PACK_RATE_INDICATORS,
+    ];
+
+    /**
+     * (mailClass, rateIndicator) → the USPS packaging that rate is priced for.
+     *
+     * Read off the sandbox `search` response for a small box, recorded with
+     * its source in packaging-form-and-carrier-identity/05. The international
+     * classes return the same indicators for the same packaging, entered at
+     * the ISC. Deliberately absent: `PM` (large flat rate box at the
+     * APO/FPO/DPO price, returned for any destination and cheaper than `PL`)
+     * and `E7` (the Express legal envelope at the holiday-delivery price) —
+     * both are dropped by {@see isValidRateIndicator()} rather than offered as
+     * a second price for the same box or envelope.
+     *
+     * @var array<string, array<string, CarrierPackaging>>
+     */
+    private const FLAT_RATE_PACKAGING = [
+        'PRIORITY_MAIL' => self::PRIORITY_MAIL_FLAT_RATE_PACKAGING,
+        'PRIORITY_MAIL_INTERNATIONAL' => self::PRIORITY_MAIL_FLAT_RATE_PACKAGING,
+        'PRIORITY_MAIL_EXPRESS' => self::PRIORITY_MAIL_EXPRESS_FLAT_RATE_PACKAGING,
+        'PRIORITY_MAIL_EXPRESS_INTERNATIONAL' => self::PRIORITY_MAIL_EXPRESS_FLAT_RATE_PACKAGING,
+    ];
+
+    /**
+     * @var array<string, CarrierPackaging>
+     */
+    private const PRIORITY_MAIL_FLAT_RATE_PACKAGING = [
+        'FE' => CarrierPackaging::UspsFlatRateEnvelope,
+        'FA' => CarrierPackaging::UspsLegalFlatRateEnvelope,
+        'FP' => CarrierPackaging::UspsPaddedFlatRateEnvelope,
+        'FS' => CarrierPackaging::UspsSmallFlatRateBox,
+        'FB' => CarrierPackaging::UspsMediumFlatRateBox,
+        'PL' => CarrierPackaging::UspsLargeFlatRateBox,
+    ];
+
+    /**
+     * @var array<string, CarrierPackaging>
+     */
+    private const PRIORITY_MAIL_EXPRESS_FLAT_RATE_PACKAGING = [
+        'E4' => CarrierPackaging::UspsExpressFlatRateEnvelope,
+        'E6' => CarrierPackaging::UspsExpressLegalFlatRateEnvelope,
+        'FP' => CarrierPackaging::UspsExpressPaddedFlatRateEnvelope,
+    ];
+
+    /**
+     * The flat-rate envelopes are priced as `FLATS`, the category
+     * {@see isValidRate()} otherwise drops; these are the indicators it lets
+     * through that filter. The boxes are `MACHINABLE` and need no exemption.
+     */
+    private const FLAT_RATE_ENVELOPE_INDICATORS = ['FE', 'FA', 'FP', 'E4', 'E6'];
+
+    /**
+     * Single-piece indicators, valid for all package types once their mail
+     * class has admitted them: `SP`, and `PA` for Priority Mail Express.
      */
     private const UNIVERSAL_RATE_INDICATORS = ['SP', 'PA'];
 
@@ -1179,13 +1290,20 @@ class UspsAdapter implements DirectCarrierAdapter
      */
     private function isValidRate(array $rate, array $serviceCodes, ?BoxSizeType $boxType = null): bool
     {
-        // Filter out non-applicable processing categories
-        if (in_array($rate['processingCategory'], ['CARDS', 'LETTERS', 'FLATS', 'OPEN_AND_DISTRIBUTE'])) {
+        // Filter out non-applicable processing categories. The flat-rate
+        // envelopes are priced as FLATS and are the one thing in that
+        // category a parcel can ship in.
+        if (in_array($rate['processingCategory'], ['CARDS', 'LETTERS', 'OPEN_AND_DISTRIBUTE'])) {
             return false;
         }
 
-        // Filter out library and media mail
-        if (in_array($rate['mailClass'], ['LIBRARY_MAIL', 'MEDIA_MAIL'])) {
+        if ($rate['processingCategory'] === 'FLATS' && ! in_array($rate['rateIndicator'], self::FLAT_RATE_ENVELOPE_INDICATORS, true)) {
+            return false;
+        }
+
+        // Only the mail classes the classifier can place in a packaging —
+        // which excludes Library Mail, Media Mail and the presort classes.
+        if (! isset(self::SHIPPER_PACKAGING_INDICATORS[$rate['mailClass']])) {
             return false;
         }
 
@@ -1195,7 +1313,7 @@ class UspsAdapter implements DirectCarrierAdapter
         }
 
         // Filter rate indicators based on box type
-        if (! $this->isValidRateIndicator($rate['rateIndicator'], $boxType)) {
+        if (! $this->isValidRateIndicator($rate['rateIndicator'], $rate['mailClass'], $boxType)) {
             return false;
         }
 
@@ -1209,9 +1327,27 @@ class UspsAdapter implements DirectCarrierAdapter
 
     /**
      * Check if a rate indicator is valid for the given box type.
+     *
+     * This is the physical-form half of ADR-0005 decision 3: cubic tiers are
+     * chosen by box type because both cubic tables are the packer's own
+     * packaging and the shared filter cannot tell them apart. The flat-rate
+     * indicators pass for every form — whether the Package is actually in
+     * that envelope or box is the shared filter's question, answered from the
+     * `exactly(…)` requirement {@see classifyPackaging()} stamps on the rate.
      */
-    private function isValidRateIndicator(string $rateIndicator, ?BoxSizeType $boxType): bool
+    private function isValidRateIndicator(string $rateIndicator, string $mailClass, ?BoxSizeType $boxType): bool
     {
+        if (isset(self::FLAT_RATE_PACKAGING[$mailClass][$rateIndicator])) {
+            return true;
+        }
+
+        // The pair must be one USPS prices for the packer's own packaging on
+        // this class — `PA` is Express-only, the cubic tiers are Ground
+        // Advantage and Priority Mail only.
+        if (! in_array($rateIndicator, self::SHIPPER_PACKAGING_INDICATORS[$mailClass] ?? [], true)) {
+            return false;
+        }
+
         // Universal rate indicators are always valid
         if (in_array($rateIndicator, self::UNIVERSAL_RATE_INDICATORS)) {
             return true;
@@ -1219,11 +1355,7 @@ class UspsAdapter implements DirectCarrierAdapter
 
         // Packages with no box size (manual ship) have no box type to filter on
         if ($boxType === null) {
-            return in_array($rateIndicator, [
-                ...self::UNIVERSAL_RATE_INDICATORS,
-                ...self::BOX_RATE_INDICATORS,
-                ...self::SOFT_PACK_RATE_INDICATORS,
-            ]);
+            return true;
         }
 
         // Soft pack types (polybag, padded mailer) can use soft pack rate indicators

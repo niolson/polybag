@@ -3,11 +3,14 @@
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CustomsItem;
 use App\DataTransferObjects\Shipping\PackageData;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\BoxSizeType;
+use App\Enums\CarrierPackaging;
 use App\Enums\TrackingStatus;
+use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Http\Integrations\USPS\Requests\CancelInternationalLabel;
 use App\Http\Integrations\USPS\Requests\CancelLabel;
 use App\Http\Integrations\USPS\Requests\InternationalLabel;
@@ -20,6 +23,7 @@ use App\Models\CarrierAccount;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\Carriers\UspsAdapter;
+use Illuminate\Support\Collection;
 use Saloon\Exceptions\Request\Statuses\InternalServerErrorException;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\Request;
@@ -802,7 +806,8 @@ it('filters rate indicators for padded mailer same as polybag', function (): voi
                                     'totalBasePrice' => 8.50,
                                     'rates' => [
                                         [
-                                            'mailClass' => 'USPS_GROUND_ADVANTAGE',
+                                            // PA is Priority Mail Express's single-piece indicator; USPS never returns it on Ground Advantage.
+                                            'mailClass' => 'PRIORITY_MAIL_EXPRESS',
                                             'processingCategory' => 'MACHINABLE',
                                             'rateIndicator' => 'PA',
                                             'destinationEntryFacilityType' => 'NONE',
@@ -853,6 +858,289 @@ it('filters rate indicators for padded mailer same as polybag', function (): voi
     expect($rateIndicators)->toContain('PA')
         ->toContain('Q6')
         ->not->toContain('CP');
+});
+
+/**
+ * A `search` response in the shape USPS returns it, one rate per (mailClass,
+ * rateIndicator, processingCategory) triple — the pairs are the ones the
+ * sandbox returned for a small box (packaging-form-and-carrier-identity/05).
+ *
+ * @param  list<array{0: string, 1: string, 2: string, 3?: float}>  $rates
+ */
+function fakeUspsSearch(array $rates): void
+{
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        ShippingOptions::class => MockResponse::make([
+            'pricingOptions' => [[
+                'shippingOptions' => [[
+                    'rateOptions' => array_map(fn (array $rate): array => [
+                        'totalBasePrice' => $rate[3] ?? 10.00,
+                        'rates' => [[
+                            'mailClass' => $rate[0],
+                            'rateIndicator' => $rate[1],
+                            'processingCategory' => $rate[2],
+                            'destinationEntryFacilityType' => 'NONE',
+                            'description' => "{$rate[0]} {$rate[1]}",
+                        ]],
+                    ], $rates),
+                ]],
+            ]],
+        ]),
+    ]);
+}
+
+/**
+ * The flat-rate mix a small box gets quoted, plus the two shipper-packaging
+ * indicators and a soft-pack tier.
+ *
+ * @return list<array{0: string, 1: string, 2: string, 3?: float}>
+ */
+function uspsSmallBoxSearch(): array
+{
+    return [
+        ['PRIORITY_MAIL', 'SP', 'MACHINABLE', 15.22],
+        ['PRIORITY_MAIL', 'CP', 'MACHINABLE', 15.51],
+        ['PRIORITY_MAIL', 'P5', 'MACHINABLE', 15.51],
+        ['PRIORITY_MAIL', 'FE', 'FLATS', 11.12],
+        ['PRIORITY_MAIL', 'FA', 'FLATS', 11.66],
+        ['PRIORITY_MAIL', 'FP', 'FLATS', 11.99],
+        ['PRIORITY_MAIL', 'FS', 'MACHINABLE', 12.10],
+        ['PRIORITY_MAIL', 'FB', 'MACHINABLE', 21.17],
+        ['PRIORITY_MAIL', 'PL', 'MACHINABLE', 31.00],
+        ['PRIORITY_MAIL', 'PM', 'MACHINABLE', 29.59],
+        ['PRIORITY_MAIL_EXPRESS', 'PA', 'MACHINABLE', 55.79],
+        ['PRIORITY_MAIL_EXPRESS', 'E4', 'FLATS', 31.11],
+        ['PRIORITY_MAIL_EXPRESS', 'E6', 'FLATS', 31.43],
+        ['PRIORITY_MAIL_EXPRESS', 'E7', 'FLATS', 31.43],
+        ['PRIORITY_MAIL_EXPRESS', 'FP', 'FLATS', 31.70],
+    ];
+}
+
+/**
+ * @return array<string, PackagingRequirement> keyed "MAIL_CLASS/INDICATOR"
+ */
+function uspsRequirementsByPair(Collection $rates): array
+{
+    return $rates
+        ->mapWithKeys(fn (RateResponse $rate): array => [
+            "{$rate->metadata['mailClass']}/{$rate->metadata['rateIndicator']}" => $rate->packagingRequirement,
+        ])
+        ->all();
+}
+
+it('keeps the flat-rate indicators for a box as exactly the packaging USPS priced them for', function (): void {
+    fakeUspsSearch(uspsSmallBoxSearch());
+
+    $request = new RateRequest(
+        originPostalCode: '90210',
+        destinationPostalCode: '10001',
+        packages: [new PackageData(weight: 1.0, length: 8, width: 5, height: 1.5, boxType: BoxSizeType::BOX)],
+    );
+
+    $byPair = uspsRequirementsByPair($this->adapter->getRates($request, []));
+
+    expect(array_keys($byPair))->toBe([
+        'PRIORITY_MAIL/SP', 'PRIORITY_MAIL/CP',
+        'PRIORITY_MAIL/FE', 'PRIORITY_MAIL/FA', 'PRIORITY_MAIL/FP', 'PRIORITY_MAIL/FS', 'PRIORITY_MAIL/FB', 'PRIORITY_MAIL/PL',
+        'PRIORITY_MAIL_EXPRESS/PA', 'PRIORITY_MAIL_EXPRESS/E4', 'PRIORITY_MAIL_EXPRESS/E6', 'PRIORITY_MAIL_EXPRESS/FP',
+    ]);
+
+    expect($byPair['PRIORITY_MAIL/SP']->isShipperPackaging())->toBeTrue()
+        ->and($byPair['PRIORITY_MAIL/CP']->isShipperPackaging())->toBeTrue()
+        ->and($byPair['PRIORITY_MAIL_EXPRESS/PA']->isShipperPackaging())->toBeTrue();
+
+    expect($byPair['PRIORITY_MAIL/FE'])->toEqual(PackagingRequirement::exactly(CarrierPackaging::UspsFlatRateEnvelope))
+        ->and($byPair['PRIORITY_MAIL/FA'])->toEqual(PackagingRequirement::exactly(CarrierPackaging::UspsLegalFlatRateEnvelope))
+        ->and($byPair['PRIORITY_MAIL/FP'])->toEqual(PackagingRequirement::exactly(CarrierPackaging::UspsPaddedFlatRateEnvelope))
+        ->and($byPair['PRIORITY_MAIL/FS'])->toEqual(PackagingRequirement::exactly(CarrierPackaging::UspsSmallFlatRateBox))
+        ->and($byPair['PRIORITY_MAIL/FB'])->toEqual(PackagingRequirement::exactly(CarrierPackaging::UspsMediumFlatRateBox))
+        ->and($byPair['PRIORITY_MAIL/PL'])->toEqual(PackagingRequirement::exactly(CarrierPackaging::UspsLargeFlatRateBox));
+
+    // FP is the padded envelope under both classes; the class tells them apart.
+    expect($byPair['PRIORITY_MAIL_EXPRESS/E4'])->toEqual(PackagingRequirement::exactly(CarrierPackaging::UspsExpressFlatRateEnvelope))
+        ->and($byPair['PRIORITY_MAIL_EXPRESS/E6'])->toEqual(PackagingRequirement::exactly(CarrierPackaging::UspsExpressLegalFlatRateEnvelope))
+        ->and($byPair['PRIORITY_MAIL_EXPRESS/FP'])->toEqual(PackagingRequirement::exactly(CarrierPackaging::UspsExpressPaddedFlatRateEnvelope));
+});
+
+it('drops the APO large box and holiday envelope prices rather than offer a box twice', function (): void {
+    // PM is the large flat rate box at the APO/FPO/DPO price and comes back
+    // for any destination, cheaper than PL; E7 is the Express legal envelope
+    // at the holiday-delivery price. Neither is a packaging of its own.
+    fakeUspsSearch(uspsSmallBoxSearch());
+
+    $request = new RateRequest(
+        originPostalCode: '90210',
+        destinationPostalCode: '10001',
+        packages: [new PackageData(weight: 1.0, length: 8, width: 5, height: 1.5)],
+    );
+
+    $indicators = $this->adapter->getRates($request, [])->pluck('metadata.rateIndicator')->all();
+
+    expect($indicators)->toContain('PL', 'E6')
+        ->and(array_intersect($indicators, ['PM', 'E7']))->toBe([]);
+});
+
+it('keeps the flat-rate indicators for a polybag too, alongside its soft-pack tiers', function (): void {
+    // The form filter still chooses cubic tiers by box type; the flat-rate
+    // indicators pass every form and the shared filter decides from the
+    // Package's declared packaging.
+    fakeUspsSearch(uspsSmallBoxSearch());
+
+    $request = new RateRequest(
+        originPostalCode: '90210',
+        destinationPostalCode: '10001',
+        packages: [new PackageData(weight: 1.0, length: 8, width: 5, height: 1.5, boxType: BoxSizeType::POLYBAG)],
+    );
+
+    $indicators = $this->adapter->getRates($request, [])->pluck('metadata.rateIndicator')->all();
+
+    expect($indicators)->toContain('P5', 'FE', 'FB')
+        ->and(in_array('CP', $indicators, true))->toBeFalse();
+});
+
+it('still drops real flats that are not flat-rate envelopes', function (): void {
+    // Priority Mail International quotes a "Single-piece Large Envelope" as
+    // SP/FLATS — a flat, not a parcel, and not a flat-rate product.
+    fakeUspsSearch([
+        ['PRIORITY_MAIL_INTERNATIONAL', 'SP', 'FLATS'],
+        ['PRIORITY_MAIL_INTERNATIONAL', 'SP', 'MACHINABLE'],
+        ['PRIORITY_MAIL_INTERNATIONAL', 'FB', 'MACHINABLE'],
+    ]);
+
+    $request = new RateRequest(
+        originPostalCode: '90210',
+        destinationPostalCode: 'M5V 3L9',
+        destinationCountry: 'CA',
+        packages: [new PackageData(weight: 1.0, length: 8, width: 5, height: 1.5)],
+    );
+
+    $rates = $this->adapter->getRates($request, []);
+
+    expect($rates->map(fn (RateResponse $rate): string => "{$rate->metadata['rateIndicator']}/{$rate->metadata['processingCategory']}")->all())
+        ->toBe(['SP/MACHINABLE', 'FB/MACHINABLE'])
+        ->and($rates[1]->packagingRequirement)->toEqual(PackagingRequirement::exactly(CarrierPackaging::UspsMediumFlatRateBox));
+});
+
+it('classifies a purchase from the same pair the label sends', function (): void {
+    $rate = fn (string $mailClass, string $indicator): RateResponse => new RateResponse(
+        carrier: 'USPS',
+        serviceCode: $mailClass,
+        serviceName: $mailClass,
+        price: 10.0,
+        metadata: ['mailClass' => $mailClass, 'rateIndicator' => $indicator, 'processingCategory' => 'MACHINABLE'],
+        // The browser may restate anything here; the adapter does not read it.
+        packagingRequirement: PackagingRequirement::shipperPackaging(),
+    );
+
+    expect($this->adapter->packagingRequirementFor($rate('PRIORITY_MAIL', 'FB')))
+        ->toEqual(PackagingRequirement::exactly(CarrierPackaging::UspsMediumFlatRateBox))
+        ->and($this->adapter->packagingRequirementFor($rate('PRIORITY_MAIL_EXPRESS', 'FP')))
+        ->toEqual(PackagingRequirement::exactly(CarrierPackaging::UspsExpressPaddedFlatRateEnvelope))
+        ->and($this->adapter->packagingRequirementFor($rate('USPS_GROUND_ADVANTAGE', 'CP'))->isShipperPackaging())
+        ->toBeTrue();
+});
+
+it('refuses to classify an indicator it does not sell instead of defaulting it', function (string $mailClass, string $indicator): void {
+    $rate = new RateResponse(
+        carrier: 'USPS',
+        serviceCode: $mailClass,
+        serviceName: $mailClass,
+        price: 10.0,
+        metadata: ['mailClass' => $mailClass, 'rateIndicator' => $indicator, 'processingCategory' => 'MACHINABLE'],
+    );
+
+    expect(fn () => $this->adapter->packagingRequirementFor($rate))
+        ->toThrow(UnclassifiablePackagingException::class);
+})->with([
+    'APO large box price' => ['PRIORITY_MAIL', 'PM'],
+    'holiday envelope price' => ['PRIORITY_MAIL_EXPRESS', 'E7'],
+    'a Priority Mail envelope under Ground Advantage' => ['USPS_GROUND_ADVANTAGE', 'FE'],
+    'single-piece on a class rate shopping excludes' => ['MEDIA_MAIL', 'SP'],
+    'single-piece on a presort class' => ['BOUND_PRINTED_MATTER', 'SP'],
+    'a class USPS does not have' => ['PRIORITY_MAIL_CUBIC', 'CP'],
+    'the Express single-piece indicator on Ground Advantage' => ['USPS_GROUND_ADVANTAGE', 'PA'],
+    'a cubic tier on Express, which has none' => ['PRIORITY_MAIL_EXPRESS', 'CP'],
+    'a cubic tier on an international class' => ['PRIORITY_MAIL_INTERNATIONAL', 'P5'],
+    'the domestic single-piece indicator on Express International' => ['PRIORITY_MAIL_EXPRESS_INTERNATIONAL', 'SP'],
+    'nothing at all' => ['PRIORITY_MAIL', ''],
+]);
+
+it('drops a rate whose class and indicator are each sold, but not together', function (): void {
+    // The filter reads the same per-class table as the classifier, so a pair
+    // the classifier would refuse never reaches a quote — and the classifier
+    // never throws at rate shopping on something the filter kept.
+    fakeUspsSearch([
+        ['USPS_GROUND_ADVANTAGE', 'SP', 'MACHINABLE'],
+        ['USPS_GROUND_ADVANTAGE', 'PA', 'MACHINABLE'],
+        ['PRIORITY_MAIL_EXPRESS', 'PA', 'MACHINABLE'],
+        ['PRIORITY_MAIL_EXPRESS', 'CP', 'MACHINABLE'],
+        ['PRIORITY_MAIL_EXPRESS', 'SP', 'MACHINABLE'],
+    ]);
+
+    $request = new RateRequest(
+        originPostalCode: '90210',
+        destinationPostalCode: '10001',
+        packages: [new PackageData(weight: 1.0, length: 8, width: 5, height: 1.5)],
+    );
+
+    expect(uspsRequirementsByPair($this->adapter->getRates($request, [])))
+        ->toHaveKeys(['USPS_GROUND_ADVANTAGE/SP', 'PRIORITY_MAIL_EXPRESS/PA'])
+        ->toHaveCount(2);
+});
+
+it('builds a flat-rate label from the rate metadata alone and it conforms to our USPS schema', function (): void {
+    fakeUspsLabelEndpoints();
+
+    $request = new ShipRequest(
+        fromAddress: new AddressData(
+            firstName: 'Shipping',
+            lastName: 'Center',
+            streetAddress: '123 Warehouse St',
+            city: 'Seattle',
+            stateOrProvince: 'WA',
+            postalCode: '98072',
+            company: 'PolyBag Fulfillment',
+        ),
+        toAddress: new AddressData(
+            firstName: 'Jane',
+            lastName: 'Receiving',
+            streetAddress: '456 Main St',
+            city: 'Los Angeles',
+            stateOrProvince: 'CA',
+            postalCode: '90210',
+        ),
+        packageData: new PackageData(weight: 2.0, length: 11, width: 8.5, height: 5.5, boxType: BoxSizeType::BOX, carrierPackaging: CarrierPackaging::UspsMediumFlatRateBox),
+        selectedRate: new RateResponse(
+            carrier: 'USPS',
+            serviceCode: 'PRIORITY_MAIL',
+            serviceName: 'Priority Mail Machinable Medium Flat Rate Box',
+            price: 21.17,
+            metadata: [
+                'mailClass' => 'PRIORITY_MAIL',
+                'processingCategory' => 'MACHINABLE',
+                'rateIndicator' => 'FB',
+                'destinationEntryFacilityType' => 'NONE',
+            ],
+            packagingRequirement: PackagingRequirement::exactly(CarrierPackaging::UspsMediumFlatRateBox),
+        ),
+    );
+
+    expect($this->adapter->createShipment($request)->success)->toBeTrue();
+
+    Saloon::assertSent(function ($request): bool {
+        if (! $request instanceof Label) {
+            return false;
+        }
+
+        $body = $request->body()->all();
+
+        assertMatchesUspsSchema($body, 'LabelRequest');
+
+        return $body['packageDescription']['mailClass'] === 'PRIORITY_MAIL'
+            && $body['packageDescription']['rateIndicator'] === 'FB'
+            && $body['packageDescription']['processingCategory'] === 'MACHINABLE';
+    });
 });
 
 it('allows all rate indicators when the package has no box type', function (): void {

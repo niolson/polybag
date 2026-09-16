@@ -862,6 +862,61 @@ it('keeps both the weight-based and One Rate FedEx rates for a Package in a FedE
     }
 });
 
+it('offers only the medium-flat-rate-box rate for a Package in a USPS Medium Flat Rate Box', function (): void {
+    // ADR-0005 decision 3, the USPS half: the adapter now keeps the flat-rate
+    // indicators as exactly(…) requirements, and the shared filter — not the
+    // adapter — matches them to the Package's declared packaging.
+    $rate = fn (string $indicator, string $category, float $price, string $description): array => [
+        'totalBasePrice' => $price,
+        'commitment' => ['name' => '1-3 Business Days', 'scheduleDeliveryDate' => '2025-01-15'],
+        'rates' => [[
+            'mailClass' => 'PRIORITY_MAIL',
+            'processingCategory' => $category,
+            'rateIndicator' => $indicator,
+            'destinationEntryFacilityType' => 'NONE',
+            'description' => $description,
+        ]],
+    ];
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        ShippingOptions::class => MockResponse::make([
+            'pricingOptions' => [[
+                'shippingOptions' => [[
+                    'rateOptions' => [
+                        $rate('SP', 'MACHINABLE', 15.22, 'Priority Mail Machinable Single-piece'),
+                        $rate('CP', 'MACHINABLE', 15.51, 'Priority Mail Machinable Cubic Non-Soft Pack Tier 1'),
+                        $rate('FE', 'FLATS', 11.12, 'Priority Mail Flat Rate Envelope'),
+                        $rate('FB', 'MACHINABLE', 21.17, 'Priority Mail Machinable Medium Flat Rate Box'),
+                        $rate('PL', 'MACHINABLE', 31.00, 'Priority Mail Machinable Large Flat Rate Box'),
+                    ],
+                ]],
+            ]],
+        ]),
+    ]);
+
+    $shippingMethod = ShippingMethod::factory()->create();
+    $priority = CarrierService::factory()->uspsPriority()->for($this->uspsCarrier)->create();
+    $shippingMethod->carrierServices()->attach($priority);
+
+    $shipment = Shipment::factory()->for($shippingMethod)->create(['postal_code' => '10001']);
+    $package = Package::factory()->for($shipment)->create([
+        'box_size_id' => BoxSize::factory()->carrierPackaging(CarrierPackaging::UspsMediumFlatRateBox)->create()->id,
+        'weight' => 2.0,
+        'height' => 5.5,
+        'width' => 8.5,
+        'length' => 11,
+    ]);
+
+    $rates = app(ShippingRateService::class)->getShippingRates($package->id);
+
+    expect($rates)->toHaveCount(1)
+        ->and($rates[0]->metadata['rateIndicator'])->toBe('FB')
+        ->and($rates[0]->price)->toBe(21.17)
+        ->and($rates[0]->packagingRequirement->accepts(CarrierPackaging::UspsMediumFlatRateBox))->toBeTrue()
+        ->and(RateQuote::where('package_id', $package->id)->count())->toBe(1);
+});
+
 /*
 |--------------------------------------------------------------------------
 | Special service capability + carrier-service scope filtering
