@@ -9,6 +9,7 @@ use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PackageStatus;
 use App\Models\Location;
 use App\Models\Package;
@@ -77,6 +78,9 @@ function carrierThatMustNotBeAsked(): void
 {
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    // Fused, so the report printer gate stands aside and the customs value
+    // guard is what refuses.
+    $adapter->shouldReceive('customsDocumentDelivery')->andReturn(CustomsDocumentDelivery::FusedIntoLabel);
     $adapter->shouldNotReceive('createShipment');
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
 }
@@ -85,6 +89,7 @@ function carrierThatSells(): void
 {
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('customsDocumentDelivery')->andReturn(CustomsDocumentDelivery::FusedIntoLabel);
     $adapter->shouldReceive('createShipment')->once()->andReturn(ShipResponse::success(
         trackingNumber: 'TRACK123',
         cost: 7.25,

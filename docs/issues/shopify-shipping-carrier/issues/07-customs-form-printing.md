@@ -1,6 +1,6 @@
 # International labels return a customs form PolyBag could not print
 
-Status: ready-for-human — storage and printing shipped 2026-09-10 with two carriers feeding them; the pre-purchase gate's Amazon predicate shipped 2026-09-16 in `amazon-buy-shipping/13` (`AmazonBuyShippingAdapter::returnsSeparateCustomsDocument()`, from the offering's document details) and Amazon now feeds `customs_form_data` with its format carried; the gate itself (constraints 3 and 4) and the FedEx row of `23` still wait
+Status: done — storage and printing shipped 2026-09-10, the pre-purchase gate (constraints 3 and 4) 2026-09-16, reading a per-carrier `CustomsDocumentDelivery` capability on `PostageOfferSource`; Shopify, UPS and Amazon feed the column, USPS is never blocked, FedEx records why it returns nothing
 
 Repo: `polybag`
 
@@ -124,27 +124,73 @@ otherwise notional, and recorded separately as
 — it is not a Shopify issue and it has an operational tail: the first run after it deploys
 purges a backlog.
 
-## What is left — constraints 3 and 4
+## What shipped — constraints 3 and 4 (2026-09-16)
 
-The gate: requiring a report printer before buying a label that needs a customs declaration,
-pushing `reportPrinter` into Livewire state, and the batch skip reason.
+**The capability is a method on `PostageOfferSource`, not a boolean and not a column:**
+`customsDocumentDelivery(AddressData $from, AddressData $to, ?RateResponse $rate = null)`
+returning `App\Enums\CustomsDocumentDelivery` — `Separate`, `FusedIntoLabel`,
+`NotRequested`, `None`. Only `Separate` needs a report printer. On `PostageOfferSource`
+rather than `CarrierAdapterInterface` because Shopify is a `BlindPurchaseSource` and must
+answer; the packaging check bails out for non-quoting sellers and this one cannot.
+`23`'s rows, as each adapter answers for a lane that crosses a customs zone:
 
-**It needs `23`**, because `requiresCustomsDeclaration()` is a superset of "a separate
-document comes back" and the per-carrier answers are not uniform. `23` settled that in the
-direction that makes this real: **USPS fuses** its CP72 into the label in both formats, so
-gating on the predicate would block USPS international on a workstation with only a label
-printer — for three 4×6 pages that print on the thermal path it already has. **UPS returns a
-separate document**, so the gate genuinely is per-carrier. **FedEx returns nothing separate
-because nothing is requested**, which is true today and stale the moment
-`shippingDocumentSpecification` or ETD lands — so the capability must record *why* a carrier
-returns nothing, not a bare boolean. Amazon is unobserved.
+| Source | Answers | Because |
+|---|---|---|
+| USPS | `FusedIntoLabel` | CP72 is three plies inside the label; thermal path |
+| UPS | `Separate` | `ShipmentResults.Form.Image`, on the same condition that sends `InternationalForms` |
+| FedEx | `NotRequested` | no `shippingDocumentSpecification`, no ETD — stale the day either lands, and the case name says so |
+| Shopify | `Separate` | `CUSTOMS_FORM`, asked of the pair since a blind offer has no rate |
+| Amazon | from the offering when a rate is in hand (`returnsSeparateCustomsDocument()`); without one, `Separate` for a foreign country and `None` for a territory, the `09` observation | batch validation runs before any rate exists |
+| Fake | whatever the test says | both directions of `23`'s test note |
 
-Until then a missing report printer stays **soft**: the form does not print and the operator
-is told so, which is strictly better than the status quo of the form not existing.
+**The workstation's answer is browser state, pushed the way label format is.**
+`hasReportPrinter` (`!!localStorage.reportPrinter`) is set into Livewire on mount by the
+Ship, Pack and Manual Ship views, and by `batch-ship-local-storage` into a hidden
+`has_report_printer` on the Batch Ship action. It rides `PackageShippingRequest`,
+`PackageAutoShippingRequest`, `BatchLabelService::createBatch()` and `GenerateLabelJob`.
+Absent means not configured.
+
+**The gate is in `EloquentPackageShippingWorkflow::reportPrinterRefused()`**, immediately
+after the `ShipRequest` is built and before the zero-value refusal, the weight prompt and
+the offer claim — nothing is spent and nothing is consumed. It is asked only when there is
+no report printer *and* the lane crosses a customs zone (the same pair test the weight
+reconciliation uses), so a domestic label never asks the seller and a workstation with a
+report printer never does either. The refusal is `PackageShippingResult::reportPrinterRequired()`:
+package intact, no re-quote, message naming the seller and Device Settings. The Ship page
+stays on the package.
+
+**Batch ship skips before starting** with `No report printer configured for the customs
+form`, beside "Not picked" — but only when **every** carrier on the shipping method
+answers `Separate` for the lane. "Every carrier" is rate shopping's own set,
+`ShippingRateService::sellersForShippingMethod()` — active services that can reach the
+destination (PO Box, military), with a registered *and configured* adapter — so an
+unconfigured USPS, or a USPS service flagged unable to reach an FPO address, cannot
+rescue a shipment the batch could only ever buy from UPS. The batch has not chosen a
+carrier when it validates, and a method offering USPS beside UPS can still buy USPS; if
+the rate selector then picks UPS
+anyway, the purchase-time gate refuses that item with the same reason. A rate-selection
+filter that would prefer the fused carrier in that case is not built — it is the natural
+next step if the item failures turn out to be common.
+
+**Decided in the implementation, worth knowing:**
+
+1. **The gate is hard.** For Shopify the old remedy (print from the admin via
+   `shopify_customs_form_url`) still exists; for UPS there is none, so a workstation with
+   only a label printer cannot buy UPS international at all. That is what the 2026-09-10
+   decision says, stated here so nobody reads it as an accident.
+2. **The lane test in the workflow is a precondition, not the gate.** Every adapter answers
+   `None` inside one customs zone; the workflow checks the pair first so that a domestic
+   purchase never touches the seller. The per-carrier answer stays the seller's.
+
+Tests: `tests/Unit/Services/Carriers/CustomsDocumentDeliveryTest.php` (the table above),
+`PackageShippingWorkflowTest` (refused / fused not refused / configured not refused /
+domestic never asked / flag survives `autoShip()`), `BlindPurchaseTest` (Shopify refused),
+`BatchLabelServiceTest` (skip, one-fused-carrier not skipped, flag reaches every job),
+`ShipErrorHandlingTest` and `ShipmentResourceTest` (the page and the bulk action).
 
 ## Related
 
-- `23` — the per-carrier capability the gate reads
+- `23` — the per-carrier capability the gate reads, now `CustomsDocumentDelivery`
 - `24` — why UPS returned nothing until 2026-09-10
 - `19` — the declared-weight precondition on the same path
 - `pii-retention/01` — the purge defect found here

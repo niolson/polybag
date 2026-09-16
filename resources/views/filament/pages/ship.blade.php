@@ -10,6 +10,7 @@
                 init() {
                     $wire.set('labelFormat', localStorage.getItem('labelFormat') || 'pdf');
                     $wire.set('labelDpi', parseInt(localStorage.getItem('labelDpi') || '203') || null);
+                    $wire.set('hasReportPrinter', !!localStorage.getItem('reportPrinter'));
                 },
 
                 handleGlobalKey(e) {

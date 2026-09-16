@@ -232,7 +232,9 @@ class Pack extends Page
 
     public ?int $labelDpi = null;
 
-    public function ship(array $packingItems, ?int $boxSizeId, string $weight, string $height, string $width, string $length, bool $autoShip, string $labelFormat = 'pdf', ?int $labelDpi = null): void
+    public bool $hasReportPrinter = false;
+
+    public function ship(array $packingItems, ?int $boxSizeId, string $weight, string $height, string $width, string $length, bool $autoShip, string $labelFormat = 'pdf', ?int $labelDpi = null, bool $hasReportPrinter = false): void
     {
         $this->packingItems = $packingItems;
         $this->boxSizeId = $boxSizeId;
@@ -242,6 +244,7 @@ class Pack extends Page
         $this->length = $length;
         $this->labelFormat = $labelFormat;
         $this->labelDpi = $labelDpi;
+        $this->hasReportPrinter = $hasReportPrinter;
 
         if ($autoShip && ! auth()->user()->role->isAtLeast(Role::Admin)) {
             $autoShip = false;
@@ -300,6 +303,7 @@ class Pack extends Page
                 labelDpi: $this->labelDpi,
                 userId: auth()->id(),
                 cleanupOnFailure: false,
+                hasReportPrinter: $this->hasReportPrinter,
             ),
         );
 

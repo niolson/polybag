@@ -663,6 +663,37 @@ class ShippingRateService
     }
 
     /**
+     * The sources rate shopping would ask for this shipping method and
+     * destination: the carriers of its active services that can reach the
+     * destination, with a registered, configured adapter behind them.
+     *
+     * The same two filters {@see buildCarrierTasks()} and the task runner
+     * apply — {@see getActiveCarrierServices()} and `isConfigured()` — so a
+     * caller deciding ahead of a purchase what the purchase could buy reads
+     * the same set the purchase will. `BatchLabelService` asks this before a
+     * batch starts, for the report printer skip: an unconfigured carrier, or
+     * one whose services cannot reach a PO Box or military address, would
+     * otherwise count as an option the batch does not actually have.
+     *
+     * Special-service exclusions are not applied here; they are per-package
+     * and resolved once the rate request exists.
+     *
+     * @return Collection<int, PostageOfferSource>
+     */
+    public function sellersForShippingMethod(ShippingMethod $shippingMethod, AddressData $destination): Collection
+    {
+        $registry = app(CarrierRegistry::class);
+
+        return $this->getActiveCarrierServices($shippingMethod, $destination)
+            ->map(fn (CarrierService $service): ?string => $service->carrier?->name)
+            ->filter(fn (?string $name): bool => $name !== null && $registry->has($name))
+            ->unique()
+            ->map(fn (string $name): PostageOfferSource => $registry->get($name))
+            ->filter(fn (PostageOfferSource $seller): bool => $seller->isConfigured())
+            ->values();
+    }
+
+    /**
      * Get active carrier services for a shipping method.
      * Filters to only include services where both the carrier and the service are active.
      *

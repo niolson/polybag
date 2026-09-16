@@ -1,6 +1,7 @@
 <?php
 
 use App\Contracts\DirectCarrierAdapter;
+use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
@@ -10,6 +11,7 @@ use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackingEventData;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\Role;
 use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
@@ -119,6 +121,11 @@ it('refreshes a package tracking snapshot and dispatches a status change event',
             return PackagingRequirement::shipperPackaging();
         }
 
+        public function customsDocumentDelivery(AddressData $from, AddressData $to, ?RateResponse $rate = null): CustomsDocumentDelivery
+        {
+            return CustomsDocumentDelivery::None;
+        }
+
         public function serviceCapability(string $serviceCode): ServiceCapability
         {
             return ServiceCapability::NotImplemented;
@@ -223,6 +230,11 @@ it('returns unsupported tracking safely without changing status unexpectedly', f
         public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
         {
             return PackagingRequirement::shipperPackaging();
+        }
+
+        public function customsDocumentDelivery(AddressData $from, AddressData $to, ?RateResponse $rate = null): CustomsDocumentDelivery
+        {
+            return CustomsDocumentDelivery::None;
         }
 
         public function serviceCapability(string $serviceCode): ServiceCapability
@@ -331,6 +343,11 @@ it('notifies operational users when a package enters exception or is stuck in pr
         public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
         {
             return PackagingRequirement::shipperPackaging();
+        }
+
+        public function customsDocumentDelivery(AddressData $from, AddressData $to, ?RateResponse $rate = null): CustomsDocumentDelivery
+        {
+            return CustomsDocumentDelivery::None;
         }
 
         public function serviceCapability(string $serviceCode): ServiceCapability

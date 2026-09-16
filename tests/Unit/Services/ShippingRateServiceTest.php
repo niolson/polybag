@@ -3,6 +3,7 @@
 use App\Contracts\AsyncRateQuoting;
 use App\Contracts\CarrierAdapterInterface;
 use App\Contracts\DirectCarrierAdapter;
+use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
@@ -11,6 +12,7 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CarrierPackaging;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\ServiceCapability;
 use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Exceptions\MissingDeclaredValueException;
@@ -1746,6 +1748,11 @@ class AsyncOfferSourceStub implements AsyncRateQuoting, CarrierAdapterInterface
     public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
     {
         return PackagingRequirement::shipperPackaging();
+    }
+
+    public function customsDocumentDelivery(AddressData $from, AddressData $to, ?RateResponse $rate = null): CustomsDocumentDelivery
+    {
+        return CustomsDocumentDelivery::None;
     }
 }
 

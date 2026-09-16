@@ -8,6 +8,7 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CarrierPackaging;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Models\Package;
@@ -82,6 +83,9 @@ function mockShippingAdapter(?ShipResponse $response = null): void
 {
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    // Fused, so an international package reaches the prompt under test rather
+    // than the report printer gate.
+    $adapter->shouldReceive('customsDocumentDelivery')->andReturn(CustomsDocumentDelivery::FusedIntoLabel);
     $adapter->shouldReceive('createShipment')->andReturn(
         $response ?? ShipResponse::success(
             trackingNumber: 'TRACK123',

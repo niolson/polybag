@@ -3,11 +3,14 @@
 namespace App\Services\Carriers;
 
 use App\Contracts\BlindPurchaseSource;
+use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\RateRequest;
+use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ServiceInference;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
@@ -129,6 +132,21 @@ class ShopifyAdapter implements BlindPurchaseSource
     public function offerDeclaredValueCap(): ?float
     {
         return null;
+    }
+
+    /**
+     * An international purchase returns `documentType: CUSTOMS_FORM` as its
+     * own document — a three-page Letter commercial invoice, nothing like the
+     * 4×6 label — which `ShopifyShippingLabelService` downloads into
+     * `customsFormData` for the report printer. Asked of the pair, as the
+     * decision in `shopify-shipping-carrier/07` requires: a blind offer has no
+     * rate, so the lane is the only thing there is to ask.
+     */
+    public function customsDocumentDelivery(AddressData $from, AddressData $to, ?RateResponse $rate = null): CustomsDocumentDelivery
+    {
+        return $from->sharesCustomsZoneWith($to)
+            ? CustomsDocumentDelivery::None
+            : CustomsDocumentDelivery::Separate;
     }
 
     /**

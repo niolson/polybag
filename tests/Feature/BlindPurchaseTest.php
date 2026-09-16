@@ -11,6 +11,7 @@ use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
@@ -448,11 +449,33 @@ it('never offers to scale customs weights for a blind purchase', function (): vo
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package->fresh(),
-        new PackageShippingRequest(blindOffer: shopifyBlindOffer()),
+        new PackageShippingRequest(blindOffer: shopifyBlindOffer(), hasReportPrinter: true),
     );
 
     expect($result->requiresCustomsWeightOverride)->toBeFalse()
         ->and($result->success)->toBeTrue();
+});
+
+it('refuses an international blind purchase when no report printer is configured', function (): void {
+    // shopify-shipping-carrier/07 constraint 3 on the path that opened it: an
+    // international Shopify purchase returns a separate CUSTOMS_FORM, and a
+    // blind offer has no rate, so the gate asks the source about the lane.
+    $package = blindPurchasePackage();
+    allowBlindPurchase($package);
+    $package->shipment->update(['country' => 'CA']);
+
+    $source = registerBlindSource();
+    $source->shouldNotReceive('createShipment');
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package->fresh(),
+        new PackageShippingRequest(blindOffer: shopifyBlindOffer(), hasReportPrinter: false),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Report Printer Required')
+        ->and($result->message)->toContain('Shopify')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 
 /** A packed item whose product weighs far more than the box was weighed at. */
@@ -526,6 +549,9 @@ function registerBlindSource(): MockInterface
     $source->shouldReceive('isConfigured')->andReturnTrue();
     $source->shouldReceive('offerCapability')->andReturn(ServiceCapability::Unguaranteed);
     $source->shouldReceive('offerDeclaredValueCap')->andReturnNull();
+    // As Shopify answers: an international purchase returns its commercial
+    // invoice as a separate document for the report printer.
+    $source->shouldReceive('customsDocumentDelivery')->andReturn(CustomsDocumentDelivery::Separate);
     $source->shouldReceive('blindPurchaseOffers')->andReturn(collect([shopifyBlindOffer()]));
     $source->shouldReceive('createShipment')->andReturnUsing(fn (): ShipResponse => blindShipResponse())->byDefault();
 

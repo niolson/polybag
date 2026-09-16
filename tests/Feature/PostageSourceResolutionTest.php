@@ -2,11 +2,13 @@
 
 use App\Contracts\CarrierAdapterInterface;
 use App\Contracts\CarrierPolicy;
+use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
 use App\Models\Carrier;
@@ -98,6 +100,11 @@ class PolicyOnlyCarrierAdapter implements CarrierAdapterInterface, CarrierPolicy
     public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
     {
         return PackagingRequirement::shipperPackaging();
+    }
+
+    public function customsDocumentDelivery(AddressData $from, AddressData $to, ?RateResponse $rate = null): CustomsDocumentDelivery
+    {
+        return CustomsDocumentDelivery::None;
     }
 
     public function serviceCapability(string $serviceCode): ServiceCapability

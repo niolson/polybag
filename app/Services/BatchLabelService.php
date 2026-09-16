@@ -3,9 +3,12 @@
 namespace App\Services;
 
 use App\Contracts\PackageDraftWorkflow;
+use App\Contracts\PostageOfferSource;
 use App\DataTransferObjects\BatchValidationResult;
 use App\DataTransferObjects\PackageDrafts\BatchPackageDraftInput;
+use App\DataTransferObjects\Shipping\AddressData;
 use App\Enums\AuditAction;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\LabelBatchStatus;
 use App\Enums\PackageStatus;
@@ -15,6 +18,7 @@ use App\Models\AuditLog;
 use App\Models\BoxSize;
 use App\Models\LabelBatch;
 use App\Models\LabelBatchItem;
+use App\Models\Location;
 use App\Models\Shipment;
 use App\Models\User;
 use App\Notifications\BatchLabelCompleted;
@@ -26,16 +30,17 @@ class BatchLabelService
 {
     /**
      * @param  Collection<int, Shipment>  $shipments
+     * @param  bool  $hasReportPrinter  Whether the workstation starting the batch has a report printer — browser state, pushed with the label format
      */
-    public function validateShipmentsForBatch(Collection $shipments): BatchValidationResult
+    public function validateShipmentsForBatch(Collection $shipments, bool $hasReportPrinter = false): BatchValidationResult
     {
         $eligible = collect();
         $ineligible = collect();
 
-        $shipments->each(fn (Shipment $s) => $s->loadMissing(['shipmentItems.product', 'packages']));
+        $shipments->each(fn (Shipment $s) => $s->loadMissing(['shipmentItems.product', 'packages', 'location']));
 
         foreach ($shipments as $shipment) {
-            $reason = $this->getIneligibilityReason($shipment);
+            $reason = $this->getIneligibilityReason($shipment, $hasReportPrinter);
 
             if ($reason) {
                 $ineligible->push(['shipment' => $shipment, 'reason' => $reason]);
@@ -47,7 +52,7 @@ class BatchLabelService
         return new BatchValidationResult($eligible, $ineligible);
     }
 
-    private function getIneligibilityReason(Shipment $shipment): ?string
+    private function getIneligibilityReason(Shipment $shipment, bool $hasReportPrinter): ?string
     {
         if ($shipment->status === ShipmentStatus::Shipped) {
             return 'Already shipped';
@@ -87,7 +92,53 @@ class BatchLabelService
             }
         }
 
+        if (! $hasReportPrinter && $this->everyCarrierReturnsASeparateCustomsDocument($shipment)) {
+            return 'No report printer configured for the customs form';
+        }
+
         return null;
+    }
+
+    /**
+     * Whether this batch cannot buy anything for the shipment without a report
+     * printer — `shopify-shipping-carrier/07` constraint 4, the skip beside
+     * "Not picked".
+     *
+     * Asked of every carrier the shipping method could rate-shop, because the
+     * batch has not chosen one yet: a method that offers USPS beside UPS can
+     * still buy USPS, whose CP72 prints on the label printer, so it is not
+     * skipped here. It is skipped only when every carrier on the method
+     * answers {@see CustomsDocumentDelivery::Separate} for this
+     * lane — when the batch would be starting a purchase that
+     * `EloquentPackageShippingWorkflow` is certain to refuse. That purchase-time
+     * check still stands behind this one, with the rate in hand.
+     *
+     * "Could rate-shop" is rate shopping's own answer,
+     * {@see ShippingRateService::sellersForShippingMethod()}, so an
+     * unconfigured carrier or one whose services cannot reach this
+     * destination does not count as a way out that the batch does not have.
+     */
+    private function everyCarrierReturnsASeparateCustomsDocument(Shipment $shipment): bool
+    {
+        // No origin means no lane to ask about. Validation reports reasons
+        // rather than throwing; the purchase will name the missing location.
+        $origin = $shipment->location ?? Location::getDefault();
+
+        if ($origin === null) {
+            return false;
+        }
+
+        $from = AddressData::fromLocation($origin);
+        $to = AddressData::fromShipment($shipment);
+
+        if ($from->sharesCustomsZoneWith($to)) {
+            return false;
+        }
+
+        $sellers = app(ShippingRateService::class)->sellersForShippingMethod($shipment->shippingMethod, $to);
+
+        return $sellers->isNotEmpty()
+            && $sellers->every(fn (PostageOfferSource $seller): bool => $seller->customsDocumentDelivery($from, $to)->needsReportPrinter());
     }
 
     /**
@@ -99,8 +150,9 @@ class BatchLabelService
         User $user,
         string $labelFormat,
         ?int $labelDpi,
+        bool $hasReportPrinter = false,
     ): LabelBatch {
-        return DB::transaction(function () use ($shipments, $boxSize, $user, $labelFormat, $labelDpi) {
+        return DB::transaction(function () use ($shipments, $boxSize, $user, $labelFormat, $labelDpi, $hasReportPrinter) {
             $batch = LabelBatch::create([
                 'user_id' => $user->id,
                 'box_size_id' => $boxSize->id,
@@ -125,7 +177,7 @@ class BatchLabelService
                     'status' => LabelBatchItemStatus::Pending,
                 ]);
 
-                $jobs[] = new GenerateLabelJob($batchItem->id, $labelFormat, $labelDpi);
+                $jobs[] = new GenerateLabelJob($batchItem->id, $labelFormat, $labelDpi, $hasReportPrinter);
             }
 
             $busBatch = Bus::batch($jobs)

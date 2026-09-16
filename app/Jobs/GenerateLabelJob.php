@@ -25,6 +25,7 @@ class GenerateLabelJob implements ShouldQueue
         public int $labelBatchItemId,
         public string $labelFormat,
         public ?int $labelDpi,
+        public bool $hasReportPrinter = false,
     ) {
         $this->onQueue('low');
     }
@@ -51,6 +52,7 @@ class GenerateLabelJob implements ShouldQueue
                     labelDpi: $this->labelDpi,
                     userId: $item->labelBatch->user_id,
                     cleanupOnFailure: false,
+                    hasReportPrinter: $this->hasReportPrinter,
                 ),
             );
 

@@ -1,6 +1,7 @@
 <?php
 
 use App\Contracts\DirectCarrierAdapter;
+use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
@@ -9,6 +10,7 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\Role;
@@ -187,6 +189,11 @@ it('voids a label and clears shipping fields', function (): void {
         public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
         {
             return PackagingRequirement::shipperPackaging();
+        }
+
+        public function customsDocumentDelivery(AddressData $from, AddressData $to, ?RateResponse $rate = null): CustomsDocumentDelivery
+        {
+            return CustomsDocumentDelivery::None;
         }
 
         public function serviceCapability(string $serviceCode): ServiceCapability

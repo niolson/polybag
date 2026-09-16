@@ -19,6 +19,7 @@
             autoShipEnabled: false,
             labelFormat: localStorage.getItem('labelFormat') || 'pdf',
             labelDpi: parseInt(localStorage.getItem('labelDpi') || '203') || null,
+            hasReportPrinter: !!localStorage.getItem('reportPrinter'),
             packingItems: @js($packingItems),
             transparencyEnabled: @js($transparencyEnabled),
             scanToAddMode: @js($scanToAddMode),
@@ -286,7 +287,8 @@
                         this.length,
                         this.autoShipEnabled,
                         this.labelFormat,
-                        this.labelDpi
+                        this.labelDpi,
+                        this.hasReportPrinter
                     );
                     completed = true;
                 } finally {

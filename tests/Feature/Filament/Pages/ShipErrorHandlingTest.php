@@ -3,6 +3,7 @@
 use App\Contracts\DirectCarrierAdapter;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PackageStatus;
 use App\Filament\Pages\Ship;
 use App\Models\BoxSize;
@@ -193,4 +194,67 @@ it('ship disables ship action when no rates available', function (): void {
     $component = Livewire::test(Ship::class, ['package_id' => $package->id]);
 
     $component->assertSet('rateOptions', []);
+});
+
+it('ship refuses a separate customs document when the workstation has no report printer, and stays put', function (): void {
+    // shopify-shipping-carrier/07 constraint 3 from the page: `hasReportPrinter`
+    // is browser state pushed on mount, and its absence refuses the purchase
+    // before the carrier is called. The page stays on the package — the
+    // remedy is Device Settings, not a fresh quote.
+    $package = createShippablePackageForErrorTest();
+    $package->shipment->update([
+        'address1' => '100 Queen St W',
+        'city' => 'Toronto',
+        'state_or_province' => 'ON',
+        'postal_code' => 'M5H 2N2',
+        'country' => 'CA',
+    ]);
+
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('getCarrierName')->andReturn('USPS');
+    $adapter->shouldReceive('isConfigured')->andReturn(true);
+    $adapter->shouldReceive('prepareRateRequest')->andReturnNull();
+    $adapter->shouldReceive('getRates')->andReturn(collect());
+    $adapter->shouldReceive('customsDocumentDelivery')->andReturn(CustomsDocumentDelivery::Separate);
+    $adapter->shouldNotReceive('createShipment');
+    app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
+
+    $component = setUpShipComponentWithRate($package);
+
+    $component->set('hasReportPrinter', false)
+        ->call('ship')
+        ->assertNotified('Report Printer Required')
+        ->assertNotDispatched('print-label')
+        ->assertNoRedirect();
+
+    expect($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});
+
+it('ship buys a separate customs document once the workstation reports a report printer', function (): void {
+    $package = createShippablePackageForErrorTest();
+    $package->shipment->update([
+        'address1' => '100 Queen St W',
+        'city' => 'Toronto',
+        'state_or_province' => 'ON',
+        'postal_code' => 'M5H 2N2',
+        'country' => 'CA',
+    ]);
+
+    registerMockAdapterForErrorTest(ShipResponse::success(
+        trackingNumber: '1Z999AA10123456784',
+        cost: 22.50,
+        carrier: 'USPS',
+        service: 'USPS_GROUND_ADVANTAGE',
+        labelData: base64_encode('PDF content'),
+        customsFormData: base64_encode('INVOICE'),
+    ));
+
+    $component = setUpShipComponentWithRate($package);
+
+    $component->set('hasReportPrinter', true)
+        ->call('ship')
+        ->assertDispatched('print-label');
+
+    expect($package->fresh()->status)->toBe(PackageStatus::Shipped);
 });

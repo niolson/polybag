@@ -57,6 +57,8 @@ class ManualShip extends Page implements HasForms
 
     public ?int $labelDpi = null;
 
+    public bool $hasReportPrinter = false;
+
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-pencil-square';
 
     protected static ?string $navigationLabel = 'Manual Ship';
@@ -252,6 +254,7 @@ class ManualShip extends Page implements HasForms
                 labelFormat: $this->labelFormat,
                 labelDpi: $this->labelDpi,
                 userId: auth()->id(),
+                hasReportPrinter: $this->hasReportPrinter,
             ),
         );
 

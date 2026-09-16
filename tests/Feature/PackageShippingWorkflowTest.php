@@ -9,6 +9,7 @@ use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CarrierPackaging;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PackageStatus;
 use App\Enums\ShippingRuleAction;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
@@ -538,6 +539,9 @@ it('prompts for a customs weight override when a military destination is overwei
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    // A military lane clears customs, so the report printer gate asks the
+    // seller first. Fused is what lets the test reach the weight prompt.
+    $adapter->shouldReceive('customsDocumentDelivery')->andReturn(CustomsDocumentDelivery::FusedIntoLabel);
     // A concrete return value, even though the call is not expected: Mockery
     // cannot synthesize one for the readonly ShipResponse, and a regression
     // should fail this test rather than fatal out of the whole suite.
@@ -577,6 +581,9 @@ it('scales customs weights for a military destination once the override is confi
 
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    // A military lane clears customs, so the report printer gate asks the
+    // seller first. Fused is what lets the test reach the weight prompt.
+    $adapter->shouldReceive('customsDocumentDelivery')->andReturn(CustomsDocumentDelivery::FusedIntoLabel);
     $adapter->shouldReceive('createShipment')->once()->andReturnUsing(
         function ($shipRequest): ShipResponse {
             $total = collect($shipRequest->customsItems)
@@ -639,6 +646,160 @@ it('does not prompt for a customs override on an ordinary domestic destination',
             selectedRate: new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'),
             userId: $user->id,
         ),
+    );
+
+    expect($result->success)->toBeTrue();
+});
+
+/**
+ * A lane that clears customs, for the report printer gate. Canada rather than
+ * a military address so the customs weight prompt stays out of the way: the
+ * package weighs more than its one item.
+ */
+function sendWorkflowPackageAbroad(Package $package): void
+{
+    $package->shipment->update([
+        'address1' => '100 Queen St W',
+        'city' => 'Toronto',
+        'state_or_province' => 'ON',
+        'postal_code' => 'M5H 2N2',
+        'country' => 'CA',
+    ]);
+}
+
+it('refuses to buy from a seller that returns a separate customs document when no report printer is configured', function (): void {
+    // shopify-shipping-carrier/07 constraint 3: the document would come back
+    // and have nowhere to print, so nothing is bought.
+    $this->actingAs($user = User::factory()->create());
+    $package = createWorkflowPackage();
+    sendWorkflowPackageAbroad($package);
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('getCarrierName')->andReturn('MockCarrier');
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('customsDocumentDelivery')->once()->andReturn(CustomsDocumentDelivery::Separate);
+    $adapter->shouldReceive('createShipment')->never()->andReturn(
+        ShipResponse::success(trackingNumber: 'UNEXPECTED', cost: 7.25, carrier: 'MockCarrier', service: 'Ground', labelData: base64_encode('label')),
+    );
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package->fresh(),
+        new PackageShippingRequest(
+            selectedRate: new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'),
+            userId: $user->id,
+            hasReportPrinter: false,
+        ),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Report Printer Required')
+        ->and($result->message)->toContain('Device Settings')
+        ->and($result->leavePackageIntact)->toBeTrue()
+        ->and($result->requiresRequote)->toBeFalse()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});
+
+it('buys from a seller that fuses the customs form into the label without a report printer', function (): void {
+    // The over-block shopify-shipping-carrier/23 exists to prevent: USPS's
+    // CP72 is three plies inside the label and prints on the thermal path, so
+    // a workstation with only a label printer keeps its international labels.
+    $this->actingAs($user = User::factory()->create());
+    $package = createWorkflowPackage();
+    sendWorkflowPackageAbroad($package);
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('customsDocumentDelivery')->once()->andReturn(CustomsDocumentDelivery::FusedIntoLabel);
+    $adapter->shouldReceive('createShipment')->once()->andReturn(
+        ShipResponse::success(trackingNumber: 'FUSED123', cost: 7.25, carrier: 'MockCarrier', service: 'Ground', labelData: base64_encode('label')),
+    );
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package->fresh(),
+        new PackageShippingRequest(
+            selectedRate: new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'),
+            userId: $user->id,
+            hasReportPrinter: false,
+        ),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($package->fresh()->tracking_number)->toBe('FUSED123');
+});
+
+it('buys from a seller that returns a separate customs document once a report printer is configured', function (): void {
+    $this->actingAs($user = User::factory()->create());
+    $package = createWorkflowPackage();
+    sendWorkflowPackageAbroad($package);
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    // With a report printer every answer prints, so the seller is not asked.
+    $adapter->shouldNotReceive('customsDocumentDelivery');
+    $adapter->shouldReceive('createShipment')->once()->andReturn(
+        ShipResponse::success(trackingNumber: 'SEPARATE123', cost: 7.25, carrier: 'MockCarrier', service: 'Ground', labelData: base64_encode('label')),
+    );
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package->fresh(),
+        new PackageShippingRequest(
+            selectedRate: new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'),
+            userId: $user->id,
+            hasReportPrinter: true,
+        ),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($package->fresh()->tracking_number)->toBe('SEPARATE123');
+});
+
+it('does not ask the seller about customs documents on a domestic lane', function (): void {
+    $this->actingAs($user = User::factory()->create());
+    $package = createWorkflowPackage();
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldNotReceive('customsDocumentDelivery');
+    $adapter->shouldReceive('createShipment')->once()->andReturn(
+        ShipResponse::success(trackingNumber: 'DOMESTIC123', cost: 7.25, carrier: 'MockCarrier', service: 'Ground', labelData: base64_encode('label')),
+    );
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(
+            selectedRate: new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'),
+            userId: $user->id,
+            hasReportPrinter: false,
+        ),
+    );
+
+    expect($result->success)->toBeTrue();
+});
+
+it('carries the report printer flag into an unattended purchase', function (): void {
+    // Batch ship and auto ship arrive through autoShip(); the workstation's
+    // answer has to survive the hop into the attended request or every batch
+    // would be refused as if no report printer existed.
+    $this->actingAs($user = User::factory()->create());
+    $package = createWorkflowPackage();
+    sendWorkflowPackageAbroad($package);
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('resolvePreSelectedRate')->andReturnUsing(fn ($rate) => $rate);
+    $adapter->shouldNotReceive('customsDocumentDelivery');
+    $adapter->shouldReceive('createShipment')->once()->andReturn(
+        ShipResponse::success(trackingNumber: 'AUTO123', cost: 7.25, carrier: 'MockCarrier', service: 'Ground', labelData: base64_encode('label')),
+    );
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package->fresh(),
+        new PackageAutoShippingRequest(userId: $user->id, hasReportPrinter: true),
     );
 
     expect($result->success)->toBeTrue();
