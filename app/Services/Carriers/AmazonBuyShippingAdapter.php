@@ -37,6 +37,7 @@ use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\Shipping\PackagingFilter;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Response;
 
 /**
@@ -100,6 +101,22 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
     public const CARRIER_ID_KEY = 'amazon_carrier_id';
 
     public const SERVICE_ID_KEY = 'amazon_service_id';
+
+    /**
+     * The `rate_metadata` key under which a rate says whether buying it
+     * returns a customs document beside the label — the Amazon half of the
+     * pre-purchase gate `shopify-shipping-carrier/07` describes. Stamped at
+     * quote time and re-derived at purchase by {@see returnsSeparateCustomsDocument()},
+     * from the offering's own document details rather than from the address.
+     */
+    public const CUSTOMS_DOCUMENT_METADATA_KEY = 'returnsSeparateCustomsDocument';
+
+    /**
+     * How long a fetched additional-inputs schema is remembered per `rateId`,
+     * so that a reply parsed twice asks Amazon once. Longer than the offer
+     * window: a `rateId` is never reissued, so nothing is lost by keeping it.
+     */
+    private const ADDITIONAL_INPUTS_SCHEMA_CACHE_SECONDS = 900;
 
     /**
      * Amazon's confirmation value-added services, and the special-service codes
@@ -288,6 +305,23 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
     public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
     {
         return $this->classifyPackaging((string) ($rate->metadata['amazonServiceId'] ?? ''));
+    }
+
+    /**
+     * Whether buying this rate returns a customs document beside the label,
+     * which the report printer has to be there for.
+     *
+     * Re-derived from the `supportedDocumentSpecifications` the offer stored,
+     * the same way {@see packagingRequirementFor()} re-classifies — so the
+     * purchase reads the offering the quote read, never the browser's copy of
+     * the stamp. See {@see AmazonBuyShippingService::declaresCustomsForm()}
+     * for why the offering and not the address.
+     */
+    public function returnsSeparateCustomsDocument(RateResponse $rate): bool
+    {
+        return AmazonBuyShippingService::declaresCustomsForm(
+            (array) ($rate->metadata['supportedDocumentSpecifications'] ?? [])
+        );
     }
 
     /**
@@ -495,6 +529,8 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
             labelOrientation: 'portrait',
             labelFormat: $label->labelFormat,
             labelDpi: $label->labelDpi,
+            customsFormData: $label->customsFormData,
+            customsFormFormat: $label->customsFormFormat ?? 'pdf',
             shipDate: $request->shipDate,
             appliedServices: $this->appliedServices($metadata, $request),
             postageSource: PostageSource::PostageDataSource,
@@ -542,6 +578,11 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
         $marketplace = $source ? app(AmazonBuyShippingService::class)->marketplaceIdFor($source) : null;
 
         $observations = $this->record($quote, $marketplace);
+
+        if ($source) {
+            $this->recordAdditionalInputsSchemas($quote, $source, $observations);
+        }
+
         $environment = SourceEnvironment::current();
         $expiresAt = now()->addSeconds(AmazonBuyShippingService::OFFER_WINDOW_SECONDS);
         $offerStore = app(OfferStore::class);
@@ -648,9 +689,71 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
     }
 
     /**
+     * Fetch and keep the schema for every rate that asks for additional inputs.
+     *
+     * This is what turns "wait for a test order" into "wait for a customer"
+     * (`13`): the first cross-border offer any tenant is quoted answers `09`'s
+     * first finding by itself, without anyone buying a label. The schema
+     * carries no order data, so it goes on the observation row for the
+     * service — the durable place, beside the identity it belongs to — and is
+     * logged at `info` for whoever is watching. Fetching is free and touches
+     * nothing; a failure to fetch changes nothing about the quote, because the
+     * rate is dropped either way.
+     *
+     * Once per distinct `rateId`, never per page render: a fetched ID is
+     * remembered for longer than the offer lives, so a reply parsed twice asks
+     * once — and a failed fetch is forgotten, so the next parse asks again.
+     *
+     * @param  Collection<string, ObservedService>  $observations  keyed by service key
+     */
+    private function recordAdditionalInputsSchemas(AmazonShippingQuote $quote, DataSource $source, Collection $observations): void
+    {
+        $service = app(AmazonBuyShippingService::class);
+
+        foreach ($quote->rates as $rate) {
+            if (! ($rate['requiresAdditionalInputs'] ?? false) || blank($rate['rateId'] ?? null)) {
+                continue;
+            }
+
+            $rateId = (string) $rate['rateId'];
+
+            if (! Cache::add("amazon-additional-inputs-schema:{$rateId}", true, self::ADDITIONAL_INPUTS_SCHEMA_CACHE_SECONDS)) {
+                continue;
+            }
+
+            $schema = $service->additionalInputsSchema($source, $quote->requestToken, $rateId);
+
+            if ($schema === null) {
+                // Only a fetched schema is remembered. A failed fetch must not
+                // suppress the next attempt for a rate that may be the only
+                // one of its kind this account is quoted before it expires.
+                Cache::forget("amazon-additional-inputs-schema:{$rateId}");
+
+                continue;
+            }
+
+            $carrierId = (string) ($rate['carrierId'] ?? '');
+            $serviceId = (string) ($rate['serviceId'] ?? '');
+
+            logger()->info('Amazon rate requires additional inputs', [
+                'carrier_id' => $carrierId,
+                'service_id' => $serviceId,
+                'schema' => $schema,
+            ]);
+
+            $observations->get(ObservedService::serviceKey(self::OBSERVATION_SOURCE, $carrierId, $serviceId))
+                ?->forceFill([
+                    'additional_inputs_schema' => $schema,
+                    'additional_inputs_schema_seen_at' => now(),
+                ])
+                ->save();
+        }
+    }
+
+    /**
      * Whether this offer could actually be bought and printed.
      *
-     * Three filters that would otherwise fail the *purchase* rather than the
+     * Four filters that would otherwise fail the *purchase* rather than the
      * quote — after the packer has committed and, for the second one, after
      * the offer has been spent — and two that would fail at the carrier's
      * acceptance counter, after the label is on the parcel.
@@ -667,10 +770,27 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
     private function isBuyable(array $rate, RateRequest $request): bool
     {
         return $this->hasPrintableDocument($rate)
+            && $this->needsNoAdditionalInputs($rate)
             && $this->honoursRequiredServices($rate, $request)
             && $this->answersRequiredGroupsForFree($rate, $request)
             && $this->fitsThePackaging($rate, $request)
             && $this->carriesPermittedContent($rate);
+    }
+
+    /**
+     * Drop a rate whose purchase must carry `additionalInputs`.
+     *
+     * Nothing here can build them yet: the schema they must satisfy is
+     * fetched per rate and has never been seen for this account (`09`), so a
+     * rate that asks for them would pass the quote and fail the purchase. The
+     * same shape as {@see hasPrintableDocument()} — refused before an offer is
+     * issued and before the money. The observation is still recorded, and
+     * {@see recordAdditionalInputsSchemas()} keeps what the rate asked for, so
+     * the drop becomes "satisfied or dropped" once someone has read a schema.
+     */
+    private function needsNoAdditionalInputs(array $rate): bool
+    {
+        return ! ($rate['requiresAdditionalInputs'] ?? false);
     }
 
     /**
@@ -808,6 +928,12 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
             'amazonServiceId' => $rate['serviceId'] ?? null,
             PackagingRequirement::RATE_METADATA_KEY => $packagingRequirement->toArray(),
             'supportedDocumentSpecifications' => $rate['supportedDocumentSpecifications'] ?? [],
+            // Whether a second document comes back, for the report-printer
+            // gate — derived from the offering, and re-derived at purchase
+            // from the specifications stored beside it.
+            self::CUSTOMS_DOCUMENT_METADATA_KEY => AmazonBuyShippingService::declaresCustomsForm(
+                $rate['supportedDocumentSpecifications'] ?? []
+            ),
             'availableValueAddedServiceGroups' => $rate['availableValueAddedServiceGroups'] ?? [],
             // Buy Shipping protection: a reason to prefer this offer that has
             // nothing to do with price, and worth keeping on the package.

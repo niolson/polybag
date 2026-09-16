@@ -11,6 +11,7 @@ readonly class ShipResponse
     /**
      * @param  array<string>  $appliedServices  Carrier-agnostic service codes actually sent to the carrier (e.g. 'saturday_delivery')
      * @param  string|null  $customsFormData  Base64 of a customs document returned separately from the label, for the report printer
+     * @param  string|null  $customsFormFormat  What that document is, in the vocabulary of $labelFormat — `pdf`, `image` or `zpl`. Defaults to PDF, which is all Shopify and UPS return; Amazon states one per document.
      * @param  array<string, mixed>  $metadata  Carrier-specific facts worth keeping on the package (e.g. what Shopify chose)
      * @param  PostageSource  $postageSource  Where the postage was bought. Defaults to the direct-carrier case; sales-channel postage must say so.
      * @param  int|null  $postageDataSourceId  The data source the postage was bought through, required when $postageSource is PostageDataSource
@@ -31,6 +32,7 @@ readonly class ShipResponse
         public ?string $labelFormat = 'pdf',
         public ?int $labelDpi = null,
         public ?string $customsFormData = null,
+        public ?string $customsFormFormat = 'pdf',
         public ?CarbonImmutable $shipDate = null,
         public ?string $errorMessage = null,
         public array $appliedServices = [],

@@ -99,6 +99,7 @@ class PackageFactory extends Factory
     {
         return $this->shipped()->state(fn () => [
             'customs_form_data' => base64_encode('mock-customs-form-pdf'),
+            'customs_form_format' => 'pdf',
         ]);
     }
 

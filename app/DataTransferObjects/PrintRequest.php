@@ -20,6 +20,8 @@ readonly class PrintRequest
          * printer rather than through the 4x6 label path.
          */
         public ?string $customsForm = null,
+        /** What the customs document is — `pdf` or `image` for the report printer, `zpl` for the label printer raw. */
+        public ?string $customsFormFormat = null,
     ) {}
 
     public static function fromShipResponse(ShipResponse $response, ?Package $package = null): self
@@ -31,6 +33,7 @@ readonly class PrintRequest
             dpi: $response->labelDpi,
             packageId: $package?->id,
             customsForm: $response->customsFormData,
+            customsFormFormat: $response->customsFormFormat,
         );
     }
 
@@ -43,6 +46,7 @@ readonly class PrintRequest
             dpi: $package->label_dpi,
             packageId: $package->id,
             customsForm: $package->customs_form_data,
+            customsFormFormat: $package->customs_form_format,
         );
     }
 }

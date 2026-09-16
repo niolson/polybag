@@ -2,6 +2,7 @@
 
 use App\Contracts\PackageLabelWorkflow;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
+use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
@@ -13,6 +14,7 @@ use App\Enums\ServiceEvidence;
 use App\Enums\SourceEnvironment;
 use App\Http\Integrations\Amazon\Requests\CancelAmazonShipment;
 use App\Http\Integrations\Amazon\Requests\ConfirmShipment;
+use App\Http\Integrations\Amazon\Requests\GetAdditionalInputsSchema;
 use App\Http\Integrations\Amazon\Requests\GetShipmentTracking;
 use App\Http\Integrations\Amazon\Requests\GetShippingRates;
 use App\Http\Integrations\Amazon\Requests\PurchaseShipment;
@@ -28,6 +30,7 @@ use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\ShippingOffer;
+use App\Services\AmazonBuyShippingService;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\PackageShipping\EloquentPackageShippingWorkflow;
 use App\Services\PostageSources\ObservedServiceMapper;
@@ -40,6 +43,7 @@ use App\Services\ShippingRateService;
 use App\Services\TrackingService;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Faking\MockResponse;
+use Saloon\Http\Request;
 use Saloon\Laravel\Facades\Saloon;
 
 /**
@@ -1510,4 +1514,362 @@ it('holds an offer nothing can be asked to buy any more', function (): void {
     expect($result->success)->toBeFalse()
         ->and($result->title)->toBe('Rate Not Purchasable')
         ->and($this->package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});
+
+/**
+ * A cross-border offer, synthesised from the Shipping v2 schema rather than
+ * captured: no foreign order exists in the account (`09`). Its shape follows
+ * what Amazon support stated on 2026-09-16 — the customs declaration is a
+ * `CUSTOM_FORM` document declared in the print option's
+ * `supportedDocumentDetails` — with `requiresAdditionalInputs` as given, since
+ * that is the other thing a cross-border rate may say and nothing here can
+ * satisfy yet (`13`).
+ *
+ * @return array<string, mixed>
+ */
+function amazonInternationalRate(bool $requiresAdditionalInputs = false, bool $customsFormMandatory = false): array
+{
+    $customsForm = ['name' => 'CUSTOM_FORM', 'isMandatory' => $customsFormMandatory];
+
+    return [
+        'rateId' => '5e2a7c31-8d4b-4f6e-b1a9-3c7d2e8f9a0b',
+        'carrierId' => 'USPS',
+        'carrierName' => 'USPS',
+        'serviceId' => 'USPS_PTP_PRI_INTL',
+        'serviceName' => 'USPS Priority Mail International',
+        'totalCharge' => ['unit' => 'USD', 'value' => 42.15],
+        'requiresAdditionalInputs' => $requiresAdditionalInputs,
+        'promise' => ['deliveryWindow' => ['start' => '2026-09-24T06:59:59Z', 'end' => '2026-09-30T06:59:59Z']],
+        'availableValueAddedServiceGroups' => [],
+        'supportedDocumentSpecifications' => [
+            [
+                'format' => 'ZPL',
+                'size' => ['width' => 4.0, 'length' => 6.0, 'unit' => 'INCH'],
+                'printOptions' => [['supportedDPIs' => [300], 'supportedPageLayouts' => ['LEFT'], 'supportedFileJoiningOptions' => [true], 'supportedDocumentDetails' => [['name' => 'LABEL', 'isMandatory' => true], $customsForm]]],
+            ],
+            [
+                'format' => 'PNG',
+                'size' => ['width' => 4.0, 'length' => 6.0, 'unit' => 'INCH'],
+                'printOptions' => [['supportedDPIs' => [], 'supportedPageLayouts' => ['LEFT'], 'supportedFileJoiningOptions' => [true], 'supportedDocumentDetails' => [['name' => 'LABEL', 'isMandatory' => true], $customsForm]]],
+            ],
+            [
+                'format' => 'PDF',
+                'size' => ['width' => 4.0, 'length' => 6.0, 'unit' => 'INCH'],
+                'printOptions' => [['supportedDPIs' => [], 'supportedPageLayouts' => ['LEFT'], 'supportedFileJoiningOptions' => [true], 'supportedDocumentDetails' => [['name' => 'PACKSLIP', 'isMandatory' => true], ['name' => 'LABEL', 'isMandatory' => true], $customsForm]]],
+            ],
+        ],
+    ];
+}
+
+/**
+ * A purchase that returned the label and a customs document as two package
+ * documents, which is what Amazon support says a cross-border purchase does.
+ */
+function amazonPurchaseWithCustomsFormResponse(string $customsFormFormat = 'PDF'): MockResponse
+{
+    return MockResponse::make(['payload' => [
+        'shipmentId' => 'amzn1.sid.intl001',
+        'promise' => ['deliveryWindow' => ['start' => '2026-09-24T06:59:59Z', 'end' => '2026-09-30T06:59:59Z']],
+        'packageDocumentDetails' => [[
+            'packageClientReferenceId' => '1',
+            'trackingId' => 'LZ123456789US',
+            'packageDocuments' => [
+                ['type' => 'LABEL', 'format' => 'ZPL', 'contents' => base64_encode('LABEL-BYTES')],
+                ['type' => 'CUSTOM_FORM', 'format' => $customsFormFormat, 'contents' => base64_encode('CUSTOMS-FORM-BYTES')],
+            ],
+        ]],
+    ]]);
+}
+
+/**
+ * What `getAdditionalInputs` is expected to answer for a rate that asks — the
+ * shape of the one documented example, not an observed schema. The real one is
+ * exactly what this test's code path exists to record.
+ */
+function amazonAdditionalInputsSchema(): array
+{
+    return [
+        'title' => 'Additional Inputs',
+        'type' => 'object',
+        'properties' => [
+            'harmonizedSystemCode' => ['type' => 'string', 'description' => 'The harmonized system code of the item'],
+            'packageClientReferenceId' => ['type' => 'string'],
+        ],
+        'required' => ['harmonizedSystemCode'],
+    ];
+}
+
+it('synthesises international fixtures that conform to the published Shipping v2 schema', function (): void {
+    assertMatchesSpApiSchema(amazonInternationalRate(requiresAdditionalInputs: true), 'Rate', 'shippingV2');
+    assertMatchesSpApiSchema(amazonInternationalRate(customsFormMandatory: true), 'Rate', 'shippingV2');
+    assertMatchesSpApiSchema(amazonPurchaseWithCustomsFormResponse()->body()->all(), 'PurchaseShipmentResponse', 'shippingV2');
+    assertMatchesSpApiSchema(amazonPurchaseWithCustomsFormResponse('PNG')->body()->all(), 'PurchaseShipmentResponse', 'shippingV2');
+    assertMatchesSpApiSchema(['payload' => amazonAdditionalInputsSchema()], 'GetAdditionalInputsResponse', 'shippingV2');
+});
+
+it('never offers a rate that requires additional inputs, and records that it was quoted', function (): void {
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse([amazonInternationalRate(requiresAdditionalInputs: true), ...amazonEligibleRates()]),
+        GetAdditionalInputsSchema::class => MockResponse::make(['payload' => amazonAdditionalInputsSchema()]),
+    ]);
+
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), []);
+
+    // The purchase would need `additionalInputs` nothing can build yet, so the
+    // rate is refused before an offer exists and before the money — but the
+    // catalog still learns the service was on offer.
+    expect($rates->pluck('serviceCode')->all())->toBe(['ONTRAC_MFN_GROUND', 'UPS_PTP_NEXT_DAY_AIR_SAVER'])
+        ->and(ShippingOffer::where('service_code', 'USPS_PTP_PRI_INTL')->exists())->toBeFalse()
+        ->and(ObservedService::where('external_service_id', 'USPS_PTP_PRI_INTL')->value('last_eligible_at'))->not->toBeNull();
+});
+
+it('fetches and records the additional-inputs schema for a rate that asks, once per rate', function (): void {
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse([amazonInternationalRate(requiresAdditionalInputs: true), ...amazonEligibleRates()]),
+        GetAdditionalInputsSchema::class => MockResponse::make(['payload' => amazonAdditionalInputsSchema()]),
+    ]);
+
+    amazonAdapter()->getRates(RateRequest::fromPackage($this->package), []);
+    // The same reply parsed again — a re-render, a retry — must not ask twice.
+    amazonAdapter()->getRates(RateRequest::fromPackage($this->package), []);
+
+    $observed = ObservedService::where('external_service_id', 'USPS_PTP_PRI_INTL')->sole();
+
+    // The schema, and nothing about the order: it is the one input the next
+    // piece of work needs and the sandbox cannot produce.
+    expect($observed->additional_inputs_schema)->toBe(amazonAdditionalInputsSchema())
+        ->and($observed->additional_inputs_schema_seen_at)->not->toBeNull()
+        ->and(ObservedService::where('external_service_id', 'ONTRAC_MFN_GROUND')->value('additional_inputs_schema'))->toBeNull();
+
+    // Two quotes, one schema call.
+    Saloon::assertSentCount(3);
+    Saloon::assertSent(fn (Request $request): bool => $request instanceof GetAdditionalInputsSchema
+        && $request->resolveEndpoint() === '/shipping/v2/shipments/additionalInputs/schema'
+        && $request->query()->all() === [
+            'requestToken' => 'amzn1.rq.ca171d6e-d13b-4973-993b-6461775',
+            'rateId' => '5e2a7c31-8d4b-4f6e-b1a9-3c7d2e8f9a0b',
+        ]
+        && $request->headers()->get('x-amzn-shipping-business-id') === 'AmazonShipping_US');
+});
+
+it('still quotes the other offers when the schema cannot be fetched', function (): void {
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse([amazonInternationalRate(requiresAdditionalInputs: true), ...amazonEligibleRates()]),
+        GetAdditionalInputsSchema::class => MockResponse::make(['errors' => [['code' => 'InternalFailure', 'message' => 'try again']]], 500),
+    ]);
+
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), []);
+
+    expect($rates->pluck('carrier')->all())->toBe(['OnTrac', 'UPS'])
+        ->and(ObservedService::where('external_service_id', 'USPS_PTP_PRI_INTL')->value('additional_inputs_schema'))->toBeNull();
+});
+
+it('asks again on the next quote when the schema fetch failed', function (): void {
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse([amazonInternationalRate(requiresAdditionalInputs: true)]),
+        GetAdditionalInputsSchema::class => MockResponse::make(['errors' => [['code' => 'InternalFailure', 'message' => 'try again']]], 500),
+    ]);
+
+    amazonAdapter()->getRates(RateRequest::fromPackage($this->package), []);
+
+    // A failed fetch must not be remembered as a fetch: the same rate, asked
+    // about again, is asked about again — this may be the only time this
+    // account is quoted a rate that asks before the offer expires.
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse([amazonInternationalRate(requiresAdditionalInputs: true)]),
+        GetAdditionalInputsSchema::class => MockResponse::make(['payload' => amazonAdditionalInputsSchema()]),
+    ]);
+
+    amazonAdapter()->getRates(RateRequest::fromPackage($this->package), []);
+
+    expect(ObservedService::where('external_service_id', 'USPS_PTP_PRI_INTL')->value('additional_inputs_schema'))
+        ->toBe(amazonAdditionalInputsSchema());
+});
+
+it('does not ask for a schema when nothing requires additional inputs', function (): void {
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse(),
+        GetAdditionalInputsSchema::class => MockResponse::make(['payload' => []]),
+    ]);
+
+    amazonAdapter()->getRates(RateRequest::fromPackage($this->package), []);
+
+    Saloon::assertNotSent(GetAdditionalInputsSchema::class);
+});
+
+it('stamps whether a purchase returns a separate customs document, from the offering rather than the address', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse([amazonInternationalRate(), amazonEligibleRates()[0]])]);
+
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), []);
+    [$international, $domestic] = [$rates->get(0), $rates->get(1)];
+    $adapter = amazonAdapter();
+
+    expect($international->serviceCode)->toBe('USPS_PTP_PRI_INTL')
+        ->and($international->metadata[AmazonBuyShippingAdapter::CUSTOMS_DOCUMENT_METADATA_KEY])->toBeTrue()
+        ->and($domestic->metadata[AmazonBuyShippingAdapter::CUSTOMS_DOCUMENT_METADATA_KEY])->toBeFalse()
+        // Re-derived from the stored offer, the way the purchase reads it.
+        ->and($adapter->returnsSeparateCustomsDocument(RateResponse::fromArray($international->toArray())))->toBeTrue()
+        ->and($adapter->returnsSeparateCustomsDocument(RateResponse::fromArray($domestic->toArray())))->toBeFalse()
+        ->and(ShippingOffer::where('public_id', $international->offerId)->sole()->rate_metadata[AmazonBuyShippingAdapter::CUSTOMS_DOCUMENT_METADATA_KEY])->toBeTrue();
+});
+
+it('does not gate a territory Amazon quoted as plain domestic, whatever the address predicate says', function (): void {
+    // The four-territory shape from `09`: Puerto Rico, Guam, the Northern
+    // Marianas and American Samoa were each quoted as domestic USPS with no
+    // CUSTOM_FORM in any print option, while requiresCustomsDeclaration() is
+    // true for all of them. A gate on the address would refuse these for a
+    // report printer that would print nothing.
+    $this->package->shipment->update([
+        'city' => 'San Juan',
+        'state_or_province' => 'PR',
+        'postal_code' => '00901',
+        'country' => 'US',
+        'validated_state_or_province' => null,
+        'validated_country' => null,
+    ]);
+
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse([amazonUspsRate()])]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package->fresh()), [])->sole();
+
+    expect(AddressData::fromShipment($this->package->shipment->fresh())->requiresCustomsDeclaration())->toBeTrue()
+        ->and($rate->metadata[AmazonBuyShippingAdapter::CUSTOMS_DOCUMENT_METADATA_KEY])->toBeFalse()
+        ->and(amazonAdapter()->returnsSeparateCustomsDocument($rate))->toBeFalse();
+});
+
+it('requests the customs form the offering declares and stores what comes back beside the label', function (): void {
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse([amazonInternationalRate()]),
+        PurchaseShipment::class => amazonPurchaseWithCustomsFormResponse(),
+    ]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->sole();
+
+    $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(
+        selectedRate: $rate,
+        labelFormat: 'zpl',
+        labelDpi: 300,
+    ));
+
+    $package = $this->package->fresh();
+
+    expect($result->success)->toBeTrue()
+        ->and($package->tracking_number)->toBe('LZ123456789US')
+        ->and(base64_decode((string) $package->label_data))->toBe('LABEL-BYTES')
+        ->and($package->label_format)->toBe('zpl')
+        // Through the same slot UPS and Shopify fill, so `07`'s storage and
+        // report-printer path apply unchanged — with the format Amazon stated.
+        ->and(base64_decode((string) $package->customs_form_data))->toBe('CUSTOMS-FORM-BYTES')
+        ->and($package->customs_form_format)->toBe('pdf');
+
+    Saloon::assertSent(function (PurchaseShipment $request): bool {
+        $body = $request->body()->all();
+
+        assertMatchesSpApiSchema($body, 'PurchaseShipmentRequest', 'shippingV2');
+
+        // Declared but not mandatory on the fixture, and asked for anyway.
+        return $body['requestedDocumentSpecification']['format'] === 'ZPL'
+            && $body['requestedDocumentSpecification']['requestedDocumentTypes'] === ['LABEL', 'CUSTOM_FORM'];
+    });
+});
+
+it('carries the format of a customs form that is not a PDF', function (): void {
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse([amazonInternationalRate(customsFormMandatory: true)]),
+        PurchaseShipment::class => amazonPurchaseWithCustomsFormResponse('PNG'),
+    ]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->sole();
+
+    app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(
+        selectedRate: $rate,
+        labelFormat: 'zpl',
+        labelDpi: 300,
+    ));
+
+    // `image`, the word the print path uses for a raster document, so the
+    // report printer renders it as one rather than as a PDF it is not.
+    expect($this->package->fresh()->customs_form_format)->toBe('image');
+
+    Saloon::assertSent(fn (PurchaseShipment $request): bool => $request->body()->all()['requestedDocumentSpecification']['requestedDocumentTypes'] === ['LABEL', 'CUSTOM_FORM']);
+});
+
+it('records a ZPL customs form as ZPL, so the browser sends it raw to the label printer', function (): void {
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse([amazonInternationalRate()]),
+        PurchaseShipment::class => amazonPurchaseWithCustomsFormResponse('ZPL'),
+    ]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->sole();
+
+    app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(
+        selectedRate: $rate,
+        labelFormat: 'zpl',
+        labelDpi: 300,
+    ));
+
+    // The report path is pixel-only; `zpl` is what tells `printCustomsForm()`
+    // to take the raw label-printer path instead of declaring the bytes a PDF.
+    expect($this->package->fresh()->customs_form_format)->toBe('zpl');
+});
+
+it('never requests a customs form the offering did not declare, but keeps one that arrives anyway', function (): void {
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse(),
+        PurchaseShipment::class => amazonPurchaseWithCustomsFormResponse(),
+    ]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->first();
+
+    $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(
+        selectedRate: $rate,
+        labelFormat: 'zpl',
+        labelDpi: 300,
+    ));
+
+    // Amazon refuses a specification naming a document the offering did not
+    // publish, so nothing is asked for — and Amazon is the authority on what
+    // it sends back, so a document that came regardless is not thrown away.
+    expect($result->success)->toBeTrue()
+        ->and($rate->metadata[AmazonBuyShippingAdapter::CUSTOMS_DOCUMENT_METADATA_KEY])->toBeFalse()
+        ->and(base64_decode((string) $this->package->fresh()->customs_form_data))->toBe('CUSTOMS-FORM-BYTES');
+
+    Saloon::assertSent(fn (PurchaseShipment $request): bool => $request->body()->all()['requestedDocumentSpecification']['requestedDocumentTypes'] === ['LABEL']);
+});
+
+it('does not take a customs form as the label when no label came back', function (): void {
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse([amazonInternationalRate()]),
+        PurchaseShipment::class => MockResponse::make(['payload' => [
+            'shipmentId' => 'amzn1.sid.customsonly',
+            'packageDocumentDetails' => [[
+                'packageClientReferenceId' => '1',
+                'trackingId' => 'LZ123456789US',
+                'packageDocuments' => [['type' => 'CUSTOM_FORM', 'format' => 'PDF', 'contents' => base64_encode('CUSTOMS-FORM-BYTES')]],
+            ]],
+        ]]),
+    ]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->sole();
+
+    $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(
+        selectedRate: $rate,
+        labelFormat: 'zpl',
+        labelDpi: 300,
+    ));
+
+    expect($result->success)->toBeFalse()
+        ->and($result->message)->toContain('amzn1.sid.customsonly')
+        ->and($this->package->fresh()->customs_form_data)->toBeNull();
+});
+
+it('reads a customs form off the offering regardless of which print option is chosen', function (): void {
+    $service = app(AmazonBuyShippingService::class);
+
+    expect(AmazonBuyShippingService::declaresCustomsForm(amazonInternationalRate()['supportedDocumentSpecifications']))->toBeTrue()
+        ->and(AmazonBuyShippingService::declaresCustomsForm(amazonDocumentSpecifications()))->toBeFalse()
+        ->and(AmazonBuyShippingService::declaresCustomsForm([]))->toBeFalse()
+        // Each print option asks for it under its own format.
+        ->and($service->documentSpecification(amazonInternationalRate()['supportedDocumentSpecifications'], 'pdf', null)['requestedDocumentTypes'])->toBe(['LABEL', 'CUSTOM_FORM'])
+        ->and($service->documentSpecification(amazonInternationalRate()['supportedDocumentSpecifications'], 'zpl', 300)['requestedDocumentTypes'])->toBe(['LABEL', 'CUSTOM_FORM']);
 });

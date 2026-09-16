@@ -77,6 +77,8 @@ short a document FedEx itself listed as required.
 - **Format is not carried alongside the bytes.** UPS's PDF happens to line up with
   `printReport()`'s default, which is luck rather than design: a carrier returning its form as
   a GIF would need the format carried. Worth knowing before the FedEx and Amazon rows land.
+  *Carried since 2026-09-16* (`amazon-buy-shipping/13`): `packages.customs_form_format`,
+  default `pdf`, filled from the source that stated it.
 
 ## What is left
 
