@@ -1,6 +1,6 @@
 # International labels return a customs form PolyBag could not print
 
-Status: ready-for-human — storage and printing shipped 2026-09-10 with two carriers feeding them; the pre-purchase gate waits on `23`'s Amazon and FedEx rows
+Status: ready-for-human — storage and printing shipped 2026-09-10 with two carriers feeding them; the pre-purchase gate's Amazon half is `amazon-buy-shipping/13` (from the offering's document details, per Amazon support 2026-09-16); the FedEx row of `23` still waits
 
 Repo: `polybag`
 

@@ -1,6 +1,6 @@
 # Buy one international label and see what Amazon does with customs
 
-Status: ready-for-human — sandbox ruled out 2026-09-11; PR, GU, MP and AS quoted and all found domestic; a purchase was attempted and refused because the order had shipped; needs an unshipped non-US order placed in the seller account. Fix `10` first
+Status: ready-for-human — sandbox ruled out 2026-09-11 and confirmed by Amazon support 2026-09-16; PR, GU, MP and AS quoted and all found domestic; a purchase was attempted and refused because the order had shipped; needs an unshipped non-US order placed in the seller account. The adapter work that does not need the order moved to `13`; this issue is the purchase-only observations
 
 Repo: `polybag`
 
@@ -145,32 +145,31 @@ on an order that has not shipped yet; the customs half additionally needs it to 
 
 ## What to build
 
-Whatever the run finds, wired into the existing seams rather than beside them:
+Moved to [`13`](13-handle-international-offers-from-the-rate-response.md) on 2026-09-16:
+the quote-time drop of a rate that requires additional inputs, the
+`GetAdditionalInputsSchema` request that records the schema the first time a rate asks
+for it, the `07` gate derived from the offering's `supportedDocumentDetails`, and the
+`CUSTOM_FORM` read into `customsFormData`. All of it is testable from the schema and
+none of it needs the order. What stays here is what only the purchase can show:
 
-- **`CUSTOM_FORM` → `ShipResponse::customsFormData`**, the same base64 slot `ShopifyAdapter`
-  and `UpsAdapter` fill, so `07`'s storage and report-printer printing apply without
-  change. Request it in `requestedDocumentTypes`; read it in `labelFrom()`'s sibling rather
-  than widening the label filter.
-- **`additionalInputs`**, if any international rate demands them: a `GetAdditionalInputsSchema`
-  request, and either a pre-purchase drop of the rate at quote time (the `03` pattern for
-  what would fail the purchase) or a payload built from `CustomsItem`, depending on what the
-  schema asks for. The choice waits on finding 1.
-- **`23`'s Amazon row**, filled in with the observation, and the per-carrier capability the
-  `07` gate reads.
-- **Tests from the capture**, the way `03` built its 22 from `01`'s: an international rate
-  with `requiresAdditionalInputs` true, a purchase response carrying both `LABEL` and
-  `CUSTOM_FORM`, both validated against `shippingV2.json`.
+- **The customs document's format and size**, if one is returned — whether it belongs on
+  the report printer (Letter) or the label printer (4×6).
+- **Whether the items we send are enough.** A rejection naming a missing HS code or origin
+  country on an international quote or purchase is the answer to whether `CustomsItem`'s
+  fields need to reach the request.
+- **The `additionalInputs` payload**, built from `CustomsItem` against the schema `13`
+  will have recorded, replacing `13`'s unconditional drop with "satisfied or dropped".
+- **`23`'s Amazon row** promoted from a vendor statement to an observation.
 
 ## Acceptance criteria
 
 - [ ] An international `getRates` and `purchaseShipment` have been run and captured, with
       the environment recorded
-- [ ] `23`'s Amazon row says Fused / Separate / Not offered, and why
-- [ ] A separately-returned `CUSTOM_FORM` reaches `customs_form_data` and prints to the
-      report printer through the `07` path
-- [ ] A rate that requires additional inputs is either satisfied or dropped at quote time,
-      never failed at purchase
-- [ ] Fixtures for the international shapes, schema-validated
+- [ ] `23`'s Amazon row says Fused / Separate / Not offered from observation, with the
+      document's format and size
+- [ ] A rate that requires additional inputs is satisfied from `CustomsItem` where the
+      schema allows, and the drop `13` added applies only where it cannot be
+- [ ] Fixtures for the observed international shapes, schema-validated
 
 ## Blocked by
 
@@ -183,6 +182,8 @@ bought and voided, and the order cancelled.
 
 ## Related
 
+- [`13`](13-handle-international-offers-from-the-rate-response.md) — the adapter work
+  that does not need the order, split out 2026-09-16
 - [`03`](03-amazon-buy-shipping-adapter.md) — the adapter; its "no live run" criterion is
   what this run also discharges
 - [`04`](04-per-api-sandbox-host.md) — why the sandbox is reachable
@@ -213,3 +214,16 @@ the adapter's own body (spun out as `10`) and, once the body was valid, a refusa
 order because it had shipped. All recorded in the body. Nothing bought. The `getAdditionalInputs` path was not reached, because
 no offer asked for it — so the request class, `additionalInputs` on the purchase and the
 `CUSTOM_FORM` read all still wait on a foreign order.
+
+### 2026-09-16 — Amazon support answered the sandbox case; `13` split out
+
+Asked Amazon three sandbox questions (a test path for `requiresAdditionalInputs`, a
+static `additionalInputs` schema, and non-Amazon-Shipping carriers in the sandbox). All
+three answered no, which the vendored model already showed: every Shipping v2 operation
+is `dynamic` except `getAdditionalInputs`, whose one static case returns `payload: {}`.
+Two statements in the reply were new enough to act on — a customs form is a separate
+`CUSTOM_FORM` package document, and which documents an offering returns is declared in
+that offering's `getRates` entry — so the adapter work that only needed those went to
+`13`, and this issue narrowed to what the purchase alone can show. Still blocked on the
+order; `13` makes the adapter safe for one in the meantime and records the schema if a
+tenant is ever quoted a rate that asks for it.
