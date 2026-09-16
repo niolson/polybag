@@ -32,6 +32,7 @@ use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
 use App\Services\Carriers\Concerns\HasSaturdayDelivery;
 use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
+use App\Services\Shipping\PackagingFilter;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
@@ -818,9 +819,9 @@ class UpsAdapter implements DirectCarrierAdapter
         return false;
     }
 
-    public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
+    public function resolvePreSelectedRate(RateResponse $rate, Package $package): ?RateResponse
     {
-        return $rate;
+        return PackagingFilter::keepCompatible(collect([$rate]), PackageData::fromPackage($package)->carrierPackaging)->first();
     }
 
     public function packagingRequirementFor(RateResponse $rate): PackagingRequirement

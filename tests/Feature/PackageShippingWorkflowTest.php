@@ -23,6 +23,7 @@ use App\Models\ShippingMethod;
 use App\Models\ShippingRule;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
+use Illuminate\Support\Facades\Log;
 use Saloon\Exceptions\Request\RequestException;
 use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
@@ -366,6 +367,53 @@ it('auto ships through a rule preselected rate', function (): void {
     expect($result->success)->toBeTrue()
         ->and($result->summaryMessage())->toContain('AUTO123')
         ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
+});
+
+it('rate shops when the pre-selected service has no variant for the packaging', function (): void {
+    // ADR-0005 decision 4: null from `resolvePreSelectedRate()` is "no
+    // pre-selection", not a failure. The workflow says so in the log and buys
+    // through rate shopping, where the same filter runs on real rates.
+    $log = Log::spy();
+    $this->actingAs($user = User::factory()->create());
+    $package = createWorkflowPackage();
+
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnNull();
+    $adapter->shouldReceive('isConfigured')->once()->andReturnTrue();
+    $adapter->shouldReceive('prepareRateRequest')->once()->andReturnNull();
+    $adapter->shouldReceive('getRates')->once()->andReturn(collect([
+        new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'),
+    ]));
+    $adapter->shouldReceive('createShipment')
+        ->once()
+        ->withArgs(fn ($shipRequest): bool => $shipRequest->selectedRate?->serviceCode === 'GROUND' && $shipRequest->selectedRate->price === 7.25)
+        ->andReturn(ShipResponse::success(
+            trackingNumber: 'SHOPPED123',
+            cost: 7.25,
+            carrier: 'MockCarrier',
+            service: 'Ground',
+            labelData: base64_encode('label'),
+        ));
+
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package,
+        new PackageAutoShippingRequest(userId: $user->id, cleanupOnFailure: false),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($result->summaryMessage())->toContain('SHOPPED123')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
+
+    $log->shouldHaveReceived('info', [
+        'Pre-selected service has no variant for this packaging; rate shopping instead',
+        Mockery::on(fn (array $context): bool => $context['package_id'] === $package->id
+            && $context['carrier'] === 'MockCarrier'
+            && $context['service_code'] === 'GROUND'
+            && array_key_exists('packaging', $context)),
+    ]);
 });
 
 it('passes label format and dpi into auto ship requests', function (): void {

@@ -987,12 +987,27 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             ? $this->carrierRegistry->quotingAdapterFor($ruleResult->preSelectedRate->carrier)
             : null;
 
-        if ($adapter) {
+        $preSelected = $adapter?->resolvePreSelectedRate($ruleResult->preSelectedRate, $package);
+
+        if ($preSelected instanceof RateResponse) {
             return $this->rateSelector->selectForAutomation(
-                collect([$adapter->resolvePreSelectedRate($ruleResult->preSelectedRate, $package)]),
+                collect([$preSelected]),
                 deadline: null,
                 clientId: $clientId,
             );
+        }
+
+        // The adapter found no variant of the pre-selected service this
+        // Package's packaging can use (ADR-0005 decision 4). Not a failure:
+        // rate shopping runs the same filter on real rates, and the rule's
+        // exclusions still apply there.
+        if ($adapter) {
+            logger()->info('Pre-selected service has no variant for this packaging; rate shopping instead', [
+                'package_id' => $package->id,
+                'carrier' => $ruleResult->preSelectedRate->carrier,
+                'service_code' => $ruleResult->preSelectedRate->serviceCode,
+                'packaging' => PackageData::fromPackage($package)->carrierPackaging?->value,
+            ]);
         }
 
         $rates = $this->shippingRateService->getShippingRates($package->id);

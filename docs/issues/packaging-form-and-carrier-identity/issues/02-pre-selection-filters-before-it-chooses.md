@@ -1,6 +1,6 @@
 # Pre-selection filters before it chooses; `resolvePreSelectedRate()` becomes nullable
 
-Status: needs-triage
+Status: done — shipped 2026-09-16; every rate still says `shipperPackaging()` and every Package is still null, so nothing returns null yet and nothing visible changed
 
 Repo: `polybag`
 
@@ -30,8 +30,8 @@ says so, and says that the caller falls through to rate shopping.
 ### Five implementations
 
 - **`UspsAdapter`** fetches its variants as today, runs `01`'s filter on the collection
-  against `$package->boxSize?->carrier_packaging` (null until `03`, read through the
-  same accessor `PackageData::fromPackage()` will use), and returns the cheapest of what
+  against `PackageData::fromPackage($package)->carrierPackaging` (null until `03`; the
+  same accessor `01`'s purchase re-check reads), and returns the cheapest of what
   remains — or null when nothing does. When the fetch itself comes back empty it falls to
   the synthetic-rate case below rather than returning the rule's rate unconditionally.
 - **`FedexAdapter`, `UpsAdapter`, `AmazonBuyShippingAdapter`, `FakeCarrierAdapter`**
@@ -40,7 +40,12 @@ says so, and says that the caller falls through to rate shopping.
   `RuleEvaluator` sets it explicitly in `01`), so for a Package in carrier packaging the
   filter drops it and the adapter returns null.
 
-The filter call is the same one-liner in all five; resist a base class for it.
+The filter call is the same one-liner in all five; resist a base class for it. It is
+`PackagingFilter::keepCompatible()` reading each rate's stamped requirement — which for a
+USPS variant came from the adapter's own `classifyPackaging()` in `getRates()`, and for
+the rule's rate from `RuleEvaluator` — so `classifyPackaging()` stays the one place `04`
+and `05` fill in. The purchase re-check rederives because the browser restates the rate;
+nothing here came from the browser.
 
 ### The caller
 
@@ -57,24 +62,26 @@ so the line goes in this PR.
 
 ## Acceptance criteria
 
-- [ ] The interface returns `?RateResponse` and all five implementations compile under
+- [x] The interface returns `?RateResponse` and all five implementations compile under
       PHPStan with no `@phpstan-ignore`
-- [ ] `UspsAdapter::resolvePreSelectedRate()` test: variants `[SP, exactly(UspsFlatRateEnvelope)]`
+- [x] `UspsAdapter::resolvePreSelectedRate()` test: variants `[SP, exactly(UspsFlatRateEnvelope)]`
       where the flat-rate one is cheaper, Package in shipper packaging → the `SP` variant
       is returned, not the cheapest
-- [ ] `UspsAdapter::resolvePreSelectedRate()` test: a Package whose box size declares
-      carrier packaging and variants that are all `shipperPackaging()` → null. (Until `03`
-      lands, build this with a hand-set packaging rather than a column — or land it in
-      `03`'s PR; say which)
-- [ ] For each of the other four adapters: a `shipperPackaging()` rule rate against a
+- [x] `UspsAdapter::resolvePreSelectedRate()` test: a Package whose box size declares
+      carrier packaging and variants that are all `shipperPackaging()` → null. Triage
+      decision: landed here with a hand-set packaging, so this PR proves the null path
+      on its own. `PackageData::fromPackage()` already reads
+      `$package->boxSize?->carrier_packaging` (declared as a `@property` on `BoxSize`
+      until the column exists); `03` adds the column, the cast and the factory state
+- [x] For each of the other four adapters: a `shipperPackaging()` rule rate against a
       Package with no packaging is returned unchanged; against a Package with carrier
       packaging (same caveat) returns null
-- [ ] `EloquentPackageShippingWorkflow` feature test: a rule pre-selects a service, the
+- [x] `EloquentPackageShippingWorkflow` feature test: a rule pre-selects a service, the
       adapter returns null, and the workflow buys through rate shopping instead — asserting
       both the log line and that `ShippingRateService::getShippingRates()` was reached
-- [ ] Existing auto-ship and batch-ship suites pass unchanged
-- [ ] Release-note line in the PR description
-- [ ] `vendor/bin/pint --dirty --format agent` clean
+- [x] Existing auto-ship and batch-ship suites pass unchanged
+- [x] Release-note line in the PR description
+- [x] `vendor/bin/pint --dirty --format agent` clean
 
 ## Blocked by
 

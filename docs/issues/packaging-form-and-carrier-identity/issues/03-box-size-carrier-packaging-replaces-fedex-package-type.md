@@ -43,7 +43,10 @@ seeded is `06`.
 
 ### `PackageData`
 
-`fromPackage()` reads `carrierPackaging: $package->boxSize?->carrier_packaging`.
+`fromPackage()` already reads `carrierPackaging: $package->boxSize?->carrier_packaging`
+— `02` landed that line so its tests could hand-set a packaging, with a `@property`
+docblock on `BoxSize` standing in for the column. This slice adds the column and the
+cast, and the docblock can go.
 `fedexPackageType` is removed from the constructor; the three sites that construct
 `PackageData` with it in tests move to `carrierPackaging`.
 

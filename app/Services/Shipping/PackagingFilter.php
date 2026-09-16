@@ -15,10 +15,11 @@ use Illuminate\Support\Collection;
  * cubic tiers for boxes against soft packs) stays inside the adapters, where
  * both tier tables are honestly `shipperPackaging()` rates.
  *
- * Runs wherever adapter rates are collected. Today that is
- * `ShippingRateService::getShippingRates()`, before the quote log, so a rate
- * that was never offered is never logged as one; the pre-selection site inside
- * every `resolvePreSelectedRate()` is packaging-form-and-carrier-identity/02.
+ * Runs wherever adapter rates are collected: `ShippingRateService::getShippingRates()`,
+ * before the quote log, so a rate that was never offered is never logged as
+ * one; and inside every `resolvePreSelectedRate()`, where a rule's chosen
+ * service reaches automation without passing through rate shopping. An empty
+ * result there is the contract's null — the caller rate-shops instead.
  */
 final class PackagingFilter
 {
