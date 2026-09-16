@@ -3,22 +3,28 @@
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CustomsItem;
 use App\DataTransferObjects\Shipping\PackageData;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
+use App\Enums\CarrierPackaging;
 use App\Enums\TrackingStatus;
 use App\Exceptions\Carriers\CarrierRateFetchException;
+use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Http\Integrations\Ups\Requests\CreateShipment;
 use App\Http\Integrations\Ups\Requests\Rate;
 use App\Http\Integrations\Ups\Requests\TrackShipment;
+use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierAccountScope;
 use App\Models\Client;
 use App\Models\Package;
 use App\Services\Carriers\UpsAdapter;
+use Carbon\CarbonImmutable;
 use Saloon\Exceptions\Request\RequestException;
 use Saloon\Http\Faking\MockResponse;
+use Saloon\Http\PendingRequest;
 use Saloon\Laravel\Facades\Saloon;
 
 beforeEach(function (): void {
@@ -1417,3 +1423,209 @@ it('keeps the customs invoice when Saturday delivery is also requested', functio
 | response for the branch to inspect. Recorded as its own issue; the unset()
 | there is surgical anyway, so reviving the retry does not reintroduce the bug.
 */
+
+/*
+|--------------------------------------------------------------------------
+| Carrier packaging — ADR-0005 decision 3, the UPS half
+|--------------------------------------------------------------------------
+|
+| UPS puts packaging on the request, so the adapter sends the code the Box
+| Size's CarrierPackaging maps to on both bodies and stamps every rate with
+| the code it sent. packaging-form-and-carrier-identity/07.
+|
+*/
+
+function fakeUpsRateEndpointsQuoting(array $ratedShipments): void
+{
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Rate::class => MockResponse::make(['RateResponse' => ['RatedShipment' => $ratedShipments]]),
+    ]);
+}
+
+function upsRateRequestIn(?CarrierPackaging $packaging): RateRequest
+{
+    return new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
+        packages: [new PackageData(weight: 2.0, length: 12, width: 10, height: 8, carrierPackaging: $packaging)],
+    );
+}
+
+function upsShipRequestIn(?CarrierPackaging $packaging, array $metadata = ['serviceCode' => '03']): ShipRequest
+{
+    return new ShipRequest(
+        fromAddress: new AddressData(firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle', stateOrProvince: 'WA', postalCode: '98072', phone: '5551234567'),
+        toAddress: new AddressData(firstName: 'Jane', lastName: 'Doe', streetAddress: '456 Main St', city: 'Los Angeles', stateOrProvince: 'CA', postalCode: '90210', phone: '5559876543'),
+        packageData: new PackageData(weight: 2.0, length: 12, width: 10, height: 8, carrierPackaging: $packaging),
+        selectedRate: new RateResponse(carrier: 'UPS', serviceCode: '03', serviceName: 'UPS Ground', price: 11.00, metadata: $metadata),
+    );
+}
+
+/**
+ * The `Package` of every rate request actually sent, in order. Read off the
+ * recorded responses rather than a counting closure: a mock closure also runs
+ * when prepareRateRequest() creates a PendingRequest it never sends.
+ *
+ * @return array<int, array<string, mixed>>
+ */
+function sentUpsRatePackages(): array
+{
+    return collect(Saloon::mockClient()->getRecordedResponses())
+        ->map(fn ($response) => $response->getPendingRequest())
+        ->filter(fn (PendingRequest $pendingRequest): bool => $pendingRequest->getRequest() instanceof Rate)
+        ->map(fn (PendingRequest $pendingRequest): array => $pendingRequest->body()->all()['RateRequest']['Shipment']['Package'])
+        ->values()
+        ->all();
+}
+
+dataset('ups packaging codes', [
+    'a UPS Letter' => [CarrierPackaging::UpsLetter, '01'],
+    'a UPS Pak' => [CarrierPackaging::UpsPak, '04'],
+    'a medium UPS Express Box' => [CarrierPackaging::UpsExpressBoxMedium, '2b'],
+    'the packer\'s own box' => [null, '02'],
+    'a USPS Medium Flat Rate Box' => [CarrierPackaging::UspsMediumFlatRateBox, '02'],
+]);
+
+it('names the packaging on the rate request', function (?CarrierPackaging $packaging, string $expectedCode): void {
+    fakeUpsRateEndpointsQuoting([]);
+
+    $this->adapter->getRates(upsRateRequestIn($packaging), ['03']);
+
+    $sent = sentUpsRatePackages();
+
+    expect($sent)->toHaveCount(1)
+        ->and($sent[0]['PackagingType']['Code'])->toBe($expectedCode);
+
+    // The whole rate body is not validated (see the skips above); the
+    // container this slice changes is.
+    assertMatchesUpsSchema($sent[0]['PackagingType'], 'Package_PackagingType', 'upsRating');
+})->with('ups packaging codes');
+
+it('names the packaging on the ship request', function (?CarrierPackaging $packaging, string $expectedCode): void {
+    fakeUpsShipEndpoints();
+
+    expect($this->adapter->createShipment(upsShipRequestIn($packaging))->success)->toBeTrue();
+
+    Saloon::assertSent(function ($request) use ($expectedCode): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $body = $request->body()->all();
+
+        assertMatchesUpsSchema($body, 'SHIPRequestWrapper', 'upsShipping');
+
+        return $body['ShipmentRequest']['Shipment']['Package'][0]['Packaging']['Code'] === $expectedCode;
+    });
+})->with('ups packaging codes');
+
+it('sends dimensions for every packaging except a UPS Letter, whose size is UPS\'s own', function (?CarrierPackaging $packaging, bool $expectsDimensions): void {
+    fakeUpsShipEndpoints();
+
+    expect($this->adapter->createShipment(upsShipRequestIn($packaging))->success)->toBeTrue();
+
+    Saloon::assertSent(function ($request) use ($expectsDimensions): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $body = $request->body()->all();
+
+        assertMatchesUpsSchema($body, 'SHIPRequestWrapper', 'upsShipping');
+
+        return array_key_exists('Dimensions', $body['ShipmentRequest']['Shipment']['Package'][0]) === $expectsDimensions;
+    });
+})->with([
+    'a UPS Letter' => [CarrierPackaging::UpsLetter, false],
+    'a UPS Pak' => [CarrierPackaging::UpsPak, true],
+    'the packer\'s own box' => [null, true],
+]);
+
+it('sends the same packaging code on the Saturday follow-up rate request', function (): void {
+    fakeUpsRateEndpointsQuoting([
+        ['Service' => ['Code' => '03'], 'TotalCharges' => ['MonetaryValue' => '11.00']],
+        ['Service' => ['Code' => '01'], 'TotalCharges' => ['MonetaryValue' => '45.00']],
+    ]);
+
+    // Ground and Next Day Air: a mixed Saturday request is sent twice.
+    $request = new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
+        packages: [new PackageData(weight: 2.0, length: 12, width: 10, height: 8, carrierPackaging: CarrierPackaging::UpsPak)],
+        specialServiceCodes: ['saturday_delivery'],
+        shipDate: CarbonImmutable::parse('next friday'),
+    );
+
+    $rates = $this->adapter->getRates($request, ['03', '01']);
+
+    $sent = sentUpsRatePackages();
+
+    expect($sent)->toHaveCount(2)
+        ->and(array_column(array_column($sent, 'PackagingType'), 'Code'))->toBe(['04', '04'])
+        ->and($rates->pluck('metadata.packagingCode')->unique()->all())->toBe(['04']);
+});
+
+it('stamps every rate from a UPS Pak request as exactly a UPS Pak', function (): void {
+    fakeUpsRateEndpointsQuoting([
+        ['Service' => ['Code' => '03'], 'TotalCharges' => ['MonetaryValue' => '11.00']],
+        ['Service' => ['Code' => '02'], 'TotalCharges' => ['MonetaryValue' => '28.00']],
+    ]);
+
+    $rates = $this->adapter->getRates(upsRateRequestIn(CarrierPackaging::UpsPak), ['03', '02']);
+
+    expect($rates)->toHaveCount(2)
+        ->and($rates->pluck('metadata.packagingCode')->unique()->all())->toBe(['04']);
+
+    foreach ($rates as $rate) {
+        expect($rate->packagingRequirement->accepts(CarrierPackaging::UpsPak))->toBeTrue()
+            ->and($rate->packagingRequirement->accepts(CarrierPackaging::UpsLetter))->toBeFalse()
+            ->and($rate->packagingRequirement->accepts(null))->toBeFalse()
+            ->and($this->adapter->packagingRequirementFor($rate)->accepts(CarrierPackaging::UpsPak))->toBeTrue();
+    }
+});
+
+it('stamps every rate from a plain request as the shipper\'s packaging', function (?CarrierPackaging $packaging): void {
+    fakeUpsRateEndpointsQuoting([
+        ['Service' => ['Code' => '03'], 'TotalCharges' => ['MonetaryValue' => '11.00']],
+    ]);
+
+    $rates = $this->adapter->getRates(upsRateRequestIn($packaging), ['03']);
+
+    expect($rates)->toHaveCount(1)
+        ->and($rates[0]->metadata['packagingCode'])->toBe('02')
+        ->and($rates[0]->packagingRequirement->isShipperPackaging())->toBeTrue()
+        ->and($this->adapter->packagingRequirementFor($rates[0])->isShipperPackaging())->toBeTrue();
+})->with([
+    'the packer\'s own box' => [null],
+    'a USPS Medium Flat Rate Box, which UPS rates as customer packaging' => [CarrierPackaging::UspsMediumFlatRateBox],
+]);
+
+it('treats a rate quoted before the packaging code was stamped as the shipper\'s packaging', function (): void {
+    $legacy = new RateResponse(carrier: 'UPS', serviceCode: '03', serviceName: 'UPS Ground', price: 11.00, metadata: ['serviceCode' => '03']);
+
+    expect($this->adapter->packagingRequirementFor($legacy)->isShipperPackaging())->toBeTrue();
+});
+
+it('refuses to classify a packaging code it never sends', function (string $code): void {
+    $restated = new RateResponse(carrier: 'UPS', serviceCode: '03', serviceName: 'UPS Ground', price: 11.00, metadata: ['serviceCode' => '03', 'packagingCode' => $code]);
+
+    expect(fn () => $this->adapter->packagingRequirementFor($restated))
+        ->toThrow(UnclassifiablePackagingException::class, "UPS packaging code {$code}");
+})->with([
+    'the 25KG box, not yet in the enum' => ['24'],
+    'a pallet' => ['30'],
+    'nonsense' => ['zz'],
+]);
+
+it('keeps a pre-selected rate only when the package meets its packaging requirement', function (): void {
+    $package = Package::factory()->create([
+        'box_size_id' => BoxSize::factory()->carrierPackaging(CarrierPackaging::UpsPak)->create()->id,
+    ]);
+
+    $quotedForAPak = new RateResponse(carrier: 'UPS', serviceCode: '03', serviceName: 'UPS Ground', price: 11.00, metadata: ['serviceCode' => '03', 'packagingCode' => '04'], packagingRequirement: PackagingRequirement::exactly(CarrierPackaging::UpsPak));
+    $rulesRate = new RateResponse(carrier: 'UPS', serviceCode: '03', serviceName: 'UPS Ground', price: 11.00, metadata: ['serviceCode' => '03']);
+
+    expect($this->adapter->resolvePreSelectedRate($quotedForAPak, $package))->toBe($quotedForAPak)
+        ->and($this->adapter->resolvePreSelectedRate($rulesRate, $package))->toBeNull();
+});
