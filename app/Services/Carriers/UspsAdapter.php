@@ -5,6 +5,7 @@ namespace App\Services\Carriers;
 use App\Contracts\DirectCarrierAdapter;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
+use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
@@ -31,6 +32,7 @@ use App\Services\Carriers\Concerns\DecodesJsonResponses;
 use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
 use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
+use App\Services\Shipping\PackagingFilter;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -933,16 +935,18 @@ class UspsAdapter implements DirectCarrierAdapter
         return true;
     }
 
-    public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
+    public function resolvePreSelectedRate(RateResponse $rate, Package $package): ?RateResponse
     {
-        $rateRequest = RateRequest::fromPackage($package);
-        $rates = $this->getRates($rateRequest, [$rate->serviceCode]);
+        $packaging = PackageData::fromPackage($package)->carrierPackaging;
+        $variants = $this->getRates(RateRequest::fromPackage($package), [$rate->serviceCode]);
 
-        if ($rates->isEmpty()) {
-            return $rate;
+        // No variant quoted: the rule's own rate stands, subject to the same
+        // filter as everything else, rather than being returned unconditionally.
+        if ($variants->isEmpty()) {
+            $variants = collect([$rate]);
         }
 
-        return $rates->sortBy('price')->first();
+        return PackagingFilter::keepCompatible($variants, $packaging)->sortBy('price')->first();
     }
 
     public function packagingRequirementFor(RateResponse $rate): PackagingRequirement

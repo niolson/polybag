@@ -4,6 +4,7 @@ namespace App\Services\Carriers;
 
 use App\Contracts\DirectCarrierAdapter;
 use App\DataTransferObjects\Shipping\CancelResponse;
+use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
@@ -15,6 +16,7 @@ use App\Enums\ServiceCapability;
 use App\Models\Package;
 use App\Services\Carriers\Concerns\ConsultsCarrierPolicyForOffers;
 use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
+use App\Services\Shipping\PackagingFilter;
 use Illuminate\Support\Collection;
 use Saloon\Http\Response;
 
@@ -156,9 +158,9 @@ class FakeCarrierAdapter implements DirectCarrierAdapter
         return false;
     }
 
-    public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
+    public function resolvePreSelectedRate(RateResponse $rate, Package $package): ?RateResponse
     {
-        return $rate;
+        return PackagingFilter::keepCompatible(collect([$rate]), PackageData::fromPackage($package)->carrierPackaging)->first();
     }
 
     public function packagingRequirementFor(RateResponse $rate): PackagingRequirement

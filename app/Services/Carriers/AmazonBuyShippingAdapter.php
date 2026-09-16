@@ -9,6 +9,7 @@ use App\DataTransferObjects\PostageSources\OfferDraft;
 use App\DataTransferObjects\PostageSources\ServiceObservation;
 use App\DataTransferObjects\Shipping\AmazonPurchasedLabel;
 use App\DataTransferObjects\Shipping\AmazonShippingQuote;
+use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
@@ -33,6 +34,7 @@ use App\Services\PostageSources\OfferStore;
 use App\Services\RateSelector;
 use App\Services\ShipmentImport\AmazonOrderItems;
 use App\Services\ShipmentImport\Sources\AmazonSource;
+use App\Services\Shipping\PackagingFilter;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Saloon\Http\Response;
@@ -270,11 +272,11 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
      * Nothing to resolve: an Amazon rate already *is* a specific offer, priced
      * and tokenized. The variant-picking `UspsAdapter` does here has no analogue
      * — there is no second call that would narrow one Amazon `rateId` into
-     * another.
+     * another. Only the packaging filter stands between the rule and the buy.
      */
-    public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
+    public function resolvePreSelectedRate(RateResponse $rate, Package $package): ?RateResponse
     {
-        return $rate;
+        return PackagingFilter::keepCompatible(collect([$rate]), PackageData::fromPackage($package)->carrierPackaging)->first();
     }
 
     /**

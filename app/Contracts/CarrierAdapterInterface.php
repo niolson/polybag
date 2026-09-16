@@ -42,8 +42,16 @@ interface CarrierAdapterInterface extends PostageOfferSource
      * For carriers like USPS where one service code maps to many rate variants
      * (cubic tiers, single-piece, etc.), this fetches rates and picks the cheapest
      * matching variant. Other carriers return the rate as-is.
+     *
+     * Either way the answer passes through the shared packaging filter first
+     * (ADR-0005 decision 4, the pre-selection site): a rule names a service,
+     * never a packaging, so the rate it hands over is the shipper's own
+     * packaging and a Package in carrier packaging cannot use it. Null means
+     * no compatible variant of this service exists for this Package. The
+     * caller treats that as "no pre-selection" and falls through to rate
+     * shopping, where the same filter runs on real rates.
      */
-    public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse;
+    public function resolvePreSelectedRate(RateResponse $rate, Package $package): ?RateResponse;
 
     /**
      * Which carrier packaging this rate is valid in, classified by the adapter
