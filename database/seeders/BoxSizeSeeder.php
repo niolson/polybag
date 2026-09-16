@@ -42,8 +42,8 @@ class BoxSizeSeeder extends Seeder
             ['code' => '23', 'height' => '9.5', 'width' => '15', 'length' => '0.5', 'max_weight' => '70', 'empty_weight' => '0', 'materials_cost' => '0', 'label' => 'USPS Legal Flat Rate Envelope', 'type' => 'PADDED_MAILER', 'carrier_packaging' => 'usps_legal_flat_rate_envelope'],
             ['code' => '24', 'height' => '8.69', 'width' => '5.44', 'length' => '1.75', 'max_weight' => '70', 'empty_weight' => '0', 'materials_cost' => '0', 'label' => 'USPS Small Flat Rate Box', 'type' => 'BOX', 'carrier_packaging' => 'usps_small_flat_rate_box'],
             ['code' => '25', 'height' => '11.25', 'width' => '8.75', 'length' => '6', 'max_weight' => '70', 'empty_weight' => '0', 'materials_cost' => '0', 'label' => 'USPS Medium Flat Rate Box (top-loading)', 'type' => 'BOX', 'carrier_packaging' => 'usps_medium_flat_rate_box'],
-            ['code' => '26', 'height' => '14', 'width' => '12', 'length' => '3.5', 'max_weight' => '70', 'empty_weight' => '0', 'materials_cost' => '0', 'label' => 'USPS Medium Flat Rate Box (side-loading)', 'type' => 'BOX', 'carrier_packaging' => 'usps_medium_flat_rate_box'],
-            ['code' => '27', 'height' => '12.25', 'width' => '12.25', 'length' => '6', 'max_weight' => '70', 'empty_weight' => '0', 'materials_cost' => '0', 'label' => 'USPS Large Flat Rate Box', 'type' => 'BOX', 'carrier_packaging' => 'usps_large_flat_rate_box'],
+            ['code' => '26', 'height' => '14.13', 'width' => '12', 'length' => '3.5', 'max_weight' => '70', 'empty_weight' => '0', 'materials_cost' => '0', 'label' => 'USPS Medium Flat Rate Box (side-loading)', 'type' => 'BOX', 'carrier_packaging' => 'usps_medium_flat_rate_box'],
+            ['code' => '27', 'height' => '12.25', 'width' => '12', 'length' => '6', 'max_weight' => '70', 'empty_weight' => '0', 'materials_cost' => '0', 'label' => 'USPS Large Flat Rate Box', 'type' => 'BOX', 'carrier_packaging' => 'usps_large_flat_rate_box'],
         ];
 
         foreach ($boxes as $box) {

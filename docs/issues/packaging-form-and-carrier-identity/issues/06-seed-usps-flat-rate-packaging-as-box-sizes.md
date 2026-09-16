@@ -84,7 +84,7 @@ default), published outside dimensions:
   Envelope at `20`: nothing today represents a flat envelope as a form, and the ADR's
   "Foreseen, not decided" keeps `LETTER`/`FLAT` for shipper-owned envelopes, which these
   are not. The form is not what prices them; `carrier_packaging` is.
-- The medium box is two shapes (11¼×8¾×6 top-loading, 14×12×3½ side-loading) with one
+- The medium box is two shapes (11¼×8¾×6 top-loading, 14⅛×12×3½ side-loading) with one
   carrier identity. Both are seeded so the label on the Pack page matches the box in the
   packer's hand; the rating is identical.
 - The three Priority Mail Express envelopes are not seeded. They are separate USPS stock

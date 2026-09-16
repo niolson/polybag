@@ -40,6 +40,29 @@ it('seeds every USPS Priority Mail flat-rate packaging as a box size the flat-ra
     ])->exists())->toBeFalse();
 });
 
+it('seeds the USPS packaging at the outside dimensions USPS publishes', function (): void {
+    $this->seed(BoxSizeSeeder::class);
+
+    // Postal Store outside dimensions, rounded to the column's two decimals.
+    $published = [
+        '16' => [9.5, 12.5, 0.5],
+        '22' => [9.5, 12.5, 0.5],
+        '23' => [9.5, 15.0, 0.5],
+        '24' => [8.69, 5.44, 1.75],
+        '25' => [11.25, 8.75, 6.0],
+        '26' => [14.13, 12.0, 3.5],
+        '27' => [12.25, 12.0, 6.0],
+    ];
+
+    foreach ($published as $code => [$height, $width, $length]) {
+        $row = BoxSize::where('code', $code)->firstOrFail();
+
+        expect((float) $row->height)->toBe($height, "{$row->label} height")
+            ->and((float) $row->width)->toBe($width, "{$row->label} width")
+            ->and((float) $row->length)->toBe($length, "{$row->label} length");
+    }
+});
+
 it('reseeds without duplicating box sizes or disturbing an operator edit to one', function (): void {
     $this->seed(BoxSizeSeeder::class);
     $count = BoxSize::count();
