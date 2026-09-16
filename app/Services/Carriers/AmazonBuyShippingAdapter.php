@@ -7,6 +7,7 @@ use App\Contracts\RecoversUnresolvedPurchase;
 use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
 use App\DataTransferObjects\PostageSources\OfferDraft;
 use App\DataTransferObjects\PostageSources\ServiceObservation;
+use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\AmazonPurchasedLabel;
 use App\DataTransferObjects\Shipping\AmazonShippingQuote;
 use App\DataTransferObjects\Shipping\PackageData;
@@ -17,6 +18,7 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CarrierPackaging;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
 use App\Enums\ServiceEvidence;
@@ -305,6 +307,31 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
     public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
     {
         return $this->classifyPackaging((string) ($rate->metadata['amazonServiceId'] ?? ''));
+    }
+
+    /**
+     * From the offering when there is one: {@see returnsSeparateCustomsDocument()}
+     * reads the `CUSTOM_FORM` declaration off the stored rate, which is what
+     * lifts the territory over-block — Amazon quotes Puerto Rico as plain
+     * domestic USPS, and that offering declares no form.
+     *
+     * Without a rate (batch validation, before anything is quoted) the
+     * offering cannot be read, so the answer is the lane's: a foreign country
+     * gets Amazon's stated separate `CUSTOM_FORM`, and a territory gets the
+     * plain domestic label `09` observed four times. An approximation of the
+     * offering, corrected by the purchase-time check, which always has one.
+     */
+    public function customsDocumentDelivery(AddressData $from, AddressData $to, ?RateResponse $rate = null): CustomsDocumentDelivery
+    {
+        if ($rate !== null) {
+            return $this->returnsSeparateCustomsDocument($rate)
+                ? CustomsDocumentDelivery::Separate
+                : CustomsDocumentDelivery::None;
+        }
+
+        return $from->country !== $to->country
+            ? CustomsDocumentDelivery::Separate
+            : CustomsDocumentDelivery::None;
     }
 
     /**

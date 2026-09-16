@@ -64,6 +64,13 @@ class Ship extends Page
 
     public ?int $labelDpi = null;
 
+    /**
+     * Whether this workstation has a report printer, pushed from
+     * `localStorage.reportPrinter` on mount the way label format is. A
+     * purchase that returns a separate customs document is refused without one.
+     */
+    public bool $hasReportPrinter = false;
+
     public ?int $selectedRateIndex = null;
 
     /**
@@ -375,6 +382,7 @@ class Ship extends Page
                 overrideDeclaredWeight: $this->overrideDeclaredWeight,
                 userId: auth()->id(),
                 blindOffer: $blindOffer,
+                hasReportPrinter: $this->hasReportPrinter,
             )
             : new PackageShippingRequest(
                 selectedRate: RateResponse::fromArray($this->rateOptions[$this->selectedRateIndex]),
@@ -382,6 +390,7 @@ class Ship extends Page
                 labelDpi: $this->labelDpi,
                 overrideCustomsWeights: $this->overrideCustomsWeights,
                 userId: auth()->id(),
+                hasReportPrinter: $this->hasReportPrinter,
             );
 
         $result = app(PackageShippingWorkflow::class)->ship($this->package, $request);

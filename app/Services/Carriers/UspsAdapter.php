@@ -16,6 +16,7 @@ use App\DataTransferObjects\Tracking\TrackingEventData;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\BoxSizeType;
 use App\Enums\CarrierPackaging;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
@@ -954,6 +955,23 @@ class UspsAdapter implements DirectCarrierAdapter
     public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
     {
         return $this->classifyPackaging($rate->metadata);
+    }
+
+    /**
+     * USPS fuses the declaration into the label: the CP72 comes back as three
+     * 4×6 plies inside the one label document — postage on ply 1, plies 2–3
+     * stamped "Not Valid As Proof-of-Payment" — in PDF and in ZPL alike. It
+     * prints on the thermal path the workstation already has, so a missing
+     * report printer must not block it (`shopify-shipping-carrier/23`).
+     *
+     * Asked of the pair, like {@see createShipment()} deciding whether to
+     * send a customs form at all.
+     */
+    public function customsDocumentDelivery(AddressData $from, AddressData $to, ?RateResponse $rate = null): CustomsDocumentDelivery
+    {
+        return $from->sharesCustomsZoneWith($to)
+            ? CustomsDocumentDelivery::None
+            : CustomsDocumentDelivery::FusedIntoLabel;
     }
 
     /**

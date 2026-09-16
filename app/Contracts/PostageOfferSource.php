@@ -2,8 +2,11 @@
 
 namespace App\Contracts;
 
+use App\DataTransferObjects\Shipping\AddressData;
+use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\ServiceCapability;
 
 /**
@@ -49,6 +52,25 @@ interface PostageOfferSource
      * the package's declared value exceeds this — never clamps silently.
      */
     public function offerDeclaredValueCap(): ?float;
+
+    /**
+     * What buying from here returns for the customs declaration this lane
+     * carries — the capability the report printer gate reads before spending
+     * anything (`shopify-shipping-carrier/07` constraint 3).
+     *
+     * Asked of the address pair, never of the destination alone: a label from
+     * Canada into Pennsylvania clears customs and one within Canada does not.
+     * The rate is there for a source whose answer depends on the offering
+     * rather than the lane — Amazon declares a `CUSTOM_FORM` per offering and
+     * quotes the territories as plain domestic — and is null where no rate
+     * exists yet, which is batch validation and every blind purchase.
+     *
+     * The gate refuses only {@see CustomsDocumentDelivery::Separate}. A source
+     * that fuses its declaration into the label must say so, or every
+     * workstation without a report printer loses its international labels
+     * for a document that prints on the thermal path it already has.
+     */
+    public function customsDocumentDelivery(AddressData $from, AddressData $to, ?RateResponse $rate = null): CustomsDocumentDelivery;
 
     /**
      * Buy the label and return the result with tracking/label info.

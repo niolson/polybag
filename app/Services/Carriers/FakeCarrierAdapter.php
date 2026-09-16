@@ -3,6 +3,7 @@
 namespace App\Services\Carriers;
 
 use App\Contracts\DirectCarrierAdapter;
+use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
@@ -12,6 +13,7 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\ServiceCapability;
 use App\Models\Package;
 use App\Services\Carriers\Concerns\ConsultsCarrierPolicyForOffers;
@@ -73,6 +75,7 @@ class FakeCarrierAdapter implements DirectCarrierAdapter
 
     public function __construct(
         private readonly string $carrierName,
+        public CustomsDocumentDelivery $customsDocumentDelivery = CustomsDocumentDelivery::None,
     ) {}
 
     public function getCarrierName(): string
@@ -166,5 +169,14 @@ class FakeCarrierAdapter implements DirectCarrierAdapter
     public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
     {
         return PackagingRequirement::shipperPackaging();
+    }
+
+    /**
+     * Whatever a test says, so the report printer gate can be proved in both
+     * directions — a fused carrier not blocked, a separate one blocked.
+     */
+    public function customsDocumentDelivery(AddressData $from, AddressData $to, ?RateResponse $rate = null): CustomsDocumentDelivery
+    {
+        return $this->customsDocumentDelivery;
     }
 }

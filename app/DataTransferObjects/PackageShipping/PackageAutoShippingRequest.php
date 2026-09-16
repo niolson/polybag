@@ -9,5 +9,7 @@ readonly class PackageAutoShippingRequest
         public ?int $labelDpi = null,
         public ?int $userId = null,
         public bool $cleanupOnFailure = true,
+        // See PackageShippingRequest::$hasReportPrinter.
+        public bool $hasReportPrinter = false,
     ) {}
 }

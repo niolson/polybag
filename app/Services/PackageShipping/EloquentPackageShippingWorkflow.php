@@ -10,6 +10,7 @@ use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingOptions;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingResult;
+use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\ClassifiedRate;
 use App\DataTransferObjects\Shipping\PackageData;
@@ -332,7 +333,14 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             // operator, and consuming the offer on the way out would leave the
             // confirmed retry with nothing to buy.
             //
-            // A zero-value customs line is refused first, and outright: there
+            // The workstation is checked first: a purchase that returns a
+            // customs document this workstation cannot print is refused
+            // outright, before any question about the data is asked.
+            if (($refused = $this->reportPrinterRefused($adapter, $shipRequest, $request)) !== null) {
+                return $refused;
+            }
+
+            // A zero-value customs line is refused next, and outright: there
             // is no override for it, so asking the operator to confirm a weight
             // and then refusing anyway would be the worse order.
             if (($zeroValued = $shipRequest->zeroValueCustomsItems()) !== []) {
@@ -453,6 +461,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                     labelDpi: $request->labelDpi,
                     requireCustomsWeightOverride: false,
                     userId: $request->userId,
+                    hasReportPrinter: $request->hasReportPrinter,
                 ),
             );
 
@@ -775,6 +784,51 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             'Carrier Account Changed',
             'This rate was quoted on a carrier account that is no longer the one this package would ship on. '
             .'Get rates again so the price matches the account that will be billed.',
+        );
+    }
+
+    /**
+     * Refuse a purchase that returns a customs document this workstation has
+     * nowhere to print.
+     *
+     * The gate `shopify-shipping-carrier/07` decided on (constraint 3), read
+     * off the seller's own answer through
+     * {@see PostageOfferSource::customsDocumentDelivery()} rather than off
+     * {@see AddressData::requiresCustomsDeclaration()}: the address says a
+     * declaration exists, the seller says whether it comes back on paper. USPS
+     * fuses its CP72 into the label and is never refused; UPS, Shopify and an
+     * Amazon offering that declares a `CUSTOM_FORM` return a separate Letter
+     * document and are, when no report printer is configured.
+     *
+     * Only ever asked when the workstation has no report printer and the lane
+     * crosses a customs zone: with a report printer every answer prints, and
+     * a lane inside one zone carries no declaration for any seller — the same
+     * pair test {@see requiresCustomsWeightOverride()} gates on. The addresses
+     * and rate come off the ship request the seller is about to be handed, so
+     * the lane and the offering checked are the ones bought.
+     */
+    private function reportPrinterRefused(PostageOfferSource $seller, ShipRequest $shipRequest, PackageShippingRequest $request): ?PackageShippingResult
+    {
+        if ($request->hasReportPrinter || $shipRequest->fromAddress->sharesCustomsZoneWith($shipRequest->toAddress)) {
+            return null;
+        }
+
+        $delivery = $seller->customsDocumentDelivery($shipRequest->fromAddress, $shipRequest->toAddress, $shipRequest->selectedRate);
+
+        if (! $delivery->needsReportPrinter()) {
+            return null;
+        }
+
+        logger()->info('Refused a purchase that returns a customs document with no report printer configured', [
+            'package_id' => $shipRequest->packageId,
+            'seller' => $seller->getCarrierName(),
+            'destination_country' => $shipRequest->toAddress->country,
+        ]);
+
+        return PackageShippingResult::reportPrinterRequired(
+            'This shipment needs a customs form, and '.$seller->getCarrierName().' returns it as a separate document '
+            .'that prints on the report printer. Choose a report printer in Device Settings on this workstation, '
+            .'then ship again.',
         );
     }
 

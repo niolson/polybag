@@ -1,10 +1,15 @@
 <?php
 
+use App\Contracts\PostageOfferSource;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\LabelBatchStatus;
 use App\Enums\PackageStatus;
 use App\Enums\PickingStatus;
+use App\Jobs\GenerateLabelJob;
 use App\Models\BoxSize;
+use App\Models\Carrier;
+use App\Models\CarrierService;
 use App\Models\LabelBatch;
 use App\Models\LabelBatchItem;
 use App\Models\Package;
@@ -12,13 +17,21 @@ use App\Models\PackageItem;
 use App\Models\Product;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
+use App\Models\ShippingMethod;
 use App\Models\User;
 use App\Services\BatchLabelService;
+use App\Services\Carriers\CarrierRegistry;
+use App\Services\Carriers\FakeCarrierAdapter;
 use App\Services\SettingsService;
 use Illuminate\Support\Facades\Bus;
 
 beforeEach(function (): void {
     $this->service = new BatchLabelService;
+    app(CarrierRegistry::class)->reset();
+});
+
+afterEach(function (): void {
+    app(CarrierRegistry::class)->reset();
 });
 
 // --- validateShipmentsForBatch ---
@@ -262,4 +275,128 @@ it('dispatches a bus batch with jobs', function (): void {
 
     expect($batch->label_format)->toBe('zpl')
         ->and($batch->label_dpi)->toBe(203);
+});
+
+// --- the report printer skip (shopify-shipping-carrier/07 constraint 4) ---
+
+/**
+ * An international shipment on a method that can buy from the named carriers,
+ * each registered as a fake that answers the report printer gate as told.
+ *
+ * @param  array<string, CustomsDocumentDelivery>  $carriers
+ */
+function internationalShipmentOnCarriers(array $carriers): Shipment
+{
+    $method = ShippingMethod::factory()->create();
+
+    foreach ($carriers as $name => $delivery) {
+        $carrier = Carrier::factory()->create(['name' => $name, 'active' => true]);
+        $service = CarrierService::factory()->create(['carrier_id' => $carrier->id, 'active' => true]);
+        $method->carrierServices()->attach($service->id);
+
+        app(CarrierRegistry::class)->registerInstance($name, new FakeCarrierAdapter($name, $delivery));
+    }
+
+    $shipment = Shipment::factory()->create([
+        'shipping_method_id' => $method->id,
+        'address1' => '100 Queen St W',
+        'city' => 'Toronto',
+        'state_or_province' => 'ON',
+        'postal_code' => 'M5H 2N2',
+        'country' => 'CA',
+    ]);
+    ShipmentItem::factory()->create(['shipment_id' => $shipment->id]);
+
+    return $shipment;
+}
+
+it('skips an international shipment when every carrier on its method returns a separate customs form and there is no report printer', function (): void {
+    $shipment = internationalShipmentOnCarriers(['UPS' => CustomsDocumentDelivery::Separate]);
+
+    $result = $this->service->validateShipmentsForBatch(collect([$shipment]), hasReportPrinter: false);
+
+    expect($result->eligible)->toBeEmpty()
+        ->and($result->ineligible->first()['reason'])->toBe('No report printer configured for the customs form');
+});
+
+it('keeps an international shipment when one carrier on its method fuses the customs form into the label', function (): void {
+    // The batch has not chosen a carrier yet, and USPS's CP72 prints on the
+    // label printer, so a method offering USPS beside UPS can still buy.
+    $shipment = internationalShipmentOnCarriers([
+        'UPS' => CustomsDocumentDelivery::Separate,
+        'USPS' => CustomsDocumentDelivery::FusedIntoLabel,
+    ]);
+
+    $result = $this->service->validateShipmentsForBatch(collect([$shipment]), hasReportPrinter: false);
+
+    expect($result->eligible)->toHaveCount(1)
+        ->and($result->ineligible)->toBeEmpty();
+});
+
+it('does not let an unconfigured fused-document carrier rescue the shipment from the skip', function (): void {
+    // Rate shopping never asks an unconfigured adapter, so it is not a way the
+    // batch could buy: the only carrier that can quote needs a report printer.
+    $shipment = internationalShipmentOnCarriers(['UPS' => CustomsDocumentDelivery::Separate]);
+
+    $usps = Carrier::factory()->create(['name' => 'USPS', 'active' => true]);
+    $shipment->shippingMethod->carrierServices()->attach(
+        CarrierService::factory()->create(['carrier_id' => $usps->id, 'active' => true])->id,
+    );
+    $unconfigured = Mockery::mock(PostageOfferSource::class);
+    $unconfigured->shouldReceive('isConfigured')->andReturnFalse();
+    $unconfigured->shouldNotReceive('customsDocumentDelivery');
+    app(CarrierRegistry::class)->registerInstance('USPS', $unconfigured);
+
+    $result = $this->service->validateShipmentsForBatch(collect([$shipment]), hasReportPrinter: false);
+
+    expect($result->ineligible->first()['reason'])->toBe('No report printer configured for the customs form');
+});
+
+it('does not let a fused-document carrier that cannot reach the destination rescue the shipment from the skip', function (): void {
+    // The same destination-capability filter rate shopping applies: a
+    // military address is customs-declared, and a USPS service flagged unable
+    // to reach it is not offered, leaving UPS alone.
+    $shipment = internationalShipmentOnCarriers([
+        'UPS' => CustomsDocumentDelivery::Separate,
+        'USPS' => CustomsDocumentDelivery::FusedIntoLabel,
+    ]);
+    $shipment->update(['city' => 'FPO', 'state_or_province' => 'AE', 'postal_code' => '09532', 'country' => 'US']);
+    CarrierService::query()->update(['can_ship_to_military_addresses' => true]);
+    CarrierService::whereHas('carrier', fn ($q) => $q->where('name', 'USPS'))->update(['can_ship_to_military_addresses' => false]);
+
+    $result = $this->service->validateShipmentsForBatch(collect([$shipment]), hasReportPrinter: false);
+
+    expect($result->ineligible->first()['reason'])->toBe('No report printer configured for the customs form');
+});
+
+it('keeps an international shipment on a separate-document carrier once a report printer is configured', function (): void {
+    $shipment = internationalShipmentOnCarriers(['UPS' => CustomsDocumentDelivery::Separate]);
+
+    $result = $this->service->validateShipmentsForBatch(collect([$shipment]), hasReportPrinter: true);
+
+    expect($result->eligible)->toHaveCount(1);
+});
+
+it('never asks about a report printer for a domestic shipment', function (): void {
+    $shipment = internationalShipmentOnCarriers(['UPS' => CustomsDocumentDelivery::Separate]);
+    $shipment->update(['city' => 'Portland', 'state_or_province' => 'OR', 'postal_code' => '97201', 'country' => 'US']);
+
+    $result = $this->service->validateShipmentsForBatch(collect([$shipment]), hasReportPrinter: false);
+
+    expect($result->eligible)->toHaveCount(1);
+});
+
+it('hands the report printer flag to every label job in the batch', function (): void {
+    Bus::fake();
+
+    $user = User::factory()->admin()->create();
+    $boxSize = BoxSize::factory()->create();
+
+    $shipment = Shipment::factory()->create();
+    ShipmentItem::factory()->create(['shipment_id' => $shipment->id]);
+    $shipment->load('shipmentItems.product');
+
+    $this->service->createBatch(collect([$shipment]), $boxSize, $user, 'pdf', null, hasReportPrinter: true);
+
+    Bus::assertBatched(fn ($batch): bool => $batch->jobs->every(fn (GenerateLabelJob $job): bool => $job->hasReportPrinter));
 });

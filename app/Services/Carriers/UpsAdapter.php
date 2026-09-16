@@ -16,6 +16,7 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackingEventData;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\CarrierPackaging;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
 use App\Exceptions\Carriers\CarrierRateFetchException;
@@ -841,6 +842,20 @@ class UpsAdapter implements DirectCarrierAdapter
     public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
     {
         return $this->classifyPackaging($rate->metadata);
+    }
+
+    /**
+     * UPS returns the invoice apart from the label: `ShipmentResults.Form.Image`,
+     * a PDF of three Letter pages, whenever {@see CreateShipment()} sends
+     * `InternationalForms` — which it does on exactly this condition. Read
+     * into `customsFormData` and printed to the report printer, so a
+     * workstation without one cannot print what UPS hands back.
+     */
+    public function customsDocumentDelivery(AddressData $from, AddressData $to, ?RateResponse $rate = null): CustomsDocumentDelivery
+    {
+        return $from->sharesCustomsZoneWith($to)
+            ? CustomsDocumentDelivery::None
+            : CustomsDocumentDelivery::Separate;
     }
 
     /**

@@ -22,6 +22,7 @@
 
                 $wire.set('labelFormat', storedFormat);
                 $wire.set('labelDpi', storedDpi);
+                $wire.set('hasReportPrinter', !!localStorage.getItem('reportPrinter'));
 
                 this.$watch('autoShipEnabled', (value) => {
                     localStorage.setItem('manualShipAutoShip', value.toString());

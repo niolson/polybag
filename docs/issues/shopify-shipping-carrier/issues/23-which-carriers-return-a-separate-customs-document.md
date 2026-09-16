@@ -1,6 +1,6 @@
 # Which carriers return a separate customs document, and which fuse it into the label
 
-Status: ready-for-human — USPS, UPS and FedEx answered 2026-09-10; Amazon's row is a vendor statement (separate `CUSTOM_FORM`, per support 2026-09-16) awaiting observation, and FedEx's row goes stale the moment `shippingDocumentSpecification` or ETD is sent
+Status: ready-for-human — the capability landed 2026-09-16 as `PostageOfferSource::customsDocumentDelivery()` / `CustomsDocumentDelivery`, and `07`'s gate reads it; what remains is observation: Amazon's row is a vendor statement (separate `CUSTOM_FORM`, per support 2026-09-16) awaiting a purchase in `amazon-buy-shipping/09`, and FedEx's `NotRequested` row goes stale the moment `shippingDocumentSpecification` or ETD is sent
 
 Repo: `polybag`
 
@@ -133,3 +133,11 @@ this issue exists to prevent.
   and marked as a statement; `amazon-buy-shipping/13` builds the gate off the offering's
   document details, which also lifts the territory over-block, and `09` keeps the
   observation.
+- **2026-09-16** — The table above is now code: `App\Enums\CustomsDocumentDelivery`
+  (`Separate` / `FusedIntoLabel` / `NotRequested` / `None`), answered per lane by every
+  `PostageOfferSource`, with `tests/Unit/Services/Carriers/CustomsDocumentDeliveryTest.php`
+  pinning each row and both directions of the test note — a fused carrier is not blocked, a
+  separate one is. Finding 1 is why `NotRequested` is its own case rather than a "no": the
+  FedEx row reads as stale on its face. The Amazon no-rate approximation (foreign country →
+  `Separate`, territory → `None`) exists only because batch validation runs before any
+  rate is quoted; the purchase-time check always has the offering. See `07`.

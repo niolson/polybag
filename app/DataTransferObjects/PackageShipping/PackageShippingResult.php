@@ -115,6 +115,23 @@ readonly class PackageShippingResult
         );
     }
 
+    /**
+     * The purchase would return a customs document beside the label and this
+     * workstation has nowhere to print it.
+     *
+     * Nothing was bought. The package stays as it is and the rate list stands:
+     * the remedy is Device Settings, not a fresh quote.
+     */
+    public static function reportPrinterRequired(string $message): self
+    {
+        return new self(
+            success: false,
+            title: 'Report Printer Required',
+            message: $message,
+            leavePackageIntact: true,
+        );
+    }
+
     public static function stateConflict(string $message): self
     {
         return new self(success: false, title: 'Package State Changed', message: $message, leavePackageIntact: true);

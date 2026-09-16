@@ -195,7 +195,9 @@ existing 43 Amazon tests pass unchanged beside twelve new ones.
    `AmazonBuyShippingAdapter::CUSTOMS_DOCUMENT_METADATA_KEY` (`returnsSeparateCustomsDocument`).
    The territory test builds the `09` shape — Puerto Rico, domestic USPS, no `CUSTOM_FORM`
    — and asserts `requiresCustomsDeclaration()` true while the stamp is false. The gate
-   itself (`07`'s constraints 3 and 4) is still unbuilt; this is the predicate it reads.
+   itself (`07`'s constraints 3 and 4) shipped 2026-09-16 and reads this through
+   `AmazonBuyShippingAdapter::customsDocumentDelivery()`, the `PostageOfferSource` method
+   every seller now answers.
 4. **`CUSTOM_FORM`.** `documentSpecification()` now requests it whenever the chosen print
    option declares it, mandatory or not, and never otherwise. `labelFrom()` reads a
    `CUSTOM_FORM` beside the label — the `LABEL` filter is untouched, so a lone customs form

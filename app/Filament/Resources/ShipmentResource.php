@@ -331,6 +331,8 @@ class ShipmentResource extends Resource
                         Forms\Components\Hidden::make('label_format')
                             ->default('pdf'),
                         Forms\Components\Hidden::make('label_dpi'),
+                        Forms\Components\Hidden::make('has_report_printer')
+                            ->default(false),
                         Components\View::make('filament.components.batch-ship-local-storage'),
                     ])
                     ->modalHeading('Batch Ship')
@@ -349,7 +351,7 @@ class ShipmentResource extends Resource
 
                         $service = new BatchLabelService;
 
-                        $validation = $service->validateShipmentsForBatch($records);
+                        $validation = $service->validateShipmentsForBatch($records, (bool) ($data['has_report_printer'] ?? false));
 
                         if ($validation->allIneligible()) {
                             Notification::make()
@@ -377,6 +379,7 @@ class ShipmentResource extends Resource
                             auth()->user(),
                             $data['label_format'] ?: 'pdf',
                             $data['label_dpi'] ? (int) $data['label_dpi'] : null,
+                            (bool) ($data['has_report_printer'] ?? false),
                         );
 
                         redirect(LabelBatchResource::getUrl('view', ['record' => $batch]));

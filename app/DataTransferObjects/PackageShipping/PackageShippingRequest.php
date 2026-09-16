@@ -26,6 +26,13 @@ readonly class PackageShippingRequest
         public bool $overrideDeclaredWeight = false,
         public ?int $userId = null,
         public ?BlindPurchaseOffer $blindOffer = null,
+        // Whether the workstation has a report printer to print a separate
+        // customs document on. Browser state (`localStorage.reportPrinter`)
+        // pushed into Livewire before the purchase, the way label format is;
+        // the server cannot see printer configuration any other way. Absent
+        // means not configured, and a purchase that returns a separate
+        // document is refused before anything is bought.
+        public bool $hasReportPrinter = false,
     ) {
         if (($selectedRate === null) === ($blindOffer === null)) {
             throw new InvalidArgumentException('A shipping request buys either a quoted rate or a blind purchase offer, and must name exactly one.');

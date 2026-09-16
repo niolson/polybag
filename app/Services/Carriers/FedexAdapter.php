@@ -15,6 +15,7 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackingEventData;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\CarrierPackaging;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\FedexPackageType;
 use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
@@ -982,6 +983,24 @@ class FedexAdapter implements DirectCarrierAdapter
     public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
     {
         return $this->classifyPackaging($rate->metadata);
+    }
+
+    /**
+     * FedEx returns no separate document because none is requested: no ship
+     * request sends `shippingDocumentSpecification` and nothing sends ETD, so
+     * the commercial invoice FedEx's own `documentRequirements` lists comes
+     * back as nothing at all. What does come back — pages 2–4 of the 4×6
+     * label — is the air waybill pouch copies, not a declaration.
+     *
+     * {@see CustomsDocumentDelivery::NotRequested} rather than fused, so this
+     * row reads as stale the day either mechanism lands and the invoice
+     * starts arriving in `shipmentDocuments` (`shopify-shipping-carrier/23`).
+     */
+    public function customsDocumentDelivery(AddressData $from, AddressData $to, ?RateResponse $rate = null): CustomsDocumentDelivery
+    {
+        return $from->sharesCustomsZoneWith($to)
+            ? CustomsDocumentDelivery::None
+            : CustomsDocumentDelivery::NotRequested;
     }
 
     /**
