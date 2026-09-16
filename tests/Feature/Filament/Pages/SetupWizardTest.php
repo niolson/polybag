@@ -44,7 +44,7 @@ it('prepopulates starter box sizes when selected', function (): void {
 
     expect(BoxSize::count())->toBeGreaterThan(0)
         ->and(BoxSize::where('code', '01')->exists())->toBeTrue()
-        ->and(BoxSize::where('label', 'USPS Flat Rate Padded Envelope')->exists())->toBeTrue();
+        ->and(BoxSize::where('carrier_packaging', CarrierPackaging::UspsPaddedFlatRateEnvelope)->exists())->toBeTrue();
 });
 
 it('creates box sizes with and without carrier packaging', function (): void {
