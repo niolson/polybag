@@ -4,7 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Enums\AmazonMarketplace;
 use App\Enums\BoxSizeType;
-use App\Enums\FedexPackageType;
+use App\Enums\CarrierPackaging;
 use App\Enums\Role;
 use App\Filament\Resources\CarrierAccounts\CarrierAccountResource;
 use App\Filament\Resources\DataSources\DataSourceResource;
@@ -278,10 +278,12 @@ class SetupWizard extends Page
                             ->default(0)
                             ->minValue(0)
                             ->maxValue(50),
-                        Forms\Components\Select::make('fedex_package_type')
-                            ->label('FedEx Package Type')
-                            ->options(FedexPackageType::class)
-                            ->nullable(),
+                        Forms\Components\Select::make('carrier_packaging')
+                            ->label('Carrier packaging')
+                            ->options(CarrierPackaging::groupedOptions())
+                            ->nullable()
+                            ->placeholder('Own packaging')
+                            ->helperText('A carrier packaging is only useful for a carrier whose account or reseller can rate it: declaring a FedEx Pak on a UPS-only install simply yields no matching rates.'),
                     ])
                     ->columns(3)
                     ->defaultItems(0)
@@ -748,7 +750,7 @@ class SetupWizard extends Page
                 'length' => $box['length'],
                 'max_weight' => $box['max_weight'],
                 'empty_weight' => $box['empty_weight'] ?? 0,
-                'fedex_package_type' => $box['fedex_package_type'] ?? null,
+                'carrier_packaging' => $box['carrier_packaging'] ?? null,
             ]);
         }
 

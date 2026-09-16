@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Enums\BoxSizeType;
+use App\Enums\CarrierPackaging;
 use App\Models\BoxSize;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -25,5 +26,15 @@ class BoxSizeFactory extends Factory
             'max_weight' => fake()->randomFloat(2, 10, 70),
             'empty_weight' => fake()->randomFloat(2, 0.1, 2),
         ];
+    }
+
+    /**
+     * A box size that is a carrier's own packaging — ADR-0005's second axis.
+     */
+    public function carrierPackaging(CarrierPackaging $packaging): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'carrier_packaging' => $packaging,
+        ]);
     }
 }

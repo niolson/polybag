@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\BoxSizeType;
+use App\Enums\CarrierPackaging;
 use App\Enums\Role;
 use App\Filament\Pages\Settings;
 use App\Filament\Resources\BoxSizeResource\Pages\CreateBoxSize;
@@ -96,6 +97,45 @@ it('can edit a BoxSize', function (): void {
     expect($record->refresh())
         ->label->toBe('Updated Box')
         ->max_weight->toEqual(50);
+});
+
+it('can create a BoxSize that is carrier-supplied packaging', function (): void {
+    Livewire::test(CreateBoxSize::class)
+        ->fillForm([
+            'label' => 'USPS Medium Flat Rate Box',
+            'code' => 'MFRB',
+            'type' => BoxSizeType::BOX->value,
+            'carrier_packaging' => CarrierPackaging::UspsMediumFlatRateBox->value,
+            'height' => 5.5,
+            'width' => 8.5,
+            'length' => 11,
+            'max_weight' => 70,
+            'empty_weight' => 0.4,
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    expect(BoxSize::where('code', 'MFRB')->sole()->carrier_packaging)->toBe(CarrierPackaging::UspsMediumFlatRateBox);
+});
+
+it('can edit a BoxSize between carrier-supplied packaging and its own', function (): void {
+    $record = BoxSize::factory()->create();
+
+    Livewire::test(EditBoxSize::class, ['record' => $record->id])
+        ->assertFormSet(['carrier_packaging' => null])
+        ->fillForm(['carrier_packaging' => CarrierPackaging::FedexPak->value])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($record->refresh()->carrier_packaging)->toBe(CarrierPackaging::FedexPak);
+
+    Livewire::test(EditBoxSize::class, ['record' => $record->id])
+        ->assertFormSet(['carrier_packaging' => CarrierPackaging::FedexPak->value])
+        ->fillForm(['carrier_packaging' => null])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($record->refresh()->carrier_packaging)->toBeNull();
 });
 
 // CarrierServiceResource

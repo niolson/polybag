@@ -3,7 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Enums\BoxSizeType;
-use App\Enums\FedexPackageType;
+use App\Enums\CarrierPackaging;
 use App\Filament\Resources\BoxSizeResource\Pages;
 use App\Models\BoxSize;
 use App\Services\SettingsService;
@@ -76,8 +76,12 @@ class BoxSizeResource extends Resource
                     ])->columns(5),
                 Components\Section::make('Carrier Settings')
                     ->schema([
-                        Forms\Components\Select::make('fedex_package_type')
-                            ->options(FedexPackageType::class),
+                        Forms\Components\Select::make('carrier_packaging')
+                            ->label('Carrier packaging')
+                            ->options(CarrierPackaging::groupedOptions())
+                            ->nullable()
+                            ->placeholder('Own packaging')
+                            ->helperText('A carrier packaging is only useful for a carrier whose account or reseller can rate it: declaring a FedEx Pak on a UPS-only install simply yields no matching rates.'),
                     ]),
                 Components\Section::make('Billing')
                     ->visible(fn () => app(SettingsService::class)->get('multi_client_enabled', false))

@@ -51,6 +51,17 @@ Buying postage where the price and service are not known until after the fact â€
 Shopify, never. It is not something we can compare or rank.
 _Avoid_: Rate, quote
 
+**Packaging**:
+What a Package is enclosed in, described on two axes: its physical form (box, polybag,
+padded mailer) and, when it is not the packer's own, the carrier-supplied identity it
+carries (a Priority Mail Small Flat Rate Box, a FedEx Pak). A property of the Box Size.
+_Avoid_: Package type (FedEx's word, and ambiguous with Package), packaging type (UPS's
+word)
+
+**Carrier-supplied packaging**:
+Packaging the carrier provides and prices specifically. A Box Size with a
+`carrier_packaging` value. A rate that *requires* one is valid in nothing else.
+
 ## Relationships
 
 - A **Shipment** can produce one or more **Packages**.

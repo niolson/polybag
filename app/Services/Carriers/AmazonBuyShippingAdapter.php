@@ -16,7 +16,6 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
-use App\Enums\FedexPackageType;
 use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
 use App\Enums\ServiceEvidence;
@@ -700,8 +699,9 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
      *    path segments so `_INTL` and `_CUSTOMS` variants are caught and
      *    `USPS_PTP_FC` is not. Always dropped: nothing in the app can yet say a
      *    box size *is* USPS packaging.
-     * 2. FedEx One Rate (`_ONE_RATE`) unless the box size says FedEx packaging,
-     *    exactly as {@see FedexAdapter::isOneRateEligible()} decides it.
+     * 2. FedEx One Rate (`_ONE_RATE`) unless the box size's carrier packaging
+     *    is FedEx's, exactly as {@see FedexAdapter::isOneRateEligible()}
+     *    decides it.
      * 3. Content-restricted services — Media Mail and Bound Printed Matter —
      *    always, until the app can say a Package's contents qualify.
      *
@@ -721,12 +721,8 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
             return false;
         }
 
-        if (str_contains($serviceId, '_ONE_RATE')) {
-            $fedexType = $package?->fedexPackageType;
-
-            if (! $fedexType || $fedexType === FedexPackageType::YOUR_PACKAGING) {
-                return false;
-            }
+        if (str_contains($serviceId, '_ONE_RATE') && $package?->carrierPackaging?->carrier() !== 'FedEx') {
+            return false;
         }
 
         return ! in_array($serviceId, self::CONTENT_RESTRICTED_SERVICES, true);

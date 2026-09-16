@@ -6,7 +6,7 @@ use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
-use App\Enums\FedexPackageType;
+use App\Enums\CarrierPackaging;
 use App\Enums\LabelReferenceSource;
 use App\Enums\TrackingStatus;
 use App\Http\Integrations\Fedex\Requests\CancelShipment;
@@ -189,7 +189,7 @@ it('keeps the client account through FedEx Saturday retry and One Rate follow-up
             length: 12,
             width: 10,
             height: 8,
-            fedexPackageType: FedexPackageType::FEDEX_SMALL_BOX,
+            carrierPackaging: CarrierPackaging::FedexSmallBox,
         )],
         specialServiceCodes: ['saturday_delivery'],
         clientId: $client->id,
@@ -1837,7 +1837,7 @@ it('builds a ZPL One Rate ship request with Saturday delivery that conforms to o
             phone: '5559876543',
             phoneExtension: '12',
         ),
-        packageData: new PackageData(weight: 2.0, length: 12, width: 10, height: 8, fedexPackageType: FedexPackageType::FEDEX_SMALL_BOX),
+        packageData: new PackageData(weight: 2.0, length: 12, width: 10, height: 8, carrierPackaging: CarrierPackaging::FedexSmallBox),
         selectedRate: new RateResponse(
             carrier: 'FedEx',
             serviceCode: 'PRIORITY_OVERNIGHT',
@@ -1846,7 +1846,7 @@ it('builds a ZPL One Rate ship request with Saturday delivery that conforms to o
             metadata: [
                 'serviceType' => 'PRIORITY_OVERNIGHT',
                 'isOneRate' => true,
-                'fedexPackageType' => 'FEDEX_SMALL_BOX',
+                'packagingType' => 'FEDEX_SMALL_BOX',
             ],
         ),
         labelFormat: 'zpl',
@@ -1892,3 +1892,152 @@ it('builds a ZPL One Rate ship request with Saturday delivery that conforms to o
             ];
     });
 });
+
+/*
+|--------------------------------------------------------------------------
+| Carrier packaging — ADR-0005 decision 3: the adapter stamps what it sent
+|--------------------------------------------------------------------------
+*/
+
+/**
+ * Fakes the rate endpoint so the ordinary request answers Express Saver and
+ * Ground, and the One Rate request answers Express Saver again.
+ */
+function fakeFedexRateEndpoints(): void
+{
+    $expressSaver = [
+        'serviceType' => 'EXPRESS_SAVER',
+        'serviceName' => 'FedEx Express Saver',
+        'ratedShipmentDetails' => [['totalNetCharge' => 21.40]],
+    ];
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Rates::class => function (PendingRequest $pendingRequest) use ($expressSaver): MockResponse {
+            $isOneRate = in_array('FEDEX_ONE_RATE', data_get($pendingRequest->body()->all(), 'requestedShipment.shipmentSpecialServices.specialServiceTypes', []), true);
+
+            return MockResponse::make(['output' => ['rateReplyDetails' => $isOneRate
+                ? [['ratedShipmentDetails' => [['totalNetCharge' => 14.95]]] + $expressSaver]
+                : [
+                    $expressSaver,
+                    [
+                        'serviceType' => 'FEDEX_GROUND',
+                        'serviceName' => 'FedEx Ground',
+                        'ratedShipmentDetails' => [['totalNetCharge' => 9.80]],
+                    ],
+                ],
+            ]]);
+        },
+    ]);
+}
+
+/**
+ * The `requestedShipment` of every rate request actually sent, in order.
+ *
+ * @return array<int, array<string, mixed>>
+ */
+function sentFedexRateShipments(): array
+{
+    return collect(Saloon::mockClient()->getRecordedResponses())
+        ->map(fn ($response) => $response->getPendingRequest())
+        ->filter(fn (PendingRequest $pendingRequest): bool => $pendingRequest->getRequest() instanceof Rates)
+        ->map(fn (PendingRequest $pendingRequest): array => $pendingRequest->body()->all()['requestedShipment'])
+        ->values()
+        ->all();
+}
+
+function fedexRateRequestIn(?CarrierPackaging $packaging): RateRequest
+{
+    return new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
+        packages: [new PackageData(weight: 2.0, length: 12, width: 10, height: 8, carrierPackaging: $packaging)],
+    );
+}
+
+it('names the packaging on every rate request and asks for One Rate only in FedEx packaging', function (?CarrierPackaging $packaging, string $expectedPackagingType, bool $expectsOneRate): void {
+    fakeFedexRateEndpoints();
+
+    $this->adapter->getRates(fedexRateRequestIn($packaging), ['EXPRESS_SAVER', 'FEDEX_GROUND']);
+
+    $sent = sentFedexRateShipments();
+    $oneRateRequests = array_filter(
+        $sent,
+        fn (array $shipment): bool => in_array('FEDEX_ONE_RATE', $shipment['shipmentSpecialServices']['specialServiceTypes'] ?? [], true),
+    );
+
+    expect($sent)->toHaveCount($expectsOneRate ? 2 : 1)
+        ->and($oneRateRequests)->toHaveCount($expectsOneRate ? 1 : 0)
+        ->and(array_column($sent, 'packagingType'))->each->toBe($expectedPackagingType);
+})->with([
+    'a FedEx Pak' => [CarrierPackaging::FedexPak, 'FEDEX_PAK', true],
+    'a USPS Medium Flat Rate Box' => [CarrierPackaging::UspsMediumFlatRateBox, 'YOUR_PACKAGING', false],
+    'the packer\'s own box' => [null, 'YOUR_PACKAGING', false],
+]);
+
+it('stamps the weight-based rate and its One Rate variant alike with the FedEx packaging it sent', function (): void {
+    fakeFedexRateEndpoints();
+
+    $rates = $this->adapter->getRates(fedexRateRequestIn(CarrierPackaging::FedexPak), ['EXPRESS_SAVER', 'FEDEX_GROUND']);
+
+    $expressSaver = $rates->where('serviceCode', 'EXPRESS_SAVER')->values();
+
+    expect($rates)->toHaveCount(3)
+        ->and($expressSaver)->toHaveCount(2)
+        ->and($expressSaver->pluck('metadata.isOneRate')->map(fn ($v): bool => (bool) $v)->all())->toBe([false, true])
+        ->and($rates->pluck('metadata.packagingType')->unique()->all())->toBe(['FEDEX_PAK']);
+
+    foreach ($rates as $rate) {
+        expect($rate->packagingRequirement->accepts(CarrierPackaging::FedexPak))->toBeTrue()
+            ->and($rate->packagingRequirement->accepts(null))->toBeFalse()
+            ->and($this->adapter->packagingRequirementFor($rate)->accepts(CarrierPackaging::FedexPak))->toBeTrue();
+    }
+});
+
+it('stamps every rate for a plain box as the shipper\'s packaging', function (): void {
+    fakeFedexRateEndpoints();
+
+    $rates = $this->adapter->getRates(fedexRateRequestIn(null), ['EXPRESS_SAVER', 'FEDEX_GROUND']);
+
+    expect($rates)->toHaveCount(2);
+
+    foreach ($rates as $rate) {
+        expect($rate->packagingRequirement->isShipperPackaging())->toBeTrue()
+            ->and($this->adapter->packagingRequirementFor($rate)->isShipperPackaging())->toBeTrue();
+    }
+});
+
+it('treats a rate quoted before packaging was stamped as the shipper\'s packaging', function (): void {
+    $legacy = new RateResponse(carrier: 'FedEx', serviceCode: 'FEDEX_GROUND', serviceName: 'FedEx Ground', price: 9.80, metadata: ['serviceType' => 'FEDEX_GROUND']);
+
+    expect($this->adapter->packagingRequirementFor($legacy)->isShipperPackaging())->toBeTrue();
+});
+
+it('ships a weight-based rate in the packaging the rate request named, without One Rate', function (string $selectedServiceCode, array $metadata, string $expectedPackagingType, bool $expectsOneRate): void {
+    fakeFedexShipEndpoints();
+
+    $request = new ShipRequest(
+        fromAddress: new AddressData(firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle', stateOrProvince: 'WA', postalCode: '98072', phone: '5551234567'),
+        toAddress: new AddressData(firstName: 'Jane', lastName: 'Doe', streetAddress: '456 Main St', city: 'Los Angeles', stateOrProvince: 'CA', postalCode: '90210', phone: '5559876543'),
+        packageData: new PackageData(weight: 2.0, length: 12, width: 10, height: 8, carrierPackaging: CarrierPackaging::FedexPak),
+        selectedRate: new RateResponse(carrier: 'FedEx', serviceCode: $selectedServiceCode, serviceName: 'FedEx', price: 20.00, metadata: $metadata),
+    );
+
+    expect($this->adapter->createShipment($request)->success)->toBeTrue();
+
+    Saloon::assertSent(function ($request) use ($expectedPackagingType, $expectsOneRate): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $shipment = $request->body()->all()['requestedShipment'];
+
+        return $shipment['packagingType'] === $expectedPackagingType
+            && in_array('FEDEX_ONE_RATE', $shipment['shipmentSpecialServices']['specialServiceTypes'] ?? [], true) === $expectsOneRate;
+    });
+})->with([
+    'weight-based Express Saver in a Pak' => ['EXPRESS_SAVER', ['serviceType' => 'EXPRESS_SAVER', 'packagingType' => 'FEDEX_PAK'], 'FEDEX_PAK', false],
+    'One Rate Express Saver in a Pak' => ['EXPRESS_SAVER', ['serviceType' => 'EXPRESS_SAVER', 'isOneRate' => true, 'packagingType' => 'FEDEX_PAK'], 'FEDEX_PAK', true],
+    'Ground quoted as the shipper\'s packaging' => ['FEDEX_GROUND', ['serviceType' => 'FEDEX_GROUND', 'packagingType' => 'YOUR_PACKAGING'], 'YOUR_PACKAGING', false],
+    'a rate quoted before packaging was stamped' => ['FEDEX_GROUND', ['serviceType' => 'FEDEX_GROUND'], 'YOUR_PACKAGING', false],
+]);

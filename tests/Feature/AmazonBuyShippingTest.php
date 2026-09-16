@@ -6,7 +6,7 @@ use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\BoxSizeType;
-use App\Enums\FedexPackageType;
+use App\Enums\CarrierPackaging;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
@@ -473,15 +473,15 @@ function amazonFedexOneRate(): array
 }
 
 /**
- * The Package under test, put in a box size of the given type and FedEx
+ * The Package under test, put in a box size of the given type and carrier
  * packaging — the two things {@see AmazonBuyShippingAdapter} reads to decide
  * what an offer's packaging has to be.
  */
-function amazonPackageIn(Package $package, BoxSizeType $type, FedexPackageType $fedexPackageType = FedexPackageType::YOUR_PACKAGING): Package
+function amazonPackageIn(Package $package, BoxSizeType $type, ?CarrierPackaging $carrierPackaging = null): Package
 {
     $package->update(['box_size_id' => BoxSize::factory()->create([
         'type' => $type,
-        'fedex_package_type' => $fedexPackageType,
+        'carrier_packaging' => $carrierPackaging,
     ])->id]);
 
     return $package->fresh();
@@ -518,11 +518,11 @@ it('drops a flat-rate box offer even when the parcel is a box', function (): voi
 it('drops FedEx One Rate for the packer\'s own box and keeps it for FedEx packaging', function (): void {
     Saloon::fake([GetShippingRates::class => amazonRatesResponse([amazonFedexOneRate()])]);
 
-    $ownBox = amazonPackageIn($this->package, BoxSizeType::BOX, FedexPackageType::YOUR_PACKAGING);
+    $ownBox = amazonPackageIn($this->package, BoxSizeType::BOX);
 
     expect(amazonAdapter()->getRates(RateRequest::fromPackage($ownBox), []))->toBeEmpty();
 
-    $fedexPak = amazonPackageIn($this->package, BoxSizeType::PADDED_MAILER, FedexPackageType::FEDEX_PAK);
+    $fedexPak = amazonPackageIn($this->package, BoxSizeType::PADDED_MAILER, CarrierPackaging::FedexPak);
 
     $rates = amazonAdapter()->getRates(RateRequest::fromPackage($fedexPak), []);
 

@@ -14,6 +14,7 @@ use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackingEventData;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
+use App\Enums\CarrierPackaging;
 use App\Enums\FedexPackageType;
 use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
@@ -312,7 +313,7 @@ class FedexAdapter implements DirectCarrierAdapter
             'body' => $response->json(),
         ]);
 
-        $results = $this->extractRateDetails($response, $serviceCodes);
+        $results = $this->extractRateDetails($response, $request, $serviceCodes);
 
         // Mixed Saturday: initial request was sent without Saturday, now send
         // a follow-up with Saturday for eligible services and merge results
@@ -323,7 +324,7 @@ class FedexAdapter implements DirectCarrierAdapter
                 $saturdayResponse = $connector->send($saturdayApiRequest);
 
                 if ($saturdayResponse->successful()) {
-                    $saturdayRates = $this->extractRateDetails($saturdayResponse, $serviceCodes);
+                    $saturdayRates = $this->extractRateDetails($saturdayResponse, $request, $serviceCodes);
 
                     if ($saturdayRates->isNotEmpty()) {
                         $saturdayServiceCodes = $saturdayRates->pluck('serviceCode')->unique()->all();
@@ -414,6 +415,7 @@ class FedexAdapter implements DirectCarrierAdapter
                 ],
                 'pickupType' => 'USE_SCHEDULED_PICKUP',
                 'rateRequestType' => ['ACCOUNT'],
+                'packagingType' => $this->packagingTypeFor($package->carrierPackaging)->value,
                 ...($smartPostInfoDetail ? [
                     'serviceType' => self::SMART_POST_SERVICE_CODE,
                 ] : []),
@@ -570,9 +572,11 @@ class FedexAdapter implements DirectCarrierAdapter
                 ] : []),
                 'pickupType' => 'USE_SCHEDULED_PICKUP',
                 'serviceType' => $request->selectedRate->metadata['serviceType'],
-                'packagingType' => ! empty($request->selectedRate->metadata['isOneRate'])
-                    ? $request->selectedRate->metadata['fedexPackageType']
-                    : 'YOUR_PACKAGING',
+                // The packaging the rate request named, so the label declares
+                // what is in the packer's hand — a weight-based rate quoted for
+                // a Pak ships as a Pak. Rates quoted before that key existed
+                // were all quoted as the shipper's own packaging.
+                'packagingType' => $request->selectedRate->metadata['packagingType'] ?? FedexPackageType::YOUR_PACKAGING->value,
                 'shippingChargesPayment' => [
                     'paymentType' => 'SENDER',
                     'payor' => [
@@ -981,23 +985,80 @@ class FedexAdapter implements DirectCarrierAdapter
     }
 
     /**
-     * Which packaging a FedEx rate is valid in, read off the same metadata the
-     * purchase sends: `isOneRate` and the `fedexPackageType` the rate request
-     * named.
+     * Which packaging a FedEx rate is valid in — ADR-0005 decision 3: the
+     * adapter stamps the packaging it sent. Every rate request, ordinary,
+     * Saturday and One Rate, names a `packagingType`, and the ship body sends
+     * the same one back, so the rate's requirement is read off that key: a
+     * FedEx code is `exactly(…)` the packaging it stands for, and
+     * `YOUR_PACKAGING` is the shipper's own.
      *
-     * The ordinary rate request names no `packagingType` and the ship body
-     * labels it `YOUR_PACKAGING`, so those rates are honestly the shipper's
-     * own packaging. A One Rate rate is honestly `exactly(…)` — that request
-     * named FedEx packaging — but the Package cannot yet say which packaging
-     * it is in, so until packaging-form-and-carrier-identity/03 wires the
-     * column the shared filter would drop every One Rate rate. `03` flips it
-     * in the same change that adds the column.
+     * Weight-based rates are quoted in FedEx packaging too, and priced the
+     * same as in the shipper's own; classifying them by the code sent rather
+     * than by `isOneRate` is what keeps them for a Package in a Pak.
      *
      * @param  array<string, mixed>  $metadata
      */
     private function classifyPackaging(array $metadata): PackagingRequirement
     {
-        return PackagingRequirement::shipperPackaging();
+        $sent = FedexPackageType::tryFrom((string) ($metadata['packagingType'] ?? ''));
+
+        if ($sent === null || $sent === FedexPackageType::YOUR_PACKAGING) {
+            return PackagingRequirement::shipperPackaging();
+        }
+
+        $packaging = array_find(
+            CarrierPackaging::cases(),
+            fn (CarrierPackaging $candidate): bool => $this->packagingTypeFor($candidate) === $sent,
+        );
+
+        return $packaging === null
+            ? PackagingRequirement::shipperPackaging()
+            : PackagingRequirement::exactly($packaging);
+    }
+
+    /**
+     * The `packagingType` FedEx is sent for a Package's carrier packaging —
+     * the one place `CarrierPackaging` meets FedEx's wire enum.
+     *
+     * Another carrier's packaging — a USPS flat-rate box — is `YOUR_PACKAGING`:
+     * FedEx rates the parcel as customer packaging, every rate that comes back
+     * is stamped `shipperPackaging()`, and the shared filter drops all of them
+     * for a Package that says it is in USPS packaging. That is the right
+     * outcome — FedEx cannot carry a USPS flat-rate box at a USPS flat rate —
+     * and it needs no special case here.
+     */
+    private function packagingTypeFor(?CarrierPackaging $packaging): FedexPackageType
+    {
+        return match ($packaging) {
+            CarrierPackaging::FedexEnvelope => FedexPackageType::FEDEX_ENVELOPE,
+            CarrierPackaging::FedexPak => FedexPackageType::FEDEX_PAK,
+            CarrierPackaging::FedexTube => FedexPackageType::FEDEX_TUBE,
+            CarrierPackaging::FedexBox => FedexPackageType::FEDEX_BOX,
+            CarrierPackaging::FedexExtraSmallBox => FedexPackageType::FEDEX_EXTRA_SMALL_BOX,
+            CarrierPackaging::FedexSmallBox => FedexPackageType::FEDEX_SMALL_BOX,
+            CarrierPackaging::FedexMediumBox => FedexPackageType::FEDEX_MEDIUM_BOX,
+            CarrierPackaging::FedexLargeBox => FedexPackageType::FEDEX_LARGE_BOX,
+            CarrierPackaging::FedexExtraLargeBox => FedexPackageType::FEDEX_EXTRA_LARGE_BOX,
+            CarrierPackaging::Fedex10kgBox => FedexPackageType::FEDEX_10KG_BOX,
+            CarrierPackaging::Fedex25kgBox => FedexPackageType::FEDEX_25KG_BOX,
+            null,
+            CarrierPackaging::UspsFlatRateEnvelope,
+            CarrierPackaging::UspsLegalFlatRateEnvelope,
+            CarrierPackaging::UspsPaddedFlatRateEnvelope,
+            CarrierPackaging::UspsSmallFlatRateBox,
+            CarrierPackaging::UspsMediumFlatRateBox,
+            CarrierPackaging::UspsLargeFlatRateBox,
+            CarrierPackaging::UspsExpressFlatRateEnvelope,
+            CarrierPackaging::UspsExpressLegalFlatRateEnvelope,
+            CarrierPackaging::UspsExpressPaddedFlatRateEnvelope,
+            CarrierPackaging::UpsLetter,
+            CarrierPackaging::UpsPak,
+            CarrierPackaging::UpsTube,
+            CarrierPackaging::UpsExpressBox,
+            CarrierPackaging::UpsExpressBoxSmall,
+            CarrierPackaging::UpsExpressBoxMedium,
+            CarrierPackaging::UpsExpressBoxLarge => FedexPackageType::YOUR_PACKAGING,
+        };
     }
 
     /**
@@ -1009,7 +1070,7 @@ class FedexAdapter implements DirectCarrierAdapter
      * Extract rate details from a successful FedEx rate response.
      * Core parsing loop used by parseRateResponse and mixed Saturday handling.
      */
-    private function extractRateDetails(Response $response, array $serviceCodes): Collection
+    private function extractRateDetails(Response $response, RateRequest $request, array $serviceCodes): Collection
     {
         try {
             $rateReplyDetails = $response->json('output.rateReplyDetails', []);
@@ -1058,6 +1119,7 @@ class FedexAdapter implements DirectCarrierAdapter
 
             $metadata = [
                 'serviceType' => $detail['serviceType'],
+                'packagingType' => $this->packagingTypeFor($request->packages[0]->carrierPackaging)->value,
             ];
 
             $results->push(new RateResponse(
@@ -1082,6 +1144,9 @@ class FedexAdapter implements DirectCarrierAdapter
     /**
      * Check if the request is eligible for FedEx One Rate pricing.
      * Requires: FedEx-branded packaging, domestic US, weight ≤ 50 lbs.
+     *
+     * A USPS or UPS packaging is not FedEx-branded: it maps to
+     * `YOUR_PACKAGING`, and One Rate is not asked for.
      */
     private function isOneRateEligible(RateRequest $request): bool
     {
@@ -1091,9 +1156,7 @@ class FedexAdapter implements DirectCarrierAdapter
             return false;
         }
 
-        $fedexType = $package->fedexPackageType;
-
-        if (! $fedexType || $fedexType === FedexPackageType::YOUR_PACKAGING) {
+        if ($this->packagingTypeFor($package->carrierPackaging) === FedexPackageType::YOUR_PACKAGING) {
             return false;
         }
 
@@ -1174,7 +1237,7 @@ class FedexAdapter implements DirectCarrierAdapter
                 ...($request->shipDate ? [
                     'shipDateStamp' => $request->shipDate->format('Y-m-d'),
                 ] : []),
-                'packagingType' => $package->fedexPackageType->value,
+                'packagingType' => $this->packagingTypeFor($package->carrierPackaging)->value,
                 'requestedPackageLineItems' => [
                     [
                         'weight' => [
@@ -1240,7 +1303,7 @@ class FedexAdapter implements DirectCarrierAdapter
             $metadata = [
                 'serviceType' => $serviceType,
                 'isOneRate' => true,
-                'fedexPackageType' => $package->fedexPackageType->value,
+                'packagingType' => $this->packagingTypeFor($package->carrierPackaging)->value,
             ];
 
             $results->push(new RateResponse(

@@ -121,4 +121,20 @@ enum CarrierPackaging: string implements HasLabel
             self::UpsExpressBoxLarge => 'UPS',
         };
     }
+
+    /**
+     * Select options grouped by carrier, for the Box Size forms.
+     *
+     * @return array<string, array<string, string>>
+     */
+    public static function groupedOptions(): array
+    {
+        $options = [];
+
+        foreach (self::cases() as $case) {
+            $options[$case->carrier()][$case->value] = $case->getLabel();
+        }
+
+        return $options;
+    }
 }
