@@ -480,8 +480,9 @@ function upsSpecialServiceShipRequest(array $codes, array $config = [], array $r
  *
  * @param  array<int, CustomsItem>  $customsItems
  * @param  AddressData|null  $fromAddress  Origin, a Seattle warehouse unless the lane under test needs another
+ * @param  array<string, mixed>  $rateMetadata  The selected rate's metadata, as UpsAdapter::extractRateDetails() stamps it
  */
-function upsShipRequestTo(AddressData $toAddress, string $reference = 'ORD-10042', array $customsItems = [], array $specialServiceCodes = [], ?AddressData $fromAddress = null): ShipRequest
+function upsShipRequestTo(AddressData $toAddress, string $reference = 'ORD-10042', array $customsItems = [], array $specialServiceCodes = [], ?AddressData $fromAddress = null, array $rateMetadata = ['serviceCode' => '03']): ShipRequest
 {
     return new ShipRequest(
         fromAddress: $fromAddress ?? new AddressData(
@@ -499,7 +500,7 @@ function upsShipRequestTo(AddressData $toAddress, string $reference = 'ORD-10042
             serviceCode: '03',
             serviceName: 'UPS Ground',
             price: 11.00,
-            metadata: ['serviceCode' => '03'],
+            metadata: $rateMetadata,
         ),
         references: [$reference],
         customsItems: $customsItems,
@@ -1392,13 +1393,14 @@ it('leaves the customs document null when UPS returns no form', function (): voi
         ->and($response->customsFormData)->toBeNull();
 });
 
-it('keeps the customs invoice when Saturday delivery is also requested', function (): void {
+it('keeps the customs invoice when the selected rate is a Saturday quote', function (): void {
     fakeUpsShipEndpoints();
 
     expect($this->adapter->createShipment(upsShipRequestTo(
         upsCanadianAddress(),
         customsItems: upsCustomsItems(),
         specialServiceCodes: ['saturday_delivery'],
+        rateMetadata: ['serviceCode' => '03', 'saturday_delivery' => true],
     ))->success)->toBeTrue();
 
     Saloon::assertSent(function ($request): bool {
@@ -1415,14 +1417,161 @@ it('keeps the customs invoice when Saturday delivery is also requested', functio
 });
 
 /*
-| A third test belongs here — that the Saturday-rejection retry drops only the
-| Saturday key and keeps the customs invoice — and it cannot be written. The
-| retry branch is unreachable: UpsConnector sets $tries = 3 and Saloon's
-| throwOnMaxTries defaults to true, so a UPS 4xx throws out of
-| sendCreateShipment() into the adapter's catch instead of returning a failed
-| response for the branch to inspect. Recorded as its own issue; the unset()
-| there is surgical anyway, so reviving the retry does not reintroduce the bug.
+|--------------------------------------------------------------------------
+| Saturday delivery — read off the rate response, not a calendar
+|--------------------------------------------------------------------------
+|
+| A shop request on a Friday returns a service twice when it can reach
+| Saturday: a Saturday row and a weekday row, told apart only by
+| TimeInTransit.ServiceSummary.SaturdayDelivery. Sending the indicator
+| filters the response to the Saturday rows; it is never an error. So the
+| adapter sends one request, keeps the rows matching what was asked, tags
+| the Saturday ones, and at label time sends the indicator for a tagged
+| rate only. shopify-shipping-carrier/25, from a CIE capture of 2026-09-18.
+|
 */
+
+/**
+ * One rated shipment as a Friday shop response lists it.
+ *
+ * @return array<string, mixed>
+ */
+function upsRatedShipment(string $serviceCode, string $price, bool $saturday, string $arrival): array
+{
+    return [
+        'Service' => ['Code' => $serviceCode],
+        'TotalCharges' => ['CurrencyCode' => 'USD', 'MonetaryValue' => $price],
+        'TimeInTransit' => [
+            'PickupDate' => '20260918',
+            'ServiceSummary' => [
+                'EstimatedArrival' => [
+                    'Arrival' => ['Date' => $arrival, 'Time' => '103000'],
+                    'BusinessDaysInTransit' => '1',
+                    'DayOfWeek' => $saturday ? 'SAT' : 'MON',
+                ],
+                'SaturdayDelivery' => $saturday ? '1' : '0',
+                'SundayDelivery' => '0',
+            ],
+        ],
+        ...($saturday ? ['ItemizedCharges' => [['Code' => '300', 'CurrencyCode' => 'USD', 'MonetaryValue' => '20.96']]] : []),
+    ];
+}
+
+/**
+ * The Friday capture, cut to the rows the assertions need: Next Day Air
+ * twice, 3 Day Select once.
+ *
+ * @return array<int, array<string, mixed>>
+ */
+function upsFridayShopResponse(): array
+{
+    return [
+        upsRatedShipment('01', '87.17', saturday: true, arrival: '20260919'),
+        upsRatedShipment('01', '66.21', saturday: false, arrival: '20260921'),
+        upsRatedShipment('12', '27.90', saturday: false, arrival: '20260923'),
+    ];
+}
+
+function upsFridayRateRequest(array $specialServiceCodes = []): RateRequest
+{
+    return new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
+        packages: [new PackageData(weight: 5.0, length: 12, width: 10, height: 8)],
+        specialServiceCodes: $specialServiceCodes,
+        shipDate: CarbonImmutable::parse('2026-09-18'),
+    );
+}
+
+it('drops the Saturday rows when Saturday delivery was not requested', function (): void {
+    fakeUpsRateEndpointsQuoting(upsFridayShopResponse());
+
+    $rates = $this->adapter->getRates(upsFridayRateRequest(), ['01', '12']);
+
+    expect($rates->map(fn (RateResponse $rate): array => [$rate->serviceCode, $rate->price, $rate->deliveryDate])->all())
+        ->toBe([['01', 66.21, '2026-09-21'], ['12', 27.90, '2026-09-23']])
+        ->and($rates->pluck('metadata')->filter(fn (array $metadata): bool => array_key_exists('saturday_delivery', $metadata)))->toBeEmpty()
+        ->and(sentUpsRatePackages())->toHaveCount(1);
+
+    Saloon::assertSent(fn ($request): bool => $request instanceof Rate
+        && ! isset($request->body()->all()['RateRequest']['Shipment']['ShipmentServiceOptions']));
+});
+
+it('keeps only the Saturday rows, tagged, when Saturday delivery was requested', function (): void {
+    fakeUpsRateEndpointsQuoting(upsFridayShopResponse());
+
+    $rates = $this->adapter->getRates(upsFridayRateRequest(['saturday_delivery']), ['01', '12']);
+
+    expect($rates)->toHaveCount(1)
+        ->and($rates[0]->serviceCode)->toBe('01')
+        ->and($rates[0]->price)->toBe(87.17)
+        ->and($rates[0]->deliveryDate)->toBe('2026-09-19')
+        ->and($rates[0]->metadata['saturday_delivery'])->toBeTrue()
+        ->and(sentUpsRatePackages())->toHaveCount(1);
+
+    Saloon::assertSent(fn ($request): bool => $request instanceof Rate
+        && array_key_exists('SaturdayDeliveryIndicator', $request->body()->all()['RateRequest']['Shipment']['ShipmentServiceOptions']));
+});
+
+it('returns nothing, without a second request, when Saturday was requested and UPS offers no Saturday row', function (): void {
+    fakeUpsRateEndpointsQuoting([
+        upsRatedShipment('01', '66.21', saturday: false, arrival: '20260921'),
+        upsRatedShipment('12', '27.90', saturday: false, arrival: '20260923'),
+    ]);
+
+    $rates = $this->adapter->getRates(upsFridayRateRequest(['saturday_delivery']), ['01', '12']);
+
+    expect($rates)->toBeEmpty()
+        ->and(sentUpsRatePackages())->toHaveCount(1);
+});
+
+it('sends the Saturday indicator at label time only for a rate quoted as Saturday', function (bool $tagged, array $specialServiceCodes): void {
+    fakeUpsShipEndpoints();
+
+    $response = $this->adapter->createShipment(upsShipRequestTo(
+        new AddressData(firstName: 'Jane', lastName: 'Doe', streetAddress: '456 Main St', city: 'Los Angeles', stateOrProvince: 'CA', postalCode: '90210'),
+        specialServiceCodes: $specialServiceCodes,
+        rateMetadata: ['serviceCode' => '01', ...($tagged ? ['saturday_delivery' => true] : [])],
+    ));
+
+    expect($response->success)->toBeTrue()
+        ->and(in_array('saturday_delivery', $response->appliedServices, true))->toBe($tagged);
+
+    Saloon::assertSent(function ($request) use ($tagged): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $shipment = $request->body()->all()['ShipmentRequest']['Shipment'];
+
+        expect(isset($shipment['ShipmentServiceOptions']['SaturdayDeliveryIndicator']))->toBe($tagged);
+
+        return true;
+    });
+})->with([
+    'a tagged rate' => [true, []],
+    'an untagged rate, even with the request flag still set' => [false, ['saturday_delivery']],
+]);
+
+it('fails the label with the UPS message from a single attempt when UPS refuses it', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => MockResponse::make([
+            'response' => ['errors' => [['code' => '120202', 'message' => 'Saturday Delivery is not available for this shipment.']]],
+        ], 400),
+    ]);
+
+    $response = $this->adapter->createShipment(upsShipRequestTo(
+        new AddressData(firstName: 'Jane', lastName: 'Doe', streetAddress: '456 Main St', city: 'Los Angeles', stateOrProvince: 'CA', postalCode: '90210'),
+        rateMetadata: ['serviceCode' => '01', 'saturday_delivery' => true],
+    ));
+
+    expect($response->success)->toBeFalse()
+        ->and($response->errorMessage)->toBe('Saturday Delivery is not available for this shipment.')
+        ->and(collect(Saloon::mockClient()->getRecordedResponses())
+            ->filter(fn ($recorded): bool => $recorded->getPendingRequest()->getRequest() instanceof CreateShipment))
+        ->toHaveCount(1);
+});
 
 /*
 |--------------------------------------------------------------------------
@@ -1541,30 +1690,6 @@ it('sends dimensions for every packaging except a UPS Letter, whose size is UPS\
     'a UPS Pak' => [CarrierPackaging::UpsPak, true],
     'the packer\'s own box' => [null, true],
 ]);
-
-it('sends the same packaging code on the Saturday follow-up rate request', function (): void {
-    fakeUpsRateEndpointsQuoting([
-        ['Service' => ['Code' => '03'], 'TotalCharges' => ['MonetaryValue' => '11.00']],
-        ['Service' => ['Code' => '01'], 'TotalCharges' => ['MonetaryValue' => '45.00']],
-    ]);
-
-    // Ground and Next Day Air: a mixed Saturday request is sent twice.
-    $request = new RateRequest(
-        originPostalCode: '98072',
-        destinationPostalCode: '90210',
-        packages: [new PackageData(weight: 2.0, length: 12, width: 10, height: 8, carrierPackaging: CarrierPackaging::UpsPak)],
-        specialServiceCodes: ['saturday_delivery'],
-        shipDate: CarbonImmutable::parse('next friday'),
-    );
-
-    $rates = $this->adapter->getRates($request, ['03', '01']);
-
-    $sent = sentUpsRatePackages();
-
-    expect($sent)->toHaveCount(2)
-        ->and(array_column(array_column($sent, 'PackagingType'), 'Code'))->toBe(['04', '04'])
-        ->and($rates->pluck('metadata.packagingCode')->unique()->all())->toBe(['04']);
-});
 
 it('stamps every rate from a UPS Pak request as exactly a UPS Pak', function (): void {
     fakeUpsRateEndpointsQuoting([
