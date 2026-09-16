@@ -1,7 +1,9 @@
 <?php
 
 use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\Enums\CarrierPackaging;
 use App\Enums\SourceEnvironment;
 
 it('round-trips the offer identifier through Livewire serialization', function (): void {
@@ -40,6 +42,7 @@ it('carries nothing that could buy a label on its own', function (): void {
         'priceUnknown',
         'offerId',
         'observedService',
+        'packagingRequirement',
     ]);
 });
 
@@ -91,4 +94,53 @@ it('defaults to no offer, for rates from sources that issue none', function (): 
             'deliveryDate' => null,
             'transitTime' => null,
         ])->offerId)->toBeNull();
+});
+
+it('round-trips the packaging requirement through Livewire serialization', function (PackagingRequirement $requirement): void {
+    // ADR-0005 consequence: rates cross Livewire state on the Ship page through
+    // this serialization, and a requirement that did not survive it would let a
+    // rate chosen from the page be bought without the check that hid its siblings.
+    $rate = new RateResponse(
+        carrier: 'USPS',
+        serviceCode: 'PRIORITY_MAIL',
+        serviceName: 'Priority Mail',
+        price: 9.65,
+        packagingRequirement: $requirement,
+    );
+
+    $restored = RateResponse::fromArray($rate->toArray());
+
+    expect($restored->packagingRequirement->toArray())->toBe($requirement->toArray());
+
+    foreach ([null, ...CarrierPackaging::cases()] as $packaging) {
+        expect($restored->packagingRequirement->accepts($packaging))->toBe($requirement->accepts($packaging));
+    }
+})->with([
+    'shipperPackaging' => [fn (): PackagingRequirement => PackagingRequirement::shipperPackaging()],
+    'exactly' => [fn (): PackagingRequirement => PackagingRequirement::exactly(CarrierPackaging::UspsPaddedFlatRateEnvelope)],
+    'anyOf' => [fn (): PackagingRequirement => PackagingRequirement::anyOf(CarrierPackaging::FedexEnvelope, CarrierPackaging::FedexPak, CarrierPackaging::FedexTube)],
+]);
+
+it('reads a legacy array with no packaging key as shipper packaging', function (): void {
+    // The safe direction: an array serialized before the requirement existed
+    // accepts only the packer's own packaging, never anything a carrier supplies.
+    $restored = RateResponse::fromArray([
+        'carrier' => 'USPS',
+        'serviceCode' => 'USPS_GROUND_ADVANTAGE',
+        'serviceName' => 'Ground Advantage',
+        'price' => 6.93,
+        'deliveryCommitment' => null,
+        'deliveryDate' => null,
+        'transitTime' => null,
+    ]);
+
+    expect($restored->packagingRequirement->isShipperPackaging())->toBeTrue()
+        ->and($restored->packagingRequirement->accepts(null))->toBeTrue()
+        ->and($restored->packagingRequirement->accepts(CarrierPackaging::UspsSmallFlatRateBox))->toBeFalse();
+});
+
+it('defaults to shipper packaging, so a hand-built rate is never valid in carrier packaging', function (): void {
+    $rate = new RateResponse('USPS', 'USPS_GROUND_ADVANTAGE', 'Ground Advantage', 6.93);
+
+    expect($rate->packagingRequirement->isShipperPackaging())->toBeTrue();
 });

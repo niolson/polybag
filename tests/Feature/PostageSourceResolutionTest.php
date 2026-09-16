@@ -2,6 +2,7 @@
 
 use App\Contracts\CarrierAdapterInterface;
 use App\Contracts\CarrierPolicy;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
@@ -92,6 +93,11 @@ class PolicyOnlyCarrierAdapter implements CarrierAdapterInterface, CarrierPolicy
     public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
     {
         return $rate;
+    }
+
+    public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
+    {
+        return PackagingRequirement::shipperPackaging();
     }
 
     public function serviceCapability(string $serviceCode): ServiceCapability

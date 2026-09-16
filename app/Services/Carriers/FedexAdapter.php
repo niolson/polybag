@@ -5,6 +5,7 @@ namespace App\Services\Carriers;
 use App\Contracts\DirectCarrierAdapter;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
@@ -972,6 +973,31 @@ class FedexAdapter implements DirectCarrierAdapter
         return $rate;
     }
 
+    public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
+    {
+        return $this->classifyPackaging($rate->metadata);
+    }
+
+    /**
+     * Which packaging a FedEx rate is valid in, read off the same metadata the
+     * purchase sends: `isOneRate` and the `fedexPackageType` the rate request
+     * named.
+     *
+     * The ordinary rate request names no `packagingType` and the ship body
+     * labels it `YOUR_PACKAGING`, so those rates are honestly the shipper's
+     * own packaging. A One Rate rate is honestly `exactly(…)` — that request
+     * named FedEx packaging — but the Package cannot yet say which packaging
+     * it is in, so until packaging-form-and-carrier-identity/03 wires the
+     * column the shared filter would drop every One Rate rate. `03` flips it
+     * in the same change that adds the column.
+     *
+     * @param  array<string, mixed>  $metadata
+     */
+    private function classifyPackaging(array $metadata): PackagingRequirement
+    {
+        return PackagingRequirement::shipperPackaging();
+    }
+
     /**
      * Build FedEx contact/address structure from AddressData DTO.
      *
@@ -1028,6 +1054,10 @@ class FedexAdapter implements DirectCarrierAdapter
             $transitTime = is_string($transitDays) ? $transitDays : ($transitDays['minimumTransitTime'] ?? null);
             $deliveryDate = $detail['commit']['dateDetail']['dayFormat'] ?? $detail['commit']['dateDetail']['dayOfWeek'] ?? null;
 
+            $metadata = [
+                'serviceType' => $detail['serviceType'],
+            ];
+
             $results->push(new RateResponse(
                 carrier: 'FedEx',
                 serviceCode: $detail['serviceType'],
@@ -1035,9 +1065,8 @@ class FedexAdapter implements DirectCarrierAdapter
                 price: (float) ($ratedShipmentDetails['totalNetCharge'] ?? 0),
                 deliveryDate: $deliveryDate,
                 transitTime: $transitTime,
-                metadata: [
-                    'serviceType' => $detail['serviceType'],
-                ],
+                metadata: $metadata,
+                packagingRequirement: $this->classifyPackaging($metadata),
             ));
         }
 
@@ -1206,6 +1235,12 @@ class FedexAdapter implements DirectCarrierAdapter
 
             $serviceName = ($detail['serviceName'] ?? $serviceType).' (One Rate)';
 
+            $metadata = [
+                'serviceType' => $serviceType,
+                'isOneRate' => true,
+                'fedexPackageType' => $package->fedexPackageType->value,
+            ];
+
             $results->push(new RateResponse(
                 carrier: 'FedEx',
                 serviceCode: $serviceType,
@@ -1213,11 +1248,8 @@ class FedexAdapter implements DirectCarrierAdapter
                 price: (float) ($ratedShipmentDetails['totalNetCharge'] ?? 0),
                 deliveryDate: $deliveryDate,
                 transitTime: $transitTime,
-                metadata: [
-                    'serviceType' => $serviceType,
-                    'isOneRate' => true,
-                    'fedexPackageType' => $package->fedexPackageType->value,
-                ],
+                metadata: $metadata,
+                packagingRequirement: $this->classifyPackaging($metadata),
             ));
         }
 

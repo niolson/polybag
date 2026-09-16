@@ -4,11 +4,13 @@ use App\Contracts\AsyncRateQuoting;
 use App\Contracts\CarrierAdapterInterface;
 use App\Contracts\DirectCarrierAdapter;
 use App\DataTransferObjects\Shipping\PackageData;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\CarrierPackaging;
 use App\Enums\ServiceCapability;
 use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Exceptions\MissingDeclaredValueException;
@@ -22,6 +24,7 @@ use App\Models\CarrierService;
 use App\Models\Package;
 use App\Models\PackageItem;
 use App\Models\Product;
+use App\Models\RateQuote;
 use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
@@ -759,6 +762,56 @@ it('continues when carrier rate fetch exception has no previous exception', func
     $rates = app(ShippingRateService::class)->getShippingRates($package->id);
 
     expect($rates)->toHaveCount(0);
+});
+
+it('drops rates whose packaging requirement the package does not meet, before they are logged as quotes', function (): void {
+    // ADR-0005 decision 4: the shared filter runs on every collection of rates
+    // an adapter returns, and a dropped rate was never offered — so it must
+    // not appear in the quote log either.
+    app(CarrierRegistry::class)->reset();
+
+    $upsCarrier = Carrier::factory()->ups()->create();
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('isConfigured')->once()->andReturnTrue();
+    $adapter->shouldReceive('prepareRateRequest')->once()->andReturnNull();
+    $adapter->shouldReceive('getRates')->once()->andReturn(collect([
+        new RateResponse(
+            carrier: 'UPS',
+            serviceCode: 'GROUND',
+            serviceName: 'UPS Ground',
+            price: 9.10,
+            packagingRequirement: PackagingRequirement::shipperPackaging(),
+        ),
+        new RateResponse(
+            carrier: 'UPS',
+            serviceCode: 'EXPRESS_BOX',
+            serviceName: 'UPS Express (Express Box)',
+            price: 24.50,
+            packagingRequirement: PackagingRequirement::exactly(CarrierPackaging::UpsExpressBox),
+        ),
+    ]));
+
+    app(CarrierRegistry::class)->registerInstance('UPS', $adapter);
+
+    $shippingMethod = ShippingMethod::factory()->create();
+    $upsService = CarrierService::factory()->upsGround()->for($upsCarrier)->create();
+    $shippingMethod->carrierServices()->attach($upsService->id);
+
+    $shipment = Shipment::factory()->for($shippingMethod)->create(['postal_code' => '90210']);
+    // A plain package: no box size, so the packer's own packaging.
+    $package = Package::factory()->for($shipment)->create([
+        'box_size_id' => null,
+        'weight' => 2.5,
+        'height' => 6,
+        'width' => 8,
+        'length' => 10,
+    ]);
+
+    $rates = app(ShippingRateService::class)->getShippingRates($package->id);
+
+    expect($rates)->toHaveCount(1)
+        ->and($rates[0]->serviceCode)->toBe('GROUND')
+        ->and(RateQuote::where('package_id', $package->id)->pluck('service_code')->all())->toBe(['GROUND']);
 });
 
 /*
@@ -1530,6 +1583,11 @@ class AsyncOfferSourceStub implements AsyncRateQuoting, CarrierAdapterInterface
     public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
     {
         return $rate;
+    }
+
+    public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
+    {
+        return PackagingRequirement::shipperPackaging();
     }
 }
 

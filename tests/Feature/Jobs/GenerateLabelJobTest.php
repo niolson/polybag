@@ -1,6 +1,7 @@
 <?php
 
 use App\Contracts\CarrierAdapterInterface;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
@@ -83,6 +84,7 @@ it('updates batch item on successful label generation', function (): void {
     );
 
     $mockAdapter = Mockery::mock(CarrierAdapterInterface::class);
+    $mockAdapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
     $mockAdapter->shouldReceive('createShipment')->once()->andReturn($mockResponse);
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $mockAdapter);
@@ -108,6 +110,7 @@ it('handles label generation failure', function (): void {
     $ctx = createBatchContext();
 
     $mockAdapter = Mockery::mock(CarrierAdapterInterface::class);
+    $mockAdapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
     $mockAdapter->shouldReceive('createShipment')->once()->andReturn(
         ShipResponse::failure('Address validation failed')
@@ -133,6 +136,7 @@ it('handles exceptions during label generation', function (): void {
     $ctx = createBatchContext();
 
     $mockAdapter = Mockery::mock(CarrierAdapterInterface::class);
+    $mockAdapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
     $mockAdapter->shouldReceive('createShipment')->once()->andThrow(new RuntimeException('Carrier API timeout'));
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $mockAdapter);

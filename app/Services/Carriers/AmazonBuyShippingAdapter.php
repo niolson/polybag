@@ -9,6 +9,7 @@ use App\DataTransferObjects\PostageSources\OfferDraft;
 use App\DataTransferObjects\PostageSources\ServiceObservation;
 use App\DataTransferObjects\Shipping\AmazonPurchasedLabel;
 use App\DataTransferObjects\Shipping\AmazonShippingQuote;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
@@ -276,6 +277,31 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
         return $rate;
     }
 
+    /**
+     * Classifies from the `amazonServiceId` in the rate metadata, which the
+     * purchase path rebuilds from the stored offer rather than from the
+     * browser — so the packaging checked at purchase is the packaging quoted.
+     */
+    public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
+    {
+        return $this->classifyPackaging((string) ($rate->metadata['amazonServiceId'] ?? ''));
+    }
+
+    /**
+     * Which packaging an Amazon serviceId is valid in — ADR-0005 decision 5.
+     *
+     * Every serviceId that survives {@see isBuyable()} today is one Amazon
+     * rates for the packer's own packaging. Turning {@see fitsThePackaging()}'s
+     * drop list into the classifier here — `USPS_PTP_PRI_FRE` to
+     * `exactly(UspsFlatRateEnvelope)`, `FEDEX_PTP_..._ONE_RATE` to
+     * `anyOf(FedexEnvelope, FedexPak, …)` — is
+     * packaging-form-and-carrier-identity/04.
+     */
+    private function classifyPackaging(string $serviceId): PackagingRequirement
+    {
+        return PackagingRequirement::shipperPackaging();
+    }
+
     public function createShipment(ShipRequest $request): ShipResponse
     {
         $package = $this->purchasablePackage($request);
@@ -462,6 +488,10 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
                 $price = round((float) ($rate['totalCharge']['value'] ?? 0), 2);
                 $currency = (string) ($rate['totalCharge']['unit'] ?? 'USD');
 
+                // Stored with the offer so the purchase re-classifies from
+                // server-side data, never from the browser.
+                $packagingRequirement = $this->classifyPackaging($serviceId);
+
                 $offer = $offerStore->issue($package, new OfferDraft(
                     carrier: $carrier,
                     postageSource: PostageSource::PostageDataSource,
@@ -474,7 +504,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
                     serviceName: $serviceName,
                     price: $price,
                     currency: $currency,
-                    rateMetadata: $this->rateMetadata($rate),
+                    rateMetadata: $this->rateMetadata($rate, $packagingRequirement),
                     purchaseContext: [
                         'requestToken' => $quote->requestToken,
                         'rateId' => (string) $rate['rateId'],
@@ -497,6 +527,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
                         externalCarrierId: $carrierId,
                         externalServiceId: $serviceId,
                     ),
+                    packagingRequirement: $packagingRequirement,
                 );
             })
             ->values();
@@ -706,14 +737,17 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
      * `supportedDocumentSpecifications` is the load-bearing entry: the document
      * format has to be validated against the *chosen rate*, and re-quoting to
      * find out which sizes it offered would invalidate the token being spent.
+     * The packaging requirement rides along for the same reason: the purchase
+     * re-checks it against the Package, and must read the one the quote stated.
      *
      * @return array<string, mixed>
      */
-    private function rateMetadata(array $rate): array
+    private function rateMetadata(array $rate, PackagingRequirement $packagingRequirement): array
     {
         return array_filter([
             'amazonCarrierId' => $rate['carrierId'] ?? null,
             'amazonServiceId' => $rate['serviceId'] ?? null,
+            PackagingRequirement::RATE_METADATA_KEY => $packagingRequirement->toArray(),
             'supportedDocumentSpecifications' => $rate['supportedDocumentSpecifications'] ?? [],
             'availableValueAddedServiceGroups' => $rate['availableValueAddedServiceGroups'] ?? [],
             // Buy Shipping protection: a reason to prefer this offer that has

@@ -2,6 +2,7 @@
 
 namespace App\Services\PackageShipping;
 
+use App\Contracts\CarrierAdapterInterface;
 use App\Contracts\PackageShippingWorkflow;
 use App\Contracts\PostageOfferSource;
 use App\Contracts\RecoversUnresolvedPurchase;
@@ -11,6 +12,8 @@ use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingResult;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\ClassifiedRate;
+use App\DataTransferObjects\Shipping\PackageData;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\UnattendedRateSelection;
@@ -284,6 +287,13 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             }
 
             $selectedRate = $this->rateFromOffer($offer, $selectedRate);
+        }
+
+        // The rate's packaging requirement was checked once at rate shopping;
+        // it is checked again here, against the Package as it is now, because
+        // this is the only check `04` cannot ship without (ADR-0005 decision 4).
+        if ($selectedRate !== null && ($refused = $this->packagingRefused($package, $offer, $selectedRate)) !== null) {
+            return $refused;
         }
 
         // Nothing to mark for a blind purchase: no quote was logged, because
@@ -768,6 +778,53 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
     }
 
     /**
+     * Refuse a rate that is not valid in the packaging this Package is in.
+     *
+     * The requirement is asked of the adapter that will buy, through
+     * {@see CarrierAdapterInterface::packagingRequirementFor()}, and not read
+     * off {@see RateResponse::$packagingRequirement}: for a direct-carrier rate
+     * that field was rebuilt from browser state, and a check that trusted it
+     * would be one the browser could switch off. The adapter classifies from
+     * the same metadata it will send — which, for an offer-backed rate, the
+     * server has already rebuilt from the stored offer.
+     *
+     * The packaging is read through {@see PackageData::fromPackage()}, the
+     * same fact every adapter is handed, rather than off a column of its own.
+     *
+     * A seller that is not a quoting adapter — none, or a source that no
+     * longer sells postage — is left to {@see unsupportedDispatch()}.
+     */
+    private function packagingRefused(Package $package, ?ShippingOffer $offer, RateResponse $rate): ?PackageShippingResult
+    {
+        $seller = $this->sellerFor($offer, $rate);
+
+        if (! $seller instanceof CarrierAdapterInterface) {
+            return null;
+        }
+
+        $required = $seller->packagingRequirementFor($rate);
+        $packaging = PackageData::fromPackage($package)->carrierPackaging;
+
+        if ($required->accepts($packaging)) {
+            return null;
+        }
+
+        logger()->warning('Refused a rate whose packaging requirement the package does not meet', [
+            'package_id' => $package->id,
+            'carrier' => $rate->carrier,
+            'service_code' => $rate->serviceCode,
+            'required' => $required->toArray(),
+            'package_packaging' => $packaging?->value,
+        ]);
+
+        return PackageShippingResult::packagingMismatch(
+            "This rate is only valid in {$required->describe()}, and this package is in "
+            .($packaging?->getLabel() ?? 'your own packaging')
+            .'. Get rates again and choose one quoted for this packaging.',
+        );
+    }
+
+    /**
      * The rate as the server knows it, for an offer the browser only named.
      *
      * Carrier, service, price and rate metadata all come off the stored offer;
@@ -780,10 +837,14 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * dropped it would not buy the wrong label — it would fail to buy one at
      * all. It is restored from the offer rather than from the request for the
      * same reason the price is: the source stated it, and the browser does not
-     * get to restate it.
+     * get to restate it. The packaging requirement travels the same way, under
+     * {@see PackagingRequirement::RATE_METADATA_KEY}, so that the purchase
+     * re-check runs on what the source said and not on what came back.
      */
     private function rateFromOffer(ShippingOffer $offer, ?RateResponse $selected = null): RateResponse
     {
+        $metadata = $offer->rate_metadata ?? [];
+
         return new RateResponse(
             carrier: $offer->carrier,
             serviceCode: $offer->service_code ?? '',
@@ -792,9 +853,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             deliveryCommitment: $selected?->deliveryCommitment,
             deliveryDate: $selected?->deliveryDate,
             transitTime: $selected?->transitTime,
-            metadata: $offer->rate_metadata ?? [],
+            metadata: $metadata,
             priceUnknown: $offer->price === null,
             offerId: $offer->public_id,
+            packagingRequirement: PackagingRequirement::fromRateMetadata($metadata),
         );
     }
 

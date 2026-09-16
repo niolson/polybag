@@ -2,6 +2,7 @@
 
 namespace App\Contracts;
 
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Models\Package;
@@ -43,4 +44,33 @@ interface CarrierAdapterInterface extends PostageOfferSource
      * matching variant. Other carriers return the rate as-is.
      */
     public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse;
+
+    /**
+     * Which carrier packaging this rate is valid in, classified by the adapter
+     * that produced it.
+     *
+     * ADR-0005 decision 3: the adapter that produced the rate sets the
+     * requirement, in its own vocabulary, because it is the only party that
+     * knows. It classifies from the same fields it will send to the carrier —
+     * USPS from `mailClass` and `rateIndicator` in the metadata, FedEx from
+     * `isOneRate` and the packaging it named, Amazon from the serviceId — so
+     * the requirement stamped on the rate at quote time and the one the
+     * purchase re-checks come from one function and cannot disagree.
+     *
+     * The purchase path asks this rather than reading
+     * {@see RateResponse::$packagingRequirement}: for a direct-carrier rate
+     * that field is rebuilt from browser state, and a check that trusted it
+     * would be a check the browser could switch off. The stamped field is for
+     * display and the rate-shopping filter only.
+     *
+     * The metadata is browser state too, so this is consistency rather than
+     * authority: the classifier must read exactly the fields the ship body
+     * sends and nothing else, so that no metadata can classify as the
+     * shipper's packaging while buying the carrier's. An indicator or code the
+     * classifier does not recognise must not fall through to
+     * `shipperPackaging()`. Authority — the quoted rate restored server-side
+     * behind an opaque identifier, as an offer already is — is
+     * `postage-source-split/14`.
+     */
+    public function packagingRequirementFor(RateResponse $rate): PackagingRequirement;
 }

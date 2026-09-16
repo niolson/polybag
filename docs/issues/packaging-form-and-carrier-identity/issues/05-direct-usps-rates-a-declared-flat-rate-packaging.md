@@ -97,6 +97,17 @@ back and the label's rate indicator in a comment here.
 - [ ] One sandbox rate-and-buy for a declared flat-rate box, recorded here
 - [ ] `vendor/bin/pint --dirty --format agent` clean
 
+## Classifier invariant (added 2026-09-16)
+
+`UspsAdapter::packagingRequirementFor()` / `classifyPackaging()` is the hook `01` left for
+this slice. It classifies from the same `rateIndicator` / `mailClass` the ship body sends,
+which is what makes the purchase-time check consistent with the purchase — so the
+classifier must be **exhaustive** over the indicators USPS returns for the mail classes
+the adapter keeps, and an indicator it does not recognise must not fall through to
+`shipperPackaging()`. Refuse it or classify it conservatively; do not default it. The
+authority question (the browser restates the metadata) is `postage-source-split/14`, not
+this issue.
+
 ## Blocked by
 
 - [`02`](02-pre-selection-filters-before-it-chooses.md) — the USPS variant choice must

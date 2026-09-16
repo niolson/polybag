@@ -2,6 +2,7 @@
 
 namespace App\Services\Carriers;
 
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Models\CarrierService;
@@ -98,6 +99,7 @@ class FedexSandboxInternationalRates
                     'serviceType' => $code,
                     'isSandboxStub' => true,
                 ],
+                packagingRequirement: PackagingRequirement::shipperPackaging(),
             );
         });
     }

@@ -7,6 +7,7 @@ use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\CustomsItem;
 use App\DataTransferObjects\Shipping\PackageData;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
@@ -469,6 +470,10 @@ class UpsAdapter implements DirectCarrierAdapter
                 $deliveryDate = substr($deliveryDate, 0, 4).'-'.substr($deliveryDate, 4, 2).'-'.substr($deliveryDate, 6, 2);
             }
 
+            $metadata = [
+                'serviceCode' => $serviceCode,
+            ];
+
             $results->push(new RateResponse(
                 carrier: 'UPS',
                 serviceCode: $serviceCode,
@@ -476,9 +481,8 @@ class UpsAdapter implements DirectCarrierAdapter
                 price: $totalCharges,
                 deliveryDate: $deliveryDate,
                 transitTime: $transitTime,
-                metadata: [
-                    'serviceCode' => $serviceCode,
-                ],
+                metadata: $metadata,
+                packagingRequirement: $this->classifyPackaging($metadata),
             ));
         }
 
@@ -817,6 +821,26 @@ class UpsAdapter implements DirectCarrierAdapter
     public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
     {
         return $rate;
+    }
+
+    public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
+    {
+        return $this->classifyPackaging($rate->metadata);
+    }
+
+    /**
+     * Which packaging a UPS rate is valid in.
+     *
+     * The rate request hard-codes the "customer supplied package" packaging
+     * code, so every rate it returns is the shipper's own packaging. Sending a
+     * Letter, Pak or Express Box and reading it back here is
+     * packaging-form-and-carrier-identity/07.
+     *
+     * @param  array<string, mixed>  $metadata
+     */
+    private function classifyPackaging(array $metadata): PackagingRequirement
+    {
+        return PackagingRequirement::shipperPackaging();
     }
 
     /**
