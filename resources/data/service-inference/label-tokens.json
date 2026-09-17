@@ -32,6 +32,12 @@
             "tokens": {
                 "GRD": "DHL SmartMail Parcel Ground"
             }
+        },
+        "dhl express": {
+            "observed_on": "The DHL sample label Shopify returned for a dhl_express:P test purchase on the development store, 2026-09-17 -- a MyDHL API certified test document (SPC Test shipper, waybill 96 3812 1732, stamped SAMPLE), not a label generated for the parcel. It has a text layer and prints the product as a whole field beside WPX, DHL's code for the same product. Whether a live label prints the identical field is unconfirmed; rung 3 answers this carrier from the selection first, so this token only matters for an auto purchase.",
+            "tokens": {
+                "EXPRESS WORLDWIDE": "DHL Express Worldwide"
+            }
         }
     }
 }

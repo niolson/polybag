@@ -227,9 +227,8 @@ of inference methods — never to relabel a decoded value as `confirmed`.
    the `PriorityExpress` purchase came back priced an order of magnitude above `auto`, with
    the order timeline (`Order.events`, the same record the admin page shows) naming the
    service; and the four UPS international purchases returned 1Z indicators agreeing with a
-   twenty-year production history for exactly the services asked for. **`dhl_express:P` is
-   deliberately not in the table** — oracle-matched, never bought, and a DHL waybill encodes
-   no service, so it is the pair this rung would matter most for. One test purchase adds it.
+   twenty-year production history for exactly the services asked for. `dhl_express:P` was
+   held back until seen honoured, then **bought 2026-09-17** — see the comment of that date.
    The purchase records its own verdict as `metadata.shopify_honoured_selection` — the pair
    when Shopify named the carrier, **null otherwise, and written either way** — and the
    re-run path reads only that key. It cannot be reassembled from
@@ -290,6 +289,25 @@ of inference methods — never to relabel a decoded value as `confirmed`.
   reported as withdrawn. Only a contradiction withdraws — a rung that no longer runs, such as
   a purged label, says nothing about whether what it once read was right — and only an
   `inferred` service is ever withdrawn.
+- **2026-09-17** — **`dhl_express:P` seen honoured and added**; ruleset `2026-09-17`. One test
+  purchase on the development store, order `#1240` to Montréal (DHL Express Worldwide is
+  international-only, so a domestic order cannot exercise it). The free oracle matched `P`
+  and refused `D` on the same parcel first. Shopify reported `trackingInfo.company` as
+  `dhl_express`, wrote *"PolyBag purchased a shipping label for $35.07."* to the timeline,
+  and returned **no separate customs document** for this carrier (noted on `23`). Three
+  things a DHL test label does differently, all worth knowing before reading one: the
+  tracking number is a placeholder (`9000000000`) rather than the waybill printed on the
+  label (`96 3812 1732`); the label is **DHL's own canned sample** — *SPC Test shipper*,
+  Wichita to Pickle Lake, stamped `SAMPLE` — not a document generated for the parcel; and it
+  **has a text layer**, printing `EXPRESS WORLDWIDE` as a whole field beside `WPX`, DHL's
+  product code for the same thing `P` names. That token went into `label-tokens.json` with
+  the sample-label caveat in its provenance. On this package the two rungs agree — rung 2
+  reached it first and wrote `label-text-pdf`; rung 3 gives the same answer — which is the
+  cross-check the table needed. Two operational snags on the way, neither a defect: the
+  shipment's stored fulfillment order had been closed by earlier admin voids and needed
+  repointing at the order's one open replacement (what `applyVoid()` does when the void goes
+  through PolyBag), and `19`'s guard correctly refused the purchase at 0.15 lb against a
+  2.29 lb declaration.
 
 ## Related
 

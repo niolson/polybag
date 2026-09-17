@@ -1,5 +1,5 @@
 {
-    "version": "2026-09-16",
+    "version": "2026-09-17",
     "notes": [
         "The version is the date this ruleset last changed, and it is what lands in",
         "packages.service_ruleset_version. Bump it whenever any table in this directory",

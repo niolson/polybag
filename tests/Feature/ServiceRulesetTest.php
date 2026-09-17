@@ -85,8 +85,9 @@ it('resolves a Shopify selection pair, and falls through on auto and on pairs ne
         ->and($ruleset->shopifySelection('ups_shipping:65'))->toBe(['carrier' => 'UPS', 'service' => 'UPS Worldwide Saver'])
         ->and($ruleset->shopifySelection('auto'))->toBeNull()
         ->and($ruleset->shopifySelection(null))->toBeNull()
-        // Oracle-matched but never bought, so never seen honoured.
-        ->and($ruleset->shopifySelection('dhl_express:P'))->toBeNull();
+        ->and($ruleset->shopifySelection('dhl_express:P'))->toBe(['carrier' => 'DHL Express', 'service' => 'DHL Express Worldwide'])
+        // Oracle-matched for a rate, never bought, so never seen honoured.
+        ->and($ruleset->shopifySelection('dhl_express:D'))->toBeNull();
 });
 
 it('does not serve the version and the tables from independent caches', function (): void {

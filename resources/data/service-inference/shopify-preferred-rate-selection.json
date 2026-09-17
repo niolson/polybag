@@ -35,16 +35,14 @@
             "pair probed.",
             "The service each code names is the carrier's own published vocabulary: USPS",
             "product names for the PascalCase codes, and UPS's numeric service codes,",
-            "the same alphabet CarrierSeeder's UPS block carries."
+            "the same alphabet CarrierSeeder's UPS block carries.",
+            "DHL Express: one purchase with dhl_express:P on 2026-09-17, order #1240 on the",
+            "development store, to Montréal. Shopify reported trackingInfo.company",
+            "'dhl_express', wrote 'PolyBag purchased a shipping label for $35.07.' to the",
+            "order timeline, and returned a DHL sample label printing EXPRESS WORLDWIDE and",
+            "WPX -- DHL's product code for Express Worldwide, which is what P names."
         ],
-        "not_included": [
-            "dhl_express:P (DHL Express Worldwide). The oracle matches a rate for it and",
-            "DHL's product code P is documented, but no purchase has been made with it,",
-            "so the selection has never been seen honoured. A DHL waybill encodes no",
-            "service, which makes this the pair where the rung would matter most -- add",
-            "it after one purchase, and record the order here."
-        ],
-        "effective_date": "2026-09-16"
+        "effective_date": "2026-09-17"
     },
     "selections": {
         "usps:GroundAdvantage": {"carrier": "USPS", "service": "USPS Ground Advantage"},
@@ -62,6 +60,7 @@
         "ups_shipping:07": {"carrier": "UPS", "service": "UPS Worldwide Express"},
         "ups_shipping:08": {"carrier": "UPS", "service": "UPS Worldwide Expedited"},
         "ups_shipping:65": {"carrier": "UPS", "service": "UPS Worldwide Saver"},
-        "ups_shipping:11": {"carrier": "UPS", "service": "UPS Standard"}
+        "ups_shipping:11": {"carrier": "UPS", "service": "UPS Standard"},
+        "dhl_express:P": {"carrier": "DHL Express", "service": "DHL Express Worldwide"}
     }
 }

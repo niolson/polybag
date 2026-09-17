@@ -412,7 +412,34 @@ describe('rung 3 — the honoured Shopify selection', function (): void {
         expect(inferrer()->infer(shopifySelected($pair, 'UPS', [
             'tracking_number' => ups1zWithIndicator('59'),
         ]))->isResolved())->toBeFalse();
-    })->with(['auto', 'dhl_express:P', 'ups_shipping:14', 'usps:usps_ground_advantage']);
+    })->with(['auto', 'dhl_express:D', 'ups_shipping:14', 'usps:usps_ground_advantage']);
+
+    it('is the only rung that can answer a DHL Express package', function (): void {
+        // A DHL waybill encodes no service and Shopify's test purchase returned a
+        // placeholder number besides, so rung 1 has nothing; the selection is
+        // what names the service. Bought 2026-09-17 on the development store.
+        $inference = inferrer()->infer(shopifySelected('dhl_express:P', 'DHL Express', [
+            'tracking_number' => '9000000000',
+        ]));
+
+        expect($inference->service)->toBe('DHL Express Worldwide')
+            ->and($inference->method)->toBe(ServiceInferrer::METHOD_SHOPIFY_SELECTION);
+    });
+
+    it('agrees with the label token a DHL Express label prints', function (): void {
+        // Same purchase, `auto` instead: no selection, so the label's own
+        // EXPRESS WORLDWIDE field is what answers, and it must name the same
+        // service the selection does or every such package reads as a
+        // disagreement.
+        $inference = inferrer()->infer(packageFor([
+            'carrier' => 'DHL Express',
+            'tracking_number' => '9000000000',
+            'label_data' => zplPrinting('EXPRESS WORLDWIDE'),
+        ]));
+
+        expect($inference->service)->toBe('DHL Express Worldwide')
+            ->and($inference->method)->toStartWith(ServiceInferrer::METHOD_LABEL_TEXT);
+    });
 
     it('ignores the pair left behind by a voided label', function (): void {
         // The raw pair survives a void in metadata by design; `requested_service`

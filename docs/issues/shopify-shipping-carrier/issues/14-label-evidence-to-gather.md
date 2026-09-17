@@ -72,7 +72,7 @@ given client's Shopify admin actually offers.
 | USPS | US | **Done.** 342 service type codes resolve USPS domestic on the tracking number alone. Rung 2 **descoped** — Shopify passes USPS's own label through, so a token could be sourced from our labels, but rung 1 already answers |
 | UPS | US, CA | **Rung 1 done; rung 2 permanently closed.** UPS offers ZPL or GIF and no PDF, so Shopify's PDF is a wrapped raster necessarily. The 1Z indicator table is built. Token on the printed face: `UPS GROUND SAVER` — and that label is a **consolidator**, USPS last mile, dual `1Z` + IMpb |
 | FedEx | US | **Closed — not sold through the Shopify API** (`01`, PRD), and every other FedEx label PolyBag holds came with its service confirmed. Domestic tokens from sandbox PDFs stay in the table unconsumed; international prints `IP`/`XQ`, left alone for the same reason |
-| DHL | US, intl | One ZPL token from vendor docs. **Which DHL** — Express or eCommerce — is unconfirmed, and they are different carriers with different labels |
+| DHL | US, intl | **Express, confirmed by purchase 2026-09-17** — Shopify's code is `dhl_express`, and `dhl_express:P` (Express Worldwide, international only) is honoured and in the selection table. The returned document is DHL's canned sample label, with a text layer, printing `EXPRESS WORLDWIDE` — tokened with that caveat. Test tracking number is a placeholder, not the printed waybill. No separate customs document came back. The eCommerce ZPL token from vendor docs stays, unconfirmed against any Shopify label |
 | Canada Post | CA | Nothing. PDF or ZPL |
 | Purolator | CA | Nothing |
 | Australia Post | AU | Nothing |
