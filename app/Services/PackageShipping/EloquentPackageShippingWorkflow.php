@@ -827,7 +827,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
         return PackageShippingResult::reportPrinterRequired(
             'This shipment needs a customs form, and '.$seller->getCarrierName().' returns it as a separate document '
-            .'that prints on the report printer. Choose a report printer in Device Settings on this workstation, '
+            .'that prints on the document printer. Choose a document printer in Device Settings on this workstation, '
             .'then ship again.',
         );
     }

@@ -1,7 +1,9 @@
+<x-printer-settings-script />
+
 <div
     x-init="
-        $wire.set('mountedActions.0.data.label_format', localStorage.getItem('labelFormat') || 'pdf');
-        $wire.set('mountedActions.0.data.label_dpi', parseInt(localStorage.getItem('labelDpi') || '203') || null);
-        $wire.set('mountedActions.0.data.has_report_printer', !!localStorage.getItem('reportPrinter'));
+        $wire.set('mountedActions.0.data.label_format', PrinterSettings.labelFormat());
+        $wire.set('mountedActions.0.data.label_dpi', PrinterSettings.labelDpi());
+        $wire.set('mountedActions.0.data.has_report_printer', PrinterSettings.hasDocumentPrinter());
     "
 ></div>

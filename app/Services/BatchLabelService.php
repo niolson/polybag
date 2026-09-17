@@ -93,7 +93,7 @@ class BatchLabelService
         }
 
         if (! $hasReportPrinter && $this->everyCarrierReturnsASeparateCustomsDocument($shipment)) {
-            return 'No report printer configured for the customs form';
+            return 'No document printer configured for the customs form';
         }
 
         return null;

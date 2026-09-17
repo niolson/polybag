@@ -34,8 +34,11 @@ Built with Laravel 13, Filament 5, Livewire 4, Tailwind CSS 4, MySQL, and Redis.
 ### Label printing
 
 [QZ Tray](https://qz.io/download/) runs on each workstation and sends jobs to
-local label and report printers. Printer, label format, DPI, and scale preferences
-are stored in that browser and managed from **Device Settings**.
+local label and document printers. Labels have two printer slots — one for PDF/image
+labels through the driver, one for raw ZPL — which can be the same printer; a raw-only
+workstation can be a plain "Generic / Text Only" queue on Windows. Printer, label
+format, DPI, and scale preferences are stored in that browser and managed from
+**Device Settings**.
 
 Generate a self-signed QZ certificate for development or a private deployment:
 

@@ -126,7 +126,7 @@ readonly class PackageShippingResult
     {
         return new self(
             success: false,
-            title: 'Report Printer Required',
+            title: 'Document Printer Required',
             message: $message,
             leavePackageIntact: true,
         );

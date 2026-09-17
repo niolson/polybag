@@ -473,7 +473,7 @@ it('refuses an international blind purchase when no report printer is configured
     );
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Report Printer Required')
+        ->and($result->title)->toBe('Document Printer Required')
         ->and($result->message)->toContain('Shopify')
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
