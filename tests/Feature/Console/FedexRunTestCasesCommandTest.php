@@ -3,6 +3,7 @@
 use App\Http\Integrations\Fedex\FedexConnector;
 use App\Http\Integrations\Fedex\Requests\CreateFreightShipment;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
+use App\Http\Integrations\Fedex\Requests\Rates;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\FedexTestCases\FedexTestCaseNormalizer;
@@ -269,6 +270,90 @@ it('stores Freight LTL labels using the freight image type', function (): void {
 
     expect($result['success'])->toBeTrue()
         ->and(Package::query()->latest('id')->first()?->label_format)->toBe('zpl');
+});
+
+it('runs a rate fixture as a rate quote and records no package for it', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Rates::class => MockResponse::make([
+            'output' => [
+                'alerts' => [['code' => 'VIRTUAL.RESPONSE', 'message' => 'This is a Virtual Response.', 'alertType' => 'NOTE']],
+                'rateReplyDetails' => [
+                    [
+                        'serviceType' => 'INTERNATIONAL_ECONOMY',
+                        'commit' => [
+                            'derivedOriginDetail' => ['countryCode' => 'CA', 'postalCode' => 'L4W5K6'],
+                            'derivedDestinationDetail' => ['countryCode' => 'US', 'postalCode' => '43301'],
+                        ],
+                        'ratedShipmentDetails' => [['totalNetCharge' => 41.20]],
+                    ],
+                    ['serviceType' => 'FEDEX_INTERNATIONAL_PRIORITY', 'ratedShipmentDetails' => [['totalNetCharge' => 63.10]]],
+                ],
+            ],
+        ]),
+    ]);
+
+    $this->artisan('fedex:run-test-cases', ['IntegratorCA06', '--region' => 'ca', '--suite' => 'rate'])
+        ->expectsOutputToContain('Running IntegratorCA06')
+        ->expectsOutputToContain('Quoted 2 service(s): INTERNATIONAL_ECONOMY, FEDEX_INTERNATIONAL_PRIORITY')
+        ->expectsOutputToContain('Lane: CA L4W5K6 -> US 43301 (canned sandbox response)')
+        ->expectsOutputToContain('Done. Passed: 1, Failed: 0.')
+        ->assertSuccessful();
+
+    Saloon::assertSent(function (Rates $request): bool {
+        $body = $request->body()->all();
+
+        return ! array_key_exists('labelResponseOptions', $body)
+            && data_get($body, 'requestedShipment.serviceType') === 'INTERNATIONAL_ECONOMY'
+            && data_get($body, 'requestedShipment.recipient.address.countryCode') === 'US';
+    });
+
+    expect(Shipment::count())->toBe(0)
+        ->and(Package::count())->toBe(0);
+});
+
+it('sends a rate fixture as written rather than applying the shipment fix-ups', function (): void {
+    $normalizer = app(FedexTestCaseNormalizer::class);
+    $repository = app(FedexTestCaseRepository::class);
+
+    $ca = collect($repository->load(region: 'ca', suite: 'rate')->cases())->firstWhere('id', 'IntegratorCA06');
+    $lac = collect($repository->load(region: 'lac', suite: 'rate')->cases())->firstWhere('id', 'IntegratorLAC04');
+
+    $caPayload = $normalizer->normalize($ca, '700257037');
+    $lacPayload = $normalizer->normalize($lac, '700257037');
+
+    expect($caPayload)->toBe($ca->request)
+        ->and(data_get($caPayload, 'requestedShipment.customsClearanceDetail.totalCustomsValue'))->toBeNull()
+        ->and($lacPayload)->toBe($lac->request)
+        ->and(data_get($lacPayload, 'requestedShipment.totalWeight'))->toBe(12)
+        ->and($lacPayload)->not->toHaveKey('labelResponseOptions');
+});
+
+it('counts a rate response that quotes nothing as a failure', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Rates::class => MockResponse::make(['output' => ['alerts' => [['code' => 'VIRTUAL.RESPONSE']], 'rateReplyDetails' => []]]),
+    ]);
+
+    $this->artisan('fedex:run-test-cases', ['IntegratorCA06', '--region' => 'ca', '--suite' => 'rate'])
+        ->expectsOutputToContain('[NO_RATES]')
+        ->expectsOutputToContain('Done. Passed: 0, Failed: 1.')
+        ->assertFailed();
+});
+
+it('reports a rate response the sandbox cut off mid-body instead of throwing', function (): void {
+    $truncated = substr(json_encode(['output' => ['rateReplyDetails' => [['serviceType' => 'FEDEX_GROUND']]]]), 0, 40);
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Rates::class => MockResponse::make($truncated, 200, ['Content-Type' => 'application/json']),
+    ]);
+
+    $this->artisan('fedex:run-test-cases', ['IntegratorLAC04', '--region' => 'lac', '--suite' => 'rate'])
+        ->expectsOutputToContain('Running IntegratorLAC04')
+        ->expectsOutputToContain('[UNDECODABLE_RESPONSE]')
+        ->expectsOutputToContain('Done. Passed: 0, Failed: 1.')
+        ->assertFailed();
 });
 
 it('fails fast for an unsupported region', function (): void {

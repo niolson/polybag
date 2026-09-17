@@ -9,6 +9,7 @@ use App\Enums\ServiceEvidence;
 use App\Http\Integrations\Fedex\FedexConnector;
 use App\Http\Integrations\Fedex\Requests\CreateFreightShipment;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
+use App\Http\Integrations\Fedex\Requests\Rates;
 use App\Models\Package;
 use App\Models\PackageLabel;
 use App\Models\Shipment;
@@ -30,6 +31,7 @@ class FedexTestCaseRunner
     ): array {
         $request = match ($testCase->requestType) {
             'create_freight_shipment' => new CreateFreightShipment,
+            'rate' => new Rates,
             default => new CreateShipment,
         };
 
@@ -53,7 +55,33 @@ class FedexTestCaseRunner
             $response = $exception->getResponse();
         }
 
-        $body = $response->json();
+        if ($artifactDirectory) {
+            Storage::put("{$artifactDirectory}/{$testCase->id}/request.json", json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        }
+
+        try {
+            $body = $response->json();
+        } catch (\JsonException $exception) {
+            // The FedEx sandbox serves some canned rate responses cut off mid-body,
+            // with a Content-Length that agrees with the cut. Keep the raw bytes: the
+            // point of running these cases is to see exactly what came back.
+            Log::channel('fedex-validation')->error('RESPONSE (undecodable)', [
+                'status' => $response->status(),
+                'body_length' => strlen($response->body()),
+                'error' => $exception->getMessage(),
+            ]);
+
+            if ($artifactDirectory) {
+                Storage::put("{$artifactDirectory}/{$testCase->id}/response.raw", $response->body());
+            }
+
+            return [
+                'success' => false,
+                'status' => $response->status(),
+                'error_code' => 'UNDECODABLE_RESPONSE',
+                'message' => sprintf('%s (%d bytes)', $exception->getMessage(), strlen($response->body())),
+            ];
+        }
 
         Log::channel('fedex-validation')->info('RESPONSE', [
             'status' => $response->status(),
@@ -61,7 +89,6 @@ class FedexTestCaseRunner
         ]);
 
         if ($artifactDirectory) {
-            Storage::put("{$artifactDirectory}/{$testCase->id}/request.json", json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
             Storage::put("{$artifactDirectory}/{$testCase->id}/response.json", json_encode($body, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
         }
 
@@ -73,6 +100,10 @@ class FedexTestCaseRunner
                 'message' => data_get($body, 'errors.0.message', 'No message'),
                 'response' => $body,
             ];
+        }
+
+        if ($testCase->requestType === 'rate') {
+            return $this->summarizeRateResponse(is_array($body) ? $body : []);
         }
 
         $trackingNumber = data_get($body, 'output.transactionShipments.0.pieceResponses.0.trackingNumber')
@@ -114,6 +145,63 @@ class FedexTestCaseRunner
             'label_path' => $labelPath,
             'package_id' => $recordIds['package_id'] ?? null,
             'shipment_id' => $recordIds['shipment_id'] ?? null,
+        ];
+    }
+
+    /**
+     * A rate quote buys nothing, so there is no package to record — only the
+     * services quoted and, since the sandbox rewrites addresses, the lane it
+     * actually quoted. A 200 with nothing quoted is a failure: the case exists
+     * to see rates come back.
+     *
+     * @param  array<string, mixed>  $body
+     * @return array<string, mixed>
+     */
+    private function summarizeRateResponse(array $body): array
+    {
+        $details = data_get($body, 'output.rateReplyDetails', []);
+        $details = is_array($details) ? $details : [];
+
+        $services = array_values(array_filter(array_map(
+            fn (mixed $detail): ?string => is_array($detail) ? ($detail['serviceType'] ?? null) : null,
+            $details,
+        )));
+
+        $alerts = array_values(array_filter(array_map(
+            fn (mixed $alert): ?string => is_array($alert) ? ($alert['code'] ?? null) : null,
+            data_get($body, 'output.alerts', []) ?: [],
+        )));
+
+        if ($services === []) {
+            return [
+                'success' => false,
+                'status' => 200,
+                'error_code' => 'NO_RATES',
+                'message' => 'Response carried no rateReplyDetails'.($alerts === [] ? '' : ' (alerts: '.implode(', ', $alerts).')'),
+                'response' => $body,
+            ];
+        }
+
+        $lane = null;
+        $origin = data_get($details, '0.commit.derivedOriginDetail');
+        $destination = data_get($details, '0.commit.derivedDestinationDetail');
+
+        if (is_array($origin) && is_array($destination)) {
+            $lane = sprintf(
+                '%s %s -> %s %s',
+                $origin['countryCode'] ?? '?',
+                $origin['postalCode'] ?? '?',
+                $destination['countryCode'] ?? '?',
+                $destination['postalCode'] ?? '?',
+            );
+        }
+
+        return [
+            'success' => true,
+            'services' => $services,
+            'alerts' => $alerts,
+            'lane' => $lane,
+            'virtual' => in_array('VIRTUAL.RESPONSE', $alerts, true),
         ];
     }
 

@@ -129,6 +129,15 @@ class FedexRunTestCases extends Command
                 continue;
             }
 
+            if ($testCase->requestType === 'rate') {
+                $services = $result['services'] ?? [];
+                $this->line('  ✓ Quoted '.count($services).' service(s): '.implode(', ', $services));
+                $this->line('  ✓ Lane: '.($result['lane'] ?? 'not reported').(($result['virtual'] ?? false) ? ' (canned sandbox response)' : ''));
+                $passed++;
+
+                continue;
+            }
+
             $this->line("  ✓ Tracking: {$result['tracking_number']}");
 
             if ($result['label_path']) {
