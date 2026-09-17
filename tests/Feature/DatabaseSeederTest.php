@@ -95,3 +95,17 @@ it('marks Shopify USPS services and only Ground Saver on its UPS side as PO Box 
         ->and($shopify->carrierServices()->where('service_code', 'dhl_express:P')->value('can_ship_to_po_boxes'))->toBeFalse()
         ->and($shopify->carrierServices()->where('service_code', 'ups_shipping:07')->value('can_ship_to_po_boxes'))->toBeFalse();
 });
+
+it('seeds the Shopify USPS international services under the names the oracle confirmed', function (): void {
+    $this->seed(DatabaseSeeder::class);
+
+    $shopify = Carrier::query()->where('name', ShopifyAdapter::CARRIER_NAME)->firstOrFail();
+
+    // The full USPS product name in PascalCase, "Service" suffix included --
+    // `FirstClassPackageInternational` and the international API's own
+    // `PRIORITY_MAIL_INTERNATIONAL` both find no rate.
+    expect($shopify->carrierServices()->where('service_code', 'usps:FirstClassPackageInternationalService')->value('can_ship_to_po_boxes'))->toBeTrue()
+        ->and($shopify->carrierServices()->where('service_code', 'usps:PriorityMailInternational')->exists())->toBeTrue()
+        ->and($shopify->carrierServices()->where('service_code', 'usps:PriorityMailExpressInternational')->exists())->toBeTrue()
+        ->and($shopify->carrierServices()->where('service_code', 'ups_shipping:14')->value('can_ship_to_po_boxes'))->toBeFalse();
+});

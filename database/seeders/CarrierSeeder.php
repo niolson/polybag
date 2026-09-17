@@ -116,8 +116,12 @@ class CarrierSeeder extends Seeder
         // caveats. There is no single vocabulary here: each carrier keeps its
         // own, and Shopify passes it through.
         //
-        //   USPS  a PascalCase of Shopify's own -- `GroundAdvantage`, not the
-        //         `USPS_GROUND_ADVANTAGE` the USPS block above uses
+        //   USPS  the product name in PascalCase -- `GroundAdvantage`, not the
+        //         `USPS_GROUND_ADVANTAGE` the USPS block above uses, and not
+        //         the `PRIORITY_MAIL_INTERNATIONAL` of USPS's international
+        //         API either. Domestic Priority drops the "Mail"
+        //         (`Priority`); international keeps it and the trailing
+        //         "Service" (`FirstClassPackageInternationalService`)
         //   UPS   UPS's own numeric codes, the same alphabet as the UPS block
         //   DHL   DHL's own single-letter product codes, where `P` is Express
         //         Worldwide
@@ -151,12 +155,16 @@ class CarrierSeeder extends Seeder
             ['name' => "Shopify's USPS Priority Mail", 'service_code' => 'usps:Priority'],
             ['name' => "Shopify's USPS Priority Mail Express", 'service_code' => 'usps:PriorityExpress'],
             ['name' => "Shopify's USPS Media Mail", 'service_code' => 'usps:MediaMail'],
+            ['name' => "Shopify's USPS First Class Package International", 'service_code' => 'usps:FirstClassPackageInternationalService'],
+            ['name' => "Shopify's USPS Priority Mail International", 'service_code' => 'usps:PriorityMailInternational'],
+            ['name' => "Shopify's USPS Priority Mail Express International", 'service_code' => 'usps:PriorityMailExpressInternational'],
             ['name' => "Shopify's UPS Ground", 'service_code' => 'ups_shipping:03'],
             ['name' => "Shopify's UPS 3 Day Select", 'service_code' => 'ups_shipping:12'],
             ['name' => "Shopify's UPS 2nd Day Air", 'service_code' => 'ups_shipping:02'],
             ['name' => "Shopify's UPS 2nd Day Air A.M.", 'service_code' => 'ups_shipping:59'],
             ['name' => "Shopify's UPS Next Day Air Saver", 'service_code' => 'ups_shipping:13'],
             ['name' => "Shopify's UPS Next Day Air", 'service_code' => 'ups_shipping:01'],
+            ['name' => "Shopify's UPS Next Day Air Early", 'service_code' => 'ups_shipping:14'],
             // Named apart, unlike the UPS block's pair. There the two rows only
             // ever filter a rate response that already returned exactly one of
             // them, so a packer never sees both; here they are advertised from

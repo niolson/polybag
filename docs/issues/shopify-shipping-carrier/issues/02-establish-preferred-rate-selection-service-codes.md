@@ -1,6 +1,6 @@
 # Find out whether preferredRateSelection works, and catalogue the codes that do
 
-Status: done — 2026-09-09
+Status: done — 2026-09-09; second pass 2026-09-17
 
 Repo: `polybag`
 
@@ -67,17 +67,23 @@ choosing from the same inputs.
 
 ## What shipped
 
-**Seventeen `carrier:service` pairs** seeded under the `Shopify` carrier — four USPS, twelve
-UPS, one DHL — plus `auto`, which stays the default and sends no selection. `ShopifyAdapter`
-splits on the colon; anything without one leaves the choice to Shopify. `ShopifyAdapterTest`'s
-example moved onto confirmed codes so the file stops teaching a spelling that finds no rate.
+**Twenty-one `carrier:service` pairs** seeded under the `Shopify` carrier — seven USPS,
+thirteen UPS, one DHL — plus `auto`, which stays the default and sends no selection.
+`ShopifyAdapter` splits on the colon; anything without one leaves the choice to Shopify.
+`ShopifyAdapterTest`'s example moved onto confirmed codes so the file stops teaching a
+spelling that finds no rate. Seventeen shipped 2026-09-09; the three USPS international
+codes and UPS `14` were added 2026-09-17 — see *The second pass* below.
 
 **The admin's own *Preferred services* screens are the denominator** this issue never had —
-25 services across three carriers, of which **17 are mapped**. Still unmapped: six USPS (the
-four international ones plus First Class Mail, First Class Package and Parcel Select Ground)
-and two UPS — `14` Next Day Air Early and `54` Worldwide Express Plus, both toggled on in
-the admin and finding no rate on any parcel or destination probed. The likeliest reading is
-that a development account is not offered the premium tiers.
+25 services across three carriers, of which **21 are mapped**. The four that remain are
+accounted for rather than open:
+
+| Admin lists | Status |
+|---|---|
+| USPS First Class Mail | `usps:First` finds a rate — **but only with `packageInfo.customPackage.type: ENVELOPE`**, and neither `BOX` (what production sends) nor `SOFT_PACK` rates it. It is the letters-and-flats product, and PolyBag's box types are Box, Polybag and Padded Mailer, none of which is an envelope. Not seeded: it would be an offer that never finds a rate. |
+| USPS First Class Package | Retired by USPS in July 2023, folded into Ground Advantage. The admin's list is stale. Nothing will rate it. |
+| USPS Parcel Select Ground | Same — retired July 2023 into Ground Advantage. `ParcelSelectGround`, `ParcelSelect`, `RetailGround` all miss at 3.1 lb and 25 lb, where Ground Advantage matches. |
+| UPS `54` Worldwide Express Plus | Toggled on in the admin; no rate on Montréal, Poland or Singapore. The one still genuinely unresolved — Express Plus is a postal-code-limited product and the only international fulfillment order on hand may simply be outside its footprint. |
 
 **One thing deliberately not done.** `ShopifyAdapter` still records `service: null` and
 `ServiceEvidence::Unknown` for every purchase, including one made with an explicit pair
@@ -100,32 +106,68 @@ parcel on this store", not "no such code" — the `92`/`93` split is the standin
 product codes — expected for a US-origin shop, and consistent with it having no *Preferred
 services* screen here at all.
 
+**UPS `14` was a false negative** on the first pass: it missed on a 0.3 lb parcel to
+Washington DC 20515 on 2026-09-09, and matched on the same destination at 3.1 lb and on
+Greenwich NY 12834 at 0.15 lb on 2026-09-17. Read the first miss as one more instance of
+rule 5, not as a service that appeared in the meantime.
+
 **A probe caveat.** A shipment whose destination address carries no province returns
 `Select a region` — a user error with a **null code** — for every pair, because the address
 fails before the rate resolves. A screen of those looks nothing like `RATES_NOT_FOUND`.
 Check the destination is complete before reading a sweep as a result; the rig prints unknown
 error codes verbatim for exactly this reason.
 
-## The one real gap: USPS international
+## The second pass: USPS international, resolved
 
-Twenty spellings across Poland and Singapore missed, then nine more on Canada — the
-most-served USPS international destination there is — while UPS and DHL matched on the same
-shipments and USPS domestic worked in the same session. That read as "this shop is not
-offered USPS international rates at all".
+Twenty spellings across Poland and Singapore missed, then nine more on Canada, while UPS and
+DHL matched on the same shipments and USPS domestic worked in the same session. That read as
+"this shop is not offered USPS international rates at all" — and the admin's own rate list
+for a Canada parcel (First Class Package International $36.57, Priority Mail International
+$48.81, Priority Mail Express International $74.85) showed the reading was wrong.
 
-**That reading is wrong, and the admin proves it.** For the same parcel the admin's own rate
-list offers USPS First Class Package International ($36.57), Priority Mail International
-($48.81) and Priority Mail Express International ($74.85), alongside the UPS and DHL rates
-the oracle *did* match. So the rates exist and the codes do not name them: **the vocabulary
-is what is missing**, not the rates.
+**The codes are the full USPS product name in PascalCase**, confirmed 2026-09-17 against
+shipment 6770 / package 215 (2.30 lb, Montréal QC):
 
-That also narrows the search. The admin's strings are USPS's own product names, and the
-pattern here is that each carrier's vocabulary passes through — so the codes are likely
-USPS's, in the PascalCase form USPS domestic already uses. None of the obvious
-concatenations matched. Cheap to continue: the oracle is free and an international
-fulfillment order now exists to run it against. Worth a second pass with USPS's **published
-international product identifiers** rather than guessed spellings, which is the discipline
-that produced the domestic table.
+| Admin name | `serviceCode` |
+|---|---|
+| USPS First Class Package International | `usps:FirstClassPackageInternationalService` |
+| USPS Priority Mail International | `usps:PriorityMailInternational` |
+| USPS Priority Mail Express International | `usps:PriorityMailExpressInternational` |
+
+Two details of the vocabulary that the domestic table did not predict: international keeps
+the "Mail" that domestic `Priority` drops, and the trailing "Service" is load-bearing —
+`FirstClassPackageInternational` misses where `…Service` hits.
+
+**The 2026-09-09 negatives for these exact spellings were wrong about the parcel, not the
+vocabulary.** All three were in the Canada list that day and came back `RATES_NOT_FOUND`.
+The order probed then was almost certainly one where USPS returned nothing for its own
+reasons — the box-weight failure that became `19` is the likeliest — and rule 5 applied to
+this issue's own findings: a negative is only ever about the parcel it was probed with. The
+control `usps:Priority` misses on the Canada parcel, so the oracle does discriminate there.
+
+**The USPS international API's `mailClass` enum is not the vocabulary.** The question was
+whether international codes might be encoded differently because USPS serves them from a
+different API. `PRIORITY_MAIL_INTERNATIONAL`, `PRIORITY_MAIL_EXPRESS_INTERNATIONAL` and the
+hyphenated `FIRST-CLASS_PACKAGE_INTERNATIONAL_SERVICE` all miss on the parcel where the
+PascalCase names hit — consistent with the domestic finding that `PRIORITY_MAIL` misses
+where `Priority` hits. Whatever Shopify calls USPS, it is one mapping layer for both.
+
+**Further negatives on the same Canada parcel**, so nobody probes them twice:
+`PriorityMailIntl`, `ExpressMailIntl`, `FirstClassMailIntl`, `FirstClassPackageIntl`,
+`PriorityIntl`, `PriorityExpressIntl`, `ExpressIntl`, `FirstClassIntl`,
+`InternationalFirstClass`, `InternationalExpress`, `PMI`, `PMEI`, `FCPIS`,
+`FirstClassPackageInternational`, `FirstClassMailInternational`, `FirstClassInternational`,
+`FirstClassPackageServiceInternational`, `GroundAdvantageInternational`.
+
+The probe lists are `canada2.json` and `canada3.json` in the rig, and `enumerate.php` now
+takes a fourth argument overriding the package type, which is what found `usps:First`.
+
+**One thing this turned up that is not this issue's to fix.** `buildPurchaseInput()` sends
+`type: BOX` for every package, and Shopify's rate engine does look at the type — `usps:First`
+rates only under `ENVELOPE`. PolyBag knows a box size's type (`BoxSizeType`: Box, Polybag,
+Padded Mailer), and the latter two are plausibly Shopify's `SOFT_PACK`. Whether that changes
+any rate PolyBag can actually buy is untested; noted here so the `BOX` constant is not
+mistaken for a fact about the parcel.
 
 ## Spun out
 
