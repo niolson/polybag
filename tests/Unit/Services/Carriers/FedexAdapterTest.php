@@ -574,6 +574,31 @@ it('leaves domestic sandbox rates to the FedEx sandbox API', function (): void {
     Saloon::assertSent(Rates::class);
 });
 
+it('sends the caller\'s own rate request to the FedEx sandbox rather than a canned one', function (): void {
+    // The sandbox answers this shape — a packaging type, a ship date and a
+    // weight-only line item — with a complete canned response. The docs example
+    // the adapter used to substitute here no longer gets one.
+    app(SettingsService::class)->set('sandbox_mode', true);
+    fakeFedexRateEndpoints();
+
+    $request = new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
+        packages: [new PackageData(weight: 5.0, length: 12, width: 10, height: 8)],
+        shipDate: CarbonImmutable::parse('2026-09-21'),
+    );
+
+    $this->adapter->getRates($request, ['FEDEX_GROUND']);
+
+    [$sent] = sentFedexRateShipments();
+
+    expect($sent['shipper']['address']['postalCode'])->toBe('98072')
+        ->and($sent['recipient']['address']['postalCode'])->toBe('90210')
+        ->and($sent['packagingType'])->toBe('YOUR_PACKAGING')
+        ->and($sent['shipDateStamp'])->toBe('2026-09-21')
+        ->and($sent['requestedPackageLineItems'])->toBe([['weight' => ['units' => 'LB', 'value' => 5.0]]]);
+});
+
 it('asks FedEx for international rates outside sandbox mode', function (): void {
     app(SettingsService::class)->set('sandbox_mode', false);
 

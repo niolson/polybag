@@ -58,13 +58,14 @@ Two international rate fixtures are already committed and already skipped:
 
 | Fixture | Case | State |
 |---|---|---|
-| `resources/data/carrier-test-cases/fedex/ca/rate.json` | International Economy Rate Quote | `supported: false` |
-| `resources/data/carrier-test-cases/fedex/lac/rate.json` | First Overnight Rate Quote | `supported: false` |
+| `resources/data/carrier-test-cases/fedex/ca/rate.json` | International Economy Rate Quote | `supported: true` since 2026-09-17; sandbox engine 503'd |
+| `resources/data/carrier-test-cases/fedex/lac/rate.json` | First Overnight Rate Quote | `supported: true` since 2026-09-17; sandbox engine 503'd |
 
-Both carry the same `skip_reason`: *"Rate test case execution is not implemented yet."*
-`FedexRunTestCases` already accepts and validates `--suite=rate`; `FedexTestCaseRunner`
-is where it stops, because its request-type match builds a shipment request or a freight
-shipment request and has no rate branch.
+Both were skipped with *"Rate test case execution is not implemented yet."* until
+2026-09-17, when `FedexTestCaseRunner` gained its rate branch and both ran verbatim —
+see `issues/01` for what came back, and for the measurement that replaced the two
+guesses above (the sandbox is a virtualisation layer keyed on request *shape*, and the
+docs example had stopped matching it).
 
 ## Why this is measurement before implementation
 
