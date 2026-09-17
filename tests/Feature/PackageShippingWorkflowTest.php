@@ -693,7 +693,7 @@ it('refuses to buy from a seller that returns a separate customs document when n
     );
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Report Printer Required')
+        ->and($result->title)->toBe('Document Printer Required')
         ->and($result->message)->toContain('Device Settings')
         ->and($result->leavePackageIntact)->toBeTrue()
         ->and($result->requiresRequote)->toBeFalse()

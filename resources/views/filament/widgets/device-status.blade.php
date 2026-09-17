@@ -1,11 +1,12 @@
 <x-filament-widgets::widget>
+    <x-printer-settings-script />
     <div
         x-data="{
             printer: null,
             scaleConfigured: false,
 
             init() {
-                this.printer = localStorage.getItem('labelPrinter') || null
+                this.printer = PrinterSettings.labelPrinterFor(PrinterSettings.labelFormat())
                 this.scaleConfigured = !!localStorage.getItem('scaleProductId')
             },
 

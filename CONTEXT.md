@@ -62,6 +62,19 @@ word)
 Packaging the carrier provides and prices specifically. A Box Size with a
 `carrier_packaging` value. A rate that *requires* one is valid in nothing else.
 
+**Label printer**:
+A 4x6 printer on the workstation, of which there are two settings: the *image* label
+printer takes PDF/PNG/GIF through its driver, the *raw* label printer takes ZPL bytes
+straight through. They may be the same physical device. A label prints on the one its
+own format needs, whatever the workstation prefers to buy.
+_Avoid_: The label printer (singular — there are two)
+
+**Document printer**:
+The 8.5x11 printer on the workstation for pack slips, customs forms and pick lists. Still
+`reportPrinter` / `hasReportPrinter` / `printReport()` in code, from before it was renamed
+in the UI; the code name is not worth a churn commit.
+_Avoid_: Report printer (in anything a user reads)
+
 ## Relationships
 
 - A **Shipment** can produce one or more **Packages**.

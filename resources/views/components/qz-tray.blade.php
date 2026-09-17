@@ -65,13 +65,10 @@
             }
         }
 
-        // Get printer names from localStorage
-        function getLabelPrinter() {
-            return localStorage.getItem('labelPrinter');
-        }
-
+        // Printer names come from this browser's Device Settings — see
+        // the printer-settings-script component for which label printer a format goes to.
         function getReportPrinter() {
-            return localStorage.getItem('reportPrinter');
+            return PrinterSettings.documentPrinter();
         }
 
         // Initialize QZ Tray connection
@@ -92,12 +89,12 @@
 
                 document.dispatchEvent(new CustomEvent('qz-tray:connected'));
 
-                const printer = getLabelPrinter();
-                if (!printer) {
+                if (!PrinterSettings.hasLabelPrinter()) {
                     // Always warn if no printer configured
-                    showStatus('QZ Tray connected - No printer configured. Go to Device Settings.', 'warning');
+                    showStatus('QZ Tray connected - No label printer configured. Go to Device Settings.', 'warning');
                 } else if (showStatusOnSuccess) {
                     // Only show success message when explicitly requested (e.g., during print reconnect)
+                    const printer = PrinterSettings.labelPrinterFor(PrinterSettings.labelFormat());
                     showStatus(`Connected - Printer: ${printer}`, 'success');
                 }
                 // Otherwise, silently connected - no banner needed
@@ -151,25 +148,24 @@
         // Throws on any failure so callers can tell a real print from a no-op —
         // the label printed flag on the package depends on this.
         async function printLabel(base64Data, orientation = 'portrait', format = 'pdf', dpi = null) {
-            const printer = getLabelPrinter();
+            // Routed by what the label is, not by what this workstation prefers to
+            // buy: a ZPL label needs the raw printer, anything else the image one.
+            // A workstation with both can reprint labels bought either way.
+            const printer = PrinterSettings.labelPrinterFor(format);
 
             if (!printer) {
-                showStatus('No label printer configured. Go to Device Settings.', 'error');
-                throw new Error('No label printer configured');
+                const message = format === 'zpl'
+                    ? 'This label is ZPL but no raw label printer is configured. Go to Device Settings.'
+                    : 'This label is an image but no PDF/image label printer is configured. Go to Device Settings.';
+                showStatus(message, 'error');
+                throw new Error(message);
             }
 
-            // Block reprinting ZPL labels when printer isn't configured for raw ZPL
-            // PDF/image labels can always print via the pixel path on any printer
             if (format === 'zpl') {
-                const configFormat = localStorage.getItem('labelFormat') || 'pdf';
-                const configDpi = parseInt(localStorage.getItem('labelDpi') || '203');
+                const configDpi = PrinterSettings.labelDpi();
 
-                if (configFormat !== 'zpl') {
-                    showStatus('This label is ZPL but your printer is configured for PDF. Go to Device Settings to change.', 'error');
-                    throw new Error('Label is ZPL but printer is configured for PDF');
-                }
                 if (dpi && dpi !== configDpi) {
-                    showStatus(`This label was generated for ${dpi} DPI but your printer is configured for ${configDpi} DPI. Go to Device Settings to change.`, 'error');
+                    showStatus(`This label was generated for ${dpi} DPI but your raw label printer is configured for ${configDpi} DPI. Go to Device Settings to change.`, 'error');
                     throw new Error(`Label DPI ${dpi} does not match printer DPI ${configDpi}`);
                 }
             }
@@ -239,7 +235,7 @@
             const printer = getReportPrinter();
 
             if (!printer) {
-                showStatus('No report printer configured. Go to Device Settings.', 'error');
+                showStatus('No document printer configured. Go to Device Settings.', 'error');
                 return false;
             }
 
@@ -249,7 +245,7 @@
                     await initQZTray(true);
                 }
 
-                showStatus('Printing report...', 'info');
+                showStatus('Printing document...', 'info');
 
                 const config = qz.configs.create(printer, {
                     size: { width: 8.5, height: 11 },
@@ -272,7 +268,7 @@
                 return true;
             } catch (error) {
                 console.error('Report print error:', error);
-                showStatus(`Report print failed: ${error.message || 'Unknown error'}`, 'error');
+                showStatus(`Document print failed: ${error.message || 'Unknown error'}`, 'error');
 
                 return false;
             }

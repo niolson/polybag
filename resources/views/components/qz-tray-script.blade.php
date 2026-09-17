@@ -1,5 +1,7 @@
 @vite('resources/js/qz.js')
 
+<x-printer-settings-script />
+
 <script>
     /**
      * qz-tray internally SHA-256-hashes the {call, params, timestamp} object

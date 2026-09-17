@@ -224,7 +224,7 @@ it('ship refuses a separate customs document when the workstation has no report 
 
     $component->set('hasReportPrinter', false)
         ->call('ship')
-        ->assertNotified('Report Printer Required')
+        ->assertNotified('Document Printer Required')
         ->assertNotDispatched('print-label')
         ->assertNoRedirect();
 

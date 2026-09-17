@@ -17,12 +17,9 @@
                 this.autoShipEnabled = storedAutoShip === 'true';
                 $wire.set('autoShipEnabled', this.autoShipEnabled);
 
-                const storedFormat = localStorage.getItem('labelFormat') || 'pdf';
-                const storedDpi = parseInt(localStorage.getItem('labelDpi') || '203') || null;
-
-                $wire.set('labelFormat', storedFormat);
-                $wire.set('labelDpi', storedDpi);
-                $wire.set('hasReportPrinter', !!localStorage.getItem('reportPrinter'));
+                $wire.set('labelFormat', PrinterSettings.labelFormat());
+                $wire.set('labelDpi', PrinterSettings.labelDpi());
+                $wire.set('hasReportPrinter', PrinterSettings.hasDocumentPrinter());
 
                 this.$watch('autoShipEnabled', (value) => {
                     localStorage.setItem('manualShipAutoShip', value.toString());

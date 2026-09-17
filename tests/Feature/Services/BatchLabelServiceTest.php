@@ -316,7 +316,7 @@ it('skips an international shipment when every carrier on its method returns a s
     $result = $this->service->validateShipmentsForBatch(collect([$shipment]), hasReportPrinter: false);
 
     expect($result->eligible)->toBeEmpty()
-        ->and($result->ineligible->first()['reason'])->toBe('No report printer configured for the customs form');
+        ->and($result->ineligible->first()['reason'])->toBe('No document printer configured for the customs form');
 });
 
 it('keeps an international shipment when one carrier on its method fuses the customs form into the label', function (): void {
@@ -349,7 +349,7 @@ it('does not let an unconfigured fused-document carrier rescue the shipment from
 
     $result = $this->service->validateShipmentsForBatch(collect([$shipment]), hasReportPrinter: false);
 
-    expect($result->ineligible->first()['reason'])->toBe('No report printer configured for the customs form');
+    expect($result->ineligible->first()['reason'])->toBe('No document printer configured for the customs form');
 });
 
 it('does not let a fused-document carrier that cannot reach the destination rescue the shipment from the skip', function (): void {
@@ -366,7 +366,7 @@ it('does not let a fused-document carrier that cannot reach the destination resc
 
     $result = $this->service->validateShipmentsForBatch(collect([$shipment]), hasReportPrinter: false);
 
-    expect($result->ineligible->first()['reason'])->toBe('No report printer configured for the customs form');
+    expect($result->ineligible->first()['reason'])->toBe('No document printer configured for the customs form');
 });
 
 it('keeps an international shipment on a separate-document carrier once a report printer is configured', function (): void {

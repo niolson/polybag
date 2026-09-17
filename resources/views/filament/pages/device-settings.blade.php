@@ -57,72 +57,99 @@
         </div>
     </div>
 
-    <!-- Printers Section -->
+    <!-- Label Printers Section -->
     <x-filament::section>
-        <x-slot name="heading">Printers</x-slot>
-        <x-slot name="description">Configure label and report printers for this workstation. Printers are discovered via QZ Tray.</x-slot>
-        
+        <x-slot name="heading">Label Printers</x-slot>
+        <x-slot name="description">4x6 shipping labels. Printers are discovered via QZ Tray. The two label printers can be the same printer if it accepts both PDF and raw ZPL; set only one to buy every label in that format.</x-slot>
+        <x-slot name="afterHeader">
+            <x-filament::button
+                type="button"
+                id="refresh-printers"
+                color="gray"
+                size="sm"
+            >
+                Refresh Printers
+            </x-filament::button>
+        </x-slot>
+
+        <div class="space-y-4">
+            <x-filament::fieldset>
+                <x-slot name="label">
+                    PDF / Image Printer
+                </x-slot>
+
+                <x-filament::input.wrapper>
+                    <x-filament::input.select id="image-label-printer" label="PDF / Image Label Printer">
+                        <option value="">Loading printers...</option>
+                    </x-filament::input.select>
+                </x-filament::input.wrapper>
+
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Prints PDF, PNG and GIF labels through the printer driver. Any 4x6 printer QZ Tray can see works here.
+                </p>
+            </x-filament::fieldset>
+
+            <x-filament::fieldset>
+                <x-slot name="label">
+                    Raw ZPL Printer
+                </x-slot>
+
+                <x-filament::input.wrapper>
+                    <x-filament::input.select id="raw-label-printer" label="Raw ZPL Label Printer">
+                        <option value="">Loading printers...</option>
+                    </x-filament::input.select>
+                </x-filament::input.wrapper>
+
+                <div id="label-dpi-fieldset" class="mt-3">
+                    <label for="label-dpi" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Printer DPI</label>
+                    <x-filament::input.wrapper>
+                        <x-filament::input.select id="label-dpi">
+                            <option value="203">203 DPI</option>
+                            <option value="300">300 DPI</option>
+                        </x-filament::input.select>
+                    </x-filament::input.wrapper>
+                </div>
+
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Sends ZPL straight to a thermal printer, bypassing the driver. On Windows this can be a "Generic / Text Only" queue pointed at the printer's port. Labels that only come back as PDF or PNG (Shopify Shipping, Amazon Buy Shipping, older reprints) need the PDF / Image printer.
+                </p>
+            </x-filament::fieldset>
+
+            <x-filament::fieldset>
+                <x-slot name="label">
+                    Preferred Label Format
+                </x-slot>
+
+                <x-filament::input.wrapper>
+                    <x-filament::input.select id="label-format">
+                        <option value="pdf">PDF (PDF / Image printer)</option>
+                        <option value="zpl">ZPL (Raw ZPL printer)</option>
+                    </x-filament::input.select>
+                </x-filament::input.wrapper>
+
+                <p id="label-format-info" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    The format requested from carriers when this workstation buys a label. Only formats with a printer above are available.
+                </p>
+            </x-filament::fieldset>
+        </div>
+    </x-filament::section>
+
+    <!-- Document Printer Section -->
+    <x-filament::section>
+        <x-slot name="heading">Document Printer</x-slot>
+        <x-slot name="description">8.5x11 paper for packing slips, customs forms and pick lists. Without one, international shipments whose carrier returns the customs form as a separate document cannot be bought from this workstation.</x-slot>
+
         <x-filament::fieldset>
             <x-slot name="label">
-                Label Printer (for 4x6 shipping labels)
+                Document Printer
             </x-slot>
-            
+
             <x-filament::input.wrapper>
-                <x-filament::input.select id="label-printer" label="Label Printer">
+                <x-filament::input.select id="report-printer" label="Document Printer">
                     <option value="">Loading printers...</option>
                 </x-filament::input.select>
             </x-filament::input.wrapper>
         </x-filament::fieldset>
-        <x-filament::fieldset
-            style="margin-top: 16px;">
-            <x-slot name="label">
-                Report Printer (for packing slips, customs forms)
-            </x-slot>
-            
-            <x-filament::input.wrapper>
-                <x-filament::input.select id="report-printer" label="Report Printer">
-                    <option value="">Loading printers...</option>
-                </x-filament::input.select>
-            </x-filament::input.wrapper>
-        </x-filament::fieldset>
-
-        <x-filament::fieldset
-            style="margin-top: 16px;">
-            <x-slot name="label">
-                Label Format
-            </x-slot>
-
-            <x-filament::input.wrapper>
-                <x-filament::input.select id="label-format">
-                    <option value="pdf">PDF (pixel)</option>
-                    <option value="zpl">ZPL (thermal/raw)</option>
-                </x-filament::input.select>
-            </x-filament::input.wrapper>
-        </x-filament::fieldset>
-        <x-filament::fieldset
-            id="label-dpi-fieldset"
-            style="margin-top: 16px;">
-            <x-slot name="label">
-                Label DPI
-            </x-slot>
-
-            <x-filament::input.wrapper>
-                <x-filament::input.select id="label-dpi">
-                    <option value="203">203 DPI</option>
-                    <option value="300">300 DPI</option>
-                </x-filament::input.select>
-            </x-filament::input.wrapper>
-        </x-filament::fieldset>
-
-        <x-filament::button
-            style="margin-top: 16px;"
-            type="button"
-            id="refresh-printers"
-            color="gray"
-        >
-            Refresh Printers
-        </x-filament::button>
-
     </x-filament::section>
 
     <!-- Scale Section -->
@@ -224,10 +251,13 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            const labelPrinterSelect = document.getElementById('label-printer');
+            const imageLabelPrinterSelect = document.getElementById('image-label-printer');
+            const rawLabelPrinterSelect = document.getElementById('raw-label-printer');
             const reportPrinterSelect = document.getElementById('report-printer');
+            const printerSelects = [imageLabelPrinterSelect, rawLabelPrinterSelect, reportPrinterSelect];
             const refreshPrintersBtn = document.getElementById('refresh-printers');
             const labelFormatSelect = document.getElementById('label-format');
+            const labelFormatInfo = document.getElementById('label-format-info');
             const labelDpiSelect = document.getElementById('label-dpi');
             const labelDpiFieldset = document.getElementById('label-dpi-fieldset');
             const detectScalesBtn = document.getElementById('detect-scales');
@@ -245,24 +275,48 @@
 
             // Load saved settings from localStorage
             function loadSettings() {
-                const labelPrinter = localStorage.getItem('labelPrinter') || '';
-                const reportPrinter = localStorage.getItem('reportPrinter') || '';
-                const labelFormat = localStorage.getItem('labelFormat') || 'pdf';
-                const labelDpi = localStorage.getItem('labelDpi') || '203';
                 const scaleBackend = localStorage.getItem('scaleBackend') || 'auto';
 
-                labelFormatSelect.value = labelFormat;
-                labelDpiSelect.value = labelDpi;
+                labelFormatSelect.value = PrinterSettings.labelFormat();
+                labelDpiSelect.value = String(PrinterSettings.labelDpi());
                 scaleBackendSelect.value = scaleBackend;
-                updateDpiVisibility();
                 updateScaleBackendUI();
-
-                return { labelPrinter, reportPrinter };
             }
 
-            // Show/hide DPI selector based on label format
-            function updateDpiVisibility() {
-                labelDpiFieldset.style.display = labelFormatSelect.value === 'zpl' ? '' : 'none';
+            // Saved printer names, for re-selecting after the list is (re)loaded.
+            function savedPrinters() {
+                return {
+                    [imageLabelPrinterSelect.id]: PrinterSettings.imageLabelPrinter() || '',
+                    [rawLabelPrinterSelect.id]: PrinterSettings.rawLabelPrinter() || '',
+                    [reportPrinterSelect.id]: PrinterSettings.documentPrinter() || '',
+                };
+            }
+
+            // The format to buy in can only be one this workstation can print. Keep
+            // the select honest as printers are chosen or cleared, and show DPI only
+            // while a raw printer is picked, since it only applies to ZPL.
+            function updateLabelFormatChoices() {
+                const hasImage = imageLabelPrinterSelect.value !== '';
+                const hasRaw = rawLabelPrinterSelect.value !== '';
+
+                labelFormatSelect.querySelector('option[value="pdf"]').disabled = !hasImage;
+                labelFormatSelect.querySelector('option[value="zpl"]').disabled = !hasRaw;
+                labelDpiFieldset.style.display = hasRaw ? '' : 'none';
+
+                if (labelFormatSelect.value === 'pdf' && !hasImage && hasRaw) {
+                    labelFormatSelect.value = 'zpl';
+                } else if (labelFormatSelect.value === 'zpl' && !hasRaw && hasImage) {
+                    labelFormatSelect.value = 'pdf';
+                }
+
+                if (!hasImage && !hasRaw) {
+                    labelFormatInfo.textContent = 'Choose at least one label printer to buy labels from this workstation.';
+                } else if (hasImage && hasRaw) {
+                    labelFormatInfo.textContent = 'The format requested from carriers when this workstation buys a label. Labels bought either way can be reprinted here.';
+                } else {
+                    const only = hasRaw ? 'ZPL' : 'PDF';
+                    labelFormatInfo.textContent = `Only ${only} is available — add the other label printer to choose.`;
+                }
             }
 
             // Show/hide scale pairing UI based on resolved backend
@@ -330,23 +384,42 @@
                 }
             }
 
-            // Save settings to localStorage
+            // Save settings to localStorage. A printer left blank is removed rather
+            // than stored as '', so the "is one configured" checks stay simple.
+            //
+            // Saving with no label printer is allowed, only warned about: a printer
+            // that was renamed or deleted vanishes from QZ Tray's list, and refusing
+            // the save here would leave its stale key in place with no way to clear it.
             function saveSettings() {
-                localStorage.setItem('labelPrinter', labelPrinterSelect.value);
-                localStorage.setItem('reportPrinter', reportPrinterSelect.value);
-                localStorage.setItem('labelFormat', labelFormatSelect.value);
-                localStorage.setItem('labelDpi', labelDpiSelect.value);
+                updateLabelFormatChoices();
+
+                const keys = PrinterSettings.keys;
+                const storePrinter = (key, value) => value ? localStorage.setItem(key, value) : localStorage.removeItem(key);
+
+                storePrinter(keys.image, imageLabelPrinterSelect.value);
+                storePrinter(keys.raw, rawLabelPrinterSelect.value);
+                storePrinter(keys.document, reportPrinterSelect.value);
+                localStorage.setItem(keys.format, labelFormatSelect.value);
+                localStorage.setItem(keys.dpi, labelDpiSelect.value);
                 localStorage.setItem('scaleBackend', scaleBackendSelect.value);
 
                 saveStatus.textContent = 'Settings saved!';
                 saveStatus.classList.remove('hidden');
                 setTimeout(() => saveStatus.classList.add('hidden'), 3000);
 
-                new FilamentNotification()
-                    .title('Settings Saved')
-                    .body('Device settings have been saved to this browser.')
-                    .success()
-                    .send();
+                if (!PrinterSettings.hasLabelPrinter()) {
+                    new FilamentNotification()
+                        .title('Settings Saved — No Label Printer')
+                        .body('This workstation cannot print labels until a PDF / Image or Raw ZPL printer is chosen.')
+                        .warning()
+                        .send();
+                } else {
+                    new FilamentNotification()
+                        .title('Settings Saved')
+                        .body('Device settings have been saved to this browser.')
+                        .success()
+                        .send();
+                }
             }
 
             // Update QZ Tray status indicator
@@ -358,10 +431,10 @@
             }
 
             // Populate printer dropdowns
-            function populatePrinters(printers, savedLabelPrinter, savedReportPrinter) {
-                [labelPrinterSelect, reportPrinterSelect].forEach((select, index) => {
-                    const savedValue = index === 0 ? savedLabelPrinter : savedReportPrinter;
-                    select.innerHTML = '<option value="">-- Select a printer --</option>';
+            function populatePrinters(printers, saved) {
+                printerSelects.forEach((select) => {
+                    const savedValue = saved[select.id];
+                    select.innerHTML = '<option value="">-- None --</option>';
 
                     printers.forEach(printer => {
                         const option = document.createElement('option');
@@ -378,11 +451,12 @@
 
                 refreshPrintersBtn.removeAttribute('aria-disabled');
                 refreshPrintersBtn.classList.remove('fi-disabled');
+                updateLabelFormatChoices();
             }
 
             // Initialize QZ Tray connection
             async function initQZTray() {
-                const saved = loadSettings();
+                loadSettings();
 
                 if (typeof qz === 'undefined') {
                     updateQzStatus(false, 'QZ Tray library failed to load');
@@ -404,7 +478,7 @@
 
                     // Get available printers
                     const printers = await qz.printers.find();
-                    populatePrinters(printers, saved.labelPrinter, saved.reportPrinter);
+                    populatePrinters(printers, savedPrinters());
 
                 } catch (error) {
                     console.error('QZ Tray error:', error);
@@ -416,8 +490,9 @@
                     }
 
                     // Disable printer selects
-                    labelPrinterSelect.innerHTML = '<option value="">QZ Tray not available</option>';
-                    reportPrinterSelect.innerHTML = '<option value="">QZ Tray not available</option>';
+                    printerSelects.forEach((select) => {
+                        select.innerHTML = '<option value="">QZ Tray not available</option>';
+                    });
                 }
             }
 
@@ -433,9 +508,7 @@
                     }
 
                     const printers = await qz.printers.find();
-                    const savedLabel = localStorage.getItem('labelPrinter') || '';
-                    const savedReport = localStorage.getItem('reportPrinter') || '';
-                    populatePrinters(printers, savedLabel, savedReport);
+                    populatePrinters(printers, savedPrinters());
 
                     new FilamentNotification()
                         .title('Printers Refreshed')
@@ -619,7 +692,7 @@
             // Unsaved changes alert
             let hasUnsavedChanges = false;
             const markDirty = () => { hasUnsavedChanges = true; };
-            [labelPrinterSelect, reportPrinterSelect, labelFormatSelect, labelDpiSelect, scaleBackendSelect].forEach(el => {
+            [...printerSelects, labelFormatSelect, labelDpiSelect, scaleBackendSelect].forEach(el => {
                 el.addEventListener('change', markDirty);
             });
             window.addEventListener('beforeunload', (event) => {
@@ -636,7 +709,8 @@
 
             // Event listeners
             refreshPrintersBtn.addEventListener('click', refreshPrinters);
-            labelFormatSelect.addEventListener('change', updateDpiVisibility);
+            imageLabelPrinterSelect.addEventListener('change', updateLabelFormatChoices);
+            rawLabelPrinterSelect.addEventListener('change', updateLabelFormatChoices);
             detectScalesBtn.addEventListener('click', detectScales);
             disconnectScaleBtn.addEventListener('click', disconnectScale);
             saveSettingsBtn.addEventListener('click', () => { hasUnsavedChanges = false; saveSettings(); });
