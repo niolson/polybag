@@ -357,8 +357,18 @@ class ShopifyAdapter implements BlindPurchaseSource
         // label is a wrapped raster with no text layer, so rung 2 cannot read it
         // and rung 1 answers only where the 1Z service indicator is one the
         // ruleset has evidence for; a consolidator handoff stops rung 1 outright,
-        // by design, rather than decoding the last mile.
+        // by design, rather than decoding the last mile. Where both decline, an
+        // explicit selection Shopify honoured is the last thing left to read.
         //
+        // The selection is the third rung, and it is evidence only where the
+        // carrier Shopify reports can vouch for it. When Shopify omits the
+        // tracking company the carrier above was filled in from the request, and
+        // a request agreeing with itself is no check at all -- so the ladder
+        // gets the pair only when Shopify named the carrier.
+        $honouredSelection = $serviceCode !== null && filled($label->trackingCompany)
+            ? $offer->serviceCode
+            : null;
+
         // Wrapped because Shopify has already bought and charged for the label by
         // this point. Everything below is our own bookkeeping about a purchase
         // that succeeded, and the ladder is not throw-free -- the ruleset reads
@@ -372,6 +382,7 @@ class ShopifyAdapter implements BlindPurchaseSource
                 $carrier,
                 $label->trackingNumber,
                 $label->labelData,
+                $honouredSelection,
             );
         } catch (\Throwable $e) {
             logger()->error('Shopify label bought, but service inference failed', [
@@ -431,7 +442,15 @@ class ShopifyAdapter implements BlindPurchaseSource
                 // The raw code beside the requested preference the package
                 // records, so a selection Shopify silently ignored stays visible.
                 'shopify_requested_service_code' => $offer->serviceCode,
-            ], fn (?string $value): bool => filled($value)),
+            ], fn (?string $value): bool => filled($value)) + [
+                // Written even when null, unlike the keys above. Metadata is
+                // merged over what the package already carries and survives a
+                // void, so a key only written when present would let a voided
+                // label's value stand in for this purchase's -- and this one
+                // says whether the selection may be read as honoured, which is
+                // exactly the thing a previous label must not vouch for.
+                'shopify_honoured_selection' => $honouredSelection,
+            ],
         );
     }
 

@@ -1,0 +1,67 @@
+{
+    "notes": [
+        "The service each Shopify preferredRateSelection pair names, for the requested-",
+        "selection rung. Keyed by the exact `carrier:service` string PolyBag sends,",
+        "which is also what ShopifyAdapter writes to metadata.shopify_requested_service_code.",
+        "",
+        "This is the weakest rung and runs last. A selection is what was asked for, not",
+        "what was observed: the tracking number and the label are the artefact Shopify",
+        "produced, this is the request that produced it. It fills in only where both",
+        "of those decline -- a UPS service whose 1Z indicator is not yet tabled, a",
+        "carrier whose number encodes nothing -- and where a decode disagrees with the",
+        "selection the ladder reports the disagreement and picks neither.",
+        "",
+        "A pair is evidence only when Shopify's own report of the carrier agrees with",
+        "the carrier the pair asked for. The rung compares the two before it reads",
+        "this table, so a selection Shopify did not honour resolves to nothing.",
+        "",
+        "Service names are the same vocabulary the other tables use -- USPS's product",
+        "names as the Service Type Code appendix spells them, UPS names as CarrierSeeder",
+        "spells them -- so a decode and a selection for the same service compare equal."
+    ],
+    "provenance": {
+        "source": "issue shopify-shipping-carrier/02: preferredRateSelection is honoured, and each carrier's own vocabulary is passed through",
+        "observed_on": [
+            "Honouring, established by purchase rather than assumed. A pair with no",
+            "matching rate fails synchronously with RATES_NOT_FOUND and buys nothing, so a",
+            "purchase that succeeded with a selection is one Shopify matched a rate to.",
+            "USPS: a production purchase with usps:PriorityExpress came back priced an",
+            "order of magnitude above what auto had chosen from the same inputs, and the",
+            "order timeline read back through Order.events named the service.",
+            "UPS: purchases with ups_shipping:65, :07, :08 and :11 returned 1Z numbers",
+            "whose service level indicators (04, 66, 67, 68) match the indicators a 3PL's",
+            "twenty-year production history holds for exactly those services -- an",
+            "independent record agreeing with what was asked for, on every international",
+            "pair probed.",
+            "The service each code names is the carrier's own published vocabulary: USPS",
+            "product names for the PascalCase codes, and UPS's numeric service codes,",
+            "the same alphabet CarrierSeeder's UPS block carries."
+        ],
+        "not_included": [
+            "dhl_express:P (DHL Express Worldwide). The oracle matches a rate for it and",
+            "DHL's product code P is documented, but no purchase has been made with it,",
+            "so the selection has never been seen honoured. A DHL waybill encodes no",
+            "service, which makes this the pair where the rung would matter most -- add",
+            "it after one purchase, and record the order here."
+        ],
+        "effective_date": "2026-09-16"
+    },
+    "selections": {
+        "usps:GroundAdvantage": {"carrier": "USPS", "service": "USPS Ground Advantage"},
+        "usps:Priority": {"carrier": "USPS", "service": "Priority Mail"},
+        "usps:PriorityExpress": {"carrier": "USPS", "service": "Priority Mail Express"},
+        "usps:MediaMail": {"carrier": "USPS", "service": "Media Mail"},
+        "ups_shipping:01": {"carrier": "UPS", "service": "UPS Next Day Air"},
+        "ups_shipping:02": {"carrier": "UPS", "service": "UPS 2nd Day Air"},
+        "ups_shipping:03": {"carrier": "UPS", "service": "UPS Ground"},
+        "ups_shipping:12": {"carrier": "UPS", "service": "UPS 3 Day Select"},
+        "ups_shipping:13": {"carrier": "UPS", "service": "UPS Next Day Air Saver"},
+        "ups_shipping:59": {"carrier": "UPS", "service": "UPS 2nd Day Air A.M."},
+        "ups_shipping:92": {"carrier": "UPS", "service": "UPS Ground Saver"},
+        "ups_shipping:93": {"carrier": "UPS", "service": "UPS Ground Saver"},
+        "ups_shipping:07": {"carrier": "UPS", "service": "UPS Worldwide Express"},
+        "ups_shipping:08": {"carrier": "UPS", "service": "UPS Worldwide Expedited"},
+        "ups_shipping:65": {"carrier": "UPS", "service": "UPS Worldwide Saver"},
+        "ups_shipping:11": {"carrier": "UPS", "service": "UPS Standard"}
+    }
+}

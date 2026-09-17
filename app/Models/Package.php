@@ -350,6 +350,8 @@ class Package extends Model
      *   it; nothing we derive outranks that.
      * - An inference never downgrades. Re-running produces a value or it does
      *   not, and a run that produces nothing leaves the previous one standing.
+     *   The one exception is a run that produces evidence *against* it, which
+     *   is `withdrawInferredService()`'s job rather than this method's.
      * - An inference from an older ruleset is replaced together with its version
      *   stamp, so a value and the rules that produced it never disagree.
      * - An inference under the same ruleset is a no-op, because re-deriving the
@@ -430,6 +432,81 @@ class Package extends Model
             'service_evidence' => ServiceEvidence::Inferred,
             'service_inference_method' => $inference->method,
             'service_ruleset_version' => $inference->rulesetVersion,
+        ])->syncOriginal();
+
+        return true;
+    }
+
+    /**
+     * Withdraw an inferred service the current ruleset contradicts.
+     *
+     * The counterpart of `recordInferredService()`, for the one inconclusive
+     * result that says something about a value already on the package: two rungs
+     * resolving to different services. A run that merely resolves nothing leaves
+     * an earlier inference standing, because a rung that no longer runs -- the
+     * label purged, say -- is silent about whether what it once read was right.
+     * A contradiction is not silent, and a value the rules that produced it now
+     * refuse is not one that should keep being reported under those rules'
+     * version stamp.
+     *
+     * Only an `inferred` service is withdrawn, at any ruleset version -- a
+     * contradiction is evidence, not a newer edition of the tables. A `confirmed`
+     * one is the postage source's and untouchable, and `unknown` has nothing to
+     * withdraw. Both rows, in the same lock order as every other writer, and the
+     * package returns to exactly the `unknown` state a fresh purchase records.
+     *
+     * Returns whether the package was changed.
+     */
+    public function withdrawInferredService(ServiceInference $inference): bool
+    {
+        if (! $inference->isContradicted() || ! $this->exists) {
+            return false;
+        }
+
+        $projected = [
+            'service' => null,
+            'service_evidence' => ServiceEvidence::Unknown->value,
+            'service_inference_method' => null,
+            'service_ruleset_version' => null,
+        ];
+
+        $updated = DB::transaction(function () use ($projected): int {
+            $updated = DB::table('packages')
+                ->where('id', $this->id)
+                ->where('status', PackageStatus::Shipped->value)
+                ->where('service_evidence', ServiceEvidence::Inferred->value)
+                ->update($projected + ['updated_at' => now()]);
+
+            if ($updated === 0) {
+                return 0;
+            }
+
+            $labelUpdated = DB::table('package_labels')
+                ->where('package_id', $this->id)
+                ->whereNull('voided_at')
+                ->where('service_evidence', ServiceEvidence::Inferred->value)
+                ->update(PackageLabel::projectionFrom($projected) + ['updated_at' => now()]);
+
+            if ($labelUpdated !== 1) {
+                throw new \LogicException(
+                    "Package {$this->id} withdrew an inferred service its active label did not carry; the projection and the label have drifted."
+                );
+            }
+
+            $this->assertLabelStateIsConsistent();
+
+            return $updated;
+        });
+
+        if ($updated === 0) {
+            return false;
+        }
+
+        $this->forceFill([
+            'service' => null,
+            'service_evidence' => ServiceEvidence::Unknown,
+            'service_inference_method' => null,
+            'service_ruleset_version' => null,
         ])->syncOriginal();
 
         return true;

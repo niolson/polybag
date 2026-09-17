@@ -82,7 +82,10 @@ that a development account is not offered the premium tiers.
 **One thing deliberately not done.** `ShopifyAdapter` still records `service: null` and
 `ServiceEvidence::Unknown` for every purchase, including one made with an explicit pair
 Shopify is now known to honour. That is a weaker claim than the evidence supports, and it
-belongs to `11`'s inference ladder rather than here. Raised there.
+belongs to `11`'s inference ladder rather than here. Raised there — and built there
+2026-09-16 as the ladder's third rung, which fills in where the tracking number and label
+decline and treats a decode that disagrees with an honoured pair as a reason to resolve
+nothing.
 
 ## The negatives, so nobody probes them twice
 

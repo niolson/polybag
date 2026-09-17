@@ -78,6 +78,17 @@ it('resolves a UPS service level indicator, and falls through on one it has no e
         ->and($ruleset->upsServiceForServiceIndicator('YN'))->toBeNull();
 });
 
+it('resolves a Shopify selection pair, and falls through on auto and on pairs never seen honoured', function (): void {
+    $ruleset = new ServiceRuleset;
+
+    expect($ruleset->shopifySelection('usps:PriorityExpress'))->toBe(['carrier' => 'USPS', 'service' => 'Priority Mail Express'])
+        ->and($ruleset->shopifySelection('ups_shipping:65'))->toBe(['carrier' => 'UPS', 'service' => 'UPS Worldwide Saver'])
+        ->and($ruleset->shopifySelection('auto'))->toBeNull()
+        ->and($ruleset->shopifySelection(null))->toBeNull()
+        // Oracle-matched but never bought, so never seen honoured.
+        ->and($ruleset->shopifySelection('dhl_express:P'))->toBeNull();
+});
+
 it('does not serve the version and the tables from independent caches', function (): void {
     (new ServiceRuleset)->version();
 

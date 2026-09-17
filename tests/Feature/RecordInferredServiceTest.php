@@ -159,3 +159,83 @@ it('writes nothing for a package that was never persisted', function (): void {
     expect((new Package(['service_evidence' => ServiceEvidence::Unknown]))->recordInferredService(inference()))
         ->toBeFalse();
 });
+
+// --- withdrawInferredService() ---------------------------------------------
+//
+// The one inconclusive result that acts on an earlier inference: a run that
+// found evidence *against* the stored value, not merely none for one.
+
+it('withdraws an inferred service the current ruleset contradicts', function (): void {
+    $package = Package::factory()->shipped()->create([
+        'service' => 'USPS Ground Advantage',
+        'service_evidence' => ServiceEvidence::Inferred,
+        'service_inference_method' => 'usps-impb-stc',
+        'service_ruleset_version' => '2026-09-09',
+    ]);
+
+    expect($package->withdrawInferredService(ServiceInference::contradicted('decoded one thing, selection names another')))->toBeTrue();
+
+    $package->refresh();
+
+    expect($package->service)->toBeNull()
+        ->and($package->service_evidence)->toBe(ServiceEvidence::Unknown)
+        ->and($package->service_inference_method)->toBeNull()
+        ->and($package->service_ruleset_version)->toBeNull()
+        ->and($package->activeLabel->service)->toBeNull()
+        ->and($package->activeLabel->service_evidence)->toBe(ServiceEvidence::Unknown)
+        ->and($package->activeLabel->service_ruleset_version)->toBeNull();
+});
+
+it('never withdraws a confirmed service, whatever the ladder says', function (): void {
+    $package = Package::factory()->shipped()->create([
+        'service' => 'Priority Mail',
+        'service_evidence' => ServiceEvidence::Confirmed,
+    ]);
+
+    expect($package->withdrawInferredService(ServiceInference::contradicted('decoded one thing, selection names another')))->toBeFalse();
+
+    $package->refresh();
+
+    expect($package->service)->toBe('Priority Mail')
+        ->and($package->service_evidence)->toBe(ServiceEvidence::Confirmed)
+        ->and($package->activeLabel->service)->toBe('Priority Mail');
+});
+
+it('withdraws nothing on a plain miss', function (): void {
+    // A rung that no longer runs -- the label purged -- says nothing about
+    // whether what it once read was right. Only a contradiction withdraws.
+    $package = Package::factory()->shipped()->create([
+        'service' => 'USPS Ground Advantage',
+        'service_evidence' => ServiceEvidence::Inferred,
+        'service_inference_method' => 'label-text-zpl',
+        'service_ruleset_version' => '2026-09-09',
+    ]);
+
+    expect($package->withdrawInferredService(ServiceInference::inconclusive('no readable label')))->toBeFalse()
+        ->and($package->fresh()->service)->toBe('USPS Ground Advantage');
+});
+
+it('loses the race when the postage source confirms the service before the withdrawal lands', function (): void {
+    $package = Package::factory()->shipped()->create([
+        'service' => 'USPS Ground Advantage',
+        'service_evidence' => ServiceEvidence::Inferred,
+        'service_inference_method' => 'usps-impb-stc',
+        'service_ruleset_version' => '2026-09-09',
+    ]);
+
+    DB::table('packages')->where('id', $package->id)->update([
+        'service' => 'Priority Mail Express',
+        'service_evidence' => ServiceEvidence::Confirmed->value,
+        'service_inference_method' => null,
+        'service_ruleset_version' => null,
+    ]);
+    DB::table('package_labels')->where('package_id', $package->id)->update([
+        'service' => 'Priority Mail Express',
+        'service_evidence' => ServiceEvidence::Confirmed->value,
+        'service_inference_method' => null,
+        'service_ruleset_version' => null,
+    ]);
+
+    expect($package->withdrawInferredService(ServiceInference::contradicted('stale')))->toBeFalse()
+        ->and(Package::find($package->id)->service)->toBe('Priority Mail Express');
+});
