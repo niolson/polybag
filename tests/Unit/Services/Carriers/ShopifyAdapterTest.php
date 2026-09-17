@@ -10,6 +10,7 @@ use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
+use App\Enums\VoidReason;
 use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Models\Carrier;
@@ -623,6 +624,104 @@ it('infers the service from the label at purchase time, and records how it was i
         ->and($package->confirmedService())->toBeNull();
 });
 
+it('falls back to the honoured selection when the number and the label both decline', function (): void {
+    seedShopifyCarrierServices();
+    $package = shopifyPackage();
+
+    Saloon::fake([
+        MockResponse::make(purchaseAccepted()),
+        // A service type code naming no product, over label bytes with no text:
+        // both artefact rungs decline, and the pair Shopify honoured is what is
+        // left. Shopify names the carrier, which is what vouches for the pair.
+        MockResponse::make(purchasePurchased(trackingNumber: SHOPIFY_IMPB_STC_NAMING_NO_PRODUCT)),
+    ]);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    $response = $this->adapter->createShipment(shopifyShipRequest($package, 'usps:GroundAdvantage'));
+
+    expect($response->service)->toBe('USPS Ground Advantage')
+        ->and($response->serviceEvidence)->toBe(ServiceEvidence::Inferred)
+        ->and($response->serviceInferenceMethod)->toBe(ServiceInferrer::METHOD_SHOPIFY_SELECTION)
+        ->and($response->serviceRulesetVersion)->not->toBeEmpty()
+        ->and($response->requestedService)->toBe('USPS Ground Advantage');
+
+    $package->markShipped($response, $response->postageSource);
+
+    expect($package->refresh()->service)->toBe('USPS Ground Advantage')
+        ->and($package->service_evidence)->toBe(ServiceEvidence::Inferred)
+        ->and($package->service_inference_method)->toBe(ServiceInferrer::METHOD_SHOPIFY_SELECTION)
+        // Still ours, still not published.
+        ->and($package->confirmedService())->toBeNull();
+});
+
+it('does not let the selection vouch for itself when Shopify omits the tracking company', function (): void {
+    seedShopifyCarrierServices();
+    $package = shopifyPackage();
+
+    Saloon::fake([
+        MockResponse::make(purchaseAccepted()),
+        // No company: the carrier of record is filled in from the request, so
+        // the selection's carrier check would be checking the request against
+        // itself. The ladder does not get the pair.
+        MockResponse::make(purchasePurchased(company: null, trackingNumber: SHOPIFY_IMPB_STC_NAMING_NO_PRODUCT)),
+    ]);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    $response = $this->adapter->createShipment(shopifyShipRequest($package, 'usps:GroundAdvantage'));
+
+    expect($response->carrier)->toBe('USPS')
+        ->and($response->service)->toBeNull()
+        ->and($response->serviceEvidence)->toBe(ServiceEvidence::Unknown);
+});
+
+it('does not let a voided label\'s carrier vouch for the selection on the label bought after it', function (): void {
+    seedShopifyCarrierServices();
+    $package = shopifyPackage();
+
+    // First label: Shopify names the carrier, so the selection is honoured and
+    // the purchase says so.
+    Saloon::fake([
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased(trackingNumber: SHOPIFY_IMPB_STC_NAMING_NO_PRODUCT)),
+    ]);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    $response = $this->adapter->createShipment(shopifyShipRequest($package, 'usps:GroundAdvantage'));
+    $package->markShipped($response, $response->postageSource);
+
+    expect($package->refresh()->metadata['shopify_honoured_selection'])->toBe('usps:GroundAdvantage')
+        ->and($package->service_inference_method)->toBe(ServiceInferrer::METHOD_SHOPIFY_SELECTION);
+
+    // Void it the way `ShopifyFulfillmentSynchronizer::applyVoid()` does: the
+    // label identifiers go, so the next purchase cannot recover this label, and
+    // the rest of the metadata -- the tracking company included -- survives.
+    $package->metadata = collect($package->metadata)
+        ->except(['shopify_shipping_label_id', 'shopify_purchase_result_id', 'shopify_label_document_url', 'shopify_customs_form_url'])
+        ->all();
+    $package->save();
+    $package->clearShipping(VoidReason::VoidedUpstream);
+
+    expect($package->refresh()->metadata['shopify_tracking_company'])->toBe('USPS');
+
+    // Second label, same selection, but this time Shopify omits the carrier.
+    // The stale `shopify_tracking_company` from the first label is still in
+    // metadata; it must not stand in for this purchase's.
+    Saloon::fake([
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased(company: null, trackingNumber: SHOPIFY_IMPB_STC_NAMING_NO_PRODUCT)),
+    ]);
+
+    $response = $this->adapter->createShipment(shopifyShipRequest($package, 'usps:GroundAdvantage'));
+    $package->markShipped($response, $response->postageSource);
+    $package->refresh();
+
+    expect($package->service)->toBeNull()
+        ->and($package->service_evidence)->toBe(ServiceEvidence::Unknown)
+        ->and($package->metadata['shopify_honoured_selection'])->toBeNull()
+        // And the historical re-run path reads the same answer off the row.
+        ->and(app(ServiceInferrer::class)->infer($package)->isResolved())->toBeFalse();
+});
+
 it('reads the label bytes at purchase time, before the retention period can null them', function (): void {
     seedShopifyCarrierServices();
     Carrier::firstOrCreate(['name' => 'DHL eCommerce'], ['active' => true]);
@@ -682,7 +781,7 @@ it('still returns the bought label when inference itself throws', function (): v
     {
         public function __construct() {}
 
-        public function inferFrom(?string $carrierName, ?string $trackingNumber, ?string $labelData): ServiceInference
+        public function inferFrom(?string $carrierName, ?string $trackingNumber, ?string $labelData, ?string $requestedSelection = null): ServiceInference
         {
             throw new RuntimeException('ruleset table is missing');
         }

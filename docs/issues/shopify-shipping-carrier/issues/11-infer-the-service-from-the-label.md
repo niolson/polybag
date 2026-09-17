@@ -1,6 +1,6 @@
 # Infer the service Shopify bought, and record how it was inferred
 
-Status: ready-for-human — the ladder, both tables and the purchase-time hook are built; the coverage measurement needs real Shopify packages
+Status: ready-for-human — the ladder, three rungs, four tables and the purchase-time hook are built; the coverage measurement needs real Shopify packages
 
 Repo: `polybag`
 
@@ -37,17 +37,24 @@ and is the only one that can be re-run over historical packages, because
 shelf life — `PurgePiiCommand` nulls `label_data` after `pii_retention_days` — so inference
 runs **at purchase time**, not lazily.
 
-**3. Fingerprinting or OCR.** A decided non-goal, not vague future work. See question 2.
+**3. The `preferredRateSelection` Shopify honoured.** The request rather than the artefact,
+so the weakest rung and the last: it fills in only where the number and the label both
+decline, and where a decode disagrees with an honoured selection the ladder reports the
+disagreement and picks neither. Evidence only where Shopify's own report of the carrier
+agrees with the carrier the pair asked for. Added 2026-09-16 — see remaining-work item 4.
+
+**Fingerprinting or OCR.** A decided non-goal, not vague future work. See question 2.
 
 ## What is built
 
 | | |
 |---|---|
 | `smalot/pdfparser` | PDF text extraction. One package, no `Dockerfile` change |
-| `ServiceInferrer` | the ladder; `inferFrom(carrier, trackingNumber, labelData)` for purchase time, `infer(Package)` for a saved row |
+| `ServiceInferrer` | the ladder; `inferFrom(carrier, trackingNumber, labelData, requestedSelection)` for purchase time, `infer(Package)` for a saved row |
 | `ImpbTrackingNumber` | IMpb parse, `420`-prefix strip, mod-10 check digit |
 | `LabelTextExtractor` | ZPL and PDF to text, **dispatching on magic bytes, not `label_format`** |
 | `ServiceRuleset` | loads the versioned tables as one unit, memoized per instance |
+| `shopify-preferred-rate-selection.json` | the service each honoured `carrier:service` pair names, for rung 3 |
 | `Package::recordInferredService()` | the write path |
 | `app:infer-package-services` | coverage measurement; reports by default, writes under `--apply` |
 | `app:build-service-inference-ruleset` | generates the USPS table from USPS's published appendix |
@@ -70,6 +77,8 @@ it would leave the package unshipped against postage already paid for. It degrad
 - [x] Nothing inferred reaches a channel export
 - [x] The tables are versioned data under `resources/data/service-inference/`
 - [x] A tracking number failing validation infers nothing
+- [x] An honoured selection fills in where the number and label decline, and a decode that
+      disagrees with one resolves to nothing
 - [ ] **Coverage against real Shopify packages is measured and reported**
 
 ## The answered questions
@@ -192,17 +201,41 @@ of inference methods — never to relabel a decoded value as `confirmed`.
    as this can take them — USPS descoped above, UPS permanently unreadable. What remains is
    the other seventeen, gated on `14`'s install-base question. Do not add tokens from carrier
    documentation; what a carrier calls a service and what it prints routinely differ.
-3. **International FedEx labels print `IP`/`XQ` rather than service names.** Ten of fourteen
-   real labels fall through on this. Independent of everything else — it needs FedEx
-   documentation and our own existing labels, not a Shopify purchase.
-4. **Decide whether an honoured `preferredRateSelection` is evidence.** `02` established
-   Shopify obeys it, so a package bought with `usps:PriorityExpress` carries a materially
-   stronger claim than one bought with `auto` — where Shopify picked USPS once and UPS the
-   next time from identical inputs — and the two are presently recorded identically. Whether
-   an honoured selection outranks a decoded tracking number, or only fills in where the
-   number declines, is a rung-ordering question and belongs here. It gains weight from the
-   UPS finding: where the label cannot be read and the number cannot be decoded, an explicit
-   selection may be the only evidence available.
+3. ~~**International FedEx labels print `IP`/`XQ` rather than service names.**~~ **Descoped
+   2026-09-16: no FedEx label reaches this ladder.** Shopify Shipping does not sell FedEx
+   through the API at all (`01`, PRD), and the only two sources that do produce a FedEx label
+   — `FedexAdapter` and Amazon Buy Shipping — both report the service they sold, so their
+   packages are `confirmed` and the ladder never runs over them; the backfill migration
+   confirmed every existing FedEx package the same way. The three FedEx tokens in
+   `label-tokens.json` stay, because they were observed, but nothing consumes them. Reopen
+   if a FedEx label ever arrives without a service — a new postage source, or an import of
+   externally shipped packages — and then it needs FedEx's documentation and our own labels,
+   not a Shopify purchase.
+4. ~~**Decide whether an honoured `preferredRateSelection` is evidence.**~~ **Decided and
+   built 2026-09-16: it is, and it fills in rather than outranks.** The reasoning, so it is
+   not re-argued: rungs 1 and 2 read the artefact Shopify produced; the selection is the
+   request that produced it, and the service name it resolves to comes from our own table
+   rather than from anything Shopify or the carrier returned. So it runs last, and a decode
+   that disagrees with an honoured selection resolves to *nothing* — two sources disagreeing
+   is a wrong table somewhere, and the coverage command counts those on their own line,
+   which is also the standing check that Shopify still honours selections. "Honoured" is
+   read off the carrier: Shopify reports the carrier of record itself, and a pair whose
+   carrier is not that one was not what got bought. Where Shopify omits the tracking company
+   the carrier was filled in from the request, so the pair is withheld from the ladder rather
+   than allowed to vouch for itself. The evidence that the mechanism is honoured at all is
+   `02`'s: a mismatched pair fails synchronously with `RATES_NOT_FOUND` and buys nothing;
+   the `PriorityExpress` purchase came back priced an order of magnitude above `auto`, with
+   the order timeline (`Order.events`, the same record the admin page shows) naming the
+   service; and the four UPS international purchases returned 1Z indicators agreeing with a
+   twenty-year production history for exactly the services asked for. `dhl_express:P` was
+   held back until seen honoured, then **bought 2026-09-17** — see the comment of that date.
+   The purchase records its own verdict as `metadata.shopify_honoured_selection` — the pair
+   when Shopify named the carrier, **null otherwise, and written either way** — and the
+   re-run path reads only that key. It cannot be reassembled from
+   `shopify_requested_service_code` and `shopify_tracking_company`: both are written only
+   when present and both survive a void, so a re-ship on which Shopify omits the company
+   would leave the *voided* label's company beside the new pair and let one label vouch for
+   the next.
 
 ## Comments
 
@@ -238,6 +271,43 @@ of inference methods — never to relabel a decoded value as `confirmed`.
 - **2026-09-10** — first live confirmation of the hook on a real Shopify label:
   `service = 'USPS Ground Advantage'`, `service_evidence = inferred`,
   `service_inference_method = 'usps-impb-stc'`, `service_ruleset_version = '2026-09-09'`.
+- **2026-09-16** — rung 3 (the honoured selection) built and the ruleset bumped to
+  `2026-09-16`; item 3 descoped for want of a consumer. Anything already stamped
+  `2026-09-09` is re-derivable under `app:infer-package-services --apply`, though nothing
+  it resolved will change: the new rung only adds answers where the old two had none, and a
+  package where it would now *withdraw* a decode (a disagreement) is one the command reports
+  rather than rewrites, because `recordInferredService()` never writes an inconclusive
+  result.
+- **2026-09-17, review** — two defects in the above, both fixed with regression tests.
+  **A voided label's carrier could vouch for the next label's selection** (the metadata
+  reassembly described under item 4; now one unconditional key). **A contradiction left the
+  contradicted value in place**: a package decoded under `2026-09-09` whose honoured
+  selection now disagrees produced an inconclusive result, and the command skips those, so
+  the stored service kept its old version stamp indefinitely. `ServiceInference::contradicted()`
+  now marks that one result apart from a plain miss, and `Package::withdrawInferredService()`
+  returns the package and its active label to `unknown` atomically, under `--apply`,
+  reported as withdrawn. Only a contradiction withdraws — a rung that no longer runs, such as
+  a purged label, says nothing about whether what it once read was right — and only an
+  `inferred` service is ever withdrawn.
+- **2026-09-17** — **`dhl_express:P` seen honoured and added**; ruleset `2026-09-17`. One test
+  purchase on the development store, order `#1240` to Montréal (DHL Express Worldwide is
+  international-only, so a domestic order cannot exercise it). The free oracle matched `P`
+  and refused `D` on the same parcel first. Shopify reported `trackingInfo.company` as
+  `dhl_express`, wrote *"PolyBag purchased a shipping label for $35.07."* to the timeline,
+  and returned **no separate customs document** for this carrier (noted on `23`). Three
+  things a DHL test label does differently, all worth knowing before reading one: the
+  tracking number is a placeholder (`9000000000`) rather than the waybill printed on the
+  label (`96 3812 1732`); the label is **DHL's own canned sample** — *SPC Test shipper*,
+  Wichita to Pickle Lake, stamped `SAMPLE` — not a document generated for the parcel; and it
+  **has a text layer**, printing `EXPRESS WORLDWIDE` as a whole field beside `WPX`, DHL's
+  product code for the same thing `P` names. That token went into `label-tokens.json` with
+  the sample-label caveat in its provenance. On this package the two rungs agree — rung 2
+  reached it first and wrote `label-text-pdf`; rung 3 gives the same answer — which is the
+  cross-check the table needed. Two operational snags on the way, neither a defect: the
+  shipment's stored fulfillment order had been closed by earlier admin voids and needed
+  repointing at the order's one open replacement (what `applyVoid()` does when the void goes
+  through PolyBag), and `19`'s guard correctly refused the purchase at 0.15 lb against a
+  2.29 lb declaration.
 
 ## Related
 

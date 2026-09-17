@@ -91,6 +91,30 @@ class ServiceRuleset
     }
 
     /**
+     * The carrier and service a Shopify `carrier:service` selection pair names,
+     * or null for a pair the table has never seen honoured.
+     *
+     * Null is the answer for `auto` and for anything else without a carrier
+     * prefix, since those leave the choice to Shopify and name nothing.
+     *
+     * @return array{carrier: string, service: string}|null
+     */
+    public function shopifySelection(?string $pair): ?array
+    {
+        if (blank($pair)) {
+            return null;
+        }
+
+        $selection = $this->table('shopify-preferred-rate-selection')['selections'][$pair] ?? null;
+
+        if (! is_array($selection) || blank($selection['carrier'] ?? null) || blank($selection['service'] ?? null)) {
+            return null;
+        }
+
+        return ['carrier' => (string) $selection['carrier'], 'service' => (string) $selection['service']];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function table(string $name): array
@@ -100,7 +124,7 @@ class ServiceRuleset
 
             $directory = $this->directory ?? resource_path('data/service-inference');
 
-            foreach (['ruleset', 'usps-impb-stc', 'ups-1z-service-indicator', 'label-tokens'] as $table) {
+            foreach (['ruleset', 'usps-impb-stc', 'ups-1z-service-indicator', 'label-tokens', 'shopify-preferred-rate-selection'] as $table) {
                 $path = "{$directory}/{$table}.json";
 
                 $this->tables[$table] = json_decode(

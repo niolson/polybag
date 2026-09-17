@@ -46,14 +46,22 @@ class InferPackageServices extends Command
         $byReason = [];
         $total = 0;
         $written = 0;
+        $withdrawn = 0;
 
-        $query->chunkById(500, function ($packages) use ($inferrer, $apply, &$byMethod, &$byReason, &$total, &$written): void {
+        $query->chunkById(500, function ($packages) use ($inferrer, $apply, &$byMethod, &$byReason, &$total, &$written, &$withdrawn): void {
             foreach ($packages as $package) {
                 $total++;
                 $inference = $inferrer->infer($package);
 
                 if (! $inference->isResolved()) {
                     $byReason[$this->summarize($inference->reason)] = ($byReason[$this->summarize($inference->reason)] ?? 0) + 1;
+
+                    // A contradiction is the one miss that acts on an earlier
+                    // inference: the value stays reported under a ruleset that
+                    // now refuses it otherwise.
+                    if ($apply && $package->withdrawInferredService($inference)) {
+                        $withdrawn++;
+                    }
 
                     continue;
                 }
@@ -100,6 +108,10 @@ class InferPackageServices extends Command
 
         if ($apply) {
             $this->info("Wrote {$written} inferred service(s).");
+
+            if ($withdrawn > 0) {
+                $this->warn("Withdrew {$withdrawn} earlier inference(s) the current ruleset contradicts.");
+            }
         } else {
             $this->comment('Nothing written. Re-run with --apply to record what was inferred.');
         }
@@ -116,8 +128,15 @@ class InferPackageServices extends Command
     private function summarize(string $reason): string
     {
         return match (true) {
+            // First, because these are the two figures that say whether Shopify
+            // still honours a selection, and a package showing either wants a
+            // person: a decode and an honoured selection naming different
+            // services means a table is wrong, ours or the carrier's.
+            str_contains($reason, 'but the honoured selection names') => 'decode disagrees with the honoured selection',
+            str_contains($reason, 'sold the label') => 'selection not honoured: another carrier sold the label',
             str_contains($reason, 'last-mile') => 'USPS last-mile handoff, service not encoded',
             str_contains($reason, 'names no product') => 'service type code names no product',
+            str_contains($reason, 'not a valid IMpb') && str_contains($reason, 'no readable label') && str_contains($reason, 'no selection requested') => 'no IMpb, no readable label, no selection',
             str_contains($reason, 'not a valid IMpb') && str_contains($reason, 'no readable label') => 'no IMpb, no readable label',
             str_contains($reason, 'no label tokens') => 'no label tokens for this carrier',
             str_contains($reason, 'no known service token') => 'label carries no known service token',

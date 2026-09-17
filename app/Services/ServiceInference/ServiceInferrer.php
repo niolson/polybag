@@ -20,6 +20,13 @@ use App\Services\CarrierNormalizer;
  * The carrier is known before any rung runs, so every rung only has to choose a
  * service within a known carrier. An unrecognised carrier is a clean stop.
  *
+ * Two rungs read the artefact -- the tracking number, then the label -- and a
+ * third reads the request that produced it: the `preferredRateSelection` Shopify
+ * honoured. That one runs last and only fills in where the artefact declines,
+ * because what was asked for is weaker evidence than what was produced, and
+ * where the two disagree the ladder reports the disagreement rather than
+ * preferring either.
+ *
  * Nothing here publishes: `Package::confirmedService()` withholds anything that
  * is not `confirmed`, and ADR-0003 decision 7 keeps it that way regardless of how
  * good inference gets.
@@ -31,6 +38,8 @@ class ServiceInferrer
     public const METHOD_UPS_1Z = 'ups-1z-service-indicator';
 
     public const METHOD_LABEL_TEXT = 'label-text';
+
+    public const METHOD_SHOPIFY_SELECTION = 'shopify-preferred-rate-selection';
 
     public function __construct(
         private readonly ServiceRuleset $ruleset,
@@ -47,7 +56,37 @@ class ServiceInferrer
             $package->carrierOfRecordName(),
             $package->tracking_number,
             $package->label_data,
+            self::honouredSelectionOn($package),
         );
+    }
+
+    /**
+     * The Shopify selection a saved package was bought with, where it can still
+     * be read as honoured.
+     *
+     * Read from the one key the purchase writes for exactly this purpose --
+     * `shopify_honoured_selection`, the pair only when Shopify itself named the
+     * carrier, null otherwise -- rather than reassembled from the raw pair and
+     * the tracking company. Those two are written only when present, and
+     * metadata is merged over what a package already carries and survives a
+     * void, so a re-ship that omits one of them would leave the voided label's
+     * value in place and let a previous label vouch for this one. The purchase
+     * writes this key unconditionally, so it always describes the latest label.
+     *
+     * `requested_service` is nulled by a void and is the liveness check: a
+     * package whose label was voided and not re-bought keeps the key and must
+     * not be read.
+     */
+    private static function honouredSelectionOn(Package $package): ?string
+    {
+        if (blank($package->requested_service)) {
+            return null;
+        }
+
+        $metadata = is_array($package->metadata) ? $package->metadata : [];
+        $pair = $metadata['shopify_honoured_selection'] ?? null;
+
+        return is_string($pair) && filled($pair) ? $pair : null;
     }
 
     /**
@@ -60,29 +99,70 @@ class ServiceInferrer
      * and a package inferred later may have no label left to read. At that
      * moment the label bytes and the tracking number exist only in the response,
      * so the ladder has to be reachable without a persisted package.
+     *
+     * `$requestedSelection` is the `carrier:service` pair the purchase asked
+     * Shopify for, or null where the choice was left to Shopify or the carrier
+     * of record is not Shopify's own report. It is the last rung, and it also
+     * checks the first two: a decode that names a different service from an
+     * honoured selection is two sources disagreeing, and the ladder declines
+     * rather than picking one.
      */
-    public function inferFrom(?string $carrierName, ?string $trackingNumber, ?string $labelData): ServiceInference
-    {
+    public function inferFrom(
+        ?string $carrierName,
+        ?string $trackingNumber,
+        ?string $labelData,
+        ?string $requestedSelection = null,
+    ): ServiceInference {
         $carrier = $this->canonicalCarrier($carrierName);
 
         if ($carrier === null) {
             return ServiceInference::inconclusive('no carrier of record');
         }
 
+        $fromSelection = $this->fromRequestedSelection($requestedSelection, $carrier);
+
         $fromTrackingNumber = $this->fromTrackingNumber($trackingNumber, $carrier);
 
         if ($fromTrackingNumber->isResolved()) {
-            return $fromTrackingNumber;
+            return $this->unlessContradicted($fromTrackingNumber, $fromSelection);
         }
 
         $fromLabel = $this->fromLabelText($labelData, $carrier);
 
         if ($fromLabel->isResolved()) {
-            return $fromLabel;
+            return $this->unlessContradicted($fromLabel, $fromSelection);
+        }
+
+        if ($fromSelection->isResolved()) {
+            return $fromSelection;
         }
 
         return ServiceInference::inconclusive(
-            "tracking number: {$fromTrackingNumber->reason}; label: {$fromLabel->reason}"
+            "tracking number: {$fromTrackingNumber->reason}; label: {$fromLabel->reason}; selection: {$fromSelection->reason}"
+        );
+    }
+
+    /**
+     * A decode stands unless an honoured selection names a different service.
+     *
+     * Rung 1 decodes what the carrier encoded and rung 3 knows what Shopify was
+     * asked for; Shopify has been observed to honour a selection every time it
+     * sells with one, so the two disagreeing means a table is wrong -- ours or
+     * the carrier's -- and which one is not something this ladder can settle.
+     * The disagreement is what the coverage command counts; it is also the
+     * running check that Shopify still honours selections at all. And it is
+     * marked as a contradiction rather than a plain miss, because a package
+     * already carrying the decoded value under an older ruleset should lose it:
+     * `Package::withdrawInferredService()` acts on this result and no other.
+     */
+    private function unlessContradicted(ServiceInference $decoded, ServiceInference $selected): ServiceInference
+    {
+        if (! $selected->isResolved() || $selected->service === $decoded->service) {
+            return $decoded;
+        }
+
+        return ServiceInference::contradicted(
+            "{$decoded->method} decoded {$decoded->service} but the honoured selection names {$selected->service}"
         );
     }
 
@@ -224,6 +304,41 @@ class ServiceInferrer
             self::METHOD_LABEL_TEXT.($format === null ? '' : "-{$format}"),
             $this->ruleset->version(),
         );
+    }
+
+    /**
+     * Rung 3 — the `preferredRateSelection` Shopify honoured.
+     *
+     * Weaker than either rung above, because it reads the request and not the
+     * result. What makes it evidence at all is Shopify's behaviour, established
+     * by purchase: a pair with no matching rate fails synchronously and buys
+     * nothing, so a purchase that succeeded with a selection is one Shopify
+     * matched a rate to. The check that it was honoured is the carrier: Shopify
+     * reports the carrier of record itself, and a selection whose carrier is not
+     * that one was not what got bought.
+     *
+     * The table holds only pairs seen honoured, so `auto`, an unlisted pair and
+     * a pair whose carrier does not match all fall through.
+     */
+    private function fromRequestedSelection(?string $pair, string $carrier): ServiceInference
+    {
+        if (blank($pair)) {
+            return ServiceInference::inconclusive('no selection requested');
+        }
+
+        $selection = $this->ruleset->shopifySelection($pair);
+
+        if ($selection === null) {
+            return ServiceInference::inconclusive("selection {$pair} is not one seen honoured");
+        }
+
+        if (CarrierAlias::lookupKey($selection['carrier']) !== CarrierAlias::lookupKey($carrier)) {
+            return ServiceInference::inconclusive(
+                "selection {$pair} asked for {$selection['carrier']} but {$carrier} sold the label"
+            );
+        }
+
+        return ServiceInference::resolved($selection['service'], self::METHOD_SHOPIFY_SELECTION, $this->ruleset->version());
     }
 
     /**

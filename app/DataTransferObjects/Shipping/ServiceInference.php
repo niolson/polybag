@@ -18,6 +18,7 @@ readonly class ServiceInference
         public ?string $method,
         public ?string $rulesetVersion,
         public string $reason,
+        public bool $contradicted = false,
     ) {}
 
     public static function resolved(string $service, string $method, string $rulesetVersion): self
@@ -33,8 +34,27 @@ readonly class ServiceInference
         return new self(null, null, null, $reason);
     }
 
+    /**
+     * Two rungs resolved and named different services.
+     *
+     * Inconclusive, but a stronger kind: the ladder found evidence *against* a
+     * value rather than merely none for one. That is the one inconclusive result
+     * that can withdraw an inference already on a package -- the others cannot,
+     * because a rung that no longer runs (a purged label) says nothing about
+     * whether what it once read was right.
+     */
+    public static function contradicted(string $reason): self
+    {
+        return new self(null, null, null, $reason, contradicted: true);
+    }
+
     public function isResolved(): bool
     {
         return $this->service !== null;
+    }
+
+    public function isContradicted(): bool
+    {
+        return $this->contradicted;
     }
 }

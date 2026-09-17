@@ -344,6 +344,162 @@ describe('carrier aliasing', function (): void {
     });
 });
 
+describe('rung 3 — the honoured Shopify selection', function (): void {
+    /**
+     * A package bought through Shopify with an explicit pair, as the purchase
+     * records it: the pair in metadata beside the carrier Shopify reported, and
+     * the selection label as the requested preference.
+     */
+    function shopifySelected(string $pair, string $carrier, array $attributes = []): Package
+    {
+        return packageFor(array_merge([
+            'carrier' => $carrier,
+            'requested_service' => "Shopify's ".$pair,
+            'metadata' => [
+                'shopify_tracking_company' => $carrier,
+                'shopify_requested_service_code' => $pair,
+                'shopify_honoured_selection' => $pair,
+            ],
+        ], $attributes));
+    }
+
+    it('fills in the service where the number and the label both decline', function (): void {
+        // A UPS indicator the 1Z table has no evidence for, on a raster label
+        // with nothing to read: exactly the package the selection was kept for.
+        $inference = inferrer()->infer(shopifySelected('ups_shipping:59', 'UPS', [
+            'tracking_number' => ups1zWithIndicator('59'),
+        ]));
+
+        expect($inference->isResolved())->toBeTrue()
+            ->and($inference->service)->toBe('UPS 2nd Day Air A.M.')
+            ->and($inference->method)->toBe(ServiceInferrer::METHOD_SHOPIFY_SELECTION)
+            ->and($inference->rulesetVersion)->not->toBeEmpty();
+    });
+
+    it('lets a decode that agrees with the selection stand, under the decode\'s own method', function (): void {
+        $inference = inferrer()->infer(shopifySelected('usps:GroundAdvantage', 'USPS', [
+            'tracking_number' => IMPB_GROUND_ADVANTAGE,
+        ]));
+
+        expect($inference->service)->toBe('USPS Ground Advantage')
+            ->and($inference->method)->toBe(ServiceInferrer::METHOD_USPS_STC);
+    });
+
+    it('declines when the decode and the honoured selection name different services', function (): void {
+        // Priority Mail asked for, a Ground Advantage number returned. Two
+        // sources disagreeing is a wrong table somewhere, not a tie to break.
+        $inference = inferrer()->infer(shopifySelected('usps:Priority', 'USPS', [
+            'tracking_number' => IMPB_GROUND_ADVANTAGE,
+        ]));
+
+        expect($inference->isResolved())->toBeFalse()
+            ->and($inference->reason)->toContain('USPS Ground Advantage')
+            ->and($inference->reason)->toContain('Priority Mail');
+    });
+
+    it('declines a selection whose carrier is not the one that sold the label', function (): void {
+        // Asked for USPS, and Shopify reports UPS sold it: whatever happened,
+        // the selection was not honoured and names nothing about this label.
+        $inference = inferrer()->infer(shopifySelected('usps:Priority', 'UPS', [
+            'tracking_number' => ups1zWithIndicator('59'),
+        ]));
+
+        expect($inference->isResolved())->toBeFalse()
+            ->and($inference->reason)->toContain('sold the label');
+    });
+
+    it('reads nothing into auto or a pair never seen honoured', function (string $pair): void {
+        expect(inferrer()->infer(shopifySelected($pair, 'UPS', [
+            'tracking_number' => ups1zWithIndicator('59'),
+        ]))->isResolved())->toBeFalse();
+    })->with(['auto', 'dhl_express:D', 'ups_shipping:14', 'usps:usps_ground_advantage']);
+
+    it('is the only rung that can answer a DHL Express package', function (): void {
+        // A DHL waybill encodes no service and Shopify's test purchase returned a
+        // placeholder number besides, so rung 1 has nothing; the selection is
+        // what names the service. Bought 2026-09-17 on the development store.
+        $inference = inferrer()->infer(shopifySelected('dhl_express:P', 'DHL Express', [
+            'tracking_number' => '9000000000',
+        ]));
+
+        expect($inference->service)->toBe('DHL Express Worldwide')
+            ->and($inference->method)->toBe(ServiceInferrer::METHOD_SHOPIFY_SELECTION);
+    });
+
+    it('agrees with the label token a DHL Express label prints', function (): void {
+        // Same purchase, `auto` instead: no selection, so the label's own
+        // EXPRESS WORLDWIDE field is what answers, and it must name the same
+        // service the selection does or every such package reads as a
+        // disagreement.
+        $inference = inferrer()->infer(packageFor([
+            'carrier' => 'DHL Express',
+            'tracking_number' => '9000000000',
+            'label_data' => zplPrinting('EXPRESS WORLDWIDE'),
+        ]));
+
+        expect($inference->service)->toBe('DHL Express Worldwide')
+            ->and($inference->method)->toStartWith(ServiceInferrer::METHOD_LABEL_TEXT);
+    });
+
+    it('ignores the pair left behind by a voided label', function (): void {
+        // The raw pair survives a void in metadata by design; `requested_service`
+        // does not, and that is what says the selection still describes this label.
+        $package = shopifySelected('ups_shipping:59', 'UPS', [
+            'tracking_number' => ups1zWithIndicator('59'),
+            'requested_service' => null,
+        ]);
+
+        expect(inferrer()->infer($package)->isResolved())->toBeFalse();
+    });
+
+    it('reads only the key the purchase wrote for it, never the raw pair', function (): void {
+        // The raw pair and the tracking company are each written only when
+        // present and both survive a void, so a re-ship that omits the company
+        // would leave the voided label's beside this label's pair. The purchase
+        // writes `shopify_honoured_selection` unconditionally -- null here,
+        // because Shopify named no carrier -- and that is the only key read.
+        $package = shopifySelected('ups_shipping:59', 'UPS', [
+            'tracking_number' => ups1zWithIndicator('59'),
+            'metadata' => [
+                'shopify_tracking_company' => 'UPS',
+                'shopify_requested_service_code' => 'ups_shipping:59',
+                'shopify_honoured_selection' => null,
+            ],
+        ]);
+
+        expect(inferrer()->infer($package)->isResolved())->toBeFalse();
+    });
+
+    it('both Ground Saver tiers name the one Ground Saver service', function (string $pair): void {
+        expect(inferrer()->infer(shopifySelected($pair, 'UPS', [
+            'tracking_number' => ups1zWithIndicator('YN'),
+        ]))->service)->toBe('UPS Ground Saver');
+    })->with(['ups_shipping:92', 'ups_shipping:93']);
+
+    it('agrees with the 1Z table on every UPS pair the table decodes', function (string $pair, string $indicator): void {
+        // The two tables share a vocabulary on purpose: a decode and a selection
+        // for the same service must compare equal, or every such package would
+        // read as a disagreement.
+        $inference = inferrer()->infer(shopifySelected($pair, 'UPS', [
+            'tracking_number' => ups1zWithIndicator($indicator),
+        ]));
+
+        expect($inference->isResolved())->toBeTrue()
+            ->and($inference->method)->toBe(ServiceInferrer::METHOD_UPS_1Z);
+    })->with([
+        ['ups_shipping:01', '01'],
+        ['ups_shipping:02', '02'],
+        ['ups_shipping:03', '03'],
+        ['ups_shipping:12', '12'],
+        ['ups_shipping:13', '13'],
+        ['ups_shipping:65', '04'],
+        ['ups_shipping:07', '66'],
+        ['ups_shipping:08', '67'],
+        ['ups_shipping:11', '68'],
+        ['ups_shipping:92', 'YW'],
+    ]);
+});
+
 describe('UPS 1Z validation', function (): void {
     it('reads the service level indicator out of bytes 9 and 10', function (): void {
         $ups = Ups1zTrackingNumber::tryParse(UPS_1Z_GROUND_SAVER);
