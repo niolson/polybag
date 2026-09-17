@@ -357,33 +357,20 @@ class FedexAdapter implements DirectCarrierAdapter
 
     /**
      * Build the FedEx rate API request.
+     *
+     * The same request goes to the sandbox as to production. The sandbox is a
+     * virtualisation layer in front of a rating engine: a request whose shape
+     * matches one of its canned cases gets that canned body back, addresses
+     * ignored, and anything else is passed to the engine. Measured 2026-09-17
+     * (`docs/issues/fedex-sandbox-rate-testing`): the shape built here — a
+     * packaging type, a ship date, a weight-only line item — matches a
+     * complete canned domestic response. The docs example this method used to
+     * substitute in sandbox mode no longer matches anything and 503s, and the
+     * one canned response that is cut off mid-body is matched by a ship date
+     * *without* a packaging type, which this method never sends.
      */
     private function buildRateApiRequest(RateRequest $request, array $serviceCodes, ?CarrierAccount $account): Rates
     {
-        if ($this->isSandbox()) {
-            // The FedEx sandbox returns truncated (unparseable) JSON for most request
-            // shapes. The example payload from the FedEx developer docs is the one known
-            // request that produces a valid, complete response from the sandbox API.
-            $apiRequest = new Rates;
-            $apiRequest->body()->set([
-                'accountNumber' => ['value' => '740561073'],
-                'rateRequestControlParameters' => [
-                    'returnTransitTimes' => true,
-                ],
-                'requestedShipment' => [
-                    'shipper' => ['address' => ['postalCode' => '65247', 'countryCode' => 'US']],
-                    'recipient' => ['address' => ['postalCode' => '72348', 'countryCode' => 'US']],
-                    'pickupType' => 'DROPOFF_AT_FEDEX_LOCATION',
-                    'rateRequestType' => ['ACCOUNT', 'LIST'],
-                    'requestedPackageLineItems' => [
-                        ['weight' => ['units' => 'LB', 'value' => '1']],
-                    ],
-                ],
-            ]);
-
-            return $apiRequest;
-        }
-
         $package = $request->packages[0];
         $smartPostInfoDetail = $this->buildSmartPostInfoDetail($request, $serviceCodes);
         $lineItemFields = $this->buildPackageSpecialServices(
@@ -1094,8 +1081,9 @@ class FedexAdapter implements DirectCarrierAdapter
         try {
             $rateReplyDetails = $response->json('output.rateReplyDetails', []);
         } catch (\JsonException $e) {
-            // FedEx sandbox returns truncated JSON (confirmed: Postman also receives the
-            // same cut-off response). Nothing to fix here; just return empty rates.
+            // One of the FedEx sandbox's canned rate responses is stored cut off
+            // mid-body, Content-Length and all, so it is deterministic and not
+            // worth retrying. Nothing to fix here; just return empty rates.
             logger()->warning('FedEx rate response could not be decoded — likely truncated sandbox response', [
                 'error' => $e->getMessage(),
                 'body_len' => strlen($response->body()),
@@ -1485,10 +1473,11 @@ class FedexAdapter implements DirectCarrierAdapter
     /**
      * Whether this rate request has to be quoted locally rather than by FedEx.
      *
-     * The sandbox rate API answers the canned domestic payload in
-     * {@see self::buildRateApiRequest()} whatever it is asked, so an
-     * international destination gets back domestic services and nothing
-     * selectable. {@see FedexSandboxInternationalRates} stands in for it.
+     * The sandbox rate API answers the request shape built by
+     * {@see self::buildRateApiRequest()} with a canned domestic response and
+     * ignores the addresses in it, so an international destination gets back
+     * domestic services and nothing selectable.
+     * {@see FedexSandboxInternationalRates} stands in for it.
      */
     private function quotesInternationalLocally(RateRequest $request): bool
     {

@@ -12,10 +12,10 @@ use Illuminate\Support\Collection;
 /**
  * Stand-in FedEx international rates for sandbox mode.
  *
- * The FedEx sandbox rate API rewrites the shipper and recipient addresses of
- * whatever it is sent — see the canned payload in {@see FedexAdapter} — so it
- * only ever answers with domestic services, and no international service can
- * be selected on the Ship page while sandbox mode is on. These quotes stand in
+ * The FedEx sandbox rate API answers the request shape {@see FedexAdapter}
+ * builds with a canned US-domestic response, whatever addresses it carries —
+ * so it only ever answers with domestic services, and no international
+ * service can be selected on the Ship page while sandbox mode is on. These quotes stand in
  * for that missing half so the international workflow (customs, commercial
  * invoice, label purchase) can be walked end to end. Only rating is faked:
  * the label itself is still bought from the real FedEx sandbox, which does

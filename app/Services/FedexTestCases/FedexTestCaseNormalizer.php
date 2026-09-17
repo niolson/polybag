@@ -13,6 +13,18 @@ class FedexTestCaseNormalizer
     public function normalize(FedexTestCaseData $testCase, string $shipperAccountNumber): array
     {
         $payload = $this->resolveArray($testCase->request, $shipperAccountNumber);
+        $payload = $payload instanceof \stdClass ? (array) $payload : $payload;
+
+        // A rate fixture goes out as written, placeholders aside. The sandbox
+        // matches rate requests on their shape, so the shipment fix-ups below —
+        // a synthesised totalCustomsValue, a dropped totalWeight, a label option
+        // — would change what it answers and the fixture would no longer be
+        // FedEx's own documented case.
+        if ($testCase->requestType === 'rate') {
+            $payload['accountNumber'] ??= ['value' => $shipperAccountNumber];
+
+            return $payload;
+        }
 
         return $this->normalizePayload($payload, $shipperAccountNumber);
     }
