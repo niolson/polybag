@@ -88,8 +88,27 @@ it('does not give an Amazon Buy Shipping label the Shopify void guidance', funct
     Livewire::test(ListPackages::class)
         ->assertActionVisible(TestAction::make('void')->table($package))
         ->assertActionEnabled(TestAction::make('void')->table($package))
-        ->assertSee('via Amazon Buy Shipping')
-        ->assertDontSee('via Shopify Shipping');
+        ->assertSee('via Amazon')
+        ->assertDontSee('via Shopify');
+});
+
+it('keeps the packages table narrow by hiding secondary columns and grouping row actions', function (): void {
+    $package = Package::factory()->shipped()->create([
+        'tracking_number' => '9400111899223197428490',
+        'service' => 'USPS Ground Advantage Machinable Cubic Non-Soft Pack Tier 1',
+    ]);
+
+    Livewire::test(ListPackages::class)
+        ->assertTableColumnExists('shipment.shipment_reference', fn ($column): bool => $column->getDescriptionBelow() === '9400111899223197428490', $package)
+        ->assertTableColumnDoesNotExist('tracking_number')
+        ->assertTableColumnExists('service', fn ($column): bool => $column->canWrap())
+        ->assertTableColumnExists('weight', fn ($column): bool => ! $column->isToggledHiddenByDefault())
+        ->assertTableColumnExists('tracking_status', fn ($column): bool => $column->isToggledHiddenByDefault())
+        ->assertTableColumnExists('exported', fn ($column): bool => $column->isToggledHiddenByDefault())
+        ->assertActionVisible(TestAction::make('track')->table($package))
+        ->assertActionVisible(TestAction::make('view')->table($package))
+        ->assertActionVisible(TestAction::make('edit')->table($package))
+        ->assertActionVisible(TestAction::make('void')->table($package));
 });
 
 it('filters Amazon Buy Shipping packages by postage source rather than carrier text', function (): void {
