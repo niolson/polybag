@@ -2075,7 +2075,7 @@ it('turns a ship request that got no answer into a decline that says to try agai
     // look for a label that will never be charged.
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
-        CreateShipment::class => MockResponse::make()->throw(fn (PendingRequest $pending) => new FatalRequestException(new RuntimeException('Connection timed out'), $pending)),
+        CreateShipment::class => MockResponse::make()->throw(fn (PendingRequest $pending): FatalRequestException => new FatalRequestException(new RuntimeException('Connection timed out'), $pending)),
     ]);
 
     $response = $this->adapter->createShipment(new ShipRequest(

@@ -2300,9 +2300,9 @@ it('leaves the question open on any other reprint answer', function (MockRespons
 
     expect($this->adapter->recoverPurchase(uspsOfferShipRequest($offer)))->toBeNull();
 })->with([
-    'a different 400' => fn () => uspsLabelError('160999', 'Something else'),
+    'a different 400' => fn (): MockResponse => uspsLabelError('160999', 'Something else'),
     'a 503' => fn () => MockResponse::make(['error' => ['message' => 'Service Unavailable']], 503),
-    'no answer' => fn () => MockResponse::make()->throw(fn (PendingRequest $pending) => new FatalRequestException(new RuntimeException('Connection timed out'), $pending)),
+    'no answer' => fn () => MockResponse::make()->throw(fn (PendingRequest $pending): FatalRequestException => new FatalRequestException(new RuntimeException('Connection timed out'), $pending)),
 ]);
 
 it('settles an offer spent before any key was recorded, since USPS cannot be asked about it', function (): void {

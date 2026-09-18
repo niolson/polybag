@@ -1943,9 +1943,9 @@ it('leaves the question open on any other Label Recovery answer', function (Mock
 
     expect($this->adapter->recoverPurchase(upsOfferShipRequest(ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['carrier' => 'UPS']))))->toBeNull();
 })->with([
-    'a different 400' => fn () => upsLabelRecoveryError('9801050', 'Label Stock Size not allowed for specified Label Image Type.'),
+    'a different 400' => fn (): MockResponse => upsLabelRecoveryError('9801050', 'Label Stock Size not allowed for specified Label Image Type.'),
     'a 503' => fn () => MockResponse::make(['response' => ['errors' => [['code' => '10429', 'message' => 'Service Unavailable']]]], 503),
-    'no answer' => fn () => MockResponse::make()->throw(fn (PendingRequest $pending) => new FatalRequestException(new RuntimeException('Connection timed out'), $pending)),
+    'no answer' => fn () => MockResponse::make()->throw(fn (PendingRequest $pending): FatalRequestException => new FatalRequestException(new RuntimeException('Connection timed out'), $pending)),
     'a label with no tracking number' => fn () => MockResponse::make(['LabelRecoveryResponse' => ['Response' => ['ResponseStatus' => ['Code' => '1']], 'LabelResults' => []]]),
 ]);
 
