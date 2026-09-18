@@ -348,6 +348,20 @@ declined purchase, and `recordFailure()` on it lets a retry buy a duplicate. The
 premise — that no direct carrier can be asked what happened — was then checked against the
 carrier specs and is wrong for two of three: USPS reprints by `X-Idempotency-Key` and UPS
 recovers a label by `ReferenceNumber`, and both bill an orphan. Neither key is sent today.
-`18` opened for the recovery work; `resolveTimedOutOffer()` already keys on
-`RecoversUnresolvedPurchase`, so each adapter leaves the carve-out as it implements the
-contract, and FedEx — which does not bill an untendered label — keeps it on purpose.
+`18` opened for the recovery work; the carve-out keys on `RecoversUnresolvedPurchase`, so
+each adapter leaves it as it implements the contract, and FedEx — which does not bill an
+untendered label — keeps it on purpose.
+
+**2026-09-18, review of the branch** — two more findings, both fixed. (1) A declined direct
+purchase left the offer consumed, and a retry with the same offer — USPS rejects the address,
+the packer fixes it and presses Ship — was refused as *Rate Already Used* with "check for a
+tracking number", though the row proves nothing was bought. `OfferRejection::PurchaseDeclined`
+now covers a consumed offer with `purchase_failed_at` set: same one-way consumption, but the
+remedy is the re-quote the Ship page performs on the spot. (2) The timeout carve-out was
+unreachable: every direct adapter catches the exception inside `createShipment()` and returns
+a failed `ShipResponse`, so a timeout was already settled as a decline and
+`resolveTimedOutOffer()` never ran — while the state it was for (a worker killed between the
+claim and the reply) had no exit at all. The carve-out moved to where that state is actually
+seen: `recoverPurchase()` settles a stranded *direct-carrier* offer on the next attempt when
+the seller cannot be asked. A stalled channel offer whose data source is gone is deliberately
+not settled — the channel may have sold the label — and stays behind `16`.

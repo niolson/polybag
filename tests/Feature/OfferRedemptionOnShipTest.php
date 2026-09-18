@@ -157,6 +157,26 @@ it('refuses a second purchase against an offer already spent', function (): void
         ->and($second->title)->toBe('Rate Already Used');
 });
 
+it('sends a declined offer back to a re-quote, not to a search for a label', function (): void {
+    // USPS rejected the address; the packer fixed it and pressed Ship again
+    // on the same page, so the same offer comes back. The row proves nothing
+    // was bought, and the packer must not be told to look for a tracking
+    // number that cannot exist.
+    $package = Package::factory()->create(['status' => PackageStatus::Unshipped]);
+    $offer = ShippingOffer::factory()->declined()->for($package)->create(['carrier' => 'MockCarrier']);
+    mockShippingAdapter();
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: rateForOffer($offer)),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Purchase Declined')
+        ->and($result->requiresRequote)->toBeTrue()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});
+
 it('settles a declined purchase rather than leaving the package jammed', function (): void {
     $package = Package::factory()->create(['status' => PackageStatus::Unshipped]);
     $offer = ShippingOffer::factory()->for($package)->create(['carrier' => 'MockCarrier', 'postage_source' => PostageSource::CarrierAccount]);
@@ -176,12 +196,13 @@ it('settles a declined purchase rather than leaving the package jammed', functio
         ->and($offer->fresh()->purchase_failure_reason)->toBe('The carrier rejected the shipment.');
 });
 
-it('settles a direct offer as failed when a carrier that cannot be asked never answers', function (): void {
-    // A timeout is not an answer, and for a source that can be asked later
-    // the offer stays unresolved (below). None of USPS, FedEx or UPS can be
-    // asked — nothing deduplicates a repeated purchase — so for them the
-    // unresolved state would be terminal after one dropped connection. The
-    // claim already stopped the double-click; the package stays buyable.
+it('settles a stranded direct offer on the next attempt, since nobody can be asked about it', function (): void {
+    // A timeout is not an answer. The real direct adapters never let one out
+    // — each turns it into a failed ShipResponse, which is settled as a
+    // decline — so an offer left consumed-but-unresolved on a direct carrier
+    // is a worker killed between the claim and the reply. None of USPS, FedEx
+    // or UPS can be asked what became of it, so the state can never resolve;
+    // the next attempt settles it and buys, rather than stranding the package.
     $package = Package::factory()->create(['status' => PackageStatus::Unshipped]);
     $offer = ShippingOffer::factory()->direct()->for($package)->create(['carrier' => 'MockCarrier']);
 
@@ -196,14 +217,11 @@ it('settles a direct offer as failed when a carrier that cannot be asked never a
         new PackageShippingRequest(selectedRate: rateForOffer($offer)),
     );
 
+    // The exception escaped, so nothing settled it here.
     expect($result->success)->toBeFalse()
         ->and($result->title)->toBe('Carrier Timeout')
-        ->and($offer->fresh()->consumed_at)->not->toBeNull()
-        ->and($offer->fresh()->isAwaitingPurchaseConfirmation())->toBeFalse()
-        ->and($offer->fresh()->purchase_failed_at)->not->toBeNull()
-        ->and($offer->fresh()->purchase_failure_reason)->toContain('Timed out');
+        ->and($offer->fresh()->isAwaitingPurchaseConfirmation())->toBeTrue();
 
-    // Buyable on retry: a fresh offer for the same package goes through.
     $retry = ShippingOffer::factory()->direct()->for($package)->create(['carrier' => 'MockCarrier']);
     app(CarrierRegistry::class)->reset();
     mockShippingAdapter();
@@ -214,7 +232,10 @@ it('settles a direct offer as failed when a carrier that cannot be asked never a
     );
 
     expect($again->success)->toBeTrue()
-        ->and($package->fresh()->tracking_number)->toBe('TRACK123');
+        ->and($package->fresh()->tracking_number)->toBe('TRACK123')
+        ->and($offer->fresh()->isAwaitingPurchaseConfirmation())->toBeFalse()
+        ->and($offer->fresh()->purchase_failed_at)->not->toBeNull()
+        ->and($offer->fresh()->purchase_failure_reason)->toContain('cannot be asked');
 });
 
 it('leaves an offer unresolved when a seller that can be asked later never answers', function (): void {
@@ -250,10 +271,12 @@ it('leaves an offer unresolved when a seller that can be asked later never answe
 
 it('refuses to buy while an earlier purchase is unaccounted for', function (): void {
     $package = Package::factory()->create(['status' => PackageStatus::Unshipped]);
-    ShippingOffer::factory()->awaitingConfirmation()->for($package)->create();
+    ShippingOffer::factory()->direct()->awaitingConfirmation()->for($package)->create(['carrier' => 'MockCarrier']);
 
-    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    // The stalled offer's seller can be asked and, asked, does not know.
+    $adapter = Mockery::mock(CarrierAdapterInterface::class, RecoversUnresolvedPurchase::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('recoverPurchase')->once()->andReturnNull();
     $adapter->shouldNotReceive('createShipment');
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
 
@@ -270,6 +293,28 @@ it('refuses to buy while an earlier purchase is unaccounted for', function (): v
         ->and($result->title)->toBe('Earlier Purchase Unresolved')
         ->and($result->leavePackageIntact)->toBeTrue()
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});
+
+it('keeps a stalled channel purchase blocked when its source can no longer be found', function (): void {
+    // Not a direct carrier: the channel may have sold the label, and the way
+    // to ask is to restore the source. Nothing settles it in the meantime.
+    $package = Package::factory()->create(['status' => PackageStatus::Unshipped]);
+    $stalled = ShippingOffer::factory()->awaitingConfirmation()->for($package)->create([
+        'postage_source' => PostageSource::PostageDataSource,
+        'postage_data_source_id' => null,
+    ]);
+    mockShippingAdapter();
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(
+            selectedRate: quotedDirectly($package, new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25)),
+        ),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Earlier Purchase Unresolved')
+        ->and($stalled->fresh()->isAwaitingPurchaseConfirmation())->toBeTrue();
 });
 
 it('buys again once the stalled purchase is settled', function (): void {

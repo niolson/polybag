@@ -17,12 +17,16 @@ arrives — a dropped connection, a proxy giving up, our own client timeout. Fro
 that is indistinguishable from "the carrier never received it": one observation, two
 truths.
 
-`14` gave direct rates an offer and an atomic claim, and then made a deliberate carve-out:
-a timeout from a seller that does not implement `RecoversUnresolvedPurchase` resolves the
-offer as failed, so the package stays buyable (`resolveTimedOutOffer()`). The reasoning was
-that none of USPS, FedEx or UPS could be asked what happened, so the alternative — the
-strict "spent, nothing confirmed" block — would be terminal for the package with no way
-out. That premise was checked on review and is wrong for two of the three:
+`14` gave direct rates an offer and an atomic claim, and then made a deliberate carve-out
+for a direct-carrier offer left consumed with no reply: on the next attempt,
+`recoverPurchase()` settles it as failed when the seller does not implement
+`RecoversUnresolvedPurchase`, so the package stays buyable. (A plain timeout never even
+reaches that state — each direct adapter catches it inside `createShipment()` and answers
+with a failed `ShipResponse`, which is settled as a decline; the carve-out is for a worker
+killed between the claim and the reply.) The reasoning was that none of USPS, FedEx or UPS
+could be asked what happened, so the alternative — the strict "spent, nothing confirmed"
+block — would be terminal for the package with no way out. That premise was checked on
+review and is wrong for two of the three:
 
 | Carrier | Bills an orphaned label? | Can be asked "did it go through?" | We send what it would need? |
 |---|---|---|---|
@@ -86,8 +90,11 @@ Then:
    implements `RecoversUnresolvedPurchase`: `recoverPurchase()` calls reprint by the key,
    builds a `ShipResponse` from the reply on 200, returns a failed `ShipResponse` on the
    status probe 1 established for an unknown key, and `null` on anything else. Once it
-   implements the contract, `resolveTimedOutOffer()` leaves its offers unresolved by
-   itself — no workflow change.
+   implements the contract, `recoverPurchase()` asks it instead of settling — no
+   workflow change. The adapter must also stop swallowing transport errors on the
+   purchase: today a USPS timeout is caught inside `createShipment()` and returned as a
+   failure, which settles the offer as a decline; with a key to ask by, the exception
+   must propagate (as Amazon's does) so the offer stays unresolved until reprint answers.
 2. **USPS void of an orphan.** `recoverPurchase()` answering with a label is the normal
    path (ship on it). Cancel-by-key is for `16`'s "nothing should have been bought"
    outcome, and for a purchase that timed out on a package the operator has since
@@ -101,8 +108,9 @@ Then:
    `RecoversUnresolvedPurchase` through Label Recovery by that reference.
 4. **UPS, if probe 2 fails.** Record why in this issue, keep the carve-out for UPS, and
    change nothing.
-5. **FedEx wording.** `resolveTimedOutOffer()` stays, and the result the packer sees for a
-   FedEx timeout says *Label purchase failed — try again*, not that a label may exist.
+5. **FedEx wording.** FedEx keeps swallowing the timeout into a failed `ShipResponse`, and
+   the message the packer sees for it says *Label purchase failed — try again*, not that
+   a label may exist.
    A generic "a label may already exist" for a carrier that will never bill one sends
    the packer to a portal for nothing.
 6. **`RecoversUnresolvedPurchase` docblock.** It says a source without an idempotent
@@ -155,4 +163,4 @@ Then:
 ## Blocked by
 
 `14` (branch `postage-source-split-14`), which introduces the offer row a direct
-purchase is spent against and the `resolveTimedOutOffer()` carve-out this narrows.
+purchase is spent against and the `recoverPurchase()` carve-out this narrows.

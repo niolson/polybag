@@ -93,7 +93,7 @@ class OfferStore
         }
 
         if ($offer->isConsumed()) {
-            return OfferRedemption::rejected(OfferRejection::AlreadyConsumed, $offer);
+            return OfferRedemption::rejected($this->consumedRejection($offer), $offer);
         }
 
         if ($offer->environment !== SourceEnvironment::current()) {
@@ -161,13 +161,29 @@ class OfferStore
             // already bought this" is more actionable than "and it had also
             // expired".
             return OfferRedemption::rejected(match (true) {
-                $offer->isConsumed() => OfferRejection::AlreadyConsumed,
+                $offer->isConsumed() => $this->consumedRejection($offer),
                 $offer->environment !== $environment => OfferRejection::EnvironmentChanged,
                 default => OfferRejection::Expired,
             }, $offer);
         }
 
         return OfferRedemption::available($offer->refresh());
+    }
+
+    /**
+     * Which refusal a spent offer gets.
+     *
+     * A declined purchase is settled: the source answered and sold nothing, so
+     * the packer is sent to re-quote rather than told to look for a label
+     * that provably does not exist. Every other consumed offer — a label
+     * bought, or an outcome nobody knows — is `AlreadyConsumed`, whose remedy
+     * is a person looking before anything is bought again.
+     */
+    private function consumedRejection(ShippingOffer $offer): OfferRejection
+    {
+        return $offer->purchase_failed_at !== null
+            ? OfferRejection::PurchaseDeclined
+            : OfferRejection::AlreadyConsumed;
     }
 
     /**
@@ -196,11 +212,12 @@ class OfferStore
      * must leave the offer unresolved so
      * {@see awaitingPurchaseConfirmation()} blocks further spending.
      *
-     * One exception, made by the purchase path rather than here: a timeout
-     * from a source that cannot be asked what happened — none of USPS, FedEx
-     * or UPS implements `RecoversUnresolvedPurchase` — is recorded as a
-     * failure, because the unresolved state would otherwise be terminal for
-     * the package after a single dropped connection.
+     * One exception, made by the purchase path rather than here: an offer
+     * left unresolved on a source that cannot be asked what happened — none
+     * of USPS, FedEx or UPS implements `RecoversUnresolvedPurchase` — is
+     * recorded as a failure on the next attempt, because for that source the
+     * unresolved state can never be resolved and would otherwise be terminal
+     * for the package. See `EloquentPackageShippingWorkflow::recoverPurchase()`.
      */
     public function recordFailure(ShippingOffer $offer, string $reason): void
     {

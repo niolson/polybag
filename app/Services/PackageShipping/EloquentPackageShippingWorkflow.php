@@ -19,6 +19,7 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\UnattendedRateSelection;
 use App\Enums\PackageStatus;
+use App\Enums\PostageSource;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\MissingDeclaredValueException;
 use App\Exceptions\ShopifyDeclaredWeightException;
@@ -449,8 +450,6 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 'package_id' => $package->id,
             ]);
 
-            $this->resolveTimedOutOffer($offer, $adapter);
-
             return PackageShippingResult::failed(
                 'Carrier Timeout',
                 "The {$seller} API is not responding. Please try again in a few moments.",
@@ -731,10 +730,45 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * already been paid for. A definite "nothing was bought" resolves the offer
      * and returns null, so the caller carries on to the purchase the operator
      * actually asked for; anything else leaves the offer unresolved on purpose.
+     *
+     * A direct carrier that cannot be asked gets the second answer without
+     * the question. "Spent, nothing confirmed" is only a useful state when a
+     * later attempt can ask what happened, which is what
+     * {@see RecoversUnresolvedPurchase} promises and only Amazon implements;
+     * USPS, FedEx and UPS cannot (FedEx's `customerTransactionId` and UPS's
+     * `transId` are echoed, not deduplicated, and nothing is sent to USPS —
+     * `postage-source-split/18` is what changes that). For them the state can
+     * never resolve, so leaving it would strand the package behind a refusal
+     * nobody can clear, over a purchase that in practice was a worker killed
+     * between the claim and the reply — the adapters themselves turn a
+     * timeout into a decline. Settling it keeps the package buyable, which is
+     * what such a package was before direct rates were offers at all, and the
+     * claim has already stopped the double-click.
+     *
+     * Only a direct carrier. An offer whose channel can no longer be found —
+     * a data source deleted or re-pointed since the quote — is not settled:
+     * the channel may well have sold the label, and someone restoring the
+     * source is how it gets asked. Until then it blocks, and `16` is the
+     * by-hand way out.
      */
     private function recoverPurchase(Package $package, ShippingOffer $offer, PackageShippingRequest $request): ?PackageShippingResult
     {
         $seller = $this->postageSources->sellerFor($offer);
+
+        if ($offer->postage_source === PostageSource::CarrierAccount && ! $seller instanceof RecoversUnresolvedPurchase) {
+            logger()->warning('Settled an unresolved purchase on a source that cannot be asked what became of it', [
+                'package_id' => $package->id,
+                'offer' => $offer->public_id,
+                'carrier' => $offer->carrier,
+            ]);
+
+            $this->offerStore->recordFailure(
+                $offer,
+                'No reply was recorded and the carrier cannot be asked what happened; settled on the next attempt',
+            );
+
+            return null;
+        }
 
         if (! $seller instanceof RecoversUnresolvedPurchase) {
             return null;
@@ -1013,43 +1047,21 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      *
      * Only ever called on a response — a reply from the source is proof that
      * nothing was bought. An exception is not: a timeout leaves the offer
-     * unresolved on purpose, so the next attempt is blocked until someone
-     * establishes whether a label exists — with the one exception
-     * {@see resolveTimedOutOffer()} makes.
+     * unresolved on purpose, so the next attempt asks the source what
+     * happened before anything else is bought — see {@see recoverPurchase()},
+     * including what it does for a source that cannot be asked.
+     *
+     * The direct carrier adapters never let a transport error reach here:
+     * each catches it inside `createShipment()` and answers with a failed
+     * `ShipResponse`, so a USPS, FedEx or UPS timeout arrives as a decline
+     * and is settled by this method like one. Only Amazon lets the exception
+     * through, and Amazon is the seller that can be asked.
      */
     private function resolveOfferAsFailed(?ShippingOffer $offer, string $reason): void
     {
         if ($offer !== null) {
             $this->offerStore->recordFailure($offer, $reason);
         }
-    }
-
-    /**
-     * Settle a claimed offer whose purchase timed out, when nobody could ever
-     * settle it otherwise.
-     *
-     * "Spent, nothing confirmed" is only a useful state when a later attempt
-     * can ask the source what happened, which is what
-     * {@see RecoversUnresolvedPurchase} promises and only Amazon implements.
-     * USPS, FedEx and UPS cannot: FedEx's `customerTransactionId` and UPS's
-     * `transId` are echoed, not deduplicated, and USPS has nothing — so for a
-     * direct rate the state would be terminal after a single dropped
-     * connection, with the package refusing every purchase and no UI to clear
-     * it. That is a regression from what a timeout meant before direct rates
-     * were offers at all: try again.
-     *
-     * So the offer is resolved as failed and the package stays buyable, which
-     * is today's behaviour plus the atomic claim that stopped the double-click.
-     * A seller that *can* recover keeps the strict block; resolving one of its
-     * offers by hand is `postage-source-split/16`.
-     */
-    private function resolveTimedOutOffer(?ShippingOffer $offer, ?PostageOfferSource $seller): void
-    {
-        if ($offer === null || ! $offer->isConsumed() || $seller instanceof RecoversUnresolvedPurchase) {
-            return;
-        }
-
-        $this->offerStore->recordFailure($offer, 'Timed out; the carrier did not answer');
     }
 
     /**

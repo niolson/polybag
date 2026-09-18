@@ -179,8 +179,24 @@ it('reports the same refusals when inspecting as when redeeming', function (Offe
 })->with([
     'expired' => [OfferRejection::Expired, fn (Package $p) => ShippingOffer::factory()->expired()->for($p)->create()],
     'consumed' => [OfferRejection::AlreadyConsumed, fn (Package $p) => ShippingOffer::factory()->consumed()->for($p)->create()],
+    'declined' => [OfferRejection::PurchaseDeclined, fn (Package $p) => ShippingOffer::factory()->declined()->for($p)->create()],
     'wrong package' => [OfferRejection::WrongPackage, fn (Package $p) => ShippingOffer::factory()->create()],
 ]);
+
+it('tells a declined offer apart from one that may have bought a label', function (): void {
+    $package = Package::factory()->create();
+    $store = app(OfferStore::class);
+
+    $declined = ShippingOffer::factory()->declined()->for($package)->create();
+    $unknown = ShippingOffer::factory()->awaitingConfirmation()->for($package)->create();
+
+    // Both are spent. Only one of them might have a label behind it, and only
+    // that one must send a person to look before anything is re-quoted.
+    expect($store->redeem($package, $declined->public_id)->rejection)->toBe(OfferRejection::PurchaseDeclined)
+        ->and(OfferRejection::PurchaseDeclined->requiresRequote())->toBeTrue()
+        ->and($store->redeem($package, $unknown->public_id)->rejection)->toBe(OfferRejection::AlreadyConsumed)
+        ->and(OfferRejection::AlreadyConsumed->requiresRequote())->toBeFalse();
+});
 
 it('settles an offer the source declined so nothing stays unresolved', function (): void {
     $package = Package::factory()->create();

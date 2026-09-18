@@ -411,7 +411,9 @@ it('lets one direct offer be claimed once, so two purchases of it cannot both bu
 it('refuses the second purchase of a direct offer already spent', function (): void {
     // The carrier declines the first attempt, so the offer is consumed and
     // settled and the package is still unshipped. A double-click that lands
-    // after that names a spent offer and buys nothing.
+    // after that names a spent offer and buys nothing — and, because the
+    // decline proves nothing was bought, is sent to a re-quote rather than
+    // to look for a label.
     $package = packageOnMockCarrier();
     $quoted = quotedDirectly($package, new RateResponse('MockCarrier', 'PRIORITY_MAIL', 'Priority Mail', 9.65));
 
@@ -426,8 +428,8 @@ it('refuses the second purchase of a direct offer already spent', function (): v
     expect($first->success)->toBeFalse()
         ->and($first->title)->toBe('Shipping Error')
         ->and($second->success)->toBeFalse()
-        ->and($second->title)->toBe('Rate Already Used')
-        ->and($second->requiresRequote)->toBeFalse()
+        ->and($second->title)->toBe('Purchase Declined')
+        ->and($second->requiresRequote)->toBeTrue()
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 
