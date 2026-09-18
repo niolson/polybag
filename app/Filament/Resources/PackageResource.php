@@ -288,7 +288,8 @@ class PackageResource extends Resource
                     ->label('Shipment')
                     ->fontFamily('mono')
                     ->size('sm')
-                    ->sortable(),
+                    ->sortable()
+                    ->description(fn (Package $record): ?string => $record->tracking_number),
                 Tables\Columns\TextColumn::make('shipment.client.name')
                     ->label('Client')
                     ->placeholder('—')
@@ -297,20 +298,23 @@ class PackageResource extends Resource
                     ->label('Location')
                     ->placeholder('—')
                     ->visible(fn () => app(SettingsService::class)->get('multi_location_enabled', false)),
-                Tables\Columns\TextColumn::make('tracking_number')
-                    ->fontFamily('mono')
-                    ->size('sm')
-                    ->copyable()
-                    ->placeholder('—'),
                 CarrierLogoColumn::make('carrier')
                     ->placeholder('—')
+                    // Short in the cell so the column stays logo-width; the
+                    // full postage source name is one hover away.
                     ->description(fn (Package $record): ?string => match (true) {
-                        $record->isShopifyShipped() => 'via Shopify Shipping',
-                        $record->isAmazonShipped() => 'via Amazon Buy Shipping',
+                        $record->isShopifyShipped() => 'via Shopify',
+                        $record->isAmazonShipped() => 'via Amazon',
+                        default => null,
+                    })
+                    ->tooltip(fn (Package $record): ?string => match (true) {
+                        $record->isShopifyShipped() => 'Bought through Shopify Shipping',
+                        $record->isAmazonShipped() => 'Bought through Amazon Buy Shipping',
                         default => null,
                     }),
                 Tables\Columns\TextColumn::make('service')
                     ->placeholder('—')
+                    ->wrap()
                     // A blank service is a fact, not missing data: Shopify never
                     // reports what it bought. Show what was asked for instead,
                     // labelled as the request it was (ADR-0003 decision 7).
@@ -321,7 +325,8 @@ class PackageResource extends Resource
                 Tables\Columns\TextColumn::make('weight')
                     ->numeric()
                     ->suffix(' lbs')
-                    ->sortable(),
+                    ->sortable()
+                    ->toggleable(),
                 Tables\Columns\TextColumn::make('cost')
                     ->money('USD')
                     ->sortable(),
@@ -329,7 +334,8 @@ class PackageResource extends Resource
                     ->badge(),
                 Tables\Columns\TextColumn::make('tracking_status')
                     ->badge()
-                    ->placeholder('—'),
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\IconColumn::make('label_printed_at')
                     ->label('Printed')
                     ->boolean()
@@ -337,7 +343,8 @@ class PackageResource extends Resource
                         ? 'Last printed '.$record->label_printed_at->tz(Location::timezone())->format('M j, Y g:i A')
                         : 'Not printed'),
                 Tables\Columns\IconColumn::make('exported')
-                    ->boolean(),
+                    ->boolean()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('tracking_updated_at')
                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->toggleable(isToggledHiddenByDefault: true),
@@ -432,6 +439,8 @@ class PackageResource extends Resource
                         'image' => 'Image',
                     ]),
                 Tables\Filters\Filter::make('shipped_at')
+                    ->columnSpan(2)
+                    ->columns(2)
                     ->form([
                         DatePicker::make('shipped_from')
                             ->label('Shipped From'),
@@ -455,6 +464,8 @@ class PackageResource extends Resource
                         return $indicators;
                     }),
                 Tables\Filters\Filter::make('cost_range')
+                    ->columnSpan(2)
+                    ->columns(2)
                     ->form([
                         TextInput::make('cost_from')
                             ->label('Min Cost ($)')
@@ -479,44 +490,56 @@ class PackageResource extends Resource
 
                         return $indicators;
                     }),
-            ], layout: FiltersLayout::AboveContentCollapsible)
+            ], layout: FiltersLayout::Dropdown)
+            ->deferFilters(false)
+            ->filtersFormColumns(4)
+            // Track and Print are the everyday clicks, so they stay one tap away
+            // as icon buttons; the rest fold into a dropdown to keep the table
+            // narrow. View stays in the group (not just as the row link) because
+            // Filament derives the row link from the table's `view` action.
             ->recordActions([
-                Actions\ViewAction::make(),
-                static::makeTrackAction(),
+                static::makeTrackAction()
+                    ->iconButton()
+                    ->tooltip('Track'),
                 Actions\Action::make('reprint')
                     ->label(fn (Package $record): string => $record->label_printed_at ? 'Reprint' : 'Print')
+                    ->iconButton()
+                    ->tooltip(fn (Package $record): string => $record->label_printed_at ? 'Reprint label' : 'Print label')
                     ->icon('heroicon-o-printer')
                     ->color('gray')
                     ->visible(fn (Package $record): bool => $record->status === PackageStatus::Shipped && $record->label_data)
                     ->action(fn (Package $record, $livewire) => $livewire->printStoredPackageLabel($record->id)),
-                Actions\Action::make('void')
-                    ->label('Void Label')
-                    ->icon('heroicon-o-x-circle')
-                    ->color('danger')
-                    ->requiresConfirmation()
-                    ->modalHeading('Void Label')
-                    ->modalDescription('This will cancel the label with the carrier. The package will be kept with its dimensions so it can be re-shipped.')
-                    ->visible(fn (Package $record): bool => $record->status === PackageStatus::Shipped
-                        && $record->tracking_number
-                        && ($record->carrier || $record->isShopifyShipped()))
-                    // Shopify's API has no void operation at all, so offering a
-                    // live button here would only ever produce a failure.
-                    ->disabled(fn (Package $record): bool => $record->isShopifyShipped())
-                    ->tooltip(fn (Package $record): ?string => $record->isShopifyShipped()
-                        ? 'Bought through Shopify Shipping — void and refund it in the Shopify admin. PolyBag un-ships the package once Shopify reports the label voided.'
-                        : null)
-                    ->action(function (Package $record): void {
-                        $result = app(PackageLabelWorkflow::class)->voidLabel($record);
+                Actions\ActionGroup::make([
+                    Actions\ViewAction::make(),
+                    Actions\EditAction::make(),
+                    Actions\Action::make('void')
+                        ->label('Void Label')
+                        ->icon('heroicon-o-x-circle')
+                        ->color('danger')
+                        ->requiresConfirmation()
+                        ->modalHeading('Void Label')
+                        ->modalDescription('This will cancel the label with the carrier. The package will be kept with its dimensions so it can be re-shipped.')
+                        ->visible(fn (Package $record): bool => $record->status === PackageStatus::Shipped
+                            && $record->tracking_number
+                            && ($record->carrier || $record->isShopifyShipped()))
+                        // Shopify's API has no void operation at all, so offering a
+                        // live button here would only ever produce a failure.
+                        ->disabled(fn (Package $record): bool => $record->isShopifyShipped())
+                        ->tooltip(fn (Package $record): ?string => $record->isShopifyShipped()
+                            ? 'Bought through Shopify Shipping — void and refund it in the Shopify admin. PolyBag un-ships the package once Shopify reports the label voided.'
+                            : null)
+                        ->action(function (Package $record): void {
+                            $result = app(PackageLabelWorkflow::class)->voidLabel($record);
 
-                        $notification = Notification::make()
-                            ->title($result->title)
-                            ->body($result->message);
+                            $notification = Notification::make()
+                                ->title($result->title)
+                                ->body($result->message);
 
-                        $result->success
-                            ? $notification->success()->send()
-                            : $notification->danger()->send();
-                    }),
-                Actions\EditAction::make(),
+                            $result->success
+                                ? $notification->success()->send()
+                                : $notification->danger()->send();
+                        }),
+                ]),
             ]);
     }
 
