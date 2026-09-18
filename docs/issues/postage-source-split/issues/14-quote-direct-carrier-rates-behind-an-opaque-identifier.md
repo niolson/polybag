@@ -79,17 +79,26 @@ plus the claim. A seller that *can* recover keeps the strict block. An admin act
 the unresolved state is a separate issue, since even Amazon's recovery can return `null`
 indefinitely (`16`).
 
-**Expiry: end of the quoted ship day, plus a staleness check on the package.** Nothing
+**Expiry: end of the quoted ship day, plus a staleness check on the quote inputs.** Nothing
 about a direct rate moves intra-day — FedEx and UPS fuel surcharges change weekly, on the
 ship date; demand surcharges on announced dates; USPS twice a year. And nothing sits: the
 Ship page re-quotes on `mount()`, so a package revisited next week is re-quoted; the local
 data has 145 of 155 shipped packages bought within an hour of their first quote and one
-after a week. The stale case is a tab left open across a package edit, and the Ship page
-already keys its rate cache on `package.updated_at` and `shipment.updated_at` for exactly
-that reason. The offer stores the same pair at issue and `inspect()`/`redeem()` reject
-when either has moved, so the rate cache's staleness rule is the offer's staleness rule
-and the row is trustworthy as the price for *this* package, not just *a* price.
-`expires_at` is the end of the quoted ship date in the location's timezone; not minutes.
+after a week. The stale case is a tab left open across a package edit. Triage first
+proposed binding the offer to the `package.updated_at` / `shipment.updated_at` pair the
+Ship page keys its rate cache on; review (2026-09-18) found that pair both too coarse and
+too fine — neither `PackageItem` nor `ShipmentItem` touches its parent and a product edit
+touches nothing, so a quantity, declared-value or compliance-flag change moved neither
+timestamp, while any parent save retired every offer. The offer instead stores
+`RateRequest::fingerprint()`, a digest of exactly what the carrier was asked to price
+(ship date and package id excluded), and `inspect()`/`redeem()` recompute it from the
+package and reject on a mismatch — so the row is trustworthy as the price for *this*
+package as priced, not just *a* price, and a save that changes nothing priced keeps it.
+The same review added a second binding: the quoting account's billing identity
+(`CarrierAccount::fingerprint()`, carrier plus non-secret credentials), since the same
+account row with an edited account number is a different payer, and secrets are excluded so
+a token refresh does not retire a quote. `expires_at` is the end of the quoted ship date in
+the location's timezone; not minutes.
 
 **Issue in `ShippingRateService::getShippingRates()`, next to `logRates()`.** One loop
 that no adapter can bypass and a new adapter cannot forget, and the `rate_quotes` row and
@@ -131,7 +140,7 @@ so re-classifying the restored metadata through `packagingRequirementFor()` is t
 authoritative check the reviewer asked for, with no new field.
 
 **Re-quote hygiene: nothing.** 144 of 164 local packages were quoted once; the rest a
-handful of times. With the `updated_at` check above, a superseded price is already caught
+handful of times. With the fingerprint check above, a superseded price is already caught
 when it is the package that changed, and the purge handles the rest.
 
 ## What to build
@@ -141,8 +150,20 @@ when it is the package that changed, and the purge handles the rest.
    set it from the account they resolved. Amazon leaves it null (its offers name a data
    source instead).
 2. `shipping_offers` gains `rate_quote_id` (nullable FK, `nullOnDelete`),
-   `package_updated_at` and `shipment_updated_at` (nullable timestamps). `OfferDraft`
-   carries the three.
+   `quote_fingerprint` and `carrier_account_fingerprint` (nullable `string(64)`).
+   `OfferDraft` carries the three. `RateRequest::fingerprint()` is a sha256 of a canonical
+   JSON encoding of the request — keys sorted at every depth, the code list sorted, enums by
+   value — excluding `shipDate` (per-carrier, set after `fromPackage()`) and `packageId`
+   (already `package_id`). `CarrierAccount::fingerprint()` is a sha256 of `carrier_id` plus
+   the non-secret `credentials`, keys sorted; `secret_credentials` are excluded on purpose
+   so a refreshed token or a rotated client secret does not retire a quote, and
+   `updated_at` is not used for the same reason. The shared loop computes the quote
+   fingerprint once from the request it built and reads each distinct quoting account once;
+   an offer Amazon issued itself is stamped with the shared quote fingerprint when the loop
+   points it at its quote row, because the request an adapter holds has been narrowed to
+   the codes that carrier can express and would not digest the same.
+   *(Amended on review 2026-09-18; the first draft stored the package and shipment
+   `updated_at` pair.)*
 3. `ShippingRateService::getShippingRates()` writes each `rate_quotes` row and, for every
    rate without an `offerId` already, issues a `ShippingOffer` against it and returns the
    rate with `offerId` set. A rate that already carries one — Amazon issues its own inside
@@ -154,9 +175,16 @@ when it is the package that changed, and the purge handles the rest.
    the carrier calls, and the same date closes the offer's window — read again afterwards,
    a pickup cutoff or an End of Day run in between would give the offer a later day than
    the price was quoted for.
-4. `OfferStore::inspect()` and `redeem()` reject an offer whose stored
-   `package_updated_at` / `shipment_updated_at` no longer match the package, with a
-   rejection that asks for a re-quote (new `OfferRejection` case, e.g. `PackageChanged`).
+4. `OfferStore::inspect()` and `redeem()` recompute `RateRequest::fromPackage()`'s
+   fingerprint from the package as the database has it (loading what `fromPackage()`
+   reads, so the recompute is not a lazy-load storm) and reject on a mismatch with a
+   rejection that asks for a re-quote (new `OfferRejection` case, `PackageChanged`). A
+   package that can no longer be priced — `MissingDeclaredValueException` from a declared
+   value removed after the quote — counts as changed. A stored fingerprint of null is not
+   judged. `accountNoLongerResolves()` additionally compares the resolved account's
+   `fingerprint()` to the stored one after the id check and refuses with the same *Carrier
+   Account Changed* on a mismatch, logging it as a credentials change without the
+   credentials. *(Amended on review 2026-09-18.)*
 5. `EloquentPackageShippingWorkflow::ship()` refuses a `selectedRate` with no `offerId`
    (a `PackageShippingResult::offerUnavailable` asking for a re-quote, never a purchase).
    `autoShip()` today delegates to `ship()`, and a rule's pre-selected rate from
@@ -272,6 +300,29 @@ store-level `PackageChanged` pair in `OfferStoreTest`, and `RateQuoteLoggerTest`
 for id-based marking. The ten existing files that shipped a hand-built rate now issue a
 direct offer through `quotedDirectly()` in `tests/Pest.php`; the one that was *about* a rate
 with no offer became the refusal test.
+
+**2026-09-18, amended on review** — Two findings, both about what an offer is bound to.
+(P1) The `updated_at` pair missed child edits and over-fired on parent saves; replaced by
+`RateRequest::fingerprint()` stored as `shipping_offers.quote_fingerprint`, recomputed at
+`inspect()`/`redeem()`. The unmerged migration was amended in place (renamed
+`…_add_rate_quote_and_fingerprints_to_shipping_offers_table`), the timestamp columns are
+gone, `ShippingOffer::packageHasChangedSince()` became `quoteInputsChangedSince()`, and
+the Amazon draft no longer passes a fingerprint of its own — the shared loop stamps the
+package-level one, since the adapter's request is carrier-narrowed. (P2) The same account
+id with an edited account number would have bought on a different payer; `CarrierAccount::
+fingerprint()` (carrier + non-secret credentials) is stored as
+`carrier_account_fingerprint` and compared by `accountNoLongerResolves()` after the id
+check. One test moved: the restored-rate packaging check used to move the package into a
+flat-rate box between quote and purchase, which the fingerprint now (correctly) catches
+first, so it keeps the package still and lets the mock adapter's purchase-time
+classification disagree instead. Tests: `RateRequestFingerprintTest` (stable across code
+and config-key order, across `shipDate` and `packageId`; changes with every priced input),
+`CarrierAccountFingerprintTest` (credential change, carrier change, secrets ignored, key
+order), `OfferStoreTest` (destination change, packed quantity through a required declared
+value, product compliance flag, declared value removed → all `PackageChanged`; `touch()`
+and a phone edit → kept), `DirectCarrierOfferTest` (edited `eps_account` → *Carrier
+Account Changed*; `mergeSecret()` + save → buys), and the existing different-account
+refusal in `OfferRedemptionOnShipTest` unchanged.
 
 **2026-09-18, later** — Review challenged the timeout carve-out: a timeout is not a
 declined purchase, and `recordFailure()` on it lets a retry buy a duplicate. The carve-out's
