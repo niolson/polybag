@@ -527,3 +527,40 @@ it('keeps a direct offer across a token refresh on the quoting account', functio
     expect($result->success)->toBeTrue()
         ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
 });
+
+it('refuses a direct offer once the shipment moves to a method that excludes its carrier', function (): void {
+    // The Ship page quoted USPS under a method that permits it. The shipment
+    // is then moved to a UPS-only method; the USPS offer is still on file,
+    // unexpired, and the tab still holds its id.
+    $this->actingAs($user = User::factory()->create());
+    ['package' => $package] = packageQuotedByFakeUsps();
+
+    $quoted = rateOptionFromShipPage($package);
+
+    $ups = Carrier::factory()->create(['name' => 'UPS', 'active' => true]);
+    $upsOnly = ShippingMethod::factory()->create();
+    $upsOnly->carrierServices()->attach(CarrierService::factory()->create([
+        'carrier_id' => $ups->id,
+        'name' => 'UPS Ground',
+        'service_code' => '03',
+        'active' => true,
+    ])->id);
+    $package->shipment->update(['shipping_method_id' => $upsOnly->id]);
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->never()->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('createShipment')->never()->andReturn(ShipResponse::failure('unexpected'));
+    app(CarrierRegistry::class)->reset();
+    app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package->fresh(),
+        new PackageShippingRequest(selectedRate: $quoted, userId: $user->id),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Package Changed')
+        ->and($result->requiresRequote)->toBeTrue()
+        ->and(ShippingOffer::where('public_id', $quoted->offerId)->value('consumed_at'))->toBeNull()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});

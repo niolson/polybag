@@ -26,6 +26,7 @@ function rateRequestFor(array $overrides = []): RateRequest
         'clientId' => 7,
         'contentsValue' => 40.0,
         'packageId' => 11,
+        'shippingMethodId' => 2,
         ...$overrides,
     ]);
 }
@@ -69,6 +70,13 @@ it('changes with anything the carrier was asked to price', function (): void {
         ->and(rateRequestFor(['specialServiceCodes' => ['declared_value']])->fingerprint())->not->toBe($base)
         ->and(rateRequestFor(['specialServiceConfig' => ['declared_value' => ['amount' => 41.0, 'currency' => 'USD']]])->fingerprint())->not->toBe($base)
         ->and(rateRequestFor(['clientId' => 8])->fingerprint())->not->toBe($base);
+});
+
+it('changes with the shipping method, which decides who is asked at all', function (): void {
+    // No carrier prices on the method, but the method decides which carriers
+    // and services are on the list: a swap changes the list the price is on.
+    expect(rateRequestFor(['shippingMethodId' => 3])->fingerprint())
+        ->not->toBe(rateRequestFor(['shippingMethodId' => 2])->fingerprint());
 });
 
 it('stripping a special service digests the same as never having had it', function (): void {

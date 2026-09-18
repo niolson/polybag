@@ -310,6 +310,20 @@ it('retires an offer when the destination changes', function (): void {
     expect($store->inspect($package, $offer->public_id)->rejection)->toBe(OfferRejection::PackageChanged);
 });
 
+it('retires an offer when the shipment moves to another shipping method', function (): void {
+    // The method decides which carriers are asked at all, so a quote under
+    // one method is not a quote under another — even at the same price.
+    $package = Package::factory()->create();
+    $store = app(OfferStore::class);
+    $offer = directOfferQuotedFor($package);
+
+    $package->shipment->update(['shipping_method_id' => ShippingMethod::factory()->create()->id]);
+
+    expect($store->inspect($package, $offer->public_id)->rejection)->toBe(OfferRejection::PackageChanged)
+        ->and($store->redeem($package, $offer->public_id)->rejection)->toBe(OfferRejection::PackageChanged)
+        ->and($offer->fresh()->consumed_at)->toBeNull();
+});
+
 it('retires an offer when a packed quantity changes the declared value', function (): void {
     // Neither PackageItem nor ShipmentItem touches its parent, so a timestamp
     // would have missed this. The quantity enters the request through the

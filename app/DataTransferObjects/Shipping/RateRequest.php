@@ -12,6 +12,7 @@ readonly class RateRequest
      * @param  array<PackageData>  $packages
      * @param  array<int, string>  $specialServiceCodes
      * @param  array<string, array<string, mixed>>  $specialServiceConfig  Per-code config values (e.g. declared_value amount)
+     * @param  int|null  $shippingMethodId  The shipping method the package is quoted under. No adapter reads it — it is eligibility, not price: `ShippingRateService::buildCarrierTasks()` derives from the method which carriers are asked at all and which of their services, so a method swap changes the price *list* without changing any price on it. It is here so that {@see fingerprint()} covers that: an offer quoted under a method that permitted its carrier must not stay spendable once the shipment moves to one that does not.
      */
     public function __construct(
         public string $originPostalCode,
@@ -31,6 +32,7 @@ readonly class RateRequest
         public ?string $originStateOrProvince = null,
         public ?float $contentsValue = null,
         public ?int $packageId = null,
+        public ?int $shippingMethodId = null,
     ) {}
 
     public static function fromPackage(Package $package): self
@@ -67,6 +69,7 @@ readonly class RateRequest
             originStateOrProvince: $origin->stateOrProvince,
             contentsValue: $shipment->value !== null ? (float) $shipment->value : null,
             packageId: $package->id,
+            shippingMethodId: $shipment->shipping_method_id,
         );
     }
 
@@ -83,8 +86,11 @@ readonly class RateRequest
      *
      * Two inputs are left out. The ship date is set per carrier after
      * `fromPackage()` and is the offer's window, not its identity; the
-     * package id is already the row's `package_id`. Everything else is
-     * encoded canonically — keys sorted at every depth, lists of codes
+     * package id is already the row's `package_id`. The shipping method is
+     * kept in even though no carrier prices on it: it decides which carriers
+     * and services are on the list at all, so a swap to a method that
+     * excludes the quoted carrier changes the list this price belongs to.
+     * Everything else is encoded canonically — keys sorted at every depth, lists of codes
      * sorted, enums by value — so the same request always digests the same,
      * however it was built.
      */
@@ -179,6 +185,7 @@ readonly class RateRequest
             originStateOrProvince: $this->originStateOrProvince,
             contentsValue: $this->contentsValue,
             packageId: $this->packageId,
+            shippingMethodId: $this->shippingMethodId,
         );
     }
 
@@ -202,6 +209,7 @@ readonly class RateRequest
             originStateOrProvince: $this->originStateOrProvince,
             contentsValue: $this->contentsValue,
             packageId: $this->packageId,
+            shippingMethodId: $this->shippingMethodId,
         );
     }
 }

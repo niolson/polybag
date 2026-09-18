@@ -90,10 +90,17 @@ Ship page keys its rate cache on; review (2026-09-18) found that pair both too c
 too fine — neither `PackageItem` nor `ShipmentItem` touches its parent and a product edit
 touches nothing, so a quantity, declared-value or compliance-flag change moved neither
 timestamp, while any parent save retired every offer. The offer instead stores
-`RateRequest::fingerprint()`, a digest of exactly what the carrier was asked to price
-(ship date and package id excluded), and `inspect()`/`redeem()` recompute it from the
-package and reject on a mismatch — so the row is trustworthy as the price for *this*
-package as priced, not just *a* price, and a save that changes nothing priced keeps it.
+`RateRequest::fingerprint()`, a digest of exactly what produced the price list — origin
+and destination, the package's weight, dimensions and packaging, the special services and
+their config, location, client and shipping method (ship date and package id excluded) —
+and `inspect()`/`redeem()` recompute it from the package and reject on a mismatch — so the
+row is trustworthy as the price for *this* package as priced, not just *a* price, and a
+save that changes nothing priced keeps it. The shipping method is in the digest even though
+no carrier prices on it, because it decides which carriers and services are asked at all;
+re-deriving eligibility at redemption instead was considered and not done, since
+service-code vocabularies differ per source — Amazon's `service_code` is the mapped
+`CarrierService` code or its own `serviceId` — and a false refusal costs a re-quote for a
+case rarer than the method swap.
 The same review added a second binding: the quoting account's billing identity
 (`CarrierAccount::fingerprint()`, carrier plus non-secret credentials), since the same
 account row with an edited account number is a different payer, and secrets are excluded so
@@ -323,6 +330,18 @@ value, product compliance flag, declared value removed → all `PackageChanged`;
 and a phone edit → kept), `DirectCarrierOfferTest` (edited `eps_account` → *Carrier
 Account Changed*; `mergeSecret()` + save → buys), and the existing different-account
 refusal in `OfferRedemptionOnShipTest` unchanged.
+
+**2026-09-18, amended on review (third)** — The fingerprint missed the shipping method:
+`buildCarrierTasks()` reads it off the package to decide which carriers and services are
+asked, but nothing about it reached `RateRequest`, so swapping the shipment from a method
+that permits USPS Priority Mail to a UPS-only one left the USPS offer spendable.
+`RateRequest` gains `shippingMethodId`, set in `fromPackage()`, carried by both cloners,
+and in the digest; its docblock says it is eligibility rather than price so nobody removes
+it as unused by adapters. `buildCarrierTasks()` still reads the method off the package.
+Tests: `RateRequestFingerprintTest` (digest changes with the method), `OfferStoreTest`
+(method swap → `PackageChanged` at inspect and redeem, offer unconsumed),
+`DirectCarrierOfferTest` (quote USPS, move the shipment to a UPS-only method, `ship()` with
+the old id → *Package Changed* with re-quote, no adapter call).
 
 **2026-09-18, later** — Review challenged the timeout carve-out: a timeout is not a
 declined purchase, and `recordFailure()` on it lets a retry buy a duplicate. The carve-out's
