@@ -228,7 +228,11 @@ class FedexAdapter implements DirectCarrierAdapter
     public function getRates(RateRequest $request, array $serviceCodes): Collection
     {
         if ($this->quotesInternationalLocally($request)) {
-            return app(FedexSandboxInternationalRates::class)->ratesFor($request, $serviceCodes);
+            return app(FedexSandboxInternationalRates::class)->ratesFor(
+                $request,
+                $serviceCodes,
+                $this->resolveAccount($request->locationId, $request->clientId)?->id,
+            );
         }
 
         $prepared = $this->prepareRateRequest($request, $serviceCodes);
@@ -314,7 +318,7 @@ class FedexAdapter implements DirectCarrierAdapter
             'body' => $response->json(),
         ]);
 
-        $results = $this->extractRateDetails($response, $request, $serviceCodes);
+        $results = $this->extractRateDetails($response, $request, $serviceCodes, $account?->id);
 
         // Mixed Saturday: initial request was sent without Saturday, now send
         // a follow-up with Saturday for eligible services and merge results
@@ -325,7 +329,7 @@ class FedexAdapter implements DirectCarrierAdapter
                 $saturdayResponse = $connector->send($saturdayApiRequest);
 
                 if ($saturdayResponse->successful()) {
-                    $saturdayRates = $this->extractRateDetails($saturdayResponse, $request, $serviceCodes);
+                    $saturdayRates = $this->extractRateDetails($saturdayResponse, $request, $serviceCodes, $account?->id);
 
                     if ($saturdayRates->isNotEmpty()) {
                         $saturdayServiceCodes = $saturdayRates->pluck('serviceCode')->unique()->all();
@@ -1076,7 +1080,7 @@ class FedexAdapter implements DirectCarrierAdapter
      * Extract rate details from a successful FedEx rate response.
      * Core parsing loop used by parseRateResponse and mixed Saturday handling.
      */
-    private function extractRateDetails(Response $response, RateRequest $request, array $serviceCodes): Collection
+    private function extractRateDetails(Response $response, RateRequest $request, array $serviceCodes, ?int $carrierAccountId = null): Collection
     {
         try {
             $rateReplyDetails = $response->json('output.rateReplyDetails', []);
@@ -1138,6 +1142,7 @@ class FedexAdapter implements DirectCarrierAdapter
                 transitTime: $transitTime,
                 metadata: $metadata,
                 packagingRequirement: $this->classifyPackaging($metadata),
+                carrierAccountId: $carrierAccountId,
             ));
         }
 
@@ -1203,7 +1208,7 @@ class FedexAdapter implements DirectCarrierAdapter
                 'body' => $response->json(),
             ]);
 
-            return $this->parseOneRateResponse($response, $request, $serviceCodes);
+            return $this->parseOneRateResponse($response, $request, $serviceCodes, $account?->id);
         } catch (\Exception $e) {
             logger()->warning('FedEx One Rate request error', ['error' => $e->getMessage()]);
 
@@ -1272,7 +1277,7 @@ class FedexAdapter implements DirectCarrierAdapter
     /**
      * Parse One Rate response, appending " (One Rate)" to service names.
      */
-    private function parseOneRateResponse(Response $response, RateRequest $request, array $serviceCodes): Collection
+    private function parseOneRateResponse(Response $response, RateRequest $request, array $serviceCodes, ?int $carrierAccountId = null): Collection
     {
         $rateReplyDetails = $response->json('output.rateReplyDetails', []);
 
@@ -1322,6 +1327,7 @@ class FedexAdapter implements DirectCarrierAdapter
                 transitTime: $transitTime,
                 metadata: $metadata,
                 packagingRequirement: $this->classifyPackaging($metadata),
+                carrierAccountId: $carrierAccountId,
             ));
         }
 
