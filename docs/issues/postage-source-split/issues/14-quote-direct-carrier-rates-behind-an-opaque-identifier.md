@@ -1,6 +1,6 @@
 # Quote direct-carrier rates behind an opaque identifier, restored server-side at purchase
 
-Status: ready-for-agent — triaged 2026-09-18; every open question below is answered under *Decisions*
+Status: done — shipped 2026-09-18; every rate the Ship page lists is a `ShippingOffer`, direct rates included, and a direct purchase restores carrier, service, price and metadata from the row
 
 Repo: `polybag`
 
@@ -188,14 +188,14 @@ when it is the package that changed, and the purge handles the rest.
 
 ## Acceptance criteria
 
-- [ ] Every rate the Ship page lists has an `offerId`, direct or resold.
-- [ ] A direct purchase from the Ship page sends the id and nothing the server reads;
+- [x] Every rate the Ship page lists has an `offerId`, direct or resold.
+- [x] A direct purchase from the Ship page sends the id and nothing the server reads;
       carrier, service, price and metadata come off the row.
-- [ ] The purchase-time packaging check classifies the restored rate.
-- [ ] `markSelected()` marks exactly the quoted variant.
-- [ ] A carrier timeout on a direct purchase does not strand the package.
-- [ ] Batch ship and auto-ship behave as before.
-- [ ] `PurgeData` needs no change (direct offers are unconsumed or resolved, so they age
+- [x] The purchase-time packaging check classifies the restored rate.
+- [x] `markSelected()` marks exactly the quoted variant.
+- [x] A carrier timeout on a direct purchase does not strand the package.
+- [x] Batch ship and auto-ship behave as before.
+- [x] `PurgeData` needs no change (direct offers are unconsumed or resolved, so they age
       out; a consumed-unresolved direct offer cannot exist after step 6).
 
 ## Not this issue
@@ -220,3 +220,39 @@ issue is what makes that check authoritative.
 local data rather than in the abstract; findings are under *Decisions*. Two follow-ups
 opened: `16` (unresolved-offer admin action) and `17` (shadow quoting for rule and blind
 purchases). `ready-for-agent`.
+
+**2026-09-18** — Shipped, all eight steps as written. `RateResponse` carries
+`carrierAccountId`, stamped by USPS, FedEx (both parsers and the sandbox international
+stub), UPS and the fake adapter — the fake now resolves an account through
+`ResolvesCarrierAccount` so fake mode exercises the purchase's account check.
+`shipping_offers` gained `rate_quote_id`, `package_updated_at` and `shipment_updated_at`;
+`OfferStore::inspect()` / `redeem()` refuse with a new `OfferRejection::PackageChanged`,
+compared against the package as the database has it, at whole-second precision, and skipped
+for an offer that recorded no version. `ShippingRateService::getShippingRates()` runs one
+shared loop after the packaging filter: log the quotes (now returning ids), issue a
+`CarrierAccount` offer for every rate without one, point an offer the adapter issued itself
+(Amazon) at its quote row. `ship()` refuses a rate with no `offerId`; `autoShip()` goes
+through a new private `purchase()` — the lock and the blind-purchase lock, formerly the body
+of `ship()` — so a rule's pre-selection still buys unrestored. `markSelected()` takes the
+offer and updates by its `rate_quote_id`. The timeout catch resolves a claimed offer as
+failed when the seller is not a `RecoversUnresolvedPurchase`.
+
+Two things worth knowing that *What to build* did not spell out:
+
+- The end-of-ship-day expiry is computed in the location's timezone and Eloquent's datetime
+  cast drops the zone on write, so `OfferStore::issue()` moves `expiresAt` into the app
+  timezone first. Without that the window closed four hours early in the tests.
+- The offer's `rate_metadata` also carries the packaging requirement under the same key
+  Amazon's does, so the rate restored from a direct offer keeps the requirement the adapter
+  stamped at quote time for display; the purchase re-check still asks the adapter, which
+  reads only its own keys.
+
+Tests: `DirectCarrierOfferTest` (quote → offer row, tampered purchase, restored-rate
+packaging check, `PackageChanged` at the workflow and on the Ship page, one claim per offer,
+second purchase of a spent offer, exact-variant `markSelected()`, auto-ship through rate
+shopping), the timeout pair and the offer-less refusal in `OfferRedemptionOnShipTest`, the
+store-level `PackageChanged` pair in `OfferStoreTest`, and `RateQuoteLoggerTest` rewritten
+for id-based marking. The ten existing files that shipped a hand-built rate now issue a
+direct offer through `quotedDirectly()` in `tests/Pest.php`; the one that was *about* a rate
+with no offer became the refusal test.
+
