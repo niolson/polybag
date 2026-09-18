@@ -3,6 +3,7 @@
 namespace App\Services\Carriers;
 
 use App\Contracts\DirectCarrierAdapter;
+use App\Contracts\RecoversUnresolvedPurchase;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\PackageData;
@@ -23,9 +24,12 @@ use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Http\Integrations\USPS\Requests\CancelInternationalLabel;
 use App\Http\Integrations\USPS\Requests\CancelLabel;
 use App\Http\Integrations\USPS\Requests\InternationalLabel;
+use App\Http\Integrations\USPS\Requests\InternationalLabelReprint;
 use App\Http\Integrations\USPS\Requests\Label;
+use App\Http\Integrations\USPS\Requests\LabelReprint;
 use App\Http\Integrations\USPS\Requests\ShippingOptions;
 use App\Http\Integrations\USPS\Requests\TrackShipment;
+use App\Http\Integrations\USPS\Responses\LabelResponse;
 use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\CarrierAccount;
 use App\Models\Package;
@@ -40,11 +44,15 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Exceptions\Request\RequestException;
+use Saloon\Exceptions\Request\ServerException;
 use Saloon\Exceptions\Request\Statuses\ForbiddenException;
+use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
 
-class UspsAdapter implements DirectCarrierAdapter
+class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
 {
     use BuildsCustomerReferences;
     use ConsultsCarrierPolicyForOffers;
@@ -102,7 +110,29 @@ class UspsAdapter implements DirectCarrierAdapter
         '160021' => 'The customs item weights add up to more than the package weight. Re-weigh the package, or confirm the customs weight override.',
         '160138' => 'USPS reports this destination ZIP Code is no longer in service. Check the address with the customer.',
         '160140' => 'USPS requires customs details for this destination. The package needs scanned items before a label can be bought.',
+        self::REPRINT_KEY_NOT_FOUND => 'USPS has no label for the earlier purchase attempt; nothing was bought.',
+        self::REPRINT_LABEL_CANCELLED => 'The label from the earlier purchase attempt has since been cancelled at USPS.',
     ];
+
+    /**
+     * The two reprint errors that settle an unresolved purchase, both observed
+     * in production on 2026-09-18 (`postage-source-split/18`): no label was
+     * ever bought under the key, or one was and has since been cancelled.
+     * Either way nothing usable exists and the package may be quoted again.
+     * Every other reprint error leaves the question open.
+     */
+    private const REPRINT_KEY_NOT_FOUND = '160412';
+
+    private const REPRINT_LABEL_CANCELLED = '160979';
+
+    /**
+     * Where the purchase's `X-Idempotency-Key` lives on the offer.
+     *
+     * The only thing a direct USPS offer's `purchase_context` holds. It is
+     * recorded before the label request leaves, so a reply that never arrives
+     * still leaves behind the handle the reprint is asked by.
+     */
+    public const PURCHASE_CONTEXT_KEY = 'idempotency_key';
 
     /**
      * USPS prints a reference in the label's reference block only when the entry
@@ -447,13 +477,171 @@ class UspsAdapter implements DirectCarrierAdapter
         return $apiRequest;
     }
 
+    /**
+     * Buy a label, under a key the purchase can later be asked about.
+     *
+     * A connection failure, a timeout or a 5xx on the label request is *not*
+     * caught here, unlike every other error: the label may exist and be paid
+     * for — a server error can arrive after the label was created — and
+     * turning that into a failed response would settle the offer as a decline
+     * and let the next attempt buy a second one. The exception leaves the
+     * offer unresolved, and {@see recoverPurchase()} asks USPS by the key
+     * before anything else is bought — ADR-0002 decision 4's fifth property.
+     */
     public function createShipment(ShipRequest $request): ShipResponse
     {
         $isInternational = $request->toAddress->country !== 'US';
+        $idempotencyKey = $this->issueIdempotencyKey($request);
 
         return $isInternational
-            ? $this->createInternationalShipment($request)
-            : $this->createDomesticShipment($request);
+            ? $this->createInternationalShipment($request, $idempotencyKey)
+            : $this->createDomesticShipment($request, $idempotencyKey);
+    }
+
+    /**
+     * A fresh `X-Idempotency-Key`, stored on the offer before it is spent.
+     *
+     * USPS asks for a UUID unique per CRID across all label requests. It is
+     * a handle, not a guard — the label endpoint buys again under a repeated
+     * key — so it is minted per purchase rather than derived from the offer,
+     * and written to the offer's encrypted `purchase_context` first: the
+     * window this exists for opens the moment the request leaves.
+     */
+    private function issueIdempotencyKey(ShipRequest $request): string
+    {
+        $key = (string) Str::uuid();
+
+        $request->offer?->update(['purchase_context' => [self::PURCHASE_CONTEXT_KEY => $key]]);
+
+        return $key;
+    }
+
+    /**
+     * Ask USPS whether a spent offer bought a label, by the key it was sent under.
+     *
+     * The reprint endpoint is the question: side-effect free, and a 200 is the
+     * label already paid for, so the package ships on it. `160412` is USPS
+     * being certain no label exists under the key, and `160979` that the one
+     * that did has been cancelled — both settle the offer as declined. Anything
+     * else, including a transport error, leaves it unresolved.
+     *
+     * Asked on the account the offer was bought on, never the one scopes
+     * prefer now: keys are per CRID, so another account's "not found" says
+     * nothing about the label — see {@see purchasingAccountChanged()}.
+     *
+     * An offer with no key recorded predates the key being sent (or was spent
+     * by a path with nowhere to store it); nobody can be asked about it, so
+     * it is settled the way `14`'s carve-out settled every direct offer —
+     * the alternative strands the package behind a question with no answer.
+     */
+    public function recoverPurchase(ShipRequest $request): ?ShipResponse
+    {
+        $offer = $request->offer;
+        $key = $offer?->purchase_context[self::PURCHASE_CONTEXT_KEY] ?? null;
+
+        if ($offer === null || ! is_string($key) || $key === '') {
+            return ShipResponse::failure('No idempotency key was recorded for the earlier purchase attempt, so USPS cannot be asked about it; settled as not bought.');
+        }
+
+        if ($this->purchasingAccountChanged($offer)) {
+            Log::channel('usps-validation')->warning('Cannot ask USPS about a purchase: the account it was bought on is gone or bills someone else now', [
+                'offer' => $offer->public_id,
+                'carrier_account_id' => $offer->carrier_account_id,
+            ]);
+
+            return null;
+        }
+
+        $isInternational = $request->toAddress->country !== 'US';
+        $account = $this->purchasingAccount($offer, $request->locationId, $request->clientId);
+
+        try {
+            $connector = USPSConnector::getAuthenticatedConnector($account);
+            $paymentAuthorizationToken = USPSConnector::getUspsPaymentAuthorizationToken($account?->id);
+
+            $imageInfo = [
+                'imageType' => match (true) {
+                    $request->labelFormat !== 'zpl' => 'PDF',
+                    $request->labelDpi === 300 => 'ZPL300DPI',
+                    default => 'ZPL203DPI',
+                },
+                'labelType' => '4X6LABEL',
+            ];
+
+            $apiRequest = $isInternational
+                ? new InternationalLabelReprint($key, $imageInfo)
+                : new LabelReprint($key, $imageInfo);
+            $apiRequest->headers()->add('X-Payment-Authorization-Token', $paymentAuthorizationToken);
+
+            $response = $connector->send($apiRequest);
+        } catch (RequestException $e) {
+            $response = $e->getResponse();
+        } catch (\Exception $e) {
+            Log::channel('usps-validation')->warning('Could not ask USPS what became of a purchase', [
+                'offer' => $offer->public_id,
+                'exception' => $e::class,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        if (! $response->successful()) {
+            $payload = $this->decodeJsonSafely($response);
+            $codes = array_map(fn (array $error): string => (string) ($error['code'] ?? ''), $payload['error']['errors'] ?? []);
+
+            Log::channel('usps-validation')->info('USPS reprint by idempotency key did not return a label', [
+                'offer' => $offer->public_id,
+                'status' => $response->status(),
+                'codes' => $codes,
+            ]);
+
+            if (array_intersect($codes, [self::REPRINT_KEY_NOT_FOUND, self::REPRINT_LABEL_CANCELLED]) !== []) {
+                return ShipResponse::failure($this->describeLabelError($payload));
+            }
+
+            return null;
+        }
+
+        try {
+            /** @var LabelResponse $response */
+            $response->parseBody();
+        } catch (\Exception $e) {
+            Log::channel('usps-validation')->error('USPS reprint returned a label that could not be read', [
+                'offer' => $offer->public_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        $trackingNumber = $response->metadata['internationalTrackingNumber']
+            ?? $response->metadata['trackingNumber']
+            ?? null;
+
+        if (empty($trackingNumber) || $response->label === '') {
+            return null;
+        }
+
+        Log::channel('usps-validation')->info('Recovered a USPS label by idempotency key', [
+            'offer' => $offer->public_id,
+            'tracking_number' => $trackingNumber,
+            'reprint' => $response->reprintInfo,
+        ]);
+
+        return ShipResponse::success(
+            trackingNumber: $trackingNumber,
+            cost: (float) ($response->metadata['postage'] ?? $request->selectedRate->price),
+            carrier: 'USPS',
+            service: $request->selectedRate->serviceName,
+            labelData: $response->label,
+            // The same orientation the purchase path records for each API.
+            labelOrientation: $isInternational ? 'landscape' : 'portrait',
+            labelFormat: $request->labelFormat,
+            labelDpi: $request->labelDpi,
+            shipDate: $request->shipDate,
+            carrierAccountId: $account?->id,
+        );
     }
 
     public function supportsTracking(): bool
@@ -561,7 +749,7 @@ class UspsAdapter implements DirectCarrierAdapter
         }
     }
 
-    private function createDomesticShipment(ShipRequest $request): ShipResponse
+    private function createDomesticShipment(ShipRequest $request, string $idempotencyKey): ShipResponse
     {
         try {
             $account = $this->resolveAccount($request->locationId, $request->clientId);
@@ -571,6 +759,7 @@ class UspsAdapter implements DirectCarrierAdapter
             $apiRequest = new Label;
             $apiRequest->headers()->set([
                 'X-Payment-Authorization-Token' => $paymentAuthorizationToken,
+                'X-Idempotency-Key' => $idempotencyKey,
             ]);
 
             $toAddress = $this->buildDomesticAddress($request->toAddress);
@@ -629,6 +818,12 @@ class UspsAdapter implements DirectCarrierAdapter
 
             $response = $connector->send($apiRequest);
 
+            // A 5xx is not a refusal — see createShipment(). Thrown, so it
+            // reaches the rethrow below rather than the decline path.
+            if ($response->serverError()) {
+                $response->throw();
+            }
+
             if (! $response->successful()) {
                 $payload = $this->decodeJsonSafely($response);
                 $errorMessage = $this->describeLabelError($payload);
@@ -679,6 +874,15 @@ class UspsAdapter implements DirectCarrierAdapter
                 ],
                 carrierAccountId: $account?->id,
             );
+        } catch (FatalRequestException|RequestTimeOutException|ServerException $e) {
+            // No answer is not a refusal — see createShipment().
+            Log::channel('usps-validation')->warning('USPS createDomesticShipment got no answer; the offer stays unresolved', [
+                'exception' => $e::class,
+                'error' => $e->getMessage(),
+                'idempotency_key' => $idempotencyKey,
+            ]);
+
+            throw $e;
         } catch (\Exception $e) {
             Log::channel('usps-validation')->error('USPS createDomesticShipment error', [
                 'exception' => $e::class,
@@ -690,7 +894,7 @@ class UspsAdapter implements DirectCarrierAdapter
         }
     }
 
-    private function createInternationalShipment(ShipRequest $request): ShipResponse
+    private function createInternationalShipment(ShipRequest $request, string $idempotencyKey): ShipResponse
     {
         try {
             $account = $this->resolveAccount($request->locationId, $request->clientId);
@@ -700,6 +904,7 @@ class UspsAdapter implements DirectCarrierAdapter
             $apiRequest = new InternationalLabel;
             $apiRequest->headers()->set([
                 'X-Payment-Authorization-Token' => $paymentAuthorizationToken,
+                'X-Idempotency-Key' => $idempotencyKey,
             ]);
 
             $toAddress = $this->buildInternationalAddress($request->toAddress);
@@ -748,6 +953,12 @@ class UspsAdapter implements DirectCarrierAdapter
             ]);
 
             $response = $connector->send($apiRequest);
+
+            // A 5xx is not a refusal — see createShipment(). Thrown, so it
+            // reaches the rethrow below rather than the decline path.
+            if ($response->serverError()) {
+                $response->throw();
+            }
 
             if (! $response->successful()) {
                 $payload = $this->decodeJsonSafely($response);
@@ -805,6 +1016,15 @@ class UspsAdapter implements DirectCarrierAdapter
                 ],
                 carrierAccountId: $account?->id,
             );
+        } catch (FatalRequestException|RequestTimeOutException|ServerException $e) {
+            // No answer is not a refusal — see createShipment().
+            Log::channel('usps-validation')->warning('USPS createInternationalShipment got no answer; the offer stays unresolved', [
+                'exception' => $e::class,
+                'error' => $e->getMessage(),
+                'idempotency_key' => $idempotencyKey,
+            ]);
+
+            throw $e;
         } catch (\Exception $e) {
             Log::channel('usps-validation')->error('USPS createInternationalShipment error', [
                 'exception' => $e::class,

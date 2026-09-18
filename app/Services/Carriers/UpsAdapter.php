@@ -3,6 +3,7 @@
 namespace App\Services\Carriers;
 
 use App\Contracts\DirectCarrierAdapter;
+use App\Contracts\RecoversUnresolvedPurchase;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\CustomsItem;
@@ -22,6 +23,7 @@ use App\Enums\TrackingStatus;
 use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Http\Integrations\Ups\Requests\CreateShipment;
+use App\Http\Integrations\Ups\Requests\LabelRecovery;
 use App\Http\Integrations\Ups\Requests\Rate;
 use App\Http\Integrations\Ups\Requests\TrackShipment;
 use App\Http\Integrations\Ups\Requests\VoidShipment;
@@ -39,10 +41,13 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
+use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Exceptions\Request\RequestException;
+use Saloon\Exceptions\Request\ServerException;
+use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
 
-class UpsAdapter implements DirectCarrierAdapter
+class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
 {
     use BuildsCustomerReferences;
     use ConsultsCarrierPolicyForOffers;
@@ -126,15 +131,38 @@ class UpsAdapter implements DirectCarrierAdapter
     }
 
     /**
+     * The two Label Recovery errors that settle an unresolved purchase, both
+     * observed in production on 2026-09-18 (`postage-source-split/18`): no
+     * shipment exists under the reference and shipper number, or one did and
+     * has since been voided. Either way nothing usable exists and the package
+     * may be quoted again. Every other error leaves the question open.
+     */
+    private const RECOVERY_NOT_FOUND = '9801031';
+
+    private const RECOVERY_VOIDED = '9801040';
+
+    /**
      * UPS accepts two reference numbers, each up to 35 characters. Which level
      * of the payload they belong on depends on the lane — see
      * acceptsPackageLevelReferences().
+     *
+     * A purchase made from an offer spends the first slot on the offer's
+     * `public_id`, which is what Label Recovery is asked by if the reply never
+     * arrives (`recoverPurchase()`); the client's references fill what is
+     * left, so a client printing two loses the second on the label. ADR-0002
+     * decision 4's recovery property outranks the second reference for the
+     * tenants who would otherwise pay for orphaned labels.
      *
      * @return array<string, mixed>
      */
     private function buildReferenceNumbers(ShipRequest $request): array
     {
-        $references = $this->labelReferences($request, maxLength: 35, maxCount: 2);
+        $recoveryKey = $request->offer?->public_id;
+        $references = $this->labelReferences($request, maxLength: 35, maxCount: $recoveryKey === null ? 2 : 1);
+
+        if ($recoveryKey !== null) {
+            array_unshift($references, $recoveryKey);
+        }
 
         if ($references === []) {
             return [];
@@ -718,6 +746,19 @@ class UpsAdapter implements DirectCarrierAdapter
                 ],
                 carrierAccountId: $account?->id,
             );
+        } catch (FatalRequestException|RequestTimeOutException|ServerException $e) {
+            // No answer is not a refusal, and neither is a 5xx — UPS may have
+            // created the shipment before failing. The exception leaves the
+            // offer unresolved and recoverPurchase() asks Label Recovery
+            // before anything else is bought — ADR-0002 decision 4's fifth
+            // property.
+            Log::channel('ups-validation')->warning('UPS createShipment got no answer; the offer stays unresolved', [
+                'exception' => $e::class,
+                'error' => $e->getMessage(),
+                'offer' => $request->offer?->public_id,
+            ]);
+
+            throw $e;
         } catch (RequestException $e) {
             $rawResponse = $this->decodeJsonSafely($e->getResponse());
 
@@ -965,7 +1006,162 @@ class UpsAdapter implements DirectCarrierAdapter
             'body' => $response->json(),
         ]);
 
+        // The request is sent once (see CreateShipment::$tries), which also
+        // means a refusal comes back as a response rather than thrown; throw
+        // it so the caller's RequestException catch stays the one place an
+        // error body is read.
+        $response->throw();
+
         return $response;
+    }
+
+    /**
+     * Ask UPS whether a spent offer created a shipment, by the reference it
+     * was sent under.
+     *
+     * Label Recovery is the question: side-effect free, and a 200 is the
+     * label already created, so the package ships on it. `9801031` is UPS
+     * being certain nothing exists under the reference and shipper number,
+     * and `9801040` that what did has been voided — both settle the offer as
+     * declined. Anything else, including a transport error, leaves it
+     * unresolved.
+     *
+     * Label Recovery returns no charges, so the cost is the offer's price.
+     * It does return the international forms UPS generated with the label,
+     * which a cross-border package needs as much as the label itself: a
+     * recovery that finds the label but not the form it should have is left
+     * unresolved rather than shipped without a customs document.
+     *
+     * Asked on the account the offer was bought on, never the one scopes
+     * prefer now: the lookup is by reference *and* shipper number, so another
+     * account's "not found" says nothing about the shipment — see
+     * {@see purchasingAccountChanged()}.
+     */
+    public function recoverPurchase(ShipRequest $request): ?ShipResponse
+    {
+        $offer = $request->offer;
+        $recoveryKey = $offer?->public_id;
+
+        if ($offer === null || $recoveryKey === null) {
+            return null;
+        }
+
+        if ($this->purchasingAccountChanged($offer)) {
+            Log::channel('ups-validation')->warning('Cannot ask UPS about a purchase: the account it was bought on is gone or bills someone else now', [
+                'offer' => $recoveryKey,
+                'carrier_account_id' => $offer->carrier_account_id,
+            ]);
+
+            return null;
+        }
+
+        $account = $this->purchasingAccount($offer, $request->locationId, $request->clientId);
+        $shipperNumber = $this->resolveAccountNumber($account);
+
+        if ($shipperNumber === null) {
+            return null;
+        }
+
+        try {
+            $connector = $this->resolveConnector($account);
+            $response = $connector->send(new LabelRecovery(
+                $recoveryKey,
+                $shipperNumber,
+                $request->labelFormat === 'zpl' ? 'ZPL' : 'GIF',
+            ));
+        } catch (RequestException $e) {
+            $response = $e->getResponse();
+        } catch (\Exception $e) {
+            Log::channel('ups-validation')->warning('Could not ask UPS what became of a purchase', [
+                'offer' => $recoveryKey,
+                'exception' => $e::class,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        $body = $this->decodeJsonSafely($response);
+
+        if (! $response->successful()) {
+            $errors = data_get($body, 'response.errors', data_get($body, 'errors', []));
+            $codes = array_map(fn ($error): string => (string) ($error['code'] ?? ''), is_array($errors) ? $errors : []);
+
+            Log::channel('ups-validation')->info('UPS Label Recovery by reference did not return a label', [
+                'offer' => $recoveryKey,
+                'status' => $response->status(),
+                'codes' => $codes,
+            ]);
+
+            if (array_intersect($codes, [self::RECOVERY_NOT_FOUND, self::RECOVERY_VOIDED]) !== []) {
+                $message = data_get($errors, '0.message') ?? 'UPS has no shipment for the earlier purchase attempt.';
+
+                return ShipResponse::failure(in_array(self::RECOVERY_VOIDED, $codes, true)
+                    ? 'The shipment from the earlier purchase attempt has since been voided at UPS.'
+                    : 'UPS has no shipment for the earlier purchase attempt; nothing was bought. ('.$message.')');
+            }
+
+            return null;
+        }
+
+        $results = data_get($body, 'LabelRecoveryResponse.LabelResults');
+
+        if (isset($results['TrackingNumber'])) {
+            $results = [$results];
+        }
+
+        $trackingNumber = data_get($body, 'LabelRecoveryResponse.ShipmentIdentificationNumber')
+            ?? data_get($results, '0.TrackingNumber');
+        $labelData = data_get($results, '0.LabelImage.GraphicImage');
+
+        if (empty($trackingNumber) || empty($labelData)) {
+            Log::channel('ups-validation')->error('UPS Label Recovery answered without a tracking number or label', [
+                'offer' => $recoveryKey,
+                'body' => $body,
+            ]);
+
+            return null;
+        }
+
+        // The same document the purchase path stores from ShipmentResults.Form.
+        $customsFormData = data_get($body, 'LabelRecoveryResponse.Form.Image.GraphicImage');
+        $needsCustomsForm = ! $request->fromAddress->sharesCustomsZoneWith($request->toAddress) && $request->customsItems !== [];
+
+        if ($needsCustomsForm && empty($customsFormData)) {
+            Log::channel('ups-validation')->error('UPS Label Recovery found the label but not the international forms the lane needs', [
+                'offer' => $recoveryKey,
+                'tracking_number' => $trackingNumber,
+            ]);
+
+            return null;
+        }
+
+        $isZpl = $request->labelFormat === 'zpl';
+
+        if ($isZpl && $request->labelDpi === 300) {
+            $decoded = base64_decode($labelData);
+            $decoded = preg_replace('/\^XA/', '^XA^JMA', $decoded, 1);
+            $labelData = base64_encode($decoded);
+        }
+
+        Log::channel('ups-validation')->info('Recovered a UPS label by reference', [
+            'offer' => $recoveryKey,
+            'tracking_number' => $trackingNumber,
+        ]);
+
+        return ShipResponse::success(
+            trackingNumber: $trackingNumber,
+            cost: (float) $request->selectedRate->price,
+            carrier: 'UPS',
+            service: $request->selectedRate->serviceName,
+            labelData: $labelData,
+            labelOrientation: $isZpl ? 'portrait' : 'landscape',
+            labelFormat: $isZpl ? 'zpl' : 'image',
+            labelDpi: $request->labelDpi,
+            shipDate: $request->shipDate,
+            carrierAccountId: $account?->id,
+            customsFormData: is_string($customsFormData) && $customsFormData !== '' ? $customsFormData : null,
+        );
     }
 
     /**

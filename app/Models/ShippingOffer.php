@@ -42,6 +42,7 @@ use Illuminate\Support\Str;
  * @property string|null $carrier_account_fingerprint
  * @property Carbon|null $consumed_at
  * @property Carbon|null $purchase_failed_at
+ * @property Carbon|null $recovery_unanswered_at
  */
 class ShippingOffer extends Model
 {
@@ -90,6 +91,7 @@ class ShippingOffer extends Model
             'expires_at' => 'datetime',
             'consumed_at' => 'datetime',
             'purchase_failed_at' => 'datetime',
+            'recovery_unanswered_at' => 'datetime',
         ];
     }
 

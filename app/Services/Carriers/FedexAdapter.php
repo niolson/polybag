@@ -39,7 +39,10 @@ use App\Services\Shipping\PackagingFilter;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
+use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Exceptions\Request\RequestException;
+use Saloon\Exceptions\Request\Statuses\GatewayTimeoutException;
+use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
 
 class FedexAdapter implements DirectCarrierAdapter
@@ -50,6 +53,12 @@ class FedexAdapter implements DirectCarrierAdapter
     use HasSaturdayDelivery;
     use ResolvesCarrierAccount;
     use ResolvesDeliveredAt;
+
+    /**
+     * What the packer reads when FedEx never answered the label request.
+     * Nothing was bought that FedEx will bill, so the remedy is a retry.
+     */
+    public const NO_ANSWER_MESSAGE = 'FedEx did not answer the label request. Nothing was bought — try again.';
 
     private function resolveConnector(?CarrierAccount $account): FedexConnector
     {
@@ -761,6 +770,19 @@ class FedexAdapter implements DirectCarrierAdapter
                 appliedServices: $appliedServices,
                 carrierAccountId: $account?->id,
             );
+        } catch (FatalRequestException|RequestTimeOutException|GatewayTimeoutException $e) {
+            // Deliberately a decline, unlike USPS and UPS: FedEx bills a label
+            // when it is tendered, never for one that was created and never
+            // printed, and the Ship API has no lookup to ask by. So a reply
+            // that never arrived costs nothing, the offer is settled, and the
+            // packer is told to try again — not sent to a portal to look for
+            // a label that will never be billed. `postage-source-split/18`.
+            Log::channel('fedex-validation')->warning('FedEx createShipment got no answer', [
+                'exception' => $e::class,
+                'error' => $e->getMessage(),
+            ]);
+
+            return ShipResponse::failure(self::NO_ANSWER_MESSAGE);
         } catch (\Exception $e) {
             Log::channel('fedex-validation')->error('FedEx createShipment error', [
                 'exception' => $e::class,
