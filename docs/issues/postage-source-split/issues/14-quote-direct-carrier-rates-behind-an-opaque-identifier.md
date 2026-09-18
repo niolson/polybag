@@ -273,3 +273,11 @@ for id-based marking. The ten existing files that shipped a hand-built rate now 
 direct offer through `quotedDirectly()` in `tests/Pest.php`; the one that was *about* a rate
 with no offer became the refusal test.
 
+**2026-09-18, later** — Review challenged the timeout carve-out: a timeout is not a
+declined purchase, and `recordFailure()` on it lets a retry buy a duplicate. The carve-out's
+premise — that no direct carrier can be asked what happened — was then checked against the
+carrier specs and is wrong for two of three: USPS reprints by `X-Idempotency-Key` and UPS
+recovers a label by `ReferenceNumber`, and both bill an orphan. Neither key is sent today.
+`18` opened for the recovery work; `resolveTimedOutOffer()` already keys on
+`RecoversUnresolvedPurchase`, so each adapter leaves the carve-out as it implements the
+contract, and FedEx — which does not bill an untendered label — keeps it on purpose.
