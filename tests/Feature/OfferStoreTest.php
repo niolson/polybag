@@ -225,3 +225,52 @@ it('reports an environment mismatch even when the offer has also expired', funct
     expect(app(OfferStore::class)->inspect($package, $offer->public_id)->rejection)
         ->toBe(OfferRejection::EnvironmentChanged);
 });
+
+it('records the package as it stood and refuses the offer once it has moved', function (): void {
+    $package = Package::factory()->create();
+    $store = app(OfferStore::class);
+
+    $offer = $store->issue($package, new OfferDraft(
+        carrier: 'USPS',
+        postageSource: PostageSource::CarrierAccount,
+        serviceCode: 'PRIORITY_MAIL',
+        serviceName: 'Priority Mail',
+        price: 9.65,
+        currency: 'USD',
+        expiresAt: now()->endOfDay(),
+        rateQuoteId: null,
+        packageUpdatedAt: $package->updated_at,
+        shipmentUpdatedAt: $package->shipment?->updated_at,
+    ));
+
+    expect($offer->package_updated_at->format('Y-m-d H:i:s'))->toBe($package->updated_at->format('Y-m-d H:i:s'))
+        ->and($store->inspect($package, $offer->public_id)->wasRejected())->toBeFalse();
+
+    // Timestamps carry whole seconds, so the edit has to land in a later one.
+    $this->travel(1)->minutes();
+    $package->update(['weight' => 3.0]);
+
+    $inspection = $store->inspect($package, $offer->public_id);
+    $claim = $store->redeem($package, $offer->public_id);
+
+    // Refused, and left unconsumed: nothing was spent on it, and a re-quote
+    // supersedes it rather than a recovery.
+    expect($inspection->rejection)->toBe(OfferRejection::PackageChanged)
+        ->and($inspection->requiresRequote())->toBeTrue()
+        ->and($claim->rejection)->toBe(OfferRejection::PackageChanged)
+        ->and($offer->fresh()->consumed_at)->toBeNull();
+});
+
+it('does not judge an offer that recorded no package version', function (): void {
+    // Issued before the check existed, or hand-built: nothing to compare, so
+    // nothing to refuse on.
+    $package = Package::factory()->create();
+    $store = app(OfferStore::class);
+    $offer = $store->issue($package, amazonOfferDraft());
+
+    $this->travel(1)->minutes();
+    $package->update(['weight' => 3.0]);
+
+    expect($offer->package_updated_at)->toBeNull()
+        ->and($store->redeem($package, $offer->public_id)->wasRejected())->toBeFalse();
+});

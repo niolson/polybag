@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\PostageSource;
 use App\Enums\SourceEnvironment;
+use Carbon\CarbonInterface;
 use Database\Factories\ShippingOfferFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -33,7 +34,10 @@ use Illuminate\Support\Str;
  * @property array<string, mixed>|null $purchase_context
  * @property string|null $purchase_reference
  * @property string|null $purchase_failure_reason
+ * @property int|null $rate_quote_id
  * @property Carbon|null $expires_at
+ * @property Carbon|null $package_updated_at
+ * @property Carbon|null $shipment_updated_at
  * @property Carbon|null $consumed_at
  * @property Carbon|null $purchase_failed_at
  */
@@ -47,6 +51,7 @@ class ShippingOffer extends Model
         'postage_source',
         'carrier_account_id',
         'postage_data_source_id',
+        'rate_quote_id',
         'carrier',
         'service_code',
         'service_name',
@@ -57,6 +62,8 @@ class ShippingOffer extends Model
         'environment',
         'marketplace',
         'expires_at',
+        'package_updated_at',
+        'shipment_updated_at',
     ];
 
     /**
@@ -79,6 +86,8 @@ class ShippingOffer extends Model
             'rate_metadata' => 'array',
             'purchase_context' => 'encrypted:array',
             'expires_at' => 'datetime',
+            'package_updated_at' => 'datetime',
+            'shipment_updated_at' => 'datetime',
             'consumed_at' => 'datetime',
             'purchase_failed_at' => 'datetime',
         ];
@@ -116,6 +125,18 @@ class ShippingOffer extends Model
     }
 
     /**
+     * The analytics row logged for the same quote, when rate shopping logged
+     * one. The two tables are kept apart on purpose — different retention,
+     * different purpose — and this is the one pointer between them.
+     *
+     * @return BelongsTo<RateQuote, $this>
+     */
+    public function rateQuote(): BelongsTo
+    {
+        return $this->belongsTo(RateQuote::class);
+    }
+
+    /**
      * An offer with no published window has not expired — the absence of an
      * expiry is not an expiry of zero.
      */
@@ -127,6 +148,44 @@ class ShippingOffer extends Model
     public function isConsumed(): bool
     {
         return $this->consumed_at !== null;
+    }
+
+    /**
+     * Whether the package has been edited since this offer was quoted.
+     *
+     * Compared against the package as the database has it now, not the
+     * instance the caller happens to hold: the Ship page keeps its package
+     * loaded from before, and it is the stored row that the purchase will be
+     * for. An offer that recorded no version — one issued before this check
+     * existed, or a hand-built one — is not judged by it.
+     */
+    public function packageHasChangedSince(Package $package): bool
+    {
+        if ($this->package_updated_at === null && $this->shipment_updated_at === null) {
+            return false;
+        }
+
+        $stored = Package::query()->with('shipment:id,updated_at')->find($package->id);
+
+        if ($stored === null) {
+            return true;
+        }
+
+        return ! self::sameSecond($this->package_updated_at, $stored->updated_at)
+            || ! self::sameSecond($this->shipment_updated_at, $stored->shipment?->updated_at);
+    }
+
+    /**
+     * Timestamp columns carry whole seconds, so that is the grain two of them
+     * can honestly be compared at.
+     */
+    private static function sameSecond(?CarbonInterface $recorded, ?CarbonInterface $current): bool
+    {
+        if ($recorded === null || $current === null) {
+            return $recorded === null && $current === null;
+        }
+
+        return $recorded->format('Y-m-d H:i:s') === $current->format('Y-m-d H:i:s');
     }
 
     /**

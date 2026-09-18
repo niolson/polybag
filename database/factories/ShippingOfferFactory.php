@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\PostageSource;
 use App\Enums\SourceEnvironment;
 use App\Models\Package;
@@ -77,6 +78,61 @@ class ShippingOfferFactory extends Factory
             'consumed_at' => now(),
             'purchase_reference' => null,
             'purchase_failed_at' => null,
+        ]);
+    }
+
+    /**
+     * A direct-carrier rate quoted from a carrier account: no purchase
+     * context, because the account buys; a window that closes with the ship
+     * day rather than in minutes; and no marketplace. What the rate service
+     * issues for every USPS, FedEx or UPS rate (`postage-source-split/14`).
+     */
+    public function direct(): static
+    {
+        return $this->state(fn (): array => [
+            'postage_source' => PostageSource::CarrierAccount,
+            'carrier' => 'USPS',
+            'service_code' => 'PRIORITY_MAIL',
+            'service_name' => 'Priority Mail',
+            'rate_metadata' => [
+                'mailClass' => 'PRIORITY_MAIL',
+                'processingCategory' => 'MACHINABLE',
+                'rateIndicator' => 'SP',
+                'destinationEntryFacilityType' => 'NONE',
+            ],
+            'purchase_context' => null,
+            'marketplace' => null,
+            'expires_at' => now()->endOfDay(),
+        ]);
+    }
+
+    /**
+     * The offer for exactly this rate — carrier, service, price, metadata and
+     * the account it was quoted on — as the rate service would have issued it.
+     */
+    public function forRate(RateResponse $rate): static
+    {
+        return $this->state(fn (): array => [
+            'carrier' => $rate->carrier,
+            'carrier_account_id' => $rate->carrierAccountId,
+            'service_code' => $rate->serviceCode,
+            'service_name' => $rate->serviceName,
+            'price' => $rate->priceUnknown ? null : $rate->price,
+            'currency' => $rate->priceUnknown ? null : 'USD',
+            'rate_metadata' => $rate->packagingRequirement->intoRateMetadata($rate->metadata),
+        ]);
+    }
+
+    /**
+     * Bound to this package as it stands now, so that an edit to the package
+     * or its shipment before the purchase is refused as `PackageChanged`.
+     */
+    public function quotedFor(Package $package): static
+    {
+        return $this->state(fn (): array => [
+            'package_id' => $package->id,
+            'package_updated_at' => $package->updated_at,
+            'shipment_updated_at' => $package->shipment?->updated_at,
         ]);
     }
 

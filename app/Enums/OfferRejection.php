@@ -30,6 +30,14 @@ enum OfferRejection: string
      */
     case EnvironmentChanged = 'environment_changed';
 
+    /**
+     * The package or its shipment was edited after the quote. The price was
+     * for a different parcel — a different weight, box or address — and the
+     * Ship page keys its rate cache on the same two timestamps for the same
+     * reason, so the remedy is the re-quote it would have done anyway.
+     */
+    case PackageChanged = 'package_changed';
+
     public function title(): string
     {
         return match ($this) {
@@ -37,6 +45,7 @@ enum OfferRejection: string
             self::Expired => 'Rate Expired',
             self::AlreadyConsumed => 'Rate Already Used',
             self::EnvironmentChanged => 'Sandbox Mode Changed',
+            self::PackageChanged => 'Package Changed',
         };
     }
 
@@ -72,6 +81,8 @@ enum OfferRejection: string
                 .'Check the package for a tracking number before buying again — if there is none, get rates again.',
             self::EnvironmentChanged => 'Sandbox mode was switched after this rate was quoted, so it belongs to the '
                 .'other environment. Get rates again.',
+            self::PackageChanged => 'This package or its shipment was edited after this rate was quoted. '
+                .'Get rates again for the package as it is now.',
         };
     }
 }
