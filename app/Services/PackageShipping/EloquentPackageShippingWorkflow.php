@@ -814,7 +814,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         )->first();
 
         if ($resolved?->id === $offer->carrier_account_id) {
-            return null;
+            return $this->accountNowBillsSomeoneElse($offer, $resolved, $package);
         }
 
         logger()->warning('Refused an offer whose carrier account is no longer the one that would be used', [
@@ -827,6 +827,38 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         return PackageShippingResult::offerUnavailable(
             'Carrier Account Changed',
             'This rate was quoted on a carrier account that is no longer the one this package would ship on. '
+            .'Get rates again so the price matches the account that will be billed.',
+        );
+    }
+
+    /**
+     * Refuse an offer whose account row is the same but whose payer is not.
+     *
+     * The id check above says the same `CarrierAccount` would buy. It does
+     * not say the same account would be billed: the adapters read the account
+     * number, EPS account or CRID fresh from the row's credentials at
+     * purchase, and those are editable. The offer recorded a digest of that
+     * billing identity — and of nothing secret, so a refreshed OAuth token or
+     * a rotated client secret leaves it alone — and the purchase compares.
+     * An offer that recorded none, issued before the digest existed or
+     * resold through a channel, is not judged by it.
+     */
+    private function accountNowBillsSomeoneElse(ShippingOffer $offer, CarrierAccount $resolved, Package $package): ?PackageShippingResult
+    {
+        if ($offer->carrier_account_fingerprint === null
+            || $resolved->fingerprint() === $offer->carrier_account_fingerprint) {
+            return null;
+        }
+
+        logger()->warning('Refused an offer whose carrier account credentials changed after the quote', [
+            'package_id' => $package->id,
+            'offer' => $offer->public_id,
+            'carrier_account_id' => $resolved->id,
+        ]);
+
+        return PackageShippingResult::offerUnavailable(
+            'Carrier Account Changed',
+            'The carrier account this rate was quoted on has had its account details changed since. '
             .'Get rates again so the price matches the account that will be billed.',
         );
     }

@@ -2,7 +2,9 @@
 
 namespace App\DataTransferObjects\PostageSources;
 
+use App\DataTransferObjects\Shipping\RateRequest;
 use App\Enums\PostageSource;
+use App\Models\CarrierAccount;
 use Carbon\CarbonInterface;
 
 /**
@@ -22,8 +24,8 @@ readonly class OfferDraft
      * @param  array<string, mixed>  $purchaseContext  Opaque source tokens — Amazon's `requestToken` and `rateId`. Never rendered, never serialized to the browser.
      * @param  CarbonInterface|null  $expiresAt  When the source's window closes. Null when it publishes none; Amazon returns no expiry field, so its 10-minute window is tracked from request time here. A direct-carrier rate has no window of its own and is given the end of its quoted ship day.
      * @param  int|null  $rateQuoteId  The `rate_quotes` row logged for this rate, when rate shopping logged one, so that marking the selected quote is an update by primary key rather than a match on carrier and service code.
-     * @param  CarbonInterface|null  $packageUpdatedAt  The package's `updated_at` when quoted. The offer store refuses the offer once it has moved: an edit to the package makes this a price for a different parcel.
-     * @param  CarbonInterface|null  $shipmentUpdatedAt  The shipment's `updated_at` when quoted, for the same reason — the address and the items are the shipment's.
+     * @param  string|null  $quoteFingerprint  {@see RateRequest::fingerprint()} of the request this price answers. The offer store recomputes it from the package at redemption and refuses on a mismatch: an edit to what the carrier was asked to price makes this a price for a different parcel.
+     * @param  string|null  $carrierAccountFingerprint  {@see CarrierAccount::fingerprint()} of the account that quoted a direct rate — its billing identity, not its secrets — so the purchase can refuse when the same account row would now bill someone else. Null for a rate resold through a channel.
      */
     public function __construct(
         public string $carrier,
@@ -39,7 +41,7 @@ readonly class OfferDraft
         public ?CarbonInterface $expiresAt = null,
         public ?string $marketplace = null,
         public ?int $rateQuoteId = null,
-        public ?CarbonInterface $packageUpdatedAt = null,
-        public ?CarbonInterface $shipmentUpdatedAt = null,
+        public ?string $quoteFingerprint = null,
+        public ?string $carrierAccountFingerprint = null,
     ) {}
 }

@@ -19,8 +19,8 @@ use Illuminate\Database\Eloquent\Collection;
  * - an **opaque identifier**, which is all the browser ever holds;
  * - **binding** to both the package and the postage-source instance, so a
  *   USPS rate quoted directly and the same service quoted through Amazon are
- *   two offers rather than one ambiguous pair of strings — and to the package
- *   *as it stood* when quoted, so an edit to the parcel retires the price;
+ *   two offers rather than one ambiguous pair of strings — and to the rate
+ *   request *as quoted*, so an edit to what the carrier priced retires it;
  * - **expiry**, checked inside the claim so a window cannot close between
  *   reading a row and writing to it;
  * - **atomic consumption**, so one offer cannot be spent twice.
@@ -63,8 +63,8 @@ class OfferStore
             'environment' => SourceEnvironment::current(),
             'marketplace' => $draft->marketplace,
             'expires_at' => $expiresAt,
-            'package_updated_at' => $draft->packageUpdatedAt,
-            'shipment_updated_at' => $draft->shipmentUpdatedAt,
+            'quote_fingerprint' => $draft->quoteFingerprint,
+            'carrier_account_fingerprint' => $draft->carrierAccountFingerprint,
         ]);
     }
 
@@ -104,7 +104,7 @@ class OfferStore
             return OfferRedemption::rejected(OfferRejection::Expired, $offer);
         }
 
-        if ($offer->packageHasChangedSince($package)) {
+        if ($offer->quoteInputsChangedSince($package)) {
             return OfferRedemption::rejected(OfferRejection::PackageChanged, $offer);
         }
 
@@ -135,11 +135,11 @@ class OfferStore
             return OfferRedemption::rejected(OfferRejection::WrongPackage, $offer);
         }
 
-        // Checked before the claim rather than inside it: the package's
-        // timestamps are not what two concurrent purchases race over, and a
-        // stale offer refused here is left unconsumed, which is the truth — a
-        // re-quote supersedes it and nothing was ever spent on it.
-        if ($offer->packageHasChangedSince($package)) {
+        // Checked before the claim rather than inside it: the quote inputs
+        // are not what two concurrent purchases race over, and a stale offer
+        // refused here is left unconsumed, which is the truth — a re-quote
+        // supersedes it and nothing was ever spent on it.
+        if ($offer->quoteInputsChangedSince($package)) {
             return OfferRedemption::rejected(OfferRejection::PackageChanged, $offer);
         }
 

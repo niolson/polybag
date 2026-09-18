@@ -17,6 +17,7 @@ use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
 use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Exceptions\NoActiveCarrierServicesException;
+use App\Models\CarrierAccount;
 use App\Models\CarrierService;
 use App\Models\CarrierServiceSpecialService;
 use App\Models\Package;
@@ -111,7 +112,7 @@ class ShippingRateService
             PackageData::fromPackage($package)->carrierPackaging,
         );
 
-        return $this->offer($package, $rateOptions, $shipDates);
+        return $this->offer($package, $rateOptions, $shipDates, $rateRequest->fingerprint());
     }
 
     /**
@@ -148,10 +149,14 @@ class ShippingRateService
      * and the metadata the adapter reads at purchase are now the server's
      * copy rather than the browser's. Its window is the end of the quoted
      * ship day in the location's timezone — nothing about a direct rate moves
-     * intra-day — and it is bound to the package as it stands, so an edit
-     * retires it. A rate that already carries an offer — Amazon issues its
-     * own from inside `getRates()`, with the purchase tokens only it holds —
-     * is left as it is, and only pointed at its quote row.
+     * intra-day — and it is bound to the rate request it answers and to the
+     * quoting account's billing identity, so an edit to either retires it. A
+     * rate that already carries an offer — Amazon issues its own from inside
+     * `getRates()`, with the purchase tokens only it holds — is left as it
+     * is, and only pointed at its quote row and stamped with the same quote
+     * fingerprint — computed here, from the package-level request, because
+     * the request an adapter holds has been narrowed to the codes that
+     * carrier can express and would not digest the same.
      *
      * The quote log and the offers are written together so they can point at
      * each other: `markSelected()` marks by that pointer. A quote log that
@@ -161,11 +166,18 @@ class ShippingRateService
      *
      * @param  Collection<int, RateResponse>  $rates
      * @param  array<string, CarbonImmutable>  $shipDates  The date each carrier was quoted for, by carrier name
+     * @param  string  $quoteFingerprint  {@see RateRequest::fingerprint()} of the request every rate here answers
      * @return Collection<int, RateResponse>
      */
-    private function offer(Package $package, Collection $rates, array $shipDates): Collection
+    private function offer(Package $package, Collection $rates, array $shipDates, string $quoteFingerprint): Collection
     {
         $rates = $rates->values();
+
+        // One read per account quoted, not per rate: several rates share one.
+        $accountFingerprints = CarrierAccount::query()
+            ->whereIn('id', $rates->pluck('carrierAccountId')->filter()->unique())
+            ->get()
+            ->mapWithKeys(fn (CarrierAccount $account): array => [$account->id => $account->fingerprint()]);
 
         try {
             $quoteIds = app(RateQuoteLogger::class)->logRates($package->id, $rates);
@@ -181,16 +193,17 @@ class ShippingRateService
         $offerStore = app(OfferStore::class);
         $shipDateService = app(ShipDateService::class);
 
-        return $rates->map(function (RateResponse $rate, int $index) use ($package, $quoteIds, $offerStore, $shipDateService, &$shipDates): RateResponse {
+        return $rates->map(function (RateResponse $rate, int $index) use ($package, $quoteIds, $offerStore, $shipDateService, &$shipDates, $quoteFingerprint, $accountFingerprints): RateResponse {
             $quoteId = $quoteIds[$index] ?? null;
 
             if ($rate->offerId !== null) {
-                if ($quoteId !== null) {
-                    ShippingOffer::query()
-                        ->where('public_id', $rate->offerId)
-                        ->whereNull('rate_quote_id')
-                        ->update(['rate_quote_id' => $quoteId]);
-                }
+                ShippingOffer::query()
+                    ->where('public_id', $rate->offerId)
+                    ->whereNull('rate_quote_id')
+                    ->update(array_filter([
+                        'rate_quote_id' => $quoteId,
+                        'quote_fingerprint' => $quoteFingerprint,
+                    ]));
 
                 return $rate;
             }
@@ -213,8 +226,8 @@ class ShippingRateService
                 rateMetadata: $rate->packagingRequirement->intoRateMetadata($rate->metadata),
                 expiresAt: $shipDates[$rate->carrier]->endOfDay(),
                 rateQuoteId: $quoteId,
-                packageUpdatedAt: $package->updated_at,
-                shipmentUpdatedAt: $package->shipment?->updated_at,
+                quoteFingerprint: $quoteFingerprint,
+                carrierAccountFingerprint: $accountFingerprints->get($rate->carrierAccountId),
             ));
 
             return $rate->withOfferId($offer->public_id);

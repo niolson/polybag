@@ -6,6 +6,7 @@ use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
+use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
@@ -212,8 +213,9 @@ it('quotes a direct rate behind an offer that records everything the purchase ne
         ->and($offer->rate_quote_id)->toBe($quote->id)
         ->and($offer->rateQuote->is($quote))->toBeTrue()
         ->and($offer->consumed_at)->toBeNull()
-        ->and($offer->package_updated_at->format('Y-m-d H:i:s'))->toBe($package->updated_at->format('Y-m-d H:i:s'))
-        ->and($offer->shipment_updated_at->format('Y-m-d H:i:s'))->toBe($package->shipment->updated_at->format('Y-m-d H:i:s'))
+        // Bound to what was priced and to who would be billed.
+        ->and($offer->quote_fingerprint)->toBe(RateRequest::fromPackage($package->fresh())->fingerprint())
+        ->and($offer->carrier_account_fingerprint)->toBe($account->fingerprint())
         // The window closes with the quoted ship day, in the location's
         // timezone; the column carries whole seconds.
         ->and($offer->expires_at->timestamp)->toBe($shipDay->endOfDay()->timestamp)
@@ -285,15 +287,20 @@ it('buys what the offer says when the browser restates the rate', function (): v
 });
 
 it('classifies the packaging of the restored rate, not the one the browser sent', function (): void {
-    // The authoritative check the reviewer asked for: the offer says this is
-    // a flat-rate box rate, the browser says single-piece. The adapter is
-    // asked about the offer's metadata and refuses, whatever the browser said.
+    // The authoritative check the reviewer asked for. The package stays in
+    // the packer's own box throughout — moving it would change what was
+    // priced and retire the offer before this check ran — and the browser's
+    // copy of the rate says single-piece. The adapter is asked about the
+    // offer's metadata, which says flat-rate box, and refuses.
     $this->actingAs($user = User::factory()->create());
     $package = packageOnMockCarrier();
 
     $adapter = Mockery::mock(DirectCarrierAdapter::class);
     $adapter->shouldReceive('isConfigured')->andReturnTrue();
     $adapter->shouldReceive('prepareRateRequest')->andReturnNull();
+    // Stamped as shipper packaging at quote time so rate shopping's filter
+    // lets it onto the list; the purchase asks the adapter again, and the
+    // adapter reads the offer's `FB` and answers with the box it names.
     $adapter->shouldReceive('getRates')->andReturn(collect([
         new RateResponse(
             carrier: 'MockCarrier',
@@ -301,12 +308,9 @@ it('classifies the packaging of the restored rate, not the one the browser sent'
             serviceName: 'Priority Mail Medium Flat Rate Box',
             price: 18.40,
             metadata: ['mailClass' => 'PRIORITY_MAIL', 'rateIndicator' => 'FB'],
-            packagingRequirement: PackagingRequirement::exactly(CarrierPackaging::UspsMediumFlatRateBox),
+            packagingRequirement: PackagingRequirement::shipperPackaging(),
         ),
     ]));
-    // Rate shopping's filter drops a flat-rate rate for a package in the
-    // packer's own box before it is offered at all, so the mock package is
-    // told it is in that box to get the rate onto the list.
     $adapter->shouldReceive('packagingRequirementFor')
         ->once()
         ->withArgs(fn (RateResponse $rate): bool => ($rate->metadata['rateIndicator'] ?? null) === 'FB')
@@ -314,12 +318,9 @@ it('classifies the packaging of the restored rate, not the one the browser sent'
     $adapter->shouldReceive('createShipment')->never()->andReturn(ShipResponse::failure('unexpected'));
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
 
-    $package->boxSize->update(['carrier_packaging' => CarrierPackaging::UspsMediumFlatRateBox]);
-    $quoted = rateOptionFromShipPage($package->fresh());
+    $quoted = rateOptionFromShipPage($package);
 
-    // Between quote and purchase the packer moves the parcel into their own
-    // box, and the browser's copy of the rate claims it never needed one.
-    $package->boxSize->update(['carrier_packaging' => null]);
+    // The browser's copy of the rate claims it never needed a box.
     $browserRate = RateResponse::fromArray([
         ...$quoted->toArray(),
         'metadata' => ['mailClass' => 'PRIORITY_MAIL', 'rateIndicator' => 'SP'],
@@ -327,7 +328,7 @@ it('classifies the packaging of the restored rate, not the one the browser sent'
     ]);
 
     $result = app(PackageShippingWorkflow::class)->ship(
-        $package->fresh(),
+        $package,
         new PackageShippingRequest(selectedRate: $browserRate, userId: $user->id),
     );
 
@@ -344,8 +345,7 @@ it('refuses an offer once the package has been edited, and the Ship page re-quot
 
     $quoted = rateOptionFromShipPage($package);
 
-    // Timestamps carry whole seconds, so the edit has to land in a later one.
-    $this->travel(1)->minutes();
+    // The weight is what the carrier priced.
     $package->update(['weight' => 4.0]);
 
     $inspection = app(OfferStore::class)->inspect($package->fresh(), $quoted->offerId);
@@ -378,7 +378,6 @@ it('re-quotes on the Ship page when the offer it holds is for an edited package'
     expect($staleOfferId)->not->toBeNull();
 
     // The tab stays open while someone edits the shipment's address.
-    $this->travel(1)->minutes();
     $package->shipment->update(['city' => 'Elsewhere']);
 
     $component->set('selectedRateIndex', 0)
@@ -482,4 +481,49 @@ it('auto ships through rate shopping as before, spending the offer it was issued
         ->and($spent->first()->purchase_reference)->toBe($package->fresh()->tracking_number)
         ->and(RateQuote::where('package_id', $package->id)->where('selected', true)->count())->toBe(1)
         ->and(RateQuote::where('package_id', $package->id)->where('selected', true)->value('id'))->toBe($spent->first()->rate_quote_id);
+});
+
+it('refuses a direct offer once the quoting account bills as someone else', function (): void {
+    // Same account row, different payer: the adapters read the account
+    // number fresh at purchase, so the offer's price would land on an
+    // account that never quoted it.
+    $this->actingAs($user = User::factory()->create());
+    ['package' => $package, 'account' => $account] = packageQuotedByFakeUsps();
+
+    $quoted = rateOptionFromShipPage($package);
+
+    $account->mergeCredential('eps_account', '99999999');
+    $account->save();
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: $quoted, userId: $user->id),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Carrier Account Changed')
+        ->and($result->message)->toContain('account details changed')
+        ->and(ShippingOffer::where('public_id', $quoted->offerId)->value('consumed_at'))->toBeNull()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});
+
+it('keeps a direct offer across a token refresh on the quoting account', function (): void {
+    // OAuthService writes refreshed tokens into the secret credentials. The
+    // payer has not changed, so neither has the quote.
+    $this->actingAs($user = User::factory()->create());
+    ['package' => $package, 'account' => $account] = packageQuotedByFakeUsps();
+
+    $quoted = rateOptionFromShipPage($package);
+
+    $account->mergeSecret('oauth_token', 'refreshed-'.fake()->sha256());
+    $account->mergeSecret('client_secret', 'rotated-'.fake()->sha256());
+    $account->save();
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: $quoted, userId: $user->id),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
 });

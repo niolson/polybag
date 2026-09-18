@@ -70,6 +70,72 @@ readonly class RateRequest
         );
     }
 
+    /**
+     * A digest of everything a carrier was asked to price.
+     *
+     * What an offer is bound to. A price is a function of these inputs and
+     * nothing else, so an offer whose package still produces the same digest
+     * is still the price for that package, and one whose package does not is
+     * not — whatever else was or was not saved in between. Timestamps could
+     * not say that: neither `PackageItem` nor `ShipmentItem` touches its
+     * parent, so a quantity or declared-value edit moved nothing, while any
+     * parent save retired every offer for no reason.
+     *
+     * Two inputs are left out. The ship date is set per carrier after
+     * `fromPackage()` and is the offer's window, not its identity; the
+     * package id is already the row's `package_id`. Everything else is
+     * encoded canonically — keys sorted at every depth, lists of codes
+     * sorted, enums by value — so the same request always digests the same,
+     * however it was built.
+     */
+    public function fingerprint(): string
+    {
+        $inputs = get_object_vars($this);
+        unset($inputs['shipDate'], $inputs['packageId']);
+
+        return hash('sha256', json_encode(self::canonical($inputs), JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION));
+    }
+
+    /**
+     * The same value in a form that encodes identically however it was built.
+     *
+     * Associative arrays and objects are sorted by key at every depth; a list
+     * of scalars — special service codes — is sorted too, since it names a
+     * set. A list of objects, the packages, keeps its order: it is a sequence.
+     */
+    private static function canonical(mixed $value): mixed
+    {
+        if ($value instanceof \BackedEnum) {
+            return $value->value;
+        }
+
+        if ($value instanceof \UnitEnum) {
+            return $value->name;
+        }
+
+        if (is_object($value)) {
+            $value = get_object_vars($value);
+        }
+
+        if (! is_array($value)) {
+            return $value;
+        }
+
+        if (array_is_list($value)) {
+            $items = array_map(self::canonical(...), $value);
+
+            if ($items === [] || array_all($items, fn (mixed $item): bool => is_scalar($item) || $item === null)) {
+                sort($items);
+            }
+
+            return $items;
+        }
+
+        ksort($value);
+
+        return array_map(self::canonical(...), $value);
+    }
+
     public function hasSpecialService(string $code): bool
     {
         return in_array($code, $this->specialServiceCodes, true);

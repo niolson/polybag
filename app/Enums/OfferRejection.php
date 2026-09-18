@@ -31,10 +31,10 @@ enum OfferRejection: string
     case EnvironmentChanged = 'environment_changed';
 
     /**
-     * The package or its shipment was edited after the quote. The price was
-     * for a different parcel — a different weight, box or address — and the
-     * Ship page keys its rate cache on the same two timestamps for the same
-     * reason, so the remedy is the re-quote it would have done anyway.
+     * What the carrier was asked to price has changed since the quote — a
+     * weight, a box, an address, a declared value, a compliance service. The
+     * price was for a different parcel, and the remedy is the re-quote the
+     * Ship page would do for any of those edits anyway.
      */
     case PackageChanged = 'package_changed';
 

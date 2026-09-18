@@ -2,9 +2,10 @@
 
 namespace App\Models;
 
+use App\DataTransferObjects\Shipping\RateRequest;
 use App\Enums\PostageSource;
 use App\Enums\SourceEnvironment;
-use Carbon\CarbonInterface;
+use App\Exceptions\MissingDeclaredValueException;
 use Database\Factories\ShippingOfferFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -35,9 +36,10 @@ use Illuminate\Support\Str;
  * @property string|null $purchase_reference
  * @property string|null $purchase_failure_reason
  * @property int|null $rate_quote_id
+ * @property int|null $carrier_account_id
  * @property Carbon|null $expires_at
- * @property Carbon|null $package_updated_at
- * @property Carbon|null $shipment_updated_at
+ * @property string|null $quote_fingerprint
+ * @property string|null $carrier_account_fingerprint
  * @property Carbon|null $consumed_at
  * @property Carbon|null $purchase_failed_at
  */
@@ -62,8 +64,8 @@ class ShippingOffer extends Model
         'environment',
         'marketplace',
         'expires_at',
-        'package_updated_at',
-        'shipment_updated_at',
+        'quote_fingerprint',
+        'carrier_account_fingerprint',
     ];
 
     /**
@@ -86,8 +88,6 @@ class ShippingOffer extends Model
             'rate_metadata' => 'array',
             'purchase_context' => 'encrypted:array',
             'expires_at' => 'datetime',
-            'package_updated_at' => 'datetime',
-            'shipment_updated_at' => 'datetime',
             'consumed_at' => 'datetime',
             'purchase_failed_at' => 'datetime',
         ];
@@ -151,41 +151,42 @@ class ShippingOffer extends Model
     }
 
     /**
-     * Whether the package has been edited since this offer was quoted.
+     * Whether what the carrier was asked to price has changed since the quote.
      *
-     * Compared against the package as the database has it now, not the
-     * instance the caller happens to hold: the Ship page keeps its package
-     * loaded from before, and it is the stored row that the purchase will be
-     * for. An offer that recorded no version — one issued before this check
-     * existed, or a hand-built one — is not judged by it.
+     * The rate request is rebuilt from the package as the database has it now
+     * — not from the instance the caller holds, since the Ship page keeps its
+     * package loaded from before — and its digest compared with the one
+     * recorded at issue. A digest of the inputs rather than the parents'
+     * `updated_at`, because the inputs are spread across rows that do not
+     * touch their parents: a `PackageItem` quantity, a `ShipmentItem` value
+     * and a product's compliance flags all change the request without moving
+     * either timestamp, while a save that changes nothing the carrier priced
+     * would have retired every offer.
+     *
+     * A package that can no longer be priced at all — its declared value
+     * removed after a rate that needed one — has changed by definition. An
+     * offer that recorded no fingerprint, issued before the check existed or
+     * hand-built, is not judged by it.
      */
-    public function packageHasChangedSince(Package $package): bool
+    public function quoteInputsChangedSince(Package $package): bool
     {
-        if ($this->package_updated_at === null && $this->shipment_updated_at === null) {
+        if ($this->quote_fingerprint === null) {
             return false;
         }
 
-        $stored = Package::query()->with('shipment:id,updated_at')->find($package->id);
+        $stored = Package::query()
+            ->with(['packageItems.product', 'packageItems.shipmentItem', 'shipment.shippingMethod', 'shipment.packages', 'boxSize', 'location'])
+            ->find($package->id);
 
         if ($stored === null) {
             return true;
         }
 
-        return ! self::sameSecond($this->package_updated_at, $stored->updated_at)
-            || ! self::sameSecond($this->shipment_updated_at, $stored->shipment?->updated_at);
-    }
-
-    /**
-     * Timestamp columns carry whole seconds, so that is the grain two of them
-     * can honestly be compared at.
-     */
-    private static function sameSecond(?CarbonInterface $recorded, ?CarbonInterface $current): bool
-    {
-        if ($recorded === null || $current === null) {
-            return $recorded === null && $current === null;
+        try {
+            return RateRequest::fromPackage($stored)->fingerprint() !== $this->quote_fingerprint;
+        } catch (MissingDeclaredValueException) {
+            return true;
         }
-
-        return $recorded->format('Y-m-d H:i:s') === $current->format('Y-m-d H:i:s');
     }
 
     /**

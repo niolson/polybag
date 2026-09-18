@@ -95,6 +95,44 @@ class CarrierAccount extends Model
         $this->secret_credentials = array_merge($this->secret_credentials ?? [], [$key => $value]);
     }
 
+    /**
+     * A digest of who this account bills as.
+     *
+     * An offer records the account that quoted it by id, but the adapters
+     * read the billing identity — UPS's and FedEx's `account_number`, USPS's
+     * `eps_account` and `crid` — fresh from `credentials` at purchase, and
+     * those are editable. The same row with a different account number is a
+     * different payer, so the offer stores this beside the id and the
+     * purchase compares.
+     *
+     * Secrets are excluded on purpose. `OAuthService` writes refreshed tokens
+     * into `secret_credentials` through {@see mergeSecret()}, and a rotated
+     * client secret for the same account number still bills the same account;
+     * neither may retire a quote. `updated_at` would move on every one of
+     * those, which is why it is not used either.
+     */
+    public function fingerprint(): string
+    {
+        return hash('sha256', json_encode([
+            'carrier_id' => $this->carrier_id,
+            'credentials' => self::sortedRecursively($this->credentials ?? []),
+        ], JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $values
+     * @return array<array-key, mixed>
+     */
+    private static function sortedRecursively(array $values): array
+    {
+        ksort($values);
+
+        return array_map(
+            fn (mixed $value): mixed => is_array($value) ? self::sortedRecursively($value) : $value,
+            $values,
+        );
+    }
+
     public function connectionStatus(): string
     {
         return match ($this->carrier?->name) {
