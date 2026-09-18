@@ -6,22 +6,28 @@ use App\Contracts\AsyncRateQuoting;
 use App\Contracts\BlindPurchaseSource;
 use App\Contracts\CarrierAdapterInterface;
 use App\Contracts\PostageOfferSource;
+use App\DataTransferObjects\PostageSources\OfferDraft;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
 use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Exceptions\NoActiveCarrierServicesException;
+use App\Models\CarrierAccount;
 use App\Models\CarrierService;
 use App\Models\CarrierServiceSpecialService;
 use App\Models\Package;
 use App\Models\ShippingMethod;
+use App\Models\ShippingOffer;
 use App\Models\SpecialService;
 use App\Services\Carriers\CarrierRegistry;
+use App\Services\PostageSources\OfferStore;
 use App\Services\Shipping\PackagingFilter;
+use Carbon\CarbonImmutable;
 use GuzzleHttp\Promise\Utils as PromiseUtils;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -92,23 +98,140 @@ class ShippingRateService
         $rateRequest = RateRequest::fromPackage($package);
         $carrierTasks = $this->buildCarrierTasks($package, $rateRequest);
 
+        // One ship date per carrier, read once and used twice: the carrier is
+        // quoted for it, and the offer's window ends with it. Reading it again
+        // after the carrier calls would let a pickup cutoff or an End of Day
+        // run in between hand the offer a later day than the one it was
+        // priced for.
+        $shipDates = $this->shipDatesFor($carrierTasks, $rateRequest->locationId);
+
         // Before the quote log: a rate the package's packaging rules out was
         // never offered, and must not be logged as one (ADR-0005 decision 4).
         $rateOptions = PackagingFilter::keepCompatible(
-            $this->fetchRatesConcurrently($carrierTasks, $rateRequest),
+            $this->fetchRatesConcurrently($carrierTasks, $rateRequest, $shipDates),
             PackageData::fromPackage($package)->carrierPackaging,
         );
 
-        try {
-            app(RateQuoteLogger::class)->logRates($packageId, $rateOptions);
-        } catch (\Exception $e) {
-            logger()->warning('Failed to log rate quotes', [
-                'package_id' => $packageId,
-                'error' => $e->getMessage(),
-            ]);
+        return $this->offer($package, $rateOptions, $shipDates, $rateRequest->fingerprint());
+    }
+
+    /**
+     * The ship date each carrier in these tasks will be quoted for.
+     *
+     * @param  array<int, array{name: string, serviceCodes: array<string>, specialServiceCodes: array<string>}>  $carrierTasks
+     * @return array<string, CarbonImmutable>
+     */
+    private function shipDatesFor(array $carrierTasks, ?int $locationId): array
+    {
+        $shipDateService = app(ShipDateService::class);
+        $shipDates = [];
+
+        foreach ($carrierTasks as $task) {
+            $shipDates[$task['name']] ??= $shipDateService->getShipDate($task['name'], $locationId);
         }
 
-        return $rateOptions;
+        return $shipDates;
+    }
+
+    /**
+     * Log every surviving rate and put an offer behind each one.
+     *
+     * The one loop no adapter can bypass and a new adapter cannot forget,
+     * placed after the packaging filter so a rate never offered never holds
+     * an identifier. Runs on every quoting path — the Ship page, batch ship,
+     * auto-ship — because the purchase path is shared and restores from the
+     * offer whenever a rate carries one; the rows the unattended paths leave
+     * behind are unconsumed and age out with the rest.
+     *
+     * A direct-carrier rate becomes a {@see ShippingOffer} with
+     * `postage_source = CarrierAccount`, the account the adapter quoted on,
+     * and no purchase context: the account still buys, but the price, service
+     * and the metadata the adapter reads at purchase are now the server's
+     * copy rather than the browser's. Its window is the end of the quoted
+     * ship day in the location's timezone — nothing about a direct rate moves
+     * intra-day — and it is bound to the rate request it answers and to the
+     * quoting account's billing identity, so an edit to either retires it. A
+     * rate that already carries an offer — Amazon issues its own from inside
+     * `getRates()`, with the purchase tokens only it holds — is left as it
+     * is, and only pointed at its quote row and stamped with the same quote
+     * fingerprint — computed here, from the package-level request, because
+     * the request an adapter holds has been narrowed to the codes that
+     * carrier can express and would not digest the same.
+     *
+     * The quote log and the offers are written together so they can point at
+     * each other: `markSelected()` marks by that pointer. A quote log that
+     * fails to write is a warning, as before, and the offers are issued
+     * without a pointer rather than not at all — the log is analytics, the
+     * offer is what the purchase needs.
+     *
+     * @param  Collection<int, RateResponse>  $rates
+     * @param  array<string, CarbonImmutable>  $shipDates  The date each carrier was quoted for, by carrier name
+     * @param  string  $quoteFingerprint  {@see RateRequest::fingerprint()} of the request every rate here answers
+     * @return Collection<int, RateResponse>
+     */
+    private function offer(Package $package, Collection $rates, array $shipDates, string $quoteFingerprint): Collection
+    {
+        $rates = $rates->values();
+
+        // One read per account quoted, not per rate: several rates share one.
+        $accountFingerprints = CarrierAccount::query()
+            ->whereIn('id', $rates->pluck('carrierAccountId')->filter()->unique())
+            ->get()
+            ->mapWithKeys(fn (CarrierAccount $account): array => [$account->id => $account->fingerprint()]);
+
+        try {
+            $quoteIds = app(RateQuoteLogger::class)->logRates($package->id, $rates);
+        } catch (\Exception $e) {
+            logger()->warning('Failed to log rate quotes', [
+                'package_id' => $package->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            $quoteIds = [];
+        }
+
+        $offerStore = app(OfferStore::class);
+        $shipDateService = app(ShipDateService::class);
+
+        return $rates->map(function (RateResponse $rate, int $index) use ($package, $quoteIds, $offerStore, $shipDateService, &$shipDates, $quoteFingerprint, $accountFingerprints): RateResponse {
+            $quoteId = $quoteIds[$index] ?? null;
+
+            if ($rate->offerId !== null) {
+                ShippingOffer::query()
+                    ->where('public_id', $rate->offerId)
+                    ->whereNull('rate_quote_id')
+                    ->update(array_filter([
+                        'rate_quote_id' => $quoteId,
+                        'quote_fingerprint' => $quoteFingerprint,
+                    ]));
+
+                return $rate;
+            }
+
+            // A rate normally names the carrier it was asked of. One that does
+            // not — an adapter answering under a different carrier name — is
+            // windowed on a date read now, which is the best available.
+            $shipDates[$rate->carrier] ??= $shipDateService->getShipDate($rate->carrier, $package->location_id);
+
+            $offer = $offerStore->issue($package, new OfferDraft(
+                carrier: $rate->carrier,
+                postageSource: PostageSource::CarrierAccount,
+                carrierAccountId: $rate->carrierAccountId,
+                serviceCode: $rate->serviceCode,
+                serviceName: $rate->serviceName,
+                price: $rate->priceUnknown ? null : $rate->price,
+                currency: 'USD',
+                // The packaging requirement travels with the metadata so the
+                // purchase-time check classifies what the server quoted.
+                rateMetadata: $rate->packagingRequirement->intoRateMetadata($rate->metadata),
+                expiresAt: $shipDates[$rate->carrier]->endOfDay(),
+                rateQuoteId: $quoteId,
+                quoteFingerprint: $quoteFingerprint,
+                carrierAccountFingerprint: $accountFingerprints->get($rate->carrierAccountId),
+            ));
+
+            return $rate->withOfferId($offer->public_id);
+        });
     }
 
     /**
@@ -268,17 +391,16 @@ class ShippingRateService
      * Fetch rates from multiple carriers concurrently using a shared Guzzle sender.
      *
      * @param  array<int, array{name: string, serviceCodes: array<string>, specialServiceCodes: array<string>}>  $carrierTasks
+     * @param  array<string, CarbonImmutable>  $shipDates  The date to quote each carrier for, by carrier name
      * @return Collection<int, RateResponse>
      */
-    private function fetchRatesConcurrently(array $carrierTasks, RateRequest $rateRequest): Collection
+    private function fetchRatesConcurrently(array $carrierTasks, RateRequest $rateRequest, array $shipDates): Collection
     {
         $rateOptions = collect();
         $preparedRequests = [];
         $taskMeta = [];
 
         $registry = app(CarrierRegistry::class);
-
-        $shipDateService = app(ShipDateService::class);
 
         // Phase 1: Prepare all requests (authenticate connectors, build request bodies)
         foreach ($carrierTasks as $task) {
@@ -300,9 +422,8 @@ class ShippingRateService
                     continue;
                 }
 
-                $shipDate = $shipDateService->getShipDate($carrierName, $rateRequest->locationId);
                 $carrierRateRequest = $rateRequest
-                    ->withShipDate($shipDate)
+                    ->withShipDate($shipDates[$carrierName])
                     ->withSpecialServiceCodes($task['specialServiceCodes']);
 
                 if ($adapter instanceof AsyncRateQuoting) {

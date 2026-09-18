@@ -20,8 +20,16 @@ enum OfferRejection: string
     /** The source's window has closed; the price and promise are no longer good. */
     case Expired = 'expired';
 
-    /** Already spent. Buying again would be a second purchase, not a retry. */
+    /** Already spent, outcome unknown or a label bought. Buying again would be a second purchase, not a retry. */
     case AlreadyConsumed = 'already_consumed';
+
+    /**
+     * Spent, and the source answered "no". Nothing was bought, and the offer is
+     * not returned to the pool — but the packer who fixed the address the
+     * carrier rejected must not be told a label may exist. The remedy is the
+     * re-quote, the same as for any other settled rejection.
+     */
+    case PurchaseDeclined = 'purchase_declined';
 
     /**
      * Quoted in the other world. Sandbox and production identifiers differ, and
@@ -30,13 +38,23 @@ enum OfferRejection: string
      */
     case EnvironmentChanged = 'environment_changed';
 
+    /**
+     * What the carrier was asked to price has changed since the quote — a
+     * weight, a box, an address, a declared value, a compliance service. The
+     * price was for a different parcel, and the remedy is the re-quote the
+     * Ship page would do for any of those edits anyway.
+     */
+    case PackageChanged = 'package_changed';
+
     public function title(): string
     {
         return match ($this) {
             self::NotFound, self::WrongPackage => 'Rate Unavailable',
             self::Expired => 'Rate Expired',
             self::AlreadyConsumed => 'Rate Already Used',
+            self::PurchaseDeclined => 'Purchase Declined',
             self::EnvironmentChanged => 'Sandbox Mode Changed',
+            self::PackageChanged => 'Package Changed',
         };
     }
 
@@ -51,7 +69,9 @@ enum OfferRejection: string
      *
      * `AlreadyConsumed` is the exception, and not by omission: a label may
      * already exist for that offer, so quoting again is exactly what must not
-     * happen automatically. Someone has to look first.
+     * happen automatically. Someone has to look first. `PurchaseDeclined` is
+     * consumed too but is not that case — the source said nothing was bought —
+     * which is why it is its own rejection rather than a wording of this one.
      */
     public function requiresRequote(): bool
     {
@@ -70,8 +90,12 @@ enum OfferRejection: string
             self::Expired => 'This rate has expired. Get rates again to buy at a current price.',
             self::AlreadyConsumed => 'This rate has already been used to buy a label. '
                 .'Check the package for a tracking number before buying again — if there is none, get rates again.',
+            self::PurchaseDeclined => 'The carrier declined the last attempt to buy this rate, so nothing was bought. '
+                .'Get rates again and try once more.',
             self::EnvironmentChanged => 'Sandbox mode was switched after this rate was quoted, so it belongs to the '
                 .'other environment. Get rates again.',
+            self::PackageChanged => 'This package or its shipment was edited after this rate was quoted. '
+                .'Get rates again for the package as it is now.',
         };
     }
 }

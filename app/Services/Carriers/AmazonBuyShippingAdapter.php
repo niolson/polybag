@@ -652,6 +652,12 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
                     ],
                     expiresAt: $expiresAt,
                     marketplace: $marketplace,
+                    // No quote fingerprint here: the request in hand is the
+                    // per-carrier one, with codes Amazon cannot express
+                    // dropped, and would not match the package-level request
+                    // the offer store recomputes. `ShippingRateService`
+                    // stamps the shared one when it points this row at its
+                    // quote log.
                 ));
 
                 return new RateResponse(

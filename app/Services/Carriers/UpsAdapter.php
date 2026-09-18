@@ -263,6 +263,8 @@ class UpsAdapter implements DirectCarrierAdapter
             $serviceCodes,
             $this->packagingCodeFor($request->packages[0]->carrierPackaging),
             $request->hasSpecialService('saturday_delivery'),
+            // The account the offer will record as having quoted this price.
+            $this->resolveAccount($request->locationId, $request->clientId)?->id,
         );
     }
 
@@ -386,7 +388,7 @@ class UpsAdapter implements DirectCarrierAdapter
      * @param  string  $packagingCode  A UPS packaging code, {@see packagingCodeFor()}
      * @param  bool  $saturdayRequested  Whether the request that produced this response carried `SaturdayDeliveryIndicator`
      */
-    private function extractRateDetails(Response $response, array $serviceCodes, string $packagingCode, bool $saturdayRequested): Collection
+    private function extractRateDetails(Response $response, array $serviceCodes, string $packagingCode, bool $saturdayRequested, ?int $carrierAccountId = null): Collection
     {
         $ratedShipments = $response->json('RateResponse.RatedShipment', []);
 
@@ -462,6 +464,7 @@ class UpsAdapter implements DirectCarrierAdapter
                 transitTime: $transitTime,
                 metadata: $metadata,
                 packagingRequirement: $this->classifyPackaging($metadata),
+                carrierAccountId: $carrierAccountId,
             ));
         }
 

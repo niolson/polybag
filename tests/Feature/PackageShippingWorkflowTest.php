@@ -22,6 +22,7 @@ use App\Models\Product;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
+use App\Models\ShippingOffer;
 use App\Models\ShippingRule;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
@@ -146,7 +147,7 @@ it('ships a package with the selected rate and marks it shipped', function (): v
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: $rate, userId: $user->id),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate), userId: $user->id),
     );
 
     expect($result->success)->toBeTrue()
@@ -180,7 +181,7 @@ it('refuses a rate that requires carrier packaging the package is not in', funct
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: $rate, userId: $user->id),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate), userId: $user->id),
     );
 
     expect($result->success)->toBeFalse()
@@ -221,7 +222,7 @@ it('asks the adapter which packaging the rate needs, so the browser cannot switc
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: $browserRate, userId: $user->id),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, $browserRate), userId: $user->id),
     );
 
     expect($browserRate->packagingRequirement->isShipperPackaging())->toBeTrue()
@@ -254,7 +255,7 @@ it('refuses a rate whose packaging the adapter cannot classify, rather than buyi
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: $rate, userId: $user->id),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate), userId: $user->id),
     );
 
     expect($result->success)->toBeFalse()
@@ -278,7 +279,7 @@ it('returns a failure result when the carrier rejects the shipment', function ()
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: $rate),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate)),
     );
 
     expect($result->success)->toBeFalse()
@@ -301,7 +302,7 @@ it('reports a carrier timeout when shipping times out', function (): void {
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: $rate),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate)),
     );
 
     expect($result->success)->toBeFalse()
@@ -323,7 +324,7 @@ it('reports a carrier error when shipping raises a request exception', function 
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: $rate),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate)),
     );
 
     expect($result->success)->toBeFalse()
@@ -345,7 +346,7 @@ it('reports a state conflict when shipping raises a runtime exception', function
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: $rate),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate)),
     );
 
     expect($result->success)->toBeFalse()
@@ -367,7 +368,7 @@ it('reports a generic error when shipping raises an unexpected exception', funct
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: $rate),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate)),
     );
 
     expect($result->success)->toBeFalse()
@@ -399,9 +400,13 @@ it('auto ships through a rule preselected rate', function (): void {
         new PackageAutoShippingRequest(userId: $user->id, cleanupOnFailure: false),
     );
 
+    // A rule's pre-selected rate never rate-shopped, so it carries no offer —
+    // and the unattended path is the trusted side of the boundary ship()
+    // enforces, so it buys anyway.
     expect($result->success)->toBeTrue()
         ->and($result->summaryMessage())->toContain('AUTO123')
-        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped)
+        ->and(ShippingOffer::count())->toBe(0);
 });
 
 it('rate shops when the pre-selected service has no variant for the packaging', function (): void {
@@ -559,7 +564,7 @@ it('prompts for a customs weight override when a military destination is overwei
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
         new PackageShippingRequest(
-            selectedRate: new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'),
+            selectedRate: quotedDirectly($package, new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days')),
             userId: $user->id,
         ),
     );
@@ -606,7 +611,7 @@ it('scales customs weights for a military destination once the override is confi
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
         new PackageShippingRequest(
-            selectedRate: new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'),
+            selectedRate: quotedDirectly($package, new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days')),
             userId: $user->id,
             overrideCustomsWeights: true,
         ),
@@ -643,7 +648,7 @@ it('does not prompt for a customs override on an ordinary domestic destination',
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
         new PackageShippingRequest(
-            selectedRate: new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'),
+            selectedRate: quotedDirectly($package, new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days')),
             userId: $user->id,
         ),
     );
@@ -686,7 +691,7 @@ it('refuses to buy from a seller that returns a separate customs document when n
     $result = app(PackageShippingWorkflow::class)->ship(
         $package->fresh(),
         new PackageShippingRequest(
-            selectedRate: new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'),
+            selectedRate: quotedDirectly($package, new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days')),
             userId: $user->id,
             hasReportPrinter: false,
         ),
@@ -719,7 +724,7 @@ it('buys from a seller that fuses the customs form into the label without a repo
     $result = app(PackageShippingWorkflow::class)->ship(
         $package->fresh(),
         new PackageShippingRequest(
-            selectedRate: new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'),
+            selectedRate: quotedDirectly($package, new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days')),
             userId: $user->id,
             hasReportPrinter: false,
         ),
@@ -746,7 +751,7 @@ it('buys from a seller that returns a separate customs document once a report pr
     $result = app(PackageShippingWorkflow::class)->ship(
         $package->fresh(),
         new PackageShippingRequest(
-            selectedRate: new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'),
+            selectedRate: quotedDirectly($package, new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days')),
             userId: $user->id,
             hasReportPrinter: true,
         ),
@@ -771,7 +776,7 @@ it('does not ask the seller about customs documents on a domestic lane', functio
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
         new PackageShippingRequest(
-            selectedRate: new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'),
+            selectedRate: quotedDirectly($package, new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days')),
             userId: $user->id,
             hasReportPrinter: false,
         ),

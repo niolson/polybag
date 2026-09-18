@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use App\DataTransferObjects\Shipping\RateRequest;
 use App\Enums\PostageSource;
 use App\Enums\SourceEnvironment;
+use App\Exceptions\MissingDeclaredValueException;
 use Database\Factories\ShippingOfferFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -33,7 +35,11 @@ use Illuminate\Support\Str;
  * @property array<string, mixed>|null $purchase_context
  * @property string|null $purchase_reference
  * @property string|null $purchase_failure_reason
+ * @property int|null $rate_quote_id
+ * @property int|null $carrier_account_id
  * @property Carbon|null $expires_at
+ * @property string|null $quote_fingerprint
+ * @property string|null $carrier_account_fingerprint
  * @property Carbon|null $consumed_at
  * @property Carbon|null $purchase_failed_at
  */
@@ -47,6 +53,7 @@ class ShippingOffer extends Model
         'postage_source',
         'carrier_account_id',
         'postage_data_source_id',
+        'rate_quote_id',
         'carrier',
         'service_code',
         'service_name',
@@ -57,6 +64,8 @@ class ShippingOffer extends Model
         'environment',
         'marketplace',
         'expires_at',
+        'quote_fingerprint',
+        'carrier_account_fingerprint',
     ];
 
     /**
@@ -116,6 +125,18 @@ class ShippingOffer extends Model
     }
 
     /**
+     * The analytics row logged for the same quote, when rate shopping logged
+     * one. The two tables are kept apart on purpose — different retention,
+     * different purpose — and this is the one pointer between them.
+     *
+     * @return BelongsTo<RateQuote, $this>
+     */
+    public function rateQuote(): BelongsTo
+    {
+        return $this->belongsTo(RateQuote::class);
+    }
+
+    /**
      * An offer with no published window has not expired — the absence of an
      * expiry is not an expiry of zero.
      */
@@ -127,6 +148,45 @@ class ShippingOffer extends Model
     public function isConsumed(): bool
     {
         return $this->consumed_at !== null;
+    }
+
+    /**
+     * Whether what the carrier was asked to price has changed since the quote.
+     *
+     * The rate request is rebuilt from the package as the database has it now
+     * — not from the instance the caller holds, since the Ship page keeps its
+     * package loaded from before — and its digest compared with the one
+     * recorded at issue. A digest of the inputs rather than the parents'
+     * `updated_at`, because the inputs are spread across rows that do not
+     * touch their parents: a `PackageItem` quantity, a `ShipmentItem` value
+     * and a product's compliance flags all change the request without moving
+     * either timestamp, while a save that changes nothing the carrier priced
+     * would have retired every offer.
+     *
+     * A package that can no longer be priced at all — its declared value
+     * removed after a rate that needed one — has changed by definition. An
+     * offer that recorded no fingerprint, issued before the check existed or
+     * hand-built, is not judged by it.
+     */
+    public function quoteInputsChangedSince(Package $package): bool
+    {
+        if ($this->quote_fingerprint === null) {
+            return false;
+        }
+
+        $stored = Package::query()
+            ->with(['packageItems.product', 'packageItems.shipmentItem', 'shipment.shippingMethod', 'shipment.packages', 'boxSize', 'location'])
+            ->find($package->id);
+
+        if ($stored === null) {
+            return true;
+        }
+
+        try {
+            return RateRequest::fromPackage($stored)->fingerprint() !== $this->quote_fingerprint;
+        } catch (MissingDeclaredValueException) {
+            return true;
+        }
     }
 
     /**

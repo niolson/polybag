@@ -18,6 +18,7 @@ use App\Enums\ServiceCapability;
 use App\Models\Package;
 use App\Services\Carriers\Concerns\ConsultsCarrierPolicyForOffers;
 use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
+use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Shipping\PackagingFilter;
 use Illuminate\Support\Collection;
 use Saloon\Http\Response;
@@ -26,6 +27,10 @@ class FakeCarrierAdapter implements DirectCarrierAdapter
 {
     use ConsultsCarrierPolicyForOffers;
     use HasDefaultServiceCapabilities;
+
+    // For `resolveAccount()` only: the `isConfigured()` below wins over the
+    // trait's, because fake mode quotes with or without an account.
+    use ResolvesCarrierAccount;
 
     // In test/fake mode, report everything as Supported so capability checks don't filter rates.
     public function serviceCapability(string $serviceCode): ServiceCapability
@@ -97,6 +102,11 @@ class FakeCarrierAdapter implements DirectCarrierAdapter
     {
         $rates = self::RATES[$this->carrierName] ?? [];
 
+        // Resolved the way a real adapter resolves it, so the offer the rate
+        // service issues records the account — and the purchase's account
+        // check exercises the same path fake mode is standing in for.
+        $account = $this->resolveAccount($request->locationId, $request->clientId);
+
         return collect($rates)
             ->when(! empty($serviceCodes), fn (Collection $c) => $c->whereIn('code', $serviceCodes))
             ->map(fn (array $rate): RateResponse => new RateResponse(
@@ -108,6 +118,7 @@ class FakeCarrierAdapter implements DirectCarrierAdapter
                 deliveryDate: now()->addWeekdays($rate['days'])->toDateString(),
                 transitTime: $rate['transit'],
                 packagingRequirement: PackagingRequirement::shipperPackaging(),
+                carrierAccountId: $account?->id,
             ));
     }
 

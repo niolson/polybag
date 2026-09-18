@@ -31,8 +31,10 @@ satisfy. "Ground" is a service class; `USPS_GROUND_ADVANTAGE` is one service tha
 _Avoid_: Service, shipping service
 
 **Offer**:
-One ephemeral, package-specific quote: price, promise, purchase token, expiry. Discarded once
-it expires or is spent.
+One ephemeral, package-specific quote: price, promise, purchase token where the source issues
+one, expiry. Every rate a packer can choose is one, quoted directly from a carrier account or
+resold through a channel; the browser names an Offer and restates nothing. Discarded once it
+expires or is spent.
 
 **Observed service**:
 A durable service identity seen in a postage source's response, not part of the catalog. It

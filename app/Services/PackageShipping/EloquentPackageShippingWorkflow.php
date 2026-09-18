@@ -19,6 +19,7 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\UnattendedRateSelection;
 use App\Enums\PackageStatus;
+use App\Enums\PostageSource;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\MissingDeclaredValueException;
 use App\Exceptions\ShopifyDeclaredWeightException;
@@ -132,6 +133,39 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
     private const PURCHASE_LOCK_SECONDS = 180;
 
     /**
+     * Buy what the Ship page chose.
+     *
+     * The one entry point the browser reaches, and so the one that trusts
+     * nothing it is handed: a quoted rate must name an offer, because the
+     * offer row is the server's copy of the price, service and metadata and a
+     * rate without one is a description the browser could have written
+     * (`postage-source-split/14`). {@see autoShip()} is the other side of
+     * that boundary — its rates are built server-side and never round-trip —
+     * so trust is decided by entry point rather than by a flag on the request.
+     *
+     * A blind offer carries no rate and is revalidated against the server's
+     * own list in {@see resolveBlindOffer()}, so it is not subject to this.
+     */
+    public function ship(Package $package, PackageShippingRequest $request): PackageShippingResult
+    {
+        if ($request->selectedRate !== null && $request->selectedRate->offerId === null) {
+            logger()->warning('Refused a rate from the Ship page that names no offer', [
+                'package_id' => $package->id,
+                'carrier' => $request->selectedRate->carrier,
+                'service_code' => $request->selectedRate->serviceCode,
+            ]);
+
+            return PackageShippingResult::offerUnavailable(
+                'Rate Unavailable',
+                'This rate is not one on file for this package. Get rates again and choose one.',
+                requiresRequote: true,
+            );
+        }
+
+        return $this->purchase($package, $request);
+    }
+
+    /**
      * Buy postage for exactly one attempt at a time, per package.
      *
      * The unresolved-purchase guard and the offer claim inside are two separate
@@ -148,7 +182,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * what it buys against belongs to the shipment rather than to the package —
      * see {@see withBlindPurchaseLock()}.
      */
-    public function ship(Package $package, PackageShippingRequest $request): PackageShippingResult
+    private function purchase(Package $package, PackageShippingRequest $request): PackageShippingResult
     {
         $lock = Cache::lock("package-purchase:{$package->id}", self::PURCHASE_LOCK_SECONDS);
 
@@ -267,7 +301,8 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         // against its description: what came back from the browser says which
         // offer, and nothing more. The carrier, service and price come off the
         // stored row, so a tampered or stale rate cannot spend one offer and
-        // buy something else.
+        // buy something else. Every rate the Ship page lists carries one now,
+        // direct or resold; ship() refuses one that does not.
         $offer = null;
         $selectedRate = $request->selectedRate;
 
@@ -298,11 +333,15 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             return $refused;
         }
 
-        // Nothing to mark for a blind purchase: no quote was logged, because
-        // none was given.
-        if ($selectedRate !== null) {
-            $this->rateQuoteLogger->markSelected($package->id, $selectedRate);
+        // Marked through the offer, which points at the row the quote log
+        // wrote for exactly this rate. Nothing to mark for a blind purchase,
+        // which logged no quote, or for a rule's pre-selected rate, which
+        // never rate-shopped (`postage-source-split/17`).
+        if ($offer !== null) {
+            $this->rateQuoteLogger->markSelected($offer);
         }
+
+        $adapter = null;
 
         try {
             $adapter = $blindOffer !== null
@@ -453,7 +492,11 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 return $result;
             }
 
-            $result = $this->ship(
+            // Through purchase() rather than ship(): a rule's pre-selected
+            // rate is resolved server-side and carries no offer, and this is
+            // the trusted side of the boundary ship() enforces. A rate from
+            // rate shopping does carry one, and is restored from it as usual.
+            $result = $this->purchase(
                 $package,
                 new PackageShippingRequest(
                     selectedRate: $selectedRate,
@@ -593,9 +636,9 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * what the packer reads and what the package will record — would find a
      * direct adapter we do not have and hold no account with.
      *
-     * A rate with no offer behind it is a direct-carrier rate quoted before
-     * offers existed for that source, and dispatches by carrier name exactly as
-     * it always did.
+     * A rate with no offer behind it is a rule's pre-selected rate, resolved
+     * server-side on the unattended path and never rate-shopped, and
+     * dispatches by carrier name exactly as it always did.
      */
     private function sellerFor(?ShippingOffer $offer, ?RateResponse $selectedRate): ?PostageOfferSource
     {
@@ -687,10 +730,45 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * already been paid for. A definite "nothing was bought" resolves the offer
      * and returns null, so the caller carries on to the purchase the operator
      * actually asked for; anything else leaves the offer unresolved on purpose.
+     *
+     * A direct carrier that cannot be asked gets the second answer without
+     * the question. "Spent, nothing confirmed" is only a useful state when a
+     * later attempt can ask what happened, which is what
+     * {@see RecoversUnresolvedPurchase} promises and only Amazon implements;
+     * USPS, FedEx and UPS cannot (FedEx's `customerTransactionId` and UPS's
+     * `transId` are echoed, not deduplicated, and nothing is sent to USPS —
+     * `postage-source-split/18` is what changes that). For them the state can
+     * never resolve, so leaving it would strand the package behind a refusal
+     * nobody can clear, over a purchase that in practice was a worker killed
+     * between the claim and the reply — the adapters themselves turn a
+     * timeout into a decline. Settling it keeps the package buyable, which is
+     * what such a package was before direct rates were offers at all, and the
+     * claim has already stopped the double-click.
+     *
+     * Only a direct carrier. An offer whose channel can no longer be found —
+     * a data source deleted or re-pointed since the quote — is not settled:
+     * the channel may well have sold the label, and someone restoring the
+     * source is how it gets asked. Until then it blocks, and `16` is the
+     * by-hand way out.
      */
     private function recoverPurchase(Package $package, ShippingOffer $offer, PackageShippingRequest $request): ?PackageShippingResult
     {
         $seller = $this->postageSources->sellerFor($offer);
+
+        if ($offer->postage_source === PostageSource::CarrierAccount && ! $seller instanceof RecoversUnresolvedPurchase) {
+            logger()->warning('Settled an unresolved purchase on a source that cannot be asked what became of it', [
+                'package_id' => $package->id,
+                'offer' => $offer->public_id,
+                'carrier' => $offer->carrier,
+            ]);
+
+            $this->offerStore->recordFailure(
+                $offer,
+                'No reply was recorded and the carrier cannot be asked what happened; settled on the next attempt',
+            );
+
+            return null;
+        }
 
         if (! $seller instanceof RecoversUnresolvedPurchase) {
             return null;
@@ -770,7 +848,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         )->first();
 
         if ($resolved?->id === $offer->carrier_account_id) {
-            return null;
+            return $this->accountNowBillsSomeoneElse($offer, $resolved, $package);
         }
 
         logger()->warning('Refused an offer whose carrier account is no longer the one that would be used', [
@@ -783,6 +861,38 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         return PackageShippingResult::offerUnavailable(
             'Carrier Account Changed',
             'This rate was quoted on a carrier account that is no longer the one this package would ship on. '
+            .'Get rates again so the price matches the account that will be billed.',
+        );
+    }
+
+    /**
+     * Refuse an offer whose account row is the same but whose payer is not.
+     *
+     * The id check above says the same `CarrierAccount` would buy. It does
+     * not say the same account would be billed: the adapters read the account
+     * number, EPS account or CRID fresh from the row's credentials at
+     * purchase, and those are editable. The offer recorded a digest of that
+     * billing identity — and of nothing secret, so a refreshed OAuth token or
+     * a rotated client secret leaves it alone — and the purchase compares.
+     * An offer that recorded none, issued before the digest existed or
+     * resold through a channel, is not judged by it.
+     */
+    private function accountNowBillsSomeoneElse(ShippingOffer $offer, CarrierAccount $resolved, Package $package): ?PackageShippingResult
+    {
+        if ($offer->carrier_account_fingerprint === null
+            || $resolved->fingerprint() === $offer->carrier_account_fingerprint) {
+            return null;
+        }
+
+        logger()->warning('Refused an offer whose carrier account credentials changed after the quote', [
+            'package_id' => $package->id,
+            'offer' => $offer->public_id,
+            'carrier_account_id' => $resolved->id,
+        ]);
+
+        return PackageShippingResult::offerUnavailable(
+            'Carrier Account Changed',
+            'The carrier account this rate was quoted on has had its account details changed since. '
             .'Get rates again so the price matches the account that will be billed.',
         );
     }
@@ -928,6 +1038,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             priceUnknown: $offer->price === null,
             offerId: $offer->public_id,
             packagingRequirement: PackagingRequirement::fromRateMetadata($metadata),
+            carrierAccountId: $offer->carrier_account_id,
         );
     }
 
@@ -936,8 +1047,15 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      *
      * Only ever called on a response — a reply from the source is proof that
      * nothing was bought. An exception is not: a timeout leaves the offer
-     * unresolved on purpose, so the next attempt is blocked until someone
-     * establishes whether a label exists.
+     * unresolved on purpose, so the next attempt asks the source what
+     * happened before anything else is bought — see {@see recoverPurchase()},
+     * including what it does for a source that cannot be asked.
+     *
+     * The direct carrier adapters never let a transport error reach here:
+     * each catches it inside `createShipment()` and answers with a failed
+     * `ShipResponse`, so a USPS, FedEx or UPS timeout arrives as a decline
+     * and is settled by this method like one. Only Amazon lets the exception
+     * through, and Amazon is the seller that can be asked.
      */
     private function resolveOfferAsFailed(?ShippingOffer $offer, string $reason): void
     {

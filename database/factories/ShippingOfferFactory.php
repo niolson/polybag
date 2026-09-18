@@ -2,8 +2,11 @@
 
 namespace Database\Factories;
 
+use App\DataTransferObjects\Shipping\RateRequest;
+use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\PostageSource;
 use App\Enums\SourceEnvironment;
+use App\Models\CarrierAccount;
 use App\Models\Package;
 use App\Models\ShippingOffer;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -77,6 +80,65 @@ class ShippingOfferFactory extends Factory
             'consumed_at' => now(),
             'purchase_reference' => null,
             'purchase_failed_at' => null,
+        ]);
+    }
+
+    /**
+     * A direct-carrier rate quoted from a carrier account: no purchase
+     * context, because the account buys; a window that closes with the ship
+     * day rather than in minutes; and no marketplace. What the rate service
+     * issues for every USPS, FedEx or UPS rate (`postage-source-split/14`).
+     */
+    public function direct(): static
+    {
+        return $this->state(fn (): array => [
+            'postage_source' => PostageSource::CarrierAccount,
+            'carrier' => 'USPS',
+            'service_code' => 'PRIORITY_MAIL',
+            'service_name' => 'Priority Mail',
+            'rate_metadata' => [
+                'mailClass' => 'PRIORITY_MAIL',
+                'processingCategory' => 'MACHINABLE',
+                'rateIndicator' => 'SP',
+                'destinationEntryFacilityType' => 'NONE',
+            ],
+            'purchase_context' => null,
+            'marketplace' => null,
+            'expires_at' => now()->endOfDay(),
+        ]);
+    }
+
+    /**
+     * The offer for exactly this rate — carrier, service, price, metadata and
+     * the account it was quoted on, billing identity included — as the rate
+     * service would have issued it.
+     */
+    public function forRate(RateResponse $rate): static
+    {
+        return $this->state(fn (): array => [
+            'carrier' => $rate->carrier,
+            'carrier_account_id' => $rate->carrierAccountId,
+            'carrier_account_fingerprint' => $rate->carrierAccountId === null
+                ? null
+                : CarrierAccount::query()->find($rate->carrierAccountId)?->fingerprint(),
+            'service_code' => $rate->serviceCode,
+            'service_name' => $rate->serviceName,
+            'price' => $rate->priceUnknown ? null : $rate->price,
+            'currency' => $rate->priceUnknown ? null : 'USD',
+            'rate_metadata' => $rate->packagingRequirement->intoRateMetadata($rate->metadata),
+        ]);
+    }
+
+    /**
+     * Bound to the rate request this package produces now, so that an edit to
+     * anything the carrier was asked to price before the purchase is refused
+     * as `PackageChanged`.
+     */
+    public function quotedFor(Package $package): static
+    {
+        return $this->state(fn (): array => [
+            'package_id' => $package->id,
+            'quote_fingerprint' => RateRequest::fromPackage($package)->fingerprint(),
         ]);
     }
 

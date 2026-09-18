@@ -43,6 +43,9 @@ it('carries nothing that could buy a label on its own', function (): void {
         'offerId',
         'observedService',
         'packagingRequirement',
+        // Which account quoted it — a number the offer already records, and
+        // nothing the purchase reads back off the browser.
+        'carrierAccountId',
     ]);
 });
 

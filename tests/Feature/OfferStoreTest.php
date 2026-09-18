@@ -1,13 +1,19 @@
 <?php
 
 use App\DataTransferObjects\PostageSources\OfferDraft;
+use App\DataTransferObjects\Shipping\RateRequest;
 use App\Enums\OfferRejection;
 use App\Enums\PostageSource;
 use App\Enums\SourceEnvironment;
 use App\Models\DataSource;
 use App\Models\Package;
+use App\Models\Product;
 use App\Models\Setting;
+use App\Models\Shipment;
+use App\Models\ShipmentItem;
+use App\Models\ShippingMethod;
 use App\Models\ShippingOffer;
+use App\Models\SpecialService;
 use App\Services\PostageSources\OfferStore;
 use App\Services\SettingsService;
 
@@ -173,8 +179,24 @@ it('reports the same refusals when inspecting as when redeeming', function (Offe
 })->with([
     'expired' => [OfferRejection::Expired, fn (Package $p) => ShippingOffer::factory()->expired()->for($p)->create()],
     'consumed' => [OfferRejection::AlreadyConsumed, fn (Package $p) => ShippingOffer::factory()->consumed()->for($p)->create()],
+    'declined' => [OfferRejection::PurchaseDeclined, fn (Package $p) => ShippingOffer::factory()->declined()->for($p)->create()],
     'wrong package' => [OfferRejection::WrongPackage, fn (Package $p) => ShippingOffer::factory()->create()],
 ]);
+
+it('tells a declined offer apart from one that may have bought a label', function (): void {
+    $package = Package::factory()->create();
+    $store = app(OfferStore::class);
+
+    $declined = ShippingOffer::factory()->declined()->for($package)->create();
+    $unknown = ShippingOffer::factory()->awaitingConfirmation()->for($package)->create();
+
+    // Both are spent. Only one of them might have a label behind it, and only
+    // that one must send a person to look before anything is re-quoted.
+    expect($store->redeem($package, $declined->public_id)->rejection)->toBe(OfferRejection::PurchaseDeclined)
+        ->and(OfferRejection::PurchaseDeclined->requiresRequote())->toBeTrue()
+        ->and($store->redeem($package, $unknown->public_id)->rejection)->toBe(OfferRejection::AlreadyConsumed)
+        ->and(OfferRejection::AlreadyConsumed->requiresRequote())->toBeFalse();
+});
 
 it('settles an offer the source declined so nothing stays unresolved', function (): void {
     $package = Package::factory()->create();
@@ -224,4 +246,188 @@ it('reports an environment mismatch even when the offer has also expired', funct
     // "The toggle moved" is the actionable half; a re-quote fixes both.
     expect(app(OfferStore::class)->inspect($package, $offer->public_id)->rejection)
         ->toBe(OfferRejection::EnvironmentChanged);
+});
+
+/**
+ * A direct offer bound to the rate request this package produces now.
+ */
+function directOfferQuotedFor(Package $package): ShippingOffer
+{
+    return app(OfferStore::class)->issue($package, new OfferDraft(
+        carrier: 'USPS',
+        postageSource: PostageSource::CarrierAccount,
+        serviceCode: 'PRIORITY_MAIL',
+        serviceName: 'Priority Mail',
+        price: 9.65,
+        currency: 'USD',
+        expiresAt: now()->endOfDay(),
+        rateQuoteId: null,
+        quoteFingerprint: RateRequest::fromPackage($package)->fingerprint(),
+    ));
+}
+
+it('records the quote inputs and refuses the offer once they have changed', function (): void {
+    $package = Package::factory()->create();
+    $store = app(OfferStore::class);
+
+    $offer = directOfferQuotedFor($package);
+
+    expect($offer->quote_fingerprint)->toBe(RateRequest::fromPackage($package)->fingerprint())
+        ->and($store->inspect($package, $offer->public_id)->wasRejected())->toBeFalse();
+
+    // The weight is what the carrier priced.
+    $package->update(['weight' => 3.0]);
+
+    $inspection = $store->inspect($package, $offer->public_id);
+    $claim = $store->redeem($package, $offer->public_id);
+
+    // Refused, and left unconsumed: nothing was spent on it, and a re-quote
+    // supersedes it rather than a recovery.
+    expect($inspection->rejection)->toBe(OfferRejection::PackageChanged)
+        ->and($inspection->requiresRequote())->toBeTrue()
+        ->and($claim->rejection)->toBe(OfferRejection::PackageChanged)
+        ->and($offer->fresh()->consumed_at)->toBeNull();
+});
+
+it('does not judge an offer that recorded no quote fingerprint', function (): void {
+    // Issued before the check existed, or hand-built: nothing to compare, so
+    // nothing to refuse on.
+    $package = Package::factory()->create();
+    $store = app(OfferStore::class);
+    $offer = $store->issue($package, amazonOfferDraft());
+
+    $package->update(['weight' => 3.0]);
+
+    expect($offer->quote_fingerprint)->toBeNull()
+        ->and($store->redeem($package, $offer->public_id)->wasRejected())->toBeFalse();
+});
+
+it('keeps an offer whose package was saved without changing what was priced', function (): void {
+    // The point of a fingerprint over a timestamp: a save that touches
+    // nothing the carrier priced is not an edit to the quote.
+    $package = Package::factory()->create();
+    $store = app(OfferStore::class);
+    $offer = directOfferQuotedFor($package);
+
+    $package->touch();
+    $package->shipment->update(['phone' => '555-0100']);
+
+    expect($store->inspect($package, $offer->public_id)->wasRejected())->toBeFalse()
+        ->and($store->redeem($package, $offer->public_id)->wasRejected())->toBeFalse();
+});
+
+it('retires an offer when the destination changes', function (): void {
+    $package = Package::factory()->create();
+    $store = app(OfferStore::class);
+    $offer = directOfferQuotedFor($package);
+
+    $package->shipment->update(['postal_code' => '99501', 'validated_postal_code' => null]);
+
+    expect($store->inspect($package, $offer->public_id)->rejection)->toBe(OfferRejection::PackageChanged);
+});
+
+it('retires an offer when the shipment moves to another shipping method', function (): void {
+    // The method decides which carriers are asked at all, so a quote under
+    // one method is not a quote under another — even at the same price.
+    $package = Package::factory()->create();
+    $store = app(OfferStore::class);
+    $offer = directOfferQuotedFor($package);
+
+    $package->shipment->update(['shipping_method_id' => ShippingMethod::factory()->create()->id]);
+
+    expect($store->inspect($package, $offer->public_id)->rejection)->toBe(OfferRejection::PackageChanged)
+        ->and($store->redeem($package, $offer->public_id)->rejection)->toBe(OfferRejection::PackageChanged)
+        ->and($offer->fresh()->consumed_at)->toBeNull();
+});
+
+it('retires an offer when a packed quantity changes the declared value', function (): void {
+    // Neither PackageItem nor ShipmentItem touches its parent, so a timestamp
+    // would have missed this. The quantity enters the request through the
+    // declared value the method requires, summed from the items packed.
+    $method = ShippingMethod::factory()->create();
+    $declaredValue = SpecialService::create([
+        'code' => 'declared_value',
+        'name' => 'Declared Value',
+        'scope' => 'package',
+        'category' => 'insurance',
+        'requires_value' => true,
+        'active' => true,
+    ]);
+    $method->specialServices()->attach($declaredValue->id, ['mode' => 'required']);
+
+    $shipment = Shipment::factory()->create(['shipping_method_id' => $method->id, 'value' => null]);
+    $shipmentItem = ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'value' => 12.50, 'quantity' => 2]);
+    $package = Package::factory()->for($shipment)->create();
+    $packageItem = $package->packageItems()->create([
+        'shipment_item_id' => $shipmentItem->id,
+        'product_id' => $shipmentItem->product_id,
+        'quantity' => 1,
+    ]);
+
+    $store = app(OfferStore::class);
+    $offer = directOfferQuotedFor($package->fresh());
+
+    expect(RateRequest::fromPackage($package->fresh())->specialServiceConfig('declared_value')['amount'])->toBe(12.5)
+        ->and($store->inspect($package, $offer->public_id)->wasRejected())->toBeFalse();
+
+    $packageItem->update(['quantity' => 2]);
+
+    expect($store->inspect($package, $offer->public_id)->rejection)->toBe(OfferRejection::PackageChanged);
+});
+
+it('retires an offer when a product starts requiring a compliance service', function (): void {
+    // A product edit touches nothing on the package or shipment, but an
+    // alcohol flag adds a special service to every request for it.
+    SpecialService::create([
+        'code' => 'alcohol',
+        'name' => 'Alcohol',
+        'scope' => 'package',
+        'category' => 'compliance',
+        'requires_value' => false,
+        'active' => true,
+    ]);
+
+    $product = Product::factory()->create(['contains_alcohol' => false]);
+    $shipment = Shipment::factory()->create();
+    $shipmentItem = ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'product_id' => $product->id]);
+    $package = Package::factory()->for($shipment)->create();
+    $package->packageItems()->create([
+        'shipment_item_id' => $shipmentItem->id,
+        'product_id' => $product->id,
+        'quantity' => 1,
+    ]);
+
+    $store = app(OfferStore::class);
+    $offer = directOfferQuotedFor($package->fresh());
+
+    expect($store->inspect($package, $offer->public_id)->wasRejected())->toBeFalse();
+
+    $product->update(['contains_alcohol' => true]);
+
+    expect($store->inspect($package, $offer->public_id)->rejection)->toBe(OfferRejection::PackageChanged);
+});
+
+it('retires an offer when the package can no longer be priced at all', function (): void {
+    // A required declared value with nothing left to derive it from makes
+    // the request unbuildable — which is a change, not an error to hide.
+    $method = ShippingMethod::factory()->create();
+    $declaredValue = SpecialService::create([
+        'code' => 'declared_value',
+        'name' => 'Declared Value',
+        'scope' => 'package',
+        'category' => 'insurance',
+        'requires_value' => true,
+        'active' => true,
+    ]);
+    $method->specialServices()->attach($declaredValue->id, ['mode' => 'required']);
+
+    $shipment = Shipment::factory()->create(['shipping_method_id' => $method->id, 'value' => 40.00]);
+    $package = Package::factory()->for($shipment)->create();
+
+    $store = app(OfferStore::class);
+    $offer = directOfferQuotedFor($package->fresh());
+
+    $shipment->update(['value' => null]);
+
+    expect($store->inspect($package, $offer->public_id)->rejection)->toBe(OfferRejection::PackageChanged);
 });

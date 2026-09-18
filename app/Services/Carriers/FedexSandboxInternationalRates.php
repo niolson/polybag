@@ -60,9 +60,10 @@ class FedexSandboxInternationalRates
      * give for a domestic-only shipping method sent abroad.
      *
      * @param  array<int, string>  $serviceCodes
+     * @param  int|null  $carrierAccountId  The account the adapter resolved, stamped on the stub as on a real quote so the offer records it.
      * @return Collection<int, RateResponse>
      */
-    public function ratesFor(RateRequest $request, array $serviceCodes): Collection
+    public function ratesFor(RateRequest $request, array $serviceCodes, ?int $carrierAccountId = null): Collection
     {
         $quoted = $serviceCodes === []
             ? array_keys(self::SERVICES)
@@ -81,7 +82,7 @@ class FedexSandboxInternationalRates
             'destination_country' => $request->destinationCountry,
         ]);
 
-        return collect($quoted)->map(function (string $code) use ($names, $weight, $shipDate): RateResponse {
+        return collect($quoted)->map(function (string $code) use ($names, $weight, $shipDate, $carrierAccountId): RateResponse {
             $service = self::SERVICES[$code];
             $days = $service['transitDays'];
 
@@ -100,6 +101,7 @@ class FedexSandboxInternationalRates
                     'isSandboxStub' => true,
                 ],
                 packagingRequirement: PackagingRequirement::shipperPackaging(),
+                carrierAccountId: $carrierAccountId,
             );
         });
     }

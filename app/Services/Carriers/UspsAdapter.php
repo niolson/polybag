@@ -342,6 +342,12 @@ class UspsAdapter implements DirectCarrierAdapter
         $results = collect();
         $totalApiRates = 0;
 
+        // Resolved again here rather than carried from prepareRateRequest():
+        // the async path parses in a different call from the one that
+        // prepared, and the account is what the offer records as having
+        // quoted this price.
+        $account = $this->resolveAccount($request->locationId, $request->clientId);
+
         foreach ($pricingOptions[0]['shippingOptions'] ?? [] as $shippingOption) {
             foreach ($shippingOption['rateOptions'] ?? [] as $rateOption) {
                 $totalApiRates++;
@@ -371,6 +377,7 @@ class UspsAdapter implements DirectCarrierAdapter
                     deliveryDate: $rateOption['commitment']['scheduleDeliveryDate'] ?? null,
                     metadata: $metadata,
                     packagingRequirement: $this->classifyPackaging($metadata),
+                    carrierAccountId: $account?->id,
                 ));
             }
         }

@@ -19,7 +19,8 @@ use Illuminate\Database\Eloquent\Collection;
  * - an **opaque identifier**, which is all the browser ever holds;
  * - **binding** to both the package and the postage-source instance, so a
  *   USPS rate quoted directly and the same service quoted through Amazon are
- *   two offers rather than one ambiguous pair of strings;
+ *   two offers rather than one ambiguous pair of strings — and to the rate
+ *   request *as quoted*, so an edit to what the carrier priced retires it;
  * - **expiry**, checked inside the claim so a window cannot close between
  *   reading a row and writing to it;
  * - **atomic consumption**, so one offer cannot be spent twice.
@@ -28,16 +29,30 @@ use Illuminate\Database\Eloquent\Collection;
  * makes "spent, nothing confirmed" a visible state and refuses to let it be
  * spent again, and the adapter asks the source what happened under
  * {@see ShippingOffer::$public_id}.
+ *
+ * Direct-carrier rates are offers too (`postage-source-split/14`): a row with
+ * `postage_source = CarrierAccount` and no purchase context, issued by the
+ * rate service for every rate an adapter returns. Nothing in that row can
+ * spend money on its own — the account still buys — but it is the server's
+ * copy of the price, service and metadata, so the browser names the offer
+ * and restates nothing.
  */
 class OfferStore
 {
     public function issue(Package $package, OfferDraft $draft): ShippingOffer
     {
+        // The datetime cast formats the instant in whatever zone it arrives
+        // in and drops the zone, so a window that closes at the end of a ship
+        // day in the location's timezone has to be moved into the app's
+        // before it is written, or it would be read back hours early.
+        $expiresAt = $draft->expiresAt?->toImmutable()->setTimezone(config('app.timezone'));
+
         return ShippingOffer::create([
             'package_id' => $package->id,
             'postage_source' => $draft->postageSource,
             'carrier_account_id' => $draft->carrierAccountId,
             'postage_data_source_id' => $draft->postageDataSourceId,
+            'rate_quote_id' => $draft->rateQuoteId,
             'carrier' => $draft->carrier,
             'service_code' => $draft->serviceCode,
             'service_name' => $draft->serviceName,
@@ -47,7 +62,9 @@ class OfferStore
             'purchase_context' => $draft->purchaseContext === [] ? null : $draft->purchaseContext,
             'environment' => SourceEnvironment::current(),
             'marketplace' => $draft->marketplace,
-            'expires_at' => $draft->expiresAt,
+            'expires_at' => $expiresAt,
+            'quote_fingerprint' => $draft->quoteFingerprint,
+            'carrier_account_fingerprint' => $draft->carrierAccountFingerprint,
         ]);
     }
 
@@ -76,7 +93,7 @@ class OfferStore
         }
 
         if ($offer->isConsumed()) {
-            return OfferRedemption::rejected(OfferRejection::AlreadyConsumed, $offer);
+            return OfferRedemption::rejected($this->consumedRejection($offer), $offer);
         }
 
         if ($offer->environment !== SourceEnvironment::current()) {
@@ -85,6 +102,10 @@ class OfferStore
 
         if ($offer->hasExpired()) {
             return OfferRedemption::rejected(OfferRejection::Expired, $offer);
+        }
+
+        if ($offer->quoteInputsChangedSince($package)) {
+            return OfferRedemption::rejected(OfferRejection::PackageChanged, $offer);
         }
 
         return OfferRedemption::available($offer);
@@ -114,6 +135,14 @@ class OfferStore
             return OfferRedemption::rejected(OfferRejection::WrongPackage, $offer);
         }
 
+        // Checked before the claim rather than inside it: the quote inputs
+        // are not what two concurrent purchases race over, and a stale offer
+        // refused here is left unconsumed, which is the truth — a re-quote
+        // supersedes it and nothing was ever spent on it.
+        if ($offer->quoteInputsChangedSince($package)) {
+            return OfferRedemption::rejected(OfferRejection::PackageChanged, $offer);
+        }
+
         $environment = SourceEnvironment::current();
 
         $claimed = ShippingOffer::query()
@@ -132,13 +161,29 @@ class OfferStore
             // already bought this" is more actionable than "and it had also
             // expired".
             return OfferRedemption::rejected(match (true) {
-                $offer->isConsumed() => OfferRejection::AlreadyConsumed,
+                $offer->isConsumed() => $this->consumedRejection($offer),
                 $offer->environment !== $environment => OfferRejection::EnvironmentChanged,
                 default => OfferRejection::Expired,
             }, $offer);
         }
 
         return OfferRedemption::available($offer->refresh());
+    }
+
+    /**
+     * Which refusal a spent offer gets.
+     *
+     * A declined purchase is settled: the source answered and sold nothing, so
+     * the packer is sent to re-quote rather than told to look for a label
+     * that provably does not exist. Every other consumed offer — a label
+     * bought, or an outcome nobody knows — is `AlreadyConsumed`, whose remedy
+     * is a person looking before anything is bought again.
+     */
+    private function consumedRejection(ShippingOffer $offer): OfferRejection
+    {
+        return $offer->purchase_failed_at !== null
+            ? OfferRejection::PurchaseDeclined
+            : OfferRejection::AlreadyConsumed;
     }
 
     /**
@@ -166,6 +211,13 @@ class OfferStore
      * or a transport error is *not* one of these — the label may exist — and
      * must leave the offer unresolved so
      * {@see awaitingPurchaseConfirmation()} blocks further spending.
+     *
+     * One exception, made by the purchase path rather than here: an offer
+     * left unresolved on a source that cannot be asked what happened — none
+     * of USPS, FedEx or UPS implements `RecoversUnresolvedPurchase` — is
+     * recorded as a failure on the next attempt, because for that source the
+     * unresolved state can never be resolved and would otherwise be terminal
+     * for the package. See `EloquentPackageShippingWorkflow::recoverPurchase()`.
      */
     public function recordFailure(ShippingOffer $offer, string $reason): void
     {
