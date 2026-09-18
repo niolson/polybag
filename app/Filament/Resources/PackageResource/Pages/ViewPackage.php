@@ -74,6 +74,15 @@ class ViewPackage extends ViewRecord
                         ? $notification->success()->send()
                         : $notification->danger()->send();
                 }),
+            // Where the packer voids a Shopify Shipping label, since the
+            // disabled Void button above cannot: Shopify's API sells labels
+            // but only the admin can cancel and refund one.
+            Action::make('open_in_shopify')
+                ->label('Open in Shopify')
+                ->icon('heroicon-o-arrow-top-right-on-square')
+                ->color('gray')
+                ->visible(fn (): bool => $this->shopifyAdminOrderUrl() !== null)
+                ->url(fn (): ?string => $this->shopifyAdminOrderUrl(), shouldOpenInNewTab: true),
             Action::make('edit')
                 ->url(fn (): string => PackageResource::getUrl('edit', ['record' => $this->record])),
         ];
@@ -91,6 +100,11 @@ class ViewPackage extends ViewRecord
     private function shopifyShipped(): bool
     {
         return $this->record instanceof Package && $this->record->isShopifyShipped();
+    }
+
+    private function shopifyAdminOrderUrl(): ?string
+    {
+        return $this->record instanceof Package ? $this->record->shopifyAdminOrderUrl() : null;
     }
 
     public function infolist(Schema $infolist): Schema
@@ -134,7 +148,7 @@ class ViewPackage extends ViewRecord
                             ->visible(fn ($record): bool => $record->isShopifyShipped())
                             ->badge()
                             ->color('warning')
-                            ->state('Bought through Shopify Shipping — void and refund it in the Shopify admin, not here. PolyBag returns this package to unshipped once Shopify reports the label voided.'),
+                            ->state('Bought through Shopify Shipping — void and refund it in the Shopify admin, not here (use Open in Shopify above). PolyBag returns this package to unshipped once Shopify reports the label voided.'),
                         Components\Fieldset::make('Dimensions')->columns(3)->schema([
                             TextEntry::make('length')
                                 ->suffix(' in'),

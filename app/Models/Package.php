@@ -282,6 +282,35 @@ class Package extends Model
     }
 
     /**
+     * The Shopify admin page for the order this package ships, or null when
+     * the package was not shipped through Shopify or the shop and order it
+     * came from are unknown.
+     *
+     * Shopify's API sells labels but exposes no way to void one, so this is
+     * where a packer is sent to cancel and refund a Shopify Shipping label.
+     * The order ID is a `gid://shopify/Order/<id>` GID on the shipment; the
+     * admin URL wants the numeric part and the shop's `.myshopify.com` handle.
+     */
+    public function shopifyAdminOrderUrl(): ?string
+    {
+        if (! $this->isShopifyShipped()) {
+            return null;
+        }
+
+        $this->loadMissing('shipment');
+
+        $orderGid = (string) ($this->shipment?->metadata['shopify_order_id'] ?? '');
+        $shopDomain = (string) ($this->postageDataSource?->settings['shop_domain'] ?? '');
+
+        if (! preg_match('#^gid://shopify/Order/(\d+)$#', $orderGid, $orderMatch)
+            || ! preg_match('/^([a-z0-9][a-z0-9-]*)\.myshopify\.com$/i', $shopDomain, $shopMatch)) {
+            return null;
+        }
+
+        return "https://admin.shopify.com/store/{$shopMatch[1]}/orders/{$orderMatch[1]}";
+    }
+
+    /**
      * Whether this package's postage was bought through Amazon Buy Shipping.
      */
     public function isAmazonShipped(): bool

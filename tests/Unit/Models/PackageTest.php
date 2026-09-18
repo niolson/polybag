@@ -220,6 +220,45 @@ it('does not identify a direct purchase as Shopify-bought from its legacy carrie
     expect($package->isShopifyShipped())->toBeFalse();
 });
 
+it('links a Shopify-shipped package to its order in the Shopify admin', function (): void {
+    $shipment = Shipment::factory()->create([
+        'metadata' => ['shopify_order_id' => 'gid://shopify/Order/1001'],
+    ]);
+    $package = Package::factory()->shipped()->for($shipment)->create([
+        'postage_source' => PostageSource::PostageDataSource,
+        'postage_data_source_id' => DataSource::factory()->shopify(),
+    ]);
+
+    expect($package->shopifyAdminOrderUrl())
+        ->toBe('https://admin.shopify.com/store/test/orders/1001');
+});
+
+it('has no Shopify admin link when the order or shop is unknown', function (array $metadata, array $settings): void {
+    $shipment = Shipment::factory()->create(['metadata' => $metadata]);
+    $package = Package::factory()->shipped()->for($shipment)->create([
+        'postage_source' => PostageSource::PostageDataSource,
+        'postage_data_source_id' => DataSource::factory()->shopify()->state(['settings' => $settings]),
+    ]);
+
+    expect($package->shopifyAdminOrderUrl())->toBeNull();
+})->with([
+    'no order id' => [[], ['shop_domain' => 'test.myshopify.com']],
+    'order id that is not an Order GID' => [['shopify_order_id' => 'gid://shopify/FulfillmentOrder/1001'], ['shop_domain' => 'test.myshopify.com']],
+    'no shop domain' => [['shopify_order_id' => 'gid://shopify/Order/1001'], []],
+    'shop domain that is not a myshopify handle' => [['shopify_order_id' => 'gid://shopify/Order/1001'], ['shop_domain' => 'shop.example.com']],
+]);
+
+it('has no Shopify admin link for a label bought elsewhere', function (): void {
+    $shipment = Shipment::factory()->create([
+        'metadata' => ['shopify_order_id' => 'gid://shopify/Order/1001'],
+    ]);
+    $package = Package::factory()->shipped()->for($shipment)->create([
+        'postage_source' => PostageSource::CarrierAccount,
+    ]);
+
+    expect($package->shopifyAdminOrderUrl())->toBeNull();
+});
+
 it('refuses to ship with a postage source its pointers contradict', function (PostageSource $postageSource, ShipResponse $response): void {
     $package = Package::factory()->create();
 

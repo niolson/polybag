@@ -251,6 +251,39 @@ it('hides void action on view page for unshipped packages', function (): void {
         ->assertActionHidden('void');
 });
 
+it('offers to open a Shopify-shipped package\'s order in the Shopify admin', function (): void {
+    $shipment = Shipment::factory()->create([
+        'metadata' => ['shopify_order_id' => 'gid://shopify/Order/1001'],
+    ]);
+    $package = Package::factory()->shipped()->for($shipment)->create([
+        'postage_source' => PostageSource::PostageDataSource,
+        'postage_data_source_id' => createShopifyDataSource()->id,
+    ]);
+
+    Livewire::test(ViewPackage::class, ['record' => $package->id])
+        ->assertActionDisabled('void')
+        ->assertActionVisible('open_in_shopify')
+        ->assertActionHasUrl('open_in_shopify', 'https://admin.shopify.com/store/test-shop/orders/1001')
+        ->assertActionShouldOpenUrlInNewTab('open_in_shopify');
+});
+
+it('hides the Shopify admin link when the shipment has no Shopify order', function (): void {
+    $package = Package::factory()->shipped()->create([
+        'postage_source' => PostageSource::PostageDataSource,
+        'postage_data_source_id' => createShopifyDataSource()->id,
+    ]);
+
+    Livewire::test(ViewPackage::class, ['record' => $package->id])
+        ->assertActionHidden('open_in_shopify');
+});
+
+it('hides the Shopify admin link for a label bought on a carrier account', function (): void {
+    $package = Package::factory()->shipped()->create();
+
+    Livewire::test(ViewPackage::class, ['record' => $package->id])
+        ->assertActionHidden('open_in_shopify');
+});
+
 it('labels an Amazon Buy Shipping package on the view page without the Shopify notice', function (): void {
     $package = Package::factory()->shipped()->create([
         'carrier' => 'Amazon Shipping',
