@@ -111,7 +111,7 @@ it('withholds a purchase whose customs items are all worth nothing', function ()
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: mockCarrierRate()),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, mockCarrierRate())),
     );
 
     expect($result->success)->toBeFalse()
@@ -127,7 +127,7 @@ it('withholds a purchase with one free line among paid ones rather than passing 
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: mockCarrierRate()),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, mockCarrierRate())),
     );
 
     expect($result->success)->toBeFalse()
@@ -145,7 +145,7 @@ it('refuses before asking the operator to confirm a customs weight', function ()
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: mockCarrierRate(), requireCustomsWeightOverride: true),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, mockCarrierRate()), requireCustomsWeightOverride: true),
     );
 
     expect($result->requiresCustomsWeightOverride)->toBeFalse()
@@ -158,7 +158,7 @@ it('still falls back to a value of 1 for a null item value, which predates the g
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: mockCarrierRate()),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, mockCarrierRate())),
     );
 
     expect($result->success)->toBeTrue();
@@ -178,7 +178,7 @@ it('lets a zero-value item ship domestically, where no declaration is made', fun
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: mockCarrierRate()),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, mockCarrierRate())),
     );
 
     expect($result->success)->toBeTrue();
@@ -225,7 +225,7 @@ it('lets a zero-value item ship within the origin country, even when that is not
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: mockCarrierRate()),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, mockCarrierRate())),
     );
 
     expect($result->success)->toBeTrue();
@@ -242,7 +242,7 @@ it('withholds a zero-value item shipped into the US from abroad, which the desti
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: mockCarrierRate()),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, mockCarrierRate())),
     );
 
     expect($result->success)->toBeFalse()
@@ -266,7 +266,7 @@ it('does not prompt for a customs weight on a shipment that stays inside a non-U
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: mockCarrierRate(), requireCustomsWeightOverride: true),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, mockCarrierRate()), requireCustomsWeightOverride: true),
     );
 
     expect($result->requiresCustomsWeightOverride)->toBeFalse()
@@ -285,7 +285,7 @@ it('prompts for a customs weight on a shipment into the US from abroad', functio
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
-        new PackageShippingRequest(selectedRate: mockCarrierRate(), requireCustomsWeightOverride: true),
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, mockCarrierRate()), requireCustomsWeightOverride: true),
     );
 
     expect($result->requiresCustomsWeightOverride)->toBeTrue();

@@ -2,6 +2,7 @@
 
 use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\RateRequest;
+use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Models\Carrier;
@@ -13,6 +14,7 @@ use App\Models\Location;
 use App\Models\Package;
 use App\Models\Setting;
 use App\Models\Shipment;
+use App\Models\ShippingOffer;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\ShopifyFulfillmentOrderActivationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -68,6 +70,25 @@ expect()->extend('toBeOne', function () {
 function something(): void
 {
     // ..
+}
+
+/**
+ * A direct-carrier rate as the Ship page would send it back: quoted for this
+ * package, with the offer the rate service would have issued behind it, and
+ * round-tripped through the array form so the test holds exactly what the
+ * browser holds. `ship()` refuses a rate with no offer, so every test that
+ * buys a hand-built rate through it goes through here.
+ */
+function quotedDirectly(Package $package, RateResponse $rate): RateResponse
+{
+    // Bound to the package as the database has it, not as the test's instance
+    // remembers it: a test that edits the shipment and then quotes must get
+    // an offer for the edited parcel, the way a real re-quote would.
+    $stored = Package::query()->with('shipment')->find($package->id) ?? $package;
+
+    $offer = ShippingOffer::factory()->direct()->forRate($rate)->quotedFor($stored)->create();
+
+    return RateResponse::fromArray($rate->withOfferId($offer->public_id)->toArray());
 }
 
 function rateRequestForClient(int $clientId): RateRequest

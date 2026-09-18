@@ -140,6 +140,23 @@ readonly class PackagingRequirement
     }
 
     /**
+     * The rate's metadata with this requirement stored in it, under
+     * {@see RATE_METADATA_KEY}, on its way onto an offer.
+     *
+     * The adapters that read the metadata at purchase read their own keys and
+     * ignore this one; it is there so that the rate restored from the offer
+     * carries the requirement the source stamped at quote time, for display,
+     * while the purchase re-check still asks the adapter.
+     *
+     * @param  array<string, mixed>  $metadata
+     * @return array<string, mixed>
+     */
+    public function intoRateMetadata(array $metadata): array
+    {
+        return [...$metadata, self::RATE_METADATA_KEY => $this->toArray()];
+    }
+
+    /**
      * The requirement stored with an offer's rate metadata.
      *
      * A missing key reads as the shipper's own packaging, which is the safe

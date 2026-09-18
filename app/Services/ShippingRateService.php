@@ -6,12 +6,14 @@ use App\Contracts\AsyncRateQuoting;
 use App\Contracts\BlindPurchaseSource;
 use App\Contracts\CarrierAdapterInterface;
 use App\Contracts\PostageOfferSource;
+use App\DataTransferObjects\PostageSources\OfferDraft;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
 use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Exceptions\NoActiveCarrierServicesException;
@@ -19,8 +21,10 @@ use App\Models\CarrierService;
 use App\Models\CarrierServiceSpecialService;
 use App\Models\Package;
 use App\Models\ShippingMethod;
+use App\Models\ShippingOffer;
 use App\Models\SpecialService;
 use App\Services\Carriers\CarrierRegistry;
+use App\Services\PostageSources\OfferStore;
 use App\Services\Shipping\PackagingFilter;
 use GuzzleHttp\Promise\Utils as PromiseUtils;
 use Illuminate\Database\Eloquent\Builder;
@@ -99,16 +103,93 @@ class ShippingRateService
             PackageData::fromPackage($package)->carrierPackaging,
         );
 
+        return $this->offer($package, $rateOptions);
+    }
+
+    /**
+     * Log every surviving rate and put an offer behind each one.
+     *
+     * The one loop no adapter can bypass and a new adapter cannot forget,
+     * placed after the packaging filter so a rate never offered never holds
+     * an identifier. Runs on every quoting path — the Ship page, batch ship,
+     * auto-ship — because the purchase path is shared and restores from the
+     * offer whenever a rate carries one; the rows the unattended paths leave
+     * behind are unconsumed and age out with the rest.
+     *
+     * A direct-carrier rate becomes a {@see ShippingOffer} with
+     * `postage_source = CarrierAccount`, the account the adapter quoted on,
+     * and no purchase context: the account still buys, but the price, service
+     * and the metadata the adapter reads at purchase are now the server's
+     * copy rather than the browser's. Its window is the end of the quoted
+     * ship day in the location's timezone — nothing about a direct rate moves
+     * intra-day — and it is bound to the package as it stands, so an edit
+     * retires it. A rate that already carries an offer — Amazon issues its
+     * own from inside `getRates()`, with the purchase tokens only it holds —
+     * is left as it is, and only pointed at its quote row.
+     *
+     * The quote log and the offers are written together so they can point at
+     * each other: `markSelected()` marks by that pointer. A quote log that
+     * fails to write is a warning, as before, and the offers are issued
+     * without a pointer rather than not at all — the log is analytics, the
+     * offer is what the purchase needs.
+     *
+     * @param  Collection<int, RateResponse>  $rates
+     * @return Collection<int, RateResponse>
+     */
+    private function offer(Package $package, Collection $rates): Collection
+    {
+        $rates = $rates->values();
+
         try {
-            app(RateQuoteLogger::class)->logRates($packageId, $rateOptions);
+            $quoteIds = app(RateQuoteLogger::class)->logRates($package->id, $rates);
         } catch (\Exception $e) {
             logger()->warning('Failed to log rate quotes', [
-                'package_id' => $packageId,
+                'package_id' => $package->id,
                 'error' => $e->getMessage(),
             ]);
+
+            $quoteIds = [];
         }
 
-        return $rateOptions;
+        $offerStore = app(OfferStore::class);
+        $shipDates = app(ShipDateService::class);
+        $windows = [];
+
+        return $rates->map(function (RateResponse $rate, int $index) use ($package, $quoteIds, $offerStore, $shipDates, &$windows): RateResponse {
+            $quoteId = $quoteIds[$index] ?? null;
+
+            if ($rate->offerId !== null) {
+                if ($quoteId !== null) {
+                    ShippingOffer::query()
+                        ->where('public_id', $rate->offerId)
+                        ->whereNull('rate_quote_id')
+                        ->update(['rate_quote_id' => $quoteId]);
+                }
+
+                return $rate;
+            }
+
+            $windows[$rate->carrier] ??= $shipDates->getShipDate($rate->carrier, $package->location_id)->endOfDay();
+
+            $offer = $offerStore->issue($package, new OfferDraft(
+                carrier: $rate->carrier,
+                postageSource: PostageSource::CarrierAccount,
+                carrierAccountId: $rate->carrierAccountId,
+                serviceCode: $rate->serviceCode,
+                serviceName: $rate->serviceName,
+                price: $rate->priceUnknown ? null : $rate->price,
+                currency: 'USD',
+                // The packaging requirement travels with the metadata so the
+                // purchase-time check classifies what the server quoted.
+                rateMetadata: $rate->packagingRequirement->intoRateMetadata($rate->metadata),
+                expiresAt: $windows[$rate->carrier],
+                rateQuoteId: $quoteId,
+                packageUpdatedAt: $package->updated_at,
+                shipmentUpdatedAt: $package->shipment?->updated_at,
+            ));
+
+            return $rate->withOfferId($offer->public_id);
+        });
     }
 
     /**

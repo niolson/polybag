@@ -159,8 +159,12 @@ it('buys an unapproved discovered service when a person deliberately chooses it'
     $package = packageForDiscoveredQuote();
     registerQuotingAdapter([discoveredRate(4.00)]);
 
+    // Chosen off the list the Ship page shows, offer and all, the way a
+    // person chooses: ship() refuses a rate that names no offer.
+    $options = app(PackageShippingWorkflow::class)->prepareRates($package);
+
     $result = app(PackageShippingWorkflow::class)->ship($package, new PackageShippingRequest(
-        selectedRate: discoveredRate(4.00),
+        selectedRate: RateResponse::fromArray($options->rateOptions[0]),
         userId: $user->id,
     ));
 

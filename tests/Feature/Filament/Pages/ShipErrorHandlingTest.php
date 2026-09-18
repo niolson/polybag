@@ -2,6 +2,7 @@
 
 use App\Contracts\DirectCarrierAdapter;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
+use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PackageStatus;
@@ -87,17 +88,16 @@ function setUpShipComponentWithRate(Package $package): Testable
 {
     $component = Livewire::test(Ship::class, ['package_id' => $package->id]);
 
+    // With the offer the rate service would have issued behind it: ship()
+    // refuses a rate that names none.
     $component->set('rateOptions', [
-        0 => [
-            'carrier' => 'USPS',
-            'serviceCode' => 'USPS_GROUND_ADVANTAGE',
-            'serviceName' => 'USPS Ground Advantage',
-            'price' => 8.50,
-            'deliveryCommitment' => '2-5 Business Days',
-            'deliveryDate' => null,
-            'transitTime' => null,
-            'metadata' => [],
-        ],
+        0 => quotedDirectly($package, new RateResponse(
+            carrier: 'USPS',
+            serviceCode: 'USPS_GROUND_ADVANTAGE',
+            serviceName: 'USPS Ground Advantage',
+            price: 8.50,
+            deliveryCommitment: '2-5 Business Days',
+        ))->toArray(),
     ]);
     $component->set('formRateOptionDescriptions', [0 => '$8.50 - 2-5 Business Days']);
     $component->set('selectedRateIndex', 0);

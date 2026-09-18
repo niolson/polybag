@@ -288,7 +288,7 @@ it('lets a carrier account sell postage while a blind purchase is in flight else
 
     try {
         $result = app(PackageShippingWorkflow::class)->ship($package, new PackageShippingRequest(
-            selectedRate: new RateResponse('USPS', 'USPS_GROUND_ADVANTAGE', 'Ground Advantage', 8.50),
+            selectedRate: quotedDirectly($package, new RateResponse('USPS', 'USPS_GROUND_ADVANTAGE', 'Ground Advantage', 8.50)),
         ));
     } finally {
         $held->release();

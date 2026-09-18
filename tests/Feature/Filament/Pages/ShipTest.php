@@ -7,6 +7,7 @@ use App\DataTransferObjects\PackageShipping\PackageShippingOptions;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingResult;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
+use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\PackageStatus;
 use App\Filament\Pages\Ship;
@@ -147,23 +148,23 @@ it('dispatches print-label event when suppress_printing is off', function (): vo
 
     $component = Livewire::test(Ship::class, ['package_id' => $package->id]);
 
-    // Set rate options manually since we can't easily mock the rate fetch in mount
+    // Set rate options manually since we can't easily mock the rate fetch in
+    // mount — with the offer the rate service would have issued behind them,
+    // because ship() refuses a rate that names none.
     $component->set('rateOptions', [
-        0 => [
-            'carrier' => 'USPS',
-            'serviceCode' => 'USPS_GROUND_ADVANTAGE',
-            'serviceName' => 'USPS Ground Advantage',
-            'price' => 8.50,
-            'deliveryCommitment' => '2-5 Business Days',
-            'deliveryDate' => null,
-            'transitTime' => null,
-            'metadata' => [
+        0 => quotedDirectly($package, new RateResponse(
+            carrier: 'USPS',
+            serviceCode: 'USPS_GROUND_ADVANTAGE',
+            serviceName: 'USPS Ground Advantage',
+            price: 8.50,
+            deliveryCommitment: '2-5 Business Days',
+            metadata: [
                 'mailClass' => 'USPS_GROUND_ADVANTAGE',
                 'processingCategory' => 'MACHINABLE',
                 'rateIndicator' => 'SP',
                 'destinationEntryFacilityType' => 'NONE',
             ],
-        ],
+        ))->toArray(),
     ]);
     $component->set('formRateOptionDescriptions', [0 => '$8.50 - 2-5 Business Days']);
     $component->set('selectedRateIndex', 0);
@@ -194,21 +195,19 @@ it('does not dispatch print-label event when suppress_printing is on', function 
     $component = Livewire::test(Ship::class, ['package_id' => $package->id]);
 
     $component->set('rateOptions', [
-        0 => [
-            'carrier' => 'USPS',
-            'serviceCode' => 'USPS_GROUND_ADVANTAGE',
-            'serviceName' => 'USPS Ground Advantage',
-            'price' => 8.50,
-            'deliveryCommitment' => '2-5 Business Days',
-            'deliveryDate' => null,
-            'transitTime' => null,
-            'metadata' => [
+        0 => quotedDirectly($package, new RateResponse(
+            carrier: 'USPS',
+            serviceCode: 'USPS_GROUND_ADVANTAGE',
+            serviceName: 'USPS Ground Advantage',
+            price: 8.50,
+            deliveryCommitment: '2-5 Business Days',
+            metadata: [
                 'mailClass' => 'USPS_GROUND_ADVANTAGE',
                 'processingCategory' => 'MACHINABLE',
                 'rateIndicator' => 'SP',
                 'destinationEntryFacilityType' => 'NONE',
             ],
-        ],
+        ))->toArray(),
     ]);
     $component->set('formRateOptionDescriptions', [0 => '$8.50 - 2-5 Business Days']);
     $component->set('selectedRateIndex', 0);

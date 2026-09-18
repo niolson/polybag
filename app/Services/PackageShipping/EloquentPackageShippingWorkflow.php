@@ -132,6 +132,39 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
     private const PURCHASE_LOCK_SECONDS = 180;
 
     /**
+     * Buy what the Ship page chose.
+     *
+     * The one entry point the browser reaches, and so the one that trusts
+     * nothing it is handed: a quoted rate must name an offer, because the
+     * offer row is the server's copy of the price, service and metadata and a
+     * rate without one is a description the browser could have written
+     * (`postage-source-split/14`). {@see autoShip()} is the other side of
+     * that boundary — its rates are built server-side and never round-trip —
+     * so trust is decided by entry point rather than by a flag on the request.
+     *
+     * A blind offer carries no rate and is revalidated against the server's
+     * own list in {@see resolveBlindOffer()}, so it is not subject to this.
+     */
+    public function ship(Package $package, PackageShippingRequest $request): PackageShippingResult
+    {
+        if ($request->selectedRate !== null && $request->selectedRate->offerId === null) {
+            logger()->warning('Refused a rate from the Ship page that names no offer', [
+                'package_id' => $package->id,
+                'carrier' => $request->selectedRate->carrier,
+                'service_code' => $request->selectedRate->serviceCode,
+            ]);
+
+            return PackageShippingResult::offerUnavailable(
+                'Rate Unavailable',
+                'This rate is not one on file for this package. Get rates again and choose one.',
+                requiresRequote: true,
+            );
+        }
+
+        return $this->purchase($package, $request);
+    }
+
+    /**
      * Buy postage for exactly one attempt at a time, per package.
      *
      * The unresolved-purchase guard and the offer claim inside are two separate
@@ -148,7 +181,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * what it buys against belongs to the shipment rather than to the package —
      * see {@see withBlindPurchaseLock()}.
      */
-    public function ship(Package $package, PackageShippingRequest $request): PackageShippingResult
+    private function purchase(Package $package, PackageShippingRequest $request): PackageShippingResult
     {
         $lock = Cache::lock("package-purchase:{$package->id}", self::PURCHASE_LOCK_SECONDS);
 
@@ -267,7 +300,8 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         // against its description: what came back from the browser says which
         // offer, and nothing more. The carrier, service and price come off the
         // stored row, so a tampered or stale rate cannot spend one offer and
-        // buy something else.
+        // buy something else. Every rate the Ship page lists carries one now,
+        // direct or resold; ship() refuses one that does not.
         $offer = null;
         $selectedRate = $request->selectedRate;
 
@@ -298,11 +332,15 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             return $refused;
         }
 
-        // Nothing to mark for a blind purchase: no quote was logged, because
-        // none was given.
-        if ($selectedRate !== null) {
-            $this->rateQuoteLogger->markSelected($package->id, $selectedRate);
+        // Marked through the offer, which points at the row the quote log
+        // wrote for exactly this rate. Nothing to mark for a blind purchase,
+        // which logged no quote, or for a rule's pre-selected rate, which
+        // never rate-shopped (`postage-source-split/17`).
+        if ($offer !== null) {
+            $this->rateQuoteLogger->markSelected($offer);
         }
+
+        $adapter = null;
 
         try {
             $adapter = $blindOffer !== null
@@ -411,6 +449,8 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 'package_id' => $package->id,
             ]);
 
+            $this->resolveTimedOutOffer($offer, $adapter);
+
             return PackageShippingResult::failed(
                 'Carrier Timeout',
                 "The {$seller} API is not responding. Please try again in a few moments.",
@@ -453,7 +493,11 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 return $result;
             }
 
-            $result = $this->ship(
+            // Through purchase() rather than ship(): a rule's pre-selected
+            // rate is resolved server-side and carries no offer, and this is
+            // the trusted side of the boundary ship() enforces. A rate from
+            // rate shopping does carry one, and is restored from it as usual.
+            $result = $this->purchase(
                 $package,
                 new PackageShippingRequest(
                     selectedRate: $selectedRate,
@@ -593,9 +637,9 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * what the packer reads and what the package will record — would find a
      * direct adapter we do not have and hold no account with.
      *
-     * A rate with no offer behind it is a direct-carrier rate quoted before
-     * offers existed for that source, and dispatches by carrier name exactly as
-     * it always did.
+     * A rate with no offer behind it is a rule's pre-selected rate, resolved
+     * server-side on the unattended path and never rate-shopped, and
+     * dispatches by carrier name exactly as it always did.
      */
     private function sellerFor(?ShippingOffer $offer, ?RateResponse $selectedRate): ?PostageOfferSource
     {
@@ -928,6 +972,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             priceUnknown: $offer->price === null,
             offerId: $offer->public_id,
             packagingRequirement: PackagingRequirement::fromRateMetadata($metadata),
+            carrierAccountId: $offer->carrier_account_id,
         );
     }
 
@@ -937,13 +982,42 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * Only ever called on a response — a reply from the source is proof that
      * nothing was bought. An exception is not: a timeout leaves the offer
      * unresolved on purpose, so the next attempt is blocked until someone
-     * establishes whether a label exists.
+     * establishes whether a label exists — with the one exception
+     * {@see resolveTimedOutOffer()} makes.
      */
     private function resolveOfferAsFailed(?ShippingOffer $offer, string $reason): void
     {
         if ($offer !== null) {
             $this->offerStore->recordFailure($offer, $reason);
         }
+    }
+
+    /**
+     * Settle a claimed offer whose purchase timed out, when nobody could ever
+     * settle it otherwise.
+     *
+     * "Spent, nothing confirmed" is only a useful state when a later attempt
+     * can ask the source what happened, which is what
+     * {@see RecoversUnresolvedPurchase} promises and only Amazon implements.
+     * USPS, FedEx and UPS cannot: FedEx's `customerTransactionId` and UPS's
+     * `transId` are echoed, not deduplicated, and USPS has nothing — so for a
+     * direct rate the state would be terminal after a single dropped
+     * connection, with the package refusing every purchase and no UI to clear
+     * it. That is a regression from what a timeout meant before direct rates
+     * were offers at all: try again.
+     *
+     * So the offer is resolved as failed and the package stays buyable, which
+     * is today's behaviour plus the atomic claim that stopped the double-click.
+     * A seller that *can* recover keeps the strict block; resolving one of its
+     * offers by hand is `postage-source-split/16`.
+     */
+    private function resolveTimedOutOffer(?ShippingOffer $offer, ?PostageOfferSource $seller): void
+    {
+        if ($offer === null || ! $offer->isConsumed() || $seller instanceof RecoversUnresolvedPurchase) {
+            return;
+        }
+
+        $this->offerStore->recordFailure($offer, 'Timed out; the carrier did not answer');
     }
 
     /**
