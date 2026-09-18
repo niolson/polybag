@@ -145,15 +145,25 @@ when it is the package that changed, and the purge handles the rest.
    carries the three.
 3. `ShippingRateService::getShippingRates()` writes each `rate_quotes` row and, for every
    rate without an `offerId` already, issues a `ShippingOffer` against it and returns the
-   rate with `offerId` set. `RateQuoteLogger::logRates()` returns the ids it inserted.
-   The order matters: the packaging filter runs first (unchanged), then the log, then
-   the offers, so a rate never offered never holds an id.
+   rate with `offerId` set. A rate that already carries one — Amazon issues its own inside
+   `getRates()`, holding purchase tokens the shared loop never sees — keeps its offer, and
+   the loop stamps that offer's `rate_quote_id` so `markSelected()` can find its row too.
+   `RateQuoteLogger::logRates()` returns the ids it inserted. The order matters: the
+   packaging filter runs first (unchanged), then the log, then the offers, so a rate never
+   offered never holds an id. The ship date each carrier is quoted for is read once, before
+   the carrier calls, and the same date closes the offer's window — read again afterwards,
+   a pickup cutoff or an End of Day run in between would give the offer a later day than
+   the price was quoted for.
 4. `OfferStore::inspect()` and `redeem()` reject an offer whose stored
    `package_updated_at` / `shipment_updated_at` no longer match the package, with a
    rejection that asks for a re-quote (new `OfferRejection` case, e.g. `PackageChanged`).
 5. `EloquentPackageShippingWorkflow::ship()` refuses a `selectedRate` with no `offerId`
    (a `PackageShippingResult::offerUnavailable` asking for a re-quote, never a purchase).
-   `autoShip()` is unchanged.
+   `autoShip()` today delegates to `ship()`, and a rule's pre-selected rate from
+   `resolvePreSelectedRate()` deliberately has no id, so the refusal cannot sit in the
+   shared body: the locks and the purchase move to a private `purchase()` that both entry
+   points call, `ship()` checks for the id before calling it, and `autoShip()` calls it
+   directly. Unattended behaviour is unchanged.
 6. `buyPostage()` already restores from the offer when there is an id; direct rates now
    take that branch. In the `RequestTimeOutException` catch: if `$offer !== null` and the
    adapter is not a `RecoversUnresolvedPurchase`, `recordFailure($offer, 'Timed out; the
@@ -236,6 +246,13 @@ through a new private `purchase()` — the lock and the blind-purchase lock, for
 of `ship()` — so a rule's pre-selection still buys unrestored. `markSelected()` takes the
 offer and updates by its `rate_quote_id`. The timeout catch resolves a claimed offer as
 failed when the seller is not a `RecoversUnresolvedPurchase`.
+
+Steps 3 and 5 above were amended on review the same day, after the code had shipped: the
+first draft said `autoShip()` was "unchanged", which would have had it inherit `ship()`'s
+refusal, and said nothing about an Amazon offer's quote row or about the ship date being
+read twice. The amended text describes what was built; the ship-date read was the one
+change the review caused — `getShippingRates()` now reads one date per carrier and hands
+it to both the carrier call and the offer, proved by a test that the date is read once.
 
 Two things worth knowing that *What to build* did not spell out:
 

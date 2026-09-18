@@ -28,10 +28,18 @@ Those are precisely the purchases most worth checking, because no person compare
 ## Shape
 
 A shadow quote, after the fact and off the packer's path: a queued job that, for a
-package shipped without a quote log, asks `getShippingRates()` what it would have offered
-and writes the rows with the bought service marked `selected`. Then `RateComparison`
-covers every package, and a rule buying a too-expensive service shows up as savings
-foregone.
+shipped package with **no `selected` quote row**, asks `getShippingRates()` what it would
+have offered and writes the rows with the bought service marked `selected`. Then
+`RateComparison` covers every package, and a rule buying a too-expensive service shows up
+as savings foregone.
+
+"No selected row", not "no rows": an attended Shopify blind purchase already has
+`rate_quotes` rows, because `getShippingRates()` logs whatever the other carriers
+returned while the blind offer is advertised beside them — and none of those rows is
+selected, because nothing in the list was bought. A job keyed on an empty log would skip
+exactly those packages. For one that already has rows, the job adds the bought service as
+a further row (its cost from the label where the source reports one, null where it does
+not) marked `selected`, rather than re-quoting the alternatives that are already there.
 
 ## Open questions
 

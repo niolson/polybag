@@ -32,8 +32,10 @@ use App\Services\Carriers\FakeCarrierAdapter;
 use App\Services\PostageSources\OfferStore;
 use App\Services\ShipDateService;
 use App\Services\ShippingRateService;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
+use Mockery\MockInterface;
 
 /**
  * Direct-carrier rates behind an opaque identifier — `postage-source-split/14`.
@@ -225,6 +227,26 @@ it('quotes a direct rate behind an offer that records everything the purchase ne
     $options = app(PackageShippingWorkflow::class)->prepareRates($package);
 
     expect(collect($options->rateOptions)->every(fn (array $option): bool => filled($option['offerId'])))->toBeTrue();
+});
+
+it('windows a direct offer on the day the carrier was quoted for, read once', function (): void {
+    ['package' => $package] = packageQuotedByFakeUsps();
+
+    // The ship date is read exactly once per carrier and shared between the
+    // rate request and the offer window. Read twice, a pickup cutoff or an
+    // End of Day run landing between the carrier call and the offer would
+    // give the offer a later day than the price was quoted for.
+    $quotedFor = CarbonImmutable::now('America/New_York')->addDays(3)->startOfDay();
+
+    $this->partialMock(ShipDateService::class, function (MockInterface $mock) use ($quotedFor): void {
+        $mock->shouldReceive('getShipDate')->once()->with('USPS', Mockery::any())->andReturn($quotedFor);
+    });
+
+    $rates = app(ShippingRateService::class)->getShippingRates($package->id);
+
+    $offer = ShippingOffer::where('public_id', $rates->first()->offerId)->firstOrFail();
+
+    expect($offer->expires_at->timestamp)->toBe($quotedFor->endOfDay()->timestamp);
 });
 
 it('buys what the offer says when the browser restates the rate', function (): void {

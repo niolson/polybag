@@ -26,6 +26,7 @@ use App\Models\SpecialService;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\PostageSources\OfferStore;
 use App\Services\Shipping\PackagingFilter;
+use Carbon\CarbonImmutable;
 use GuzzleHttp\Promise\Utils as PromiseUtils;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -96,14 +97,39 @@ class ShippingRateService
         $rateRequest = RateRequest::fromPackage($package);
         $carrierTasks = $this->buildCarrierTasks($package, $rateRequest);
 
+        // One ship date per carrier, read once and used twice: the carrier is
+        // quoted for it, and the offer's window ends with it. Reading it again
+        // after the carrier calls would let a pickup cutoff or an End of Day
+        // run in between hand the offer a later day than the one it was
+        // priced for.
+        $shipDates = $this->shipDatesFor($carrierTasks, $rateRequest->locationId);
+
         // Before the quote log: a rate the package's packaging rules out was
         // never offered, and must not be logged as one (ADR-0005 decision 4).
         $rateOptions = PackagingFilter::keepCompatible(
-            $this->fetchRatesConcurrently($carrierTasks, $rateRequest),
+            $this->fetchRatesConcurrently($carrierTasks, $rateRequest, $shipDates),
             PackageData::fromPackage($package)->carrierPackaging,
         );
 
-        return $this->offer($package, $rateOptions);
+        return $this->offer($package, $rateOptions, $shipDates);
+    }
+
+    /**
+     * The ship date each carrier in these tasks will be quoted for.
+     *
+     * @param  array<int, array{name: string, serviceCodes: array<string>, specialServiceCodes: array<string>}>  $carrierTasks
+     * @return array<string, CarbonImmutable>
+     */
+    private function shipDatesFor(array $carrierTasks, ?int $locationId): array
+    {
+        $shipDateService = app(ShipDateService::class);
+        $shipDates = [];
+
+        foreach ($carrierTasks as $task) {
+            $shipDates[$task['name']] ??= $shipDateService->getShipDate($task['name'], $locationId);
+        }
+
+        return $shipDates;
     }
 
     /**
@@ -134,9 +160,10 @@ class ShippingRateService
      * offer is what the purchase needs.
      *
      * @param  Collection<int, RateResponse>  $rates
+     * @param  array<string, CarbonImmutable>  $shipDates  The date each carrier was quoted for, by carrier name
      * @return Collection<int, RateResponse>
      */
-    private function offer(Package $package, Collection $rates): Collection
+    private function offer(Package $package, Collection $rates, array $shipDates): Collection
     {
         $rates = $rates->values();
 
@@ -152,10 +179,9 @@ class ShippingRateService
         }
 
         $offerStore = app(OfferStore::class);
-        $shipDates = app(ShipDateService::class);
-        $windows = [];
+        $shipDateService = app(ShipDateService::class);
 
-        return $rates->map(function (RateResponse $rate, int $index) use ($package, $quoteIds, $offerStore, $shipDates, &$windows): RateResponse {
+        return $rates->map(function (RateResponse $rate, int $index) use ($package, $quoteIds, $offerStore, $shipDateService, &$shipDates): RateResponse {
             $quoteId = $quoteIds[$index] ?? null;
 
             if ($rate->offerId !== null) {
@@ -169,7 +195,10 @@ class ShippingRateService
                 return $rate;
             }
 
-            $windows[$rate->carrier] ??= $shipDates->getShipDate($rate->carrier, $package->location_id)->endOfDay();
+            // A rate normally names the carrier it was asked of. One that does
+            // not — an adapter answering under a different carrier name — is
+            // windowed on a date read now, which is the best available.
+            $shipDates[$rate->carrier] ??= $shipDateService->getShipDate($rate->carrier, $package->location_id);
 
             $offer = $offerStore->issue($package, new OfferDraft(
                 carrier: $rate->carrier,
@@ -182,7 +211,7 @@ class ShippingRateService
                 // The packaging requirement travels with the metadata so the
                 // purchase-time check classifies what the server quoted.
                 rateMetadata: $rate->packagingRequirement->intoRateMetadata($rate->metadata),
-                expiresAt: $windows[$rate->carrier],
+                expiresAt: $shipDates[$rate->carrier]->endOfDay(),
                 rateQuoteId: $quoteId,
                 packageUpdatedAt: $package->updated_at,
                 shipmentUpdatedAt: $package->shipment?->updated_at,
@@ -349,17 +378,16 @@ class ShippingRateService
      * Fetch rates from multiple carriers concurrently using a shared Guzzle sender.
      *
      * @param  array<int, array{name: string, serviceCodes: array<string>, specialServiceCodes: array<string>}>  $carrierTasks
+     * @param  array<string, CarbonImmutable>  $shipDates  The date to quote each carrier for, by carrier name
      * @return Collection<int, RateResponse>
      */
-    private function fetchRatesConcurrently(array $carrierTasks, RateRequest $rateRequest): Collection
+    private function fetchRatesConcurrently(array $carrierTasks, RateRequest $rateRequest, array $shipDates): Collection
     {
         $rateOptions = collect();
         $preparedRequests = [];
         $taskMeta = [];
 
         $registry = app(CarrierRegistry::class);
-
-        $shipDateService = app(ShipDateService::class);
 
         // Phase 1: Prepare all requests (authenticate connectors, build request bodies)
         foreach ($carrierTasks as $task) {
@@ -381,9 +409,8 @@ class ShippingRateService
                     continue;
                 }
 
-                $shipDate = $shipDateService->getShipDate($carrierName, $rateRequest->locationId);
                 $carrierRateRequest = $rateRequest
-                    ->withShipDate($shipDate)
+                    ->withShipDate($shipDates[$carrierName])
                     ->withSpecialServiceCodes($task['specialServiceCodes']);
 
                 if ($adapter instanceof AsyncRateQuoting) {
