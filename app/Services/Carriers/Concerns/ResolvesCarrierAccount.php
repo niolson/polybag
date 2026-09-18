@@ -4,6 +4,7 @@ namespace App\Services\Carriers\Concerns;
 
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
+use App\Models\ShippingOffer;
 
 /**
  * Resolves the carrier account for a shipment and reports configuration status.
@@ -23,6 +24,46 @@ trait ResolvesCarrierAccount
         return $carrierId
             ? CarrierAccount::resolveForShipment($carrierId, $locationId, $clientId)->first()
             : null;
+    }
+
+    /**
+     * Whether the account an offer was bought on can no longer answer for it.
+     *
+     * Recovery must ask the account that made the purchase, not whichever
+     * account scopes now prefer: a different CRID or shipper number answers
+     * "no such label" truthfully about itself, and that would be read as
+     * "nothing was bought" while the original account owns a label. So an
+     * offer that recorded an account is asked on that account, and left
+     * unresolved when the row is gone or its billing identity has changed
+     * since the quote — the same digest the purchase path compares.
+     */
+    private function purchasingAccountChanged(ShippingOffer $offer): bool
+    {
+        if ($offer->carrier_account_id === null) {
+            // Deleting the account nulls the id (the FK is nullOnDelete) but
+            // leaves the fingerprint, so a fingerprint with no id is a gone
+            // account; neither is an offer that never recorded one.
+            return $offer->carrier_account_fingerprint !== null;
+        }
+
+        $account = CarrierAccount::query()->find($offer->carrier_account_id);
+
+        return $account === null
+            || ($offer->carrier_account_fingerprint !== null && $account->fingerprint() !== $offer->carrier_account_fingerprint);
+    }
+
+    /**
+     * The account an offer was bought on, for asking what became of it.
+     *
+     * Only after {@see purchasingAccountChanged()} said no. An offer that
+     * recorded no account (issued before rates carried one) falls back to the
+     * resolution the purchase used.
+     */
+    private function purchasingAccount(ShippingOffer $offer, ?int $locationId, ?int $clientId = null): ?CarrierAccount
+    {
+        return $offer->carrier_account_id === null
+            ? $this->resolveAccount($locationId, $clientId)
+            : CarrierAccount::query()->find($offer->carrier_account_id);
     }
 
     public function isConfigured(): bool

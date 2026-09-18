@@ -14,7 +14,9 @@ use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Http\Integrations\USPS\Requests\CancelInternationalLabel;
 use App\Http\Integrations\USPS\Requests\CancelLabel;
 use App\Http\Integrations\USPS\Requests\InternationalLabel;
+use App\Http\Integrations\USPS\Requests\InternationalLabelReprint;
 use App\Http\Integrations\USPS\Requests\Label;
+use App\Http\Integrations\USPS\Requests\LabelReprint;
 use App\Http\Integrations\USPS\Requests\PaymentAuthorization;
 use App\Http\Integrations\USPS\Requests\ShippingOptions;
 use App\Http\Integrations\USPS\Requests\TrackShipment;
@@ -22,10 +24,15 @@ use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Package;
 use App\Models\Shipment;
+use App\Models\ShippingOffer;
 use App\Services\Carriers\UspsAdapter;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
+use Saloon\Exceptions\Request\FatalRequestException;
+use Saloon\Exceptions\Request\ServerException;
 use Saloon\Exceptions\Request\Statuses\InternalServerErrorException;
 use Saloon\Http\Faking\MockResponse;
+use Saloon\Http\PendingRequest;
 use Saloon\Http\Request;
 use Saloon\Laravel\Facades\Saloon;
 
@@ -2010,8 +2017,27 @@ it('translates USPS label error codes into actionable messages', function (array
 ]);
 
 it('fails gracefully when the label endpoint answers with a non-JSON error page', function (): void {
-    // A gateway between us and USPS can answer with an HTML error page. The 5xx
-    // is retried, then thrown, and decoding it must not throw out of the catch.
+    // A gateway or WAF between us and USPS can answer with an HTML error page,
+    // and decoding it must not throw out of the catch.
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        PaymentAuthorization::class => MockResponse::make(['paymentAuthorizationToken' => 'test_payment_token']),
+        Label::class => MockResponse::make(
+            body: '<html><head><title>403 Forbidden</title></head><body>403 Forbidden</body></html>',
+            status: 403,
+            headers: ['Content-Type' => 'text/html'],
+        ),
+    ]);
+
+    $response = $this->adapter->createShipment(uspsSpecialServiceShipRequest([]));
+
+    expect($response->success)->toBeFalse()
+        ->and($response->errorMessage)->toBe('USPS rejected the label request.');
+});
+
+it('lets a 5xx on the label request escape rather than settle it as a decline', function (): void {
+    // USPS may have created the label before the server error, so a 5xx is
+    // no answer at all: the offer stays unresolved and the reprint decides.
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         PaymentAuthorization::class => MockResponse::make(['paymentAuthorizationToken' => 'test_payment_token']),
@@ -2022,10 +2048,8 @@ it('fails gracefully when the label endpoint answers with a non-JSON error page'
         ),
     ]);
 
-    $response = $this->adapter->createShipment(uspsSpecialServiceShipRequest([]));
-
-    expect($response->success)->toBeFalse()
-        ->and($response->errorMessage)->toBe('USPS rejected the label request.');
+    expect(fn () => $this->adapter->createShipment(uspsSpecialServiceShipRequest([])))
+        ->toThrow(ServerException::class);
 });
 
 it('does not surface a schema validation dump to the packer', function (): void {
@@ -2078,3 +2102,272 @@ it('does not surface a schema validation dump to the packer', function (): void 
     expect($this->adapter->createShipment($request)->errorMessage)
         ->toBe('USPS rejected the label request.');
 });
+
+// --- Recovery by X-Idempotency-Key — postage-source-split/18 ---------------
+
+/**
+ * A domestic ship request from an offer, the way the workflow builds one.
+ */
+function uspsOfferShipRequest(?ShippingOffer $offer, string $country = 'US', string $labelFormat = 'pdf', ?int $labelDpi = null): ShipRequest
+{
+    $international = $country !== 'US';
+
+    return new ShipRequest(
+        fromAddress: new AddressData(firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle', stateOrProvince: 'WA', postalCode: '98072'),
+        toAddress: $international
+            ? new AddressData(firstName: 'Jean', lastName: 'Tremblay', streetAddress: '100 Queen St W', city: 'Toronto', stateOrProvince: 'ON', postalCode: 'M5H 2N2', country: 'CA')
+            : new AddressData(firstName: 'John', lastName: 'Doe', streetAddress: '456 Main St', city: 'Los Angeles', stateOrProvince: 'CA', postalCode: '90210'),
+        packageData: new PackageData(weight: 2.5, length: 10, width: 8, height: 6),
+        selectedRate: new RateResponse(
+            carrier: 'USPS',
+            serviceCode: $international ? 'PRIORITY_MAIL_INTERNATIONAL' : 'USPS_GROUND_ADVANTAGE',
+            serviceName: $international ? 'Priority Mail International' : 'USPS Ground Advantage',
+            price: 8.50,
+            metadata: [
+                'mailClass' => $international ? 'PRIORITY_MAIL_INTERNATIONAL' : 'USPS_GROUND_ADVANTAGE',
+                'processingCategory' => 'MACHINABLE',
+                'rateIndicator' => 'SP',
+                'destinationEntryFacilityType' => $international ? 'INTERNATIONAL_SERVICE_CENTER' : 'NONE',
+            ],
+        ),
+        customsItems: $international ? [new CustomsItem(description: 'Blue Widget', quantity: 1, unitValue: 19.99, weight: 0.5)] : [],
+        labelFormat: $labelFormat,
+        labelDpi: $labelDpi,
+        offer: $offer,
+    );
+}
+
+/**
+ * The multipart body both the label and the reprint endpoints answer with;
+ * a reprint adds the third part.
+ */
+function uspsLabelMultipart(string $trackingNumber, bool $reprint = false): MockResponse
+{
+    $parts = "--boundary\r\nContent-Type: application/json\r\n\r\n{\"trackingNumber\":\"{$trackingNumber}\",\"postage\":8.40}"
+        ."\r\n--boundary\r\nContent-Type: application/pdf\r\n\r\nJVBERi0xLjQKYmFzZTY0bGFiZWxkYXRh";
+
+    if ($reprint) {
+        $parts .= "\r\n--boundary\r\nContent-Type: application/json\r\n\r\n{\"reprintNumber\":1,\"reprintLimit\":3}";
+    }
+
+    return MockResponse::make(body: $parts."\r\n--boundary--", headers: ['Content-Type' => 'multipart/form-data; boundary=boundary']);
+}
+
+/**
+ * A USPS label-API error body, as captured in production on 2026-09-18.
+ */
+function uspsLabelError(string $code, string $detail): MockResponse
+{
+    return MockResponse::make([
+        'apiVersion' => '/labels/v3/',
+        'error' => [
+            'code' => '400',
+            'message' => 'Bad Request',
+            'errors' => [['title' => 'Bad Request', 'detail' => $detail, 'code' => $code, 'source' => ['parameter' => 'Header: X-Idempotency-Key']]],
+        ],
+    ], 400);
+}
+
+function fakeUspsAuth(): array
+{
+    return [
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        PaymentAuthorization::class => MockResponse::make(['paymentAuthorizationToken' => 'test_payment_token']),
+    ];
+}
+
+it('stores a fresh idempotency key on the offer and sends it with the label request', function (string $country, string $labelClass): void {
+    Saloon::fake([...fakeUspsAuth(), $labelClass => uspsLabelMultipart('9200190414219000000011')]);
+    $offer = ShippingOffer::factory()->direct()->create();
+
+    $response = $this->adapter->createShipment(uspsOfferShipRequest($offer, $country));
+
+    $key = $offer->fresh()->purchase_context[UspsAdapter::PURCHASE_CONTEXT_KEY] ?? null;
+
+    expect($response->success)->toBeTrue()
+        ->and($key)->toBeString()
+        ->and(Str::isUuid($key))->toBeTrue()
+        // The key is the only thing the context holds — nothing that could
+        // spend money, nothing that reaches the browser.
+        ->and($offer->fresh()->purchase_context)->toBe([UspsAdapter::PURCHASE_CONTEXT_KEY => $key]);
+
+    Saloon::assertSent(function (Request $request) use ($labelClass, $key, $country): bool {
+        if (! $request instanceof $labelClass || ! ($request instanceof Label || $request instanceof InternationalLabel)) {
+            return false;
+        }
+
+        // The schema guard describes the body; the key travels as a header
+        // and must not have leaked into it.
+        assertMatchesApiSchema($request->body()->all(), $country === 'US' ? 'LabelRequest' : 'InternationalLabelRequest', 'uspsLabel');
+
+        return $request->headers()->get('X-Idempotency-Key') === $key;
+    });
+})->with([
+    'domestic' => ['US', Label::class],
+    'international' => ['CA', InternationalLabel::class],
+]);
+
+it('still sends an idempotency key when the purchase has no offer to store it on', function (): void {
+    Saloon::fake([...fakeUspsAuth(), Label::class => uspsLabelMultipart('9200190414219000000011')]);
+
+    expect($this->adapter->createShipment(uspsOfferShipRequest(null))->success)->toBeTrue();
+
+    Saloon::assertSent(fn (Request $request): bool => $request instanceof Label
+        && Str::isUuid((string) $request->headers()->get('X-Idempotency-Key')));
+});
+
+it('lets a label request that got no answer escape, with the key already on the offer', function (): void {
+    $attempts = 0;
+    Saloon::fake([
+        ...fakeUspsAuth(),
+        Label::class => function (PendingRequest $pending) use (&$attempts): MockResponse {
+            $attempts++;
+
+            return MockResponse::make()->throw(new FatalRequestException(new RuntimeException('Connection timed out'), $pending));
+        },
+    ]);
+    $offer = ShippingOffer::factory()->direct()->create();
+
+    expect(fn () => $this->adapter->createShipment(uspsOfferShipRequest($offer)))
+        ->toThrow(FatalRequestException::class);
+
+    expect($offer->fresh()->purchase_context[UspsAdapter::PURCHASE_CONTEXT_KEY] ?? null)->toBeString()
+        // Sent exactly once: the connector retries connection failures, and
+        // a retry under the same key is a second label.
+        ->and($attempts)->toBe(1);
+});
+
+it('still answers a refusal as a failed response, not an exception', function (): void {
+    Saloon::fake([...fakeUspsAuth(), Label::class => uspsLabelError('160138', 'ZIP Code not in service')]);
+
+    $response = $this->adapter->createShipment(uspsOfferShipRequest(ShippingOffer::factory()->direct()->create()));
+
+    expect($response->success)->toBeFalse()
+        ->and($response->errorMessage)->toContain('no longer in service');
+});
+
+it('recovers the label by the stored key instead of buying again', function (string $country, string $reprintClass): void {
+    Saloon::fake([...fakeUspsAuth(), $reprintClass => uspsLabelMultipart('9200190414219000000011', reprint: true)]);
+    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+        'purchase_context' => [UspsAdapter::PURCHASE_CONTEXT_KEY => '3a2befe8-4475-48c7-a327-fe53439b355b'],
+    ]);
+
+    $response = $this->adapter->recoverPurchase(uspsOfferShipRequest($offer, $country, 'zpl', 300));
+
+    expect($response)->not->toBeNull()
+        ->and($response->success)->toBeTrue()
+        ->and($response->trackingNumber)->toBe('9200190414219000000011')
+        ->and($response->cost)->toBe(8.40)
+        ->and($response->labelData)->toBe('JVBERi0xLjQKYmFzZTY0bGFiZWxkYXRh')
+        ->and($response->labelFormat)->toBe('zpl')
+        ->and($response->labelDpi)->toBe(300)
+        // The orientation the purchase path records for each API.
+        ->and($response->labelOrientation)->toBe($country === 'US' ? 'portrait' : 'landscape');
+
+    Saloon::assertSent(fn (Request $request): bool => $request instanceof $reprintClass
+        && ($request instanceof LabelReprint || $request instanceof InternationalLabelReprint)
+        && $request->headers()->get('X-Idempotency-Key') === '3a2befe8-4475-48c7-a327-fe53439b355b'
+        && $request->headers()->get('X-Payment-Authorization-Token') === 'test_payment_token'
+        && $request->body()->all() === ['imageInfo' => ['imageType' => 'ZPL300DPI', 'labelType' => '4X6LABEL']]);
+    Saloon::assertNotSent(Label::class);
+    Saloon::assertNotSent(InternationalLabel::class);
+})->with([
+    'domestic' => ['US', LabelReprint::class],
+    'international' => ['CA', InternationalLabelReprint::class],
+]);
+
+it('settles the offer when USPS is certain nothing was bought, or the label was cancelled', function (string $code, string $detail, string $expected): void {
+    Saloon::fake([...fakeUspsAuth(), LabelReprint::class => uspsLabelError($code, $detail)]);
+    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+        'purchase_context' => [UspsAdapter::PURCHASE_CONTEXT_KEY => (string) Str::uuid()],
+    ]);
+
+    $response = $this->adapter->recoverPurchase(uspsOfferShipRequest($offer));
+
+    expect($response)->not->toBeNull()
+        ->and($response->success)->toBeFalse()
+        ->and($response->errorMessage)->toContain($expected);
+})->with([
+    'key never used' => ['160412', 'Idempotency-Key not found for a mailing date within the last 7 days', 'nothing was bought'],
+    'label cancelled' => ['160979', 'Canceled labels are unavailable for reprint', 'has since been cancelled'],
+]);
+
+it('leaves the question open on any other reprint answer', function (MockResponse $reprint): void {
+    Saloon::fake([...fakeUspsAuth(), LabelReprint::class => $reprint]);
+    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+        'purchase_context' => [UspsAdapter::PURCHASE_CONTEXT_KEY => (string) Str::uuid()],
+    ]);
+
+    expect($this->adapter->recoverPurchase(uspsOfferShipRequest($offer)))->toBeNull();
+})->with([
+    'a different 400' => fn (): MockResponse => uspsLabelError('160999', 'Something else'),
+    'a 503' => fn () => MockResponse::make(['error' => ['message' => 'Service Unavailable']], 503),
+    'no answer' => fn () => MockResponse::make()->throw(fn (PendingRequest $pending): FatalRequestException => new FatalRequestException(new RuntimeException('Connection timed out'), $pending)),
+]);
+
+it('settles an offer spent before any key was recorded, since USPS cannot be asked about it', function (): void {
+    Saloon::fake(fakeUspsAuth());
+    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['purchase_context' => null]);
+
+    $response = $this->adapter->recoverPurchase(uspsOfferShipRequest($offer));
+
+    expect($response)->not->toBeNull()
+        ->and($response->success)->toBeFalse()
+        ->and($response->errorMessage)->toContain('cannot be asked');
+    Saloon::assertNothingSent();
+});
+
+it('asks USPS on the account the offer was bought on, not the one scopes prefer now', function (): void {
+    // Keys are per CRID. A second account is now the location default; the
+    // offer records the first, so the first is asked and its payment token
+    // is minted.
+    $original = CarrierAccount::query()->firstOrFail();
+    // Scopes edited since the quote: the global default now points at a
+    // second account, and the original keeps no scope at all.
+    $original->scopes()->delete();
+    $preferred = createUspsAccount(['client_id' => 'other_client'], ['crid' => 'other_crid', 'mid' => 'other_mid']);
+    expect($preferred->id)->not->toBe($original->id);
+
+    $minted = [];
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        PaymentAuthorization::class => function (PendingRequest $pending) use (&$minted): MockResponse {
+            $minted[] = $pending->body()->all()['roles'][0]['CRID'];
+
+            return MockResponse::make(['paymentAuthorizationToken' => 'test_payment_token']);
+        },
+        LabelReprint::class => uspsLabelMultipart('9200190414219000000011', reprint: true),
+    ]);
+    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+        'carrier_account_id' => $original->id,
+        'carrier_account_fingerprint' => $original->fingerprint(),
+        'purchase_context' => [UspsAdapter::PURCHASE_CONTEXT_KEY => (string) Str::uuid()],
+    ]);
+
+    $response = $this->adapter->recoverPurchase(uspsOfferShipRequest($offer));
+
+    expect($response?->success)->toBeTrue()
+        ->and($response->carrierAccountId)->toBe($original->id)
+        ->and($minted)->toBe(['test_crid']);
+});
+
+it('leaves the question open when the account the offer was bought on is gone or bills someone else', function (string $change): void {
+    Saloon::fake(fakeUspsAuth());
+    $account = CarrierAccount::query()->firstOrFail();
+    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+        'carrier_account_id' => $account->id,
+        'carrier_account_fingerprint' => $account->fingerprint(),
+        'purchase_context' => [UspsAdapter::PURCHASE_CONTEXT_KEY => (string) Str::uuid()],
+    ]);
+
+    match ($change) {
+        'deleted' => $account->delete(),
+        'rebilled' => $account->update(['credentials' => ['crid' => 'someone_else', 'mid' => 'test_mid']]),
+        default => throw new InvalidArgumentException($change),
+    };
+
+    // Another CRID's "not found" would be read as "nothing was bought" while
+    // the original account owns a label, so nobody is asked.
+    expect($this->adapter->recoverPurchase(uspsOfferShipRequest($offer->fresh())))->toBeNull();
+    Saloon::assertNothingSent();
+})->with(['deleted', 'rebilled']);

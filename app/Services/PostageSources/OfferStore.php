@@ -28,7 +28,8 @@ use Illuminate\Database\Eloquent\Collection;
  * The fifth — idempotent recovery — is a shared responsibility: this class
  * makes "spent, nothing confirmed" a visible state and refuses to let it be
  * spent again, and the adapter asks the source what happened under
- * {@see ShippingOffer::$public_id}.
+ * {@see ShippingOffer::$public_id}, or under a key of its own it stored in
+ * `purchase_context` before the purchase left (USPS's `X-Idempotency-Key`).
  *
  * Direct-carrier rates are offers too (`postage-source-split/14`): a row with
  * `postage_source = CarrierAccount` and no purchase context, issued by the
@@ -213,11 +214,11 @@ class OfferStore
      * {@see awaitingPurchaseConfirmation()} blocks further spending.
      *
      * One exception, made by the purchase path rather than here: an offer
-     * left unresolved on a source that cannot be asked what happened — none
-     * of USPS, FedEx or UPS implements `RecoversUnresolvedPurchase` — is
-     * recorded as a failure on the next attempt, because for that source the
-     * unresolved state can never be resolved and would otherwise be terminal
-     * for the package. See `EloquentPackageShippingWorkflow::recoverPurchase()`.
+     * left unresolved on a source that cannot be asked what happened — FedEx,
+     * which implements no `RecoversUnresolvedPurchase` — is recorded as a
+     * failure on the next attempt, because for that source the unresolved
+     * state can never be resolved and would otherwise be terminal for the
+     * package. See `EloquentPackageShippingWorkflow::recoverPurchase()`.
      */
     public function recordFailure(ShippingOffer $offer, string $reason): void
     {
@@ -229,6 +230,26 @@ class OfferStore
                 'purchase_failed_at' => now(),
                 'purchase_failure_reason' => mb_substr($reason, 0, 255),
             ]);
+
+        $offer->refresh();
+    }
+
+    /**
+     * Record that the source was asked about this offer and could not say.
+     *
+     * Not a resolution — the offer stays in
+     * {@see awaitingPurchaseConfirmation()} and the package stays blocked.
+     * The stamp separates an unresolved offer nobody has retried yet, which
+     * the next attempt will ask about, from one that was asked about and got
+     * no usable answer, which is the real unknown a person has to look at.
+     */
+    public function recordUnansweredRecovery(ShippingOffer $offer): void
+    {
+        ShippingOffer::query()
+            ->whereKey($offer->id)
+            ->whereNull('purchase_reference')
+            ->whereNull('purchase_failed_at')
+            ->update(['recovery_unanswered_at' => now()]);
 
         $offer->refresh();
     }

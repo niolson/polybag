@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\PostageSource;
 use App\Models\AuditLog;
 use App\Models\RateQuote;
 use App\Models\ShippingOffer;
@@ -99,11 +100,25 @@ class PurgeData extends Command
         // Deleting one destroys the answer to "was this parcel already paid
         // for?", so age alone never removes it. A declined purchase is not one
         // of these: it resolved, and it goes with the rest.
-        $unresolved = ShippingOffer::query()
+        $unresolvedQuery = fn () => ShippingOffer::query()
             ->where('created_at', '<', $cutoff)
             ->whereNotNull('consumed_at')
             ->whereNull('purchase_reference')
-            ->whereNull('purchase_failed_at')
+            ->whereNull('purchase_failed_at');
+
+        // Of those, the ones worth a warning: a channel purchase nobody can
+        // ask about from here, or a direct-carrier purchase the carrier was
+        // asked about and could not settle. A direct-carrier offer nobody has
+        // retried yet is not a real unknown — the next Ship attempt on its
+        // package asks USPS or UPS, and usually gets an answer.
+        $unresolved = $unresolvedQuery()
+            ->where(fn ($query) => $query
+                ->where('postage_source', '!=', PostageSource::CarrierAccount)
+                ->orWhereNotNull('recovery_unanswered_at'))
+            ->count();
+        $notYetAsked = $unresolvedQuery()
+            ->where('postage_source', PostageSource::CarrierAccount)
+            ->whereNull('recovery_unanswered_at')
             ->count();
 
         $total = 0;
@@ -128,6 +143,13 @@ class PurgeData extends Command
             $this->warn(
                 "Kept {$unresolved} consumed shipping offer(s) with no confirmed purchase. "
                 .'Each one may correspond to a label bought at the source and never recorded here.'
+            );
+        }
+
+        if ($notYetAsked > 0) {
+            $this->info(
+                "Kept {$notYetAsked} direct-carrier offer(s) whose purchase got no reply and has not been retried; "
+                .'the next Ship attempt on each package asks the carrier what became of it.'
             );
         }
     }

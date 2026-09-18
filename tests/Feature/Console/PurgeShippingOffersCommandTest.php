@@ -26,6 +26,25 @@ it('never purges an offer spent with no confirmed purchase', function (): void {
     expect(ShippingOffer::count())->toBe(1);
 });
 
+it('warns only about the unresolved offers nobody can still ask about', function (): void {
+    // A channel purchase with no reply: nothing here can ask, so it is a
+    // real unknown.
+    ShippingOffer::factory()->awaitingConfirmation()->create(['created_at' => now()->subYear()]);
+    // A direct-carrier purchase that was asked about and got no usable
+    // answer: also a real unknown.
+    ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['created_at' => now()->subYear(), 'recovery_unanswered_at' => now()->subMonth()]);
+    // A direct-carrier purchase nobody has retried: the next Ship attempt on
+    // its package asks USPS, so it is kept but not shouted about.
+    ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['created_at' => now()->subYear()]);
+
+    $this->artisan('data:purge')
+        ->expectsOutputToContain('Kept 2 consumed shipping offer(s) with no confirmed purchase.')
+        ->expectsOutputToContain('Kept 1 direct-carrier offer(s) whose purchase got no reply and has not been retried')
+        ->assertSuccessful();
+
+    expect(ShippingOffer::count())->toBe(3);
+});
+
 it('purges an offer the source declined, which resolved nothing to recover', function (): void {
     ShippingOffer::factory()->declined()->create(['created_at' => now()->subDays(30)]);
 

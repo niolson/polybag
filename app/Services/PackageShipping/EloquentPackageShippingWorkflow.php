@@ -38,7 +38,9 @@ use App\Services\RuleEvaluator;
 use App\Services\ShippingRateService;
 use App\Services\SpecialServiceResolver;
 use Illuminate\Support\Facades\Cache;
+use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Exceptions\Request\RequestException;
+use Saloon\Exceptions\Request\ServerException;
 use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 
 class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
@@ -442,7 +444,12 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             // and may insist; only they can, since the remedy is a catalogue
             // PolyBag does not own.
             return PackageShippingResult::declaredWeightOverrideRequired($e->getMessage());
-        } catch (RequestTimeOutException) {
+        } catch (RequestTimeOutException|FatalRequestException|ServerException) {
+            // No usable reply either way — a 5xx included, since the carrier
+            // may have created the label before failing. Nothing here settles
+            // the offer: the adapters that can be asked let these through on
+            // purpose, so that the next attempt asks the source before buying
+            // again.
             $seller = $this->sellerName($request);
 
             logger()->error('Carrier API timeout', [
@@ -511,7 +518,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             $this->cleanupPackage($package, $request, $result);
 
             return $result;
-        } catch (RequestTimeOutException) {
+        } catch (RequestTimeOutException|FatalRequestException|ServerException) {
             logger()->error('AutoShip timeout', ['package_id' => $package->id]);
             $result = PackageShippingResult::failed('Carrier Timeout', 'The carrier API is not responding. Please try again in a few moments.');
             $this->cleanupPackage($package, $request, $result);
@@ -682,9 +689,11 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * upstream that we never recorded, so nothing else may be spent until it is
      * settled. Settling it is a question for the source, not for us: Amazon
      * recognizes a repeated purchase under the same idempotency key and hands
-     * back the shipment it already made, so asking again is a lookup rather
-     * than a second purchase — which is exactly what
-     * {@see RecoversUnresolvedPurchase} claims of whoever implements it.
+     * back the shipment it already made, USPS reprints by the
+     * `X-Idempotency-Key` the purchase carried, and UPS finds the shipment by
+     * the reference it was created with — each a lookup rather than a second
+     * purchase, which is exactly what {@see RecoversUnresolvedPurchase}
+     * claims of whoever implements it.
      *
      * Three ways out, in the order they are worth having: the label exists and
      * the package ships on it; the source is certain nothing was bought and the
@@ -734,16 +743,16 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * A direct carrier that cannot be asked gets the second answer without
      * the question. "Spent, nothing confirmed" is only a useful state when a
      * later attempt can ask what happened, which is what
-     * {@see RecoversUnresolvedPurchase} promises and only Amazon implements;
-     * USPS, FedEx and UPS cannot (FedEx's `customerTransactionId` and UPS's
-     * `transId` are echoed, not deduplicated, and nothing is sent to USPS —
-     * `postage-source-split/18` is what changes that). For them the state can
-     * never resolve, so leaving it would strand the package behind a refusal
-     * nobody can clear, over a purchase that in practice was a worker killed
-     * between the claim and the reply — the adapters themselves turn a
-     * timeout into a decline. Settling it keeps the package buyable, which is
-     * what such a package was before direct rates were offers at all, and the
-     * claim has already stopped the double-click.
+     * {@see RecoversUnresolvedPurchase} promises. USPS and UPS implement it
+     * (`postage-source-split/18`); FedEx does not and cannot — its
+     * `customerTransactionId` is echoed, not deduplicated, and the Ship API
+     * has no lookup — but FedEx also never bills a label that was created and
+     * not tendered, so for it the state can never resolve and costs nothing.
+     * Leaving it would strand the package behind a refusal nobody can clear,
+     * over a purchase that in practice was a worker killed between the claim
+     * and the reply — the FedEx adapter itself turns a timeout into a
+     * decline. Settling it keeps the package buyable, and the claim has
+     * already stopped the double-click.
      *
      * Only a direct carrier. An offer whose channel can no longer be found —
      * a data source deleted or re-pointed since the quote — is not settled:
@@ -789,10 +798,16 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 'error' => $e->getMessage(),
             ]);
 
+            $this->offerStore->recordUnansweredRecovery($offer);
+
             return null;
         }
 
         if ($response === null) {
+            // Asked, and nobody could say. Stamped so the purge command can
+            // tell a real unknown from an offer nobody has retried yet.
+            $this->offerStore->recordUnansweredRecovery($offer);
+
             return null;
         }
 
@@ -1051,11 +1066,11 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * happened before anything else is bought — see {@see recoverPurchase()},
      * including what it does for a source that cannot be asked.
      *
-     * The direct carrier adapters never let a transport error reach here:
-     * each catches it inside `createShipment()` and answers with a failed
-     * `ShipResponse`, so a USPS, FedEx or UPS timeout arrives as a decline
-     * and is settled by this method like one. Only Amazon lets the exception
-     * through, and Amazon is the seller that can be asked.
+     * Which adapters let a transport error reach the caller follows from
+     * which can be asked: USPS, UPS and Amazon let it through, so their offer
+     * stays unresolved and {@see recoverPurchase()} asks; FedEx catches it
+     * inside `createShipment()` and answers with a failed `ShipResponse`, so
+     * its timeout arrives as a decline and is settled here like one.
      */
     private function resolveOfferAsFailed(?ShippingOffer $offer, string $reason): void
     {

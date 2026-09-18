@@ -19,11 +19,16 @@ use App\Services\PostageSources\OfferStore;
  * connection leaves a package nobody can ship until a human checks the seller's
  * account and edits the row. With it, the next attempt asks.
  *
- * Not every source can answer. Implementing this is a claim that a repeated
- * request is recognized as the *same* purchase rather than treated as a second
- * one: Amazon's `x-amzn-IdempotencyKey` is what makes it true there, and a
- * source without an equivalent must not implement this contract, because the
- * question and the second purchase would be the same call.
+ * Not every source can answer. Implementing this is a claim that the source
+ * can be asked about a purchase *without buying anything*: a side-effect-free
+ * way to ask, keyed by something we chose and sent with the purchase, so the
+ * question can be put even when the reply never arrived. An idempotent
+ * purchase is one such way — Amazon's `x-amzn-IdempotencyKey` makes the
+ * repeated request a lookup — but not the only one: USPS's label endpoint is
+ * not idempotent, yet its reprint by `X-Idempotency-Key` is a separate call
+ * that buys nothing, and UPS's Label Recovery by a `ReferenceNumber` is the
+ * same shape. A source with no such call must not implement this contract,
+ * because the question and the second purchase would be the same request.
  */
 interface RecoversUnresolvedPurchase
 {

@@ -10,6 +10,14 @@ class LabelResponse extends Response
 
     public string $label = '';
 
+    /**
+     * The reprint endpoints' third part — `{"reprintNumber": n, "reprintLimit": 3}`.
+     * Empty on a label purchase, which has only the two parts.
+     *
+     * @var array<string, mixed>
+     */
+    public array $reprintInfo = [];
+
     public function parseBody(): void
     {
         $contentType = $this->headers()->get('Content-Type') ?? '';
@@ -42,6 +50,8 @@ class LabelResponse extends Response
 
         // Second part: Base64 encoded label
         $this->label = $parts[1]['body'];
+
+        $this->reprintInfo = isset($parts[2]) ? (json_decode($parts[2]['body'], true) ?: []) : [];
 
         logger()->debug('USPS Label Parsed', [
             'tracking_number' => $this->metadata['internationalTrackingNumber']

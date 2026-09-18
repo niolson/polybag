@@ -197,12 +197,12 @@ it('settles a declined purchase rather than leaving the package jammed', functio
 });
 
 it('settles a stranded direct offer on the next attempt, since nobody can be asked about it', function (): void {
-    // A timeout is not an answer. The real direct adapters never let one out
-    // — each turns it into a failed ShipResponse, which is settled as a
-    // decline — so an offer left consumed-but-unresolved on a direct carrier
-    // is a worker killed between the claim and the reply. None of USPS, FedEx
-    // or UPS can be asked what became of it, so the state can never resolve;
-    // the next attempt settles it and buys, rather than stranding the package.
+    // A timeout is not an answer. This mock seller implements no
+    // RecoversUnresolvedPurchase — the FedEx-shaped case, since USPS and UPS
+    // now do (postage-source-split/18) — so an offer left consumed-but-
+    // unresolved on it can never be asked about and the state can never
+    // resolve; the next attempt settles it and buys, rather than stranding
+    // the package.
     $package = Package::factory()->create(['status' => PackageStatus::Unshipped]);
     $offer = ShippingOffer::factory()->direct()->for($package)->create(['carrier' => 'MockCarrier']);
 

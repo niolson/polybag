@@ -12,6 +12,7 @@ use App\Enums\TrackingStatus;
 use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Http\Integrations\Ups\Requests\CreateShipment;
+use App\Http\Integrations\Ups\Requests\LabelRecovery;
 use App\Http\Integrations\Ups\Requests\Rate;
 use App\Http\Integrations\Ups\Requests\TrackShipment;
 use App\Models\BoxSize;
@@ -20,9 +21,12 @@ use App\Models\CarrierAccount;
 use App\Models\CarrierAccountScope;
 use App\Models\Client;
 use App\Models\Package;
+use App\Models\ShippingOffer;
 use App\Services\Carriers\UpsAdapter;
 use Carbon\CarbonImmutable;
+use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Exceptions\Request\RequestException;
+use Saloon\Exceptions\Request\ServerException;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\PendingRequest;
 use Saloon\Laravel\Facades\Saloon;
@@ -1754,3 +1758,275 @@ it('keeps a pre-selected rate only when the package meets its packaging requirem
     expect($this->adapter->resolvePreSelectedRate($quotedForAPak, $package))->toBe($quotedForAPak)
         ->and($this->adapter->resolvePreSelectedRate($rulesRate, $package))->toBeNull();
 });
+
+// --- Recovery by reference — postage-source-split/18 ------------------------
+
+/**
+ * A domestic ship request from an offer, the way the workflow builds one.
+ */
+function upsOfferShipRequest(ShippingOffer $offer, array $references = ['ORD-10042'], string $labelFormat = 'image', ?int $labelDpi = null): ShipRequest
+{
+    return new ShipRequest(
+        fromAddress: new AddressData(firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle', stateOrProvince: 'WA', postalCode: '98072'),
+        toAddress: new AddressData(firstName: 'John', lastName: 'Doe', streetAddress: '456 Main St', city: 'Los Angeles', stateOrProvince: 'CA', postalCode: '90210'),
+        packageData: new PackageData(weight: 2.0, length: 10, width: 8, height: 4),
+        selectedRate: new RateResponse(carrier: 'UPS', serviceCode: '03', serviceName: 'UPS Ground', price: 16.96, metadata: ['serviceCode' => '03']),
+        labelFormat: $labelFormat,
+        labelDpi: $labelDpi,
+        references: $references,
+        offer: $offer,
+    );
+}
+
+/**
+ * Label Recovery's answers, as captured in production on 2026-09-18.
+ */
+function upsLabelRecoveryFound(string $trackingNumber = '1Z14A6G90303889622', string $format = 'gif', ?string $form = null): MockResponse
+{
+    return MockResponse::make([
+        'LabelRecoveryResponse' => [
+            'Response' => ['ResponseStatus' => ['Code' => '1', 'Description' => 'Success']],
+            'ShipmentIdentificationNumber' => $trackingNumber,
+            'LabelResults' => [[
+                'TrackingNumber' => $trackingNumber,
+                'LabelImage' => [
+                    'LabelImageFormat' => ['Code' => $format],
+                    'GraphicImage' => $format === 'zpl' ? base64_encode('^XA^FDrecovered^FS^XZ') : 'R0lGODlhAQABAAAAACw=',
+                ],
+            ]],
+            ...($form === null ? [] : ['Form' => ['Code' => '01', 'Image' => ['ImageFormat' => ['Code' => 'PDF'], 'GraphicImage' => $form]]]),
+        ],
+    ]);
+}
+
+/**
+ * A ship request from an offer for a lane that crosses a customs zone.
+ */
+function upsInternationalOfferShipRequest(ShippingOffer $offer): ShipRequest
+{
+    return new ShipRequest(
+        fromAddress: new AddressData(firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle', stateOrProvince: 'WA', postalCode: '98072'),
+        toAddress: upsCanadianAddress(),
+        packageData: new PackageData(weight: 2.0, length: 10, width: 8, height: 4),
+        selectedRate: new RateResponse(carrier: 'UPS', serviceCode: '11', serviceName: 'UPS Standard', price: 24.10, metadata: ['serviceCode' => '11']),
+        customsItems: upsCustomsItems(),
+        offer: $offer,
+    );
+}
+
+function upsLabelRecoveryError(string $code, string $message): MockResponse
+{
+    return MockResponse::make(['response' => ['errors' => [['code' => $code, 'message' => $message]]]], 400);
+}
+
+it('spends the first reference slot on the offer, and the client keeps one', function (): void {
+    fakeUpsShipEndpoints();
+    $offer = ShippingOffer::factory()->direct()->create(['carrier' => 'UPS']);
+
+    expect($this->adapter->createShipment(upsOfferShipRequest($offer, ['ORD-10042', 'PO-77']))->success)->toBeTrue();
+
+    Saloon::assertSent(function ($request) use ($offer): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $shipment = $request->body()->all()['ShipmentRequest']['Shipment'];
+
+        // The offer's public_id is 26 characters, inside UPS's 35; the
+        // client's second reference is the one that gives way.
+        return ($shipment['Package'][0]['ReferenceNumber'] ?? null) === [
+            ['Code' => 'TN', 'Value' => $offer->public_id],
+            ['Code' => 'TN', 'Value' => 'ORD-10042'],
+        ];
+    });
+});
+
+it('lets a ship request that got no answer escape, sent once', function (): void {
+    $attempts = 0;
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => function (PendingRequest $pending) use (&$attempts): MockResponse {
+            $attempts++;
+
+            return MockResponse::make()->throw(new FatalRequestException(new RuntimeException('Connection timed out'), $pending));
+        },
+    ]);
+
+    expect(fn () => $this->adapter->createShipment(upsOfferShipRequest(ShippingOffer::factory()->direct()->create(['carrier' => 'UPS']))))
+        ->toThrow(FatalRequestException::class);
+
+    expect($attempts)->toBe(1);
+});
+
+it('still answers a refusal as a failed response, not an exception', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => MockResponse::make(['response' => ['errors' => [['code' => '120100', 'message' => 'Missing or invalid shipper number']]]], 400),
+    ]);
+
+    $response = $this->adapter->createShipment(upsOfferShipRequest(ShippingOffer::factory()->direct()->create(['carrier' => 'UPS'])));
+
+    expect($response->success)->toBeFalse()
+        ->and($response->errorMessage)->toBe('Missing or invalid shipper number');
+});
+
+it('recovers the label by the offer reference instead of buying again', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        LabelRecovery::class => upsLabelRecoveryFound(format: 'zpl'),
+    ]);
+    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['carrier' => 'UPS']);
+
+    $response = $this->adapter->recoverPurchase(upsOfferShipRequest($offer, labelFormat: 'zpl', labelDpi: 300));
+
+    expect($response)->not->toBeNull()
+        ->and($response->success)->toBeTrue()
+        ->and($response->trackingNumber)->toBe('1Z14A6G90303889622')
+        ->and($response->carrier)->toBe('UPS')
+        ->and($response->service)->toBe('UPS Ground')
+        // Label Recovery returns no charges; the offer's price is the cost.
+        ->and($response->cost)->toBe(16.96)
+        ->and($response->labelFormat)->toBe('zpl')
+        ->and(base64_decode((string) $response->labelData))->toStartWith('^XA^JMA');
+
+    Saloon::assertSent(function ($request) use ($offer): bool {
+        if (! $request instanceof LabelRecovery) {
+            return false;
+        }
+
+        $body = $request->body()->all()['LabelRecoveryRequest'];
+
+        return $body['ReferenceValues'] === ['ReferenceNumber' => ['Value' => $offer->public_id], 'ShipperNumber' => 'A1B2C3']
+            && $body['LabelSpecification']['LabelImageFormat']['Code'] === 'ZPL'
+            && isset($body['LabelSpecification']['LabelStockSize']);
+    });
+    Saloon::assertNotSent(CreateShipment::class);
+});
+
+it('names no stock size when recovering a GIF label, which UPS refuses', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        LabelRecovery::class => upsLabelRecoveryFound(),
+    ]);
+
+    $response = $this->adapter->recoverPurchase(upsOfferShipRequest(ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['carrier' => 'UPS'])));
+
+    expect($response?->success)->toBeTrue()
+        ->and($response->labelFormat)->toBe('image')
+        ->and($response->labelOrientation)->toBe('landscape');
+
+    Saloon::assertSent(fn ($request): bool => $request instanceof LabelRecovery
+        && ! isset($request->body()->all()['LabelRecoveryRequest']['LabelSpecification']['LabelStockSize']));
+});
+
+it('settles the offer when UPS is certain nothing was created, or the shipment was voided', function (string $code, string $message, string $expected): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        LabelRecovery::class => upsLabelRecoveryError($code, $message),
+    ]);
+
+    $response = $this->adapter->recoverPurchase(upsOfferShipRequest(ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['carrier' => 'UPS'])));
+
+    expect($response)->not->toBeNull()
+        ->and($response->success)->toBeFalse()
+        ->and($response->errorMessage)->toContain($expected);
+})->with([
+    'reference never used' => ['9801031', 'The shipment for the requested tracking number or the combination of reference number plus shipper number could not be found.', 'nothing was bought'],
+    'shipment voided' => ['9801040', 'The shipment for which you are trying to recover a label or Receipt has been voided.', 'has since been voided'],
+]);
+
+it('leaves the question open on any other Label Recovery answer', function (MockResponse $recovery): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        LabelRecovery::class => $recovery,
+    ]);
+
+    expect($this->adapter->recoverPurchase(upsOfferShipRequest(ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['carrier' => 'UPS']))))->toBeNull();
+})->with([
+    'a different 400' => fn (): MockResponse => upsLabelRecoveryError('9801050', 'Label Stock Size not allowed for specified Label Image Type.'),
+    'a 503' => fn () => MockResponse::make(['response' => ['errors' => [['code' => '10429', 'message' => 'Service Unavailable']]]], 503),
+    'no answer' => fn () => MockResponse::make()->throw(fn (PendingRequest $pending): FatalRequestException => new FatalRequestException(new RuntimeException('Connection timed out'), $pending)),
+    'a label with no tracking number' => fn () => MockResponse::make(['LabelRecoveryResponse' => ['Response' => ['ResponseStatus' => ['Code' => '1']], 'LabelResults' => []]]),
+]);
+
+it('lets a 5xx on the ship request escape rather than settle it as a decline', function (): void {
+    // UPS may have created the shipment before the server error, so a 5xx
+    // is no answer at all: the offer stays unresolved and Label Recovery
+    // decides.
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => MockResponse::make(['response' => ['errors' => [['code' => '10429', 'message' => 'Service Unavailable']]]], 503),
+    ]);
+
+    expect(fn () => $this->adapter->createShipment(upsOfferShipRequest(ShippingOffer::factory()->direct()->create(['carrier' => 'UPS']))))
+        ->toThrow(ServerException::class);
+});
+
+it('recovers the international forms with the label', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        LabelRecovery::class => upsLabelRecoveryFound(form: 'JVBERi0xLjQ='),
+    ]);
+
+    $response = $this->adapter->recoverPurchase(upsInternationalOfferShipRequest(ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['carrier' => 'UPS'])));
+
+    expect($response?->success)->toBeTrue()
+        ->and($response->customsFormData)->toBe('JVBERi0xLjQ=');
+});
+
+it('leaves a cross-border recovery open when the label comes back without its forms', function (): void {
+    // A package shipped without the customs document it needs is worse than
+    // one still blocked; a person decides.
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        LabelRecovery::class => upsLabelRecoveryFound(),
+    ]);
+
+    expect($this->adapter->recoverPurchase(upsInternationalOfferShipRequest(ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['carrier' => 'UPS']))))->toBeNull();
+});
+
+it('asks UPS with the shipper number of the account the offer was bought on', function (): void {
+    // Label Recovery looks up by reference *and* shipper number. A second
+    // account is now preferred; the offer records the first.
+    $original = CarrierAccount::query()->firstOrFail();
+    // Scopes edited since the quote: the global default now points at a
+    // second account, and the original keeps no scope at all.
+    $original->scopes()->delete();
+    createUpsAccount(['client_id' => 'other_client'], ['account_number' => 'Z9Y8X7']);
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        LabelRecovery::class => upsLabelRecoveryFound(),
+    ]);
+    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+        'carrier' => 'UPS',
+        'carrier_account_id' => $original->id,
+        'carrier_account_fingerprint' => $original->fingerprint(),
+    ]);
+
+    $response = $this->adapter->recoverPurchase(upsOfferShipRequest($offer));
+
+    expect($response?->success)->toBeTrue()
+        ->and($response->carrierAccountId)->toBe($original->id);
+    Saloon::assertSent(fn ($request): bool => $request instanceof LabelRecovery
+        && $request->body()->all()['LabelRecoveryRequest']['ReferenceValues']['ShipperNumber'] === 'A1B2C3');
+});
+
+it('leaves the question open when the account the offer was bought on is gone or bills someone else', function (string $change): void {
+    Saloon::fake(['*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600])]);
+    $account = CarrierAccount::query()->firstOrFail();
+    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+        'carrier' => 'UPS',
+        'carrier_account_id' => $account->id,
+        'carrier_account_fingerprint' => $account->fingerprint(),
+    ]);
+
+    match ($change) {
+        'deleted' => $account->delete(),
+        'rebilled' => $account->update(['credentials' => ['account_number' => 'Q1W2E3']]),
+        default => throw new InvalidArgumentException($change),
+    };
+
+    expect($this->adapter->recoverPurchase(upsOfferShipRequest($offer->fresh())))->toBeNull();
+    Saloon::assertNothingSent();
+})->with(['deleted', 'rebilled']);

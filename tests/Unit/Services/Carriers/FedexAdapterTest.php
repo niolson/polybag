@@ -24,6 +24,7 @@ use App\Models\Shipment;
 use App\Services\Carriers\FedexAdapter;
 use App\Services\SettingsService;
 use Carbon\CarbonImmutable;
+use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\PendingRequest;
 use Saloon\Laravel\Facades\Saloon;
@@ -2066,3 +2067,26 @@ it('ships a weight-based rate in the packaging the rate request named, without O
     'Ground quoted as the shipper\'s packaging' => ['FEDEX_GROUND', ['serviceType' => 'FEDEX_GROUND', 'packagingType' => 'YOUR_PACKAGING'], 'YOUR_PACKAGING', false],
     'a rate quoted before packaging was stamped' => ['FEDEX_GROUND', ['serviceType' => 'FEDEX_GROUND'], 'YOUR_PACKAGING', false],
 ]);
+
+it('turns a ship request that got no answer into a decline that says to try again', function (): void {
+    // Deliberately unlike USPS and UPS (postage-source-split/18): FedEx never
+    // bills a label that was created and not tendered, and the Ship API has
+    // no lookup, so the offer is settled and the packer retries — not sent to
+    // look for a label that will never be charged.
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => MockResponse::make()->throw(fn (PendingRequest $pending): FatalRequestException => new FatalRequestException(new RuntimeException('Connection timed out'), $pending)),
+    ]);
+
+    $response = $this->adapter->createShipment(new ShipRequest(
+        fromAddress: new AddressData(firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle', stateOrProvince: 'WA', postalCode: '98072', company: 'Test Company', phone: '555-123-4567'),
+        toAddress: new AddressData(firstName: 'John', lastName: 'Doe', streetAddress: '456 Main St', city: 'Los Angeles', stateOrProvince: 'CA', postalCode: '90210', phone: '555-987-6543'),
+        packageData: new PackageData(weight: 5.0, length: 12, width: 10, height: 8),
+        selectedRate: new RateResponse(carrier: 'FedEx', serviceCode: 'FEDEX_GROUND', serviceName: 'FedEx Ground', price: 12.75, metadata: ['serviceType' => 'FEDEX_GROUND']),
+    ));
+
+    expect($response->success)->toBeFalse()
+        ->and($response->errorMessage)->toBe(FedexAdapter::NO_ANSWER_MESSAGE)
+        ->and($response->errorMessage)->toContain('try again')
+        ->and($response->errorMessage)->not->toContain('may');
+});
