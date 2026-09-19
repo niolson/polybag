@@ -7,6 +7,8 @@ use App\Events\PackageShipped;
 use App\Events\TrackingStatusUpdated;
 use App\Listeners\AuthEventLogger;
 use App\Listeners\InvalidateDashboardCache;
+use App\Listeners\RememberInstanceForDirectory;
+use Illuminate\Auth\Events\Login;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
 
 class EventServiceProvider extends ServiceProvider
@@ -20,6 +22,9 @@ class EventServiceProvider extends ServiceProvider
         ],
         TrackingStatusUpdated::class => [
             InvalidateDashboardCache::class,
+        ],
+        Login::class => [
+            RememberInstanceForDirectory::class,
         ],
     ];
 

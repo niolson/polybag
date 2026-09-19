@@ -120,6 +120,24 @@ return [
 
     'fake_carriers' => (bool) env('FAKE_CARRIERS', false),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Instance Directory Cookie Domain
+    |--------------------------------------------------------------------------
+    |
+    | Only meaningful on the hosted multi-tenant fleet, where every install
+    | lives on its own subdomain (e.g. acme.polybag.app) and there is no
+    | single "sign in to PolyBag" page. When set to the shared parent domain
+    | (e.g. ".polybag.app"), successful logins remember this tenant's
+    | subdomain in a cookie scoped to that domain, so a directory landing
+    | page elsewhere on it can redirect back here. Leave null for on-prem
+    | installs: they have no domain in common with any other install, so
+    | there is nothing for a shared cookie to reach.
+    |
+    */
+
+    'instance_cookie_domain' => env('INSTANCE_COOKIE_DOMAIN'),
+
     'maintenance' => [
         'driver' => env('APP_MAINTENANCE_DRIVER', 'file'),
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
