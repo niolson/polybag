@@ -67,6 +67,10 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
         $middleware->redirectGuestsTo(fn (): string => route('filament.app.auth.login'));
         $middleware->append(ContentSecurityPolicy::class);
+        // polybag_last_instance is read by polybag-connect, a separate app with
+        // its own APP_KEY — Laravel's default cookie encryption would make it
+        // undecipherable there, defeating the whole point of the cookie.
+        $middleware->encryptCookies(except: ['polybag_last_instance']);
         $middleware->alias([
             'admin' => EnsureUserIsAdmin::class,
             'manager' => EnsureUserIsManager::class,
