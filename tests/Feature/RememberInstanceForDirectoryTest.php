@@ -2,6 +2,7 @@
 
 use App\Models\User;
 use Illuminate\Auth\Events\Login;
+use Illuminate\Contracts\Routing\ResponseFactory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Route;
@@ -42,7 +43,7 @@ it('sends the directory cookie unencrypted on the wire, since polybag-connect ha
     // including EncryptCookies — is required here: firing the Login event
     // directly (as the tests above do) bypasses that middleware entirely and
     // would pass even if this cookie were being encrypted.
-    Route::middleware('web')->get('/__test-login', function () use ($user) {
+    Route::middleware('web')->get('/__test-login', function () use ($user): ResponseFactory|\Illuminate\Http\Response {
         auth()->login($user);
 
         return response('ok');
