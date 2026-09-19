@@ -1,8 +1,8 @@
 # PolyBag
 
 PolyBag is a barcode-driven shipping workstation for picking, packing, buying
-postage, and printing labels. Operators work from a browser connected to a local
-scale and label printer.
+postage, printing labels, and tracking fulfillment work. Operators work from a
+browser connected to a local scale and printers.
 
 Built with Laravel 13, Filament 5, Livewire 4, Tailwind CSS 4, MySQL, and Redis.
 
@@ -15,11 +15,20 @@ Built with Laravel 13, Filament 5, Livewire 4, Tailwind CSS 4, MySQL, and Redis.
 - Optional pick batches with printable summaries and pack slips
 - Barcode-guided packing with item, quantity, and transparency-code validation
 - USB scale support through WebHID or QZ Tray
-- USPS, FedEx, and UPS rates, postage purchase, labels, tracking, and voids
-- PDF labels, plus ZPL at 203 or 300 DPI
+- Direct USPS, FedEx, and UPS rate shopping, postage purchase, tracking, and voids
+- International shipping with customs declarations, including separate customs forms when
+  carriers return them
+- Amazon Buy Shipping offers, label purchase, tracking, and cancellation through SP-API
+- Attended Shopify Shipping label purchase for Shopify fulfillment orders
+- Durable label history: voided labels remain attached to the package, which can then be
+  shipped again
+- Recovery of unresolved direct-carrier purchases before PolyBag attempts another charge
+- PDF/image labels and raw ZPL at 203 or 300 DPI, with separate printer assignments
 - Delivery-date-aware rate comparison and configurable shipping rules
 - Manual shipping and background batch shipping
 - USPS SCAN forms and location-scoped end-of-day processing
+- Carrier-supplied packaging support for USPS flat-rate, FedEx, and UPS packaging
+- Dynamic Amazon service discovery with explicit mapping and approval for automated shipping
 - Database, Shopify, and Amazon SP-API shipment imports
 - Package export with per-client destination overrides
 - Multi-location carrier-account routing
@@ -34,11 +43,12 @@ Built with Laravel 13, Filament 5, Livewire 4, Tailwind CSS 4, MySQL, and Redis.
 ### Label printing
 
 [QZ Tray](https://qz.io/download/) runs on each workstation and sends jobs to
-local label and document printers. Labels have two printer slots — one for PDF/image
-labels through the driver, one for raw ZPL — which can be the same printer; a raw-only
-workstation can be a plain "Generic / Text Only" queue on Windows. Printer, label
-format, DPI, and scale preferences are stored in that browser and managed from
-**Device Settings**.
+local label and document printers. Labels have two printer slots — one for PDF, PNG,
+or GIF labels through the driver, and one for raw ZPL — which can be the same printer;
+a raw-only workstation can be a plain "Generic / Text Only" queue on Windows. The
+document printer handles pack slips, pick lists, and separate customs forms. Printer,
+preferred purchase format, DPI, and scale preferences are stored in that browser and
+managed from **Device Settings**.
 
 Generate a self-signed QZ certificate for development or a private deployment:
 
@@ -128,10 +138,12 @@ the application database.
 | Configuration | Location |
 |---|---|
 | Company, warehouse, feature flags, authentication, retention | App Settings |
-| USPS, FedEx, and UPS credentials and routing scopes | Carrier Accounts |
-| Database, Shopify, and Amazon credentials and schedules | Data Sources |
+| USPS, FedEx, and UPS credentials and Location/Client routing scopes | Carrier Accounts |
+| Database, Shopify, and Amazon credentials, schedules, and marketplace postage | Data Sources |
+| Carrier services, service classes, packaging, and shipping rules | Shipping Config |
+| Amazon observed-service mapping and unattended-purchase approval | Map Carrier Services |
 | Per-client return address, branding, and export override | Clients |
-| Printer, label format, DPI, and scale | Device Settings in each browser |
+| Image-label, raw-label, and document printers; format, DPI, and scale | Device Settings in each browser |
 | Database, Redis, mail, SSO, Google validation, Gotenberg | `.env` |
 
 Secrets on Carrier Account and Data Source records are encrypted. Never commit
@@ -149,9 +161,14 @@ Run `php artisan list` to discover all commands. Self-hosters should know these:
 | `shipments:purge-pii` | Apply recipient PII retention, with a dry-run option |
 | `db:encrypt-tables` | Enable or verify MySQL table encryption |
 | `app:generate-ssh-key` | Create keys for database import tunnels |
+| `app:verify-label-integrity` | Report any mismatch between Packages and their active Label records |
 
 When rotating `APP_KEY`, keep the old key in `APP_PREVIOUS_KEYS`. Remove it only
 after `app:reencrypt-secrets` succeeds without undecryptable values.
+
+The scheduler runs configured imports, package exports, shipment validation, Shopify
+fulfillment synchronization, and a daily label-integrity check. Keep the `scheduler`
+and both queue workers running in production.
 
 ## Development commands
 
@@ -173,8 +190,29 @@ php artisan test tests/Browser/
 ## Domain language
 
 A **Shipment** is an order to fulfil. A **Package** is the physical parcel produced
-from it. A **Package Draft** is the mutable preparation state before label purchase.
-These terms are intentionally distinct.
+from it. A **Package Draft** is an unshipped Package that has been prepared but has
+not completed label purchase. A **Label** is one purchased instance of outbound
+postage for a Package. A Package has at most one active Label; voiding it preserves
+the Label as history and returns the Package to an unshipped state. These terms are
+intentionally distinct.
+
+The **carrier of record** is the company physically moving the parcel. The **postage
+source** is where the Label was bought: one of PolyBag's direct Carrier Accounts or a
+Shopify/Amazon Data Source. Tracking, voiding, and manifest eligibility follow the
+postage source, so marketplace-bought postage is never treated as if it came from one
+of the merchant's direct carrier accounts.
+
+An **Offer** is a package-specific quoted rate backed by short-lived purchase authority
+held on the server. Shopify Shipping is different: it is an attended **blind purchase**
+whose final carrier is learned after purchase and whose price and service Shopify does
+not report. It is therefore excluded from shipping rules, batch shipping, and auto-ship.
+Shopify Shipping labels must be voided in the Shopify admin; the scheduled fulfillment
+sync detects the void and returns the Package to an unshipped state.
+
+Amazon can return carrier services that PolyBag has never seen before. An operator may
+select one manually after seeing its price and promise. Automated shipping can use it
+only after an administrator maps it to the carrier-service catalog and explicitly
+approves it for the Client and environment.
 
 The main scopes are **Location** for a warehouse and **Client** for a 3PL brand or
 retailer. **Carrier Account Scopes** select credentials from the Location and Client.

@@ -12,20 +12,25 @@ contributor agreement, and `SECURITY.md` for reporting a vulnerability.
 
 ## Project Overview
 
-PolyBag — web-based shipping workstation app for packing and labeling shipments. Built with Laravel 13 + Filament.
+PolyBag — barcode-driven shipping workstation for picking, packing, buying postage,
+printing labels, and tracking fulfillment work. Built with Laravel 13 + Filament.
 
-**Tech Stack:** PHP 8.4, Laravel 13.x, Filament 5.x, Livewire 4.x, Vite 7.0, Tailwind CSS 4.x, Pest 4.x
+**Tech Stack:** PHP 8.4, Laravel 13.x, Filament 5.x, Livewire 4.x, Vite 8.x, Tailwind CSS 4.x, Pest 4.x
 
 **Database:** MySQL 8.4
 
 **Local Hardware Integration:**
-- **Printing:** QZ Tray (local WebSocket print agent) — supports PDF and ZPL label formats
+- **Printing:** QZ Tray (local WebSocket print agent) — separate image-label,
+  raw-ZPL-label, and document printer settings
 - **Scale:** Dual-backend (WebHID for Chrome/Edge, QZ Tray fallback) — see `<x-scale-script>`
 
 ## Repository Layout
 
-- `app/` — application code: `Models/`, `Services/`, `Filament/`, `Http/`, `Console/Commands/`, `Jobs/`, `Enums/`, `Policies/`
-- `resources/views`, `resources/js`, `resources/css` — Blade templates and frontend entrypoints. All hardware JS (QZ Tray, barcode, scale) is inline in Blade components, not standalone JS files
+- `app/` — application code: `Contracts/`, `DataTransferObjects/`, `Models/`,
+  `Services/`, `Filament/`, `Http/`, `Console/Commands/`, `Jobs/`, `Enums/`, `Policies/`
+- `resources/views`, `resources/js`, `resources/css` — Blade templates and frontend
+  entrypoints. Hardware orchestration lives in Blade components; npm-backed QZ and barcode
+  libraries are bundled from `resources/js/qz.js` and `resources/js/barcodes.js`
 - `resources/data/` — carrier reference data and FedEx test cases
 - `database/` — migrations, factories, seeders
 - `tests/Feature`, `tests/Unit`, `tests/External`, `tests/Browser` — Pest suites
@@ -75,38 +80,67 @@ Server-operations tooling for our own hosted deployment lives in a separate priv
 
 - **Shipment** — Order to be shipped (address, items, validation status); scoped to a `Client`
 - **ShipmentItem** — Line items in a shipment
-- **Package** — Physical package with tracking, label, dimensions; scoped to a `Location`
+- **Package** — Physical parcel prepared from a Shipment and measured before label purchase;
+  scoped to a `Location`. Its shipping columns project the active Label for efficient reads
+- **Package Draft** — An unshipped Package prepared but not yet through label purchase;
+  resumable and editable, not temporary or orphaned
 - **PackageItem** — Items packed in a package (with transparency codes)
-- **ShippingMethod** — Available shipping options
-- **Carrier** / **CarrierService** — USPS, FedEx, UPS and their services
+- **PackageLabel** / **Label** — One purchased outbound-postage instance. A Package has at
+  most one active Label; voided Labels remain as history and the Package becomes unshipped
+- **ShippingMethod** — A service class, such as Ground, which one or more concrete
+  `CarrierService` records can satisfy
+- **ShippingOffer** / **Offer** — Ephemeral, package-bound purchase authority for a quoted
+  rate. Its opaque public ID may cross browser state; purchase tokens and source identity do not
+- **Carrier** / **CarrierService** — Authored carrier and service catalog used for policy and
+  normalization; external discovery never silently creates either
+- **ObservedService** / **ServiceApproval** — Amazon-reported service identity and the
+  separate, client/environment-scoped permission for unattended purchasing
 - **CarrierAccount** — Per-carrier API credentials; supports multiple accounts per carrier with OAuth
 - **CarrierAccountScope** — Routes a `CarrierAccount` to a specific `Location` and/or `Client` combination with priority-based resolution
-- **BoxSize** — Predefined box dimensions (scanned by code)
+- **BoxSize** — Scannable dimensions plus physical form and optional carrier-supplied
+  packaging identity; compatible packaging is enforced while rating and buying
 - **Channel** — Sales channel source (Shopify, Amazon, database import)
 - **Product** — Product catalog with barcodes and weights; scoped to a `Client`
 - **DataSource** — Configurable shipment import/export source (Database/Shopify/Amazon) with per-client assignment, encrypted secrets, and per-source scheduling
 - **Location** — Warehouse / fulfillment center with address, timezone, and carrier associations
 - **Client** — 3PL brand/retailer; scopes shipments, products, data sources, and shipping rules; carries return address, pack slip branding fields, and the reference printed on carrier labels
 
-Preserve these domain terms in code and prose — see `CONTEXT.md`. In particular **Shipment**, **Package**, and **Package Draft** are distinct things.
+Preserve these domain terms in code and prose — see `CONTEXT.md`. In particular:
+
+- **Carrier of record** is who physically moves the parcel; **postage source** is where its
+  Label was bought (`CarrierAccount` or sales-channel `DataSource`). They are independent.
+- A Shopify purchase is a **blind purchase**, not a rate or Offer: price and service are
+  unknown and it is excluded from unattended flows.
+- **Observed service**, `CarrierService` normalization, and automation approval are three
+  separate concepts.
+- **Shipment**, **Package**, **Package Draft**, and **Label** are distinct things.
 
 ## Key Workflows
 
 1. **Picking** (`/generate-pick-batch`) — Optional; generate pick batches and print picking summaries before packing. Gated by `picking_enabled`; `require_picking_before_shipping` enforces it before packing/batch shipping
 2. **Packing** (`/pack/{shipment_id}`) — Scan box code, scan items, read weight from scale; shows client indicator when multi-client is enabled
-3. **Shipping** (`/ship/{package_id}`) — Get rates, buy postage, print label; rate requests are scoped by location and client
+3. **Shipping** (`/ship/{package_id}`) — Resolve eligible direct and channel postage
+   sources, issue server-side Offers for rates, optionally present an attended Shopify blind
+   purchase, buy a Label, and print it. Offers are bound to the Package version, quote inputs,
+   source instance, environment, and billing identity
 4. **Manual Ship** (`/manual-ship`) — Ship without a pre-existing shipment
-5. **Batch Ship** — Generate labels for multiple packages
-6. **End of Day** (`/end-of-day`) — Create USPS SCAN forms / manifests; location-scoped when multi-location is enabled
+5. **Batch Ship** — Buy Labels for multiple Packages using approved, automatable services;
+   blind Shopify purchases and unapproved observed services are excluded
+6. **Label Reprint / Void** — Reprint the active Label or void it through the postage source;
+   a void retains Label history and returns the Package to unshipped
+7. **End of Day** (`/end-of-day`) — Create USPS SCAN forms / manifests only for eligible
+   direct-account Labels; location-scoped when multi-location is enabled
 
 ## Hardware Integration
 
 ### QZ Tray (Printing)
 - Must be installed on each workstation: https://qz.io/download/
 - Connects via WebSocket to `wss://localhost:8181`
-- Printer selection and label format stored in browser `localStorage`
+- Image-label printer, raw-label printer, document printer, preferred purchase format, and
+  ZPL DPI are stored in browser `localStorage`
 - Configured via Device Settings page
-- Supports PDF (default) and ZPL (opt-in) label formats at 203 or 300 DPI
+- PDF/PNG/GIF labels use the image printer driver; ZPL bytes use the raw printer at 203 or
+  300 DPI. The two settings may name the same physical printer
 - Signing certificate generated via `app:generate-qz-cert`
 - Integration code in `<x-qz-tray>` and `<x-qz-tray-script>` Blade components
 - Workstation trust provisioning: `scripts/qz-provision/` and `docs/qz-tray-provisioning.md`
@@ -117,15 +151,29 @@ Preserve these domain terms in code and prose — see `CONTEXT.md`. In particula
 - Integration code in `<x-scale-script>` Blade component
 - WebHID requires secure context (HTTPS or localhost)
 
-## API Integrations
+## API and Postage Integrations
 
-- **USPS** — Address validation, domestic/international rates, label generation, SCAN forms (via Saloon)
-- **FedEx** — Rate quotes and shipment creation (via Saloon)
-- **UPS** — Rate quotes and shipment creation (via Saloon)
+- **USPS** — Direct-account address validation, domestic/international offers and Label
+  purchase, tracking, voids, reprints, and SCAN forms (via Saloon)
+- **FedEx** — Direct-account offers, Label purchase, tracking, cancellation, and ETD/customs
+  documents (via Saloon)
+- **UPS** — Direct-account offers, Label purchase, tracking, voids/recovery, and customs
+  documents (via Saloon)
+- **Amazon Buy Shipping** — SP-API offers and Label purchase for Amazon-originating
+  Shipments, with tracking and cancellation dispatched back through Amazon. Amazon dynamically
+  discovers services; human selection may use an unmapped/unapproved service, while automation
+  requires normalization and explicit approval
+- **Shopify Shipping** — Attended blind Label purchase tied to the Shipment's originating
+  Shopify `DataSource`; Shopify may choose the carrier and does not confirm price or service.
+  Tracking comes through Shopify; Labels must be voided in the Shopify admin and are then
+  reconciled by the fulfillment synchronizer
 
-Carrier adapters: `app/Services/Carriers/` — `UspsAdapter`, `FedexAdapter`, `UpsAdapter`, `FakeCarrierAdapter`
-
-Rate/label/track/cancel paths resolve carrier accounts via `CarrierAccount::resolveForShipment()` using the package's `location_id` and shipment's `client_id`.
+Carrier and source adapters live in `app/Services/Carriers/`. Direct accounts resolve through
+`CarrierAccount::resolveForShipment()` using the Package's `location_id` and Shipment's
+`client_id`; Shopify and Amazon marketplace postage bind to the Shipment's originating
+`DataSource`. `CarrierRegistry` remains carrier-policy/direct-adapter lookup, while
+`PostageSourceResolver` and `PostageSourceDispatcher` own source selection and post-purchase
+dispatch.
 
 ## Data Import / Export
 
@@ -138,6 +186,10 @@ Supported drivers:
 
 Import sources: `app/Services/ShipmentImport/Sources/` — `DatabaseSource`, `ShopifySource`, `AmazonSource`
 Export: `app/Services/ShipmentImport/PackageExportService.php` — supports per-client export destination overrides
+
+Do not conflate a Shipment's import source with a Package's postage source. They can differ,
+although marketplace postage is deliberately bound to the originating Shopify or Amazon
+account because its order/fulfillment identity belongs to that account.
 
 ## Commands
 
@@ -184,9 +236,21 @@ php artisan demo:reset                        # Reset demo data (APP_ENV demo/lo
 - `app/Services/CacheService.php` — Centralized caching for box sizes and carrier services (1-hour TTL)
 - `app/Services/SettingsService.php` — Key-value settings stored in DB
 - `app/Services/ClientContext.php` — Resolves the default `Client` for the current request
-- `app/Services/ShippingRateService.php` — Multi-carrier rate comparison
+- `app/Services/ShippingRateService.php` — Resolves sources, quotes concurrently, filters
+  packaging, logs quotes, and issues server-side Offers; keeps blind purchases separate
+- `app/Services/PostageSources/` — Source resolution/dispatch, Offer persistence and
+  redemption, observed-service recording/mapping, and automation approval gates
+- `app/Services/PackageDrafts/` — Package preparation workflow behind `PackageDraftWorkflow`
+- `app/Services/PackageShipping/` — Offer redemption, purchase/recovery, and the atomic
+  Package-to-shipped transition behind `PackageShippingWorkflow`
+- `app/Services/PackageLabels/` — Active Label reprint/print tracking and void workflow behind
+  `PackageLabelWorkflow`
 - `app/Services/BatchLabelService.php` — Batch label generation
 - `app/Services/ManifestService.php` — USPS SCAN form / end-of-day manifests; location-scoped
+
+Keep package preparation, label lifecycle, and purchase orchestration behind their contracts
+in `app/Contracts/`. Keep structured boundary values in `app/DataTransferObjects/`; browser
+state must never become authority for offer price, service, source, or purchase tokens.
 
 Prefer small service classes over controller-heavy logic. When adding a model, add its
 factory and seeder too — the test suite leans on factories heavily.
@@ -200,8 +264,10 @@ factory and seeder too — the test suite leans on factories heavily.
 ### Frontend
 - Tailwind CSS 4.0 config in `resources/css/app.css`
 - Vite handles HMR and builds
-- QZ Tray and scale integration via Blade components (not standalone JS files)
-- All hardware JS is inline in Blade: `<x-qz-tray>`, `<x-qz-tray-script>`, `<x-scale-script>`
+- QZ Tray and scale orchestration use Blade components: `<x-qz-tray>`,
+  `<x-qz-tray-script>`, `<x-printer-settings-script>`, and `<x-scale-script>`
+- npm-backed QZ and barcode libraries are Vite entrypoints in `resources/js/`; keep
+  page-specific browser/hardware behavior with the existing Blade components
 
 ## Key Files
 
@@ -210,6 +276,15 @@ factory and seeder too — the test suite leans on factories heavily.
 - `app/Filament/Pages/Ship.php` — Label generation and print dispatch
 - `app/Filament/Pages/DeviceSettings.php` — Printer/scale/label format configuration
 - `app/Services/Carriers/CarrierRegistry.php` — Carrier adapter registration
+- `app/Services/PostageSources/PostageSourceResolver.php` — Eligible direct/channel sources
+- `app/Services/PostageSources/PostageSourceDispatcher.php` — Void, tracking, and manifest
+  dispatch by recorded postage source
+- `app/Services/PostageSources/OfferStore.php` — Opaque Offer issuance, redemption, and recovery state
+- `app/Services/PackageShipping/EloquentPackageShippingWorkflow.php` — Shared Label purchase workflow
+- `app/Services/PackageLabels/EloquentPackageLabelWorkflow.php` — Active Label reprint and void workflow
+- `app/Models/PackageLabel.php` — Durable Label history and active-label projection data
+- `app/Models/ShippingOffer.php` — Server-side quoted-purchase authority
+- `app/Models/ObservedService.php` / `ServiceApproval.php` — Amazon discovery, mapping, and automation permission
 - `app/Services/CacheService.php` — Box size and carrier service caching
 - `app/Models/CarrierAccount.php` — Per-carrier credentials with `resolveForShipment()` priority logic
 - `app/Filament/Resources/Clients/ClientResource.php` — 3PL client management (Admin nav group)
@@ -269,24 +344,24 @@ The Laravel Boost guidelines are specifically curated by Laravel maintainers for
 This application is a Laravel application and its main Laravel ecosystems package & versions are below. You are an expert with them all. Ensure you abide by these specific packages & versions.
 
 - php - 8.4
-- filament/filament (FILAMENT) - v5.6.2
-- laravel/framework (LARAVEL) - v13.13.0
-- laravel/prompts (PROMPTS) - v0.3.17
-- laravel/scout (SCOUT) - v10.25.0
-- laravel/socialite (SOCIALITE) - v5.27.0
-- livewire/livewire (LIVEWIRE) - v4.3.0
-- larastan/larastan (LARASTAN) - v3.9.6
-- laravel/boost (BOOST) - v2.4.6
-- laravel/mcp (MCP) - v0.7.0
-- laravel/pail (PAIL) - v1.2.6
-- laravel/pint (PINT) - v1.29.1
-- laravel/sail (SAIL) - v1.58.0
-- pestphp/pest (PEST) - v4.7.0
-- phpunit/phpunit (PHPUNIT) - v12.5.24
-- rector/rector (RECTOR) - v2.4.2
+- filament/filament (FILAMENT) - v5.7.8
+- laravel/framework (LARAVEL) - v13.21.1
+- laravel/prompts (PROMPTS) - v0.3.21
+- laravel/scout (SCOUT) - v11.4.0
+- laravel/socialite (SOCIALITE) - v5.29.0
+- livewire/livewire (LIVEWIRE) - v4.4.3
+- larastan/larastan (LARASTAN) - v3.10.0
+- laravel/boost (BOOST) - v2.4.13
+- laravel/mcp (MCP) - v0.9.1
+- laravel/pail (PAIL) - v1.2.7
+- laravel/pint (PINT) - v1.29.3
+- laravel/sail (SAIL) - v1.64.0
+- pestphp/pest (PEST) - v4.7.5
+- phpunit/phpunit (PHPUNIT) - v12.5.30
+- rector/rector (RECTOR) - v2.5.7
 - saloonphp/laravel-plugin (SALOON_LARAVEL) - v4.3.0
 - saloonphp/saloon (SALOON) - v4.0.0
-- tailwindcss (TAILWINDCSS) - v4.3.0
+- tailwindcss (TAILWINDCSS) - v4.3.3
 
 ## Conventions
 

@@ -7,10 +7,15 @@
 
 ## Current state
 
-- Catalog: 14 services seeded (`SpecialServiceSeeder`), code-owned, gated by `$wiredCodes` — only `saturday_delivery` is active.
+- Catalog: 14 services seeded (`SpecialServiceSeeder`), code-owned, and gated by
+  `$wiredCodes`. Saturday delivery, both signature variants, declared value, alcohol,
+  and the three lithium-battery classifications are active. The remaining catalog rows
+  stay inactive until their adapter work is complete.
 - Plumbing already in place: `SpecialServiceResolver` (method modes + product compliance), `carrier_service_special_service` scoping with `restricted_countries`, `PackageSpecialService` audit pivot, per-adapter capability maps, `appliedServices` reporting.
 - `Product.contains_alcohol` / `Product.hazmat_class` already feed the resolver; those codes start flowing the moment their services flip active.
 - No operator-selection UI on the Ship page yet — `available` mode exists in the enum but nothing consumes it.
+- Waves 1–3 below are complete. The wave descriptions remain as the rationale and
+  implementation record; Wave 4 and the deferred list are still prospective.
 
 ## Prioritization criteria
 
@@ -108,12 +113,14 @@ The plumbing is already live (`resolveProductRequiredCodes`); the deliverable he
 
 ## Issues (published 2026-07-08)
 
-1. `issues/01-signature-required.md` — AFK, no blockers
-2. `issues/02-adult-signature-required.md` — AFK, blocked by 01
-3. `issues/03-declared-value-source-decision.md` — HITL, **closed** (decision recorded 2026-07-08)
-4. `issues/04-declared-value.md` — AFK, blocked by 02
-5. `issues/05-alcohol-compliance-gating.md` — AFK, blocked by 02
-6. `issues/06-lithium-battery-family.md` — AFK (policy decided), blocked by 01
-7. `issues/07-scoping-visibility.md` — AFK, no blockers
+All seven are complete. Their files retain the decisions, carrier evidence, and test notes:
+
+1. `issues/01-signature-required.md`
+2. `issues/02-adult-signature-required.md`
+3. `issues/03-declared-value-source-decision.md`
+4. `issues/04-declared-value.md`
+5. `issues/05-alcohol-compliance-gating.md`
+6. `issues/06-lithium-battery-family.md`
+7. `issues/07-scoping-visibility.md`
 
 Wave 4 and the deferred list are intentionally not ticketed — re-evaluate after Wave 3.

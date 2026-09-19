@@ -6,7 +6,7 @@ Repo: `polybag`
 
 ## Parent
 
-[ADR-0002](../../../adr/0002-postage-source-split.md) decision 4 gave an Amazon or
+[ADR-0002](../../../adr/0002-carrier-of-record-vs-postage-source.md) decision 4 gave an Amazon or
 Shopify offer an opaque `offerId`, with everything that can buy the label kept on the
 `ShippingOffer` row so that the browser names an offer and restates nothing. Direct
 carrier rates — USPS, FedEx, UPS quoted from a `CarrierAccount` — got no such row, because

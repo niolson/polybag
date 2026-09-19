@@ -188,11 +188,13 @@ AZURE_TENANT_ID=common
 Set `AZURE_TENANT_ID` to your directory's tenant ID to restrict sign-in to your
 organisation; `common` allows any Microsoft account.
 
-## Import sources
+## Data sources and marketplace postage
 
 Import and export sources are **Data Source** records (Integrations → Data Sources), each
 with its own encrypted credentials, schedule, and optional client assignment. Nothing
-here needs `.env`.
+here needs `.env`. A Shopify or Amazon source can also be the postage source for a Label;
+that is separate from importing the Shipment, even though marketplace postage is bound to
+the originating account because the order identity belongs to it.
 
 ### Database
 
@@ -225,6 +227,18 @@ are simply the credentials.
 Scopes are declared on the app itself, so the authorization request's scope parameter is
 inert. Change the scopes on the app and reinstall it if imports come back empty.
 
+To buy Shopify Shipping Labels, the app additionally needs `write_orders`,
+`write_merchant_managed_fulfillment_orders`, and `read_products`; the Shopify staff user
+must also have the **Buy shipping labels** permission. Enable **Allow blind purchase** on
+the Client only after accepting Shopify's behavior: a packer sees no price, service, or
+carrier before purchase, and Shopify never reports the final price or service. This path is
+attended only—shipping rules, auto-ship, and batch shipping cannot choose it.
+
+Shopify Shipping Labels cannot be voided through the API. Void one in the Shopify admin;
+the scheduled `packages:sync-shopify-fulfillments` poll detects it, preserves the voided
+Label as history, and returns the Package to unshipped. Tracking also comes through the
+Shopify fulfillment rather than through one of your direct carrier accounts.
+
 ### Amazon SP-API
 
 1. Register as a developer in Seller Central / Amazon Developer Central and create an
@@ -241,6 +255,14 @@ inert. Change the scopes on the app and reinstall it if imports come back empty.
 The app refuses to activate an Amazon source until **Require MFA** is enabled in App
 Settings. That is deliberate — these sources expose customer PII — and it is another
 reason to get mail working first.
+
+Amazon Buy Shipping uses the same seller account and additionally requires access to the
+Shipping v2 operations for rates, purchase, tracking, and cancellation. Eligible offers
+appear only on Packages belonging to Shipments imported from that Amazon source. Amazon's
+service catalog is discovered from live rate responses rather than maintained as a fixed
+list: an operator may select a new service manually, but unattended flows require an
+administrator to map it under **Integrations → Map Carrier Services** and approve it for
+the Client. Sandbox and production approvals are intentionally separate.
 
 ## Upgrading
 

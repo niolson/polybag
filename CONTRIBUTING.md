@@ -19,8 +19,8 @@ terms, contact `license@polybag.app`.
 
 Separately from the licence: the **PolyBag** name, logo, and `polybag.app` branding are
 not licensed with the code, and the 2030 Apache-2.0 conversion will not change that —
-Apache-2.0 grants no trademark rights either. Fork it under your own name. See
-[Trademark and branding](README.md#trademark-and-branding) in the README.
+Apache-2.0 grants no trademark rights either. Fork it under your own name. See the
+[Licence](README.md#licence) section in the README.
 
 ### Contributions require a CLA
 
@@ -45,9 +45,9 @@ Use **GitHub Issues** — [bug report](../../issues/new?template=bug_report.yml)
 so the templates are the way in; they ask for the deployment mode and carrier
 configuration, which is usually what determines whether we can reproduce something.
 
-Maintainer planning happens in a private tracker, so an issue you open may be closed
-with a fix that references no public planning document. That is not the issue being
-dismissed — it means the work was scheduled elsewhere.
+GitHub Issues is the public intake queue. Maintainer planning is recorded as Markdown
+under [`docs/issues/`](docs/issues/): triage may promote a report into that tracker and
+close the GitHub issue with a link. The two are deliberately not synchronized.
 
 ### Security issues do not go here
 
@@ -56,7 +56,7 @@ open a public issue or pull request for it.
 
 ## Getting set up
 
-Requirements: PHP 8.4, Composer, Node.js 22+, and MySQL 8.4. SQLite works for running
+Requirements: PHP 8.4, Composer, Node.js 22.12+, and MySQL 8.4. SQLite works for running
 the test suite and is what CI uses, but develop against MySQL — that is what
 deployments run.
 
@@ -166,10 +166,15 @@ git push --no-verify
   quirks. Changes there need a test using `FakeCarrierAdapter` or a mocked Saloon
   response, and a note in the pull request about what you verified against a real
   sandbox, if anything.
-- **Hardware integration** — QZ Tray printing and the scale — is inline JavaScript in
-  Blade components (`<x-qz-tray>`, `<x-qz-tray-script>`, `<x-scale-script>`), not
-  standalone JS files. WebHID needs a secure context, so scale work has to be tested
-  over HTTPS or on localhost, in Chrome or Edge.
+- **Hardware integration** — QZ Tray and scale orchestration lives in Blade components
+  (`<x-qz-tray>`, `<x-qz-tray-script>`, `<x-printer-settings-script>`,
+  `<x-scale-script>`); npm-backed QZ and barcode libraries are Vite entrypoints under
+  `resources/js/`. WebHID needs a secure context, so scale work has to be tested over
+  HTTPS or on localhost, in Chrome or Edge.
+- **Shipping boundaries** — preparation, Label lifecycle, and purchase orchestration go
+  through `PackageDraftWorkflow`, `PackageLabelWorkflow`, and `PackageShippingWorkflow`.
+  Carrier policy is not postage-source dispatch: marketplace-bought Labels track and void
+  through the source that bought them, not a direct carrier account.
 - **Dependencies.** Please ask before adding one. This app ships as a Docker image that
   gets CVE-scanned on every build, so each new package is an ongoing cost.
 - **Hosted-only services.** The OAuth broker, and the Resend domain behind transactional

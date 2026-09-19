@@ -41,6 +41,12 @@ A durable service identity seen in a postage source's response, not part of the 
 becomes a `CarrierService` only when a human authors one; discovery never creates one.
 _Avoid_: Discovered service, carrier service
 
+**Automation approval**:
+One Client's permission for an observed service to be bought by an unattended workflow in
+one postage-source environment. It requires normalization first and never crosses between
+sandbox and production. Human selection does not require it.
+_Avoid_: Service enabled, service active
+
 **Label**:
 One purchased instance of *outbound* postage for a Package: its tracking number, cost, and
 the carrier of record it was bought as. A Package has at most one active Label; a voided
@@ -93,7 +99,12 @@ _Avoid_: Report printer (in anything a user reads)
 - A void marks the **Label** voided and returns the **Package** to unshipped; re-shipping buys a new **Label** for the same Package.
 - A **service class** is satisfied by one or more concrete carrier services; a **blind purchase** satisfies none, because no service is offered.
 - An **observed service** is normalized onto an existing `CarrierService`, or promoted by authoring one. Nothing promotes itself.
+- An **observed service** may be selected by a human without an **automation approval**;
+  shipping rules, auto-ship and batch shipping require approval for that Client and environment.
 - A **blind purchase** is not an **Offer** — with no price it can never win a comparison, so it never enters one.
+- An **Offer** is claimed atomically before purchase. If the source's answer is ambiguous,
+  it remains awaiting confirmation and must be recovered or resolved before another purchase
+  is attempted.
 
 ## Example dialogue
 
@@ -116,10 +127,13 @@ _Avoid_: Report printer (in anything a user reads)
 > **Domain expert:** "No. Manifesting follows the postage source, not the carrier — we did not buy that label, so we cannot manifest it."
 >
 > **Dev:** "The Shopify option in the rate list has no price. What should we sort it as?"
-> **Domain expert:** "Don't sort it at all. It is a blind purchase, not an offer — there is nothing to compare it against, and the price is unknown until after we have bought it."
+> **Domain expert:** "Don't sort it at all. It is a blind purchase, not an offer — there is nothing to compare it against, and Shopify does not report the price even after we have bought it."
 >
 > **Dev:** "Amazon quoted us OnTrac and we have no OnTrac in the catalog. Do we add it?"
 > **Domain expert:** "Not automatically. It is an observed service, and a packer can still pick it. A carrier row only appears when someone decides to author one."
+>
+> **Dev:** "Once we map that service, can batch shipping buy it?"
+> **Domain expert:** "Only after an administrator approves it for that Client and environment. Naming a service and authorizing unattended spend are separate decisions."
 
 ## Flagged ambiguities
 

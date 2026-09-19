@@ -32,4 +32,4 @@ old `early-plugin-load` plugin form must not come back — it was removed in MyS
 
 Server operations tooling — the shared datastore stack, TLS front door, monitoring, and
 the runbooks for all of it — is not in this repo. See the note in the
-[README](../README.md#deployment).
+[README](../README.md#supported-deployment).
