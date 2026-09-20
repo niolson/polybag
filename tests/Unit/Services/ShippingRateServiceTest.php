@@ -15,6 +15,7 @@ use App\Enums\CarrierPackaging;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\ServiceCapability;
 use App\Exceptions\Carriers\CarrierRateFetchException;
+use App\Exceptions\InvalidPackageDimensionsException;
 use App\Exceptions\MissingDeclaredValueException;
 use App\Exceptions\NoActiveCarrierServicesException;
 use App\Http\Integrations\Fedex\Requests\Rates as FedexRates;
@@ -765,6 +766,40 @@ it('continues when carrier rate fetch exception has no previous exception', func
     $rates = app(ShippingRateService::class)->getShippingRates($package->id);
 
     expect($rates)->toHaveCount(0);
+});
+
+it('explains when a carrier cannot rate an unmeasured package', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+    ]);
+
+    $upsAccount = createUpsAccount();
+    $shippingMethod = ShippingMethod::factory()->create();
+    $upsService = CarrierService::factory()->upsGround()->create([
+        'carrier_id' => $upsAccount->carrier_id,
+    ]);
+    $shippingMethod->carrierServices()->attach($upsService);
+
+    $shipment = Shipment::factory()->for($shippingMethod)->create(['postal_code' => '90210']);
+    $package = Package::factory()->for($shipment)->create([
+        'box_size_id' => null,
+        'weight' => 2.5,
+        'height' => null,
+        'width' => null,
+        'length' => null,
+    ]);
+
+    expect(fn (): array => PackageData::fromPackage($package)->dimensionsInWholeInches())
+        ->toThrow(InvalidPackageDimensionsException::class);
+
+    $service = app(ShippingRateService::class);
+    $rates = $service->getShippingRates($package->id);
+
+    expect($rates)->toBeEmpty()
+        ->and($service->getExclusions())->toBe([[
+            'carrier' => 'UPS',
+            'reason' => 'UPS requires valid package dimensions before rates can be requested.',
+        ]]);
 });
 
 it('drops rates whose packaging requirement the package does not meet, before they are logged as quotes', function (): void {

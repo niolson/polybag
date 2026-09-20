@@ -16,6 +16,7 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
 use App\Exceptions\Carriers\CarrierRateFetchException;
+use App\Exceptions\InvalidPackageDimensionsException;
 use App\Exceptions\NoActiveCarrierServicesException;
 use App\Models\CarrierAccount;
 use App\Models\CarrierService;
@@ -456,6 +457,13 @@ class ShippingRateService
                 if ($adapter instanceof CarrierAdapterInterface) {
                     $rateOptions->push(...$adapter->getRates($carrierRateRequest, $serviceCodes));
                 }
+            } catch (InvalidPackageDimensionsException $e) {
+                $this->exclusions[$carrierName] = $carrierName.' requires valid package dimensions before rates can be requested.';
+
+                logger()->warning("ShippingRateService: {$carrierName} cannot rate an unmeasured package", [
+                    'carrier' => $carrierName,
+                    'error' => $e->getMessage(),
+                ]);
             } catch (CarrierRateFetchException $e) {
                 $loggedException = $e->getPrevious() ?? $e;
 

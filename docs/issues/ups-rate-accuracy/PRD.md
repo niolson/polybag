@@ -28,14 +28,21 @@ with *Total Billable Weight: 2 lbs* — dimensional weight, from the box.
 The same gap shows on CIE: the sandbox quotes $16.96 and ships at $39.13 for the same
 package, so it is reproducible without spending anything.
 
-## What the app sends
+## Current findings and work items
 
-`UpsAdapter::buildRateApiRequest()` sends the package as `PackagingType` and
-`PackageWeight` only — no `Dimensions` — and sets `ResidentialAddressIndicator` only
-when `RateRequest::$residential` is true, which depends on address validation having
-classified the address. The ship request sends `Dimensions`. So the quote is for a
-0.15 lb parcel to a commercial address, and the label is for a 2 lb dimensional parcel
-to a residence.
+The follow-up code review on 2026-09-20 found the same missing rate dimensions in
+FedEx. UPS rating uses `validated_residential ?? residential`; new imports already
+inherit a residential database default. UPS and FedEx purchase requests omit the
+classification, and FedEx rating omits it too. Amazon Orders exposes address type,
+but both the Amazon mapper and shared import row preparer currently omit it.
 
-Read off the request in `storage/logs/ups-validation-2026-09-18.log` (`RATE REQUEST`
-at 20:39:50) and the receipt for `1Z14A6G90303889622`.
+UPS documents a missing residential indicator as false, not a request to classify.
+The recorded price difference is evidence of a mismatch, not proof that any single
+field explains every surcharge or that sandbox prices predict production charges.
+
+1. [Send UPS and FedEx rate dimensions](issues/01-ups-rate-request-omits-dimensions-and-residential.md).
+2. [Keep residential classification consistent](issues/02-residential-classification-rate-purchase-consistency.md).
+3. [Import Amazon address classification](issues/03-import-amazon-address-classification.md).
+
+Issue `01` is done. Issues `02` and `03` remain `needs-triage`; the unknown-address
+representation and fallback are proposed policy.

@@ -329,8 +329,8 @@ it('rejects a package weight sent as a string', function (): void {
 });
 
 it('rejects a fractional or zero dimension', function (int|float $length): void {
-    // Dimensions are cast to int in the adapter, so a side under an inch
-    // reaches FedEx as 0.
+    // The adapter normalizes measured dimensions upward before they reach this
+    // schema, which accepts carrier-ready positive whole inches only.
     expect(fn () => assertMatchesFedexSchema(validFedexShipBody([
         'requestedShipment' => ['requestedPackageLineItems' => [['dimensions' => ['length' => $length]]]],
     ]), 'CreateShipmentRequest'))->toThrow(AssertionFailedError::class, 'dimensions.length');
