@@ -2,7 +2,7 @@
 
 # Use consistent residential classification for UPS and FedEx rating and purchase
 
-Status: needs-triage
+Status: implemented
 Category: bug
 Repo: `polybag`
 
@@ -72,3 +72,16 @@ Coordinate the classification contract with [issue 03](03-import-amazon-address-
 Dimensions are [issue 01](01-ups-rate-request-omits-dimensions-and-residential.md).
 Do not add unsupported fields to USPS or Amazon APIs, or turn Shopify's blind
 purchase into a rate-shopping flow.
+
+## Implementation notes
+
+2026-09-20: Made imported residential classification nullable without a backfill,
+preserving unknown separately from explicit commercial and residential values. Unknown
+destinations conservatively resolve to residential in the server-side address DTO.
+UPS and FedEx rate and purchase requests now send that resolved classification, and rate
+requests include the validated/original destination street, city, state, postal code, and
+country. Those address inputs and the effective classification participate in Offer
+fingerprints, so changing either requires a fresh quote. Shipping-rule evaluation uses the
+same conservative residential fallback, and FedEx applies the same 35-character street-line
+normalization to rate and purchase requests. The rate service also reuses its destination DTO
+instead of parsing the shipment address twice.

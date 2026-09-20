@@ -23,6 +23,7 @@ readonly class AddressData
         public ?string $email = null,
         public ?string $phoneExtension = null,
         public ?string $uspsCarrierRoute = null,
+        public ?bool $residential = null,
     ) {}
 
     public static function fromShipment(Shipment $shipment): self
@@ -41,6 +42,7 @@ readonly class AddressData
             email: $shipment->email,
             phoneExtension: $shipment->phone_extension,
             uspsCarrierRoute: $shipment->validated_carrier_route,
+            residential: $shipment->validated_residential ?? $shipment->residential,
         );
     }
 
@@ -69,6 +71,19 @@ readonly class AddressData
         }
 
         return self::fromLocation($location);
+    }
+
+    /**
+     * The destination classification carriers should price and purchase.
+     *
+     * Null remains meaningful on the DTO: neither validation nor the import
+     * supplied a classification. Carrier requests conservatively treat that
+     * unknown as residential instead of producing an optimistic commercial
+     * quote.
+     */
+    public function isResidential(): bool
+    {
+        return $this->residential ?? true;
     }
 
     /**

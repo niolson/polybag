@@ -442,6 +442,27 @@ it('matches residential condition', function (): void {
     expect($result->hasPreSelectedRate())->toBeTrue();
 });
 
+it('uses the conservative residential fallback when classification is unknown', function (): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create([
+        'residential' => null,
+        'validated_residential' => null,
+    ]);
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'residential', 'data' => ['is_residential' => true]],
+        ],
+    ]);
+
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeTrue();
+});
+
 it('skips residential condition when shipment is commercial', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);

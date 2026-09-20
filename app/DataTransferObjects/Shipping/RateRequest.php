@@ -21,7 +21,7 @@ readonly class RateRequest
         public string $destinationCountry = 'US',
         public ?string $destinationCity = null,
         public ?string $destinationStateOrProvince = null,
-        public ?bool $residential = null,
+        public bool $residential = true,
         public array $packages = [],
         public array $specialServiceCodes = [],
         public ?int $locationId = null,
@@ -33,12 +33,15 @@ readonly class RateRequest
         public ?float $contentsValue = null,
         public ?int $packageId = null,
         public ?int $shippingMethodId = null,
+        public ?string $destinationStreetAddress = null,
+        public ?string $destinationStreetAddress2 = null,
     ) {}
 
-    public static function fromPackage(Package $package): self
+    public static function fromPackage(Package $package, ?AddressData $destination = null): self
     {
         $shipment = $package->shipment;
         $origin = AddressData::fromConfig();
+        $destination ??= AddressData::fromShipment($shipment);
 
         if ($package->location) {
             $origin = AddressData::fromLocation($package->location);
@@ -54,12 +57,12 @@ readonly class RateRequest
 
         return new self(
             originPostalCode: $origin->postalCode ?? '',
-            destinationPostalCode: $shipment->validated_postal_code ?? $shipment->postal_code,
+            destinationPostalCode: $destination->postalCode ?? '',
             originCountry: $origin->country,
-            destinationCountry: $shipment->validated_country ?? $shipment->country ?? 'US',
-            destinationCity: $shipment->validated_city ?? $shipment->city,
-            destinationStateOrProvince: $shipment->validated_state_or_province ?? $shipment->state_or_province,
-            residential: $shipment->validated_residential ?? $shipment->residential,
+            destinationCountry: $destination->country,
+            destinationCity: $destination->city,
+            destinationStateOrProvince: $destination->stateOrProvince,
+            residential: $destination->isResidential(),
             packages: [PackageData::fromPackage($package)],
             specialServiceCodes: $specialServiceCodes,
             locationId: $package->location_id,
@@ -70,6 +73,8 @@ readonly class RateRequest
             contentsValue: $shipment->value !== null ? (float) $shipment->value : null,
             packageId: $package->id,
             shippingMethodId: $shipment->shipping_method_id,
+            destinationStreetAddress: $destination->streetAddress,
+            destinationStreetAddress2: $destination->streetAddress2,
         );
     }
 
@@ -186,6 +191,8 @@ readonly class RateRequest
             contentsValue: $this->contentsValue,
             packageId: $this->packageId,
             shippingMethodId: $this->shippingMethodId,
+            destinationStreetAddress: $this->destinationStreetAddress,
+            destinationStreetAddress2: $this->destinationStreetAddress2,
         );
     }
 
@@ -210,6 +217,8 @@ readonly class RateRequest
             contentsValue: $this->contentsValue,
             packageId: $this->packageId,
             shippingMethodId: $this->shippingMethodId,
+            destinationStreetAddress: $this->destinationStreetAddress,
+            destinationStreetAddress2: $this->destinationStreetAddress2,
         );
     }
 }

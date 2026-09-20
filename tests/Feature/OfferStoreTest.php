@@ -326,6 +326,24 @@ it('retires an offer when the destination changes', function (): void {
     expect($store->inspect($package, $offer->public_id)->rejection)->toBe(OfferRejection::PackageChanged);
 });
 
+it('retires an offer when the effective residential classification changes', function (): void {
+    $shipment = Shipment::factory()->create([
+        'residential' => null,
+        'validated_residential' => null,
+    ]);
+    $package = Package::factory()->for($shipment)->create();
+    $store = app(OfferStore::class);
+    $offer = directOfferQuotedFor($package);
+
+    expect(RateRequest::fromPackage($package)->residential)->toBeTrue()
+        ->and($store->inspect($package, $offer->public_id)->wasRejected())->toBeFalse();
+
+    $shipment->update(['residential' => false]);
+
+    expect($store->inspect($package, $offer->public_id)->rejection)
+        ->toBe(OfferRejection::PackageChanged);
+});
+
 it('retires an offer when the shipment moves to another shipping method', function (): void {
     // The method decides which carriers are asked at all, so a quote under
     // one method is not a quote under another — even at the same price.

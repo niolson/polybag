@@ -410,6 +410,41 @@ it('includes parcel select smart post info detail for 1lb and up rate requests',
     });
 });
 
+it('sends the full destination and explicit residential boolean on rate requests', function (bool $residential): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Rates::class => MockResponse::make(['output' => ['rateReplyDetails' => []]]),
+    ]);
+
+    $this->adapter->getRates(new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
+        destinationCity: 'Beverly Hills',
+        destinationStateOrProvince: 'CA',
+        residential: $residential,
+        packages: [new PackageData(weight: 2.0, length: 10, width: 8, height: 4)],
+        destinationStreetAddress: '1234567890123456789012345678901234567890',
+        destinationStreetAddress2: 'Suite 4567890123456789012345678901234567890',
+    ), ['FEDEX_GROUND']);
+
+    Saloon::assertSent(function ($request) use ($residential): bool {
+        if (! $request instanceof Rates) {
+            return false;
+        }
+
+        $address = $request->body()->all()['requestedShipment']['recipient']['address'];
+
+        return $address === [
+            'streetLines' => ['12345678901234567890123456789012345', 'Suite 45678901234567890123456789012'],
+            'city' => 'Beverly Hills',
+            'stateOrProvinceCode' => 'CA',
+            'postalCode' => '90210',
+            'countryCode' => 'US',
+            'residential' => $residential,
+        ];
+    });
+})->with([true, false]);
+
 it('cancels a FedEx shipment', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
@@ -640,7 +675,7 @@ it('declines to prepare a sandbox international rate request so the stub answers
     expect($this->adapter->prepareRateRequest($request, ['FEDEX_INTERNATIONAL_PRIORITY']))->toBeNull();
 });
 
-it('creates shipment and returns tracking info', function (): void {
+it('creates shipment and sends the resolved residential classification', function (?bool $classification, bool $expectedResidential): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         CreateShipment::class => MockResponse::make([
@@ -683,11 +718,12 @@ it('creates shipment and returns tracking info', function (): void {
     $toAddress = new AddressData(
         firstName: 'John',
         lastName: 'Doe',
-        streetAddress: '456 Main St',
+        streetAddress: '1234567890123456789012345678901234567890',
         city: 'Los Angeles',
         stateOrProvince: 'CA',
         postalCode: '90210',
         phone: '555-987-6543',
+        residential: $classification,
     );
 
     $packageData = new PackageData(weight: 5.0, length: 12, width: 10, height: 8);
@@ -718,7 +754,7 @@ it('creates shipment and returns tracking info', function (): void {
         ->and($response->service)->toBe('FedEx Ground')
         ->and($response->labelData)->toBe('JVBERi0xLjQKYmFzZTY0bGFiZWxkYXRh');
 
-    Saloon::assertSent(function ($request): bool {
+    Saloon::assertSent(function ($request) use ($expectedResidential): bool {
         if (! $request instanceof CreateShipment) {
             return false;
         }
@@ -731,9 +767,16 @@ it('creates shipment and returns tracking info', function (): void {
             && ($body['requestedShipment']['packagingType'] ?? null) === 'YOUR_PACKAGING'
             && ! isset($body['requestedShipment']['customsClearanceDetail'])
             && ! isset($body['requestedShipment']['smartPostInfoDetail'])
-            && ! isset($body['requestedShipment']['shipmentSpecialServices']);
+            && ! isset($body['requestedShipment']['shipmentSpecialServices'])
+            && $body['requestedShipment']['recipients'][0]['address']['streetLines'] === ['12345678901234567890123456789012345']
+            && ($body['requestedShipment']['recipients'][0]['address']['residential'] ?? null) === $expectedResidential
+            && ! array_key_exists('residential', $body['requestedShipment']['shipper']['address']);
     });
-});
+})->with([
+    'validated or imported residential' => [true, true],
+    'validated or imported commercial' => [false, false],
+    'unknown falls back to residential' => [null, true],
+]);
 
 it('uses the ship-from country for FedEx customs duties payment', function (): void {
     Saloon::fake([

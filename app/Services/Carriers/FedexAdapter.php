@@ -403,10 +403,7 @@ class FedexAdapter implements DirectCarrierAdapter
                     ],
                 ],
                 'recipient' => [
-                    'address' => [
-                        'postalCode' => $request->destinationPostalCode,
-                        'countryCode' => $request->destinationCountry,
-                    ],
+                    'address' => $this->buildRateDestinationAddress($request),
                 ],
                 'pickupType' => 'USE_SCHEDULED_PICKUP',
                 'rateRequestType' => ['ACCOUNT'],
@@ -561,6 +558,7 @@ class FedexAdapter implements DirectCarrierAdapter
                     $this->buildContact(
                         $request->toAddress,
                         $request->toAddress->requiresCustomsDeclaration() ? null : $request->fromAddress->phone,
+                        includeResidentialClassification: true,
                     ),
                 ],
                 ...($request->shipDate ? [
@@ -1262,10 +1260,7 @@ class FedexAdapter implements DirectCarrierAdapter
                     ],
                 ],
                 'recipient' => [
-                    'address' => [
-                        'postalCode' => $request->destinationPostalCode,
-                        'countryCode' => $request->destinationCountry,
-                    ],
+                    'address' => $this->buildRateDestinationAddress($request),
                 ],
                 'pickupType' => 'USE_SCHEDULED_PICKUP',
                 'rateRequestType' => ['ACCOUNT'],
@@ -1376,13 +1371,11 @@ class FedexAdapter implements DirectCarrierAdapter
         }
     }
 
-    private function buildContact(AddressData $address, ?string $fallbackPhone = null): array
-    {
-        $streetLines = array_filter(array_map(
-            fn ($line): ?string => $line ? substr($line, 0, 35) : null,
-            [$address->streetAddress, $address->streetAddress2],
-        ));
-
+    private function buildContact(
+        AddressData $address,
+        ?string $fallbackPhone = null,
+        bool $includeResidentialClassification = false,
+    ): array {
         return [
             'contact' => array_filter([
                 'personName' => trim($address->firstName.' '.$address->lastName),
@@ -1391,13 +1384,45 @@ class FedexAdapter implements DirectCarrierAdapter
                 'phoneExtension' => $address->phoneExtension,
             ]),
             'address' => [
-                'streetLines' => array_values($streetLines),
+                'streetLines' => $this->buildStreetLines($address->streetAddress, $address->streetAddress2),
                 'city' => $address->city,
                 'stateOrProvinceCode' => $address->stateOrProvince,
                 'postalCode' => $address->postalCode,
                 'countryCode' => $address->country,
+                ...($includeResidentialClassification ? ['residential' => $address->isResidential()] : []),
             ],
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildRateDestinationAddress(RateRequest $request): array
+    {
+        $streetLines = $this->buildStreetLines(
+            $request->destinationStreetAddress,
+            $request->destinationStreetAddress2,
+        );
+
+        return array_filter([
+            'streetLines' => $streetLines === [] ? null : $streetLines,
+            'city' => $request->destinationCity,
+            'stateOrProvinceCode' => $request->destinationStateOrProvince,
+            'postalCode' => $request->destinationPostalCode,
+            'countryCode' => $request->destinationCountry,
+            'residential' => $request->residential,
+        ], fn (mixed $value): bool => $value !== null);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function buildStreetLines(?string $streetAddress, ?string $streetAddress2): array
+    {
+        return array_values(array_filter(array_map(
+            fn (?string $line): ?string => filled($line) ? substr($line, 0, 35) : null,
+            [$streetAddress, $streetAddress2],
+        )));
     }
 
     /**
