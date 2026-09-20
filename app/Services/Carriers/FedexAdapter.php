@@ -371,16 +371,10 @@ class FedexAdapter implements DirectCarrierAdapter
     /**
      * Build the FedEx rate API request.
      *
-     * The same request goes to the sandbox as to production. The sandbox is a
-     * virtualisation layer in front of a rating engine: a request whose shape
-     * matches one of its canned cases gets that canned body back, addresses
-     * ignored, and anything else is passed to the engine. Measured 2026-09-17
-     * (`docs/issues/fedex-sandbox-rate-testing`): the shape built here — a
-     * packaging type, a ship date, a weight-only line item — matches a
-     * complete canned domestic response. The docs example this method used to
-     * substitute in sandbox mode no longer matches anything and 503s, and the
-     * one canned response that is cut off mid-body is matched by a ship date
-     * *without* a packaging type, which this method never sends.
+     * The same production-complete request goes to the sandbox. FedEx's sandbox
+     * virtualizes some request shapes with canned responses, so adding required
+     * rating inputs can change its returned fixture; production fields must not
+     * be omitted to preserve a sandbox price.
      */
     private function buildRateApiRequest(RateRequest $request, array $serviceCodes, ?CarrierAccount $account): Rates
     {
@@ -426,6 +420,7 @@ class FedexAdapter implements DirectCarrierAdapter
                             'units' => 'LB',
                             'value' => $package->weight,
                         ],
+                        'dimensions' => $this->buildDimensions($package),
                         ...$lineItemFields,
                     ],
                 ],
@@ -600,12 +595,7 @@ class FedexAdapter implements DirectCarrierAdapter
                             'units' => 'LB',
                             'value' => $request->packageData->weight,
                         ],
-                        'dimensions' => [
-                            'length' => (int) $request->packageData->length,
-                            'width' => (int) $request->packageData->width,
-                            'height' => (int) $request->packageData->height,
-                            'units' => 'IN',
-                        ],
+                        'dimensions' => $this->buildDimensions($request->packageData),
                         ...$this->buildCustomerReferences($request),
                         ...$packageLevelServices['lineItemFields'],
                     ],
@@ -1094,6 +1084,17 @@ class FedexAdapter implements DirectCarrierAdapter
     }
 
     /**
+     * @return array{length: int, width: int, height: int, units: string}
+     */
+    private function buildDimensions(PackageData $package): array
+    {
+        return [
+            ...$package->dimensionsInWholeInches(),
+            'units' => 'IN',
+        ];
+    }
+
+    /**
      * Build FedEx contact/address structure from AddressData DTO.
      *
      * @return array<string, mixed>
@@ -1278,6 +1279,7 @@ class FedexAdapter implements DirectCarrierAdapter
                             'units' => 'LB',
                             'value' => $package->weight,
                         ],
+                        'dimensions' => $this->buildDimensions($package),
                     ],
                 ],
                 'shipmentSpecialServices' => [

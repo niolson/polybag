@@ -166,7 +166,7 @@
       }
     },
     "PackageLineItem": {
-      "description": "createShipment(). Weight is a number in pounds; dimensions are cast to whole inches, so a side under an inch would reach FedEx as 0. customerReferences comes from buildCustomerReferences(), packageSpecialServices and declaredValue from buildPackageSpecialServices(), and each is omitted rather than sent empty.",
+      "description": "createShipment(). Weight is a number in pounds; fractional dimensions are rounded upward to whole inches so carrier integer conversion cannot understate size. customerReferences comes from buildCustomerReferences(), packageSpecialServices and declaredValue from buildPackageSpecialServices(), and each is omitted rather than sent empty.",
       "type": "object",
       "required": ["weight", "dimensions"],
       "additionalProperties": false,

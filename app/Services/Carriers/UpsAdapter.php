@@ -545,6 +545,9 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
                             ],
                             'Weight' => (string) $package->weight,
                         ],
+                        ...($package->carrierPackaging === CarrierPackaging::UpsLetter ? [] : [
+                            'Dimensions' => $this->buildDimensions($package),
+                        ]),
                         ...($packageServiceOptions !== [] ? [
                             'PackageServiceOptions' => $packageServiceOptions,
                         ] : []),
@@ -632,14 +635,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
                         // Letter, whose size is UPS's own; a quoted Letter must
                         // not fail at the label over a field it never needed.
                         ...($request->packageData->carrierPackaging === CarrierPackaging::UpsLetter ? [] : [
-                            'Dimensions' => [
-                                'UnitOfMeasurement' => [
-                                    'Code' => 'IN',
-                                ],
-                                'Length' => (string) (int) $request->packageData->length,
-                                'Width' => (string) (int) $request->packageData->width,
-                                'Height' => (string) (int) $request->packageData->height,
-                            ],
+                            'Dimensions' => $this->buildDimensions($request->packageData),
                         ]),
                         ...$packageLevelReferences,
                         ...($mapped['options'] !== [] ? [
@@ -909,6 +905,21 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
                 '2c' => 'Large Express Box',
                 default => 'Customer Supplied Package',
             },
+        ];
+    }
+
+    /**
+     * @return array{UnitOfMeasurement: array{Code: string, Description: string}, Length: string, Width: string, Height: string}
+     */
+    private function buildDimensions(PackageData $package): array
+    {
+        $dimensions = $package->dimensionsInWholeInches();
+
+        return [
+            'UnitOfMeasurement' => ['Code' => 'IN', 'Description' => 'Inches'],
+            'Length' => (string) $dimensions['length'],
+            'Width' => (string) $dimensions['width'],
+            'Height' => (string) $dimensions['height'],
         ];
     }
 

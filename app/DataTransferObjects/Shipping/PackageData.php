@@ -4,6 +4,7 @@ namespace App\DataTransferObjects\Shipping;
 
 use App\Enums\BoxSizeType;
 use App\Enums\CarrierPackaging;
+use App\Exceptions\InvalidPackageDimensionsException;
 use App\Models\Package;
 
 readonly class PackageData
@@ -30,6 +31,32 @@ readonly class PackageData
             height: (float) $package->height,
             boxType: $package->boxSize?->type,
             carrierPackaging: $package->boxSize?->carrier_packaging,
+        );
+    }
+
+    /**
+     * Carrier APIs rate dimensions in whole inches. Round every measured side
+     * upward so their integer conversion cannot understate the Package size.
+     *
+     * @return array{length: int, width: int, height: int}
+     */
+    public function dimensionsInWholeInches(): array
+    {
+        $dimensions = [
+            'length' => $this->length,
+            'width' => $this->width,
+            'height' => $this->height,
+        ];
+
+        foreach ($dimensions as $dimension) {
+            if (! is_finite($dimension) || $dimension <= 0) {
+                throw new InvalidPackageDimensionsException('Package dimensions must be finite positive measurements.');
+            }
+        }
+
+        return array_map(
+            fn (float $dimension): int => (int) ceil($dimension),
+            $dimensions,
         );
     }
 }

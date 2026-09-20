@@ -359,6 +359,7 @@ it('includes smart post info detail for sub-pound smart post rate requests', fun
             && ($body['requestedShipment']['smartPostInfoDetail']['indicia'] ?? null) === 'PRESORTED_STANDARD'
             && ($body['requestedShipment']['smartPostInfoDetail']['ancillaryEndorsement'] ?? null) === 'ADDRESS_CORRECTION'
             && ($body['requestedShipment']['requestedPackageLineItems'][0]['weight']['value'] ?? null) === 0.75
+            && ($body['requestedShipment']['requestedPackageLineItems'][0]['dimensions'] ?? null) === ['length' => 10, 'width' => 8, 'height' => 6, 'units' => 'IN']
             && ! isset($body['requestedShipment']['shipDatestamp']);
     });
 });
@@ -575,10 +576,9 @@ it('leaves domestic sandbox rates to the FedEx sandbox API', function (): void {
     Saloon::assertSent(Rates::class);
 });
 
-it('sends the caller\'s own rate request to the FedEx sandbox rather than a canned one', function (): void {
-    // The sandbox answers this shape — a packaging type, a ship date and a
-    // weight-only line item — with a complete canned response. The docs example
-    // the adapter used to substitute here no longer gets one.
+it('sends the caller\'s production-complete rate request to the FedEx sandbox', function (): void {
+    // Sandbox fixture matching must not strip production rating inputs from
+    // the caller's request.
     app(SettingsService::class)->set('sandbox_mode', true);
     fakeFedexRateEndpoints();
 
@@ -597,7 +597,10 @@ it('sends the caller\'s own rate request to the FedEx sandbox rather than a cann
         ->and($sent['recipient']['address']['postalCode'])->toBe('90210')
         ->and($sent['packagingType'])->toBe('YOUR_PACKAGING')
         ->and($sent['shipDateStamp'])->toBe('2026-09-21')
-        ->and($sent['requestedPackageLineItems'])->toBe([['weight' => ['units' => 'LB', 'value' => 5.0]]]);
+        ->and($sent['requestedPackageLineItems'])->toBe([[
+            'weight' => ['units' => 'LB', 'value' => 5.0],
+            'dimensions' => ['length' => 12, 'width' => 10, 'height' => 8, 'units' => 'IN'],
+        ]]);
 });
 
 it('asks FedEx for international rates outside sandbox mode', function (): void {
@@ -2000,6 +2003,60 @@ it('names the packaging on every rate request and asks for One Rate only in FedE
     'a USPS Medium Flat Rate Box' => [CarrierPackaging::UspsMediumFlatRateBox, 'YOUR_PACKAGING', false],
     'the packer\'s own box' => [null, 'YOUR_PACKAGING', false],
 ]);
+
+it('sends normalized dimensions on weight-based and One Rate requests', function (): void {
+    fakeFedexRateEndpoints();
+
+    $request = new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
+        packages: [new PackageData(
+            weight: 1.0,
+            length: 48.1,
+            width: 20.2,
+            height: 10.3,
+            carrierPackaging: CarrierPackaging::FedexPak,
+        )],
+    );
+
+    $this->adapter->getRates($request, ['EXPRESS_SAVER', 'FEDEX_GROUND']);
+
+    expect(sentFedexRateShipments())->toHaveCount(2)
+        ->and(array_column(array_column(sentFedexRateShipments(), 'requestedPackageLineItems'), 0))->each(
+            fn ($lineItem) => $lineItem->dimensions->toBe([
+                'length' => 49,
+                'width' => 21,
+                'height' => 11,
+                'units' => 'IN',
+            ]),
+        );
+});
+
+it('uses the same upward dimension normalization when buying a FedEx label', function (): void {
+    fakeFedexShipEndpoints();
+
+    $response = $this->adapter->createShipment(new ShipRequest(
+        fromAddress: new AddressData(firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle', stateOrProvince: 'WA', postalCode: '98072', phone: '5551234567'),
+        toAddress: new AddressData(firstName: 'Jane', lastName: 'Doe', streetAddress: '456 Main St', city: 'Los Angeles', stateOrProvince: 'CA', postalCode: '90210', phone: '5559876543'),
+        packageData: new PackageData(weight: 1.0, length: 48.1, width: 20.2, height: 10.3),
+        selectedRate: new RateResponse(carrier: 'FedEx', serviceCode: 'FEDEX_GROUND', serviceName: 'FedEx Ground', price: 20.00, metadata: ['serviceType' => 'FEDEX_GROUND']),
+    ));
+
+    expect($response->success)->toBeTrue();
+
+    Saloon::assertSent(function ($sentRequest): bool {
+        if (! $sentRequest instanceof CreateShipment) {
+            return false;
+        }
+
+        return data_get($sentRequest->body()->all(), 'requestedShipment.requestedPackageLineItems.0.dimensions') === [
+            'length' => 49,
+            'width' => 21,
+            'height' => 11,
+            'units' => 'IN',
+        ];
+    });
+});
 
 it('stamps the weight-based rate and its One Rate variant alike with the FedEx packaging it sent', function (): void {
     fakeFedexRateEndpoints();

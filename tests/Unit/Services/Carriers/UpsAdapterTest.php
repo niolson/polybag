@@ -1655,6 +1655,37 @@ it('names the packaging on the rate request', function (?CarrierPackaging $packa
     assertMatchesUpsSchema($sent[0]['PackagingType'], 'Package_PackagingType', 'upsRating');
 })->with('ups packaging codes');
 
+it('rates a light bulky package with dimensions normalized upward to whole inches', function (): void {
+    fakeUpsRateEndpointsQuoting([]);
+
+    $request = new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
+        packages: [new PackageData(weight: 1.0, length: 48.1, width: 20.2, height: 10.3)],
+    );
+
+    $this->adapter->getRates($request, ['03']);
+
+    $package = sentUpsRatePackages()[0];
+
+    expect($package['Dimensions'])->toBe([
+        'UnitOfMeasurement' => ['Code' => 'IN', 'Description' => 'Inches'],
+        'Length' => '49',
+        'Width' => '21',
+        'Height' => '11',
+    ]);
+
+    assertMatchesUpsSchema($package['Dimensions'], 'Package_Dimensions', 'upsRating');
+});
+
+it('omits dimensions from UPS Letter rate requests', function (): void {
+    fakeUpsRateEndpointsQuoting([]);
+
+    $this->adapter->getRates(upsRateRequestIn(CarrierPackaging::UpsLetter), ['03']);
+
+    expect(sentUpsRatePackages()[0])->not->toHaveKey('Dimensions');
+});
+
 it('names the packaging on the ship request', function (?CarrierPackaging $packaging, string $expectedCode): void {
     fakeUpsShipEndpoints();
 
@@ -1694,6 +1725,33 @@ it('sends dimensions for every packaging except a UPS Letter, whose size is UPS\
     'a UPS Pak' => [CarrierPackaging::UpsPak, true],
     'the packer\'s own box' => [null, true],
 ]);
+
+it('uses the same upward dimension normalization when buying a UPS label', function (): void {
+    fakeUpsShipEndpoints();
+
+    $request = upsShipRequestIn(null);
+    $request = new ShipRequest(
+        fromAddress: $request->fromAddress,
+        toAddress: $request->toAddress,
+        packageData: new PackageData(weight: 1.0, length: 48.1, width: 20.2, height: 10.3),
+        selectedRate: $request->selectedRate,
+    );
+
+    expect($this->adapter->createShipment($request)->success)->toBeTrue();
+
+    Saloon::assertSent(function ($sentRequest): bool {
+        if (! $sentRequest instanceof CreateShipment) {
+            return false;
+        }
+
+        return data_get($sentRequest->body()->all(), 'ShipmentRequest.Shipment.Package.0.Dimensions') === [
+            'UnitOfMeasurement' => ['Code' => 'IN', 'Description' => 'Inches'],
+            'Length' => '49',
+            'Width' => '21',
+            'Height' => '11',
+        ];
+    });
+});
 
 it('stamps every rate from a UPS Pak request as exactly a UPS Pak', function (): void {
     fakeUpsRateEndpointsQuoting([
