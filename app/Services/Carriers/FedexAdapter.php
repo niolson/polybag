@@ -67,7 +67,7 @@ class FedexAdapter implements DirectCarrierAdapter
 
     private function resolveAccountNumber(?CarrierAccount $account): ?string
     {
-        return $account?->credential('account_number');
+        return $account?->fedexAccountNumber();
     }
 
     public function serviceCapability(string $serviceCode): ServiceCapability
@@ -371,10 +371,10 @@ class FedexAdapter implements DirectCarrierAdapter
     /**
      * Build the FedEx rate API request.
      *
-     * The same production-complete request goes to the sandbox. FedEx's sandbox
-     * virtualizes some request shapes with canned responses, so adding required
-     * rating inputs can change its returned fixture; production fields must not
-     * be omitted to preserve a sandbox price.
+     * FedEx's sandbox virtualizes request shapes with canned responses and
+     * rejects otherwise valid dimensions and detailed destination fields.
+     * Those fields are omitted only in sandbox; production receives the
+     * complete rating input, including residential classification.
      */
     private function buildRateApiRequest(RateRequest $request, array $serviceCodes, ?CarrierAccount $account): Rates
     {
@@ -417,7 +417,9 @@ class FedexAdapter implements DirectCarrierAdapter
                             'units' => 'LB',
                             'value' => $package->weight,
                         ],
-                        'dimensions' => $this->buildDimensions($package),
+                        ...($this->isSandbox() ? [] : [
+                            'dimensions' => $this->buildDimensions($package),
+                        ]),
                         ...$lineItemFields,
                     ],
                 ],
@@ -1274,7 +1276,9 @@ class FedexAdapter implements DirectCarrierAdapter
                             'units' => 'LB',
                             'value' => $package->weight,
                         ],
-                        'dimensions' => $this->buildDimensions($package),
+                        ...($this->isSandbox() ? [] : [
+                            'dimensions' => $this->buildDimensions($package),
+                        ]),
                     ],
                 ],
                 'shipmentSpecialServices' => [
@@ -1399,6 +1403,13 @@ class FedexAdapter implements DirectCarrierAdapter
      */
     private function buildRateDestinationAddress(RateRequest $request): array
     {
+        if ($this->isSandbox()) {
+            return [
+                'postalCode' => $request->destinationPostalCode,
+                'countryCode' => $request->destinationCountry,
+            ];
+        }
+
         $streetLines = $this->buildStreetLines(
             $request->destinationStreetAddress,
             $request->destinationStreetAddress2,

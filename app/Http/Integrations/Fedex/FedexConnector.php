@@ -88,15 +88,20 @@ class FedexConnector extends Connector
     {
         $childKey = $this->carrierAccount?->secret('child_key');
 
-        if (filled($childKey)) {
+        if ($this->usesChildCredentials()) {
             $env = $this->carrierAccount->credential('child_env') ?? 'production';
 
             return 'fedex_authenticator_child_'.$env.'_'.hash('sha256', $childKey);
         }
 
-        $isSandbox = (bool) app(SettingsService::class)->get('sandbox_mode', false);
+        return $this->carrierAccount
+            ? static::authenticatorCacheKeyForAccount($this->carrierAccount->id)
+            : static::getAuthenticatorCacheKey();
+    }
 
-        return $isSandbox ? 'fedex_authenticator_sandbox' : 'fedex_authenticator';
+    public static function authenticatorCacheKeyForAccount(int $accountId): string
+    {
+        return static::getAuthenticatorCacheKey().":{$accountId}";
     }
 
     public function getRequestTimeout(): float
@@ -140,15 +145,14 @@ class FedexConnector extends Connector
 
     public function resolveBaseUrl(): string
     {
-        $childKey = $this->carrierAccount?->secret('child_key');
-
-        $isSandbox = filled($childKey)
-            ? $this->carrierAccount->credential('child_env') === 'sandbox'
-            : (bool) app(SettingsService::class)->get('sandbox_mode', false);
-
-        return $isSandbox
+        return $this->usesSandbox()
             ? config('services.fedex.sandbox_url', 'https://apis-sandbox.fedex.com')
             : config('services.fedex.base_url', 'https://apis.fedex.com');
+    }
+
+    public function usesSandbox(): bool
+    {
+        return (bool) app(SettingsService::class)->get('sandbox_mode', false);
     }
 
     protected function defaultOauthConfig(): OAuthConfig
@@ -162,8 +166,8 @@ class FedexConnector extends Connector
     }
 
     /**
-     * Override token acquisition to route through polybag-connect proxy when
-     * child credentials are present, so the parent key/secret stays server-side.
+     * Route through polybag-connect when child credentials belong to the active
+     * environment; otherwise use that environment's direct client credentials.
      */
     public function getAccessToken(
         array $scopes = [],
@@ -173,7 +177,7 @@ class FedexConnector extends Connector
     ): OAuthAuthenticator|Response {
         $childKey = $this->carrierAccount?->secret('child_key');
 
-        if (filled($childKey)) {
+        if ($this->usesChildCredentials()) {
             // Child credentials (OAuth-provisioned) require the broker — it holds the parent
             // CSP key needed to exchange child_key/child_secret for an access token.
             $hasBroker = filled(config('services.oauth.broker_url'))
@@ -198,7 +202,7 @@ class FedexConnector extends Connector
         $response = $this->send($request);
 
         app(FedexMfaAuditService::class)->recordExchange(
-            filled($childKey) ? 'child-authorization' : 'parent-authorization',
+            'parent-authorization',
             $this->buildAuthRequestPayload($request, $requestedScopes, 'direct'),
             $this->buildAuthResponsePayload($response),
         );
@@ -279,8 +283,6 @@ class FedexConnector extends Connector
     private function getBrokeredChildAccessToken(string $childKey): OAuthAuthenticator
     {
         $childSecret = $this->carrierAccount?->secret('child_secret');
-        $childEnv = $this->carrierAccount?->credential('child_env');
-        $isSandbox = $childEnv === 'sandbox';
         $brokerUrl = rtrim(config('services.oauth.broker_url'), '/');
         $proxyPath = '/fedex/token';
         $fedexPath = '/oauth/token';
@@ -294,7 +296,7 @@ class FedexConnector extends Connector
             'signature' => $signature,
             'child_key' => $childKey,
             'child_secret' => $childSecret,
-            'sandbox' => $isSandbox ? '1' : '0',
+            'sandbox' => $this->usesSandbox() ? '1' : '0',
         ];
 
         $response = Http::acceptJson()->asForm()->post($brokerUrl.$proxyPath, $requestPayload);
@@ -391,14 +393,7 @@ class FedexConnector extends Connector
      */
     private function getParentCredentials(): array
     {
-        $childKey = $this->carrierAccount?->secret('child_key');
-        $childEnv = $this->carrierAccount?->credential('child_env');
-
-        $isSandbox = filled($childKey)
-            ? $childEnv === 'sandbox'
-            : (bool) app(SettingsService::class)->get('sandbox_mode', false);
-
-        if ($isSandbox) {
+        if ($this->usesSandbox()) {
             return [
                 'clientId' => (string) ($this->carrierAccount?->secret('sandbox_api_key') ?? ''),
                 'clientSecret' => (string) ($this->carrierAccount?->secret('sandbox_api_secret') ?? ''),
@@ -409,5 +404,19 @@ class FedexConnector extends Connector
             'clientId' => (string) ($this->carrierAccount?->secret('api_key') ?? ''),
             'clientSecret' => (string) ($this->carrierAccount?->secret('api_secret') ?? ''),
         ];
+    }
+
+    private function usesChildCredentials(): bool
+    {
+        $account = $this->carrierAccount;
+
+        if (! $account || blank($account->secret('child_key')) || blank($account->secret('child_secret'))) {
+            return false;
+        }
+
+        $childEnvironment = $account->credential('child_env') ?? 'production';
+        $activeEnvironment = $this->usesSandbox() ? 'sandbox' : 'production';
+
+        return $childEnvironment === $activeEnvironment;
     }
 }

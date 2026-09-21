@@ -5,8 +5,49 @@ use App\Models\CarrierAccount;
 use App\Models\CarrierAccountScope;
 use App\Models\Client;
 use App\Models\Location;
+use App\Models\Setting;
+use App\Services\SettingsService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Cache;
+
+it('requires sandbox client credentials when FedEx child credentials belong to production', function (): void {
+    Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
+    app(SettingsService::class)->clearCache();
+
+    $account = createFedexAccount(
+        ['child_key' => 'production-child-key', 'child_secret' => 'production-child-secret'],
+        ['child_env' => 'production'],
+    );
+
+    expect($account->hasUsableCredentials())->toBeFalse();
+
+    $account->mergeSecret('sandbox_api_key', 'sandbox-key');
+    $account->mergeSecret('sandbox_api_secret', 'sandbox-secret');
+
+    expect($account->hasUsableCredentials())->toBeFalse();
+
+    $account->mergeCredential('sandbox_account_number', '740561073');
+
+    expect($account->hasUsableCredentials())->toBeTrue();
+});
+
+it('reports FedEx connection status for the active environment', function (): void {
+    Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
+    app(SettingsService::class)->clearCache();
+
+    $account = createFedexAccount(
+        ['child_key' => 'production-child-key', 'child_secret' => 'production-child-secret'],
+        ['child_env' => 'production'],
+    );
+
+    expect($account->connectionStatus())->toBe('Needs Setup');
+
+    $account->mergeSecret('sandbox_api_key', 'sandbox-key');
+    $account->mergeSecret('sandbox_api_secret', 'sandbox-secret');
+    $account->mergeCredential('sandbox_account_number', '740561073');
+
+    expect($account->connectionStatus())->toBe('Connected');
+});
 
 describe('CarrierAccount::resolveForShipment', function (): void {
     beforeEach(function (): void {

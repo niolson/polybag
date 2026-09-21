@@ -73,7 +73,13 @@ trait HasFedexRegistration
                 $this->fedexAccountAuthToken,
                 $this->fedexFactor2Method,
             );
-            Notification::make()->success()->title('PIN resent.')->send();
+            Notification::make()
+                ->success()
+                ->title('PIN request accepted by FedEx.')
+                ->body('Delivery may take a few minutes. Avoid repeated requests because FedEx limits attempts across all methods.')
+                ->send();
+        } catch (FedexRegistrationMaxRetriesException $e) {
+            $this->handleFedexRegistrationLockout($e);
         } catch (\Throwable $e) {
             $this->notifyFedexRegistrationError($e);
         }
@@ -208,9 +214,12 @@ trait HasFedexRegistration
     {
         $account = $this->fedexCarrierAccount();
 
-        app(FedexRegistrationService::class)->saveChildCredentialsToAccount($childKey, $childSecret, $account);
-        $account->mergeCredential('account_number', $accountNumber);
-        $account->save();
+        app(FedexRegistrationService::class)->saveChildCredentialsToAccount(
+            $childKey,
+            $childSecret,
+            $account,
+            $accountNumber,
+        );
     }
 
     protected function fedexRegisterAction(): Action
@@ -274,7 +283,8 @@ trait HasFedexRegistration
                             ->columnSpanFull()
                             ->helperText('Must match the name on your FedEx account.'),
                         Toggle::make('fedex_reg_residential')
-                            ->label('Residential Address')
+                            ->label('FedEx classifies this account address as residential')
+                            ->helperText('This must match how FedEx classifies the address on the account. Leave it off for a home-based business unless FedEx identifies the account address as residential.')
                             ->default(false)
                             ->columnSpanFull(),
                         AddressForm::countrySelect('fedex_reg_country', 'fedex_reg_state')
@@ -354,6 +364,7 @@ trait HasFedexRegistration
                     ->schema(fn (): array => [
                         Radio::make('fedex_factor2_method')
                             ->label('Verification Method')
+                            ->helperText('FedEx limits PIN requests across email, SMS, and phone. Allow a few minutes for delivery before requesting another PIN.')
                             ->options($this->getFedexAvailableVerificationOptions())
                             ->required()
                             ->live()
@@ -384,12 +395,16 @@ trait HasFedexRegistration
                 Step::make('Enter Verification')
                     ->description(fn (): string => $this->fedexSupportFallbackActive
                         ? 'Contact customer service'
-                        : ($this->fedexFactor2Method === 'INVOICE' ? 'Enter a recent FedEx invoice' : 'Enter the PIN sent to you'))
+                        : ($this->fedexFactor2Method === 'INVOICE' ? 'Enter a recent FedEx invoice' : 'Enter the PIN from FedEx'))
                     ->schema(function (): array {
                         if ($this->fedexSupportFallbackActive) {
+                            $hasPinLockout = array_intersect(['SMS', 'CALL', 'EMAIL'], $this->fedexLockedFactor2Methods) !== [];
+                            $retryMessage = $hasPinLockout
+                                ? 'FedEx has temporarily blocked more PIN attempts. The retry limit is shared across email, SMS, and phone. Wait before starting over, or contact FedEx Customer Service for technical support.'
+                                : 'FedEx has temporarily blocked more invoice verification attempts. Wait before starting over, or contact FedEx Customer Service for technical support.';
                             $body = $this->hasAvailableFedexFactor2Methods()
-                                ? 'We are unable to process this request. Please try again later or call FedEx Customer Service and ask for technical support. You may also go back and choose a different validation method.'
-                                : 'We are unable to process this request. Please try again later or call FedEx Customer Service and ask for technical support.';
+                                ? $retryMessage.' You may also go back and choose a different validation method.'
+                                : $retryMessage;
 
                             return [
                                 Placeholder::make('fedex_support_fallback')

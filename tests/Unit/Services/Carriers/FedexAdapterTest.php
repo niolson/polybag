@@ -92,6 +92,41 @@ it('is not configured in production mode when only sandbox credentials are set',
     expect($this->adapter->isConfigured())->toBeFalse();
 });
 
+it('uses the sandbox account number for sandbox rate requests', function (): void {
+    CarrierAccount::query()->delete();
+    createFedexAccount(
+        secrets: [
+            'api_key' => null,
+            'api_secret' => null,
+            'sandbox_api_key' => 'sandbox_key',
+            'sandbox_api_secret' => 'sandbox_secret',
+        ],
+        credentials: [
+            'account_number' => 'production_account',
+            'production_account_number' => 'production_account',
+            'sandbox_account_number' => 'sandbox_account',
+        ],
+    );
+
+    app(SettingsService::class)->set('sandbox_mode', true);
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Rates::class => MockResponse::make(['output' => ['rateReplyDetails' => []]]),
+    ]);
+
+    $this->adapter->getRates(new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
+        packages: [new PackageData(weight: 5.0, length: 12, width: 10, height: 8)],
+    ), ['FEDEX_GROUND']);
+
+    Saloon::assertSent(function ($request): bool {
+        return $request instanceof Rates
+            && data_get($request->body()->all(), 'accountNumber.value') === 'sandbox_account';
+    });
+});
+
 it('prepares FedEx rates without keeping account state on the adapter', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
@@ -445,6 +480,34 @@ it('sends the full destination and explicit residential boolean on rate requests
     });
 })->with([true, false]);
 
+it('sends only destination postal code and country on sandbox rate requests', function (): void {
+    app(SettingsService::class)->set('sandbox_mode', true);
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Rates::class => MockResponse::make(['output' => ['rateReplyDetails' => []]]),
+    ]);
+
+    $this->adapter->getRates(new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
+        destinationCity: 'Beverly Hills',
+        destinationStateOrProvince: 'CA',
+        residential: true,
+        packages: [new PackageData(weight: 2.0, length: 10, width: 8, height: 4)],
+        destinationStreetAddress: '123 Test Street',
+        destinationStreetAddress2: 'Suite 456',
+    ), ['FEDEX_GROUND']);
+
+    Saloon::assertSent(function ($request): bool {
+        return $request instanceof Rates
+            && $request->body()->all()['requestedShipment']['recipient']['address'] === [
+                'postalCode' => '90210',
+                'countryCode' => 'US',
+            ];
+    });
+});
+
 it('cancels a FedEx shipment', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
@@ -611,9 +674,7 @@ it('leaves domestic sandbox rates to the FedEx sandbox API', function (): void {
     Saloon::assertSent(Rates::class);
 });
 
-it('sends the caller\'s production-complete rate request to the FedEx sandbox', function (): void {
-    // Sandbox fixture matching must not strip production rating inputs from
-    // the caller's request.
+it('omits package dimensions from FedEx sandbox rate requests', function (): void {
     app(SettingsService::class)->set('sandbox_mode', true);
     fakeFedexRateEndpoints();
 
@@ -634,8 +695,31 @@ it('sends the caller\'s production-complete rate request to the FedEx sandbox', 
         ->and($sent['shipDateStamp'])->toBe('2026-09-21')
         ->and($sent['requestedPackageLineItems'])->toBe([[
             'weight' => ['units' => 'LB', 'value' => 5.0],
-            'dimensions' => ['length' => 12, 'width' => 10, 'height' => 8, 'units' => 'IN'],
         ]]);
+});
+
+it('omits package dimensions from FedEx sandbox One Rate requests', function (): void {
+    app(SettingsService::class)->set('sandbox_mode', true);
+    fakeFedexRateEndpoints();
+
+    $request = new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
+        packages: [new PackageData(
+            weight: 5.0,
+            length: 12,
+            width: 10,
+            height: 8,
+            carrierPackaging: CarrierPackaging::FedexPak,
+        )],
+    );
+
+    $this->adapter->getRates($request, ['EXPRESS_SAVER', 'FEDEX_GROUND']);
+
+    expect(sentFedexRateShipments())->toHaveCount(2)
+        ->and(array_column(array_column(sentFedexRateShipments(), 'requestedPackageLineItems'), 0))->each(
+            fn ($lineItem) => $lineItem->not->toHaveKey('dimensions'),
+        );
 });
 
 it('asks FedEx for international rates outside sandbox mode', function (): void {

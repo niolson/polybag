@@ -13,6 +13,10 @@ class FedexRegistrationMaxRetriesException extends RuntimeException
         public readonly ?string $fedexCode = null,
         public readonly array $lockedMethods = [],
     ) {
-        parent::__construct('We are unable to process this request. Please try again later or call FedEx Customer Service and ask for technical support.');
+        parent::__construct(match ($fedexCode) {
+            'PINGENERATION.MAXRETRY.EXCEEDED', 'PINVALIDATION.MAXRETRY.EXCEEDED' => 'FedEx has temporarily blocked more PIN attempts. The retry limit is shared across email, SMS, and phone. Wait before starting over, or contact FedEx Customer Service for technical support.',
+            'INVOICEVALIDATION.MAXRETRY.EXCEEDED' => 'FedEx has temporarily blocked more invoice verification attempts. Wait before starting over, or contact FedEx Customer Service for technical support.',
+            default => 'FedEx has temporarily blocked more verification attempts. Wait before starting over, or contact FedEx Customer Service for technical support.',
+        });
     }
 }

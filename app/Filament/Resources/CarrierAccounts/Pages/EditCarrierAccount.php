@@ -134,7 +134,8 @@ class EditCarrierAccount extends EditRecord
 
         // Virtual credential fields for FedEx and UPS (stored in credentials JSON)
         $credentialFieldMap = [
-            'fedex_account_number' => 'account_number',
+            'fedex_production_account_number' => 'production_account_number',
+            'fedex_sandbox_account_number' => 'sandbox_account_number',
             'ups_account_number' => 'account_number',
         ];
 
