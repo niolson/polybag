@@ -50,6 +50,11 @@ class ShipmentRowPreparer
         $client = $clientOverride ?? $importSource->client;
         $status = ShipmentStatus::tryFrom((string) ($data['_import_status'] ?? '')) ?? ShipmentStatus::Open;
         $shippingMethodId = $this->references->shippingMethodIdFor($data, $client);
+        $preserveExistingFields = $data['_preserve_existing_fields'] ?? [];
+
+        if (! array_key_exists('residential', $data) || $data['residential'] === null) {
+            $preserveExistingFields[] = 'residential';
+        }
 
         // Sources that read a per-order shipping reference (e.g. Amazon's
         // fulfillmentServiceLevel) can supply the source's configured default as
@@ -84,6 +89,7 @@ class ShipmentRowPreparer
                 'phone_extension' => $phoneExtension,
                 'email' => $data['email'] ?? null,
                 'value' => $data['value'] ?? null,
+                'residential' => $data['residential'] ?? null,
                 'validation_message' => $validationWarnings !== [] ? implode('; ', $validationWarnings) : null,
                 'shipping_method_reference' => $data['shipping_method_id'] ?? null,
                 'shipping_method_id' => $shippingMethodId,
@@ -92,7 +98,7 @@ class ShipmentRowPreparer
                 'deliver_by' => $data['deliver_by'] ?? null,
                 'metadata' => isset($data['metadata']) ? json_encode($data['metadata']) : null,
                 'status' => $status->value,
-                '_preserve_existing_fields' => $data['_preserve_existing_fields'] ?? [],
+                '_preserve_existing_fields' => array_values(array_unique($preserveExistingFields)),
             ],
             warnings: $validationWarnings,
         );
