@@ -4,6 +4,9 @@ use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\Enums\BoxSizeType;
 use App\Enums\CarrierPackaging;
+use App\Models\Location;
+use App\Models\Package;
+use App\Models\Shipment;
 use Carbon\CarbonImmutable;
 
 /**
@@ -18,6 +21,8 @@ function rateRequestFor(array $overrides = []): RateRequest
         'destinationPostalCode' => '90210',
         'destinationCity' => 'Beverly Hills',
         'destinationStateOrProvince' => 'CA',
+        'destinationStreetAddress' => '123 Palm Drive',
+        'destinationStreetAddress2' => 'Suite 4',
         'residential' => true,
         'packages' => [new PackageData(weight: 2.0, length: 10, width: 8, height: 6, boxType: BoxSizeType::BOX)],
         'specialServiceCodes' => ['signature_required', 'declared_value'],
@@ -33,6 +38,28 @@ function rateRequestFor(array $overrides = []): RateRequest
 
 it('digests to 64 hex characters', function (): void {
     expect(rateRequestFor()->fingerprint())->toMatch('/^[0-9a-f]{64}$/');
+});
+
+it('builds a quote destination from server address and classification state', function (): void {
+    $location = Location::factory()->default()->create();
+    $shipment = Shipment::factory()->create([
+        'address1' => '1 Imported Street',
+        'address2' => 'Unit 2',
+        'city' => 'Imported City',
+        'residential' => true,
+        'validated_address1' => '9 Validated Avenue',
+        'validated_address2' => null,
+        'validated_city' => 'Validated City',
+        'validated_residential' => false,
+    ]);
+    $package = Package::factory()->for($shipment)->for($location)->create();
+
+    $request = RateRequest::fromPackage($package);
+
+    expect($request->destinationStreetAddress)->toBe('9 Validated Avenue')
+        ->and($request->destinationStreetAddress2)->toBe('Unit 2')
+        ->and($request->destinationCity)->toBe('Validated City')
+        ->and($request->residential)->toBeFalse();
 });
 
 it('is stable across the order codes and config keys were given in', function (): void {
@@ -64,6 +91,8 @@ it('changes with anything the carrier was asked to price', function (): void {
     $base = rateRequestFor()->fingerprint();
 
     expect(rateRequestFor(['destinationPostalCode' => '99501'])->fingerprint())->not->toBe($base)
+        ->and(rateRequestFor(['destinationStreetAddress' => '125 Palm Drive'])->fingerprint())->not->toBe($base)
+        ->and(rateRequestFor(['destinationStreetAddress2' => null])->fingerprint())->not->toBe($base)
         ->and(rateRequestFor(['residential' => false])->fingerprint())->not->toBe($base)
         ->and(rateRequestFor(['packages' => [new PackageData(weight: 3.0, length: 10, width: 8, height: 6, boxType: BoxSizeType::BOX)]])->fingerprint())->not->toBe($base)
         ->and(rateRequestFor(['packages' => [new PackageData(weight: 2.0, length: 10, width: 8, height: 6, boxType: BoxSizeType::BOX, carrierPackaging: CarrierPackaging::UspsMediumFlatRateBox)]])->fingerprint())->not->toBe($base)

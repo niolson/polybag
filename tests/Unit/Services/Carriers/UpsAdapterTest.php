@@ -903,6 +903,67 @@ it('sends a fully qualified origin on rate requests so international lanes resol
     });
 });
 
+it('sends the full destination and residential classification on rate requests', function (bool $residential): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Rate::class => MockResponse::make(['RateResponse' => ['RatedShipment' => []]]),
+    ]);
+
+    $this->adapter->getRates(new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
+        destinationCity: 'Beverly Hills',
+        destinationStateOrProvince: 'CA',
+        residential: $residential,
+        packages: [new PackageData(weight: 2.0, length: 10, width: 8, height: 4)],
+        destinationStreetAddress: '123 Palm Drive',
+        destinationStreetAddress2: 'Suite 4',
+    ), ['03']);
+
+    Saloon::assertSent(function ($request) use ($residential): bool {
+        if (! $request instanceof Rate) {
+            return false;
+        }
+
+        $address = $request->body()->all()['RateRequest']['Shipment']['ShipTo']['Address'];
+
+        return $address['AddressLine'] === ['123 Palm Drive', 'Suite 4']
+            && $address['City'] === 'Beverly Hills'
+            && $address['StateProvinceCode'] === 'CA'
+            && array_key_exists('ResidentialAddressIndicator', $address) === $residential;
+    });
+})->with([true, false]);
+
+it('sends the same residential classification on UPS label purchase', function (?bool $classification, bool $expectedResidential): void {
+    fakeUpsShipEndpoints();
+
+    $destination = new AddressData(
+        firstName: 'John',
+        lastName: 'Doe',
+        streetAddress: '456 Main St',
+        city: 'Los Angeles',
+        stateOrProvince: 'CA',
+        postalCode: '90210',
+        residential: $classification,
+    );
+
+    expect($this->adapter->createShipment(upsShipRequestTo($destination))->success)->toBeTrue();
+
+    Saloon::assertSent(function ($request) use ($expectedResidential): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $address = $request->body()->all()['ShipmentRequest']['Shipment']['ShipTo']['Address'];
+
+        return array_key_exists('ResidentialAddressIndicator', $address) === $expectedResidential;
+    });
+})->with([
+    'validated or imported residential' => [true, true],
+    'validated or imported commercial' => [false, false],
+    'unknown falls back to residential' => [null, true],
+]);
+
 it('declares the contents value on rate requests that leave the origin country', function (array $destination): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),

@@ -524,13 +524,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
                         'Address' => $this->buildRateOriginAddress($request),
                     ],
                     'ShipTo' => [
-                        'Address' => array_filter([
-                            'City' => $request->destinationCity,
-                            'StateProvinceCode' => $request->destinationStateOrProvince,
-                            'PostalCode' => $request->destinationPostalCode,
-                            'CountryCode' => $request->destinationCountry,
-                            'ResidentialAddressIndicator' => $request->residential ? '' : null,
-                        ], fn ($v): bool => $v !== null),
+                        'Address' => $this->buildRateDestinationAddress($request),
                     ],
                     'ShipFrom' => [
                         'Address' => $this->buildRateOriginAddress($request),
@@ -602,7 +596,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
                     'Name' => trim($request->toAddress->firstName.' '.$request->toAddress->lastName),
                     'AttentionName' => $this->buildAttentionName($request->toAddress),
                     ...$this->buildPhone($request->toAddress),
-                    'Address' => $this->buildAddress($request->toAddress),
+                    'Address' => $this->buildAddress($request->toAddress, includeResidentialClassification: true),
                 ],
                 'ShipFrom' => [
                     'Name' => trim($request->fromAddress->company ?: $request->fromAddress->firstName.' '.$request->fromAddress->lastName),
@@ -1196,6 +1190,26 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    private function buildRateDestinationAddress(RateRequest $request): array
+    {
+        $addressLines = $this->buildAddressLines(
+            $request->destinationStreetAddress,
+            $request->destinationStreetAddress2,
+        );
+
+        return array_filter([
+            'AddressLine' => $addressLines === [] ? null : $addressLines,
+            'City' => $request->destinationCity,
+            'StateProvinceCode' => $request->destinationStateOrProvince,
+            'PostalCode' => $request->destinationPostalCode,
+            'CountryCode' => $request->destinationCountry,
+            'ResidentialAddressIndicator' => $request->residential ? '' : null,
+        ], fn (mixed $value): bool => $value !== null);
+    }
+
+    /**
      * Whether a rate request leaves the country it ships from.
      *
      * Puerto Rico reaches us under either encoding depending on the import
@@ -1298,20 +1312,33 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
         return trim($address->firstName.' '.$address->lastName) ?: (string) $address->company;
     }
 
-    private function buildAddress(AddressData $address): array
+    private function buildAddress(AddressData $address, bool $includeResidentialClassification = false): array
     {
-        $addressLines = array_values(array_filter([
-            $address->streetAddress,
-            $address->streetAddress2,
-        ]));
+        $addressLines = $this->buildAddressLines($address->streetAddress, $address->streetAddress2);
 
-        return array_filter([
-            'AddressLine' => $addressLines,
-            'City' => $address->city,
-            'StateProvinceCode' => $address->stateOrProvince,
-            'PostalCode' => $address->postalCode,
-            'CountryCode' => $address->country,
-        ]);
+        return [
+            ...array_filter([
+                'AddressLine' => $addressLines,
+                'City' => $address->city,
+                'StateProvinceCode' => $address->stateOrProvince,
+                'PostalCode' => $address->postalCode,
+                'CountryCode' => $address->country,
+            ], fn (mixed $value): bool => filled($value)),
+            ...($includeResidentialClassification && $address->isResidential() ? [
+                'ResidentialAddressIndicator' => '',
+            ] : []),
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function buildAddressLines(?string $streetAddress, ?string $streetAddress2): array
+    {
+        return array_values(array_filter(
+            [$streetAddress, $streetAddress2],
+            fn (?string $value): bool => filled($value),
+        ));
     }
 
     /**

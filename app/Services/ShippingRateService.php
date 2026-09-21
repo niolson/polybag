@@ -96,8 +96,9 @@ class ShippingRateService
         $package = Package::with(['packageItems', 'shipment.shippingMethod'])
             ->findOrFail($packageId);
 
-        $rateRequest = RateRequest::fromPackage($package);
-        $carrierTasks = $this->buildCarrierTasks($package, $rateRequest);
+        $destination = AddressData::fromShipment($package->shipment);
+        $rateRequest = RateRequest::fromPackage($package, $destination);
+        $carrierTasks = $this->buildCarrierTasks($package, $rateRequest, $destination);
 
         // One ship date per carrier, read once and used twice: the carrier is
         // quoted for it, and the offer's window ends with it. Reading it again
@@ -256,11 +257,12 @@ class ShippingRateService
      */
     public function blindPurchaseOffersFor(Package $package): Collection
     {
-        $rateRequest = RateRequest::fromPackage($package);
+        $destination = AddressData::fromShipment($package->shipment);
+        $rateRequest = RateRequest::fromPackage($package, $destination);
         $registry = app(CarrierRegistry::class);
         $shipDateService = app(ShipDateService::class);
 
-        foreach ($this->buildCarrierTasks($package, $rateRequest) as $task) {
+        foreach ($this->buildCarrierTasks($package, $rateRequest, $destination) as $task) {
             $source = $registry->blindPurchaseSourceFor($task['name']);
 
             if (! $source || ! $source->isConfigured()) {
@@ -288,8 +290,11 @@ class ShippingRateService
      *
      * @throws NoActiveCarrierServicesException
      */
-    private function buildCarrierTasks(Package $package, RateRequest $rateRequest): array
-    {
+    private function buildCarrierTasks(
+        Package $package,
+        RateRequest $rateRequest,
+        AddressData $destination,
+    ): array {
         $shipment = $package->shipment;
         $shippingMethod = $shipment->shippingMethod;
 
@@ -314,7 +319,6 @@ class ShippingRateService
         $carrierTasks = [];
 
         if ($shippingMethod) {
-            $destination = AddressData::fromShipment($shipment);
             $activeCarrierServices = $this->getActiveCarrierServices($shippingMethod, $destination);
 
             if ($activeCarrierServices->isEmpty()) {
@@ -353,7 +357,6 @@ class ShippingRateService
             'package_id' => $package->id,
         ]);
 
-        $destination = AddressData::fromShipment($shipment);
         $restrictedDestination = $destination->isPoBox() || $destination->isMilitary();
 
         foreach (array_keys(app(CarrierRegistry::class)->getConfiguredAdapters()) as $name) {

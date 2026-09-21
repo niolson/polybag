@@ -1,6 +1,29 @@
 <?php
 
 use App\DataTransferObjects\Shipping\AddressData;
+use App\Models\Shipment;
+
+it('resolves validated, imported, and unknown residential classifications', function (): void {
+    $validatedCommercial = Shipment::factory()->create([
+        'residential' => true,
+        'validated_residential' => false,
+    ]);
+    $importedCommercial = Shipment::factory()->create([
+        'residential' => false,
+        'validated_residential' => null,
+    ]);
+    $unknown = Shipment::factory()->create([
+        'residential' => null,
+        'validated_residential' => null,
+    ]);
+
+    expect(AddressData::fromShipment($validatedCommercial)->residential)->toBeFalse()
+        ->and(AddressData::fromShipment($validatedCommercial)->isResidential())->toBeFalse()
+        ->and(AddressData::fromShipment($importedCommercial)->residential)->toBeFalse()
+        ->and(AddressData::fromShipment($importedCommercial)->isResidential())->toBeFalse()
+        ->and(AddressData::fromShipment($unknown)->residential)->toBeNull()
+        ->and(AddressData::fromShipment($unknown)->isResidential())->toBeTrue();
+});
 
 function makeAddress(string $streetAddress, ?string $streetAddress2 = null, ?string $uspsCarrierRoute = null, string $country = 'US'): AddressData
 {

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\RuleEvaluationResult;
@@ -195,7 +196,7 @@ class RuleEvaluator
             return true;
         }
 
-        $shipmentResidential = $shipment->validated_residential ?? $shipment->residential ?? false;
+        $shipmentResidential = AddressData::fromShipment($shipment)->isResidential();
 
         return (bool) $shipmentResidential === (bool) $isResidential;
     }
