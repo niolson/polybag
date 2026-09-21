@@ -41,8 +41,8 @@ The recorded price difference is evidence of a mismatch, not proof that any sing
 field explains every surcharge or that sandbox prices predict production charges.
 
 1. [Send UPS and FedEx rate dimensions](issues/01-ups-rate-request-omits-dimensions-and-residential.md).
-2. [Keep residential classification consistent](issues/02-residential-classification-rate-purchase-consistency.md).
-3. [Import Amazon address classification](issues/03-import-amazon-address-classification.md).
+2. [Keep residential classification consistent](issues/02-residential-classification-rate-purchase-consistency.md) — done.
+3. [Import Amazon address classification](issues/03-import-amazon-address-classification.md) — done.
 
-Issue `01` is done. Issues `02` and `03` remain `needs-triage`; the unknown-address
-representation and fallback are proposed policy.
+All three work items are implemented. Unknown imported classification remains nullable and
+uses the conservative residential fallback agreed in issue `02`.

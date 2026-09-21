@@ -13,7 +13,7 @@ class ShipmentBatchWriter
     private const PRESERVABLE_FIELDS = [
         'first_name', 'last_name', 'company', 'address1', 'address2', 'city',
         'state_or_province', 'postal_code', 'country', 'phone', 'phone_e164',
-        'phone_extension', 'email',
+        'phone_extension', 'email', 'residential',
     ];
 
     /**
@@ -86,6 +86,7 @@ class ShipmentBatchWriter
             'first_name', 'last_name', 'company',
             'address1', 'address2', 'city', 'state_or_province', 'postal_code', 'country',
             'phone', 'phone_e164', 'phone_extension', 'email', 'value',
+            'residential',
             'validation_message', 'shipping_method_reference', 'shipping_method_id',
             'channel_reference', 'deliver_by', 'metadata', 'updated_at',
             'channel_id', 'status',

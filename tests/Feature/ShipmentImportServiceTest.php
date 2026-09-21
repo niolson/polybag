@@ -1,6 +1,7 @@
 <?php
 
 use App\Contracts\DataSourceInterface;
+use App\DataTransferObjects\Shipping\RateRequest;
 use App\Enums\Role;
 use App\Enums\ShipmentStatus;
 use App\Models\Channel;
@@ -166,6 +167,65 @@ it('imports a shipment with a matching shipping method', function (): void {
         ->and($shipment->source_record_id)->toBe('ORD-001')
         ->and($shipment->dataSource)->not->toBeNull()
         ->and($shipment->dataSource->id)->toBe($this->dataSource->id);
+});
+
+it('persists explicit residential classification from the shared import contract', function (bool $residential): void {
+    $source = fakeSource(collect([[
+        'shipment_reference' => 'ORD-CLASSIFICATION-001',
+        'address1' => '123 Main St',
+        'city' => 'Seattle',
+        'state_or_province' => 'WA',
+        'postal_code' => '98101',
+        'country' => 'US',
+        'residential' => $residential,
+    ]]));
+
+    ShipmentImportService::forSource($source, $this->dataSource)->import();
+
+    expect(Shipment::where('shipment_reference', 'ORD-CLASSIFICATION-001')->firstOrFail()->residential)
+        ->toBe($residential);
+})->with([
+    'residential' => true,
+    'commercial' => false,
+]);
+
+it('preserves known residential classification when a reimport omits it', function (): void {
+    ShipmentImportService::forSource(
+        fakeSource(collect([onExistingRow(['residential' => false])])),
+        $this->dataSource,
+    )->import();
+
+    ShipmentImportService::forSource(
+        fakeSource(collect([onExistingRow(['address1' => '99 Changed Ave'])])),
+        $this->dataSource,
+    )->import();
+
+    $shipment = Shipment::where('shipment_reference', 'ORD-EXIST-001')->firstOrFail();
+
+    expect($shipment->address1)->toBe('99 Changed Ave')
+        ->and($shipment->residential)->toBeFalse();
+});
+
+it('updates imported classification without overriding validated classification precedence', function (): void {
+    ShipmentImportService::forSource(
+        fakeSource(collect([onExistingRow(['residential' => false])])),
+        $this->dataSource,
+    )->import();
+
+    $shipment = Shipment::where('shipment_reference', 'ORD-EXIST-001')->firstOrFail();
+    $shipment->update(['validated_residential' => false]);
+
+    ShipmentImportService::forSource(
+        fakeSource(collect([onExistingRow(['residential' => true])])),
+        $this->dataSource,
+    )->import();
+
+    $shipment->refresh();
+    $package = Package::factory()->for($shipment)->create();
+
+    expect($shipment->residential)->toBeTrue()
+        ->and($shipment->validated_residential)->toBeFalse()
+        ->and(RateRequest::fromPackage($package)->residential)->toBeFalse();
 });
 
 it('does not treat a mapped source status as an internal shipment status', function (): void {

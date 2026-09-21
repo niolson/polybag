@@ -1,5 +1,6 @@
 <?php
 
+use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\PackageExportStatus;
 use App\Enums\PostageSource;
@@ -293,6 +294,39 @@ it('imports amazon orders into shipments table with metadata', function (): void
     });
     Saloon::assertNotSent(SearchCatalogItems::class);
 });
+
+it('imports definitive Amazon address classifications and keeps other address types unknown', function (
+    ?string $addressType,
+    ?bool $storedResidential,
+    bool $effectiveResidential,
+): void {
+    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($channel) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $channel->id]));
+
+    $order = sampleAmazonOrder();
+
+    if ($addressType !== null) {
+        $order['recipient']['deliveryAddress']['addressType'] = $addressType;
+    }
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([$order]),
+    ]);
+
+    ShipmentImportService::forSource(amazonSourceForTest(), $this->dataSource)->import();
+
+    $shipment = Shipment::where('shipment_reference', '111-2222222-3333333')->firstOrFail();
+    $package = Package::factory()->for($shipment)->create();
+
+    expect($shipment->residential)->toBe($storedResidential)
+        ->and($shipment->metadata['amazon_address_type'])->toBe($addressType)
+        ->and(RateRequest::fromPackage($package)->residential)->toBe($effectiveResidential);
+})->with([
+    'residential' => ['RESIDENTIAL', true, true],
+    'commercial' => ['COMMERCIAL', false, false],
+    'missing' => [null, null, true],
+    'pickup point' => ['PICKUP_POINT', null, true],
+    'unexpected' => ['LOCKER', null, true],
+]);
 
 it('maps the Amazon fulfillment service level to a shipping method alias', function (): void {
     tap(Channel::factory()->create(['name' => 'Amazon']), fn ($c) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $c->id]));
@@ -1331,6 +1365,7 @@ it('preserves existing recipient data while marking a historical Amazon order sh
         'postal_code' => '97201',
         'country' => 'US',
         'email' => 'preserve@example.com',
+        'residential' => false,
     ]);
 
     $order = sampleAmazonOrder();
@@ -1356,7 +1391,8 @@ it('preserves existing recipient data while marking a historical Amazon order sh
         ->and($shipment->first_name)->toBe('Original')
         ->and($shipment->address1)->toBe('123 Existing St')
         ->and($shipment->city)->toBe('Portland')
-        ->and($shipment->email)->toBe('preserve@example.com');
+        ->and($shipment->email)->toBe('preserve@example.com')
+        ->and($shipment->residential)->toBeFalse();
 });
 
 it('preserves an existing buyer email when Amazon omits buyer data', function (): void {

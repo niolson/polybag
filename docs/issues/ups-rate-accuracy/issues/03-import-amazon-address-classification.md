@@ -2,7 +2,7 @@
 
 # Import Amazon address classification and persist explicit residential data
 
-Status: needs-triage
+Status: implemented
 Category: bug
 Repo: `polybag`
 
@@ -61,3 +61,14 @@ API calls or real order data.
 Agree the unknown/provenance contract with
 [issue 02](02-residential-classification-rate-purchase-consistency.md) before choosing
 schema changes. Independent of the dimensions fix in issue 01.
+
+## Implementation notes
+
+2026-09-21: Amazon `RESIDENTIAL` and `COMMERCIAL` address types now enter the shared
+import contract as explicit booleans. Missing, `PICKUP_POINT`, and unexpected values remain
+unknown and use issue 02's conservative residential fallback for rating; the raw Amazon
+address type is retained in Shipment metadata. The shared row preparer and batch writer now
+persist explicit residential values from every source while preserving a previously known
+value when a reimport omits classification. Validated classification remains separate and
+takes precedence. Historical recipient preservation and Shopify's unclassified addresses are
+covered by the affected feature suites.

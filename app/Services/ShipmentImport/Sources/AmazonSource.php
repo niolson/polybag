@@ -502,6 +502,12 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
         $address = $order['recipient']['deliveryAddress'] ?? [];
         $items = $order['orderItems'] ?? [];
         $recipientAvailable = filled($address['addressLine1'] ?? null) && filled($address['city'] ?? null);
+        $addressType = is_string($address['addressType'] ?? null) ? $address['addressType'] : null;
+        $residential = match ($addressType) {
+            'RESIDENTIAL' => true,
+            'COMMERCIAL' => false,
+            default => null,
+        };
         $preserveExistingFields = ['email'];
 
         if ($this->isHistoricalImport() && ! $recipientAvailable) {
@@ -557,6 +563,7 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
             'phone' => $address['phone'] ?? null,
             'email' => null,
             'value' => round($totalValue, 2),
+            'residential' => $residential,
             'channel_id' => $this->config['channel_name'] ?? 'Amazon',
             'shipping_method_id' => filled($serviceLevel) ? $serviceLevel : $defaultShippingMethod,
             '_shipping_method_fallback' => $defaultShippingMethod,
@@ -568,6 +575,7 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
                 'amazon_order_status' => $fulfillment['fulfillmentStatus'] ?? null,
                 'amazon_created_time' => $order['createdTime'] ?? null,
                 'amazon_sales_channel' => $order['salesChannel'] ?? null,
+                'amazon_address_type' => $addressType,
                 'amazon_fulfilled_by' => $fulfillment['fulfilledBy'] ?? null,
                 'amazon_fulfillment_service_level' => $serviceLevel,
                 'amazon_ship_by_window' => $fulfillment['shipByWindow'] ?? null,

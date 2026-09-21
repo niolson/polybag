@@ -192,6 +192,7 @@ it('imports mapped fulfillment orders and skips only unmapped locations', functi
     expect($shipment->location_id)->toBe($location->id)
         ->and($shipment->data_source_location_id)->not->toBeNull()
         ->and($shipment->channel_id)->toBe($channel->id)
+        ->and($shipment->residential)->toBeNull()
         ->and($shipment->metadata['shopify_fulfillment_order_id'])->toBe('gid://shopify/FulfillmentOrder/1001');
     expect(Shipment::where('shipment_reference', '#1001')->count())->toBe(2)
         ->and(Shipment::where('source_record_id', 'gid://shopify/FulfillmentOrder/1003')->value('location_id'))->toBe($location->id);
