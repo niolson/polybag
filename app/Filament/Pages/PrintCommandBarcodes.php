@@ -25,6 +25,7 @@ class PrintCommandBarcodes extends Page
             ['code' => '*1', 'label' => 'Ship Package', 'description' => 'Ship the current package (same as F12)'],
             ['code' => '*2', 'label' => 'Reprint Last Label', 'description' => 'Reprint the last shipped label'],
             ['code' => '*3', 'label' => 'Cancel Last Label', 'description' => 'Void/cancel the last shipped label'],
+            ['code' => '*4', 'label' => 'Zero Scale', 'description' => 'Re-zero the PS60 with its platform empty'],
             ['code' => '*0', 'label' => 'Clear Shipment', 'description' => 'Clear current shipment and start fresh'],
         ];
     }

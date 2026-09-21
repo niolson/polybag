@@ -110,3 +110,76 @@ it('lets a stale label printer be cleared by saving with none selected', functio
     expect($page->script('localStorage.getItem("rawLabelPrinter")'))->toBeNull()
         ->and($page->script('PrinterSettings.hasLabelPrinter()'))->toBeFalse();
 });
+
+it('sends the HID POS zero feature report through WebHID', function (): void {
+    $page = visit('/device-settings');
+
+    $report = $page->script(<<<'JS'
+        (async () => {
+            localStorage.setItem('scaleVendorId', '0xEB8');
+            localStorage.setItem('scaleProductId', '0xF000');
+            ScaleUtils.backend = 'webhid';
+            ScaleUtils._lastReading = { weight: 0.05, isStable: true };
+            ScaleUtils._webHidDevice = {
+                sendFeatureReport(reportId, data) {
+                    return Promise.resolve(window.sentScaleReport = [reportId, ...data]);
+                },
+            };
+
+            await ScaleUtils.zero();
+
+            return window.sentScaleReport;
+        })()
+    JS);
+
+    expect($report)->toBe([2, 2]);
+});
+
+it('sends the narrowly-scoped PS60 zero command through QZ Tray', function (): void {
+    $page = visit('/device-settings');
+
+    $report = $page->script(<<<'JS'
+        (async () => {
+            localStorage.setItem('scaleVendorId', '0x0EB8');
+            localStorage.setItem('scaleProductId', '0xF000');
+            ScaleUtils.backend = 'qztray';
+            ScaleUtils._lastReading = { weight: 0.05, isStable: true };
+            window.qz = {
+                hid: {
+                    sendFeatureReport: (deviceInfo) => Promise.resolve(window.sentScaleReport = deviceInfo),
+                },
+            };
+
+            await ScaleUtils.zero();
+
+            return window.sentScaleReport;
+        })()
+    JS);
+
+    expect($report)->toBe([
+        'vendorId' => '0x0EB8',
+        'productId' => '0xF000',
+        'reportId' => '0x02',
+        'data' => '02',
+        'type' => 'HEX',
+    ]);
+});
+
+it('runs the hardware zero command when its barcode is scanned on the pack page', function (): void {
+    $page = visit('/pack');
+
+    $result = $page->script(<<<'JS'
+        (async () => {
+            const packElement = document.querySelector('[x-data*="scaleConnected"]');
+            const pack = Alpine.$data(packElement);
+
+            pack.scaleConnected = true;
+            ScaleUtils.zero = () => Promise.resolve(window.scaleZeroed = true);
+            await pack.executeCommand('4');
+
+            return [window.scaleZeroed, pack.weight];
+        })()
+    JS);
+
+    expect($result)->toBe([true, '0.00']);
+});

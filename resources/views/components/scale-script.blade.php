@@ -21,6 +21,9 @@
         /** @type {Function|null} Bound WebHID inputreport listener (for removal) */
         _webHidListener: null,
 
+        /** @type {{weight: number, isStable: boolean}|null} Last scale reading */
+        _lastReading: null,
+
         /**
          * Detect and set the active backend.
          * Call this once at page load (after DOM ready).
@@ -105,11 +108,11 @@
          * @private
          */
         _computeWeight(status, unit, signedScaleFactor, weightRaw) {
-            let weight = weightRaw * Math.pow(10, signedScaleFactor);
+            let grossWeight = weightRaw * Math.pow(10, signedScaleFactor);
 
             // Convert to pounds
-            if (unit === 2) weight = weight / 453.592;       // grams
-            else if (unit === 11) weight = weight / 16;       // ounces
+            if (unit === 2) grossWeight = grossWeight / 453.592;       // grams
+            else if (unit === 11) grossWeight = grossWeight / 16;       // ounces
 
             let statusText = 'Unknown';
             let isStable = false;
@@ -120,7 +123,61 @@
                 case 5: statusText = 'Fault'; break;
             }
 
-            return { weight, status: statusText, isStable };
+            this._lastReading = { weight: grossWeight, isStable };
+
+            return { weight: grossWeight, status: statusText, isStable };
+        },
+
+        /**
+         * Ask a Mettler Toledo PS60/BC60 to re-zero through its HID POS Scale
+         * Control feature report. Report 2, value 2 sets the Zero Scale bit.
+         */
+        async zero() {
+            if (!this._lastReading) {
+                throw new Error('No scale reading is available yet.');
+            }
+
+            if (!this._lastReading.isStable) {
+                throw new Error('Wait for the scale to stop moving before zeroing.');
+            }
+
+            const deviceInfo = this.getScaleDeviceInfo();
+            if (!deviceInfo) {
+                throw new Error('No scale configured.');
+            }
+
+            const vendorId = Number.parseInt(deviceInfo.vendorId, 16);
+            const productId = Number.parseInt(deviceInfo.productId, 16);
+            if (vendorId !== 0x0EB8 || productId !== 0xF000) {
+                throw new Error(`Hardware zero is not configured for scale ${deviceInfo.vendorId}:${deviceInfo.productId}.`);
+            }
+
+            if (this.backend === 'webhid') {
+                if (!this._webHidDevice) {
+                    throw new Error('Scale not claimed. Call claimScale() first.');
+                }
+
+                await this._webHidDevice.sendFeatureReport(0x02, new Uint8Array([0x02]));
+            } else if (this.backend === 'qztray') {
+                await qz.hid.sendFeatureReport({
+                    vendorId: '0x0EB8',
+                    productId: '0xF000',
+                    reportId: '0x02',
+                    data: '02',
+                    type: 'HEX'
+                });
+            } else {
+                throw new Error('No scale backend available.');
+            }
+
+            return true;
+        },
+
+        /**
+         * Clear the last reading when starting or ending a device connection.
+         */
+        resetReading() {
+            this._lastReading = null;
         },
 
         /**
@@ -131,6 +188,8 @@
         async claimScale() {
             const deviceInfo = this.getScaleDeviceInfo();
             if (!deviceInfo) throw new Error('No scale configured');
+
+            this.resetReading();
 
             if (this.backend === 'webhid') {
                 const vendorInt = parseInt(deviceInfo.vendorId, 16);
@@ -223,6 +282,8 @@
                     console.warn('Error releasing scale device:', e);
                 }
             }
+
+            this.resetReading();
         }
     };
 

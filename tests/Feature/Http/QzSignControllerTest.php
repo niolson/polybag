@@ -13,11 +13,11 @@ uses(RefreshDatabase::class);
  *
  * @return array{request: string, payload: string}
  */
-function qzSignRequest(string $call = 'printers.find'): array
+function qzSignRequest(string $call = 'printers.find', array $params = []): array
 {
     $payload = json_encode([
         'call' => $call,
-        'params' => new stdClass,
+        'params' => $params === [] ? new stdClass : $params,
         'timestamp' => 1234567890,
     ]);
 
@@ -77,8 +77,38 @@ it('rejects QZ Tray calls that are not on the allow-list', function (string $cal
     // though the HID lifecycle calls (claim/open/close/list) are allow-listed.
     'hid send data' => 'hid.sendData',
     'hid read data' => 'hid.readData',
-    'hid send feature report' => 'hid.sendFeatureReport',
     'hid get feature report' => 'hid.getFeatureReport',
+]);
+
+it('rejects hid feature reports other than the PS60 zero command', function (array $params): void {
+    $this->actingAs(User::factory()->create());
+
+    $this->postJson('/qz/sign', qzSignRequest('hid.sendFeatureReport', $params))
+        ->assertStatus(422)
+        ->assertJson(['error' => 'Unsupported signing request']);
+})->with([
+    'wrong vendor' => [[
+        'vendorId' => '0x0922',
+        'productId' => '0xF000',
+        'reportId' => '0x02',
+        'data' => '02',
+        'type' => 'HEX',
+    ]],
+    'tare-like value' => [[
+        'vendorId' => '0x0EB8',
+        'productId' => '0xF000',
+        'reportId' => '0x02',
+        'data' => '01',
+        'type' => 'HEX',
+    ]],
+    'extra parameter' => [[
+        'vendorId' => '0x0EB8',
+        'productId' => '0xF000',
+        'reportId' => '0x02',
+        'data' => '02',
+        'type' => 'HEX',
+        'usagePage' => '0x008D',
+    ]],
 ]);
 
 it('returns 422 for missing request or payload parameter', function (): void {
@@ -135,7 +165,7 @@ it('returns 500 with generic error when private key file does not exist', functi
     }
 });
 
-it('signs allow-listed calls, including the hid.* scale integration family', function (string $call): void {
+it('signs allow-listed calls, including the hid.* scale integration family', function (string $call, array $params = []): void {
     $this->actingAs(User::factory()->create());
 
     $keyPath = storage_path('app/private/qz-private-key.pem');
@@ -167,7 +197,7 @@ it('signs allow-listed calls, including the hid.* scale integration family', fun
     file_put_contents($keyPath, $pem);
 
     try {
-        $this->postJson('/qz/sign', qzSignRequest($call))
+        $this->postJson('/qz/sign', qzSignRequest($call, $params))
             ->assertOk();
     } finally {
         if ($existedBefore) {
@@ -184,6 +214,16 @@ it('signs allow-listed calls, including the hid.* scale integration family', fun
     'hid.releaseDevice' => 'hid.releaseDevice',
     'hid.openStream' => 'hid.openStream',
     'hid.closeStream' => 'hid.closeStream',
+    'PS60 zero feature report' => [
+        'hid.sendFeatureReport',
+        [
+            'vendorId' => '0x0EB8',
+            'productId' => '0xF000',
+            'reportId' => '0x02',
+            'data' => '02',
+            'type' => 'HEX',
+        ],
+    ],
 ]);
 
 it('returns base64 signature when valid key exists', function (): void {
