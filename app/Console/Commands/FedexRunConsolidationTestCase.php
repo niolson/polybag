@@ -54,7 +54,7 @@ class FedexRunConsolidationTestCase extends Command
         $account = $carrierId
             ? CarrierAccount::active()->where('carrier_id', $carrierId)->first()
             : null;
-        $shipperAccountNumber = (string) ($account?->credential('account_number') ?? '');
+        $shipperAccountNumber = (string) ($account?->fedexAccountNumber() ?? '');
 
         if (empty($shipperAccountNumber)) {
             $this->error('No active FedEx carrier account with an account number is configured.');

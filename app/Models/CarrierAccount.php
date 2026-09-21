@@ -95,6 +95,35 @@ class CarrierAccount extends Model
         $this->secret_credentials = array_merge($this->secret_credentials ?? [], [$key => $value]);
     }
 
+    public function fedexAccountNumber(?string $environment = null): ?string
+    {
+        $environment ??= (bool) app(SettingsService::class)->get('sandbox_mode', false)
+            ? 'sandbox'
+            : 'production';
+
+        $accountNumber = $this->credential($environment.'_account_number');
+
+        if (filled($accountNumber)) {
+            return (string) $accountNumber;
+        }
+
+        $legacyAccountNumber = $this->credential('account_number');
+
+        if (blank($legacyAccountNumber)) {
+            return null;
+        }
+
+        if (filled($this->secret('child_key'))) {
+            $childEnvironment = $this->credential('child_env') ?? 'production';
+
+            if ($childEnvironment !== $environment) {
+                return null;
+            }
+        }
+
+        return (string) $legacyAccountNumber;
+    }
+
     /**
      * A digest of who this account bills as.
      *
@@ -137,7 +166,7 @@ class CarrierAccount extends Model
     {
         return match ($this->carrier?->name) {
             'USPS', 'UPS' => filled($this->secret('oauth_token')) ? 'Connected' : 'Needs Setup',
-            'FedEx' => filled($this->secret('child_key')) ? 'Connected' : 'Needs Setup',
+            'FedEx' => $this->hasUsableCredentials() ? 'Connected' : 'Needs Setup',
             default => 'Active',
         };
     }
@@ -145,9 +174,9 @@ class CarrierAccount extends Model
     public function hasUsableCredentials(): bool
     {
         return match ($this->carrier?->name) {
-            'FedEx' => filled($this->credential('account_number'))
+            'FedEx' => filled($this->fedexAccountNumber())
                 && (
-                    filled($this->secret('child_key'))
+                    $this->hasFedexChildCredentialsForActiveEnvironment()
                     || $this->hasDirectFedexCredentials()
                 ),
             'USPS' => filled($this->credential('crid'))
@@ -189,6 +218,20 @@ class CarrierAccount extends Model
 
         return filled($this->secret('api_key'))
             && filled($this->secret('api_secret'));
+    }
+
+    private function hasFedexChildCredentialsForActiveEnvironment(): bool
+    {
+        if (blank($this->secret('child_key')) || blank($this->secret('child_secret'))) {
+            return false;
+        }
+
+        $childEnvironment = $this->credential('child_env') ?? 'production';
+        $activeEnvironment = (bool) app(SettingsService::class)->get('sandbox_mode', false)
+            ? 'sandbox'
+            : 'production';
+
+        return $childEnvironment === $activeEnvironment;
     }
 
     /**
@@ -323,9 +366,11 @@ class CarrierAccount extends Model
         // Detected CONTRACT/RETAIL pricing tier — must be re-probed after a credential change.
         Cache::forget("usps_pricing_type:{$this->id}");
 
-        // FedEx: global caches + per-account child-key cache (keyed by child_key hash)
-        Cache::forget('fedex_authenticator');
-        Cache::forget('fedex_authenticator_sandbox');
+        // FedEx: global caches, per-account parent caches, and child-key cache.
+        foreach (['', '_sandbox'] as $env) {
+            Cache::forget("fedex_authenticator{$env}");
+            Cache::forget("fedex_authenticator{$env}:{$this->id}");
+        }
         if ($childKey = $this->secret('child_key')) {
             $env = $this->credential('child_env') ?? 'production';
             Cache::forget('fedex_authenticator_child_'.$env.'_'.hash('sha256', $childKey));

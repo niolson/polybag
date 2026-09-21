@@ -123,17 +123,28 @@ class CarrierAccountForm
                     ->schema([
                         TextEntry::make('fedex_connection_status')
                             ->label('Connection Status')
-                            ->state(fn (?CarrierAccount $record): HtmlString => filled($record?->secret('child_key'))
-                                ? new HtmlString('<span class="text-success-600 dark:text-success-400 font-medium">Connected</span> — child credentials provisioned via Account Registration')
-                                : new HtmlString('<span class="text-gray-400 dark:text-gray-500">Not connected</span> — use the Connect FedEx Account action above'))
+                            ->state(fn (?CarrierAccount $record): HtmlString => $record?->connectionStatus() === 'Connected'
+                                ? new HtmlString('<span class="text-success-600 dark:text-success-400 font-medium">Connected</span> — credentials configured for the active environment')
+                                : new HtmlString('<span class="text-gray-400 dark:text-gray-500">Not connected</span> — configure credentials for the active environment'))
                             ->columnSpanFull(),
-                        TextInput::make('fedex_account_number')
-                            ->label('Account Number')
+                        TextInput::make('fedex_production_account_number')
+                            ->label('Production Account Number')
                             ->maxLength(50)
-                            ->readOnly(fn (?CarrierAccount $record): bool => filled($record?->secret('child_key')))
-                            ->afterStateHydrated(fn ($component, ?CarrierAccount $record) => $component->state($record?->credential('account_number'))),
+                            ->readOnly(fn (?CarrierAccount $record): bool => $record !== null
+                                && filled($record->secret('child_key'))
+                                && ($record->credential('child_env') ?? 'production') === 'production')
+                            ->afterStateHydrated(fn ($component, ?CarrierAccount $record) => $component->state($record?->fedexAccountNumber('production'))),
+                        TextInput::make('fedex_sandbox_account_number')
+                            ->label('Sandbox Account Number')
+                            ->helperText('Use the test account number assigned with your FedEx sandbox API project.')
+                            ->maxLength(50)
+                            ->readOnly(fn (?CarrierAccount $record): bool => $record !== null
+                                && filled($record->secret('child_key'))
+                                && $record->credential('child_env') === 'sandbox')
+                            ->afterStateHydrated(fn ($component, ?CarrierAccount $record) => $component->state($record?->fedexAccountNumber('sandbox'))),
                     ])
                     ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === 'FedEx')
+                    ->columns(2)
                     ->collapsible(),
 
                 Section::make('Advanced / API App Credentials')

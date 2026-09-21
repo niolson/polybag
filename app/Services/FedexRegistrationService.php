@@ -208,8 +208,12 @@ class FedexRegistrationService
     /**
      * Store child credentials on a specific CarrierAccount.
      */
-    public function saveChildCredentialsToAccount(string $childKey, string $childSecret, CarrierAccount $account): void
-    {
+    public function saveChildCredentialsToAccount(
+        string $childKey,
+        string $childSecret,
+        CarrierAccount $account,
+        ?string $accountNumber = null,
+    ): void {
         $oldChildKey = $account->secret('child_key');
         $oldEnv = $account->credential('child_env') ?? 'production';
 
@@ -221,6 +225,9 @@ class FedexRegistrationService
         $env = $isSandbox ? 'sandbox' : 'production';
 
         $account->mergeCredential('child_env', $env);
+        if (filled($accountNumber)) {
+            $account->mergeCredential($env.'_account_number', $accountNumber);
+        }
         $account->mergeSecret('child_key', $childKey);
         $account->mergeSecret('child_secret', $childSecret);
         $account->save();
@@ -276,7 +283,13 @@ class FedexRegistrationService
             );
         }
 
-        throw new RuntimeException($message ?? 'FedEx registration request failed.');
+        $actionableMessage = match ($code) {
+            'USER.ACCOUNT.NOTFOUND' => 'FedEx could not match the account number, customer name, address, and residential classification. Check that these values match the FedEx account record. For a home-based business, leave Residential off unless FedEx classifies the account address as residential.',
+            'PIN.ISSUE.FAILED' => 'FedEx could not send a PIN using that method. Try another available method, but avoid repeated requests because FedEx limits PIN attempts across email, SMS, and phone.',
+            default => $message ?? 'FedEx registration request failed.',
+        };
+
+        throw new RuntimeException($actionableMessage);
     }
 
     private function recordExchange(string $step, Request $request, Response $response): void

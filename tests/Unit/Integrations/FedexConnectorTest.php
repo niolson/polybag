@@ -7,6 +7,7 @@ use App\Http\Integrations\Fedex\Requests\Rates;
 use App\Http\Integrations\Fedex\Requests\Registration\ValidateAddress;
 use App\Http\Integrations\Fedex\Requests\UploadEtdDocument;
 use App\Http\Integrations\Fedex\Requests\UploadEtdImage;
+use App\Models\CarrierAccount;
 use App\Models\Setting;
 use App\Services\SettingsService;
 use Illuminate\Http\Client\Request;
@@ -481,6 +482,155 @@ it('logs child authorization artifacts when brokered child credentials request a
     expect(data_get($requestArtifact, 'body.child_key'))->toBe('[REDACTED]')
         ->and(data_get($requestArtifact, 'body.child_secret'))->toBe('[REDACTED]')
         ->and(data_get($responseArtifact, 'body.access_token'))->toBe('[REDACTED]');
+});
+
+it('uses sandbox client credentials when child credentials were registered in production', function (): void {
+    Storage::fake();
+    Http::fake([
+        'https://broker.example.test/fedex/token' => Http::response([
+            'access_token' => 'production-child-access-token',
+            'token_type' => 'bearer',
+            'expires_in' => 3600,
+        ], 200),
+    ]);
+
+    config([
+        'services.oauth.broker_url' => 'https://broker.example.test',
+        'services.oauth.instance_id' => 'instance-123',
+        'services.oauth.broker_secret' => 'broker-secret',
+        'services.fedex.sandbox_url' => 'https://apis-sandbox.fedex.com',
+    ]);
+
+    Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
+    app(SettingsService::class)->clearCache();
+
+    $account = createFedexAccount(
+        [
+            'child_key' => 'production-child-key',
+            'child_secret' => 'production-child-secret',
+            'sandbox_api_key' => 'sandbox-parent-key',
+            'sandbox_api_secret' => 'sandbox-parent-secret',
+        ],
+        ['child_env' => 'production'],
+    );
+
+    Saloon::fake([
+        'https://apis-sandbox.fedex.com/oauth/token' => MockResponse::make([
+            'access_token' => 'sandbox-parent-access-token',
+            'token_type' => 'bearer',
+            'expires_in' => 3600,
+        ], 200),
+    ]);
+
+    $connector = FedexConnector::forAccount($account);
+    $authenticator = $connector->getAccessToken();
+
+    expect($connector->resolveBaseUrl())->toBe('https://apis-sandbox.fedex.com')
+        ->and($authenticator->getAccessToken())->toBe('sandbox-parent-access-token');
+
+    Saloon::assertSent(function (GetClientCredentialsTokenRequest $request): bool {
+        return $request->body()->get('client_id') === 'sandbox-parent-key'
+            && $request->body()->get('client_secret') === 'sandbox-parent-secret';
+    });
+    Http::assertNothingSent();
+});
+
+it('does not reuse a cached production child token after switching to sandbox', function (): void {
+    Storage::fake();
+    config(['services.fedex.sandbox_url' => 'https://apis-sandbox.fedex.com']);
+
+    Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
+    app(SettingsService::class)->clearCache();
+
+    $account = createFedexAccount(
+        [
+            'child_key' => 'production-child-key',
+            'child_secret' => 'production-child-secret',
+            'sandbox_api_key' => 'sandbox-parent-key',
+            'sandbox_api_secret' => 'sandbox-parent-secret',
+        ],
+        ['child_env' => 'production'],
+    );
+
+    Cache::put(
+        'fedex_authenticator_child_production_'.hash('sha256', 'production-child-key'),
+        ['access_token' => 'cached-production-child-token', 'refresh_token' => null, 'expires_at' => now()->addMinutes(30)->timestamp],
+        now()->addMinutes(20),
+    );
+
+    $rateAuthorization = null;
+    Saloon::fake([
+        GetClientCredentialsTokenRequest::class => MockResponse::make([
+            'access_token' => 'sandbox-parent-token',
+            'token_type' => 'bearer',
+            'expires_in' => 3600,
+        ], 200),
+        Rates::class => function (PendingRequest $pendingRequest) use (&$rateAuthorization): MockResponse {
+            $rateAuthorization = $pendingRequest->headers()->get('Authorization');
+
+            return MockResponse::make(['output' => ['rateReplyDetails' => []]], 200);
+        },
+    ]);
+
+    FedexConnector::getAuthenticatedConnector($account)->send(new Rates);
+
+    expect($rateAuthorization)->toBe('Bearer sandbox-parent-token');
+});
+
+it('does not share sandbox parent tokens between FedEx carrier accounts', function (): void {
+    Storage::fake();
+    Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
+    app(SettingsService::class)->clearCache();
+
+    $firstAccount = createFedexAccount(
+        [
+            'child_key' => 'first-production-child-key',
+            'child_secret' => 'first-production-child-secret',
+            'sandbox_api_key' => 'first-sandbox-key',
+            'sandbox_api_secret' => 'first-sandbox-secret',
+        ],
+        ['child_env' => 'production'],
+    );
+    $secondAccount = CarrierAccount::factory()->fedex()->create([
+        'carrier_id' => $firstAccount->carrier_id,
+        'secret_credentials' => [
+            'child_key' => 'second-production-child-key',
+            'child_secret' => 'second-production-child-secret',
+            'sandbox_api_key' => 'second-sandbox-key',
+            'sandbox_api_secret' => 'second-sandbox-secret',
+        ],
+        'credentials' => [
+            'account_number' => 'second-production-account',
+            'child_env' => 'production',
+            'sandbox_account_number' => 'second-sandbox-account',
+        ],
+    ]);
+
+    $rateAuthorizations = [];
+    Saloon::fake([
+        GetClientCredentialsTokenRequest::class => function (PendingRequest $pendingRequest): MockResponse {
+            $clientId = $pendingRequest->body()->all()['client_id'];
+
+            return MockResponse::make([
+                'access_token' => $clientId.'-access-token',
+                'token_type' => 'bearer',
+                'expires_in' => 3600,
+            ], 200);
+        },
+        Rates::class => function (PendingRequest $pendingRequest) use (&$rateAuthorizations): MockResponse {
+            $rateAuthorizations[] = $pendingRequest->headers()->get('Authorization');
+
+            return MockResponse::make(['output' => ['rateReplyDetails' => []]], 200);
+        },
+    ]);
+
+    FedexConnector::getAuthenticatedConnector($firstAccount)->send(new Rates);
+    FedexConnector::getAuthenticatedConnector($secondAccount)->send(new Rates);
+
+    expect($rateAuthorizations)->toBe([
+        'Bearer first-sandbox-key-access-token',
+        'Bearer second-sandbox-key-access-token',
+    ]);
 });
 
 it('uses direct child authorization when broker mode is disabled', function (): void {

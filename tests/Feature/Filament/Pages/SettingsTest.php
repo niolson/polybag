@@ -156,6 +156,50 @@ it('fedex registration service validates address and returns mfa options', funct
     Storage::assertExists('fedex-mfa/latest/address-validation/response.json');
 });
 
+it('explains fedex account and address classification mismatches', function (): void {
+    $account = createFedexAccount();
+
+    Saloon::fake([
+        ...fedexOauthMock(),
+        ValidateAddress::class => MockResponse::make([
+            'errors' => [[
+                'code' => 'USER.ACCOUNT.NOTFOUND',
+                'message' => 'Account Not Found in Database',
+            ]],
+        ], 400),
+    ]);
+
+    expect(fn () => app(FedexRegistrationService::class)->validateAddress(
+        account: $account,
+        accountNumber: '700257037',
+        customerName: 'Test Company',
+        residential: true,
+        street1: '15 W 18TH ST FL 7',
+        street2: '',
+        city: 'NEW YORK',
+        stateOrProvinceCode: 'NY',
+        postalCode: '10011',
+        countryCode: 'US',
+    ))->toThrow(RuntimeException::class, 'FedEx could not match the account number, customer name, address, and residential classification. Check that these values match the FedEx account record. For a home-based business, leave Residential off unless FedEx classifies the account address as residential.');
+});
+
+it('explains fedex pin delivery failures and shared retry limits', function (): void {
+    $account = createFedexAccount();
+
+    Saloon::fake([
+        ...fedexOauthMock(),
+        SendPin::class => MockResponse::make([
+            'errors' => [[
+                'code' => 'PIN.ISSUE.FAILED',
+                'message' => 'PIN Generation failed. Please try again later.',
+            ]],
+        ], 400),
+    ]);
+
+    expect(fn () => app(FedexRegistrationService::class)->sendPin($account, 'test-auth-token', 'EMAIL'))
+        ->toThrow(RuntimeException::class, 'FedEx could not send a PIN using that method. Try another available method, but avoid repeated requests because FedEx limits PIN attempts across email, SMS, and phone.');
+});
+
 it('fedex registration service saves child credentials after pin verification', function (): void {
     $account = createFedexAccount();
 
@@ -174,7 +218,31 @@ it('fedex registration service saves child credentials after pin verification', 
 
     $account->refresh();
     expect($account->secret('child_key'))->toBe('test-child-key')
-        ->and($account->secret('child_secret'))->toBe('test-child-secret');
+        ->and($account->secret('child_secret'))->toBe('test-child-secret')
+        ->and($account->credential('child_env'))->toBe('production');
+});
+
+it('fedex registration saves the account number for the OAuth environment without replacing sandbox configuration', function (): void {
+    $account = createFedexAccount(
+        credentials: [
+            'sandbox_account_number' => '740561073',
+        ],
+    );
+
+    app(SettingsService::class)->set('sandbox_mode', false);
+
+    app(FedexRegistrationService::class)->saveChildCredentialsToAccount(
+        'production-child-key',
+        'production-child-secret',
+        $account,
+        '210726418',
+    );
+
+    $account->refresh();
+
+    expect($account->credential('production_account_number'))->toBe('210726418')
+        ->and($account->credential('sandbox_account_number'))->toBe('740561073')
+        ->and($account->credential('child_env'))->toBe('production');
 });
 
 it('fedex registration service saves child credentials to the account after invoice verification', function (): void {
@@ -257,8 +325,30 @@ it('fedex registration service maps current fedex max retry codes to the fallbac
         $this->fail('Expected FedEx max retry exception was not thrown.');
     } catch (FedexRegistrationMaxRetriesException $exception) {
         expect($exception->fedexCode)->toBe('PINVALIDATION.MAXRETRY.EXCEEDED')
-            ->and($exception->lockedMethods)->toBe(['SMS', 'CALL', 'EMAIL']);
+            ->and($exception->lockedMethods)->toBe(['SMS', 'CALL', 'EMAIL'])
+            ->and($exception->getMessage())->toBe('FedEx has temporarily blocked more PIN attempts. The retry limit is shared across email, SMS, and phone. Wait before starting over, or contact FedEx Customer Service for technical support.');
     }
+});
+
+it('carrier account edit page handles a fedex pin resend lockout', function (): void {
+    $account = createFedexAccount();
+
+    Saloon::fake([
+        ...fedexOauthMock(),
+        SendPin::class => MockResponse::make([
+            'errors' => [[
+                'code' => 'PINGENERATION.MAXRETRY.EXCEEDED',
+                'message' => 'Max retry exceeded for PIN Generation.',
+            ]],
+        ], 400),
+    ]);
+
+    Livewire::test(EditCarrierAccount::class, ['record' => $account->id])
+        ->set('fedexAccountAuthToken', 'test-auth-token')
+        ->set('fedexFactor2Method', 'SMS')
+        ->call('resendFedexPin')
+        ->assertSet('fedexSupportFallbackActive', true)
+        ->assertSet('fedexLockedFactor2Methods', ['SMS', 'CALL', 'EMAIL']);
 });
 
 it('carrier account edit page filters exhausted fedex verification methods', function (): void {
@@ -291,6 +381,42 @@ it('carrier account edit page reports when all fedex verification methods are ex
     expect($page->getFedexAvailableVerificationOptions())
         ->toBe([])
         ->and($page->hasAvailableFedexFactor2Methods())->toBeFalse();
+});
+
+it('carrier account edit page explains fedex residential classification', function (): void {
+    $account = createFedexAccount();
+
+    Livewire::test(EditCarrierAccount::class, ['record' => $account->id])
+        ->mountAction('fedex_register')
+        ->assertSchemaComponentExists(
+            'fedex_reg_residential',
+            checkComponentUsing: fn ($component): bool => $component->getLabel() === 'FedEx classifies this account address as residential',
+        );
+});
+
+it('carrier account edit page saves separate FedEx account numbers by environment', function (): void {
+    $account = createFedexAccount(
+        secrets: ['child_key' => 'production-child-key', 'child_secret' => 'production-child-secret'],
+        credentials: [
+            'account_number' => '210726418',
+            'child_env' => 'production',
+        ],
+    );
+
+    Livewire::test(EditCarrierAccount::class, ['record' => $account->id])
+        ->assertFormSet([
+            'fedex_production_account_number' => '210726418',
+            'fedex_sandbox_account_number' => null,
+        ])
+        ->fillForm(['fedex_sandbox_account_number' => '740561073'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $account->refresh();
+
+    expect($account->credential('production_account_number'))->toBe('210726418')
+        ->and($account->credential('sandbox_account_number'))->toBe('740561073')
+        ->and($account->credential('account_number'))->toBe('210726418');
 });
 
 it('fedex registration service routes through proxy when broker url is configured', function (): void {

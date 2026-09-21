@@ -16,12 +16,17 @@ class CreateCarrierAccount extends CreateRecord
 
     protected function mutateFormDataBeforeCreate(array $data): array
     {
-        // Virtual account_number fields for FedEx and UPS
-        foreach (['fedex_account_number', 'ups_account_number'] as $field) {
+        $credentialFieldMap = [
+            'fedex_production_account_number' => 'production_account_number',
+            'fedex_sandbox_account_number' => 'sandbox_account_number',
+            'ups_account_number' => 'account_number',
+        ];
+
+        foreach ($credentialFieldMap as $field => $credentialKey) {
             if (array_key_exists($field, $data)) {
                 $data['credentials'] = array_merge(
                     $data['credentials'] ?? [],
-                    ['account_number' => $data[$field]]
+                    [$credentialKey => $data[$field]]
                 );
                 unset($data[$field]);
             }
