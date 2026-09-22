@@ -6,7 +6,11 @@ Current-scope clarification (2026-09-22): the shipped resolver supports postage 
 originating Shopify/Amazon source and direct carrier accounts. Off-Amazon Amazon Shipping
 (`channelType: EXTERNAL`) is not implemented. The bullet below assigning it to a
 `CarrierAccount` is superseded by ADR-0002's 2026-09-22 clarification: it should select a
-connected Amazon `DataSource` for the Shipment's Client.
+connected Amazon `DataSource` for the Shipment's Client. Which connection is chosen is
+settled by the ADR's 2026-09-22 amendment (`amazon-shipping-external-orders/03`): a
+`carrier_account_scopes` row that targets the connection on the Amazon carrier row. That
+amendment also refuses `CarrierAccount` scopes on that row, which removes the
+resale-channel tie described below for Amazon.
 
 Repo: `polybag`
 

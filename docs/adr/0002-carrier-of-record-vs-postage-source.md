@@ -20,6 +20,84 @@ implement that path. When implemented, it should select an eligible connected Am
 is superseded because these are still Shipping v2 seller credentials, not direct-carrier
 credentials.
 
+Amended 2026-09-22 (`amazon-shipping-external-orders/03`): **which** connected Amazon
+`DataSource` sells off-Amazon Amazon Shipping is decided by a scope row in
+`carrier_account_scopes` that targets the connection instead of a `CarrierAccount`.
+
+The two tenants this has to serve set it up differently. A seller who ships their own
+orders uses one Seller Central account for everything. Their Amazon orders keep binding to
+it as their origin, and a single global scope sends every other order to the same
+connection. A 3PL has its own Amazon Shipping account, connected with import off, and
+gives it the global scope. Each client's Amazon orders still bind to that client's own
+connection. A client that wants off-Amazon parcels billed to its own Amazon Shipping
+account gets a client-scoped row, which takes precedence over the 3PL's. A 3PL with a
+separate account per warehouse uses location-scoped rows. Shipping v2 sends `shipFrom` on
+every request, so nothing in the API ties an account to one site. Whether Amazon Shipping
+refuses sites it has not onboarded is unknown. If it does, the refusal appears when quoting,
+not when choosing a connection.
+
+The rule:
+
+- **Schema.** `carrier_account_id` becomes nullable, and a nullable `data_source_id` is
+  added. Exactly one of the two must be set. The table keeps its name, because renaming it
+  would touch every existing caller of the carrier-account path.
+- **`carrier_id` is the seeded `Amazon` row** (`AmazonBuyShippingAdapter::SOURCE_NAME`),
+  the postage-source row, not a new "Amazon Shipping" carrier row. The scope chooses where
+  postage is bought, and this ADR keeps that separate from who carries the parcel. A
+  carrier-of-record row would also make a direct `CarrierAccount` for Amazon Shipping look
+  like a valid thing to create. As for `CarrierAccount`-targeted rows, the scope's
+  `saving` hook derives `carrier_id` and never accepts it from the caller. It also refuses
+  a `CarrierAccount` scope on the `Amazon` row: that is the tie
+  `postage-source-split/10` found on resale-channel rows, and it is ruled out here rather
+  than reported.
+- **Precedence** is the same four bands as `CarrierAccount::resolveForShipment()`:
+  location + client, location only, client only, global. The unique index on
+  `(carrier_id, location_key, client_key)` allows at most one connection per band, so the
+  schema rules out ties, as it does for direct accounts. A sibling resolver reads the
+  data-source rows and shares the band ordering. `resolveForShipment()` itself is left
+  alone. Its `whereHas('carrierAccount')` already skips data-source rows, and its other
+  callers (manifests, address validation, recovery) must keep meaning direct accounts only.
+- **`rate_shop` is always false on a data-source row.** Each Amazon connection would quote
+  the same Amazon Shipping services, so a second connection only adds a call to the
+  packer's critical path. Revisit this if a live lane returns account-specific pricing
+  worth comparing.
+- **The client must match.** If a connection is assigned to a Client, its scopes must name
+  that Client. A client's own Amazon account is never scoped globally, to a location alone,
+  or to another client, because that would charge one client's account for another's
+  parcels. A connection with no Client, such as the 3PL's own, can take any scope.
+- **Eligibility** requires the connection to be `active`, to be an Amazon driver, and to
+  have the off-Amazon opt-in on. Scope rows for an opted-out connection are kept but
+  ignored, just as `02` keeps the hidden import settings. Turning the opt-in on when no
+  global `Amazon` scope exists creates one for that connection, the same convenience
+  `CreateCarrierAccount` gives direct accounts. This means the single-account seller never
+  has to see scopes.
+- **Scopes never override the order's origin.** An Amazon-originating Shipment uses
+  `channelSourceFor()` and never the off-Amazon arm. That holds even when its origin
+  connection is inactive, because an Amazon order sold as `EXTERNAL` would lose its link to
+  the Amazon order. `import_enabled` plays no part.
+
+Rejected:
+
+- **A priority column on `data_sources`.** It has no location or client dimension, so it
+  cannot express "this client's own account" or "this warehouse's account". Two
+  connections with equal priority would be a tie that no constraint prevents.
+- **A separate `data_source_scopes` table.** It would repeat the four-band walk and the
+  generated-column unique index that makes NULLs compare equal on MySQL. Nothing would stop
+  the two copies from drifting apart, and the carrier-account copy has been fixed for drift
+  before (`2026_09_03_204500_restamp_drifted_carrier_account_scopes`).
+- **`DataSource.client_id` alone.** It names at most one Client, says nothing about
+  Location, and leaves "which one" to an arbitrary pick when two unassigned connections
+  exist. Decision 9 rules that out.
+
+Open question, not blocking this decision: **how an Amazon Shipping account with no Seller
+Central account connects.** Amazon's integration guides say an off-Amazon shipper does not
+need a seller account and authorizes through a "website workflow" arranged with an Amazon
+Shipping Solutions Architect. PolyBag's app already has the *Shipping → Direct-to-Consumer
+Shipping* role, but the connection sends everyone to Seller Central's consent page. A 3PL
+whose account is Amazon Shipping-only may not be able to authorize there. Routing is not
+affected, because a scope targets a `DataSource` whatever way it was authorized.
+`amazon-shipping-external-orders/08` tracks this.
+
 `legacy_unknown` was specified below for packages shipped before the split, on the
 assumption that some of them had unrecoverable provenance. None do. Shopify Shipping bought
 no label before the discriminator landed — in development or in any tenant — so every
@@ -332,8 +410,9 @@ is not enough to bind an offer to a source instance. The rules:
 - **Amazon Buy Shipping binds the same way** — the order lives in one seller's account.
 - **Amazon Shipping on non-Amazon orders** is not implemented. The original decision placed it
   under `CarrierAccount` scoping; the 2026-09-22 clarification above supersedes that detail.
-  It needs an explicit rule for selecting an eligible connected Amazon `DataSource` for the
-  Shipment's Client without pretending that source was the Shipment's import source.
+  The 2026-09-22 amendment above gives the selection rule: a `carrier_account_scopes` row
+  that targets the connection, walked on the same precedence, independently of the
+  Shipment's import source.
 - **One source is quoted per carrier by default.** Quoting several sources for the same carrier
   is opt-in, mirroring `CarrierAccountScope::rate_shop`, because each extra source is another
   API call on the packer's critical path.

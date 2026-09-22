@@ -33,8 +33,10 @@ use Illuminate\Support\Collection;
  * - **Carrier accounts resolve by scope**, on the existing `(location, client)`
  *   precedence. This arm currently covers direct USPS, UPS and FedEx accounts.
  *   Amazon Shipping for an off-Amazon order is not implemented: Shipping v2
- *   calls that an `EXTERNAL` channel, and it will need to select an eligible
- *   connected Amazon `DataSource` independently of the Shipment's import source.
+ *   calls that an `EXTERNAL` channel. ADR-0002's 2026-09-22 amendment selects
+ *   it with a `carrier_account_scopes` row that targets a connected Amazon
+ *   `DataSource`, on the same precedence, independently of the Shipment's
+ *   import source, and never for an Amazon-originating Shipment.
  *
  * This resolves *who may sell*, at quote time. What a shipped package's postage
  * actually was is recorded provenance, read by `PostageSourceDispatcher` from
