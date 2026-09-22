@@ -80,18 +80,12 @@ class Pack extends Page
 
     public bool $packingValidationEnabled = true;
 
-    public ?bool $autoShipOverride = null;
-
     public function mount($shipment_id = null): void
     {
         $this->transparencyEnabled = (bool) app(SettingsService::class)->get('transparency_enabled', true);
         $this->multiClientEnabled = (bool) app(SettingsService::class)->get('multi_client_enabled', false);
         $this->scanToAddEnabled = (bool) app(SettingsService::class)->get('scan_to_add_enabled', false);
         $this->packingValidationEnabled = (bool) app(SettingsService::class)->get('packing_validation_enabled', true);
-
-        if (Session::has('pack_auto_ship_override')) {
-            $this->autoShipOverride = (bool) Session::pull('pack_auto_ship_override');
-        }
 
         if (Session::pull('pack_scan_to_add_override', false)) {
             $this->scanToAddEnabled = true;
@@ -246,9 +240,7 @@ class Pack extends Page
         $this->labelDpi = $labelDpi;
         $this->hasReportPrinter = $hasReportPrinter;
 
-        if ($autoShip && ! auth()->user()->role->isAtLeast(Role::Admin)) {
-            $autoShip = false;
-        }
+        $autoShip = (bool) auth()->user()->auto_ship_enabled;
 
         if (! $this->shipment) {
             $this->notifyError('Invalid State', 'No shipment loaded.');
@@ -308,6 +300,13 @@ class Pack extends Page
         );
 
         if (! $result->success) {
+            if ($result->requiresAttendedSelection) {
+                $this->notifyWarning($result->title ?? 'Attended Shipping Required', $result->message);
+                $this->redirect('/ship/'.$package->id);
+
+                return;
+            }
+
             $this->notifyError($result->title ?? 'Shipping Error', $result->message ?? 'Unable to ship package.');
             $this->dispatch('shipping-error');
 

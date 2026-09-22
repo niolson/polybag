@@ -81,6 +81,7 @@ class ManualShip extends Page implements HasForms
 
     public function mount(): void
     {
+        $this->autoShipEnabled = (bool) auth()->user()->auto_ship_enabled;
         $this->scanToAddEnabled = (bool) app(SettingsService::class)->get('scan_to_add_enabled', false);
 
         $this->form->fill([
@@ -203,9 +204,7 @@ class ManualShip extends Page implements HasForms
             return;
         }
 
-        if ($this->autoShipEnabled && ! auth()->user()->role->isAtLeast(Role::Admin)) {
-            $this->autoShipEnabled = false;
-        }
+        $this->autoShipEnabled = (bool) auth()->user()->auto_ship_enabled;
 
         try {
             if ($this->scanToAddEnabled) {
@@ -230,7 +229,6 @@ class ManualShip extends Page implements HasForms
     {
         ['shipment' => $shipment] = $this->createShipmentAndPackage($data);
 
-        Session::put('pack_auto_ship_override', $this->autoShipEnabled);
         Session::put('pack_scan_to_add_override', true);
         Session::put('ship_return_url', '/manual-ship');
         $this->redirect('/pack/'.$shipment->id);
@@ -259,6 +257,14 @@ class ManualShip extends Page implements HasForms
         );
 
         if (! $result->success) {
+            if ($result->requiresAttendedSelection) {
+                Session::put('ship_return_url', '/manual-ship');
+                $this->notifyWarning($result->title ?? 'Attended Shipping Required', $result->message);
+                $this->redirect('/ship/'.$package->id);
+
+                return;
+            }
+
             $this->notifyError($result->title ?? 'Shipping Error', $result->message ?? 'Unable to ship package.');
 
             return;

@@ -1,7 +1,3 @@
-@php
-    $isAdmin = auth()->user()->role->isAtLeast(\App\Enums\Role::Admin);
-@endphp
-
 <x-filament-panels::page>
     <x-qz-tray />
     <x-scale-script />
@@ -10,21 +6,12 @@
         x-data="{
             scaleConnected: false,
             scaleStable: true,
-            autoShipEnabled: false,
+            autoShipEnabled: @js($autoShipEnabled),
 
             init() {
-                const storedAutoShip = localStorage.getItem('manualShipAutoShip');
-                this.autoShipEnabled = storedAutoShip === 'true';
-                $wire.set('autoShipEnabled', this.autoShipEnabled);
-
                 $wire.set('labelFormat', PrinterSettings.labelFormat());
                 $wire.set('labelDpi', PrinterSettings.labelDpi());
                 $wire.set('hasReportPrinter', PrinterSettings.hasDocumentPrinter());
-
-                this.$watch('autoShipEnabled', (value) => {
-                    localStorage.setItem('manualShipAutoShip', value.toString());
-                    $wire.set('autoShipEnabled', value);
-                });
 
                 if (ScaleUtils.backend === 'webhid') {
                     this.autoConnectScale();
@@ -66,13 +53,6 @@
     >
         <div class="sticky top-0 z-10 mb-4">
             <div class="flex flex-wrap items-center justify-end gap-3">
-            @if($isAdmin)
-                <x-shipping-auto-ship-toggle
-                    x-on:click="autoShipEnabled = !autoShipEnabled"
-                    wire:loading.attr="disabled"
-                />
-            @endif
-
             <button
                 type="button"
                 wire:click="reprintLastLabel"

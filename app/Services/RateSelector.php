@@ -103,6 +103,9 @@ class RateSelector
         return new UnattendedRateSelection(
             rate: $priced->isEmpty() ? null : $this->classify($priced, $deadline)->first()->rate,
             withheld: $withheld,
+            attendedAlternativeAvailable: $withheld->isNotEmpty() || $eligible->contains(
+                fn (RateResponse $rate): bool => $rate->priceUnknown,
+            ),
         );
     }
 

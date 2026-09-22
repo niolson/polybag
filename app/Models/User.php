@@ -32,6 +32,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         'password',
         'password_changed_at',
         'role',
+        'auto_ship_enabled',
         'location_id',
         'active',
     ];
@@ -50,6 +51,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             'password_changed_at' => 'datetime',
             'locked_until' => 'datetime',
             'role' => Role::class,
+            'auto_ship_enabled' => 'boolean',
             'active' => 'boolean',
         ];
     }

@@ -1,5 +1,7 @@
 <?php
 
+use App\Contracts\PackageShippingWorkflow;
+use App\DataTransferObjects\PackageShipping\PackageShippingResult;
 use App\Filament\Pages\ManualShip;
 use App\Models\BoxSize;
 use App\Models\Channel;
@@ -15,7 +17,7 @@ use Livewire\Livewire;
 uses(RefreshDatabase::class);
 
 beforeEach(function (): void {
-    $this->actingAs(User::factory()->admin()->create());
+    $this->actingAs(User::factory()->admin()->create(['auto_ship_enabled' => false]));
 });
 
 it('can render the manual ship page', function (): void {
@@ -56,6 +58,49 @@ it('creates a shipment and redirects to ship page', function (): void {
     expect(Package::where('shipment_id', $shipment->id)->exists())->toBeTrue();
 });
 
+it('uses the account auto-ship setting and redirects attended-only options to the ship page', function (): void {
+    auth()->user()->update(['auto_ship_enabled' => true]);
+
+    Channel::factory()->create(['name' => 'Manual']);
+    $box = BoxSize::factory()->create();
+
+    $workflow = Mockery::mock(PackageShippingWorkflow::class);
+    $workflow->shouldReceive('autoShip')
+        ->once()
+        ->andReturn(PackageShippingResult::attendedSelectionRequired(
+            'Attended Shipping Required',
+            'Choose an available attended-only postage option.',
+        ));
+    app()->instance(PackageShippingWorkflow::class, $workflow);
+
+    $component = Livewire::test(ManualShip::class)
+        ->set('autoShipEnabled', false)
+        ->fillForm([
+            'shipment_reference' => 'MAN-AUTO-1',
+            'first_name' => 'Sam',
+            'last_name' => 'Lee',
+            'address1' => '123 Main St',
+            'city' => 'Seattle',
+            'country' => 'US',
+            'state_or_province' => 'WA',
+            'postal_code' => '98101',
+            'box_size_id' => $box->id,
+            'weight' => 2.5,
+            'height' => 10,
+            'width' => 8,
+            'length' => 6,
+        ])
+        ->call('ship')
+        ->assertNotified('Attended Shipping Required');
+
+    $shipment = Shipment::where('shipment_reference', 'MAN-AUTO-1')->firstOrFail();
+    $package = Package::where('shipment_id', $shipment->id)->firstOrFail();
+
+    $component->assertRedirect('/ship/'.$package->id);
+
+    expect(session('ship_return_url'))->toBe('/manual-ship');
+});
+
 it('rejects shipping when no name or company is provided', function (): void {
     Channel::factory()->create(['name' => 'Manual']);
     $box = BoxSize::factory()->create();
@@ -82,7 +127,7 @@ it('rejects shipping when no name or company is provided', function (): void {
     expect(Shipment::count())->toBe(0);
 });
 
-it('redirects to pack page and stores auto-ship override when scan_to_add_enabled is on', function (): void {
+it('redirects to pack page without overriding the account auto-ship policy when scan_to_add_enabled is on', function (): void {
     Setting::create(['key' => 'scan_to_add_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
     app(SettingsService::class)->clearCache();
 
@@ -90,7 +135,6 @@ it('redirects to pack page and stores auto-ship override when scan_to_add_enable
     $box = BoxSize::factory()->create();
 
     $component = Livewire::test(ManualShip::class)
-        ->set('autoShipEnabled', true)
         ->fillForm([
             'shipment_reference' => 'MAN-2001',
             'first_name' => 'Alex',
@@ -116,7 +160,7 @@ it('redirects to pack page and stores auto-ship override when scan_to_add_enable
     expect($package)->not->toBeNull()
         ->and((float) $package->weight)->toBe(1.5);
 
-    expect(session('pack_auto_ship_override'))->toBeTrue();
+    expect(session()->has('pack_auto_ship_override'))->toBeFalse();
 
     $component->assertRedirect('/pack/'.$shipment->id);
 });

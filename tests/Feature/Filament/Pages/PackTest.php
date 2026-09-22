@@ -21,7 +21,10 @@ use Illuminate\Support\Facades\Session;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::Admin]));
+    $this->actingAs(User::factory()->create([
+        'role' => Role::Admin,
+        'auto_ship_enabled' => false,
+    ]));
 });
 
 it('loads box sizes into the component', function (): void {
@@ -386,8 +389,11 @@ it('preserves shipped packages when creating a new one', function (): void {
         ->and(Package::find($shipped->id)->status)->toBe(PackageStatus::Shipped);
 });
 
-it('downgrades auto-ship to manual ship for non-admin users', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+it('uses the shipper account setting instead of a browser supplied auto-ship value', function (): void {
+    $this->actingAs(User::factory()->create([
+        'role' => Role::User,
+        'auto_ship_enabled' => false,
+    ]));
 
     $boxSize = BoxSize::factory()->create();
     $product = Product::factory()->create(['barcode' => '1234567890123']);
@@ -410,7 +416,7 @@ it('downgrades auto-ship to manual ship for non-admin users', function (): void 
         'transparency_codes' => [],
     ]];
 
-    // Pass autoShip=true as a non-admin — should be downgraded to manual ship (redirect)
+    // A stale or manipulated browser value cannot override the account policy.
     Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->call('ship', $packingItems, $boxSize->id, '1.5', '10', '8', '6', true)
         ->assertRedirect();
@@ -418,6 +424,43 @@ it('downgrades auto-ship to manual ship for non-admin users', function (): void 
     $package = Package::where('shipment_id', $shipment->id)->first();
     expect($package)->not->toBeNull()
         ->and($package->status)->toBe(PackageStatus::Unshipped);
+});
+
+it('auto ships for a shipper whose account enables it even when the browser sends false', function (): void {
+    $this->actingAs(User::factory()->create([
+        'role' => Role::User,
+        'auto_ship_enabled' => true,
+    ]));
+
+    $boxSize = BoxSize::factory()->create();
+    $product = Product::factory()->create(['barcode' => '1234567890123']);
+    $shipment = Shipment::factory()->create();
+    $shipmentItem = ShipmentItem::factory()->create([
+        'shipment_id' => $shipment->id,
+        'product_id' => $product->id,
+        'quantity' => 1,
+        'transparency' => false,
+    ]);
+
+    $mock = Mockery::mock(PackageShippingWorkflow::class);
+    $mock->shouldReceive('autoShip')
+        ->once()
+        ->andReturn(PackageShippingResult::failed('Carrier Error', 'No rates available.'));
+    app()->instance(PackageShippingWorkflow::class, $mock);
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->call('ship', [[
+            'id' => $shipmentItem->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'packed' => 1,
+            'barcode' => '1234567890123',
+            'description' => $product->description,
+            'transparency' => false,
+            'transparency_codes' => [],
+        ]], $boxSize->id, '1.5', '10', '8', '6', false)
+        ->assertNotified('Carrier Error')
+        ->assertNoRedirect();
 });
 
 it('shows client name when multi_client_enabled is true', function (): void {
@@ -619,6 +662,8 @@ it('dispatches shipping-error when ship is called with no shipment loaded', func
 });
 
 it('dispatches shipping-error when auto-ship fails at the carrier', function (): void {
+    auth()->user()->update(['auto_ship_enabled' => true]);
+
     $boxSize = BoxSize::factory()->create();
     $product = Product::factory()->create(['barcode' => '1234567890123']);
     $shipment = Shipment::factory()->create();
@@ -648,6 +693,46 @@ it('dispatches shipping-error when auto-ship fails at the carrier', function ():
         ->call('ship', $packingItems, $boxSize->id, '1.5', '10', '8', '6', true)
         ->assertNotified('Carrier Error')
         ->assertDispatched('shipping-error');
+});
+
+it('redirects to attended shipping when auto-ship requires a person to choose', function (): void {
+    auth()->user()->update(['auto_ship_enabled' => true]);
+
+    $boxSize = BoxSize::factory()->create();
+    $product = Product::factory()->create(['barcode' => '1234567890123']);
+    $shipment = Shipment::factory()->create();
+    $shipmentItem = ShipmentItem::factory()->create([
+        'shipment_id' => $shipment->id,
+        'product_id' => $product->id,
+        'quantity' => 1,
+        'transparency' => false,
+    ]);
+
+    $mock = Mockery::mock(PackageShippingWorkflow::class);
+    $mock->shouldReceive('autoShip')->once()->andReturn(
+        PackageShippingResult::attendedSelectionRequired(
+            'Attended Shipping Required',
+            'Choose an available attended-only postage option.',
+        ),
+    );
+    app()->instance(PackageShippingWorkflow::class, $mock);
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->call('ship', [[
+            'id' => $shipmentItem->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'packed' => 1,
+            'barcode' => '1234567890123',
+            'description' => $product->description,
+            'transparency' => false,
+            'transparency_codes' => [],
+        ]], $boxSize->id, '1.5', '10', '8', '6', false)
+        ->assertNotified('Attended Shipping Required')
+        ->assertRedirect();
+
+    $package = Package::where('shipment_id', $shipment->id)->firstOrFail();
+    expect($package->status)->toBe(PackageStatus::Unshipped);
 });
 
 // --- picking gate ---

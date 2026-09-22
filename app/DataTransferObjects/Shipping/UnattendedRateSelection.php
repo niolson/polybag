@@ -24,10 +24,12 @@ readonly class UnattendedRateSelection
     /**
      * @param  RateResponse|null  $rate  The rate to buy, or null when nothing is eligible
      * @param  Collection<int, RateResponse>  $withheld  Rates that were quoted and are not approved for automated purchase
+     * @param  bool  $attendedAlternativeAvailable  Whether a person can make a choice automation is forbidden to make
      */
     public function __construct(
         public ?RateResponse $rate,
         public Collection $withheld,
+        public bool $attendedAlternativeAvailable = false,
     ) {}
 
     public function withheldAnything(): bool
