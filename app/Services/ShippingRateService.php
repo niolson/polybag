@@ -63,8 +63,19 @@ class ShippingRateService
      */
     private array $configuredSourceNames = [];
 
+    /**
+     * Configured sellers whose successful response contained rates, but none
+     * compatible with the Package's packaging.
+     *
+     * @var array<int, string>
+     */
+    private array $packagingIneligibleSourceNames = [];
+
     /** Package owning the configured-source and blind-offer snapshot. */
     private ?int $ratedPackageId = null;
+
+    /** Shipping Method governing the snapshot; null means inference is not authorized. */
+    private ?int $ratedShippingMethodId = null;
 
     public function __construct()
     {
@@ -111,7 +122,9 @@ class ShippingRateService
     public function getShippingRates(int $packageId): Collection
     {
         $this->configuredSourceNames = [];
+        $this->packagingIneligibleSourceNames = [];
         $this->ratedPackageId = null;
+        $this->ratedShippingMethodId = null;
 
         $package = Package::with(['packageItems', 'shipment.shippingMethod'])
             ->findOrFail($packageId);
@@ -136,6 +149,7 @@ class ShippingRateService
 
         $rates = $this->offer($package, $rateOptions, $shipDates, $rateRequest->fingerprint());
         $this->ratedPackageId = $package->id;
+        $this->ratedShippingMethodId = $package->shipment?->shipping_method_id;
 
         return $rates;
     }
@@ -281,7 +295,9 @@ class ShippingRateService
     public function blindPurchaseOffersFor(Package $package): Collection
     {
         $this->configuredSourceNames = [];
+        $this->packagingIneligibleSourceNames = [];
         $this->ratedPackageId = null;
+        $this->ratedShippingMethodId = null;
 
         $destination = AddressData::fromShipment($package->shipment);
         $rateRequest = RateRequest::fromPackage($package, $destination);
@@ -326,11 +342,16 @@ class ShippingRateService
 
         $registry = app(CarrierRegistry::class);
 
-        if (count($this->configuredSourceNames) !== 1) {
+        $eligibleSourceNames = array_values(array_diff(
+            $this->configuredSourceNames,
+            $this->packagingIneligibleSourceNames,
+        ));
+
+        if ($this->ratedShippingMethodId === null || count($eligibleSourceNames) !== 1) {
             return null;
         }
 
-        $source = $registry->blindPurchaseSourceFor($this->configuredSourceNames[0]);
+        $source = $registry->blindPurchaseSourceFor($eligibleSourceNames[0]);
 
         if (! $source) {
             return null;
@@ -521,7 +542,9 @@ class ShippingRateService
                 // got this far can reach the parse phase below, which is why the
                 // two halves of AsyncRateQuoting travel together.
                 if ($adapter instanceof CarrierAdapterInterface) {
-                    $rateOptions->push(...$adapter->getRates($carrierRateRequest, $serviceCodes));
+                    $rates = $adapter->getRates($carrierRateRequest, $serviceCodes);
+                    $this->recordPackagingEligibility($carrierName, $rates, $carrierRateRequest);
+                    $rateOptions->push(...$rates);
                 }
             } catch (InvalidPackageDimensionsException $e) {
                 $this->exclusions[$carrierName] = $carrierName.' requires valid package dimensions before rates can be requested.';
@@ -560,6 +583,7 @@ class ShippingRateService
 
                 try {
                     $rates = $meta['adapter']->getRates($meta['rateRequest'], $meta['serviceCodes']);
+                    $this->recordPackagingEligibility($carrierName, $rates, $meta['rateRequest']);
                     $rateOptions->push(...$rates);
                 } catch (CarrierRateFetchException $e) {
                     $loggedException = $e->getPrevious() ?? $e;
@@ -605,6 +629,7 @@ class ShippingRateService
                         'rates_count' => $rates->count(),
                     ]);
 
+                    $this->recordPackagingEligibility($carrierName, $rates, $meta['rateRequest']);
                     $rateOptions->push(...$rates);
                 } catch (\Exception $e) {
                     logger()->error("ShippingRateService: {$carrierName} parse error", [
@@ -621,6 +646,27 @@ class ShippingRateService
         }
 
         return $rateOptions;
+    }
+
+    /**
+     * A successful non-empty response proves a seller is ineligible when every
+     * returned rate conflicts with the Package's packaging. Empty responses and
+     * failures remain conservatively eligible so Shopify cannot become an
+     * outage fallback.
+     *
+     * @param  Collection<int, RateResponse>  $rates
+     */
+    private function recordPackagingEligibility(string $sourceName, Collection $rates, RateRequest $rateRequest): void
+    {
+        if ($rates->isEmpty()) {
+            return;
+        }
+
+        $carrierPackaging = $rateRequest->packages[0]->carrierPackaging ?? null;
+
+        if (PackagingFilter::keepCompatible($rates, $carrierPackaging)->isEmpty()) {
+            $this->packagingIneligibleSourceNames[] = $sourceName;
+        }
     }
 
     /**

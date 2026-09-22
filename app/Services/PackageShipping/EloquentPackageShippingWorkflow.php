@@ -63,7 +63,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
         $exclusions = $this->shippingRateService->getExclusions();
 
-        $ruleResult = $this->ruleEvaluator->evaluate($package->shipment);
+        $ruleResult = $this->ruleEvaluator->evaluate($package->shipment, $package);
         if ($ruleResult->shouldFilterRates()) {
             $rates = $rates->reject(
                 fn (RateResponse $rate): bool => in_array($rate->serviceCode, $ruleResult->excludedServiceCodes, true)
