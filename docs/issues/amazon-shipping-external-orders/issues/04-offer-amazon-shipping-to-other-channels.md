@@ -1,6 +1,6 @@
 # Let an Amazon connection offer Amazon Shipping to orders from other channels
 
-Status: ready-for-agent
+Status: done
 
 Repo: `polybag`
 
@@ -113,27 +113,27 @@ Rules:
 
 ## Acceptance criteria
 
-- [ ] Opt-in, scope rows and the check result are shown and editable on an Amazon
+- [x] Opt-in, scope rows and the check result are shown and editable on an Amazon
       connection's form, validated as described in `03`
-- [ ] Resolver returns the scoped connection for a non-Amazon Shipment at the right
+- [x] Resolver returns the scoped connection for a non-Amazon Shipment at the right
       precedence (location+client, location, client, global)
-- [ ] Resolver never returns a scoped connection for an Amazon-originating Shipment
-- [ ] The off-Amazon candidate is marked as off-Amazon and carries the check result.
+- [x] Resolver never returns a scoped connection for an Amazon-originating Shipment
+- [x] The off-Amazon candidate is marked as off-Amazon and carries the check result.
       `isChannel()` is false for it, and `channel()` never returns it
-- [ ] Scope validation: exactly one target, `Amazon` carrier row derived, no
+- [x] Scope validation: exactly one target, `Amazon` carrier row derived, no
       `CarrierAccount` scope on it, `rate_shop` false, client-assigned connections only
       scoped to their Client
-- [ ] Enabling the opt-in creates the global row for an unassigned connection and the
+- [x] Enabling the opt-in creates the global row for an unassigned connection and the
       client-only row for a client-assigned one, and warns when that slot is taken
-- [ ] Existing direct-account scope screens and `resolveForShipment()` callers are
+- [x] Existing direct-account scope screens and `resolveForShipment()` callers are
       unaffected. Saving a Location that has a data-source scope row keeps the row and
       does not fail (tests)
-- [ ] Resolver returns nothing for inactive, opted-out or unscoped connections
-- [ ] Enabling the opt-in runs the check and records enabled / not set up / unknown,
+- [x] Resolver returns nothing for inactive, opted-out or unscoped connections
+- [x] Enabling the opt-in runs the check and records enabled / not set up / unknown,
       with a warning for A-101. In sandbox mode, or when no Location has an address, it
       records unknown without calling Amazon. A timeout records unknown and the save
       still succeeds (tests with a faked connector)
-- [ ] Feature tests cover each rule; factory states added for the opt-in
+- [x] Feature tests cover each rule; factory states added for the opt-in
 
 ## Blocked by
 
@@ -161,3 +161,56 @@ answer in the text above:
 
 The precedence in the acceptance criteria listed client before location. It now matches
 the ADR and `resolveForShipment()`.
+
+### 2026-09-22 — implemented
+
+Migration `2026_09_22_214300`: `data_sources.offers_off_amazon_shipping`,
+`off_amazon_shipping_status` (`OffAmazonShippingStatus`, null until first checked) and
+`off_amazon_shipping_checked_at`; `carrier_account_scopes.carrier_account_id` nullable
+plus `data_source_id`. The one-target `CHECK` is added on MySQL/MariaDB only. It was run
+up, down and up again against a throwaway MySQL 8.4 container, where the FK survived the
+column change and the constraint rejected a row with no target. SQLite relies on the
+`saving` hook.
+
+- **Rules live in `CarrierAccountScope`'s `saving` hook** and throw `DomainException`.
+  The form checks the same rules first so the operator gets a field error. The band walk
+  is now `scopeMatchingSlot()` + `precedenceFor()` on the scope, shared by
+  `resolveForShipment()` (behaviour unchanged, its tests untouched) and the sibling
+  `DataSource::resolveOffAmazonShipping()`.
+- **Ineligible connections are filtered before the walk**, as inactive accounts are in
+  `resolveForShipment()`, so a client row for an inactive connection gives way to the
+  global one.
+- **An Amazon order** is one whose origin connection is an Amazon driver (active or not)
+  *or* whose Shipment carries `metadata.amazon_order_id`, so an order whose connection was
+  deleted is still never sold as `EXTERNAL`.
+- **Candidate:** `PostageSourceCandidate::forOffAmazonShipping()` sets `offAmazon` and
+  `offAmazonShippingStatus`. `isChannel()` is false for it, `carrier` is null.
+- **The default scope is created only when the connection has no rows.** Rows kept from an
+  earlier opt-in are not topped up with a global one. Rows it cannot create are warned
+  about, and a save with the opt-in on and no rows warns every time.
+- **Moving a connection to a Client deletes its rows outside that Client** (logged), as
+  `CarrierAccount` drops scopes whose new slot is taken.
+- **The assignments repeater is not a relationship repeater.** Filament saves relationship
+  repeaters *before* the parent record, so rows would be checked against the connection's
+  old Client. The page syncs them in `afterSave()` instead. Like `CarrierAccountForm`,
+  it is hidden unless multi-location or multi-client is on.
+- **The check** (`OffAmazonShippingCheck`) sends one try with a 5 s connect / 10 s request
+  timeout. The ship-to is a fixed public business address; ship-from is a scoped row's
+  Location, else the default, else any active Location with a complete address. It runs
+  inside the save's transaction.
+
+Fixed on review:
+
+- **A blank Client on create now means shared.** `HasDefaultClient` stamps the default
+  Client on every new `DataSource`, so in multi-client mode a connection created with
+  Client blank used to become the default client's, and its default assignment was
+  (all locations, default client) rather than global. `CreateDataSource` now clears it
+  again when multi-client is on and the field was blank. Single-client installs still get
+  the default Client. Importing is unaffected, because `ShipmentRowPreparer` already falls
+  back to the default Client for a connection without one.
+- **No direct account on the `Amazon` row.** The Carrier Account create form no longer
+  offers the `Amazon` carrier, which the scope model would have refused after the account
+  was created. The migration deletes any existing carrier-account scope on the `Amazon`
+  row and logs their ids. None of them could have sold a label, because Amazon has no
+  direct adapter and the resolver reported each one as a conflict. Each still held a slot
+  a connection scope now needs. The accounts themselves are left in place.

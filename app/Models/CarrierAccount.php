@@ -287,24 +287,14 @@ class CarrierAccount extends Model
         $scopes = CarrierAccountScope::with('carrierAccount')
             ->whereHas('carrierAccount', fn (Builder $q) => $q->where('active', true))
             ->where('carrier_id', $carrierId)
-            ->where(function (Builder $q) use ($locationId, $clientId): void {
-                $q->where(fn ($q) => $q->where('location_id', $locationId)->where('client_id', $clientId))
-                    ->orWhere(fn ($q) => $q->where('location_id', $locationId)->whereNull('client_id'))
-                    ->orWhere(fn ($q) => $q->whereNull('location_id')->where('client_id', $clientId))
-                    ->orWhere(fn ($q) => $q->whereNull('location_id')->whereNull('client_id'));
-            })
+            ->matchingSlot($locationId, $clientId)
             ->get();
 
         if ($scopes->isEmpty()) {
             return new Collection;
         }
 
-        $priority = fn (CarrierAccountScope $scope): int => match (true) {
-            $scope->location_id === $locationId && $scope->client_id === $clientId => 0,
-            $scope->location_id === $locationId && $scope->client_id === null => 1,
-            $scope->location_id === null && $scope->client_id === $clientId => 2,
-            default => 3,
-        };
+        $priority = fn (CarrierAccountScope $scope): int => $scope->precedenceFor($locationId, $clientId);
 
         $sorted = $scopes->sortBy($priority);
         $bestScope = $sorted->first();

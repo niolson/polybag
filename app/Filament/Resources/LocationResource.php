@@ -16,6 +16,7 @@ use Filament\Schemas\Components;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class LocationResource extends Resource
 {
@@ -113,7 +114,11 @@ class LocationResource extends Resource
                 Components\Section::make('Carrier Accounts')
                     ->schema([
                         Forms\Components\Repeater::make('carrierAccountScopes')
-                            ->relationship()
+                            // Only rows that target a carrier account. A row for an
+                            // Amazon connection is edited on the connection, and
+                            // leaving it out of this query also keeps the repeater
+                            // from deleting it.
+                            ->relationship(modifyQueryUsing: fn (Builder $query): Builder => $query->whereNotNull('carrier_account_id'))
                             ->schema([
                                 Forms\Components\Select::make('carrier_account_id')
                                     ->label('Account')

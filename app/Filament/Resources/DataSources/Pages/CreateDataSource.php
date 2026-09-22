@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\DataSources\Pages;
 
+use App\Filament\Resources\DataSources\Concerns\SetsUpOffAmazonShipping;
 use App\Filament\Resources\DataSources\DataSourceResource;
 use App\Models\DataSource;
 use App\Services\SettingsService;
@@ -9,9 +10,12 @@ use App\Services\ShipmentImport\Sources\AmazonSource;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 use Filament\Support\Exceptions\Halt;
+use Illuminate\Database\Eloquent\Model;
 
 class CreateDataSource extends CreateRecord
 {
+    use SetsUpOffAmazonShipping;
+
     protected static string $resource = DataSourceResource::class;
 
     /**
@@ -47,6 +51,35 @@ class CreateDataSource extends CreateRecord
         $data['secret_settings'] = $secrets ?: null;
 
         return $data;
+    }
+
+    /**
+     * A blank Client in multi-client mode means the connection is shared across
+     * every client, as the field says. `HasDefaultClient` stamps the default
+     * client on every new row, so it is cleared again here — otherwise a
+     * shared Amazon connection would get a default-client assignment instead
+     * of a global one, and never sell postage for other clients' orders.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function handleRecordCreation(array $data): Model
+    {
+        $record = parent::handleRecordCreation($data);
+
+        if (app(SettingsService::class)->get('multi_client_enabled', false) && blank($data['client_id'] ?? null)) {
+            $record->forceFill(['client_id' => null])->saveQuietly();
+        }
+
+        return $record;
+    }
+
+    protected function afterCreate(): void
+    {
+        $record = $this->getRecord();
+
+        if ($record instanceof DataSource && $record->isAmazon() && $record->offers_off_amazon_shipping) {
+            $this->setUpOffAmazonShipping($record);
+        }
     }
 
     /**
