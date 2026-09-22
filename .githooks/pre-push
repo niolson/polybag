@@ -12,6 +12,16 @@
 
 echo "Running static analysis before push..."
 
+# Rector is a CI gate (the "Check Rector" step), so a change it would make
+# fails the build anyway. A dry run here catches it before the push instead of
+# after CI has run.
+if ! vendor/bin/rector process --dry-run --no-progress-bar; then
+  echo ""
+  echo "Rector would change the files above. Push blocked."
+  echo "Run 'vendor/bin/rector process', check 'git diff', then commit the result."
+  exit 1
+fi
+
 if ! vendor/bin/phpstan analyse --no-progress --memory-limit=1G; then
   echo ""
   echo "phpstan found errors. Push blocked."
