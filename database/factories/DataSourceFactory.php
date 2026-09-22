@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\OffAmazonShippingStatus;
 use App\Models\DataSource;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\DatabaseSource;
@@ -23,6 +24,7 @@ class DataSourceFactory extends Factory
             'source_type' => DatabaseSource::class,
             'active' => true,
             'import_enabled' => true,
+            'offers_off_amazon_shipping' => false,
             'global_export' => false,
             'settings' => [],
             'secret_settings' => null,
@@ -49,6 +51,29 @@ class DataSourceFactory extends Factory
                 'channel_name' => 'Amazon',
             ],
         ]);
+    }
+
+    /**
+     * An Amazon connection that offers Amazon Shipping for orders from other
+     * channels, with the account already checked and enabled.
+     */
+    public function offeringOffAmazonShipping(OffAmazonShippingStatus $status = OffAmazonShippingStatus::Enabled): static
+    {
+        return $this->amazon()->state([
+            'offers_off_amazon_shipping' => true,
+            'off_amazon_shipping_status' => $status,
+            'off_amazon_shipping_checked_at' => now(),
+        ]);
+    }
+
+    /**
+     * A connection shared across every client. `HasDefaultClient` stamps the
+     * default client on create, so the Client is cleared afterwards, as it is
+     * when an operator clears it on the edit form.
+     */
+    public function unassigned(): static
+    {
+        return $this->afterCreating(fn (DataSource $source) => $source->forceFill(['client_id' => null])->saveQuietly());
     }
 
     public function importDisabled(): static

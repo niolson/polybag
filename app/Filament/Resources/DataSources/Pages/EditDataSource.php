@@ -2,12 +2,14 @@
 
 namespace App\Filament\Resources\DataSources\Pages;
 
+use App\Filament\Resources\DataSources\Concerns\SetsUpOffAmazonShipping;
 use App\Filament\Resources\DataSources\DataSourceResource;
 use App\Jobs\RunDataSourceImportJob;
 use App\Models\DataSource;
 use App\Models\Shipment;
 use App\Services\AmazonMarketplaceDiscoveryService;
 use App\Services\OAuthService;
+use App\Services\PostageSources\OffAmazonShippingCheck;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
@@ -26,7 +28,20 @@ use Throwable;
 
 class EditDataSource extends EditRecord
 {
+    use SetsUpOffAmazonShipping;
+
     protected static string $resource = DataSourceResource::class;
+
+    /**
+     * The assignments submitted with the form, applied after the connection
+     * itself is saved so they are checked against its saved Client. Null when
+     * the repeater was hidden, which leaves existing rows alone.
+     *
+     * @var array<int, array<string, mixed>>|null
+     */
+    private ?array $pendingOffAmazonShippingScopes = null;
+
+    private bool $offeredOffAmazonShippingBeforeSave = false;
 
     public function mount(int|string $record): void
     {
@@ -294,6 +309,16 @@ class EditDataSource extends EditRecord
                     }
                 }),
 
+            Action::make('check_off_amazon_shipping')
+                ->label('Check Again')
+                ->icon('heroicon-o-arrow-path')
+                ->color('gray')
+                ->tooltip('Ask Amazon again whether this account can ship orders from other channels.')
+                ->visible(fn (): bool => $this->dataSource()->isAmazon() && $this->dataSource()->offers_off_amazon_shipping)
+                ->action(function (): void {
+                    $this->notifyOffAmazonShippingCheck(app(OffAmazonShippingCheck::class)->check($this->dataSource()));
+                }),
+
             DeleteAction::make(),
         ];
     }
@@ -310,6 +335,12 @@ class EditDataSource extends EditRecord
         $this->validateMfaRequiredForAmazon($data);
 
         $record = $this->getRecord();
+
+        $this->offeredOffAmazonShippingBeforeSave = $this->dataSource()->offers_off_amazon_shipping;
+        $this->pendingOffAmazonShippingScopes = array_key_exists('off_amazon_shipping_scopes', $data)
+            ? array_values((array) $data['off_amazon_shipping_scopes'])
+            : null;
+        unset($data['off_amazon_shipping_scopes']);
         $existing = $record->settings ?? [];
         $existingSecrets = $record->secret_settings ?? [];
         $submitted = $data['settings'] ?? [];
@@ -339,6 +370,12 @@ class EditDataSource extends EditRecord
     {
         $dataSource = $this->dataSource();
 
+        if ($dataSource->isAmazon()) {
+            $this->afterAmazonSave($dataSource);
+
+            return;
+        }
+
         if ($dataSource->source_type !== ShopifySource::class) {
             return;
         }
@@ -359,6 +396,39 @@ class EditDataSource extends EditRecord
                 ->warning()
                 ->title('Packed shipments preserved')
                 ->body("{$preservedConflicts} Shipments already have a Package and were not moved to the new mapping. Resolve open location conflicts manually; shipped history remains unchanged.")
+                ->send();
+        }
+    }
+
+    /**
+     * The opt-in is checked only when it goes from off to on, and the scope
+     * rows of an opted-out connection are kept.
+     */
+    private function afterAmazonSave(DataSource $dataSource): void
+    {
+        if ($this->pendingOffAmazonShippingScopes !== null) {
+            $dataSource->syncOffAmazonShippingScopes($this->pendingOffAmazonShippingScopes);
+        }
+
+        if (! $dataSource->offers_off_amazon_shipping) {
+            return;
+        }
+
+        if (! $this->offeredOffAmazonShippingBeforeSave) {
+            $this->setUpOffAmazonShipping($dataSource);
+
+            // Show the default assignment and the check result just recorded.
+            $this->fillForm();
+
+            return;
+        }
+
+        if (! $dataSource->offAmazonShippingScopes()->exists()) {
+            Notification::make()
+                ->warning()
+                ->title('No assignment for Amazon Shipping')
+                ->body('This connection offers Amazon Shipping for orders from other channels but has no assignment, so no order will use it. Add one below.')
+                ->persistent()
                 ->send();
         }
     }

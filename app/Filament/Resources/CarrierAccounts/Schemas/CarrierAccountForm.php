@@ -6,6 +6,7 @@ use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Client;
 use App\Models\Location;
+use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\Carriers\UspsAdapter;
 use App\Services\OAuthService;
 use App\Services\SettingsService;
@@ -31,7 +32,12 @@ class CarrierAccountForm
                     ->schema([
                         Select::make('carrier_id')
                             ->label('Carrier')
-                            ->options(fn () => Carrier::active()->pluck('name', 'id'))
+                            // Amazon postage is bought through an Amazon connection, never a
+                            // direct account (ADR-0002, 2026-09-22 amendment). An existing
+                            // record still shows its own carrier.
+                            ->options(fn (string $operation) => Carrier::active()
+                                ->when($operation !== 'edit', fn ($query) => $query->where('name', '!=', AmazonBuyShippingAdapter::SOURCE_NAME))
+                                ->pluck('name', 'id'))
                             ->required()
                             // Fixed once saved. The credentials below are issued
                             // by this carrier and mean nothing to another one, so

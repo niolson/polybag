@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Models\CarrierAccount;
 use App\Models\CarrierAccountScope;
 use App\Models\Client;
+use App\Models\DataSource;
 use App\Models\Location;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -13,13 +14,15 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class CarrierAccountScopeFactory extends Factory
 {
+    /**
+     * `carrier_id` is left to the scope's `saving` hook, which derives it from
+     * the target.
+     */
     public function definition(): array
     {
-        $account = CarrierAccount::factory()->create();
-
         return [
-            'carrier_account_id' => $account->id,
-            'carrier_id' => $account->carrier_id,
+            'carrier_account_id' => CarrierAccount::factory(),
+            'data_source_id' => null,
             'location_id' => null,
             'client_id' => null,
             'rate_shop' => false,
@@ -31,6 +34,19 @@ class CarrierAccountScopeFactory extends Factory
         return $this->state(fn () => [
             'carrier_account_id' => $account->id,
             'carrier_id' => $account->carrier_id,
+        ]);
+    }
+
+    /**
+     * A row that routes off-Amazon Amazon Shipping to an Amazon connection. A
+     * connection with a Client is scoped to it unless a state says otherwise.
+     */
+    public function forDataSource(DataSource $source): static
+    {
+        return $this->state(fn () => [
+            'carrier_account_id' => null,
+            'data_source_id' => $source->id,
+            'client_id' => $source->client_id,
         ]);
     }
 

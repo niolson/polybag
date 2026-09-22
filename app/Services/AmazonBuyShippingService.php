@@ -280,6 +280,27 @@ class AmazonBuyShippingService
     }
 
     /**
+     * The `getRates` body for an order that did not come from Amazon.
+     *
+     * The on-Amazon shape minus `amazonOrderDetails`, which `EXTERNAL` refuses
+     * (`D-722`). The package must carry `items`, each with a weight, and their
+     * `weight × quantity` total must not exceed the package weight, or Amazon
+     * answers `400` before it looks at the account (`01`).
+     *
+     * @param  array<string, mixed>  $package  One Shipping v2 `Package`
+     * @return array<string, mixed>
+     */
+    public function buildExternalRatePayload(AddressData $shipFrom, AddressData $shipTo, array $package): array
+    {
+        return [
+            'shipTo' => $this->address($shipTo),
+            'shipFrom' => $this->address($shipFrom),
+            'packages' => [$package],
+            'channelDetails' => ['channelType' => 'EXTERNAL'],
+        ];
+    }
+
+    /**
      * Buy one offer.
      *
      * The idempotency key is the offer's public identifier, which is what makes

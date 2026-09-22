@@ -4,8 +4,10 @@ namespace App\Filament\Resources\DataSources\Schemas;
 
 use App\Enums\AmazonMarketplace;
 use App\Enums\ImportExistingBehavior;
+use App\Enums\OffAmazonShippingStatus;
 use App\Enums\ScheduleInterval;
 use App\Filament\Pages\Settings as SettingsPage;
+use App\Models\CarrierAccountScope;
 use App\Models\Channel;
 use App\Models\Client;
 use App\Models\DataSource;
@@ -21,6 +23,7 @@ use App\Services\ShipmentImport\Sources\DatabaseSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\SshTunnel;
 use Carbon\Carbon;
+use Closure;
 use Filament\Actions\Action;
 use Filament\Actions\Contracts\HasActions;
 use Filament\Forms\Components\Hidden;
@@ -37,6 +40,7 @@ use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\HtmlString;
@@ -316,6 +320,64 @@ class DataSourceForm
                 ])
                 ->visible(fn (Get $get): bool => $get('source_type') === AmazonSource::class)
                 ->columns(2),
+
+            Section::make('Amazon Shipping for Other Channels')
+                ->description('Buy Amazon Shipping labels through this connection for orders that did not come from Amazon — Shopify, database, or manually created orders. Amazon orders always use the connection they came from.')
+                ->schema([
+                    Toggle::make('offers_off_amazon_shipping')
+                        ->label('Offer Amazon Shipping for orders from other channels')
+                        ->default(false)
+                        ->live()
+                        ->helperText('Independent of order import. When turned on, PolyBag checks with Amazon that the account can ship these orders.')
+                        ->columnSpanFull(),
+
+                    Placeholder::make('off_amazon_shipping_check')
+                        ->label('Amazon Shipping account check')
+                        ->content(fn (?DataSource $record): HtmlString => self::renderOffAmazonShippingCheck($record))
+                        ->visible(fn (Get $get, ?DataSource $record): bool => (bool) $record?->exists && (bool) $get('offers_off_amazon_shipping'))
+                        ->columnSpanFull(),
+
+                    Repeater::make('off_amazon_shipping_scopes')
+                        ->label('Assignments')
+                        ->helperText(fn (Get $get): string => filled($get('client_id'))
+                            ? 'This connection belongs to a client, so it only ships that client\'s orders. Choose locations to narrow it further.'
+                            : 'Which orders this connection ships. The most specific assignment wins: location and client, then location, then client, then all.')
+                        ->formatStateUsing(fn (?DataSource $record): array => $record?->offAmazonShippingScopes()
+                            ->orderBy('id')
+                            ->get(['location_id', 'client_id'])
+                            ->map(fn (CarrierAccountScope $scope): array => [
+                                'location_id' => $scope->location_id,
+                                'client_id' => $scope->client_id,
+                            ])
+                            ->all() ?? [])
+                        ->schema([
+                            Select::make('location_id')
+                                ->label('Location')
+                                ->options(fn () => Location::active()->pluck('name', 'id'))
+                                ->placeholder('All locations')
+                                ->nullable()
+                                ->visible(self::multiLocationEnabled(...)),
+                            Select::make('client_id')
+                                ->label('Client')
+                                ->options(fn () => Client::where('active', true)->pluck('name', 'id'))
+                                ->placeholder(fn (Get $get): string => filled($get('../../client_id'))
+                                    ? (string) Client::find($get('../../client_id'))?->name
+                                    : 'All clients')
+                                ->nullable()
+                                // A client's own connection is only ever scoped to that client.
+                                ->disabled(fn (Get $get): bool => filled($get('../../client_id')))
+                                ->visible(self::multiClientEnabled(...)),
+                        ])
+                        ->columns(2)
+                        ->defaultItems(0)
+                        ->addActionLabel('Add Assignment')
+                        ->rules([fn (Get $get, ?DataSource $record): Closure => self::offAmazonShippingScopesRule($get, $record)])
+                        ->visible(fn (Get $get, ?DataSource $record): bool => (bool) $record?->exists
+                            && (bool) $get('offers_off_amazon_shipping')
+                            && (self::multiLocationEnabled() || self::multiClientEnabled()))
+                        ->columnSpanFull(),
+                ])
+                ->visible(fn (Get $get): bool => $get('source_type') === AmazonSource::class),
 
             // ── Database ───────────────────────────────────────────────────────────
 
@@ -635,6 +697,84 @@ class DataSourceForm
     private static function importsOrders(Get $get): bool
     {
         return (bool) ($get('import_enabled') ?? true);
+    }
+
+    /**
+     * The scope rules of ADR-0002's 2026-09-22 amendment, checked in the form so
+     * the operator sees a message rather than the scope model's refusal: a
+     * client's connection is scoped only to that client, no slot twice, and no
+     * slot another connection already holds.
+     */
+    private static function offAmazonShippingScopesRule(Get $get, ?DataSource $record): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail) use ($get, $record): void {
+            $ownClientId = filled($get('client_id')) ? (int) $get('client_id') : null;
+            $amazonCarrierId = CarrierAccountScope::amazonCarrierId();
+            $seen = [];
+
+            foreach (is_array($value) ? $value : [] as $row) {
+                $locationId = filled($row['location_id'] ?? null) ? (int) $row['location_id'] : null;
+                $clientId = $ownClientId ?? (filled($row['client_id'] ?? null) ? (int) $row['client_id'] : null);
+                $slot = $locationId.':'.$clientId;
+
+                if (isset($seen[$slot])) {
+                    $fail('Each assignment must cover a different location and client.');
+
+                    return;
+                }
+
+                $seen[$slot] = true;
+
+                if ($amazonCarrierId === null) {
+                    continue;
+                }
+
+                $holder = CarrierAccountScope::query()
+                    ->with('dataSource')
+                    ->where('carrier_id', $amazonCarrierId)
+                    ->where(fn (Builder $q) => $locationId === null ? $q->whereNull('location_id') : $q->where('location_id', $locationId))
+                    ->where(fn (Builder $q) => $clientId === null ? $q->whereNull('client_id') : $q->where('client_id', $clientId))
+                    ->where(fn (Builder $q) => $q->whereNull('data_source_id')->orWhere('data_source_id', '!=', $record?->id))
+                    ->first();
+
+                if ($holder) {
+                    $fail("Another connection, \"{$holder->dataSource?->name}\", already ships orders for "
+                        .($locationId ? Location::find($locationId)?->name : 'all locations').' and '
+                        .($clientId ? Client::find($clientId)?->name : 'all clients').'.');
+
+                    return;
+                }
+            }
+        };
+    }
+
+    private static function renderOffAmazonShippingCheck(?DataSource $record): HtmlString
+    {
+        $status = $record?->off_amazon_shipping_status;
+
+        if (! $status) {
+            return new HtmlString('<span class="text-gray-400 dark:text-gray-500">Not checked yet</span>');
+        }
+
+        $class = match ($status) {
+            OffAmazonShippingStatus::Enabled => 'text-success-600 dark:text-success-400',
+            OffAmazonShippingStatus::NotSetUp => 'text-danger-600 dark:text-danger-400',
+            OffAmazonShippingStatus::Unknown => 'text-warning-600 dark:text-warning-400',
+        };
+
+        $explanation = match ($status) {
+            OffAmazonShippingStatus::Enabled => 'Amazon accepts this account for orders from other channels.',
+            OffAmazonShippingStatus::NotSetUp => 'Amazon refused this account (A-101). Finish Amazon Shipping sign-up in Seller Central, then use Check Again.',
+            OffAmazonShippingStatus::Unknown => 'Amazon did not answer, or the check could not run. Use Check Again.',
+        };
+
+        $checkedAt = $record->off_amazon_shipping_checked_at?->diffForHumans();
+
+        return new HtmlString(
+            '<span class="'.$class.' font-medium">'.e($status->label()).'</span>'
+                .($checkedAt ? ' — checked '.e($checkedAt) : '')
+                .'<br><span class="text-sm text-gray-500 dark:text-gray-400">'.e($explanation).'</span>'
+        );
     }
 
     private static function multiClientEnabled(): bool

@@ -9,6 +9,7 @@ use App\Models\CarrierAccount;
 use App\Models\DataSource;
 use App\Models\Package;
 use App\Services\Carriers\CarrierRegistry;
+use App\Services\ShipmentImport\AmazonOrderItems;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use Illuminate\Support\Collection;
@@ -31,12 +32,12 @@ use Illuminate\Support\Collection;
  *   not a candidate at all. There is no precedence chain here to get wrong and
  *   no fallback — a shipment that came from nowhere resolves to nothing.
  * - **Carrier accounts resolve by scope**, on the existing `(location, client)`
- *   precedence. This arm currently covers direct USPS, UPS and FedEx accounts.
- *   Amazon Shipping for an off-Amazon order is not implemented: Shipping v2
- *   calls that an `EXTERNAL` channel. ADR-0002's 2026-09-22 amendment selects
- *   it with a `carrier_account_scopes` row that targets a connected Amazon
- *   `DataSource`, on the same precedence, independently of the Shipment's
- *   import source, and never for an Amazon-originating Shipment.
+ *   precedence. This arm covers direct USPS, UPS and FedEx accounts.
+ * - **Off-Amazon Amazon Shipping resolves by scope too** — Shipping v2 calls it
+ *   an `EXTERNAL` channel. ADR-0002's 2026-09-22 amendment selects it with a
+ *   `carrier_account_scopes` row that targets an Amazon `DataSource`, on the
+ *   same precedence, independently of the Shipment's import source, and never
+ *   for an Amazon-originating Shipment.
  *
  * This resolves *who may sell*, at quote time. What a shipped package's postage
  * actually was is recorded provenance, read by `PostageSourceDispatcher` from
@@ -60,6 +61,7 @@ class PostageSourceResolver
 
     public function __construct(
         private readonly CarrierRegistry $carrierRegistry,
+        private readonly AmazonOrderItems $amazonOrderItems,
     ) {}
 
     /**
@@ -88,8 +90,36 @@ class PostageSourceResolver
     }
 
     /**
+     * The Amazon connection scoped to sell Amazon Shipping for this package's
+     * order from another channel, or null.
+     *
+     * An Amazon order never gets one, even when the connection it came from is
+     * inactive: sold as `EXTERNAL`, its label would lose its link to the Amazon
+     * order. It is recognized by the connection it was imported from or by the
+     * Amazon order ID the import recorded, so an order whose connection has
+     * since been deleted is still an Amazon order.
+     */
+    public function offAmazonShippingSourceFor(Package $package): ?DataSource
+    {
+        $package->loadMissing('shipment.dataSource');
+
+        if ($this->isAmazonOrder($package)) {
+            return null;
+        }
+
+        return DataSource::resolveOffAmazonShipping($package->location_id, $package->shipment?->client_id);
+    }
+
+    private function isAmazonOrder(Package $package): bool
+    {
+        return $package->shipment?->dataSource?->isAmazon()
+            || $this->amazonOrderItems->orderIdFor($package) !== null;
+    }
+
+    /**
      * Every source eligible to sell this package a label: the bound channel
-     * source, then one carrier account per named carrier.
+     * source, the connection scoped to sell off-Amazon Amazon Shipping, then
+     * one carrier account per named carrier.
      *
      * Carriers are named by the caller because it already knows which ones it
      * is about to quote — the shipping method's services, or every configured
@@ -115,6 +145,12 @@ class PostageSourceResolver
 
         if ($channel = $this->channelSourceFor($package)) {
             $candidates->push(PostageSourceCandidate::fromDataSource($channel));
+        }
+
+        // Always asked, like the channel arm, because no carrier name selects
+        // it: the offer's carrier is whatever Amazon Shipping quotes.
+        if ($offAmazon = $this->offAmazonShippingSourceFor($package)) {
+            $candidates->push(PostageSourceCandidate::forOffAmazonShipping($offAmazon));
         }
 
         $package->loadMissing('shipment');
