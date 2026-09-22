@@ -11,6 +11,7 @@ use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\CarrierPackaging;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
@@ -371,6 +372,23 @@ it('auto-ships a blind purchase when it is the shipping methods sole eligible ch
         ->and($package->fresh()->cost)->toBeNull();
 });
 
+it('does not infer a sole blind purchase without a shipping method', function (): void {
+    $package = blindPurchasePackage();
+    $package->shipment->update(['shipping_method_id' => null]);
+    allowBlindPurchase($package);
+    $source = registerBlindSource();
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package->fresh(),
+        new PackageAutoShippingRequest(cleanupOnFailure: false),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+
+    $source->shouldNotHaveReceived('createShipment');
+});
+
 it('does not use a blind purchase as an outage fallback for a mixed shipping method', function (): void {
     $package = blindPurchasePackage(withUspsRate: true);
     allowBlindPurchase($package);
@@ -387,6 +405,24 @@ it('does not use a blind purchase as an outage fallback for a mixed shipping met
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 
     $source->shouldNotHaveReceived('createShipment');
+});
+
+it('auto-ships the sole blind choice when another source returns only packaging-incompatible rates', function (): void {
+    $package = blindPurchasePackage(withUspsRate: true);
+    allowBlindPurchase($package);
+    registerUspsRate(
+        packagingRequirement: PackagingRequirement::exactly(CarrierPackaging::UspsSmallFlatRateBox),
+    );
+    $source = registerBlindSource();
+    $source->shouldReceive('createShipment')->once()->andReturn(blindShipResponse());
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package,
+        new PackageAutoShippingRequest(cleanupOnFailure: false),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
 });
 
 it('excludes a blind purchase selected by an exclude service rule', function (): void {
@@ -413,6 +449,27 @@ it('excludes a blind purchase selected by an exclude service rule', function ():
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 
     $source->shouldNotHaveReceived('createShipment');
+});
+
+it('applies package weight conditions when excluding an attended blind purchase', function (): void {
+    $package = blindPurchasePackage();
+    $package->update(['weight' => 20]);
+    allowBlindPurchase($package);
+    registerBlindSource();
+
+    $shopifyService = CarrierService::whereHas('carrier', fn ($query) => $query->where('name', 'Shopify'))->firstOrFail();
+    ShippingRule::factory()->create([
+        'shipping_method_id' => $package->shipment->shipping_method_id,
+        'action' => ShippingRuleAction::ExcludeService,
+        'carrier_service_id' => $shopifyService->id,
+        'conditions' => [
+            ['type' => 'weight', 'data' => ['operator' => '>=', 'value' => 16]],
+        ],
+    ]);
+
+    $options = app(PackageShippingWorkflow::class)->prepareRates($package->fresh());
+
+    expect($options->blindPurchaseOffers)->toBeEmpty();
 });
 
 it('refuses a forged purchase request for a rule-excluded blind offer', function (): void {
@@ -763,8 +820,10 @@ function registerBlindSource(?Collection $offers = null, ?Closure $offerResolver
     return $source;
 }
 
-function registerUspsRate(?float $price = 8.50): void
-{
+function registerUspsRate(
+    ?float $price = 8.50,
+    ?PackagingRequirement $packagingRequirement = null,
+): void {
     $adapter = Mockery::mock(DirectCarrierAdapter::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('getCarrierName')->andReturn('USPS');
@@ -775,7 +834,13 @@ function registerUspsRate(?float $price = 8.50): void
     $adapter->shouldReceive('offerDeclaredValueCap')->andReturnNull();
     $adapter->shouldReceive('getRates')->andReturn($price === null
         ? collect()
-        : collect([new RateResponse('USPS', 'USPS_GROUND_ADVANTAGE', 'Ground Advantage', $price)]));
+        : collect([new RateResponse(
+            'USPS',
+            'USPS_GROUND_ADVANTAGE',
+            'Ground Advantage',
+            $price,
+            packagingRequirement: $packagingRequirement ?? PackagingRequirement::shipperPackaging(),
+        )]));
 
     app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 }
