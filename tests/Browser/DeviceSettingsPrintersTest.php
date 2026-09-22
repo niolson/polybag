@@ -165,6 +165,32 @@ it('sends the narrowly-scoped PS60 zero command through QZ Tray', function (): v
     ]);
 });
 
+it('refuses to zero the scale while a weight is still on the platform', function (): void {
+    $page = visit('/device-settings');
+
+    $error = $page->script(<<<'JS'
+        (async () => {
+            localStorage.setItem('scaleVendorId', '0x0EB8');
+            localStorage.setItem('scaleProductId', '0xF000');
+            ScaleUtils.backend = 'webhid';
+            ScaleUtils._lastReading = { weight: 2.5, isStable: true };
+            ScaleUtils._webHidDevice = {
+                sendFeatureReport: () => Promise.resolve(window.sentScaleReport = true),
+            };
+
+            try {
+                await ScaleUtils.zero();
+                return null;
+            } catch (error) {
+                return error.message;
+            }
+        })()
+    JS);
+
+    expect($error)->toBe('Clear the platform before zeroing the scale.')
+        ->and($page->script('window.sentScaleReport'))->toBeNull();
+});
+
 it('runs the hardware zero command when its barcode is scanned on the pack page', function (): void {
     $page = visit('/pack');
 

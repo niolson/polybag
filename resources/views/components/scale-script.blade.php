@@ -141,6 +141,12 @@
                 throw new Error('Wait for the scale to stop moving before zeroing.');
             }
 
+            // A stable non-empty reading is still stable — reject it here so a
+            // package left on the platform can't get baked into the new zero point.
+            if (Math.abs(this._lastReading.weight) > 0.1) {
+                throw new Error('Clear the platform before zeroing the scale.');
+            }
+
             const deviceInfo = this.getScaleDeviceInfo();
             if (!deviceInfo) {
                 throw new Error('No scale configured.');
