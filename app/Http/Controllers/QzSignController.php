@@ -11,11 +11,11 @@ class QzSignController extends Controller
      *
      * This is an exact allow-list — deliberately not prefix-based. It covers only
      * the printer calls (find/print) and the scale integration's HID device
-     * lifecycle (list/claim/release/open/close stream). Crucially it does NOT
-     * include the HID data-transfer calls (hid.sendData, hid.readData,
-     * hid.sendFeatureReport, hid.getFeatureReport) that the app never uses — nor
-     * any file/serial/usb call — so the endpoint cannot be abused to mint
-     * replayable signatures for reading from or writing to workstation hardware.
+     * lifecycle (list/claim/release/open/close stream). HID data-transfer calls
+     * remain excluded here. The one hardware write the app uses is handled as a
+     * parameter-constrained special case in isSignableCall(): the standard Scale
+     * Zero feature report for the Mettler Toledo PS60 only. This prevents the
+     * endpoint from minting signatures for arbitrary workstation hardware writes.
      * See security review issue 03.
      *
      * @var list<string>
@@ -102,6 +102,26 @@ class QzSignController extends Controller
             return false;
         }
 
+        if ($call === 'hid.sendFeatureReport') {
+            return $this->isPs60ZeroCommand($decoded['params'] ?? null);
+        }
+
         return in_array($call, self::ALLOWED_CALLS, true);
+    }
+
+    /**
+     * Allow only HID POS Scale Control report 2 with the Zero Scale bit set.
+     */
+    private function isPs60ZeroCommand(mixed $params): bool
+    {
+        if (! is_array($params) || count($params) !== 5) {
+            return false;
+        }
+
+        return ($params['vendorId'] ?? null) === '0x0EB8'
+            && ($params['productId'] ?? null) === '0xF000'
+            && ($params['reportId'] ?? null) === '0x02'
+            && ($params['data'] ?? null) === '02'
+            && ($params['type'] ?? null) === 'HEX';
     }
 }

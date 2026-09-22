@@ -112,17 +112,47 @@
                     '1': () => this.shipPackage(),
                     '2': () => $wire.reprintLastLabel(),
                     '3': () => $wire.cancelLastLabel(),
+                    '4': () => this.zeroScale(),
                     '0': () => this.clearShipment(),
                 };
 
                 const action = commands[code.toUpperCase()];
                 if (action) {
-                    action();
+                    return action();
                 } else {
                     new FilamentNotification()
                         .title('Unknown Command')
                         .body(`Command '${code}' not recognized`)
                         .danger()
+                        .send();
+                }
+            },
+
+            async zeroScale() {
+                if (!this.scaleConnected) {
+                    new FilamentNotification()
+                        .title('Scale Not Connected')
+                        .body('Connect the scale before using the zero command.')
+                        .danger()
+                        .send();
+                    return;
+                }
+
+                try {
+                    await ScaleUtils.zero();
+                    this.weight = '0.00';
+                    this.lastScaleWeight = '0.00';
+
+                    new FilamentNotification()
+                        .title('Scale Zero Command Sent')
+                        .body('The empty scale should now read 0.00 lbs.')
+                        .success()
+                        .send();
+                } catch (error) {
+                    new FilamentNotification()
+                        .title('Could Not Zero Scale')
+                        .body(error.message || 'Wait for a stable reading and try again with an empty scale.')
+                        .warning()
                         .send();
                 }
             },
