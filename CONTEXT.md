@@ -25,6 +25,14 @@ Where the label was bought: a `CarrierAccount` (bought directly) or a `DataSourc
 entirely.
 _Avoid_: Carrier, channel
 
+**Connection**:
+The UI name for a `DataSource` record: one connected account (Shopify, Amazon, or an
+external database) with its credentials, OAuth state, and Client assignment. A Connection
+may import orders, sell postage, receive tracking, or several of these. Being *active*
+means it may be used at all; *importing orders* is a separate switch, so an active
+Connection can exist only to sell postage or receive tracking.
+_Avoid_: Data source, import source (in UI copy — the code keeps `DataSource`)
+
 **Amazon Buy Shipping / Amazon Shipping**:
 Amazon Buy Shipping is the Shipping v2 API used to quote and buy postage. Amazon Shipping is
 one physical carrier that API can return. For an on-Amazon order (`channelType: AMAZON`), the

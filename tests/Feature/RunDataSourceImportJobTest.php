@@ -102,6 +102,21 @@ it('does nothing for an inactive source', function (): void {
     Notification::assertNothingSent();
 });
 
+it('does nothing for an active connection with import turned off', function (): void {
+    Notification::fake();
+
+    $user = User::factory()->admin()->create();
+    $source = DataSource::factory()->importDisabled()->create([
+        'source_type' => fakeImportDriver(),
+        'active' => true,
+    ]);
+
+    app()->call([new RunDataSourceImportJob($source->id, $user->id), 'handle']);
+
+    expect(Shipment::count())->toBe(0);
+    Notification::assertNothingSent();
+});
+
 it('does not run an Amazon import without a selected marketplace', function (): void {
     Notification::fake();
     Setting::updateOrCreate(['key' => 'require_mfa'], ['value' => '1', 'type' => 'boolean', 'group' => 'general']);

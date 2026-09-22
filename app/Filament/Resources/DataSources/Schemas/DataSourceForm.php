@@ -87,21 +87,30 @@ class DataSourceForm
                         ->dehydrated(),
 
                     Toggle::make('active')
-                        ->default(true),
+                        ->default(true)
+                        ->helperText('Whether this connection may be used at all.'),
+
+                    Toggle::make('import_enabled')
+                        ->label('Import Orders')
+                        ->default(true)
+                        ->live()
+                        ->helperText('Turn off for a connection that only buys postage or receives tracking. Orders already imported from it keep their postage and write-back.'),
 
                     Select::make('schedule_interval')
                         ->label('Import Schedule')
                         ->options(ScheduleInterval::class)
                         ->nullable()
                         ->placeholder('Disabled (manual only)')
-                        ->helperText('How often this source should automatically run.'),
+                        ->helperText('How often this connection should automatically import.')
+                        ->visible(self::importsOrders(...)),
 
                     Select::make('settings.on_existing')
                         ->label('Existing Shipments')
                         ->options(ImportExistingBehavior::class)
                         ->default(ImportExistingBehavior::default()->value)
                         ->selectablePlaceholder(false)
-                        ->helperText('What to do when an imported shipment already exists. Shipped and voided shipments are never updated.'),
+                        ->helperText('What to do when an imported shipment already exists. Shipped and voided shipments are never updated.')
+                        ->visible(self::importsOrders(...)),
                 ])
                 ->columns(2),
 
@@ -142,21 +151,23 @@ class DataSourceForm
                 ->visible(fn (Get $get): bool => $get('source_type') === ShopifySource::class)
                 ->columns(2),
 
-            Section::make('Shopify Import Settings')
+            Section::make('Shopify Order Settings')
                 ->schema([
                     Select::make('settings.channel_name')
                         ->label('Channel')
                         ->options(fn () => Channel::query()->where('active', true)->orderBy('name')->pluck('name', 'id'))
                         ->required()
                         ->searchable()
-                        ->helperText('Channel assigned to imported shipments.'),
+                        ->helperText('Channel assigned to imported shipments.')
+                        ->visible(self::importsOrders(...)),
 
                     Select::make('settings.shipping_method')
                         ->label('Default Shipping Method')
                         ->options(fn () => ShippingMethod::query()->where('active', true)->orderBy('name')->pluck('name', 'id'))
                         ->nullable()
                         ->searchable()
-                        ->helperText('Leave blank to map per-order via channel aliases.'),
+                        ->helperText('Leave blank to map per-order via channel aliases.')
+                        ->visible(self::importsOrders(...)),
 
                     Toggle::make('settings.notify_customer')
                         ->label('Notify Customer on Fulfillment')
@@ -212,7 +223,9 @@ class DataSourceForm
                         ->mutateRelationshipDataBeforeSaveUsing(fn (array $data): array => self::normalizeShopifyLocationMapping($data))
                         ->columnSpanFull(),
                 ])
-                ->visible(fn (Get $get, ?DataSource $record): bool => $get('source_type') === ShopifySource::class && (bool) $record?->exists),
+                ->visible(fn (Get $get, ?DataSource $record): bool => $get('source_type') === ShopifySource::class
+                    && (bool) $record?->exists
+                    && self::importsOrders($get)),
 
             // ── Amazon ─────────────────────────────────────────────────────────────
 
@@ -220,7 +233,7 @@ class DataSourceForm
                 ->schema([
                     Placeholder::make('amazon_mfa_warning')
                         ->label('')
-                        ->content('⚠ Amazon SP-API sources give access to customer PII. Multi-Factor Authentication must be required for all users before this source can be active. Enable it in [App Settings → Authentication]('.SettingsPage::getUrl().').')
+                        ->content('⚠ Amazon SP-API connections give access to customer PII. Multi-Factor Authentication must be required for all users before this connection can be active. Enable it in [App Settings → Authentication]('.SettingsPage::getUrl().').')
                         ->markdown()
                         ->visible(fn (): bool => ! app(SettingsService::class)->get('require_mfa', false))
                         ->columnSpanFull(),
@@ -266,26 +279,29 @@ class DataSourceForm
                 ->visible(fn (Get $get): bool => $get('source_type') === AmazonSource::class)
                 ->columns(2),
 
-            Section::make('Amazon Import Settings')
+            Section::make('Amazon Order Settings')
                 ->schema([
                     Select::make('settings.channel_name')
                         ->label('Channel')
                         ->options(fn () => Channel::query()->where('active', true)->orderBy('name')->pluck('name', 'id'))
                         ->required()
-                        ->searchable(),
+                        ->searchable()
+                        ->visible(self::importsOrders(...)),
 
                     Select::make('settings.shipping_method')
                         ->label('Default Shipping Method')
                         ->options(fn () => ShippingMethod::query()->where('active', true)->orderBy('name')->pluck('name', 'id'))
                         ->nullable()
-                        ->searchable(),
+                        ->searchable()
+                        ->visible(self::importsOrders(...)),
 
                     TextInput::make('settings.lookback_days')
                         ->label('Lookback Days')
                         ->numeric()
                         ->default(30)
                         ->minValue(1)
-                        ->maxValue(365),
+                        ->maxValue(365)
+                        ->visible(self::importsOrders(...)),
 
                     Toggle::make('settings.export_enabled')
                         ->label('Confirm Shipment Back to Amazon')
@@ -295,7 +311,8 @@ class DataSourceForm
                         ->label('Import Amazon-Fulfilled (FBA) Orders')
                         ->default(false)
                         ->helperText('Off by default. Amazon picks, packs and ships FBA orders from its own warehouse, so packing one here creates a duplicate shipment and a confirmation Amazon rejects. Turn this on only if you want them visible for reference — imported FBA orders are badged and cannot be packed or exported.')
-                        ->columnSpanFull(),
+                        ->columnSpanFull()
+                        ->visible(self::importsOrders(...)),
                 ])
                 ->visible(fn (Get $get): bool => $get('source_type') === AmazonSource::class)
                 ->columns(2),
@@ -314,7 +331,7 @@ class DataSourceForm
                         ->helperText(new HtmlString(
                             'Connection fields, query contracts, field mapping and least-privilege GRANT examples: '
                             .'<a href="'.self::DATABASE_SOURCE_DOCS_URL.'" target="_blank" rel="noopener noreferrer" '
-                            .'class="text-primary-600 hover:underline font-medium">Database data source guide</a>.'
+                            .'class="text-primary-600 hover:underline font-medium">Database connection guide</a>.'
                         ))
                         ->afterStateUpdated(fn (Set $set, ?string $state): mixed => $set(
                             'settings.db_port',
@@ -415,12 +432,14 @@ class DataSourceForm
                     TextInput::make('settings.shipments_table')
                         ->label('Shipments Table')
                         ->default('shipments')
-                        ->maxLength(255),
+                        ->maxLength(255)
+                        ->visible(self::importsOrders(...)),
 
                     TextInput::make('settings.shipment_items_table')
                         ->label('Items Table')
                         ->default('shipment_items')
-                        ->maxLength(255),
+                        ->maxLength(255)
+                        ->visible(self::importsOrders(...)),
 
                     TextInput::make('settings.client_column')
                         ->label('Client Column')
@@ -428,7 +447,7 @@ class DataSourceForm
                         ->maxLength(255)
                         ->helperText('Column in each row that identifies the client (matched by name). When set, the Client field above is ignored and each row maps to its own client.')
                         ->columnSpanFull()
-                        ->visible(fn (): bool => self::multiClientEnabled()),
+                        ->visible(fn (Get $get): bool => self::multiClientEnabled() && self::importsOrders($get)),
 
                     Textarea::make('settings.shipments_query')
                         ->label('Custom Shipments Query')
@@ -437,7 +456,8 @@ class DataSourceForm
                         ->rule(RawSqlGuard::rule(RawSqlGuard::READ, 'Custom Shipments Query'))
                         ->helperText('Optional. Overrides table + filters. Leave blank to use table-based query. ⚠️ Runs verbatim against the configured database — must be a single SELECT statement.')
                         ->dehydrateStateUsing(fn (?string $state): ?string => $state ? str_replace("\u{00A0}", ' ', $state) : $state)
-                        ->columnSpanFull(),
+                        ->columnSpanFull()
+                        ->visible(self::importsOrders(...)),
 
                     Textarea::make('settings.shipment_items_query')
                         ->label('Custom Items Query')
@@ -446,11 +466,13 @@ class DataSourceForm
                         ->rule(RawSqlGuard::rule(RawSqlGuard::READ, 'Custom Items Query'))
                         ->helperText('Use :shipment_reference as the placeholder. Leave blank to query by shipment_id. ⚠️ Runs verbatim against the configured database — must be a single SELECT statement.')
                         ->dehydrateStateUsing(fn (?string $state): ?string => $state ? str_replace("\u{00A0}", ' ', $state) : $state)
-                        ->columnSpanFull(),
+                        ->columnSpanFull()
+                        ->visible(self::importsOrders(...)),
 
                     Toggle::make('settings.mark_exported_enabled')
                         ->label('Mark Exported After Import')
-                        ->live(),
+                        ->live()
+                        ->visible(self::importsOrders(...)),
 
                     Textarea::make('settings.mark_exported_query')
                         ->label('Mark Exported Query')
@@ -460,7 +482,7 @@ class DataSourceForm
                         ->helperText('Use :shipment_reference as placeholder. ⚠️ Runs automatically on every import against the configured database — must be a single UPDATE or INSERT statement.')
                         ->dehydrateStateUsing(fn (?string $state): ?string => $state ? str_replace("\u{00A0}", ' ', $state) : $state)
                         ->columnSpanFull()
-                        ->visible(fn (Get $get): bool => (bool) $get('settings.mark_exported_enabled')),
+                        ->visible(fn (Get $get): bool => self::importsOrders($get) && (bool) $get('settings.mark_exported_enabled')),
 
                     TextInput::make('settings.max_affected_rows')
                         ->label('Max Affected Rows Per Write')
@@ -475,6 +497,7 @@ class DataSourceForm
                         ->label('Preview Queries')
                         ->icon(Heroicon::CheckCircle)
                         ->color('gray')
+                        ->visible(self::importsOrders(...))
                         ->modalHeading('Query preview')
                         ->modalDescription('Runs the read queries against the configured database and shows the first rows, raw and mapped. The write queries are parse-checked only — a preview never writes.')
                         ->modalWidth('7xl')
@@ -603,6 +626,15 @@ class DataSourceForm
                 ->collapsible()
                 ->collapsed(),
         ]);
+    }
+
+    /**
+     * Whether the form describes a connection that imports orders. Everything
+     * this gates is import-only; export and postage settings stay visible.
+     */
+    private static function importsOrders(Get $get): bool
+    {
+        return (bool) ($get('import_enabled') ?? true);
     }
 
     private static function multiClientEnabled(): bool
@@ -931,7 +963,7 @@ class DataSourceForm
     private static function renderAmazonOAuthStatus(?DataSource $record): HtmlString
     {
         if (! $record?->exists) {
-            return new HtmlString('Save the data source, then use Connect Amazon.');
+            return new HtmlString('Save the connection, then use Connect Amazon.');
         }
 
         $connected = app(OAuthService::class)->isDataSourceConnected($record);

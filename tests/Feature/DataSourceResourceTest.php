@@ -1089,3 +1089,130 @@ it('offers the FBA import toggle for Amazon sources only, defaulting off', funct
         ->fillForm(['source_type' => DatabaseSource::class])
         ->assertFormFieldHidden('settings.import_fba_orders');
 });
+
+// ── Connections and the import toggle ─────────────────────────────────────────
+
+it('presents data sources as Connections', function (): void {
+    $this->actingAs($this->admin);
+
+    expect(DataSourceResource::getNavigationLabel())->toBe('Connections')
+        ->and(DataSourceResource::getModelLabel())->toBe('connection')
+        ->and(DataSourceResource::getPluralModelLabel())->toBe('connections');
+
+    Livewire::test(ListDataSources::class)->assertSee('Connections');
+});
+
+it('imports orders by default on a new connection', function (): void {
+    $this->actingAs($this->admin);
+
+    Livewire::test(CreateDataSource::class)
+        ->assertFormSet(['import_enabled' => true]);
+});
+
+it('hides import-only Shopify fields when import is off and keeps write-back', function (): void {
+    $this->actingAs($this->admin);
+
+    Livewire::test(CreateDataSource::class)
+        ->fillForm(['source_type' => ShopifySource::class])
+        ->assertFormFieldVisible('schedule_interval')
+        ->assertFormFieldVisible('settings.channel_name')
+        ->fillForm(['import_enabled' => false])
+        ->assertFormFieldHidden('schedule_interval')
+        ->assertFormFieldHidden('settings.on_existing')
+        ->assertFormFieldHidden('settings.channel_name')
+        ->assertFormFieldHidden('settings.shipping_method')
+        ->assertFormFieldVisible('settings.shop_domain')
+        ->assertFormFieldVisible('settings.export_enabled');
+});
+
+it('hides import-only Amazon fields when import is off', function (): void {
+    $this->actingAs($this->admin);
+
+    Livewire::test(CreateDataSource::class)
+        ->fillForm(['source_type' => AmazonSource::class, 'import_enabled' => false])
+        ->assertFormFieldHidden('settings.channel_name')
+        ->assertFormFieldHidden('settings.lookback_days')
+        ->assertFormFieldHidden('settings.import_fba_orders')
+        ->assertFormFieldVisible('settings.marketplace_id')
+        ->assertFormFieldVisible('settings.export_enabled');
+});
+
+it('leaves an export-only Database connection its export settings when import is off', function (): void {
+    $this->actingAs($this->admin);
+
+    Livewire::test(CreateDataSource::class)
+        ->fillForm(['source_type' => DatabaseSource::class, 'import_enabled' => false, 'settings.export_enabled' => true])
+        ->assertFormFieldHidden('settings.shipments_table')
+        ->assertFormFieldHidden('settings.shipments_query')
+        ->assertFormFieldHidden('settings.shipment_items_query')
+        ->assertFormFieldHidden('settings.mark_exported_enabled')
+        ->assertFormFieldVisible('settings.max_affected_rows')
+        ->assertFormFieldVisible('settings.export_query')
+        ->assertFormFieldVisible('settings.db_database');
+});
+
+it('creates a Shopify connection with import off without an import channel', function (): void {
+    $this->actingAs($this->admin);
+
+    Livewire::test(CreateDataSource::class)
+        ->fillForm([
+            'name' => 'Postage only',
+            'source_type' => ShopifySource::class,
+            'import_enabled' => false,
+            'settings.shop_domain' => 'test.myshopify.com',
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    expect(DataSource::where('name', 'Postage only')->firstOrFail()->import_enabled)->toBeFalse();
+});
+
+it('hides the import actions on the edit page when import is off', function (): void {
+    $this->actingAs($this->admin);
+
+    $source = DataSource::factory()->shopify()->importDisabled()->create();
+
+    Livewire::test(EditDataSource::class, ['record' => $source->id])
+        ->assertActionHidden('run_import')
+        ->assertActionHidden('activate_fulfillment_order_import')
+        ->assertActionVisible('sync_shopify_locations');
+});
+
+it('hides the Shopify location mapping when import is off', function (): void {
+    $this->actingAs($this->admin);
+
+    $source = DataSource::factory()->shopify()->importDisabled()->create();
+
+    Livewire::test(EditDataSource::class, ['record' => $source->id])
+        ->assertFormFieldHidden('locations');
+});
+
+it('hides the table run import action when import is off', function (): void {
+    $this->actingAs($this->admin);
+
+    $source = DataSource::factory()->importDisabled()->create();
+
+    Livewire::test(ListDataSources::class)
+        ->assertActionHidden(TestAction::make('run_import')->table($source));
+});
+
+it('keeps import settings when a connection with import off is saved', function (): void {
+    $this->actingAs($this->admin);
+    $channel = Channel::factory()->create();
+
+    $source = DataSource::factory()->shopify()->create([
+        'schedule_interval' => 'hourly',
+        'settings' => ['shop_domain' => 'test.myshopify.com', 'channel_name' => $channel->id],
+    ]);
+
+    Livewire::test(EditDataSource::class, ['record' => $source->id])
+        ->fillForm(['import_enabled' => false])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $source->refresh();
+
+    // Turning import back on should not mean re-entering what was there.
+    expect($source->import_enabled)->toBeFalse()
+        ->and($source->settings['channel_name'])->toBe($channel->id);
+});

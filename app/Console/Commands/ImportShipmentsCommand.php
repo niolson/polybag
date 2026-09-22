@@ -11,7 +11,7 @@ class ImportShipmentsCommand extends Command
 {
     protected $signature = 'shipments:import
                             {--source-id= : Run a single import source by ID}
-                            {--all : Run every active DataSource record}
+                            {--all : Run every active DataSource record with import turned on}
                             {--dry-run : Preview what would be imported without making changes}
                             {--validate-only : Only validate the source configuration}';
 
@@ -48,12 +48,18 @@ class ImportShipmentsCommand extends Command
             return Command::SUCCESS;
         }
 
+        if (! $record->import_enabled) {
+            $this->warn("Import is turned off for connection '{$record->name}'.");
+
+            return Command::SUCCESS;
+        }
+
         return $this->runRecord($record);
     }
 
     private function runAll(): int
     {
-        $sources = DataSource::where('active', true)->get();
+        $sources = DataSource::importing()->get();
 
         if ($sources->isEmpty()) {
             $this->warn('No active import sources found.');

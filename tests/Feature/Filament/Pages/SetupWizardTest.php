@@ -235,6 +235,74 @@ it('prefills the import source select from an existing DataSource', function ():
         ->assertSet('data.import_source', 'database');
 });
 
+it('does not prefill the import source from a connection that does not import orders', function (): void {
+    DataSource::factory()->amazon()->importDisabled()->create();
+
+    Livewire::test(SetupWizard::class)
+        ->assertSet('data.import_source', 'none');
+});
+
+it('summarizes only a connection that imports orders', function (): void {
+    // The postage-only connection is created first, so a query that ignored
+    // import_enabled would pick it.
+    DataSource::factory()->amazon()->importDisabled()->create(['name' => 'Amazon postage']);
+    DataSource::factory()->shopify()->create(['name' => 'Shopify orders']);
+
+    Livewire::test(SetupWizard::class)
+        ->assertSee('Shopify orders (Shopify)')
+        ->assertSee('Finish configuring Shopify orders')
+        ->assertDontSee('Amazon postage (Amazon SP-API)')
+        ->assertDontSee('Finish configuring Amazon postage');
+});
+
+it('turns import on for the connection it configures', function (): void {
+    $existing = DataSource::factory()->amazon()->importDisabled()->create(['active' => false]);
+
+    $component = Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
+        ->set('data.import_source', 'amazon')
+        ->set('data.amazon_marketplace_id', 'ATVPDKIKX0DER');
+
+    invokePrivateMethod($component->instance(), 'saveImportSource');
+
+    expect(DataSource::count())->toBe(1)
+        ->and($existing->refresh()->active)->toBeTrue()
+        ->and($existing->import_enabled)->toBeTrue();
+});
+
+it('configures the importing connection rather than a postage-only one of the same driver', function (): void {
+    $postageOnly = DataSource::factory()->amazon()->importDisabled()->create();
+    $importer = DataSource::factory()->amazon()->create();
+
+    $component = Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
+        ->set('data.import_source', 'amazon')
+        ->set('data.amazon_marketplace_id', 'A2EUQ1WTGCTBG2');
+
+    invokePrivateMethod($component->instance(), 'saveImportSource');
+
+    expect($importer->refresh()->settings['marketplace_id'])->toBe('A2EUQ1WTGCTBG2')
+        ->and($postageOnly->refresh()->import_enabled)->toBeFalse();
+});
+
+it('turns import off, but leaves the connection active, when none is saved', function (): void {
+    $importer = DataSource::factory()->shopify()->create();
+    $inactiveImporter = DataSource::factory()->create(['active' => false]);
+
+    $component = Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
+        ->set('data.import_source', 'none');
+
+    invokePrivateMethod($component->instance(), 'saveImportSource');
+
+    // An inactive connection is cleared too, or reactivating it later would
+    // resume the import "None" asked to stop.
+    expect($importer->refresh()->import_enabled)->toBeFalse()
+        ->and($importer->active)->toBeTrue()
+        ->and($inactiveImporter->refresh()->import_enabled)->toBeFalse()
+        ->and($inactiveImporter->active)->toBeFalse();
+});
+
 function invokePrivateMethod(object $instance, string $method): void
 {
     $reflection = new ReflectionMethod($instance, $method);

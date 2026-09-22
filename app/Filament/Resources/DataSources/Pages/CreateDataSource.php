@@ -62,7 +62,7 @@ class CreateDataSource extends CreateRecord
             return;
         }
 
-        $message = 'Amazon SP-API sources give access to customer PII, so Multi-Factor Authentication must be required for all users before this source can be active. Enable it in App Settings → Authentication first.';
+        $message = 'Amazon SP-API connections give access to customer PII, so Multi-Factor Authentication must be required for all users before this connection can be active. Enable it in App Settings → Authentication first.';
 
         Notification::make()
             ->title('Multi-Factor Authentication required')

@@ -28,7 +28,16 @@ class DataSourceResource extends Resource
 
     protected static \UnitEnum|string|null $navigationGroup = 'Integrations';
 
-    protected static ?string $navigationLabel = 'Data Sources';
+    /**
+     * The UI calls a DataSource a Connection: a connected account that may
+     * import orders, sell postage, receive tracking, or several of those. The
+     * model, table and classes keep the DataSource name (see CONTEXT.md).
+     */
+    protected static ?string $navigationLabel = 'Connections';
+
+    protected static ?string $modelLabel = 'connection';
+
+    protected static ?string $pluralModelLabel = 'connections';
 
     protected static ?string $recordTitleAttribute = 'name';
 

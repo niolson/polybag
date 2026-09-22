@@ -190,9 +190,10 @@ organisation; `common` allows any Microsoft account.
 
 ## Data sources and marketplace postage
 
-Import and export sources are **Data Source** records (Integrations → Data Sources), each
+Import and export sources are **Connection** records (Integrations → Connections), each
 with its own encrypted credentials, schedule, and optional client assignment. Nothing
-here needs `.env`. A Shopify or Amazon source can also be the postage source for a Label;
+here needs `.env`. **Import Orders** on a connection is on by default; turn it off for a
+connection that should only receive tracking or sell postage. A Shopify or Amazon source can also be the postage source for a Label;
 that is separate from importing the Shipment, even though marketplace postage is bound to
 the originating account because the order identity belongs to it.
 
@@ -215,7 +216,7 @@ external vendor, this is it.
    returns an empty list rather than an error.
 3. Shopify gates customer PII (the email and destination address the importer needs)
    behind protected customer data access. Request it if your app type requires it.
-4. Create a Shopify Data Source with the store's `.myshopify.com` **Shop Domain**, and
+4. Create a Shopify Connection with the store's `.myshopify.com` **Shop Domain**, and
    put the client ID and secret into **App Client ID** / **App Client Secret**.
 
 Without a broker the source exchanges those credentials for a token directly against the
@@ -248,7 +249,7 @@ Shopify fulfillment rather than through one of your direct carrier accounts.
 3. The importer uses the Orders and Catalog Items APIs, and it reads buyer shipping
    addresses — so the application needs the roles that cover personally identifiable
    information. Amazon approves those separately.
-4. Create an Amazon Data Source and fill in **Refresh Token**, **App Client ID**, **App
+4. Create an Amazon Connection and fill in **Refresh Token**, **App Client ID**, **App
    Client Secret**, and the **Marketplace**. Marketplace discovery only runs after an
    OAuth connection, so pick from the listed North American marketplaces manually.
 
@@ -266,7 +267,7 @@ the Client. Sandbox and production approvals are intentionally separate.
 
 That is the on-Amazon (`channelType: AMAZON`) workflow. Although Shipping v2 also accepts
 off-Amazon orders (`channelType: EXTERNAL`) and can sell Amazon Shipping labels for them,
-PolyBag does not implement that workflow yet. Connecting an Amazon Data Source and completing
+PolyBag does not implement that workflow yet. Connecting an Amazon account and completing
 Amazon Shipping onboarding therefore does not currently make Amazon Shipping appear for
 Shopify, database-imported, manual, or other non-Amazon Shipments.
 

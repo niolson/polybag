@@ -10,7 +10,7 @@
                         Multi-factor authentication is off
                     </p>
                     <p class="mt-1 text-sm text-amber-800 dark:text-amber-200">
-                        Admin accounts can configure data sources, carrier credentials, and see every client's data. Requiring MFA protects these accounts if a password is ever phished or reused.
+                        Admin accounts can configure connections, carrier credentials, and see every client's data. Requiring MFA protects these accounts if a password is ever phished or reused.
                     </p>
                     <p class="mt-1 text-sm text-amber-800 dark:text-amber-200">
                         If your admins sign in with Google or Microsoft, MFA may already be enforced by that provider — in which case you can safely dismiss this.

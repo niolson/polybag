@@ -29,7 +29,7 @@ class EditLocation extends EditRecord
                         || DataSourceLocation::where('location_id', $locationId)->exists()) {
                         Notification::make()
                             ->title('Cannot delete location')
-                            ->body('This location is referenced by existing shipments, packages, or Data Source mappings. Deactivate it instead.')
+                            ->body('This location is referenced by existing shipments, packages, or Connection location mappings. Deactivate it instead.')
                             ->danger()
                             ->send();
 

@@ -102,8 +102,9 @@ class SetupWizard extends Page
             'prepopulate_shipping_methods' => false,
             'shipping_methods' => [],
 
-            // Step 5: Import source (prefill from a previously created data source)
-            'import_source' => match (DataSource::query()->value('source_type')) {
+            // Step 5: Order import (prefill from a connection that imports orders;
+            // a postage-only connection is not an import source)
+            'import_source' => match (DataSource::importing()->value('source_type')) {
                 DatabaseSource::class => 'database',
                 ShopifySource::class => 'shopify',
                 AmazonSource::class => 'amazon',
@@ -409,12 +410,12 @@ class SetupWizard extends Page
 
     private function importSourceStep(): Step
     {
-        return Step::make('Data Source')
+        return Step::make('Order Import')
             ->icon('heroicon-o-arrow-down-tray')
             ->description('Configure where shipments come from')
             ->schema([
                 Forms\Components\Select::make('import_source')
-                    ->label('Data Source')
+                    ->label('Import Orders From')
                     ->options([
                         'none' => 'None (manual entry only)',
                         'database' => 'External Database',
@@ -588,9 +589,9 @@ class SetupWizard extends Page
                     ->label('Shipping Methods')
                     ->content(fn () => ShippingMethod::where('active', true)->pluck('name')->join(', ') ?: 'None'),
                 Forms\Components\Placeholder::make('summary_import')
-                    ->label('Data Source')
+                    ->label('Order Import')
                     ->content(function (): string {
-                        $source = DataSource::query()->first();
+                        $source = DataSource::importing()->first();
 
                         if (! $source) {
                             return 'None (manual entry only)';
@@ -620,7 +621,7 @@ class SetupWizard extends Page
                             return "<li><a href=\"{$url}\" class=\"text-primary-600 hover:underline font-medium\">{$verb} {$account->carrier->name}</a> — credentials required before shipping</li>";
                         })->values()->all();
 
-                        if ($source = DataSource::query()->first()) {
+                        if ($source = DataSource::importing()->first()) {
                             $url = DataSourceResource::getUrl('edit', ['record' => $source->id]);
                             $items[] = "<li><a href=\"{$url}\" class=\"text-primary-600 hover:underline font-medium\">Finish configuring {$source->name}</a> — credentials, queries, and connection test</li>";
                         }
@@ -815,7 +816,37 @@ class SetupWizard extends Page
             $this->saveShopifyDataSource($data);
         } elseif ($source === 'amazon') {
             $this->saveAmazonDataSource($data);
+        } else {
+            $this->stopImportingOrders();
         }
+    }
+
+    /**
+     * "None (manual entry only)" turns order import off on every connection
+     * that has it, inactive ones included, so reactivating one later does not
+     * quietly resume importing. Each connection keeps its `active` flag, so
+     * postage bought through it and tracking written back to it carry on.
+     * Saved one at a time so each change is audited.
+     */
+    private function stopImportingOrders(): void
+    {
+        DataSource::where('import_enabled', true)->get()->each(
+            fn (DataSource $record): bool => $record->update(['import_enabled' => false]),
+        );
+    }
+
+    /**
+     * The connection of this driver the wizard configures: one that already
+     * imports orders if there is one, so a postage-only connection of the same
+     * driver is not turned into an importer beside it.
+     */
+    private function importConnectionFor(string $sourceType): DataSource
+    {
+        return DataSource::query()
+            ->orderByDesc('import_enabled')
+            ->orderByDesc('active')
+            ->orderBy('id')
+            ->firstOrNew(['source_type' => $sourceType]);
     }
 
     /**
@@ -843,10 +874,11 @@ class SetupWizard extends Page
             ];
         }
 
-        $record = DataSource::firstOrNew(['source_type' => DatabaseSource::class]);
+        $record = $this->importConnectionFor(DatabaseSource::class);
         $record->fill([
             'name' => $record->name ?? 'Imported Orders Database',
             'active' => true,
+            'import_enabled' => true,
             'settings' => array_merge($record->settings ?? [], $newSettings),
         ]);
 
@@ -862,7 +894,7 @@ class SetupWizard extends Page
      */
     private function saveShopifyDataSource(array $data): void
     {
-        $record = DataSource::firstOrNew(['source_type' => ShopifySource::class]);
+        $record = $this->importConnectionFor(ShopifySource::class);
 
         $newSettings = [
             'channel_name' => $data['shopify_channel_id']
@@ -882,6 +914,7 @@ class SetupWizard extends Page
         $record->fill([
             'name' => $record->name ?? 'Shopify',
             'active' => true,
+            'import_enabled' => true,
             'settings' => array_merge($record->settings ?? [], $newSettings),
         ]);
         $record->save();
@@ -892,7 +925,7 @@ class SetupWizard extends Page
      */
     private function saveAmazonDataSource(array $data): void
     {
-        $record = DataSource::firstOrNew(['source_type' => AmazonSource::class]);
+        $record = $this->importConnectionFor(AmazonSource::class);
 
         $newSettings = [
             'channel_name' => $data['amazon_channel_id']
@@ -907,6 +940,7 @@ class SetupWizard extends Page
         $record->fill([
             'name' => $record->name ?? 'Amazon',
             'active' => true,
+            'import_enabled' => true,
             'settings' => array_merge($record->settings ?? [], $newSettings),
         ]);
         $record->save();

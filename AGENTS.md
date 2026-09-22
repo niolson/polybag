@@ -101,7 +101,10 @@ Server-operations tooling for our own hosted deployment lives in a separate priv
   packaging identity; compatible packaging is enforced while rating and buying
 - **Channel** — Sales channel source (Shopify, Amazon, database import)
 - **Product** — Product catalog with barcodes and weights; scoped to a `Client`
-- **DataSource** — Configurable shipment import/export source (Database/Shopify/Amazon) with per-client assignment, encrypted secrets, and per-source scheduling
+- **DataSource** — A connected account (Database/Shopify/Amazon), shown in the UI as a
+  **Connection**, with per-client assignment, encrypted secrets, and per-source scheduling.
+  `active` means it may be used at all; `import_enabled` separately decides whether it
+  imports orders, so a connection can exist only to sell postage or receive tracking
 - **Location** — Warehouse / fulfillment center with address, timezone, and carrier associations
 - **Client** — 3PL brand/retailer; scopes shipments, products, data sources, and shipping rules; carries return address, pack slip branding fields, and the reference printed on carrier labels
 
@@ -182,7 +185,7 @@ Amazon `DataSource`; it must not be confused with the existing direct-carrier-ac
 
 ## Data Import / Export
 
-Shipment import sources are configured as `DataSource` records in the database (Integrations nav group), not in `.env`. Each source can be assigned to a `Client` and has its own encrypted credentials and schedule.
+Shipment import sources are configured as `DataSource` records in the database (Integrations → Connections), not in `.env`. Each source can be assigned to a `Client` and has its own encrypted credentials and schedule. The scheduler, `shipments:import` and `RunDataSourceImportJob` select `DataSource::importing()` — active *and* `import_enabled`; export and origin-bound postage need only `active`.
 
 Supported drivers:
 - **Database** — Custom SQL queries against MySQL, SQL Server, PostgreSQL, or SQLite. Full reference: `docs/data-sources/database.md` — query contracts, field mapping, `RawSqlGuard`, `max_affected_rows`, and least-privilege `GRANT` examples
@@ -294,7 +297,7 @@ factory and seeder too — the test suite leans on factories heavily.
 - `app/Models/CarrierAccount.php` — Per-carrier credentials with `resolveForShipment()` priority logic
 - `app/Filament/Resources/Clients/ClientResource.php` — 3PL client management (Admin nav group)
 - `app/Filament/Resources/LocationResource.php` — Warehouse location management (Admin nav group)
-- `app/Filament/Resources/DataSources/DataSourceResource.php` — Data source management (Integrations nav group)
+- `app/Filament/Resources/DataSources/DataSourceResource.php` — Connections management (Integrations nav group)
 - `docker-compose.yml` — Container orchestration
 - `docker/entrypoint.sh` — Container startup (migrate + optimize)
 - `scripts/install-onprem.sh` — On-prem installer
@@ -330,7 +333,7 @@ Keep commits focused, with short imperative subjects (`Add per-client export des
 
 ## Security & Configuration
 
-Never commit secrets: `.env` values, carrier credentials, data source credentials, OAuth tokens, database connection strings, or private QZ signing keys. `.env` holds infrastructure and base URLs; operational credentials live encrypted in the App Settings, Carrier Accounts, and Data Sources UIs. Carrier credentials live on `CarrierAccount` records and may be scoped by location and client through `CarrierAccountScope`; import/export credentials live on `DataSource` records and may be overridden per client.
+Never commit secrets: `.env` values, carrier credentials, data source credentials, OAuth tokens, database connection strings, or private QZ signing keys. `.env` holds infrastructure and base URLs; operational credentials live encrypted in the App Settings, Carrier Accounts, and Connections UIs. Carrier credentials live on `CarrierAccount` records and may be scoped by location and client through `CarrierAccountScope`; import/export credentials live on `DataSource` records and may be overridden per client.
 
 If you touch printing, scale, OAuth, pack slips, or carrier account routing, document the workstation, callback URL, certificate, or client-scope implications in the PR.
 

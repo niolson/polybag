@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\ScheduleInterval;
 use App\Models\Concerns\HasDefaultClient;
 use Database\Factories\DataSourceFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -25,6 +26,7 @@ class DataSource extends Model
         'name',
         'source_type',
         'active',
+        'import_enabled',
         'global_export',
         'schedule_interval',
         'settings',
@@ -37,11 +39,30 @@ class DataSource extends Model
 
     protected $casts = [
         'active' => 'boolean',
+        'import_enabled' => 'boolean',
         'global_export' => 'boolean',
         'schedule_interval' => ScheduleInterval::class,
         'settings' => 'array',
         'secret_settings' => 'encrypted:array',
     ];
+
+    /**
+     * Connections whose orders are imported: active, with import turned on.
+     * Postage bound to the originating connection needs only `active`, so this
+     * is for the import paths alone.
+     *
+     * @param  Builder<DataSource>  $query
+     * @return Builder<DataSource>
+     */
+    public function scopeImporting(Builder $query): Builder
+    {
+        return $query->where('active', true)->where('import_enabled', true);
+    }
+
+    public function importsOrders(): bool
+    {
+        return $this->active && $this->import_enabled;
+    }
 
     public function secret(string $key): mixed
     {

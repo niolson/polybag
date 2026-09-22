@@ -493,7 +493,7 @@ class Settings extends Page
                         ->schema([
                             Toggle::make('require_mfa')
                                 ->label('Require Multi-Factor Authentication')
-                                ->helperText('When enabled, all users must set up MFA before accessing the app. Users with an email address may use email or authenticator app codes; users without an email must use an authenticator app. Required while an active Amazon SP-API data source exists, since it gives access to customer PII.')
+                                ->helperText('When enabled, all users must set up MFA before accessing the app. Users with an email address may use email or authenticator app codes; users without an email must use an authenticator app. Required while an active Amazon SP-API connection exists, since it gives access to customer PII.')
                                 ->default(false),
                             Toggle::make('google_sso_enabled')
                                 ->label('Google SSO')
@@ -662,7 +662,7 @@ class Settings extends Page
         ];
 
         if (! $settings['require_mfa'] && DataSource::where('source_type', AmazonSource::class)->where('active', true)->exists()) {
-            $message = 'Multi-Factor Authentication cannot be disabled while an active Amazon SP-API data source exists — it gives access to customer PII. Deactivate the Amazon source first (Integrations → Data Sources).';
+            $message = 'Multi-Factor Authentication cannot be disabled while an active Amazon SP-API connection exists — it gives access to customer PII. Deactivate the Amazon connection first (Integrations → Connections).';
 
             Notification::make()
                 ->title('Cannot disable Multi-Factor Authentication')
