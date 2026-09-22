@@ -118,9 +118,9 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             allRatesLate: $deadline !== null && $classified->isNotEmpty() && $classified->every(fn (ClassifiedRate $cr): bool => ! $cr->isOnTime),
             exclusions: $exclusions,
             selectedRateIndex: $this->selectedRateIndex($options, $ruleResult->preSelectedRate ?? null),
-            // Alongside the rates, never among them, and never pre-selected:
-            // a blind purchase is only ever chosen by a person who confirms it.
-            blindPurchaseOffers: $this->shippingRateService->getBlindPurchaseOffers()
+            // Alongside the rates, never among them, and never pre-selected on
+            // the attended page: a person must choose and confirm it here.
+            blindPurchaseOffers: $this->shippingRateService->getBlindPurchaseOffers($ruleResult->excludedBlindPurchaseIds)
                 ->map(fn (BlindPurchaseOffer $offer): array => $offer->toArray())
                 ->values()
                 ->all(),
@@ -491,8 +491,9 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         try {
             $selection = $this->selectedRateForAutoShip($package);
             $selectedRate = $selection->rate;
+            $blindOffer = $selection->blindOffer;
 
-            if (! $selectedRate) {
+            if (! $selectedRate && ! $blindOffer) {
                 $result = $this->nothingToBuyUnattended($package, $selection);
                 $this->cleanupPackage($package, $request, $result);
 
@@ -511,6 +512,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                     labelDpi: $request->labelDpi,
                     requireCustomsWeightOverride: false,
                     userId: $request->userId,
+                    blindOffer: $blindOffer,
                     hasReportPrinter: $request->hasReportPrinter,
                 ),
             );
@@ -598,6 +600,11 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
         try {
             $advertised = $this->shippingRateService->blindPurchaseOffersFor($package);
+
+            $ruleResult = $this->ruleEvaluator->evaluate($package->shipment, $package);
+            $advertised = $advertised->reject(
+                fn (BlindPurchaseOffer $offer): bool => in_array($offer->id(), $ruleResult->excludedBlindPurchaseIds, true)
+            );
         } catch (\Exception $e) {
             logger()->error('Could not re-derive blind purchase offers before buying', [
                 'package_id' => $package->id,
@@ -1165,9 +1172,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * Every unattended path arrives here — auto-ship from Pack and Manual Ship,
      * and batch ship through `GenerateLabelJob` — and every one of them leaves
      * through {@see RateSelector::selectForAutomation()}, which is the single
-     * place ADR-0003 decision 4 is enforced. A shipping rule's pre-selected rate
-     * goes through it too rather than around it: a rule is automation choosing,
-     * so a rule naming a service nobody approved must not buy it either.
+     * place ADR-0003 decision 4 is enforced for quoted services. A blind
+     * purchase follows a separate explicit-choice policy: a matching rule may
+     * name it, or it may be inferred only when it is the ShippingMethod's sole
+     * configured, package-eligible choice.
      *
      * Deliberately not routed through {@see prepareRates()}. That builds the
      * attended view — where an unapproved service is *supposed* to appear, with
@@ -1183,10 +1191,23 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         $ruleResult = $this->ruleEvaluator->evaluate($package->shipment, $package);
         $clientId = $package->shipment?->client_id;
 
-        // Only a source that quotes can resolve a pre-selected rate. Anything
-        // else falls through to rate shopping rather than being asked to
-        // invent one — `RuleEvaluator` already declines to pre-select a blind
-        // purchase, and this is the same refusal one layer down.
+        if ($ruleResult->hasPreSelectedBlindPurchase()) {
+            $blindOffer = $this->shippingRateService
+                ->blindPurchaseOffersFor($package)
+                ->reject(fn (BlindPurchaseOffer $offer): bool => in_array($offer->id(), $ruleResult->excludedBlindPurchaseIds, true))
+                ->first(fn (BlindPurchaseOffer $offer): bool => $offer->id() === $ruleResult->preSelectedBlindPurchaseId);
+
+            if ($blindOffer) {
+                return new UnattendedRateSelection(
+                    rate: null,
+                    withheld: collect(),
+                    blindOffer: $blindOffer,
+                );
+            }
+        }
+
+        // Only a source that quotes can resolve a pre-selected rate. A blind
+        // selection was handled above without inventing a rate for it.
         $adapter = $ruleResult->hasPreSelectedRate()
             ? $this->carrierRegistry->quotingAdapterFor($ruleResult->preSelectedRate->carrier)
             : null;
@@ -1228,11 +1249,26 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             $clientId,
         );
 
+        if ($selection->rate === null) {
+            $blindOffer = $this->shippingRateService->soleBlindPurchaseOfferForAutomation(
+                $package->id,
+                $ruleResult->excludedBlindPurchaseIds,
+            );
+
+            if ($blindOffer) {
+                return new UnattendedRateSelection(
+                    rate: null,
+                    withheld: $selection->withheld,
+                    blindOffer: $blindOffer,
+                );
+            }
+        }
+
         return new UnattendedRateSelection(
             rate: $selection->rate,
             withheld: $selection->withheld,
             attendedAlternativeAvailable: $selection->attendedAlternativeAvailable
-                || $this->shippingRateService->getBlindPurchaseOffers()->isNotEmpty(),
+                || $this->shippingRateService->getBlindPurchaseOffers($ruleResult->excludedBlindPurchaseIds)->isNotEmpty(),
         );
     }
 

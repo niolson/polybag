@@ -96,20 +96,6 @@ class CarrierRegistry
     }
 
     /**
-     * Every registered name that sells blind purchases, for the places that
-     * have to exclude them by name rather than by asking one source.
-     *
-     * @return array<int, string>
-     */
-    public function blindPurchaseSourceNames(): array
-    {
-        return array_values(array_filter(
-            array_keys($this->adapters),
-            fn (string $name): bool => $this->blindPurchaseSourceFor($name) !== null,
-        ));
-    }
-
-    /**
      * A registered adapter that is also the carrier itself, so it can void and
      * track the labels it sold us. Null for an unknown name or a resale channel.
      */

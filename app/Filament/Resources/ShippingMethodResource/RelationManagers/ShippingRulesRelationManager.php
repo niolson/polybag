@@ -5,7 +5,6 @@ namespace App\Filament\Resources\ShippingMethodResource\RelationManagers;
 use App\Enums\DestinationZone;
 use App\Enums\ShippingRuleAction;
 use App\Models\Channel;
-use App\Services\Carriers\CarrierRegistry;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Forms\Components\Builder;
@@ -31,19 +30,7 @@ class ShippingRulesRelationManager extends RelationManager
                     ->options(ShippingRuleAction::class)
                     ->required(),
                 Forms\Components\Select::make('carrier_service_id')
-                    // Blind-purchase sources are not offered: a rule is
-                    // automation, and postage bought with no price and no
-                    // service is only ever chosen by a person on the Ship page
-                    // (ADR-0003 decision 5). `RuleEvaluator` ignores such a rule
-                    // if one already exists; this stops another being written.
-                    ->relationship(
-                        'carrierService',
-                        'name',
-                        fn ($query) => $query->whereDoesntHave(
-                            'carrier',
-                            fn ($carrier) => $carrier->whereIn('name', app(CarrierRegistry::class)->blindPurchaseSourceNames()),
-                        ),
-                    )
+                    ->relationship('carrierService', 'name')
                     ->getOptionLabelFromRecordUsing(fn ($record): string => "{$record->carrier->name} — {$record->name}")
                     ->searchable()
                     ->preload()

@@ -49,12 +49,22 @@ class ShippingRateService
      *
      * Kept apart from the rates rather than mixed in, because they are not
      * rates and must never be sorted against one (ADR-0003 decision 6). The
-     * caller presents them separately and every automated path simply never
-     * looks at them.
+     * caller presents them separately and automation considers them only under
+     * the explicit selection policy in the package shipping workflow.
      *
      * @var Collection<int, BlindPurchaseOffer>
      */
     private Collection $blindPurchaseOffers;
+
+    /**
+     * Configured sellers represented by the last getShippingRates() task set.
+     *
+     * @var array<int, string>
+     */
+    private array $configuredSourceNames = [];
+
+    /** Package owning the configured-source and blind-offer snapshot. */
+    private ?int $ratedPackageId = null;
 
     public function __construct()
     {
@@ -62,11 +72,18 @@ class ShippingRateService
     }
 
     /**
+     * @param  array<int, string>  $excludedIds
      * @return Collection<int, BlindPurchaseOffer>
      */
-    public function getBlindPurchaseOffers(): Collection
+    public function getBlindPurchaseOffers(array $excludedIds = []): Collection
     {
-        return $this->blindPurchaseOffers;
+        if ($excludedIds === []) {
+            return $this->blindPurchaseOffers;
+        }
+
+        return $this->blindPurchaseOffers
+            ->reject(fn (BlindPurchaseOffer $offer): bool => in_array($offer->id(), $excludedIds, true))
+            ->values();
     }
 
     /**
@@ -93,6 +110,9 @@ class ShippingRateService
      */
     public function getShippingRates(int $packageId): Collection
     {
+        $this->configuredSourceNames = [];
+        $this->ratedPackageId = null;
+
         $package = Package::with(['packageItems', 'shipment.shippingMethod'])
             ->findOrFail($packageId);
 
@@ -114,7 +134,10 @@ class ShippingRateService
             PackageData::fromPackage($package)->carrierPackaging,
         );
 
-        return $this->offer($package, $rateOptions, $shipDates, $rateRequest->fingerprint());
+        $rates = $this->offer($package, $rateOptions, $shipDates, $rateRequest->fingerprint());
+        $this->ratedPackageId = $package->id;
+
+        return $rates;
     }
 
     /**
@@ -257,6 +280,9 @@ class ShippingRateService
      */
     public function blindPurchaseOffersFor(Package $package): Collection
     {
+        $this->configuredSourceNames = [];
+        $this->ratedPackageId = null;
+
         $destination = AddressData::fromShipment($package->shipment);
         $rateRequest = RateRequest::fromPackage($package, $destination);
         $registry = app(CarrierRegistry::class);
@@ -278,6 +304,41 @@ class ShippingRateService
         }
 
         return $this->blindPurchaseOffers;
+    }
+
+    /**
+     * The sole blind purchase automation may infer from a ShippingMethod.
+     *
+     * This is based on configured, package-eligible sellers, not on which rate
+     * calls happened to return an answer. A configured direct seller therefore
+     * prevents Shopify becoming a fallback during an outage. A shipping rule
+     * can make a more specific choice separately.
+     *
+     * @param  array<int, string>  $excludedIds
+     *
+     * @throws \LogicException when no completed rate snapshot exists for this package
+     */
+    public function soleBlindPurchaseOfferForAutomation(int $packageId, array $excludedIds = []): ?BlindPurchaseOffer
+    {
+        if ($this->ratedPackageId !== $packageId) {
+            throw new \LogicException('soleBlindPurchaseOfferForAutomation() must follow getShippingRates() for the same package.');
+        }
+
+        $registry = app(CarrierRegistry::class);
+
+        if (count($this->configuredSourceNames) !== 1) {
+            return null;
+        }
+
+        $source = $registry->blindPurchaseSourceFor($this->configuredSourceNames[0]);
+
+        if (! $source) {
+            return null;
+        }
+
+        $offers = $this->getBlindPurchaseOffers($excludedIds);
+
+        return $offers->count() === 1 ? $offers->first() : null;
     }
 
     /**
@@ -425,6 +486,8 @@ class ShippingRateService
 
                     continue;
                 }
+
+                $this->configuredSourceNames[] = $carrierName;
 
                 $carrierRateRequest = $rateRequest
                     ->withShipDate($shipDates[$carrierName])

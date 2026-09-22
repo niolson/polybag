@@ -125,7 +125,8 @@ Preserve these domain terms in code and prose — see `CONTEXT.md`. In particula
    source instance, environment, and billing identity
 4. **Manual Ship** (`/manual-ship`) — Ship without a pre-existing shipment
 5. **Batch Ship** — Buy Labels for multiple Packages using approved, automatable services;
-   blind Shopify purchases and unapproved observed services are excluded
+   blind Shopify purchases require an explicit rule or sole eligible ShippingMethod selection,
+   while unapproved observed services are excluded
 6. **Label Reprint / Void** — Reprint the active Label or void it through the postage source;
    a void retains Label history and returns the Package to unshipped
 7. **End of Day** (`/end-of-day`) — Create USPS SCAN forms / manifests only for eligible

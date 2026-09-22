@@ -18,11 +18,10 @@ use Illuminate\Support\Collection;
  * shop preference, then Shopify's own recommendation — so what is on offer is
  * a purchase, not a rate (ADR-0003 decision 6).
  *
- * A source declaring this is structurally excluded from every automated path:
- * auto-ship, batch ship, shipping rules and `RateSelector::selectBest()` all
- * work in {@see RateResponse}, and nothing here produces one. Attended selection is not sufficient either — the offers
- * are only advertised for a client that has opted into blind purchase
- * (ADR-0003 decision 5).
+ * Nothing here produces a {@see RateResponse}, so blind purchases never enter
+ * price comparison. Automation may buy one only when a shipping rule names it
+ * or it is the ShippingMethod's sole configured, package-eligible choice. The
+ * offers are advertised only for a client that has opted into blind purchase.
  */
 interface BlindPurchaseSource extends PostageOfferSource
 {

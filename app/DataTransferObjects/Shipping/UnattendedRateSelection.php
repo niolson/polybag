@@ -22,15 +22,21 @@ use Illuminate\Support\Collection;
 readonly class UnattendedRateSelection
 {
     /**
-     * @param  RateResponse|null  $rate  The rate to buy, or null when nothing is eligible
+     * @param  RateResponse|null  $rate  The quoted rate to buy
+     * @param  BlindPurchaseOffer|null  $blindOffer  The explicitly authorized blind purchase to buy
      * @param  Collection<int, RateResponse>  $withheld  Rates that were quoted and are not approved for automated purchase
      * @param  bool  $attendedAlternativeAvailable  Whether a person can make a choice automation is forbidden to make
      */
     public function __construct(
         public ?RateResponse $rate,
         public Collection $withheld,
+        public ?BlindPurchaseOffer $blindOffer = null,
         public bool $attendedAlternativeAvailable = false,
-    ) {}
+    ) {
+        if ($rate !== null && $blindOffer !== null) {
+            throw new \InvalidArgumentException('Unattended shipping may select either a rate or a blind purchase, never both.');
+        }
+    }
 
     public function withheldAnything(): bool
     {

@@ -45,8 +45,8 @@ use Illuminate\Support\Str;
  * - no purchased service is reported either, so the package records the service
  *   as `unknown` and keeps what was asked for as a requested preference;
  * - the offer is advertised only for a client that has opted into blind
- *   purchase, and never reaches auto-ship, batch ship, shipping rules or
- *   `RateSelector` — none of which handle anything but rates;
+ *   purchase, and automation can select it only through an explicit shipping
+ *   rule or as the ShippingMethod's sole eligible configured choice;
  * - only shipments imported from an active Shopify data source are eligible,
  *   since a purchase is keyed to a Shopify fulfillment order.
  *

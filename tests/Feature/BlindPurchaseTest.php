@@ -35,14 +35,17 @@ use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\ShopifyAdapter;
 use App\Services\RuleEvaluator;
 use App\Services\ShipmentImport\Sources\ShopifySource;
+use App\Services\ShippingRateService;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
 use Mockery\MockInterface;
 
 /**
  * Shopify Shipping as ADR-0003 decisions 5 and 6 govern it: a priceless offer
- * presented beside the rates, chosen by a person who confirms it, reachable by
- * no automated path, and only for a client that has opted in.
+ * presented beside the rates, and only for a client that has opted in. A person
+ * confirms an attended choice; automation requires an explicit rule or a sole
+ * eligible configured selection.
  */
 beforeEach(function (): void {
     app(CarrierRegistry::class)->reset();
@@ -352,9 +355,26 @@ it('excludes the blind purchase entirely when a special service is hard-required
         ->and($options->exclusions[0]['reason'])->toContain('cannot guarantee Signature Required');
 });
 
-it('never auto-ships a blind purchase', function (): void {
+it('auto-ships a blind purchase when it is the shipping methods sole eligible choice', function (): void {
     $package = blindPurchasePackage();
     allowBlindPurchase($package);
+    $source = registerBlindSource();
+    $source->shouldReceive('createShipment')->once()->andReturn(blindShipResponse());
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package,
+        new PackageAutoShippingRequest(cleanupOnFailure: false),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped)
+        ->and($package->fresh()->cost)->toBeNull();
+});
+
+it('does not use a blind purchase as an outage fallback for a mixed shipping method', function (): void {
+    $package = blindPurchasePackage(withUspsRate: true);
+    allowBlindPurchase($package);
+    registerUspsRate(price: null);
     $source = registerBlindSource();
 
     $result = app(PackageShippingWorkflow::class)->autoShip(
@@ -364,12 +384,162 @@ it('never auto-ships a blind purchase', function (): void {
 
     expect($result->success)->toBeFalse()
         ->and($result->requiresAttendedSelection)->toBeTrue()
-        ->and($result->message)->toContain('Ship page');
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 
     $source->shouldNotHaveReceived('createShipment');
 });
 
-it('ignores a shipping rule that pre-selects a blind purchase', function (): void {
+it('excludes a blind purchase selected by an exclude service rule', function (): void {
+    $package = blindPurchasePackage();
+    allowBlindPurchase($package);
+    $source = registerBlindSource();
+
+    $shopifyService = CarrierService::whereHas('carrier', fn ($query) => $query->where('name', 'Shopify'))->firstOrFail();
+    ShippingRule::factory()->create([
+        'shipping_method_id' => $package->shipment->shipping_method_id,
+        'action' => ShippingRuleAction::ExcludeService,
+        'carrier_service_id' => $shopifyService->id,
+    ]);
+
+    $options = app(PackageShippingWorkflow::class)->prepareRates($package);
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package,
+        new PackageAutoShippingRequest(cleanupOnFailure: false),
+    );
+
+    expect($options->blindPurchaseOffers)->toBeEmpty()
+        ->and($result->success)->toBeFalse()
+        ->and($result->requiresAttendedSelection)->toBeFalse()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+
+    $source->shouldNotHaveReceived('createShipment');
+});
+
+it('refuses a forged purchase request for a rule-excluded blind offer', function (): void {
+    $package = blindPurchasePackage();
+    allowBlindPurchase($package);
+    $source = registerBlindSource();
+
+    $shopifyService = CarrierService::whereHas('carrier', fn ($query) => $query->where('name', 'Shopify'))->firstOrFail();
+    ShippingRule::factory()->create([
+        'shipping_method_id' => $package->shipment->shipping_method_id,
+        'action' => ShippingRuleAction::ExcludeService,
+        'carrier_service_id' => $shopifyService->id,
+    ]);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(blindOffer: shopifyBlindOffer()),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Offer No Longer Available')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+
+    $source->shouldNotHaveReceived('createShipment');
+});
+
+it('reuses the advertised blind offer snapshot when checking sole-choice automation', function (): void {
+    $package = blindPurchasePackage();
+    allowBlindPurchase($package);
+    $offerRequests = 0;
+    registerBlindSource(offerResolver: function () use (&$offerRequests): Collection {
+        $offerRequests++;
+
+        return $offerRequests === 1
+            ? collect([shopifyBlindOffer()])
+            : collect();
+    });
+
+    $rateService = app(ShippingRateService::class);
+    $rateService->getShippingRates($package->id);
+    $selected = $rateService->soleBlindPurchaseOfferForAutomation($package->id);
+
+    expect($selected?->id())->toBe('Shopify:auto')
+        ->and($rateService->getBlindPurchaseOffers())->toHaveCount(1)
+        ->and($offerRequests)->toBe(1);
+});
+
+it('rejects a sole-offer snapshot belonging to another package', function (): void {
+    $firstPackage = blindPurchasePackage();
+    allowBlindPurchase($firstPackage);
+    registerBlindSource();
+
+    $rateService = app(ShippingRateService::class);
+    $rateService->getShippingRates($firstPackage->id);
+
+    $uspsCarrier = Carrier::factory()->usps()->create();
+    $uspsService = CarrierService::factory()->uspsGroundAdvantage()->for($uspsCarrier)->create();
+    $firstPackage->shipment->shippingMethod->carrierServices()->attach($uspsService);
+    registerUspsRate();
+
+    $secondPackage = Package::factory()->for($firstPackage->shipment)->create([
+        'status' => PackageStatus::Unshipped,
+    ]);
+    $rateService->blindPurchaseOffersFor($secondPackage);
+
+    expect(fn () => $rateService->soleBlindPurchaseOfferForAutomation($secondPackage->id))
+        ->toThrow(LogicException::class, 'getShippingRates');
+});
+
+it('revalidates a sole blind offer at the purchase boundary', function (): void {
+    $package = blindPurchasePackage();
+    allowBlindPurchase($package);
+    $offerRequests = 0;
+    $source = registerBlindSource(offerResolver: function () use (&$offerRequests): Collection {
+        $offerRequests++;
+
+        return $offerRequests === 1
+            ? collect([shopifyBlindOffer()])
+            : collect();
+    });
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package,
+        new PackageAutoShippingRequest(cleanupOnFailure: false),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Offer No Longer Available')
+        ->and($offerRequests)->toBe(2)
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+
+    $source->shouldNotHaveReceived('createShipment');
+});
+
+it('requires attended selection when a shipping method has multiple blind choices', function (): void {
+    $package = blindPurchasePackage();
+    allowBlindPurchase($package);
+
+    $shopifyCarrier = Carrier::where('name', 'Shopify')->sole();
+    $priority = CarrierService::factory()->for($shopifyCarrier)->create([
+        'name' => "Shopify's USPS Priority Mail",
+        'service_code' => 'usps:Priority',
+    ]);
+    $package->shipment->shippingMethod->carrierServices()->attach($priority);
+
+    $source = registerBlindSource(collect([
+        shopifyBlindOffer(),
+        new BlindPurchaseOffer(
+            source: 'Shopify',
+            sourceLabel: 'Shopify Shipping',
+            serviceCode: 'usps:Priority',
+            selectionLabel: "Shopify's USPS Priority Mail",
+        ),
+    ]));
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package,
+        new PackageAutoShippingRequest(cleanupOnFailure: false),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->requiresAttendedSelection)->toBeTrue();
+
+    $source->shouldNotHaveReceived('createShipment');
+});
+
+it('represents a shipping rule that pre-selects a blind purchase', function (): void {
     $package = blindPurchasePackage();
     $shopifyService = CarrierService::whereHas('carrier', fn ($query) => $query->where('name', 'Shopify'))->firstOrFail();
 
@@ -381,7 +551,31 @@ it('ignores a shipping rule that pre-selects a blind purchase', function (): voi
 
     $result = app(RuleEvaluator::class)->evaluate($package->shipment->fresh(), $package);
 
-    expect($result->hasPreSelectedRate())->toBeFalse();
+    expect($result->hasPreSelectedRate())->toBeFalse()
+        ->and($result->hasPreSelectedBlindPurchase())->toBeTrue()
+        ->and($result->preSelectedBlindPurchaseId)->toBe('Shopify:auto');
+});
+
+it('auto-ships a blind purchase selected by a rule on a mixed shipping method', function (): void {
+    $package = blindPurchasePackage(withUspsRate: true);
+    allowBlindPurchase($package);
+    $source = registerBlindSource();
+    $source->shouldReceive('createShipment')->once()->andReturn(blindShipResponse());
+
+    $shopifyService = CarrierService::whereHas('carrier', fn ($query) => $query->where('name', 'Shopify'))->firstOrFail();
+    ShippingRule::factory()->create([
+        'shipping_method_id' => $package->shipment->shipping_method_id,
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $shopifyService->id,
+    ]);
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package,
+        new PackageAutoShippingRequest(cleanupOnFailure: false),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
 });
 
 /**
@@ -543,7 +737,10 @@ function shopifyBlindOffer(): BlindPurchaseOffer
  * under the same name, so everything routes to it exactly as it would to the
  * real one — which is the point: what is under test is the path, not Shopify.
  */
-function registerBlindSource(): MockInterface
+/**
+ * @param  Collection<int, BlindPurchaseOffer>|null  $offers
+ */
+function registerBlindSource(?Collection $offers = null, ?Closure $offerResolver = null): MockInterface
 {
     $source = Mockery::mock(BlindPurchaseSource::class);
     $source->shouldReceive('getCarrierName')->andReturn('Shopify');
@@ -553,7 +750,12 @@ function registerBlindSource(): MockInterface
     // As Shopify answers: an international purchase returns its commercial
     // invoice as a separate document for the report printer.
     $source->shouldReceive('customsDocumentDelivery')->andReturn(CustomsDocumentDelivery::Separate);
-    $source->shouldReceive('blindPurchaseOffers')->andReturn(collect([shopifyBlindOffer()]));
+    $blindPurchaseOffers = $source->shouldReceive('blindPurchaseOffers');
+    if ($offerResolver) {
+        $blindPurchaseOffers->andReturnUsing($offerResolver);
+    } else {
+        $blindPurchaseOffers->andReturn($offers ?? collect([shopifyBlindOffer()]));
+    }
     $source->shouldReceive('createShipment')->andReturnUsing(fn (): ShipResponse => blindShipResponse())->byDefault();
 
     app(CarrierRegistry::class)->registerInstance('Shopify', $source);
@@ -561,7 +763,7 @@ function registerBlindSource(): MockInterface
     return $source;
 }
 
-function registerUspsRate(float $price = 8.50): void
+function registerUspsRate(?float $price = 8.50): void
 {
     $adapter = Mockery::mock(DirectCarrierAdapter::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
@@ -571,9 +773,9 @@ function registerUspsRate(float $price = 8.50): void
     $adapter->shouldReceive('serviceCapability')->andReturn(ServiceCapability::Supported);
     $adapter->shouldReceive('offerCapability')->andReturn(ServiceCapability::Supported);
     $adapter->shouldReceive('offerDeclaredValueCap')->andReturnNull();
-    $adapter->shouldReceive('getRates')->andReturn(collect([
-        new RateResponse('USPS', 'USPS_GROUND_ADVANTAGE', 'Ground Advantage', $price),
-    ]));
+    $adapter->shouldReceive('getRates')->andReturn($price === null
+        ? collect()
+        : collect([new RateResponse('USPS', 'USPS_GROUND_ADVANTAGE', 'Ground Advantage', $price)]));
 
     app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 }

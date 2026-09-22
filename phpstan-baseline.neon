@@ -1369,32 +1369,8 @@ parameters:
 			path: app/Services/PickBatchService.php
 
 		-
-			message: '#^Match arm comparison between string and App\\Enums\\ShippingRuleAction\:\:ExcludeService is always false\.$#'
-			identifier: match.alwaysFalse
-			count: 1
-			path: app/Services/RuleEvaluator.php
-
-		-
-			message: '#^Match arm comparison between string and App\\Enums\\ShippingRuleAction\:\:UseService is always false\.$#'
-			identifier: match.alwaysFalse
-			count: 1
-			path: app/Services/RuleEvaluator.php
-
-		-
-			message: '#^Match expression does not handle remaining value\: string$#'
-			identifier: match.unhandled
-			count: 1
-			path: app/Services/RuleEvaluator.php
-
-		-
 			message: '#^Parameter \#1 \$conditions of method App\\Services\\RuleEvaluator\:\:conditionsMatch\(\) expects array\|null, string\|null given\.$#'
 			identifier: argument.type
-			count: 1
-			path: app/Services/RuleEvaluator.php
-
-		-
-			message: '#^Strict comparison using \=\=\= between string and App\\Enums\\ShippingRuleAction\:\:UseService will always evaluate to false\.$#'
-			identifier: identical.alwaysFalse
 			count: 1
 			path: app/Services/RuleEvaluator.php
 
