@@ -44,6 +44,15 @@ class SettingsService
         return app()->environment('demo');
     }
 
+    /**
+     * Whether carrier integrations should use their sandbox environment.
+     * The single source of truth for the shared sandbox_mode toggle.
+     */
+    public function isSandboxMode(): bool
+    {
+        return (bool) $this->get('sandbox_mode', false);
+    }
+
     private function resolveSandboxMode(mixed $default): bool
     {
         return match (true) {
