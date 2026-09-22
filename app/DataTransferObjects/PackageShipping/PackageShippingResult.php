@@ -22,6 +22,7 @@ readonly class PackageShippingResult
         public bool $requiresDeclaredWeightOverride = false,
         public bool $leavePackageIntact = false,
         public bool $requiresRequote = false,
+        public bool $requiresAttendedSelection = false,
     ) {}
 
     /**
@@ -42,6 +43,17 @@ readonly class PackageShippingResult
     public static function failed(string $title, string $message): self
     {
         return new self(success: false, title: $title, message: $message);
+    }
+
+    public static function attendedSelectionRequired(string $title, string $message): self
+    {
+        return new self(
+            success: false,
+            title: $title,
+            message: $message,
+            leavePackageIntact: true,
+            requiresAttendedSelection: true,
+        );
     }
 
     public static function customsWeightOverrideRequired(): self

@@ -15,7 +15,10 @@ use Livewire\Livewire;
 it('dispatches PackageCreated when a package is created via Pack page', function (): void {
     Event::fake([PackageCreated::class]);
 
-    $this->actingAs(User::factory()->create(['role' => Role::Admin]));
+    $this->actingAs(User::factory()->create([
+        'role' => Role::Admin,
+        'auto_ship_enabled' => false,
+    ]));
 
     $boxSize = BoxSize::factory()->create();
     $product = Product::factory()->create(['barcode' => '1234567890123']);

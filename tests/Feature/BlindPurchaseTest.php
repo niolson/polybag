@@ -363,7 +363,8 @@ it('never auto-ships a blind purchase', function (): void {
     );
 
     expect($result->success)->toBeFalse()
-        ->and($result->message)->toContain('No shipping rates available');
+        ->and($result->requiresAttendedSelection)->toBeTrue()
+        ->and($result->message)->toContain('Ship page');
 
     $source->shouldNotHaveReceived('createShipment');
 });

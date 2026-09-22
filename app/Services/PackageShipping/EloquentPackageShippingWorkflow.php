@@ -1222,10 +1222,17 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             );
         }
 
-        return $this->rateSelector->selectForAutomation(
+        $selection = $this->rateSelector->selectForAutomation(
             $rates,
             $package->shipment->getDeliverByDate(),
             $clientId,
+        );
+
+        return new UnattendedRateSelection(
+            rate: $selection->rate,
+            withheld: $selection->withheld,
+            attendedAlternativeAvailable: $selection->attendedAlternativeAvailable
+                || $this->shippingRateService->getBlindPurchaseOffers()->isNotEmpty(),
         );
     }
 
@@ -1240,8 +1247,15 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      */
     private function nothingToBuyUnattended(Package $package, UnattendedRateSelection $selection): PackageShippingResult
     {
-        if (! $selection->withheldAnything()) {
+        if (! $selection->attendedAlternativeAvailable) {
             return PackageShippingResult::failed('Shipping Error', 'No shipping rates available for this package.');
+        }
+
+        if (! $selection->withheldAnything()) {
+            return PackageShippingResult::attendedSelectionRequired(
+                'Attended Shipping Required',
+                'Auto Ship cannot purchase the available attended-only postage. Continue on the Ship page to review and confirm it.',
+            );
         }
 
         logger()->warning('Withheld a rate from automated purchase because nobody has approved the service', [
@@ -1250,7 +1264,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             'withheld' => $selection->withheldForLog(),
         ]);
 
-        return PackageShippingResult::failed(
+        return PackageShippingResult::attendedSelectionRequired(
             'No Approved Rates',
             'This package was quoted, but no service it was offered is approved for automated purchase: '
             .$selection->withheldSummary().'. '

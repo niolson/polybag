@@ -1,7 +1,3 @@
-@php
-    $isAdmin = auth()->user()->role->isAtLeast(\App\Enums\Role::Admin);
-@endphp
-
 <x-filament-panels::page>
     <x-qz-tray />
     <x-scale-script />
@@ -16,7 +12,7 @@
         x-data="{
             scaleConnected: false,
             scaleStable: true,
-            autoShipEnabled: false,
+            autoShipEnabled: @js((bool) auth()->user()->auto_ship_enabled),
             labelFormat: PrinterSettings.labelFormat(),
             labelDpi: PrinterSettings.labelDpi(),
             hasReportPrinter: PrinterSettings.hasDocumentPrinter(),
@@ -39,21 +35,6 @@
             isShipping: false,
 
             init() {
-                const phpAutoShip = @js($autoShipOverride);
-                if (phpAutoShip !== null) {
-                    this.autoShipEnabled = phpAutoShip;
-                    localStorage.setItem('autoShipEnabled', phpAutoShip ? 'true' : 'false');
-                } else {
-                    const stored = localStorage.getItem('autoShipEnabled');
-                    if (stored !== null) {
-                        this.autoShipEnabled = stored === 'true';
-                    }
-                }
-
-                this.$watch('autoShipEnabled', (value) => {
-                    localStorage.setItem('autoShipEnabled', value.toString());
-                });
-
                 // Auto-connect scale: WebHID can connect immediately, QZ Tray must wait
                 if (ScaleUtils.backend === 'webhid') {
                     this.autoConnectScale();
@@ -381,13 +362,6 @@
                 Print Command Barcodes
             </a>
             <div class="flex items-center gap-3">
-            @if($isAdmin)
-            <x-shipping-auto-ship-toggle
-                x-on:click="autoShipEnabled = !autoShipEnabled"
-                ::disabled="isShipping"
-            />
-            @endif
-
             <x-shipping-submit-button
                 type="button"
                 x-on:click="shipPackage()"

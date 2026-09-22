@@ -184,6 +184,7 @@ it('refuses to auto ship an unapproved discovered service, and says why', functi
 
     expect($result->success)->toBeFalse()
         ->and($result->title)->toBe('No Approved Rates')
+        ->and($result->requiresAttendedSelection)->toBeTrue()
         ->and($result->message)->toContain('MockCarrier Ground (via amazon)')
         ->and($result->message)->toContain('Map Carrier Services')
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
