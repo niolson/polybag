@@ -22,6 +22,7 @@ class DataSourceFactory extends Factory
             'name' => fake()->words(2, true),
             'source_type' => DatabaseSource::class,
             'active' => true,
+            'import_enabled' => true,
             'global_export' => false,
             'settings' => [],
             'secret_settings' => null,
@@ -48,6 +49,11 @@ class DataSourceFactory extends Factory
                 'channel_name' => 'Amazon',
             ],
         ]);
+    }
+
+    public function importDisabled(): static
+    {
+        return $this->state(['import_enabled' => false]);
     }
 
     public function globalExport(): static

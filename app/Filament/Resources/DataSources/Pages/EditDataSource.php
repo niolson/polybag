@@ -52,15 +52,16 @@ class EditDataSource extends EditRecord
                 ->label('Run Import Now')
                 ->icon('heroicon-o-arrow-down-tray')
                 ->color('gray')
+                ->visible(fn (): bool => $this->dataSource()->import_enabled)
                 ->disabled(fn (): bool => ! $this->record->active || $this->amazonMarketplaceIsMissing())
                 ->tooltip(fn (): ?string => match (true) {
-                    ! $this->record->active => 'This source is inactive. Activate it to run imports.',
+                    ! $this->record->active => 'This connection is inactive. Activate it to run imports.',
                     $this->amazonMarketplaceIsMissing() => 'Choose an Amazon marketplace before running imports.',
                     default => null,
                 })
                 ->requiresConfirmation()
                 ->modalHeading('Run import now?')
-                ->modalDescription('Fetch new shipments from this source in the background. You will receive a notification when it finishes.')
+                ->modalDescription('Fetch new shipments from this connection in the background. You will receive a notification when it finishes.')
                 ->action(function (): void {
                     RunDataSourceImportJob::dispatch($this->record->id, auth()->id());
 
@@ -75,7 +76,9 @@ class EditDataSource extends EditRecord
                 ->label('Import Historical Orders')
                 ->icon('heroicon-o-clock')
                 ->color('gray')
-                ->visible(fn (): bool => config('app.env') === 'local' && $this->dataSource()->source_type === AmazonSource::class)
+                ->visible(fn (): bool => config('app.env') === 'local'
+                    && $this->dataSource()->source_type === AmazonSource::class
+                    && $this->dataSource()->import_enabled)
                 ->disabled(fn (): bool => ! $this->dataSource()->active || $this->amazonMarketplaceIsMissing() || (bool) app(SettingsService::class)->get('sandbox_mode', false))
                 ->tooltip(fn (): ?string => app(SettingsService::class)->get('sandbox_mode', false) ? 'Disable sandbox mode in App Settings to import real Amazon orders.' : null)
                 ->modalHeading('Import historical shipped Amazon orders')
@@ -145,7 +148,7 @@ class EditDataSource extends EditRecord
                 ->visible(fn (): bool => $this->record->source_type === ShopifySource::class && app(OAuthService::class)->isDataSourceConnected($this->record))
                 ->requiresConfirmation()
                 ->modalHeading('Disconnect Shopify OAuth')
-                ->modalDescription('This will remove the OAuth access token. The source will fall back to the custom access token or client credentials flow.')
+                ->modalDescription('This will remove the OAuth access token. The connection will fall back to the custom access token or client credentials flow.')
                 ->action(function (): void {
                     app(OAuthService::class)->disconnectDataSource('shopify', $this->record);
                     Notification::make()->success()->title('Shopify disconnected.')->send();
@@ -161,7 +164,7 @@ class EditDataSource extends EditRecord
                 ->tooltip(fn () => app(OAuthService::class)->brokerlessGuidance('Enter your own Amazon Refresh Token and App Client ID/Secret on this source instead.'))
                 ->requiresConfirmation()
                 ->modalHeading(fn (): string => app(OAuthService::class)->isDataSourceConnected($this->dataSource()) ? 'Reconnect Amazon' : 'Connect Amazon')
-                ->modalDescription('You will be redirected to Seller Central to authorize this Amazon SP-API data source.')
+                ->modalDescription('You will be redirected to Seller Central to authorize this Amazon SP-API connection.')
                 ->action(function (): void {
                     $url = app(OAuthService::class)->initiateAuthorizationForDataSource('sp-api', $this->dataSource());
                     $this->redirect($url, navigate: false);
@@ -174,7 +177,7 @@ class EditDataSource extends EditRecord
                 ->visible(fn (): bool => $this->dataSource()->source_type === AmazonSource::class && app(OAuthService::class)->isDataSourceConnected($this->dataSource()))
                 ->requiresConfirmation()
                 ->modalHeading('Disconnect Amazon OAuth')
-                ->modalDescription('This removes the seller authorization and refresh token from this data source. You can reconnect at any time.')
+                ->modalDescription('This removes the seller authorization and refresh token from this connection. You can reconnect at any time.')
                 ->action(function (): void {
                     $dataSource = $this->dataSource();
 
@@ -260,6 +263,7 @@ class EditDataSource extends EditRecord
                 ->icon('heroicon-o-check-circle')
                 ->color('warning')
                 ->visible(fn (): bool => $this->dataSource()->source_type === ShopifySource::class
+                    && $this->dataSource()->import_enabled
                     && ! ($this->dataSource()->settings['fulfillment_order_import_enabled'] ?? false))
                 ->requiresConfirmation()
                 ->modalHeading('Activate fulfillment-order imports?')
@@ -391,7 +395,7 @@ class EditDataSource extends EditRecord
             return;
         }
 
-        $message = 'Amazon SP-API sources give access to customer PII, so Multi-Factor Authentication must be required for all users before this source can be active. Enable it in App Settings → Authentication first.';
+        $message = 'Amazon SP-API connections give access to customer PII, so Multi-Factor Authentication must be required for all users before this connection can be active. Enable it in App Settings → Authentication first.';
 
         Notification::make()
             ->title('Multi-Factor Authentication required')

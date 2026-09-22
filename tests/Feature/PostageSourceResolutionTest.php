@@ -167,6 +167,17 @@ describe('channel binding', function (): void {
         expect(app(PostageSourceResolver::class)->channelSourceFor($package->refresh()))->toBeNull();
     });
 
+    it('still resolves the originating channel source once its order import is turned off', function (): void {
+        $source = createShopifyDataSource();
+        $package = packageFrom($source);
+
+        // The order already exists in PolyBag, so buying its postage through
+        // the connection it came from needs the connection active, not importing.
+        $source->update(['import_enabled' => false]);
+
+        expect(app(PostageSourceResolver::class)->channelSourceFor($package->refresh())?->id)->toBe($source->id);
+    });
+
     it('offers the bound channel source as a candidate with no carrier of its own', function (): void {
         $source = createShopifyDataSource();
 

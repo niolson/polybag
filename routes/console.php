@@ -11,7 +11,7 @@ Artisan::command('inspire', function (): void {
 })->purpose('Display an inspiring quote');
 
 try {
-    DataSource::where('active', true)
+    DataSource::importing()
         ->whereNotNull('schedule_interval')
         ->get()
         ->each(function (DataSource $source): void {

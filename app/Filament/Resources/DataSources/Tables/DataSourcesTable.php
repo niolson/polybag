@@ -67,6 +67,11 @@ class DataSourcesTable
                     ->boolean()
                     ->sortable(),
 
+                IconColumn::make('import_enabled')
+                    ->label('Imports')
+                    ->boolean()
+                    ->sortable(),
+
                 TextColumn::make('updated_at')
                     ->label('Updated')
                     ->since()
@@ -80,10 +85,10 @@ class DataSourcesTable
                 Action::make('run_import')
                     ->label('Run Import')
                     ->icon(Heroicon::ArrowDownTray)
-                    ->visible(fn (DataSource $record): bool => $record->active)
+                    ->visible(fn (DataSource $record): bool => $record->importsOrders())
                     ->requiresConfirmation()
                     ->modalHeading('Run import now?')
-                    ->modalDescription('Fetch new shipments from this source in the background. You will receive a notification when it finishes.')
+                    ->modalDescription('Fetch new shipments from this connection in the background. You will receive a notification when it finishes.')
                     ->action(function (DataSource $record): void {
                         RunDataSourceImportJob::dispatch($record->id, auth()->id());
 

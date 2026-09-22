@@ -51,7 +51,7 @@ class RunDataSourceImportJob implements ShouldQueue
     {
         $source = DataSource::find($this->dataSourceId);
 
-        if (! $source || ! $source->active) {
+        if (! $source || ! $source->importsOrders()) {
             return;
         }
 

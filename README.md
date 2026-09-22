@@ -140,14 +140,14 @@ the application database.
 |---|---|
 | Company, warehouse, feature flags, authentication, retention | App Settings |
 | USPS, FedEx, and UPS credentials and Location/Client routing scopes | Carrier Accounts |
-| Database, Shopify, and Amazon credentials, schedules, and marketplace postage | Data Sources |
+| Database, Shopify, and Amazon credentials, schedules, and marketplace postage | Connections |
 | Carrier services, service classes, packaging, and shipping rules | Shipping Config |
 | Amazon observed-service mapping and unattended-purchase approval | Map Carrier Services |
 | Per-client return address, branding, and export override | Clients |
 | Image-label, raw-label, and document printers; format, DPI, and scale | Device Settings in each browser |
 | Database, Redis, mail, SSO, Google validation, Gotenberg | `.env` |
 
-Secrets on Carrier Account and Data Source records are encrypted. Never commit
+Secrets on Carrier Account and Connection records are encrypted. Never commit
 `.env`, carrier credentials, OAuth tokens, database connection strings, or QZ private
 keys.
 
@@ -199,7 +199,7 @@ intentionally distinct.
 
 The **carrier of record** is the company physically moving the parcel. The **postage
 source** is where the Label was bought: one of PolyBag's direct Carrier Accounts or a
-Shopify/Amazon Data Source. Tracking, voiding, and manifest eligibility follow the
+Shopify/Amazon Connection. Tracking, voiding, and manifest eligibility follow the
 postage source, so marketplace-bought postage is never treated as if it came from one
 of the merchant's direct carrier accounts.
 
@@ -220,7 +220,7 @@ off-Amazon orders (`channelType: EXTERNAL`). PolyBag currently implements only t
 path. An Amazon order can therefore receive Amazon Shipping, USPS, UPS, FedEx, or another
 carrier that Amazon returns. PolyBag does not yet offer Amazon Shipping for Shipments
 originating on Shopify, a database source, or another non-Amazon channel, even when an
-Amazon Data Source is connected and the seller has completed Amazon Shipping onboarding.
+Amazon Connection is set up and the seller has completed Amazon Shipping onboarding.
 
 The main scopes are **Location** for a warehouse and **Client** for a 3PL brand or
 retailer. **Carrier Account Scopes** select credentials from the Location and Client.
