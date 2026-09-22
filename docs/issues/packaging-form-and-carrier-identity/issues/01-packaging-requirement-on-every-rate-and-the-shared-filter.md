@@ -91,7 +91,7 @@ It enforces the carrier-identity axis only; it knows nothing about `BoxSizeType`
 Applied in `ShippingRateService::getShippingRates()` on the fetched collection, before
 `RateQuoteLogger` — a dropped rate was never offered and should not be logged as one.
 `blindPurchaseOffersFor()` is untouched: a blind purchase has no rate to carry a
-requirement, and ADR-0003 already keeps it out of every automated path.
+requirement. ADR-0003 keeps it out of rate comparison; explicitly configured blind-purchase automation validates eligibility through its separate offer path.
 
 **Not applied inside `resolvePreSelectedRate()` here.** That is `02`, because it changes
 the method's return type.

@@ -91,7 +91,7 @@ class ClientForm
                     ->schema([
                         Toggle::make('blind_purchase_enabled')
                             ->label('Allow blind purchase for this client')
-                            ->helperText('Shopify Shipping reaches USPS Connect eCommerce rates without an account of our own, but reports no price, no service and no carrier until the label comes back, and its labels cannot be voided from PolyBag. Off by default. Never used by auto-ship, batch ship or shipping rules — a packer picks it on the Ship page and confirms.')
+                            ->helperText('Shopify Shipping reaches USPS Connect eCommerce rates without an account of our own, but reports no price or service, and no carrier until the label comes back. Its labels cannot be voided from PolyBag. Off by default. Auto-ship and batch ship use it only when a shipping rule selects it or it is the shipping method\'s sole eligible choice.')
                             ->columnSpanFull(),
                     ])
                     ->columns(1),

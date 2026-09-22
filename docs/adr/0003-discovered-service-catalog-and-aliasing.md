@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — 2026-09-02. Depends on ADR-0002.
+Accepted — 2026-09-02; amended 2026-09-22 to permit explicitly configured blind-purchase automation. Depends on ADR-0002.
 
 Drafted 2026-09-01 and revised twice. The first draft modeled Shopify as a discovery source
 alongside Amazon, on the assumption that the purchased service becomes knowable after the fact.
@@ -115,11 +115,11 @@ the Ship page**, where a person sees the price and takes responsibility. It is e
   *inferred* from the tracking number — that is a different provenance, not a contradiction.
 - A requested `preferredRateSelection` is **audit metadata, not a confirmed fact** — Shopify may
   ignore it, and the response is the only record.
-- Shopify is **excluded from every automated flow by default** — auto-ship, batch ship, shipping
-  rules, `selectBest` — and reachable only where a client has explicitly opted into blind
-  purchase. `RateSelector` currently sorts an unknown-price rate last but still lets it win when
-  it is the only offer, which its own docblock states; that is acceptable in an attended rate
-  list and not acceptable unattended.
+- Shopify never enters rate comparison or `selectBest`. Auto-ship and batch ship may buy a blind
+  purchase only where the client has opted in and configuration makes the choice unambiguous:
+  a matching shipping rule names the selection, or it is the ShippingMethod's sole configured,
+  package-eligible selection. It must not become a fallback merely because another configured
+  seller's rate call failed.
 - The Ship page must warn explicitly that price and service are unknown until purchase.
 - A shipment carrying a **hard-required special service** must exclude Shopify, since no
   guarantee about special services survives Shopify's unconstrained selection.
@@ -130,11 +130,11 @@ invented service name and `Shopify` as the carrier; leaving that in place would 
 implementation drifts back to the model this ADR rejects.
 
 It is modeled as a **priceless offer** — a type of its own, not a `RateResponse` — presented
-alongside rates, visually separated, requiring explicit confirmation, and never entering any
-comparison or ranking. It is *not* a separate attended action on its own screen: the packer's
-workflow is "look at the options, choose one," and moving the single path that saves ~25% off
-that screen is how it ends up never being used. Automation exclusion is already handled by
-decision 5, so the safety concern that would motivate a separate screen is met elsewhere.
+alongside rates, visually separated, requiring explicit confirmation when a person selects it,
+and never entering any comparison or ranking. It is *not* a separate attended action on its own
+screen: the packer's workflow is "look at the options, choose one," and moving the single path
+that saves ~25% off that screen is how it ends up never being used. Unattended selection is
+instead gated by the explicit configuration in decision 5.
 
 **7. The service value carries evidence; the requested preference is separate.** "Requested" is
 not a provenance state — we can ask Shopify for Ground Advantage and still end up with a

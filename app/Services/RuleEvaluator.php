@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\DataTransferObjects\Shipping\AddressData;
+use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\RuleEvaluationResult;
@@ -35,6 +36,7 @@ class RuleEvaluator
             ->get();
 
         $excludedServiceCodes = [];
+        $excludedBlindPurchaseIds = [];
 
         foreach ($rules as $rule) {
             if (! $this->conditionsMatch($rule->conditions, $shipment, $package)) {
@@ -43,26 +45,32 @@ class RuleEvaluator
 
             $service = $rule->carrierService;
             $carrier = $service->carrier;
+            $action = $rule->getAttribute('action');
+            $blindPurchaseSource = $this->carrierRegistry->blindPurchaseSourceFor($carrier->name);
 
-            match ($rule->action) {
-                ShippingRuleAction::UseService => null,
-                ShippingRuleAction::ExcludeService => $excludedServiceCodes[] = $service->service_code,
-            };
+            if ($action === ShippingRuleAction::ExcludeService) {
+                if ($blindPurchaseSource) {
+                    $excludedBlindPurchaseIds[] = BlindPurchaseOffer::identifier(
+                        $carrier->name,
+                        $service->service_code,
+                    );
+                } else {
+                    $excludedServiceCodes[] = $service->service_code;
+                }
 
-            if ($rule->action === ShippingRuleAction::UseService) {
-                // A rule is automation choosing on a packer's behalf, and a
-                // blind purchase is the one thing nobody may choose for them:
-                // there is no price and no service to have decided about
-                // (ADR-0003 decision 5). Skipped rather than fatal, so the next
-                // matching rule applies as if this one had not been written.
-                if ($this->carrierRegistry->blindPurchaseSourceFor($carrier->name)) {
-                    logger()->warning('Ignored a shipping rule that pre-selects a blind purchase', [
-                        'rule' => $rule->name,
-                        'carrier' => $carrier->name,
-                        'service_code' => $service->service_code,
-                    ]);
+                continue;
+            }
 
-                    continue;
+            if ($action === ShippingRuleAction::UseService) {
+                if ($blindPurchaseSource) {
+                    return new RuleEvaluationResult(
+                        preSelectedBlindPurchaseId: BlindPurchaseOffer::identifier(
+                            $carrier->name,
+                            $service->service_code,
+                        ),
+                        excludedServiceCodes: $excludedServiceCodes,
+                        excludedBlindPurchaseIds: $excludedBlindPurchaseIds,
+                    );
                 }
 
                 // A rule names a service, never a packaging (ADR-0005 decision 4).
@@ -77,12 +85,14 @@ class RuleEvaluator
                 return new RuleEvaluationResult(
                     preSelectedRate: $preSelectedRate,
                     excludedServiceCodes: $excludedServiceCodes,
+                    excludedBlindPurchaseIds: $excludedBlindPurchaseIds,
                 );
             }
         }
 
         return new RuleEvaluationResult(
             excludedServiceCodes: $excludedServiceCodes,
+            excludedBlindPurchaseIds: $excludedBlindPurchaseIds,
         );
     }
 

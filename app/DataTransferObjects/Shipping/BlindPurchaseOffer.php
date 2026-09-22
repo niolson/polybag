@@ -52,7 +52,12 @@ readonly class BlindPurchaseOffer
      */
     public function id(): string
     {
-        return $this->source.':'.$this->serviceCode;
+        return self::identifier($this->source, $this->serviceCode);
+    }
+
+    public static function identifier(string $source, string $serviceCode): string
+    {
+        return $source.':'.$serviceCode;
     }
 
     /**
