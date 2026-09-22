@@ -1,6 +1,6 @@
 # Probe off-Amazon (`EXTERNAL`) rating and purchase against the seller account
 
-Status: ready-for-human
+Status: done
 
 Repo: `polybag`
 
@@ -45,14 +45,14 @@ offers, or what an account that is not enrolled sees. Those still need a product
 - [x] A probe script under `.scratch/amazon-shipping-v2/` issues an `EXTERNAL` `getRates`
       with the existing Amazon connection's credentials (`probe-01-external.php`; sandbox
       run 2026-09-22)
-- [ ] The same script run against production (`sandbox_mode` off — rates only, nothing
-      bought)
-- [ ] Each answer is marked as observed in the sandbox or in production
-- [ ] The response (redacted as needed) is captured and each question above is answered
-      in `## Comments` here
-- [ ] Any enrollment or account prerequisite is recorded, with what a tenant must do to
-      satisfy it
-- [ ] `06` is updated if the payload differs from what it assumes
+- [x] The same script run against production (`sandbox_mode` off — rates only, nothing
+      bought; 2026-09-22 — refused, see Comments)
+- [x] Each answer is marked as observed in the sandbox or in production
+- [x] The response (redacted as needed) is captured and each question above is answered
+      in `## Comments` here, or recorded as unanswerable without an enabled account
+- [x] Any enrollment or account prerequisite is recorded, with what a tenant must do to
+      satisfy it (as far as the account we have can show — see the 2026-09-22 decision)
+- [x] `05` and `06` are updated where the payload differs from what they assume
 
 ## Blocked by
 
@@ -104,3 +104,94 @@ occur.
 
 **Still open, for production:** which carriers and services a real lane returns, whether
 the account needs an Amazon Shipping enrollment, and what an account without one sees.
+
+### 2026-09-22 — production run
+
+Run with `sandbox_mode` off, requesting rates only. Captures are `probe-01-prod-*.json`.
+
+- **`EXTERNAL` `getRates` is refused for this seller account** with
+  `403 Unauthorized`: "Access denied for this account. Please contact support. (A-101)".
+  This answers the enrollment question: an account that isn't set up gets an HTTP 403,
+  not an empty rate list and not `ineligibleRates`.
+- **The 403 comes from `EXTERNAL` itself, not from the credentials.** The same body on
+  `channelType: AMAZON` with a real order ID, sent through the same connection, got past
+  authorization and failed on body validation ("Incorrect itemIdentifier was detected in
+  the item list"). So the LWA token and the Shipping API role are fine. Only the off-Amazon
+  channel is closed.
+- The validation error for a missing `items` (`400`) comes back before the 403, which
+  suggests Amazon checks the request shape before it checks access to the channel.
+  Production agrees with the sandbox that `items` is required.
+
+**What a tenant has to do:** unknown until Amazon support answers. A-101 says "contact
+support", and the likely cause is that off-Amazon shipping needs the seller to sign up
+separately for Amazon Shipping, apart from Buy Shipping for Amazon orders. That is a
+guess and has not been confirmed. Next step: open a Seller Support / SP-API case quoting
+A-101 and `channelType: EXTERNAL`, and ask what enables it, whether it has to be done per
+seller account, and whether it is limited to certain regions.
+
+**Adapter consequence (for `04`/`05`):** a connection can be allowed to sell on-Amazon
+postage and still be refused off-Amazon. Resolution must not assume that a working Amazon
+connection can quote `EXTERNAL`. The A-101 403 should mark that connection as not enabled
+for off-Amazon shipping, with a message saying so, not a generic Amazon error.
+
+Still open, and blocked on enablement: which carriers and services a real lane returns,
+and whether production tracking and cancellation match the sandbox.
+
+### 2026-09-22 — second pass: body rules and label formats
+
+Script: `probe-01b-shape-and-formats.php`. Captures: `probe-01b-validation.json` and
+`probe-01b-formats.json`.
+
+**Using production to check bodies.** Production validates the request body before it
+checks access, so for this account every body either fails with a `400` that names the
+problem or passes and gets the `403 A-101`. The same variants were sent to the sandbox.
+The two agreed on every rule. The sandbox's messages leave out Amazon's `D-` codes, and
+it priced the variants that production let through.
+
+| Variant | Result (prod / sandbox) |
+|---|---|
+| `insuredValue` value `0` | passes (sandbox priced it the same) |
+| `insuredValue` missing | 400, "must not be null" |
+| `items: []` | 400, length must be ≥ 1 |
+| item without `weight` | 400 `D-725`, "Item weight is required for all package items" |
+| item `weight` 0 | passes |
+| items total > package weight: 3 × 0.6 lb in 1.52 lb | 400 `D-703`, "Total items weight exceeds package weight" |
+| items total 1.53 lb in 1.52 lb | passes, so there is some small tolerance, size unknown |
+| item without `itemIdentifier`, `itemValue` or `description` | passes, all three optional |
+| no phone, email or company on either address | passes |
+| `amazonOrderDetails` on `EXTERNAL` | 400 `D-722`, "not supported for EXTERNAL channelType" |
+| no `channelDetails` | 400, "must not be null" |
+| two packages in one request | 400, `packages` length must be ≤ 1 |
+
+The item-weight total is `weight × quantity` summed across the items.
+
+**Label formats (sandbox).** Each format was bought, fetched again with
+`getShipmentDocuments` and cancelled, and every call returned 200. Each rate offers PNG,
+ZPL and PDF, all 4×6. Every print option offers ZPL at 203 and 300 DPI, `LABEL` as the
+only document (no `PACKSLIP` in any format) and file joining `[false]` only. For PNG and
+ZPL, `AmazonBuyShippingService::documentSpecification()` builds a spec the sandbox
+accepts. For `pdf` its preference list picks PNG, as it does on-Amazon.
+
+**Reprint.** `getShipmentDocuments` works with `shipmentId`, `packageClientReferenceId`
+and `format`. In the sandbox it returned a different, numeric tracking ID from the one the
+purchase gave (`TBA…`). That is almost certainly the dynamic sandbox making things up,
+but it is also a reason for the Label to keep the tracking ID from the purchase and never
+overwrite it from a reprint.
+
+### 2026-09-22 — decision: build on the sandbox
+
+The seller account we have is defunct and will never sign up for Amazon Shipping, and we
+have no live account that has. The rest of the work goes ahead on these assumptions:
+
+1. **`403 A-101` on an `EXTERNAL` `getRates` means the account is not set up for Amazon
+   Shipping.** It is the only signal available: no Shipping v2 or Sellers API operation
+   reports whether an account has signed up. It is inferred from a single account.
+   Because the body is validated first, a check must send a valid body, or a `400` will
+   hide the answer.
+2. **The sandbox shows what a set-up account does.** Rates, purchase, reprint, tracking
+   and cancel are built and tested against it. What stays unconfirmed until a customer
+   with an Amazon Shipping account turns this on: which carriers and services a real lane
+   returns (Amazon's docs say Amazon Shipping only), real charges and
+   `totalChargeWithAdjustments`, and production tracking and cancellation.
+
+The PRD carries the second point as a project risk.

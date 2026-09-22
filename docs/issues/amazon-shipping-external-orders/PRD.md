@@ -35,11 +35,28 @@ Rejected:
 Deferred: removing Amazon and Shopify from `CarrierRegistry` in favor of a separate
 postage-source registry. The direction is right, but this work does not need it.
 
+## Risk: we have never seen a live account with Amazon Shipping
+
+`01` probed the only seller account available. It can buy on-Amazon postage but never
+signed up for Amazon Shipping, and never will. Production refuses every `EXTERNAL` rate
+request from it with `403 A-101`. So:
+
+- **Detection is inferred.** "A-101 on `EXTERNAL` means not set up for Amazon Shipping"
+  rests on one account. No API reports whether a seller has signed up. `04` checks with a
+  free `getRates` and treats any other refusal as unknown.
+- **The working path is built on the sandbox.** Request rules, rates, purchase, all label
+  formats, reprint, tracking and cancel were exercised there. The production body
+  rules were confirmed against the same account, because Amazon validates the body
+  before checking access. Still unconfirmed until a customer with Amazon Shipping turns
+  it on: the carriers and services a real lane returns, real charges and adjustments,
+  and production tracking and cancellation. Plan a supervised first run with that
+  customer before calling the feature done.
+
 ## Issues
 
 | # | Issue | Type | Blocked by |
 |---|---|---|---|
-| 01 | [Probe `EXTERNAL` rating and purchase](issues/01-probe-external-rates-and-purchase.md) | HITL | — |
+| 01 | [Probe `EXTERNAL` rating and purchase](issues/01-probe-external-rates-and-purchase.md) | HITL — **done** | — |
 | 02 | [Connections and the import toggle](issues/02-connections-and-import-toggle.md) | AFK | — |
 | 03 | [Decide how a connection is selected](issues/03-decide-external-connection-routing.md) | HITL | — |
 | 04 | [Offer Amazon Shipping to other channels](issues/04-offer-amazon-shipping-to-other-channels.md) | AFK | 02, 03 |

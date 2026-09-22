@@ -13,8 +13,14 @@ operation goes back to the same connection.
 - The Label's `postage_data_source_id` is the **scoped connection that sold the Offer**,
   not the Shipment's import source. For a Shopify-imported Shipment these differ, and
   confusing them would send tracking or cancellation to the wrong account (or to Shopify).
-- Carrier of record is Amazon Shipping (or whatever `01` found the response names),
-  normalized the same way on-Amazon purchases are.
+- Carrier of record is Amazon Shipping (`AMZN_US` / `std-us-swa-mfn` in the sandbox),
+  normalized the same way on-Amazon purchases are. The `01` sandbox results apply:
+  every format (PNG, ZPL at 203/300, PDF; 4×6) returns `LABEL` only, never a
+  `PACKSLIP`, with file joining `false`. The existing `documentSpecification()` builds
+  an accepted spec.
+- Keep the tracking ID from the purchase response. The sandbox's
+  `getShipmentDocuments` (reprint) returned a different one, so a reprint must never
+  overwrite the Label's tracking ID.
 - `PostageSourceDispatcher` routes tracking and void for these Labels to the recorded
   connection. A void retains Label history and returns the Package to unshipped.
 - Fulfillment write-back to the Shipment's originating channel (e.g. Shopify fulfillment
@@ -34,6 +40,7 @@ operation goes back to the same connection.
       tracking number
 - [ ] Manifest behavior decided and tested
 - [ ] Label printing works for the formats `01` observed (PNG/PDF/ZPL)
+- [ ] Reprint fetches through `getShipmentDocuments` and leaves the tracking ID unchanged
 
 ## Blocked by
 
