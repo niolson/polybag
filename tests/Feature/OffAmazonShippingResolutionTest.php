@@ -266,9 +266,9 @@ describe('scope rules', function (): void {
         $connection = DataSource::factory()->amazon()->create(['client_id' => $client->id]);
         $location = Location::factory()->create();
 
-        expect(fn () => scopeConnectionTo($connection))->toThrow(DomainException::class)
-            ->and(fn () => scopeConnectionTo($connection, location: $location))->toThrow(DomainException::class)
-            ->and(fn () => scopeConnectionTo($connection, client: Client::factory()->create()))->toThrow(DomainException::class);
+        expect(fn (): CarrierAccountScope => scopeConnectionTo($connection))->toThrow(DomainException::class)
+            ->and(fn (): CarrierAccountScope => scopeConnectionTo($connection, location: $location))->toThrow(DomainException::class)
+            ->and(fn (): CarrierAccountScope => scopeConnectionTo($connection, client: Client::factory()->create()))->toThrow(DomainException::class);
 
         scopeConnectionTo($connection, client: $client);
         scopeConnectionTo($connection, $location, $client);
