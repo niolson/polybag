@@ -1137,7 +1137,7 @@ parameters:
 		-
 			message: '#^Offset string on string\|null on left side of \?\? does not exist\.$#'
 			identifier: nullCoalesce.offset
-			count: 2
+			count: 1
 			path: app/Models/CarrierAccount.php
 
 		-
