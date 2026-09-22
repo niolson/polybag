@@ -133,8 +133,10 @@ Every behavioural change needs a test. Most should be feature tests.
 `composer install` points `core.hooksPath` at [`.githooks/`](.githooks), so
 [`.githooks/pre-push`](.githooks/pre-push) runs automatically.
 
-- **PHPStan blocks the push.** Static analysis failures are your code, and CI will fail
-  on them anyway.
+- **Rector and PHPStan block the push.** Rector runs as a dry run, so it changes
+  nothing; it fails if it would rewrite a file. Both are CI gates, so a failure here
+  would fail the build anyway. To fix a Rector failure, run `vendor/bin/rector process`
+  and review `git diff` before committing.
 - **`composer audit` and `npm audit` only warn.** They print findings and let the push
   through. An advisory published upstream this morning is not your bug, and it should
   not stand between you and a pull request on unrelated code. The `security-audit`
