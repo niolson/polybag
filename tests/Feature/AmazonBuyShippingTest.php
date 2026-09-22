@@ -315,6 +315,20 @@ it('sends a getRates body that conforms to the published Shipping v2 schema', fu
     });
 });
 
+it('does not offer Amazon Shipping to an external order yet', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    $this->package->shipment->update([
+        'data_source_id' => null,
+        'metadata' => [],
+    ]);
+
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($this->package->fresh()), []);
+
+    expect($rates)->toBeEmpty();
+    Saloon::assertNothingSent();
+});
+
 it('keeps the tokens that can spend money out of the rate and in the offer', function (): void {
     Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
 

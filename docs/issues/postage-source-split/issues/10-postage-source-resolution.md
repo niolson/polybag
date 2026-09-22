@@ -2,6 +2,12 @@
 
 Status: done — PR #167, with the scope-drift fix in PR #168
 
+Current-scope clarification (2026-09-22): the shipped resolver supports postage bound to the
+originating Shopify/Amazon source and direct carrier accounts. Off-Amazon Amazon Shipping
+(`channelType: EXTERNAL`) is not implemented. The bullet below assigning it to a
+`CarrierAccount` is superseded by ADR-0002's 2026-09-22 clarification: it should select a
+connected Amazon `DataSource` for the Shipment's Client.
+
 Repo: `polybag`
 
 ## Problem
@@ -23,9 +29,9 @@ Resolution per ADR-0002 decision 9:
   `ShopifyShippingLabelService::dataSourceFor()` behaves — lift it into the general rule
   rather than leaving it an implementation detail of one adapter.
 - **Amazon Buy Shipping binds the same way** — the order lives in one seller's account.
-- **Amazon Shipping on non-Amazon orders** resolves through `CarrierAccount` scoping, where
-  the existing `(location, client)` precedence in `CarrierAccount::resolveForShipment()`
-  already applies.
+- **Superseded:** this issue originally placed Amazon Shipping on non-Amazon orders under
+  `CarrierAccount` scoping. That path did not ship; ADR-0002's 2026-09-22 clarification now
+  requires selection of an eligible connected Amazon `DataSource` instead.
 - **One source is quoted per carrier by default.** Quoting several for the same carrier is
   opt-in, mirroring `CarrierAccountScope::rate_shop`, because each extra source is another
   API call on the packer's critical path.

@@ -18,7 +18,8 @@ Built with Laravel 13, Filament 5, Livewire 4, Tailwind CSS 4, MySQL, and Redis.
 - Direct USPS, FedEx, and UPS rate shopping, postage purchase, tracking, and voids
 - International shipping with customs declarations, including separate customs forms when
   carriers return them
-- Amazon Buy Shipping offers, label purchase, tracking, and cancellation through SP-API
+- Amazon Buy Shipping offers for Amazon-originating orders, with label purchase, tracking,
+  and cancellation through SP-API
 - Attended Shopify Shipping label purchase for Shopify fulfillment orders
 - Durable label history: voided labels remain attached to the package, which can then be
   shipped again
@@ -213,6 +214,13 @@ Amazon can return carrier services that PolyBag has never seen before. An operat
 select one manually after seeing its price and promise. Automated shipping can use it
 only after an administrator maps it to the carrier-service catalog and explicitly
 approves it for the Client and environment.
+
+Amazon's Shipping v2 API distinguishes on-Amazon orders (`channelType: AMAZON`) from
+off-Amazon orders (`channelType: EXTERNAL`). PolyBag currently implements only the first
+path. An Amazon order can therefore receive Amazon Shipping, USPS, UPS, FedEx, or another
+carrier that Amazon returns. PolyBag does not yet offer Amazon Shipping for Shipments
+originating on Shopify, a database source, or another non-Amazon channel, even when an
+Amazon Data Source is connected and the seller has completed Amazon Shipping onboarding.
 
 The main scopes are **Location** for a warehouse and **Client** for a 3PL brand or
 retailer. **Carrier Account Scopes** select credentials from the Location and Client.

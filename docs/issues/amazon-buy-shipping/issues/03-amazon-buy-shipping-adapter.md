@@ -24,7 +24,9 @@ Notes that predate `01` and survived it unchanged:
 
 - **Credentials** come from the shipment's own Amazon `DataSource`, not a `CarrierAccount` —
   the order lives in that seller's account, and per-client sources are how 3PL scoping already
-  works. Amazon Shipping on non-Amazon orders is the opposite case and is out of scope here.
+  works. Amazon Shipping on non-Amazon orders (`channelType: EXTERNAL`) is out of scope here
+  and remains unimplemented; it will need to select a connected Amazon `DataSource` that is
+  not necessarily the Shipment's import source.
 - **`directPurchaseShipment`** is the better fit for pre-selected rates, batch ship and
   auto-ship: one call, no token to expire.
 - **Rate limits** are 80 rps / burst 100, so batch ship is not constrained.

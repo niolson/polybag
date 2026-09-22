@@ -31,9 +31,10 @@ use Illuminate\Support\Collection;
  *   not a candidate at all. There is no precedence chain here to get wrong and
  *   no fallback — a shipment that came from nowhere resolves to nothing.
  * - **Carrier accounts resolve by scope**, on the existing `(location, client)`
- *   precedence, which is also where Amazon Shipping on a non-Amazon order will
- *   land: it sells against an account of ours rather than against somebody
- *   else's order.
+ *   precedence. This arm currently covers direct USPS, UPS and FedEx accounts.
+ *   Amazon Shipping for an off-Amazon order is not implemented: Shipping v2
+ *   calls that an `EXTERNAL` channel, and it will need to select an eligible
+ *   connected Amazon `DataSource` independently of the Shipment's import source.
  *
  * This resolves *who may sell*, at quote time. What a shipped package's postage
  * actually was is recorded provenance, read by `PostageSourceDispatcher` from

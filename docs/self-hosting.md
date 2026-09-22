@@ -264,6 +264,12 @@ list: an operator may select a new service manually, but unattended flows requir
 administrator to map it under **Integrations → Map Carrier Services** and approve it for
 the Client. Sandbox and production approvals are intentionally separate.
 
+That is the on-Amazon (`channelType: AMAZON`) workflow. Although Shipping v2 also accepts
+off-Amazon orders (`channelType: EXTERNAL`) and can sell Amazon Shipping labels for them,
+PolyBag does not implement that workflow yet. Connecting an Amazon Data Source and completing
+Amazon Shipping onboarding therefore does not currently make Amazon Shipping appear for
+Shopify, database-imported, manual, or other non-Amazon Shipments.
+
 ## Upgrading
 
 The `app` container's entrypoint runs `php artisan migrate` before it starts php-fpm,

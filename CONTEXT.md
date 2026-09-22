@@ -25,6 +25,15 @@ Where the label was bought: a `CarrierAccount` (bought directly) or a `DataSourc
 entirely.
 _Avoid_: Carrier, channel
 
+**Amazon Buy Shipping / Amazon Shipping**:
+Amazon Buy Shipping is the Shipping v2 API used to quote and buy postage. Amazon Shipping is
+one physical carrier that API can return. For an on-Amazon order (`channelType: AMAZON`), the
+API may return Amazon Shipping, USPS, UPS, FedEx, or another eligible carrier. For an
+off-Amazon order (`channelType: EXTERNAL`), the purchasable carrier is Amazon Shipping.
+PolyBag currently implements only the on-Amazon path; off-Amazon Amazon Shipping is a missing
+capability, not a configured-but-ineligible rate.
+_Avoid_: Using "Amazon" without saying whether it means the API/postage source or the carrier
+
 **Service class**:
 What a `ShippingMethod` is — a speed/price tier that several concrete carrier services can
 satisfy. "Ground" is a service class; `USPS_GROUND_ADVANTAGE` is one service that satisfies it.

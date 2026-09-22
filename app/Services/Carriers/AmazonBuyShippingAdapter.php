@@ -43,8 +43,7 @@ use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Response;
 
 /**
- * Buys postage through Amazon Buy Shipping rather than through a carrier
- * account of our own.
+ * Buys postage through Amazon Buy Shipping for an Amazon-originating order.
  *
  * Amazon is not a carrier, and unlike Shopify it does not pretend to be one
  * either: a single `getRates` for one parcel came back with OnTrac, UPS and
@@ -53,6 +52,10 @@ use Saloon\Http\Response;
  * *that offer* — which is the whole reason quoting and purchasing had to be
  * split off carrier-name dispatch first (`postage-source-split/08`). A rate
  * carried by OnTrac says OnTrac; buying it still calls Amazon.
+ *
+ * This is the Shipping v2 `AMAZON` channel path. The API's `EXTERNAL` channel,
+ * which sells Amazon Shipping postage for orders from other channels, is not
+ * implemented by this adapter.
  *
  * Three consequences worth stating plainly, because each is a decision:
  *
@@ -154,8 +157,10 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
     }
 
     /**
-     * Configured when any active Amazon data source exists — that source
-     * carries the credentials *and* the orders labels are bought against.
+     * Configured when any active Amazon data source exists. For the implemented
+     * on-Amazon path, that source carries both the credentials and the orders
+     * labels are bought against. Its presence alone does not currently enable
+     * Amazon Shipping for off-Amazon orders.
      */
     public function isConfigured(): bool
     {

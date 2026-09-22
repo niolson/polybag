@@ -10,10 +10,10 @@ use App\Models\DataSource;
  * One postage source instance that could sell this package a label.
  *
  * ADR-0002 decision 4 requires an offer to name the source instance it came
- * from, because "USPS" no longer identifies a seller: the same carrier can
- * reach us through our own account, through Amazon Shipping, or through a
- * storefront that will not say which carrier it picked until afterwards. This
- * is that identity, resolved before any of them is asked.
+ * from, because "USPS" no longer identifies a seller: it can reach us through
+ * our own account or as an offer resold by Amazon, while a storefront may not
+ * say which carrier it picked until afterwards. This is that identity, resolved
+ * before any of them is asked.
  *
  * `carrier` is a descriptive fact and never the identity — it is null for a
  * channel source precisely because a blind-purchase offer has no carrier until

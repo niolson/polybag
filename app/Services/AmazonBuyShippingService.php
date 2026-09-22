@@ -36,11 +36,12 @@ use Saloon\Http\Response;
  * request-building testable against Amazon's own schema without a package, an
  * offer store or a carrier registry in the way.
  *
- * **Credentials come from the shipment's own Amazon `DataSource`, never a
- * `CarrierAccount`.** The order being rated lives in that seller's account, and
- * per-client data sources are already how 3PL scoping works. Amazon Shipping
- * sold against an account of *ours*, for orders that did not come from Amazon,
- * is the opposite arrangement and is not this.
+ * **This service currently handles on-Amazon orders only.** Credentials come
+ * from the shipment's own Amazon `DataSource`, and every rate request sends
+ * `channelType: AMAZON` with that order's Amazon ID. Shipping v2 can also sell
+ * Amazon Shipping postage for off-Amazon orders with `channelType: EXTERNAL`,
+ * but selecting a connected Amazon source for such an order and building that
+ * payload are not implemented here.
  */
 class AmazonBuyShippingService
 {
@@ -252,6 +253,8 @@ class AmazonBuyShippingService
      * `GetRatesRequest` without sending anything. `shipDate` is deliberately
      * omitted: Amazon computes the promise from now, and the ship date we
      * record is our pickup policy's answer rather than a constraint on theirs.
+     * This is specifically the on-Amazon shape; an external-order implementation
+     * must send `channelType: EXTERNAL` and omit `amazonOrderDetails`.
      *
      * @return array<string, mixed>
      *

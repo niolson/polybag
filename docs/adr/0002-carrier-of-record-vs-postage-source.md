@@ -10,6 +10,16 @@ per-purchase `package_labels` row, and the `packages` copy becomes the projectio
 active label. Nothing below changes in meaning; where the two rows disagree, the label
 row is authoritative. See `0004-package-label-as-a-record.md`.
 
+Clarified 2026-09-22: the Shipping v2 distinction is between on-Amazon
+(`channelType: AMAZON`) and off-Amazon (`channelType: EXTERNAL`) orders. The implemented
+Buy Shipping adapter covers only on-Amazon orders and binds to their originating Amazon
+`DataSource`; those offers may be carried by Amazon Shipping, USPS, UPS, FedEx, or another
+carrier. The API can sell Amazon Shipping for off-Amazon orders, but PolyBag does not yet
+implement that path. When implemented, it should select an eligible connected Amazon
+`DataSource` for the Shipment's Client; the original `CarrierAccount` statement in decision 9
+is superseded because these are still Shipping v2 seller credentials, not direct-carrier
+credentials.
+
 `legacy_unknown` was specified below for packages shipped before the split, on the
 assumption that some of them had unrecoverable provenance. None do. Shopify Shipping bought
 no label before the discriminator landed — in development or in any tenant — so every
@@ -176,8 +186,9 @@ Amazon Buy Shipping, the next integration, makes the conflation actively lossy r
 merely wrong. Its `getRates` returns `carrierName` per rate and offers USPS, UPS and Amazon
 Shipping side by side; filing all of them under one "Amazon Buy Shipping" carrier row
 discards what the API is handing us. Amazon also introduces a third shape the current model
-has no room for: **Amazon Shipping on a non-Amazon order**, where the carrier is Amazon
-Shipping and the postage is bought through a carrier account rather than a data source.
+had no room for: **Amazon Shipping on a non-Amazon order**, where the carrier is Amazon
+Shipping but the postage is bought through Shipping v2 using a connected Amazon data source
+that is not the Shipment's import source.
 
 ## Decision
 
@@ -319,8 +330,10 @@ is not enough to bind an offer to a source instance. The rules:
   `ShopifyShippingLabelService::dataSourceFor()` behaves; the ADR records it as a rule rather
   than an implementation detail.
 - **Amazon Buy Shipping binds the same way** — the order lives in one seller's account.
-- **Amazon Shipping on non-Amazon orders** resolves through `CarrierAccount` scoping, where the
-  existing `(location, client)` precedence already applies.
+- **Amazon Shipping on non-Amazon orders** is not implemented. The original decision placed it
+  under `CarrierAccount` scoping; the 2026-09-22 clarification above supersedes that detail.
+  It needs an explicit rule for selecting an eligible connected Amazon `DataSource` for the
+  Shipment's Client without pretending that source was the Shipment's import source.
 - **One source is quoted per carrier by default.** Quoting several sources for the same carrier
   is opt-in, mirroring `CarrierAccountScope::rate_shop`, because each extra source is another
   API call on the packer's critical path.
