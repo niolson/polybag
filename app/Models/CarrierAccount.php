@@ -28,6 +28,15 @@ class CarrierAccount extends Model
         'secret_credentials',
     ];
 
+    /**
+     * Memoized decryption of secret_credentials. The `encrypted:array` cast
+     * re-decrypts and re-decodes the whole blob on every attribute access,
+     * so callers like hasUsableCredentials() that read several secrets in
+     * one pass would otherwise pay for that repeatedly. Invalidated in
+     * setAttribute() whenever secret_credentials is written.
+     */
+    private ?array $decryptedSecrets = null;
+
     protected function casts(): array
     {
         return [
@@ -82,7 +91,18 @@ class CarrierAccount extends Model
 
     public function secret(string $key): mixed
     {
-        return $this->secret_credentials[$key] ?? null;
+        $this->decryptedSecrets ??= $this->secret_credentials ?? [];
+
+        return $this->decryptedSecrets[$key] ?? null;
+    }
+
+    public function setAttribute($key, $value)
+    {
+        if ($key === 'secret_credentials') {
+            $this->decryptedSecrets = null;
+        }
+
+        return parent::setAttribute($key, $value);
     }
 
     public function mergeCredential(string $key, mixed $value): void
@@ -97,9 +117,7 @@ class CarrierAccount extends Model
 
     public function fedexAccountNumber(?string $environment = null): ?string
     {
-        $environment ??= (bool) app(SettingsService::class)->get('sandbox_mode', false)
-            ? 'sandbox'
-            : 'production';
+        $environment ??= $this->activeFedexEnvironment();
 
         $accountNumber = $this->credential($environment.'_account_number');
 
@@ -113,7 +131,7 @@ class CarrierAccount extends Model
             return null;
         }
 
-        if (filled($this->secret('child_key'))) {
+        if ($this->hasFedexChildCredentials()) {
             $childEnvironment = $this->credential('child_env') ?? 'production';
 
             if ($childEnvironment !== $environment) {
@@ -209,9 +227,7 @@ class CarrierAccount extends Model
      */
     private function hasDirectFedexCredentials(): bool
     {
-        $isSandbox = (bool) app(SettingsService::class)->get('sandbox_mode', false);
-
-        if ($isSandbox) {
+        if (app(SettingsService::class)->isSandboxMode()) {
             return filled($this->secret('sandbox_api_key'))
                 && filled($this->secret('sandbox_api_secret'));
         }
@@ -220,18 +236,33 @@ class CarrierAccount extends Model
             && filled($this->secret('api_secret'));
     }
 
-    private function hasFedexChildCredentialsForActiveEnvironment(): bool
+    /**
+     * Whether this account has a client key/secret pair for FedEx's OAuth
+     * child-credential flow, regardless of which environment they belong to.
+     */
+    public function hasFedexChildCredentials(): bool
     {
-        if (blank($this->secret('child_key')) || blank($this->secret('child_secret'))) {
+        return filled($this->secret('child_key')) && filled($this->secret('child_secret'));
+    }
+
+    public function hasFedexChildCredentialsForActiveEnvironment(): bool
+    {
+        if (! $this->hasFedexChildCredentials()) {
             return false;
         }
 
         $childEnvironment = $this->credential('child_env') ?? 'production';
-        $activeEnvironment = (bool) app(SettingsService::class)->get('sandbox_mode', false)
-            ? 'sandbox'
-            : 'production';
 
-        return $childEnvironment === $activeEnvironment;
+        return $childEnvironment === $this->activeFedexEnvironment();
+    }
+
+    /**
+     * The FedEx environment ('sandbox' or 'production') currently active for
+     * this app instance, per the shared sandbox_mode setting.
+     */
+    private function activeFedexEnvironment(): string
+    {
+        return app(SettingsService::class)->isSandboxMode() ? 'sandbox' : 'production';
     }
 
     /**

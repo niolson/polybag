@@ -152,7 +152,7 @@ class FedexConnector extends Connector
 
     public function usesSandbox(): bool
     {
-        return (bool) app(SettingsService::class)->get('sandbox_mode', false);
+        return app(SettingsService::class)->isSandboxMode();
     }
 
     protected function defaultOauthConfig(): OAuthConfig
@@ -408,15 +408,6 @@ class FedexConnector extends Connector
 
     private function usesChildCredentials(): bool
     {
-        $account = $this->carrierAccount;
-
-        if (! $account || blank($account->secret('child_key')) || blank($account->secret('child_secret'))) {
-            return false;
-        }
-
-        $childEnvironment = $account->credential('child_env') ?? 'production';
-        $activeEnvironment = $this->usesSandbox() ? 'sandbox' : 'production';
-
-        return $childEnvironment === $activeEnvironment;
+        return $this->carrierAccount?->hasFedexChildCredentialsForActiveEnvironment() ?? false;
     }
 }

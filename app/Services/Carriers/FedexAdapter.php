@@ -1525,7 +1525,7 @@ class FedexAdapter implements DirectCarrierAdapter
      */
     private function isSandbox(): bool
     {
-        return (bool) app(SettingsService::class)->get('sandbox_mode', false);
+        return app(SettingsService::class)->isSandboxMode();
     }
 
     /**
