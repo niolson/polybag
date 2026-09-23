@@ -249,6 +249,11 @@ class ShipmentResource extends Resource
                     ->color('warning')
                     ->state(fn (Shipment $record): ?string => $record->isAmazonFulfilled() ? 'FBA' : null)
                     ->tooltip('Fulfilled by Amazon — Amazon ships this order. It cannot be packed here.'),
+                Tables\Columns\TextColumn::make('amazon_programs')
+                    ->label('Amazon Program')
+                    ->badge()
+                    ->state(fn (Shipment $record): array => AmazonOrderProgram::forShipment($record))
+                    ->toggleable(),
                 Tables\Columns\TextColumn::make('created_at')
                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->sortable()
