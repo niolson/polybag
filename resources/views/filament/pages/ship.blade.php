@@ -210,7 +210,19 @@
                                                      postage is bought from the channel, not on our account. --}}
                                                 <x-filament::badge color="gray" size="sm">{{ $resoldVia }}</x-filament::badge>
                                             @endif
+                                            @isset($rate['otdrProtection'])
+                                                @if($rate['otdrProtection']['protected'])
+                                                    <x-filament::badge color="success" size="sm">OTDR protected</x-filament::badge>
+                                                @else
+                                                    <x-filament::badge color="warning" size="sm">Not OTDR protected</x-filament::badge>
+                                                @endif
+                                            @endisset
                                         </div>
+                                        @if(!empty($rate['otdrProtection']['reasons']))
+                                            <div class="text-xs text-warning-700 dark:text-warning-400 mt-0.5">
+                                                Not protected: {{ implode('; ', $rate['otdrProtection']['reasons']) }}
+                                            </div>
+                                        @endif
                                         @if(!empty($formRateOptionDescriptions[$index]))
                                             <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $formRateOptionDescriptions[$index] }}</div>
                                         @endif

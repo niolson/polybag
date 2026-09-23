@@ -2,6 +2,7 @@
 
 use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
 use App\DataTransferObjects\Shipping\ClassifiedRate;
+use App\DataTransferObjects\Shipping\OfferRequirements;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\SourceEnvironment;
 use App\Models\Client;
@@ -305,4 +306,147 @@ it('asks the database nothing when no rate names a discovered service', function
     expect(DB::getQueryLog())->toBeEmpty();
 
     DB::disableQueryLog();
+});
+
+/*
+|--------------------------------------------------------------------------
+| amazon-buy-shipping/16 — an Amazon connection's offer requirements
+|--------------------------------------------------------------------------
+*/
+
+/**
+ * A rate carrying Amazon's `benefits` block the way the adapter stores it.
+ */
+function rateWithBenefits(float $price, ?string $deliveryDate, bool $otdrProtected, array $reasonCodes = []): RateResponse
+{
+    return new RateResponse(
+        carrier: 'UPS',
+        serviceCode: 'GND',
+        serviceName: 'Ground',
+        price: $price,
+        deliveryDate: $deliveryDate,
+        metadata: ['benefits' => [
+            'includedBenefits' => $otdrProtected ? ['CLAIMS_PROTECTED', 'OTDR_PROTECTED'] : [],
+            'excludedBenefits' => $otdrProtected ? [] : [
+                ['benefit' => 'OTDR_PROTECTED', 'reasonCodes' => $reasonCodes],
+            ],
+        ]],
+    );
+}
+
+it('falls back to the cheapest late rate when the connection requires nothing', function (): void {
+    $deadline = Carbon::tomorrow();
+
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([makeRate(9.00, Carbon::parse('+5 days')->toDateString()), makeRate(7.00, Carbon::parse('+6 days')->toDateString())]),
+        $deadline,
+        null,
+        new OfferRequirements,
+    );
+
+    expect($selection->rate->price)->toBe(7.00)
+        ->and($selection->refusedForRequirements())->toBeFalse();
+});
+
+it('refuses every late rate when the connection requires on-time delivery', function (): void {
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([makeRate(9.00, Carbon::parse('+5 days')->toDateString()), makeRate(7.00, null)]),
+        Carbon::tomorrow(),
+        null,
+        new OfferRequirements(onTime: true),
+    );
+
+    expect($selection->rate)->toBeNull()
+        ->and($selection->late)->toHaveCount(2)
+        ->and($selection->unprotected)->toBeEmpty()
+        ->and($selection->attendedAlternativeAvailable)->toBeTrue();
+});
+
+it('buys the on-time rate over a cheaper late one under every requirement the rate meets', function (bool $onTime, bool $otdrProtection): void {
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([
+            rateWithBenefits(4.00, Carbon::parse('+5 days')->toDateString(), otdrProtected: true),
+            rateWithBenefits(8.00, Carbon::today()->toDateString(), otdrProtected: true),
+        ]),
+        Carbon::tomorrow(),
+        null,
+        new OfferRequirements(onTime: $onTime, otdrProtection: $otdrProtection),
+    );
+
+    expect($selection->rate->price)->toBe(8.00);
+})->with([
+    'neither' => [false, false],
+    'on time' => [true, false],
+    'protection' => [false, true],
+    'both' => [true, true],
+]);
+
+it('buys an on-time rate that carries LATE_DELIVERY_RISK when only on-time is required', function (): void {
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([rateWithBenefits(6.00, Carbon::today()->toDateString(), otdrProtected: false, reasonCodes: ['LATE_DELIVERY_RISK'])]),
+        Carbon::tomorrow(),
+        null,
+        new OfferRequirements(onTime: true),
+    );
+
+    expect($selection->rate?->price)->toBe(6.00);
+});
+
+it('buys a protected late rate when only protection is required', function (): void {
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([
+            rateWithBenefits(5.00, Carbon::today()->toDateString(), otdrProtected: false, reasonCodes: ['NON_SSA_ORDER']),
+            rateWithBenefits(7.00, Carbon::parse('+5 days')->toDateString(), otdrProtected: true),
+        ]),
+        Carbon::tomorrow(),
+        null,
+        new OfferRequirements(otdrProtection: true),
+    );
+
+    expect($selection->rate->price)->toBe(7.00);
+});
+
+it('refuses an unprotected rate, direct carriers included, when protection is required', function (): void {
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([
+            makeRate(3.00, Carbon::today()->toDateString()),
+            rateWithBenefits(5.00, Carbon::today()->toDateString(), otdrProtected: false, reasonCodes: ['NON_SSA_ORDER']),
+        ]),
+        Carbon::tomorrow(),
+        null,
+        new OfferRequirements(otdrProtection: true),
+    );
+
+    expect($selection->rate)->toBeNull()
+        ->and($selection->unprotected)->toHaveCount(2)
+        ->and($selection->late)->toBeEmpty();
+});
+
+it('buys only a rate that is both on time and protected when both are required', function (): void {
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([
+            rateWithBenefits(4.00, Carbon::parse('+5 days')->toDateString(), otdrProtected: true),
+            rateWithBenefits(5.00, Carbon::today()->toDateString(), otdrProtected: false, reasonCodes: ['NON_AHT_ORDER']),
+            rateWithBenefits(9.00, Carbon::today()->toDateString(), otdrProtected: true),
+        ]),
+        Carbon::tomorrow(),
+        null,
+        new OfferRequirements(onTime: true, otdrProtection: true),
+    );
+
+    expect($selection->rate->price)->toBe(9.00);
+});
+
+it('refuses every rate under the on-time requirement when there is no deadline to meet', function (): void {
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([makeRate(5.00, Carbon::today()->toDateString()), makeRate(3.00, null)]),
+        null,
+        null,
+        new OfferRequirements(onTime: true),
+    );
+
+    expect($selection->rate)->toBeNull()
+        ->and($selection->deadlineMissing)->toBeTrue()
+        ->and($selection->late)->toHaveCount(2)
+        ->and($selection->attendedAlternativeAvailable)->toBeTrue();
 });

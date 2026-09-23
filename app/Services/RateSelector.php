@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
 use App\DataTransferObjects\Shipping\ClassifiedRate;
+use App\DataTransferObjects\Shipping\OfferRequirements;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\UnattendedRateSelection;
 use App\Services\PostageSources\ServiceApprovalGate;
@@ -92,20 +93,57 @@ class RateSelector
      * the actual answer is that an administrator has not approved the service
      * yet.
      *
+     * An Amazon order's connection can also require that the rate arrive by
+     * the deliver-by date, or be OTDR-protected, or both
+     * (`amazon-buy-shipping/16`). A rate that fails either is refused the same
+     * way an unapproved one is: kept for the Ship page, named in the result.
+     * With neither required, a late rate is still bought when nothing is on
+     * time, as before. An order with no deliver-by date cannot show that any
+     * rate is on time, so requiring it refuses every rate there rather than
+     * passing them all the way {@see classify()} does.
+     *
      * @param  Collection<int, RateResponse>  $rates
      */
-    public function selectForAutomation(Collection $rates, ?Carbon $deadline, ?int $clientId): UnattendedRateSelection
-    {
+    public function selectForAutomation(
+        Collection $rates,
+        ?Carbon $deadline,
+        ?int $clientId,
+        ?OfferRequirements $requirements = null,
+    ): UnattendedRateSelection {
+        $requirements ??= OfferRequirements::none();
+
         [$eligible, $withheld] = $this->partitionByApproval($rates, $clientId);
 
-        $priced = $eligible->reject(fn (RateResponse $rate): bool => $rate->priceUnknown);
+        $classified = $this->classify(
+            $eligible->reject(fn (RateResponse $rate): bool => $rate->priceUnknown),
+            $deadline,
+        );
+
+        $refusesAsLate = fn (ClassifiedRate $cr): bool => $requirements->refusesAsLate($deadline !== null && $cr->isOnTime);
+
+        $late = $classified
+            ->filter($refusesAsLate)
+            ->map(fn (ClassifiedRate $cr): RateResponse => $cr->rate)
+            ->values();
+        $unprotected = $classified
+            ->filter(fn (ClassifiedRate $cr): bool => $requirements->refusesAsUnprotected($cr->rate))
+            ->map(fn (ClassifiedRate $cr): RateResponse => $cr->rate)
+            ->values();
+
+        $acceptable = $classified->first(fn (ClassifiedRate $cr): bool => ! $refusesAsLate($cr)
+            && ! $requirements->refusesAsUnprotected($cr->rate));
 
         return new UnattendedRateSelection(
-            rate: $priced->isEmpty() ? null : $this->classify($priced, $deadline)->first()->rate,
+            rate: $acceptable?->rate,
             withheld: $withheld,
-            attendedAlternativeAvailable: $withheld->isNotEmpty() || $eligible->contains(
-                fn (RateResponse $rate): bool => $rate->priceUnknown,
-            ),
+            attendedAlternativeAvailable: $withheld->isNotEmpty()
+                || $late->isNotEmpty()
+                || $unprotected->isNotEmpty()
+                || $eligible->contains(fn (RateResponse $rate): bool => $rate->priceUnknown),
+            late: $late,
+            unprotected: $unprotected,
+            requirements: $requirements,
+            deadlineMissing: $requirements->onTime && $deadline === null,
         );
     }
 

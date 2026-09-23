@@ -321,6 +321,22 @@ class DataSourceForm
                 ->visible(fn (Get $get): bool => $get('source_type') === AmazonSource::class)
                 ->columns(2),
 
+            Section::make('Automated Label Purchase')
+                ->description('What batch ship, auto-ship and shipping rules insist on before buying a label for an order from this connection. A person on the Ship page sees every rate, marked, and can still choose any of them.')
+                ->schema([
+                    Toggle::make('requires_on_time_offers')
+                        ->label('Require on-time delivery')
+                        ->default(true)
+                        ->helperText('Never buy a rate that is expected to arrive after the order\'s deliver-by date, or that gives no delivery date. When nothing arrives on time, the package is left for a person.'),
+
+                    Toggle::make('requires_otdr_protected_offers')
+                        ->label('Require OTDR protection')
+                        ->default(false)
+                        ->helperText('Only buy a label Amazon marks as OTDR protected, so a late delivery does not count against your on-time delivery rate. Protection needs Shipping Settings Automation and Average Handling Time automation turned on in Seller Central; without them no rate is protected, and every order is left for a person.'),
+                ])
+                ->visible(fn (Get $get): bool => $get('source_type') === AmazonSource::class)
+                ->columns(2),
+
             Section::make('Amazon Shipping for Other Channels')
                 ->description('Buy Amazon Shipping labels through this connection for orders that did not come from Amazon — Shopify, database, or manually created orders. Amazon orders always use the connection they came from.')
                 ->schema([

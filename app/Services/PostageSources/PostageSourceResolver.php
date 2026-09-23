@@ -110,7 +110,12 @@ class PostageSourceResolver
         return DataSource::resolveOffAmazonShipping($package->location_id, $package->shipment?->client_id);
     }
 
-    private function isAmazonOrder(Package $package): bool
+    /**
+     * Whether this package's order came from Amazon, recognized by the
+     * connection it was imported from or by the Amazon order ID the import
+     * recorded, so an order whose connection has since been deleted still is.
+     */
+    public function isAmazonOrder(Package $package): bool
     {
         return $package->shipment?->dataSource?->isAmazon()
             || $this->amazonOrderItems->orderIdFor($package) !== null;
