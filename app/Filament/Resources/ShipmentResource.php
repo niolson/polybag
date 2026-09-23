@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Enums\AmazonOrderProgram;
 use App\Enums\Deliverability;
 use App\Enums\PickingStatus;
 use App\Enums\Role;
@@ -478,6 +479,11 @@ class ShipmentResource extends Resource
                             ->state('Fulfilled by Amazon (FBA)')
                             ->helperText('Amazon picks, packs and ships this order. It cannot be packed or confirmed from here.')
                             ->visible(fn (Shipment $record): bool => $record->isAmazonFulfilled()),
+                        TextEntry::make('amazon_programs')
+                            ->label('Amazon program')
+                            ->badge()
+                            ->state(fn (Shipment $record): array => AmazonOrderProgram::forShipment($record))
+                            ->visible(fn (Shipment $record): bool => AmazonOrderProgram::forShipment($record) !== []),
                         TextEntry::make('picking_status')
                             ->badge()
                             ->visible(fn () => app(SettingsService::class)->get('picking_enabled', false)),

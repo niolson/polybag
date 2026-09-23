@@ -31,3 +31,25 @@ it('shows the FBA notice on the shipment view only for Amazon-fulfilled orders',
     Livewire::test(ViewShipment::class, ['record' => $mfn->id])
         ->assertSchemaComponentHidden('fulfilled_by');
 });
+
+it('badges the Amazon program on the shipment view only for an enrolled order', function (array $programs, ?string $label): void {
+    $shipment = Shipment::factory()->create([
+        'metadata' => ['amazon_order_id' => '111-2222222-3333333', 'amazon_programs' => $programs],
+    ]);
+
+    $page = Livewire::test(ViewShipment::class, ['record' => $shipment->id]);
+
+    if ($label === null) {
+        $page->assertSchemaComponentHidden('amazon_programs');
+
+        return;
+    }
+
+    $page->assertSchemaComponentExists('amazon_programs');
+    expect($page->html())->toMatch("/class=\"fi-badge [^\"]*\">\\s*{$label}\\s*</");
+})->with([
+    'prime' => [['PRIME'], 'Prime'],
+    'premium' => [['PREMIUM'], 'Premium'],
+    'ordinary' => [[], null],
+    'ship plus' => [['FBM_SHIP_PLUS'], null],
+]);
