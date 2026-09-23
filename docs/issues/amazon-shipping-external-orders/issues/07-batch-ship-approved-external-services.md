@@ -27,4 +27,8 @@ them.
 
 ## Blocked by
 
-- `06` — purchase and dispatch
+- ~~`06` — purchase and dispatch~~ done
+- [`amazon-buy-shipping/15`](../../amazon-buy-shipping/issues/15-filter-amazon-offers-by-shipping-method-service-class.md)
+  — Amazon offers are not filtered to the ShippingMethod's service class, so an approved
+  service of the wrong speed could win a batch. Off-Amazon orders often have no
+  `deliver_by` to catch that, which makes the filter the only guard
