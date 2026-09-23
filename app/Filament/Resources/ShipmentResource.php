@@ -243,17 +243,18 @@ class ShipmentResource extends Resource
                 Tables\Columns\TextColumn::make('deliverability')
                     ->label('Deliverable')
                     ->badge(),
-                Tables\Columns\TextColumn::make('fulfilled_by')
-                    ->label('Fulfillment')
+                Tables\Columns\TextColumn::make('amazon')
+                    ->label('Amazon')
                     ->badge()
-                    ->color('warning')
-                    ->state(fn (Shipment $record): ?string => $record->isAmazonFulfilled() ? 'FBA' : null)
-                    ->tooltip('Fulfilled by Amazon — Amazon ships this order. It cannot be packed here.'),
-                Tables\Columns\TextColumn::make('amazon_programs')
-                    ->label('Amazon Program')
-                    ->badge()
-                    ->state(fn (Shipment $record): array => AmazonOrderProgram::forShipment($record))
-                    ->toggleable(),
+                    ->state(fn (Shipment $record): array => [
+                        ...($record->isAmazonFulfilled() ? ['FBA'] : []),
+                        ...AmazonOrderProgram::forShipment($record),
+                    ])
+                    ->color(fn (AmazonOrderProgram|string $state): string => $state instanceof AmazonOrderProgram ? $state->getColor() : 'warning')
+                    ->tooltip(fn (Shipment $record): ?string => $record->isAmazonFulfilled()
+                        ? 'Fulfilled by Amazon — Amazon ships this order. It cannot be packed here.'
+                        : null)
+                    ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('created_at')
                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->sortable()

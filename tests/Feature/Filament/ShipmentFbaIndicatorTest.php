@@ -12,26 +12,24 @@ beforeEach(function (): void {
     $this->actingAs(User::factory()->create(['role' => Role::Admin]));
 });
 
-it('badges an Amazon-fulfilled shipment in the shipments table', function (): void {
+it('badges FBA and the Amazon program in one hidden-by-default Amazon column', function (): void {
     $fba = Shipment::factory()->create(['metadata' => ['amazon_fulfilled_by' => 'AMAZON']]);
-    $mfn = Shipment::factory()->create(['metadata' => ['amazon_fulfilled_by' => 'MERCHANT']]);
-
-    Livewire::test(ListShipments::class)
-        ->assertTableColumnStateSet('fulfilled_by', 'FBA', record: $fba)
-        ->assertTableColumnStateSet('fulfilled_by', null, record: $mfn);
-});
-
-it('badges the Amazon program in the shipments table', function (): void {
-    $prime = Shipment::factory()->create(['metadata' => ['amazon_programs' => ['PRIME']]]);
+    $fbaPrime = Shipment::factory()->create(['metadata' => ['amazon_fulfilled_by' => 'AMAZON', 'amazon_programs' => ['PRIME']]]);
+    $prime = Shipment::factory()->create(['metadata' => ['amazon_fulfilled_by' => 'MERCHANT', 'amazon_programs' => ['PRIME']]]);
     $premium = Shipment::factory()->create(['metadata' => ['amazon_programs' => ['PREMIUM', 'AMAZON_BUSINESS']]]);
-    $ordinary = Shipment::factory()->create(['metadata' => ['amazon_programs' => ['FBM_SHIP_PLUS']]]);
+    $ordinary = Shipment::factory()->create(['metadata' => ['amazon_fulfilled_by' => 'MERCHANT', 'amazon_programs' => ['FBM_SHIP_PLUS']]]);
     $shopify = Shipment::factory()->create(['metadata' => []]);
 
     Livewire::test(ListShipments::class)
-        ->assertTableColumnStateSet('amazon_programs', [AmazonOrderProgram::Prime], record: $prime)
-        ->assertTableColumnStateSet('amazon_programs', [AmazonOrderProgram::Premium], record: $premium)
-        ->assertTableColumnStateSet('amazon_programs', null, record: $ordinary)
-        ->assertTableColumnStateSet('amazon_programs', null, record: $shopify);
+        ->assertDontSeeHtml('fi-ta-header-cell-amazon')
+        ->toggleAllTableColumns()
+        ->assertSeeHtml('fi-ta-header-cell-amazon')
+        ->assertTableColumnStateSet('amazon', ['FBA'], record: $fba)
+        ->assertTableColumnStateSet('amazon', ['FBA', AmazonOrderProgram::Prime], record: $fbaPrime)
+        ->assertTableColumnStateSet('amazon', [AmazonOrderProgram::Prime], record: $prime)
+        ->assertTableColumnStateSet('amazon', [AmazonOrderProgram::Premium], record: $premium)
+        ->assertTableColumnStateSet('amazon', null, record: $ordinary)
+        ->assertTableColumnStateSet('amazon', null, record: $shopify);
 });
 
 it('shows the FBA notice on the shipment view only for Amazon-fulfilled orders', function (): void {
