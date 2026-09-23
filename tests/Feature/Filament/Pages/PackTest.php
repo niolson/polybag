@@ -822,3 +822,23 @@ it('allows packing a merchant-fulfilled Amazon shipment', function (): void {
     Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->assertSet('shipment.id', $shipment->id);
 });
+
+it('badges an Amazon order with the programs it is enrolled in', function (array $programs, array $seen, array $unseen): void {
+    $shipment = Shipment::factory()->create([
+        'metadata' => ['amazon_order_id' => '111-2222222-3333333', 'amazon_programs' => $programs],
+    ]);
+
+    $page = Livewire::test(Pack::class, ['shipment_id' => $shipment->id]);
+
+    foreach ($seen as $label) {
+        expect($page->html())->toMatch("/fi-badge-label\">\\s*{$label}\\s*</");
+    }
+
+    foreach ($unseen as $label) {
+        expect($page->html())->not->toMatch("/fi-badge-label\">\\s*{$label}\\s*</");
+    }
+})->with([
+    'prime' => [['PRIME'], ['Prime'], ['Premium']],
+    'premium' => [['PREMIUM'], ['Premium'], ['Prime']],
+    'ordinary' => [[], [], ['Prime', 'Premium']],
+]);

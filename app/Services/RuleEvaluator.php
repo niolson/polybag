@@ -7,6 +7,7 @@ use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\RuleEvaluationResult;
+use App\Enums\AmazonOrderProgram;
 use App\Enums\DestinationZone;
 use App\Enums\ShippingRuleAction;
 use App\Models\Package;
@@ -124,6 +125,7 @@ class RuleEvaluator
             'destination_state' => $this->evaluateDestinationState($data, $shipment),
             'channel' => $this->evaluateChannel($data, $shipment),
             'residential' => $this->evaluateResidential($data, $shipment),
+            'amazon_program' => $this->evaluateAmazonProgram($data, $shipment),
             default => true, // Unknown condition types pass (forward compat)
         };
     }
@@ -209,6 +211,17 @@ class RuleEvaluator
         $shipmentResidential = AddressData::fromShipment($shipment)->isResidential();
 
         return (bool) $shipmentResidential === (bool) $isResidential;
+    }
+
+    private function evaluateAmazonProgram(array $data, Shipment $shipment): bool
+    {
+        $program = AmazonOrderProgram::tryFrom($data['program'] ?? '');
+
+        if (! $program) {
+            return true;
+        }
+
+        return $program->appliesTo($shipment);
     }
 
     private function compareNumeric(array $data, float|int $actual): bool

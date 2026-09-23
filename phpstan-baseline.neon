@@ -1369,12 +1369,6 @@ parameters:
 			path: app/Services/PickBatchService.php
 
 		-
-			message: '#^Parameter \#1 \$conditions of method App\\Services\\RuleEvaluator\:\:conditionsMatch\(\) expects array\|null, string\|null given\.$#'
-			identifier: argument.type
-			count: 1
-			path: app/Services/RuleEvaluator.php
-
-		-
 			message: '#^Using nullsafe property access "\?\-\>timezone" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
 			identifier: nullsafe.neverNull
 			count: 2

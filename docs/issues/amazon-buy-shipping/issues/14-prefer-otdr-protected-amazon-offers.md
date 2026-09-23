@@ -1,6 +1,6 @@
-# Prefer OTDR-protected offers for Amazon orders
+# Record Amazon order programs, and match rules on them
 
-Status: needs-triage
+Status: done — shipped 2026-09-23; both open questions answered by assumption, see *Decided*
 
 Repo: `polybag`
 
@@ -16,6 +16,12 @@ Seller Fulfilled Prime sets a higher bar, measured weekly: OTDR at or above 93.5
 tracking at 99%, cancellations at or below 0.5%, and at least 40% of deliveries within one
 day and 75% within two. Missing them costs the seller Prime eligibility.
 
+**Prime and Premium are different programs.** Prime requires shipping to the whole
+contiguous 48 states, with no charge to the buyer for shipping. Premium shipping lets a
+seller offer one-day or two-day delivery to regions of their choosing, such as two-day to
+western Washington only, and charge for it. A seller can run either without the other, so
+PolyBag keeps them apart rather than folding Premium into Prime.
+
 Buy Shipping offers two separate protections on the Labels it sells
 ([Amazon's help page](https://sellercentral.amazon.com/help/hub/reference/GB2FHL2QMQ5NT397)):
 
@@ -29,85 +35,126 @@ Seller Central, and shipping on time depends on the warehouse. A seller without 
 automation settings gets no OTDR protection from any Label, so the Ship page should not
 suggest otherwise.
 
-PolyBag ignores all of this today:
+Where things stand:
 
-- `getRates` returns a `benefits` block on each rate, with `includedBenefits` and
-  `excludedBenefits`, and each exclusion carries `reasonCodes`. The adapter stores that
-  block on the Offer (`AmazonBuyShippingAdapter::rateMetadata()`), and nothing reads it
-  back.
-- `RateSelector::selectForAutomation()` chooses the cheapest on-time rate. An unprotected
-  offer a few cents cheaper wins over a protected one, and nothing on the Ship page shows
-  the packer the difference.
+- `getRates` returns a `benefits` block on each rate. `16` parses it
+  (`BuyShippingBenefits`): the benefit is `OTDR_PROTECTED`, withheld with reasons such as
+  `LATE_DELIVERY_RISK`, `NON_SSA_ORDER` and `NON_AHT_ORDER`. The Ship page badges it.
+- `16` added *require OTDR protection* on the Amazon connection. `17` moves it to the
+  shipping method and lets it apply to Prime orders only, which needs the order's
+  programs.
 - The import does not read the order's `programs`, so a Prime or Premium order looks the
   same as any other Amazon order. Only `fulfillmentServiceLevel` and `deliverByWindow`
   come in (`AmazonSource`).
 
+The file name predates the 2026-09-23 rewrite. It is kept so existing links still work.
+
 ## Scope
 
-All of Amazon's own orders (`channelType: AMAZON`). Protection is a property of the
-*offer*, and the order's programs decide only how strongly to weigh it. There are two
-tiers:
+Two things, both about knowing what kind of Amazon order a Shipment is:
 
-| Tier | Orders | Why |
-|---|---|---|
-| Delivery-metric | `PRIME`, `PREMIUM`, and possibly `FBM_SHIP_PLUS` | the weekly SFP metrics; losing them loses the program |
-| Standard | every other Amazon order | the 90% OTDR target, Premium and Prime eligibility, and probably the Buy Box |
+1. **Import the order's programs.** `17` needs them to require protection on Prime or
+   Premium orders only.
+2. **A shipping-rule condition on them**, for sellers who want "if the order is Prime,
+   use this service" rather than a method-wide requirement.
 
-Off-Amazon Amazon Shipping Labels (`amazon-shipping-external-orders`) are out of scope:
-those orders are not on Amazon, so their deliveries do not count toward the account's
-OTDR.
+Automated selection itself is `17`. This issue only records and exposes the programs.
 
-## What is not known yet
+## Where `programs` lives
 
-1. ~~**What string "OTDR Protected" is in the API.**~~ Answered 2026-09-23 by captures
-   already in `.scratch/amazon-shipping-v2/`: it is its own benefit, `OTDR_PROTECTED`,
-   next to `CLAIMS_PROTECTED`. Its exclusion reasons include `LATE_DELIVERY_RISK`,
-   `NON_SSA_ORDER` and `NON_AHT_ORDER`, the last two being the Seller Central automation
-   settings. No capture yet shows it *included*. `16` parses it (`BuyShippingBenefits`).
-2. **Whether OTDR Protection applies to ordinary orders, or only Prime.** The help page
-   describes it for Buy Shipping Labels generally; Amazon's Seller Fulfilled Prime text
-   describes it for Prime offers. Capture one Prime order and one ordinary order, and
-   compare their `benefits`. If ordinary orders only ever get Claims Protection, the
-   standard tier weighs that instead, or nothing.
-3. **Where `programs` sits in Orders v2026-01-01.** The values seen are `AMAZON_BAZAAR`,
-   `AMAZON_BUSINESS`, `AMAZON_EASY_SHIP`, `AMAZON_HAUL`, `DELIVERY_BY_AMAZON`,
-   `FBM_SHIP_PLUS`, `INVOICE_BY_AMAZON`, `IN_STORE_PICK_UP`, `PREMIUM`, `PREORDER` and
-   `PRIME`. Check the JSON model for whether the list is order-level or item-level. The
-   docs have been wrong about field locations in this version before. The only fixture we
-   hold is v0, where the field is `IsPrime` and item-level `AmazonPrograms`.
-4. **Whether `FBM_SHIP_PLUS` belongs in the delivery-metric tier.** The v0 model says it
-   includes late-delivery protection, but its rules may differ from SFP's.
-5. **Policy for each tier.** A reasonable default, for triage to confirm:
-   - Delivery-metric orders **require** a protected offer. If none arrives on time, the
-     Package goes to a person rather than being bought unprotected.
-   - Standard orders **prefer** a protected offer unless it costs more than a per-client
-     tolerance over the cheapest eligible offer.
+Answered 2026-09-23. In Orders v2026-01-01 `programs` is on the **order**, and its values
+are `AMAZON_BAZAAR`, `AMAZON_BUSINESS`, `AMAZON_EASY_SHIP`, `AMAZON_HAUL`,
+`DELIVERY_BY_AMAZON`, `FBM_SHIP_PLUS`, `INVOICE_BY_AMAZON`, `IN_STORE_PICK_UP`,
+`PREMIUM`, `PREORDER` and `PRIME`. Order items carry a separate `programs` list,
+`TRANSPARENCY` and `SUBSCRIBE_AND_SAVE`, which says nothing about delivery and is not
+needed here. The only fixture we hold is v0 (`IsPrime`, item-level `AmazonPrograms`), so
+build a v2026 fixture from the JSON model rather than from the docs. The docs have been
+wrong about field locations in this version before.
 
-   Whether the tolerance is a fixed amount, a percentage, or configurable at all is part
-   of the question.
+## What to build
 
-## Likely shape
+- **Import.** `AmazonSource` writes the order-level list, as Amazon spells it, to the
+  Shipment's metadata as `amazon_programs`, next to `amazon_order_id`. An order with no
+  programs stores `[]`, so "imported with none" can be told apart from "imported before
+  this existed". Re-imports refresh it like the other Amazon metadata.
+  - Stored as metadata, not a column. Everything that reads it works on one Shipment at a
+    time: rule evaluation, rate selection, the Ship page. A Shipments-table filter, if
+    one is wanted later, can use `whereJsonContains`. A cross-channel `is_prime` column
+    would be premature, since only Amazon has programs.
+- **Meaning.** One place maps program codes to the programs the app distinguishes, so
+  nobody types codes into configuration: *Prime* is `PRIME`, *Premium* is `PREMIUM`.
+  `FBM_SHIP_PLUS` maps to neither (see *Decided*).
+- **Rule condition.** `RuleEvaluator` gains an *Amazon program* condition, *is Prime* or
+  *is Premium*, beside `channel`, `residential` and the rest, with its field in the
+  Shipping Rule form. A non-Amazon Shipment never matches it.
+- **Visible.** The Pack and Ship pages show a *Prime* or *Premium* badge on such an
+  order, where the packer can see why it is being treated differently.
 
-Settle the questions above before building this.
+## Decided
 
-- **Import:** record the order's programs next to `amazon_fulfillment_service_level` in
-  the Shipment's metadata, and derive the tier from them.
-- **Offers:** parse `benefits` into a typed value on `RateResponse` rather than leaving it
-  as metadata, so the selector and the Ship page read the same fact.
-- **Automation:** apply the tier's policy after the service-class filter (`15`) and after
-  approval. Protection chooses between offers that are already eligible, and never makes
-  an ineligible one eligible.
-- **Ship page:** show protection on each Amazon offer. Where an offer lists it as
-  excluded, show the reason code, such as `LATE_DELIVERY_RISK`. Sort protected offers
-  first on delivery-metric orders.
+Both were open questions until 2026-09-23, when they were settled by decision rather than
+by capture:
 
-`16` shipped the two per-connection settings, *require on-time delivery* and *require OTDR
-protection*, and the Ship page badge.
-This issue decides what builds on top of those settings: whether the delivery-metric tier
-turns *require protection* on by itself for Prime and Premium orders, and how the standard
-tier's preference and tolerance choose among the offers that pass.
+1. **OTDR protection is assumed to be offered on ordinary orders**, not only Prime. The
+   exclusion reasons seen so far, `NON_SSA_ORDER` and `NON_AHT_ORDER`, are seller settings
+   rather than programs, which points the same way. `17`'s *Other Amazon orders* option is
+   therefore treated as usable. A `getRates` capture comparing a Prime and an ordinary
+   order, with both Seller Central automation settings on, would still confirm it.
+2. **`FBM_SHIP_PLUS` is not Prime.** It is a separate program, for shipments from China,
+   and nothing is done with it. The code is stored in `amazon_programs` as Amazon sends
+   it, but maps to no program, matches no rule and shows no badge.
+
+## Rejected
+
+- **Preferring a protected offer on ordinary orders, within a price tolerance.** The
+  earlier draft of this issue proposed two tiers: *require* on Prime, *prefer within a
+  tolerance* elsewhere. Rejected 2026-09-23. Most sellers want the cheapest protected
+  offer bought automatically, which `17`'s *All* option gives without a tolerance to
+  configure.
+
+## Out of scope
+
+- A shipping rule whose *action* names a discovered Amazon service, such as "if Prime,
+  use OnTrac Ground", when OnTrac is not in the catalog. Rule actions name a
+  `CarrierService` today. `18` loosens approval, not rule targets; this needs its own
+  issue if sellers ask for it.
+
+## Acceptance criteria
+
+- [x] A v2026 order with `programs: ["PRIME"]` imports with `amazon_programs` set to
+      `["PRIME"]`, and one with none imports with `[]`
+- [x] Item-level `programs` are not merged into the order's list
+- [x] A shipping rule with *is Prime* matches a `PRIME` order and not a `PREMIUM` one;
+      *is Premium* the reverse. Neither matches an ordinary Amazon order or a Shopify
+      order
+- [x] The Ship page shows the Prime badge on a Prime order and the Premium badge on a
+      Premium order, and neither on any other
 
 ## Blocked by
 
-Nothing for questions 2–4. Building waits on their answers, and the automation step waits
-on `15`.
+None.
+
+## Comments
+
+### 2026-09-23 — shipped
+
+> *This was generated by AI.*
+
+- **Fixture.** `orders_2026-01-01.json` is now vendored in `tests/Fixtures/Schemas/`,
+  unmodified, and the test orders in `AmazonImportExportTest` are validated against its
+  `Order` schema. That confirmed `programs` is an order-level string array and needs no
+  `includedData` value, so the import request is unchanged.
+- **Import.** `AmazonSource::mapOrderToShipment()` writes `amazon_programs`: the
+  order-level list, strings only, as Amazon spells them, `[]` when absent. Item-level
+  `programs` are ignored. Re-imports already replace the Shipment's metadata, so the list
+  refreshes with no extra code.
+- **Meaning.** `App\Enums\AmazonOrderProgram` (`Prime`, `Premium`) holds the code map
+  (`codes()`), the label and badge colour, and `forShipment()` / `appliesTo()`. A
+  Shipment with no `amazon_programs`, whether from another channel or imported before
+  this, has no programs. `17` should read programs through it rather than the metadata.
+- **Rule condition.** `amazon_program` with `data.program` of `prime` or `premium`, in
+  `RuleEvaluator` and as an *Amazon Program* block in the Shipping Rule form, summarised
+  as *Amazon Prime* / *Amazon Premium* in the rules table. Like the other conditions, a
+  malformed one without a program passes; the form requires the field.
+- **Visible.** A badge beside the client badge on Pack, and in the *Package Details*
+  header on Ship.

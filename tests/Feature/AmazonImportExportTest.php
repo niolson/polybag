@@ -375,6 +375,80 @@ it('leaves the shipping method unset when Amazon omits the service level and no 
         ->and($shipment->shipping_method_reference)->toBeNull();
 });
 
+/**
+ * A v2026-01-01 order carrying everything the Order schema requires, so it can
+ * be checked against Amazon's own model rather than against the docs.
+ *
+ * @param  list<string>|null  $programs  Omitted from the order when null.
+ */
+function v2026AmazonOrder(?array $programs): array
+{
+    $order = sampleAmazonOrder();
+    unset($order['recipient']['deliveryAddress']['addressLine2']);
+
+    $order['createdTime'] = '2026-08-11T15:00:00Z';
+    $order['lastUpdatedTime'] = '2026-08-11T15:05:00Z';
+    $order['salesChannel'] = ['channelName' => 'AMAZON', 'marketplaceId' => 'ATVPDKIKX0DER'];
+
+    if ($programs !== null) {
+        $order['programs'] = $programs;
+    }
+
+    return $order;
+}
+
+it('records the order-level Amazon programs as Amazon spells them', function (?array $programs, array $stored): void {
+    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($c) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $c->id]));
+
+    $order = v2026AmazonOrder($programs);
+    assertMatchesSpApiSchema($order, 'Order', 'orders_2026-01-01');
+
+    Saloon::fake([SearchOrders::class => amazonOrdersResponse([$order])]);
+
+    ShipmentImportService::forSource(amazonSourceForTest(), $this->dataSource)->import();
+
+    $shipment = Shipment::where('shipment_reference', '111-2222222-3333333')->firstOrFail();
+
+    expect($shipment->metadata)->toHaveKey('amazon_programs')
+        ->and($shipment->metadata['amazon_programs'])->toBe($stored);
+})->with([
+    'prime' => [['PRIME'], ['PRIME']],
+    'premium and business' => [['PREMIUM', 'AMAZON_BUSINESS'], ['PREMIUM', 'AMAZON_BUSINESS']],
+    'ship plus is kept verbatim' => [['FBM_SHIP_PLUS'], ['FBM_SHIP_PLUS']],
+    'empty list' => [[], []],
+    'omitted' => [null, []],
+]);
+
+it('does not merge item-level programs into the order programs', function (): void {
+    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($c) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $c->id]));
+
+    $order = v2026AmazonOrder(['PRIME']);
+    $order['orderItems'][0]['programs'] = ['TRANSPARENCY', 'SUBSCRIBE_AND_SAVE'];
+    assertMatchesSpApiSchema($order, 'Order', 'orders_2026-01-01');
+
+    Saloon::fake([SearchOrders::class => amazonOrdersResponse([$order])]);
+
+    ShipmentImportService::forSource(amazonSourceForTest(), $this->dataSource)->import();
+
+    $shipment = Shipment::where('shipment_reference', '111-2222222-3333333')->firstOrFail();
+
+    expect($shipment->metadata['amazon_programs'])->toBe(['PRIME']);
+});
+
+it('refreshes the Amazon programs when the order is imported again', function (): void {
+    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($c) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $c->id]));
+
+    Saloon::fake([SearchOrders::class => amazonOrdersResponse([v2026AmazonOrder(['PRIME'])])]);
+    ShipmentImportService::forSource(amazonSourceForTest(), $this->dataSource)->import();
+
+    Saloon::fake([SearchOrders::class => amazonOrdersResponse([v2026AmazonOrder([])])]);
+    ShipmentImportService::forSource(amazonSourceForTest(), $this->dataSource)->import();
+
+    $shipment = Shipment::where('shipment_reference', '111-2222222-3333333')->firstOrFail();
+
+    expect($shipment->metadata['amazon_programs'])->toBe([]);
+});
+
 it('records the deliver-by date and ship-by window from the Amazon fulfillment block', function (): void {
     tap(Channel::factory()->create(['name' => 'Amazon']), fn ($c) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $c->id]));
 
