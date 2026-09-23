@@ -362,6 +362,13 @@
                 Print Command Barcodes
             </a>
             <div class="flex items-center gap-3">
+            @if($this->canToggleAutoShip())
+            <x-shipping-auto-ship-toggle
+                x-on:click="autoShipEnabled = await $wire.toggleAutoShip()"
+                ::disabled="isShipping"
+            />
+            @endif
+
             <x-shipping-submit-button
                 type="button"
                 x-on:click="shipPackage()"

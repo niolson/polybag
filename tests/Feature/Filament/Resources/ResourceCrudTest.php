@@ -472,6 +472,35 @@ it('can edit a User', function (): void {
     expect($record->refresh())->name->toBe('Updated Name');
 });
 
+it('turns auto ship on by default for a new User', function (): void {
+    Livewire::test(CreateUser::class)
+        ->fillForm([
+            'name' => 'Jane Doe',
+            'username' => 'janedoe',
+            'password' => 'SecurePass123!456',
+            'role' => Role::User->value,
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    expect(User::firstWhere('username', 'janedoe')->auto_ship_enabled)->toBeTrue();
+});
+
+it('lets an admin turn auto ship off for any User, including themselves', function (): void {
+    $admin = auth()->user();
+    $admin->update(['auto_ship_enabled' => true]);
+    $manager = User::factory()->manager()->create(['auto_ship_enabled' => true]);
+
+    foreach ([$admin, $manager] as $record) {
+        Livewire::test(EditUser::class, ['record' => $record->id])
+            ->fillForm(['auto_ship_enabled' => false])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        expect($record->refresh()->auto_ship_enabled)->toBeFalse();
+    }
+});
+
 it('enforces the password policy when an admin sets a User password', function (): void {
     Livewire::test(CreateUser::class)
         ->fillForm([
