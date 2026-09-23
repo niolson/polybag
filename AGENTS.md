@@ -169,8 +169,8 @@ Preserve these domain terms in code and prose — see `CONTEXT.md`. In particula
   dynamically discovers services; human selection may use an unmapped/unapproved service,
   while automation requires normalization and explicit approval. Orders from other channels
   are quoted `channelType: EXTERNAL` on the Amazon connection scoped to sell them Amazon
-  Shipping; buying, tracking and voiding those Labels is not yet verified
-  (`amazon-shipping-external-orders/06`)
+  Shipping, bought, tracked and voided through that connection. Verified against the sandbox
+  only: no production Amazon Shipping account has run it
 - **Shopify Shipping** — Attended blind Label purchase tied to the Shipment's originating
   Shopify `DataSource`; Shopify may choose the carrier and does not confirm price or service.
   Tracking comes through Shopify; Labels must be voided in the Shopify admin and are then
