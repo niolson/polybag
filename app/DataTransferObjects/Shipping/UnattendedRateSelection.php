@@ -26,10 +26,10 @@ readonly class UnattendedRateSelection
      * @param  BlindPurchaseOffer|null  $blindOffer  The explicitly authorized blind purchase to buy
      * @param  Collection<int, RateResponse>  $withheld  Rates that were quoted and are not approved for automated purchase
      * @param  bool  $attendedAlternativeAvailable  Whether a person can make a choice automation is forbidden to make
-     * @param  Collection<int, RateResponse>|null  $late  Approved rates refused because the Amazon connection requires on-time delivery
-     * @param  Collection<int, RateResponse>|null  $unprotected  Approved rates refused because the Amazon connection requires OTDR protection
-     * @param  OfferRequirements|null  $requirements  What the order's Amazon connection required, if anything
-     * @param  bool  $deadlineMissing  Whether on-time delivery was required of an order with no deliver-by date, so no rate could meet it
+     * @param  Collection<int, RateResponse>|null  $late  Approved rates refused because the shipping method excludes late rates
+     * @param  Collection<int, RateResponse>|null  $unprotected  Approved rates refused because the shipping method requires OTDR protection
+     * @param  OfferRequirements|null  $requirements  What the order's shipping method required, if anything
+     * @param  bool  $deadlineMissing  Whether on-time delivery was required of an Amazon order with no due-by date, so no rate could meet it
      */
     public function __construct(
         public ?RateResponse $rate,
@@ -47,7 +47,7 @@ readonly class UnattendedRateSelection
     }
 
     /**
-     * Whether an Amazon connection's on-time or protection requirement is
+     * Whether the shipping method's on-time or protection requirement is
      * what stood between automation and a rate.
      */
     public function refusedForRequirements(): bool

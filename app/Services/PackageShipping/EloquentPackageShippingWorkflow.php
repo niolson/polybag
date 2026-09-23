@@ -1230,7 +1230,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         $deadline = $package->shipment->getDeliverByDate();
         $requirements = $this->offerRequirementsFor($package);
 
-        // A rule's choice is still unattended: an Amazon connection's on-time
+        // A rule's choice is still unattended: the shipping method's on-time
         // and protection requirements hold against it too.
         if ($preSelected instanceof RateResponse) {
             return $this->rateSelector->selectForAutomation(
@@ -1292,18 +1292,15 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
     }
 
     /**
-     * What the Amazon connection an order came from requires of the rate
-     * automation buys for it. Every other order requires nothing.
+     * What the order's shipping method requires of the rate automation buys
+     * for it. OTDR protection is only ever required of Amazon's own orders.
      */
     private function offerRequirementsFor(Package $package): OfferRequirements
     {
-        if (! $this->postageSourceResolver->isAmazonOrder($package)) {
-            return OfferRequirements::none();
-        }
-
-        $connection = $package->shipment?->dataSource;
-
-        return OfferRequirements::forAmazonOrder($connection?->isAmazon() ? $connection : null);
+        return OfferRequirements::forShipment(
+            $package->shipment,
+            $this->postageSourceResolver->isAmazonOrder($package),
+        );
     }
 
     /**
@@ -1322,7 +1319,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         }
 
         if ($selection->refusedForRequirements()) {
-            return $this->refusedForAmazonRequirements($package, $selection);
+            return $this->refusedForMethodRequirements($package, $selection);
         }
 
         if (! $selection->withheldAnything()) {
@@ -1347,11 +1344,11 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
     }
 
     /**
-     * Nothing met what the order's Amazon connection requires. Said as such,
+     * Nothing met what the order's shipping method requires. Said as such,
      * because "no rates" would send the operator to the carrier when the rates
-     * are right there on the Ship page, marked (`amazon-buy-shipping/16`).
+     * are right there on the Ship page, marked (`amazon-buy-shipping/17`).
      */
-    private function refusedForAmazonRequirements(Package $package, UnattendedRateSelection $selection): PackageShippingResult
+    private function refusedForMethodRequirements(Package $package, UnattendedRateSelection $selection): PackageShippingResult
     {
         $requirements = $selection->requirements ?? OfferRequirements::none();
         $refusedLate = $selection->late?->isNotEmpty() ?? false;
@@ -1359,28 +1356,27 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
         $missing = match (true) {
             $refusedLate && $refusedUnprotected => 'arrives on time and is OTDR-protected',
-            $refusedLate => 'arrives by the deliver-by date',
+            $refusedLate => 'arrives by the due-by date',
             default => 'is OTDR-protected',
         };
 
-        $connection = $requirements->connectionName === null
-            ? 'The Amazon connection this order came from'
-            : "The Amazon connection \"{$requirements->connectionName}\"";
+        $method = "The shipping method \"{$requirements->shippingMethodName}\"";
 
         if ($selection->deadlineMissing) {
-            logger()->info('Refused every rate for an Amazon order that requires on-time delivery but has no deliver-by date', [
+            logger()->info('Refused every rate for an Amazon order that requires on-time delivery but has no due-by date', [
                 'package_id' => $package->id,
             ]);
 
             return PackageShippingResult::attendedSelectionRequired(
-                'No Deliver-By Date',
-                "{$connection} requires on-time delivery, but this order has no deliver-by date to check a rate against. "
+                'No Due-By Date',
+                "{$method} requires on-time delivery, but this order has no due-by date to check a rate against. "
                 .'Ship it from the Ship page, where a person chooses the rate, or give its shipping method a delivery commitment.',
             );
         }
 
-        logger()->info('Refused every rate for an Amazon order under its connection\'s offer requirements', [
+        logger()->info('Refused every rate under the shipping method\'s offer requirements', [
             'package_id' => $package->id,
+            'shipping_method' => $requirements->shippingMethodName,
             'requires_on_time' => $requirements->onTime,
             'requires_otdr_protection' => $requirements->otdrProtection,
             'late' => $selection->late?->count() ?? 0,
@@ -1402,8 +1398,8 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 $refusedLate => "No {$approved}On-Time Rates",
                 default => "No {$approved}OTDR-Protected Rates",
             },
-            "{$connection} requires a rate that {$missing}, and {$scope} "
-            .'Ship it from the Ship page, where a person chooses the rate, or change the requirement on the connection.',
+            "{$method} requires a rate that {$missing}, and {$scope} "
+            .'Ship it from the Ship page, where a person chooses the rate, or change the requirement on the shipping method.',
         );
     }
 

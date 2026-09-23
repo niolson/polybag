@@ -334,7 +334,7 @@ function rateWithBenefits(float $price, ?string $deliveryDate, bool $otdrProtect
     );
 }
 
-it('falls back to the cheapest late rate when the connection requires nothing', function (): void {
+it('falls back to the cheapest late rate when the method requires nothing', function (): void {
     $deadline = Carbon::tomorrow();
 
     $selection = app(RateSelector::class)->selectForAutomation(
@@ -348,7 +348,7 @@ it('falls back to the cheapest late rate when the connection requires nothing', 
         ->and($selection->refusedForRequirements())->toBeFalse();
 });
 
-it('refuses every late rate when the connection requires on-time delivery', function (): void {
+it('refuses every late rate when the method excludes late rates', function (): void {
     $selection = app(RateSelector::class)->selectForAutomation(
         collect([makeRate(9.00, Carbon::parse('+5 days')->toDateString()), makeRate(7.00, null)]),
         Carbon::tomorrow(),
@@ -437,7 +437,21 @@ it('buys only a rate that is both on time and protected when both are required',
     expect($selection->rate->price)->toBe(9.00);
 });
 
-it('refuses every rate under the on-time requirement when there is no deadline to meet', function (): void {
+it('refuses every rate for an order that must have a deadline and has none', function (): void {
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([makeRate(5.00, Carbon::today()->toDateString()), makeRate(3.00, null)]),
+        null,
+        null,
+        new OfferRequirements(onTime: true, deadlineRequired: true),
+    );
+
+    expect($selection->rate)->toBeNull()
+        ->and($selection->deadlineMissing)->toBeTrue()
+        ->and($selection->late)->toHaveCount(2)
+        ->and($selection->attendedAlternativeAvailable)->toBeTrue();
+});
+
+it('refuses nothing as late when there is no deadline and the order need not have one', function (): void {
     $selection = app(RateSelector::class)->selectForAutomation(
         collect([makeRate(5.00, Carbon::today()->toDateString()), makeRate(3.00, null)]),
         null,
@@ -445,8 +459,7 @@ it('refuses every rate under the on-time requirement when there is no deadline t
         new OfferRequirements(onTime: true),
     );
 
-    expect($selection->rate)->toBeNull()
-        ->and($selection->deadlineMissing)->toBeTrue()
-        ->and($selection->late)->toHaveCount(2)
-        ->and($selection->attendedAlternativeAvailable)->toBeTrue();
+    expect($selection->rate->price)->toBe(3.00)
+        ->and($selection->deadlineMissing)->toBeFalse()
+        ->and($selection->late)->toBeEmpty();
 });

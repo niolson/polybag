@@ -93,14 +93,14 @@ class RateSelector
      * the actual answer is that an administrator has not approved the service
      * yet.
      *
-     * An Amazon order's connection can also require that the rate arrive by
-     * the deliver-by date, or be OTDR-protected, or both
-     * (`amazon-buy-shipping/16`). A rate that fails either is refused the same
+     * The order's shipping method can also require that the rate arrive by
+     * the due-by date, or, for an Amazon order, be OTDR-protected, or both
+     * (`amazon-buy-shipping/17`). A rate that fails either is refused the same
      * way an unapproved one is: kept for the Ship page, named in the result.
      * With neither required, a late rate is still bought when nothing is on
-     * time, as before. An order with no deliver-by date cannot show that any
-     * rate is on time, so requiring it refuses every rate there rather than
-     * passing them all the way {@see classify()} does.
+     * time, as before. An order with no due-by date cannot show that any rate
+     * is late, so it refuses none, except an Amazon order, which refuses every
+     * rate rather than passing them all the way {@see classify()} does.
      *
      * @param  Collection<int, RateResponse>  $rates
      */
@@ -119,7 +119,7 @@ class RateSelector
             $deadline,
         );
 
-        $refusesAsLate = fn (ClassifiedRate $cr): bool => $requirements->refusesAsLate($deadline !== null && $cr->isOnTime);
+        $refusesAsLate = fn (ClassifiedRate $cr): bool => $requirements->refusesAsLate($cr->isOnTime, $deadline !== null);
 
         $late = $classified
             ->filter($refusesAsLate)
@@ -143,7 +143,7 @@ class RateSelector
             late: $late,
             unprotected: $unprotected,
             requirements: $requirements,
-            deadlineMissing: $requirements->onTime && $deadline === null,
+            deadlineMissing: $requirements->deadlineRequired && $deadline === null,
         );
     }
 

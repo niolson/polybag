@@ -1,6 +1,6 @@
 # Move the on-time and OTDR requirements to the shipping method
 
-Status: ready-for-agent
+Status: done — shipped 2026-09-23; the OTDR boxes are hidden unless an Amazon connection is active
 
 Repo: `polybag`
 
@@ -83,18 +83,26 @@ Help text, in words a seller reads:
 
 ## Acceptance criteria
 
-- [ ] With only *Prime orders* ticked, a method refuses an unprotected offer for a
+- [x] With only *Prime orders* ticked, a method refuses an unprotected offer for a
       `PRIME` order, and buys the cheapest unprotected offer for a `PREMIUM` order and
       for an ordinary Amazon order
-- [ ] With all three ticked, unprotected offers are refused for every Amazon order and a
+- [x] With all three ticked, unprotected offers are refused for every Amazon order and a
       Shopify order is unaffected
-- [ ] With due-by exclusion on, a Shopify order on a method with `commitment_days: 1`
+- [x] With due-by exclusion on, a Shopify order on a method with `commitment_days: 1`
       does not buy a rate delivering in three days, and is left for a person
-- [ ] With due-by exclusion on and no due-by date, a Shopify order still buys the
+- [x] With due-by exclusion on and no due-by date, a Shopify order still buys the
       cheapest rate, and an Amazon order is left for a person
-- [ ] With due-by exclusion off, the cheapest late rate is bought, as before
-- [ ] Refusal messages name the shipping method
-- [ ] The connection form no longer shows either setting, and the columns are gone
+- [x] With due-by exclusion off, the cheapest late rate is bought, as before
+- [x] Refusal messages name the shipping method
+- [x] The connection form no longer shows either setting, and the columns are gone
+
+## Also decided
+
+- **The OTDR boxes appear only while an Amazon connection is active** (2026-09-23).
+  Protection is a Buy Shipping benefit, so without a connection to buy through the choice
+  means nothing. Hidden, the field is not saved, so a method keeps what was ticked and
+  it applies again if the connection is reactivated. The due-by toggle always shows,
+  because it applies to every order.
 
 ## Blocked by
 
