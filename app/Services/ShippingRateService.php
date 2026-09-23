@@ -16,6 +16,7 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
 use App\Exceptions\Carriers\CarrierRateFetchException;
+use App\Exceptions\Carriers\CarrierUnavailableException;
 use App\Exceptions\InvalidPackageDimensionsException;
 use App\Exceptions\NoActiveCarrierServicesException;
 use App\Models\CarrierAccount;
@@ -546,6 +547,8 @@ class ShippingRateService
                     $this->recordPackagingEligibility($carrierName, $rates, $carrierRateRequest);
                     $rateOptions->push(...$rates);
                 }
+            } catch (CarrierUnavailableException $e) {
+                $this->recordUnavailable($carrierName, $e);
             } catch (InvalidPackageDimensionsException $e) {
                 $this->exclusions[$carrierName] = $carrierName.' requires valid package dimensions before rates can be requested.';
 
@@ -585,6 +588,8 @@ class ShippingRateService
                     $rates = $meta['adapter']->getRates($meta['rateRequest'], $meta['serviceCodes']);
                     $this->recordPackagingEligibility($carrierName, $rates, $meta['rateRequest']);
                     $rateOptions->push(...$rates);
+                } catch (CarrierUnavailableException $e) {
+                    $this->recordUnavailable($carrierName, $e);
                 } catch (CarrierRateFetchException $e) {
                     $loggedException = $e->getPrevious() ?? $e;
 
@@ -631,6 +636,8 @@ class ShippingRateService
 
                     $this->recordPackagingEligibility($carrierName, $rates, $meta['rateRequest']);
                     $rateOptions->push(...$rates);
+                } catch (CarrierUnavailableException $e) {
+                    $this->recordUnavailable($carrierName, $e);
                 } catch (\Exception $e) {
                     logger()->error("ShippingRateService: {$carrierName} parse error", [
                         'carrier' => $carrierName,
@@ -646,6 +653,22 @@ class ShippingRateService
         }
 
         return $rateOptions;
+    }
+
+    /**
+     * A source that answered, or could not be asked, because of how it is set
+     * up — an Amazon connection not signed up for Amazon Shipping, say. That
+     * is not a failed request: it has no offers, and the packer is told why
+     * beside the rates rather than left to wonder where they went.
+     */
+    private function recordUnavailable(string $sourceName, CarrierUnavailableException $e): void
+    {
+        $this->exclusions[$sourceName] = $e->getMessage();
+
+        logger()->warning("ShippingRateService: {$sourceName} is unavailable", [
+            'carrier' => $sourceName,
+            'reason' => $e->getMessage(),
+        ]);
     }
 
     /**

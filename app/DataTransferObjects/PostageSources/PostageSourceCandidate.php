@@ -61,8 +61,8 @@ readonly class PostageSourceCandidate
      * come from Amazon, chosen by scope rather than by the order's origin.
      *
      * It carries the connection's check result so an account Amazon refused
-     * stays visible instead of silently dropping out. No carrier is named yet;
-     * `05` decides how its rates are named.
+     * stays visible instead of silently dropping out. No carrier is named: each
+     * rate is named after the carrier Amazon quotes, as on-Amazon rates are.
      */
     public static function forOffAmazonShipping(DataSource $source): self
     {

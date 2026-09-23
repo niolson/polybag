@@ -6,6 +6,8 @@ use App\Enums\AmazonSpApiRegion;
 use App\Http\Integrations\Amazon\DeclaresSandboxRegion;
 use Saloon\Contracts\Body\HasBody;
 use Saloon\Enums\Method;
+use Saloon\Exceptions\Request\FatalRequestException;
+use Saloon\Exceptions\Request\RequestException;
 use Saloon\Http\Request;
 use Saloon\Traits\Body\HasJsonBody;
 
@@ -46,6 +48,16 @@ class GetShippingRates extends Request implements DeclaresSandboxRegion, HasBody
         return ['x-amzn-shipping-business-id' => $this->businessId];
     }
 
+    /**
+     * The Shipping v2 channel this request rates on — `AMAZON` or `EXTERNAL`.
+     */
+    public function channelType(): ?string
+    {
+        $channelType = $this->payload['channelDetails']['channelType'] ?? null;
+
+        return is_string($channelType) ? $channelType : null;
+    }
+
     public function resolveEndpoint(): string
     {
         return '/shipping/v2/shipments/rates';
@@ -57,6 +69,24 @@ class GetShippingRates extends Request implements DeclaresSandboxRegion, HasBody
     protected function defaultBody(): array
     {
         return $this->payload;
+    }
+
+    /**
+     * Retry what might answer differently a moment later — a dropped
+     * connection, throttling, a server error — and never a refusal. Amazon
+     * refuses an invalid body or an account not set up for Amazon Shipping
+     * (`403 A-101`) the same way every time, and asking again only keeps a
+     * packer waiting for the same answer.
+     */
+    public function handleRetry(FatalRequestException|RequestException $exception, Request $request): bool
+    {
+        if (! $exception instanceof RequestException) {
+            return true;
+        }
+
+        $status = $exception->getResponse()->status();
+
+        return $status >= 500 || $status === 429;
     }
 
     /**

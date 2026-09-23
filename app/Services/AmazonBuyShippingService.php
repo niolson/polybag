@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\AmazonPurchasedLabel;
-use App\DataTransferObjects\Shipping\AmazonShippingQuote;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\PostageSource;
@@ -14,10 +13,10 @@ use App\Http\Integrations\Amazon\AmazonSpApiConnector;
 use App\Http\Integrations\Amazon\Requests\CancelAmazonShipment;
 use App\Http\Integrations\Amazon\Requests\GetAdditionalInputsSchema;
 use App\Http\Integrations\Amazon\Requests\GetShipmentTracking;
-use App\Http\Integrations\Amazon\Requests\GetShippingRates;
 use App\Http\Integrations\Amazon\Requests\PurchaseShipment;
 use App\Models\DataSource;
 use App\Models\Package;
+use App\Models\PackageItem;
 use App\Models\ShippingOffer;
 use App\Services\PostageSources\OfferStore;
 use App\Services\PostageSources\PostageSourceResolver;
@@ -36,12 +35,12 @@ use Saloon\Http\Response;
  * request-building testable against Amazon's own schema without a package, an
  * offer store or a carrier registry in the way.
  *
- * **This service currently handles on-Amazon orders only.** Credentials come
- * from the shipment's own Amazon `DataSource`, and every rate request sends
- * `channelType: AMAZON` with that order's Amazon ID. Shipping v2 can also sell
- * Amazon Shipping postage for off-Amazon orders with `channelType: EXTERNAL`,
- * but selecting a connected Amazon source for such an order and building that
- * payload are not implemented here.
+ * Two Shipping v2 channels, chosen per package by {@see quotingSourceFor()}.
+ * An Amazon order is rated `channelType: AMAZON` on the connection it was
+ * imported from, against its Amazon order ID. Any other order is rated
+ * `channelType: EXTERNAL` on the Amazon connection scoped to sell it Amazon
+ * Shipping (ADR-0002's 2026-09-22 amendment), with no order ID and items
+ * described from what was packed.
  */
 class AmazonBuyShippingService
 {
@@ -141,17 +140,22 @@ class AmazonBuyShippingService
     }
 
     /**
-     * Whether Amazon could be asked to rate this package at all.
+     * The connection that would rate this package, or null.
      *
-     * Both halves of the identity have to be present — a live Amazon source and
-     * the order the parcel belongs to. Neither is an error worth telling a
-     * packer about: a shipment imported from a database query simply has no
-     * Amazon offer, the same way it has no Shopify one.
+     * An Amazon order is rated on the connection it came from and nowhere
+     * else, and only once its order ID is known: an Amazon order sold as
+     * `EXTERNAL` would lose its link to the order. Any other order is rated on
+     * the connection scoped to sell it off-Amazon Amazon Shipping, if there is
+     * one. Neither absence is an error worth telling a packer about: a shipment
+     * with no Amazon connection simply has no Amazon offer.
      */
-    public function canQuoteFor(Package $package): bool
+    public function quotingSourceFor(Package $package): ?DataSource
     {
-        return $this->dataSourceFor($package) !== null
-            && $this->orderItems->orderIdFor($package) !== null;
+        if ($origin = $this->dataSourceFor($package)) {
+            return $this->orderItems->orderIdFor($package) !== null ? $origin : null;
+        }
+
+        return $this->postageSourceResolver->offAmazonShippingSourceFor($package);
     }
 
     public function marketplaceIdFor(DataSource $source): ?string
@@ -162,39 +166,21 @@ class AmazonBuyShippingService
     }
 
     /**
-     * Rate one package against the Amazon order it belongs to.
+     * The `getRates` body for this package, on whichever channel it is rated.
      *
-     * Returns null when there is nothing to ask — no source, no order, no
-     * dimensions — rather than raising, because rate shopping asks every
-     * configured source about every package and most packages are not Amazon's.
+     * Call it only once {@see quotingSourceFor()} has named a connection.
      *
-     * @throws MissingAmazonOrderItemsException when a packed item has no Amazon order item ID
-     * @throws RequestException on a transport or HTTP failure
+     * @return array<string, mixed>
+     *
+     * @throws MissingAmazonOrderItemsException when a packed item on an Amazon order has no Amazon order item ID
      */
-    public function quote(Package $package, RateRequest $request): ?AmazonShippingQuote
+    public function ratePayloadFor(Package $package, RateRequest $request): array
     {
-        $source = $this->dataSourceFor($package);
         $orderId = $this->orderItems->orderIdFor($package);
 
-        if (! $source || ! $orderId || $request->packages === []) {
-            return null;
-        }
-
-        $response = $this->connectorFor($source)->send(
-            new GetShippingRates($this->buildRatePayload($package, $request, $orderId), self::BUSINESS_ID)
-        );
-
-        if (! $response->successful()) {
-            logger()->warning('Amazon getRates failed', [
-                'package_id' => $package->id,
-                'status' => $response->status(),
-                'errors' => $this->describeErrors($response),
-            ]);
-
-            return null;
-        }
-
-        return AmazonShippingQuote::fromPayload($response->json('payload', []));
+        return $this->dataSourceFor($package) !== null && $orderId !== null
+            ? $this->buildRatePayload($package, $request, $orderId)
+            : $this->buildOffAmazonRatePayload($package, $request);
     }
 
     /**
@@ -253,8 +239,8 @@ class AmazonBuyShippingService
      * `GetRatesRequest` without sending anything. `shipDate` is deliberately
      * omitted: Amazon computes the promise from now, and the ship date we
      * record is our pickup policy's answer rather than a constraint on theirs.
-     * This is specifically the on-Amazon shape; an external-order implementation
-     * must send `channelType: EXTERNAL` and omit `amazonOrderDetails`.
+     * This is the on-Amazon shape; {@see buildOffAmazonRatePayload()} is the
+     * `EXTERNAL` one.
      *
      * @return array<string, mixed>
      *
@@ -271,12 +257,34 @@ class AmazonBuyShippingService
         return [
             'shipTo' => $this->address(AddressData::fromShipment($package->shipment)),
             'shipFrom' => $this->address($from),
-            'packages' => [$this->packagePayload($package, $request)],
+            'packages' => [$this->packagePayload($package, $request, $this->orderItems->shippingItemsFor($package, 'USD'))],
             'channelDetails' => [
                 'channelType' => 'AMAZON',
                 'amazonOrderDetails' => ['orderId' => $orderId],
             ],
         ];
+    }
+
+    /**
+     * The `getRates` body for a package whose order did not come from Amazon.
+     *
+     * The on-Amazon package, described from what was packed rather than from
+     * Amazon order lines, sent through {@see buildExternalRatePayload()}.
+     *
+     * @return array<string, mixed>
+     */
+    public function buildOffAmazonRatePayload(Package $package, RateRequest $request): array
+    {
+        $package->loadMissing(['shipment', 'location']);
+
+        $from = $package->location
+            ? AddressData::fromLocation($package->location)
+            : AddressData::fromConfig();
+
+        $parcel = $this->packagePayload($package, $request, []);
+        $parcel['items'] = $this->offAmazonItemsFor($package, (float) $parcel['weight']['value'], 'USD');
+
+        return $this->buildExternalRatePayload($from, AddressData::fromShipment($package->shipment), $parcel);
     }
 
     /**
@@ -811,9 +819,10 @@ class AmazonBuyShippingService
     }
 
     /**
+     * @param  list<array<string, mixed>>  $items  Shipping v2 `Item`s
      * @return array<string, mixed>
      */
-    private function packagePayload(Package $package, RateRequest $request): array
+    private function packagePayload(Package $package, RateRequest $request, array $items): array
     {
         $parcel = $request->packages[0];
         $currency = 'USD';
@@ -842,8 +851,71 @@ class AmazonBuyShippingService
             // Amazon echoes this back on the purchased document detail, which is
             // how a label is matched to the parcel it belongs to.
             'packageClientReferenceId' => (string) $package->getKey(),
-            'items' => $this->orderItems->shippingItemsFor($package, $currency),
+            'items' => $items,
         ];
+    }
+
+    /**
+     * The Shipping v2 `Item`s for an off-Amazon package, from what was packed.
+     *
+     * `EXTERNAL` insists on at least one item, each with a weight, and refuses
+     * a package whose items weigh more than it does (`D-703`, `01`). The
+     * weights come from product records, which are wrong often enough that
+     * the scanned package weight is the one to trust: when the items outweigh
+     * it they are scaled down to fit, floored to the hundredth so the total
+     * cannot round back over. The package weight is never raised to fit the
+     * items. Amazon accepts a zero item weight, so any package can be made to
+     * fit, and a package with nothing packed is sent as one weightless item.
+     *
+     * `itemIdentifier`, `itemValue` and `description` are optional here, so
+     * they are sent only when known.
+     *
+     * @return non-empty-list<array<string, mixed>>
+     */
+    private function offAmazonItemsFor(Package $package, float $packageWeight, string $currency): array
+    {
+        $package->loadMissing(['packageItems.product', 'packageItems.shipmentItem']);
+
+        $items = $package->packageItems
+            ->filter(fn (PackageItem $item): bool => (int) $item->quantity > 0)
+            ->map(fn (PackageItem $item): array => [
+                'item' => $item,
+                'weight' => max(0.0, (float) ($item->product->weight ?? 0)),
+            ])
+            ->values();
+
+        if ($items->isEmpty()) {
+            return [[
+                'description' => 'Merchandise',
+                'quantity' => 1,
+                'weight' => ['unit' => 'POUND', 'value' => 0],
+            ]];
+        }
+
+        $total = $items->sum(fn (array $line): float => round($line['weight'], 2) * (int) $line['item']->quantity);
+        $scale = $total > $packageWeight ? $packageWeight / $total : 1.0;
+
+        return $items
+            ->map(function (array $line) use ($scale, $currency): array {
+                /** @var PackageItem $item */
+                $item = $line['item'];
+                $weight = round($line['weight'], 2);
+
+                return array_filter([
+                    'itemValue' => $item->shipmentItem?->value !== null
+                        ? ['value' => round((float) $item->shipmentItem->value, 2), 'unit' => $currency]
+                        : null,
+                    'description' => $item->product?->description ?: $item->product?->name,
+                    'itemIdentifier' => $item->product?->sku ?: null,
+                    'quantity' => (int) $item->quantity,
+                    'weight' => [
+                        'unit' => 'POUND',
+                        'value' => $scale < 1.0 ? floor(round($weight * $scale * 100, 6)) / 100 : $weight,
+                    ],
+                ], fn (mixed $value): bool => filled($value));
+            })
+            ->values()
+            ->all();
     }
 
     /**

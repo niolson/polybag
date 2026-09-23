@@ -198,9 +198,10 @@ class CarrierSeeder extends Seeder
             );
         }
 
-        // This hook is for Buy Shipping against the seller's own Amazon order
-        // (`channelType: AMAZON`). The API's off-Amazon `EXTERNAL` path is not
-        // implemented. Unlike every carrier above, this catalog is *discovered*: one
+        // This hook asks Amazon for Buy Shipping against the seller's own Amazon
+        // order (`channelType: AMAZON`), and for Amazon Shipping on an order from
+        // another channel (`EXTERNAL`) where a connection is scoped to sell it.
+        // Unlike every carrier above, this catalog is *discovered*: one
         // `getRates` came back naming 108 services across fifteen carriers, and
         // nothing may create a `CarrierService` from that (ADR-0003 decision
         // 2). So exactly one row is seeded, and it is not a service — it is the

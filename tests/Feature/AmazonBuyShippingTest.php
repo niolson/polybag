@@ -315,7 +315,7 @@ it('sends a getRates body that conforms to the published Shipping v2 schema', fu
     });
 });
 
-it('does not offer Amazon Shipping to an external order yet', function (): void {
+it('does not offer Amazon Shipping to an order from another channel with no connection scoped to it', function (): void {
     Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
 
     $this->package->shipment->update([

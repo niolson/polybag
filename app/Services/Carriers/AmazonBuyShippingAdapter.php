@@ -19,12 +19,16 @@ use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CarrierPackaging;
 use App\Enums\CustomsDocumentDelivery;
+use App\Enums\OffAmazonShippingStatus;
 use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
 use App\Enums\ServiceEvidence;
 use App\Enums\SourceEnvironment;
 use App\Exceptions\Carriers\AmazonLabelPurchaseException;
+use App\Exceptions\Carriers\CarrierRateFetchException;
+use App\Exceptions\Carriers\CarrierUnavailableException;
 use App\Exceptions\MissingAmazonOrderItemsException;
+use App\Http\Integrations\Amazon\AmazonSpApiConnector;
 use App\Http\Integrations\Amazon\Requests\GetShippingRates;
 use App\Models\DataSource;
 use App\Models\ObservedService;
@@ -32,18 +36,21 @@ use App\Models\Package;
 use App\Models\ShippingOffer;
 use App\Services\AmazonBuyShippingService;
 use App\Services\PostageSources\ObservedServiceRecorder;
+use App\Services\PostageSources\OffAmazonShippingCheck;
 use App\Services\PostageSources\OfferStore;
 use App\Services\RateSelector;
-use App\Services\ShipmentImport\AmazonOrderItems;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\Shipping\PackagingFilter;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Saloon\Exceptions\Request\FatalRequestException;
+use Saloon\Exceptions\Request\RequestException;
 use Saloon\Http\Response;
 
 /**
- * Buys postage through Amazon Buy Shipping for an Amazon-originating order.
+ * Buys postage through Amazon Shipping v2: Buy Shipping for an Amazon order,
+ * and Amazon Shipping for an order from another channel.
  *
  * Amazon is not a carrier, and unlike Shopify it does not pretend to be one
  * either: a single `getRates` for one parcel came back with OnTrac, UPS and
@@ -53,9 +60,12 @@ use Saloon\Http\Response;
  * split off carrier-name dispatch first (`postage-source-split/08`). A rate
  * carried by OnTrac says OnTrac; buying it still calls Amazon.
  *
- * This is the Shipping v2 `AMAZON` channel path. The API's `EXTERNAL` channel,
- * which sells Amazon Shipping postage for orders from other channels, is not
- * implemented by this adapter.
+ * An order from another channel is rated `channelType: EXTERNAL` on the Amazon
+ * connection scoped to sell it (`amazon-shipping-external-orders/05`). Its
+ * rates go through the same filters, observations and offers as on-Amazon
+ * ones, bound to that connection. An account Amazon has not set up for it
+ * answers `403 A-101`, which {@see parseRateResponse()} reports as the
+ * connection being unavailable rather than as an Amazon error.
  *
  * Three consequences worth stating plainly, because each is a decision:
  *
@@ -157,10 +167,10 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
     }
 
     /**
-     * Configured when any active Amazon data source exists. For the implemented
-     * on-Amazon path, that source carries both the credentials and the orders
-     * labels are bought against. Its presence alone does not currently enable
-     * Amazon Shipping for off-Amazon orders.
+     * Configured when any active Amazon data source exists. Whether one can
+     * rate a given package — its own Amazon order, or a scope for an order from
+     * another channel — is settled per package by
+     * {@see AmazonBuyShippingService::quotingSourceFor()}.
      */
     public function isConfigured(): bool
     {
@@ -203,22 +213,41 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
      */
     public function prepareRateRequest(RateRequest $request, array $serviceCodes): ?PreparedRateRequest
     {
-        $package = $this->packageFor($request);
-        $service = app(AmazonBuyShippingService::class);
+        [$source, $rateRequest] = $this->rateRequestFor($request) ?? [null, null];
 
-        if (! $package || ! $service->canQuoteFor($package) || $request->packages === []) {
+        if (! $source || ! $rateRequest) {
             return null;
         }
 
-        $source = $service->dataSourceFor($package);
-        $orderId = app(AmazonOrderItems::class)->orderIdFor($package);
+        return new PreparedRateRequest(
+            pendingRequest: app(AmazonBuyShippingService::class)->connectorFor($source)->createPendingRequest($rateRequest),
+            carrierName: self::SOURCE_NAME,
+        );
+    }
 
-        if (! $source || ! $orderId) {
+    /**
+     * The connection to ask and the `getRates` to send it, or null when this
+     * package has no Amazon offer.
+     *
+     * @return array{0: DataSource, 1: GetShippingRates}|null
+     */
+    private function rateRequestFor(RateRequest $request): ?array
+    {
+        $package = $this->packageFor($request);
+        $service = app(AmazonBuyShippingService::class);
+
+        if (! $package || $request->packages === []) {
+            return null;
+        }
+
+        $source = $service->quotingSourceFor($package);
+
+        if (! $source) {
             return null;
         }
 
         try {
-            $payload = $service->buildRatePayload($package, $request, $orderId);
+            $payload = $service->ratePayloadFor($package, $request);
         } catch (MissingAmazonOrderItemsException $e) {
             // A parcel Amazon cannot be told the contents of is not an error to
             // put in front of a packer — it simply has no Amazon offer, and the
@@ -231,17 +260,22 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
             return null;
         }
 
-        return new PreparedRateRequest(
-            pendingRequest: $service->connectorFor($source)->createPendingRequest(
-                new GetShippingRates($payload, AmazonBuyShippingService::BUSINESS_ID)
-            ),
-            carrierName: self::SOURCE_NAME,
-        );
+        $rateRequest = new GetShippingRates($payload, AmazonBuyShippingService::BUSINESS_ID);
+
+        // A refusal is an answer this adapter reads — `403 A-101` says the
+        // connection is not set up for off-Amazon shipping — so it has to reach
+        // parseRateResponse() as a response. Left to Guzzle, the concurrent
+        // path would turn it into a rejected promise nobody here sees.
+        $rateRequest->config()->add('http_errors', false);
+
+        return [$source, $rateRequest];
     }
 
     /**
      * @param  array<string>  $serviceCodes
      * @return Collection<int, RateResponse>
+     *
+     * @throws CarrierUnavailableException when the connection selling off-Amazon Amazon Shipping is not set up for it
      */
     public function parseRateResponse(Response $response, RateRequest $request, array $serviceCodes): Collection
     {
@@ -251,8 +285,15 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
             return collect();
         }
 
-        if (! $response->successful()) {
-            logger()->warning('Amazon getRates failed', [
+        // Read off the request that was sent, never resolved again: a scope
+        // edited or a connection switched off while the request was in flight
+        // must not move this reply, its offers or its A-101 onto another
+        // connection (ADR-0002 decision 4).
+        $source = $this->connectionThatSent($response);
+        $offAmazon = $this->wasSentOffAmazon($response);
+
+        if (! $source) {
+            logger()->warning('Amazon getRates reply names no connection it was sent for', [
                 'package_id' => $package->id,
                 'status' => $response->status(),
             ]);
@@ -260,37 +301,107 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
             return collect();
         }
 
+        if (! $response->successful()) {
+            if ($offAmazon && OffAmazonShippingCheck::refusesAccount($response)) {
+                $this->recordOffAmazonShippingStatus($source, OffAmazonShippingStatus::NotSetUp);
+
+                throw new CarrierUnavailableException(
+                    self::SOURCE_NAME,
+                    "The Amazon connection \"{$source->name}\" is not set up to sell Amazon Shipping for orders from other channels, so it has no offers for this package. "
+                    .OffAmazonShippingCheck::NOT_SET_UP_MESSAGE,
+                );
+            }
+
+            logger()->warning('Amazon getRates failed', [
+                'package_id' => $package->id,
+                'status' => $response->status(),
+                'channel' => $offAmazon ? 'EXTERNAL' : 'AMAZON',
+                'errors' => $response->json('errors'),
+            ]);
+
+            return collect();
+        }
+
+        if ($offAmazon) {
+            $this->recordOffAmazonShippingStatus($source, OffAmazonShippingStatus::Enabled);
+        }
+
         return $this->ratesFrom(
             AmazonShippingQuote::fromPayload($response->json('payload', [])),
             $package,
             $request,
+            $source,
         );
     }
 
     /**
      * @param  array<string>  $serviceCodes
      * @return Collection<int, RateResponse>
+     *
+     * @throws CarrierUnavailableException when the connection selling off-Amazon Amazon Shipping is not set up for it
      */
     public function getRates(RateRequest $request, array $serviceCodes): Collection
     {
-        $package = $this->packageFor($request);
+        [$source, $rateRequest] = $this->rateRequestFor($request) ?? [null, null];
 
-        if (! $package) {
+        if (! $source || ! $rateRequest) {
             return collect();
         }
 
         try {
-            $quote = app(AmazonBuyShippingService::class)->quote($package, $request);
-        } catch (MissingAmazonOrderItemsException $e) {
-            logger()->info('Skipped an Amazon quote for a package Amazon cannot identify', [
-                'package_id' => $package->id,
-                'reason' => $e->getMessage(),
-            ]);
-
-            return collect();
+            $response = app(AmazonBuyShippingService::class)->connectorFor($source)->send($rateRequest);
+        } catch (RequestException $e) {
+            // The connector retries, and throws once it gives up. What it
+            // gave up on is still Amazon's answer, and read the same way.
+            $response = $e->getResponse();
+        } catch (FatalRequestException $e) {
+            throw new CarrierRateFetchException(self::SOURCE_NAME, $e);
         }
 
-        return $quote === null ? collect() : $this->ratesFrom($quote, $package, $request);
+        return $this->parseRateResponse($response, $request, $serviceCodes);
+    }
+
+    /**
+     * The connection whose credentials sent this request — the one that was
+     * resolved when it was prepared, loaded even if it has since been switched
+     * off, because the reply is still that account's answer. The purchase
+     * refuses an inactive connection on its own.
+     */
+    private function connectionThatSent(Response $response): ?DataSource
+    {
+        $connector = $response->getConnector();
+        $id = $connector instanceof AmazonSpApiConnector ? $connector->dataSourceId() : null;
+
+        return $id === null ? null : DataSource::find($id);
+    }
+
+    private function wasSentOffAmazon(Response $response): bool
+    {
+        $request = $response->getRequest();
+
+        return $request instanceof GetShippingRates && $request->channelType() === 'EXTERNAL';
+    }
+
+    /**
+     * Keep the connection's off-Amazon answer current from what a quote found.
+     *
+     * A production quote is the same question the connection's check asks, so
+     * its answer is recorded the same way: `403 A-101` means not set up, and a
+     * `200` means enabled — which also clears a stale "not set up" once the
+     * seller finishes sign-up. The sandbox quotes every account, so a sandbox
+     * answer proves nothing and is not recorded, as the check does not ask.
+     */
+    private function recordOffAmazonShippingStatus(DataSource $source, OffAmazonShippingStatus $status): void
+    {
+        if (SourceEnvironment::current() !== SourceEnvironment::Production
+            || $source->off_amazon_shipping_status === $status) {
+            return;
+        }
+
+        $source->forceFill([
+            'off_amazon_shipping_status' => $status,
+            'off_amazon_shipping_checked_at' => now(),
+        ])->save();
     }
 
     /**
@@ -602,18 +713,18 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
      * below. Offers are issued only for rates that survive them: an offer for a
      * rate nobody can be shown is a row that can only ever expire.
      *
+     * Every offer is bound to `$source`, the connection that was asked — for
+     * an off-Amazon quote the scoped connection, never the Shipment's import
+     * source.
+     *
      * @return Collection<int, RateResponse>
      */
-    private function ratesFrom(AmazonShippingQuote $quote, Package $package, RateRequest $request): Collection
+    private function ratesFrom(AmazonShippingQuote $quote, Package $package, RateRequest $request, DataSource $source): Collection
     {
-        $source = app(AmazonBuyShippingService::class)->dataSourceFor($package);
-        $marketplace = $source ? app(AmazonBuyShippingService::class)->marketplaceIdFor($source) : null;
+        $marketplace = app(AmazonBuyShippingService::class)->marketplaceIdFor($source);
 
         $observations = $this->record($quote, $marketplace);
-
-        if ($source) {
-            $this->recordAdditionalInputsSchemas($quote, $source, $observations);
-        }
+        $this->recordAdditionalInputsSchemas($quote, $source, $observations);
 
         $environment = SourceEnvironment::current();
         $expiresAt = now()->addSeconds(AmazonBuyShippingService::OFFER_WINDOW_SECONDS);
@@ -641,7 +752,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
                 $offer = $offerStore->issue($package, new OfferDraft(
                     carrier: $carrier,
                     postageSource: PostageSource::PostageDataSource,
-                    postageDataSourceId: $source?->id,
+                    postageDataSourceId: $source->id,
                     // The service code an authored mapping gives it, so a
                     // shipping rule written against Ground Advantage matches
                     // whichever source quoted it. Unmapped, Amazon's own
