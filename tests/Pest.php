@@ -12,9 +12,13 @@ use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\Package;
+use App\Models\PackageItem;
+use App\Models\Product;
 use App\Models\Setting;
 use App\Models\Shipment;
+use App\Models\ShippingMethod;
 use App\Models\ShippingOffer;
+use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\ShopifyFulfillmentOrderActivationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -260,6 +264,104 @@ function shippedShopifyPackage(array $attributes = []): Package
         'label_data' => base64_encode('LABEL-BYTES'),
         'metadata' => ['shopify_shipping_label_id' => 'gid://shopify/ShippingLabel/1'],
     ], $attributes));
+}
+
+/**
+ * The one rate the sandbox returned for `01`'s `EXTERNAL` probe: Amazon Shipping
+ * Ground, label-only in every format.
+ *
+ * @return array<string, mixed>
+ */
+function amazonShippingGroundRate(): array
+{
+    $spec = fn (string $format, array $dpis = []): array => [
+        'format' => $format,
+        'size' => ['width' => 4.0, 'length' => 6.0, 'unit' => 'INCH'],
+        'printOptions' => [[
+            'supportedDPIs' => $dpis,
+            'supportedPageLayouts' => ['LEFT'],
+            'supportedFileJoiningOptions' => [false],
+            'supportedDocumentDetails' => [['name' => 'LABEL', 'isMandatory' => true]],
+        ]],
+    ];
+
+    return [
+        'rateId' => 'b1a4a1f0-0c4f-4a47-9d2e-5c6f0a1e7a11',
+        'carrierId' => 'AMZN_US',
+        'carrierName' => 'Amazon Shipping',
+        'serviceId' => 'std-us-swa-mfn',
+        'serviceName' => 'Amazon Shipping Ground',
+        'totalCharge' => ['unit' => 'USD', 'value' => 7.90],
+        'requiresAdditionalInputs' => false,
+        'promise' => ['deliveryWindow' => ['start' => '2026-09-24T07:00:00Z', 'end' => '2026-09-25T06:59:59Z']],
+        'availableValueAddedServiceGroups' => [],
+        'supportedDocumentSpecifications' => [$spec('PNG'), $spec('ZPL', [203, 300]), $spec('PDF')],
+    ];
+}
+
+/**
+ * @param  array<int, array<string, mixed>>|null  $rates
+ */
+function externalRatesResponse(?array $rates = null): MockResponse
+{
+    return MockResponse::make(['payload' => [
+        'requestToken' => 'amzn1.rq.external-request-token',
+        'rates' => $rates ?? [amazonShippingGroundRate()],
+        'ineligibleRates' => [],
+    ]]);
+}
+
+/**
+ * A packed parcel on an order from another channel, on a shipping method that
+ * asks Amazon. Each item is `[product weight, quantity]`.
+ *
+ * @param  array<int, array{0: float|null, 1: int}>  $items
+ */
+function externalPackage(?DataSource $origin, float $weight = 1.52, array $items = [[0.5, 1]]): Package
+{
+    $amazon = Carrier::firstOrCreate(['name' => AmazonBuyShippingAdapter::SOURCE_NAME], ['active' => true]);
+    $catalog = $amazon->carrierServices()->firstOrCreate(
+        ['service_code' => AmazonBuyShippingAdapter::CATALOG_SERVICE_CODE],
+        ['name' => 'Amazon Buy Shipping rates', 'active' => true],
+    );
+    $method = ShippingMethod::factory()->create();
+    $method->carrierServices()->attach($catalog->id);
+
+    $shipment = Shipment::factory()->create([
+        'data_source_id' => $origin?->id,
+        'shipping_method_id' => $method->id,
+        'metadata' => [],
+    ]);
+
+    $package = Package::factory()->create([
+        'shipment_id' => $shipment->id,
+        'location_id' => Location::factory()->create()->id,
+        'weight' => $weight,
+        'length' => 10.0,
+        'width' => 8.0,
+        'height' => 4.0,
+    ]);
+
+    foreach ($items as $index => [$productWeight, $quantity]) {
+        $product = Product::factory()->create([
+            'weight' => $productWeight,
+            'sku' => 'SKU-'.($index + 1),
+            'description' => 'Widget '.($index + 1),
+        ]);
+        $shipmentItem = $shipment->shipmentItems()->create([
+            'product_id' => $product->id,
+            'quantity' => $quantity,
+            'value' => 12.5,
+        ]);
+        PackageItem::factory()->create([
+            'package_id' => $package->id,
+            'shipment_item_id' => $shipmentItem->id,
+            'product_id' => $product->id,
+            'quantity' => $quantity,
+        ]);
+    }
+
+    return $package->fresh();
 }
 
 /**
