@@ -25,6 +25,8 @@ class DataSourceFactory extends Factory
             'active' => true,
             'import_enabled' => true,
             'offers_off_amazon_shipping' => false,
+            'requires_on_time_offers' => true,
+            'requires_otdr_protected_offers' => false,
             'global_export' => false,
             'settings' => [],
             'secret_settings' => null,

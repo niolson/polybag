@@ -59,12 +59,11 @@ OTDR.
 
 ## What is not known yet
 
-1. **What string "OTDR Protected" is in the API.** The Shipping v2 model gives
-   `CLAIMS_PROTECTED` as an example benefit and `LATE_DELIVERY_RISK` as an example
-   exclusion reason. It does not say whether OTDR protection is a benefit of its own,
-   is `CLAIMS_PROTECTED`, or is shown some other way. Answer it with production
-   `getRates` calls, capturing the responses in `.scratch/`. The sandbox will not do:
-   ADR-0003 found it structurally unrepresentative.
+1. ~~**What string "OTDR Protected" is in the API.**~~ Answered 2026-09-23 by captures
+   already in `.scratch/amazon-shipping-v2/`: it is its own benefit, `OTDR_PROTECTED`,
+   next to `CLAIMS_PROTECTED`. Its exclusion reasons include `LATE_DELIVERY_RISK`,
+   `NON_SSA_ORDER` and `NON_AHT_ORDER`, the last two being the Seller Central automation
+   settings. No capture yet shows it *included*. `16` parses it (`BuyShippingBenefits`).
 2. **Whether OTDR Protection applies to ordinary orders, or only Prime.** The help page
    describes it for Buy Shipping Labels generally; Amazon's Seller Fulfilled Prime text
    describes it for Prime offers. Capture one Prime order and one ordinary order, and
@@ -102,11 +101,13 @@ Settle the questions above before building this.
   excluded, show the reason code, such as `LATE_DELIVERY_RISK`. Sort protected offers
   first on delivery-metric orders.
 
-Late offers are handled separately, in `16`: an offer that will miss `deliver_by` or
-names `LATE_DELIVERY_RISK` is a question of arriving on time, not of protection, and does
-not wait on these questions.
+`16` shipped the two per-connection settings, *require on-time delivery* and *require OTDR
+protection*, and the Ship page badge.
+This issue decides what builds on top of those settings: whether the delivery-metric tier
+turns *require protection* on by itself for Prime and Premium orders, and how the standard
+tier's preference and tolerance choose among the offers that pass.
 
 ## Blocked by
 
-Nothing for questions 1–4. Building waits on their answers, and the automation step waits
+Nothing for questions 2–4. Building waits on their answers, and the automation step waits
 on `15`.

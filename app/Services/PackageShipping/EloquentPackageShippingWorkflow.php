@@ -12,7 +12,9 @@ use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingResult;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
+use App\DataTransferObjects\Shipping\BuyShippingBenefits;
 use App\DataTransferObjects\Shipping\ClassifiedRate;
+use App\DataTransferObjects\Shipping\OfferRequirements;
 use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
@@ -32,6 +34,7 @@ use App\Models\SpecialService;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\PostageSources\OfferStore;
 use App\Services\PostageSources\PostageSourceDispatcher;
+use App\Services\PostageSources\PostageSourceResolver;
 use App\Services\RateQuoteLogger;
 use App\Services\RateSelector;
 use App\Services\RuleEvaluator;
@@ -53,6 +56,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         private readonly CarrierRegistry $carrierRegistry,
         private readonly OfferStore $offerStore,
         private readonly PostageSourceDispatcher $postageSources,
+        private readonly PostageSourceResolver $postageSourceResolver,
     ) {}
 
     public function prepareRates(Package $package): PackageShippingOptions
@@ -104,6 +108,15 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 $rateArray['specialServices'] = [
                     'applied' => $toNames($appliedCodes),
                     'stripped' => $toNames(array_values(array_diff($requestedCodes, $appliedCodes))),
+                ];
+            }
+
+            // Amazon's OTDR protection, beside the lateness marked above: the
+            // two are separate facts and can disagree (`amazon-buy-shipping/16`).
+            if ($benefits = BuyShippingBenefits::fromRateMetadata($classifiedRate->rate->metadata)) {
+                $rateArray['otdrProtection'] = [
+                    'protected' => $benefits->isOtdrProtected(),
+                    'reasons' => $benefits->otdrExclusionReasons(),
                 ];
             }
 
@@ -1214,11 +1227,17 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
         $preSelected = $adapter?->resolvePreSelectedRate($ruleResult->preSelectedRate, $package);
 
+        $deadline = $package->shipment->getDeliverByDate();
+        $requirements = $this->offerRequirementsFor($package);
+
+        // A rule's choice is still unattended: an Amazon connection's on-time
+        // and protection requirements hold against it too.
         if ($preSelected instanceof RateResponse) {
             return $this->rateSelector->selectForAutomation(
                 collect([$preSelected]),
-                deadline: null,
-                clientId: $clientId,
+                $deadline,
+                $clientId,
+                $requirements,
             );
         }
 
@@ -1243,11 +1262,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             );
         }
 
-        $selection = $this->rateSelector->selectForAutomation(
-            $rates,
-            $package->shipment->getDeliverByDate(),
-            $clientId,
-        );
+        $selection = $this->rateSelector->selectForAutomation($rates, $deadline, $clientId, $requirements);
 
         if ($selection->rate === null) {
             $blindOffer = $this->shippingRateService->soleBlindPurchaseOfferForAutomation(
@@ -1269,7 +1284,26 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             withheld: $selection->withheld,
             attendedAlternativeAvailable: $selection->attendedAlternativeAvailable
                 || $this->shippingRateService->getBlindPurchaseOffers($ruleResult->excludedBlindPurchaseIds)->isNotEmpty(),
+            late: $selection->late,
+            unprotected: $selection->unprotected,
+            requirements: $selection->requirements,
+            deadlineMissing: $selection->deadlineMissing,
         );
+    }
+
+    /**
+     * What the Amazon connection an order came from requires of the rate
+     * automation buys for it. Every other order requires nothing.
+     */
+    private function offerRequirementsFor(Package $package): OfferRequirements
+    {
+        if (! $this->postageSourceResolver->isAmazonOrder($package)) {
+            return OfferRequirements::none();
+        }
+
+        $connection = $package->shipment?->dataSource;
+
+        return OfferRequirements::forAmazonOrder($connection?->isAmazon() ? $connection : null);
     }
 
     /**
@@ -1285,6 +1319,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
     {
         if (! $selection->attendedAlternativeAvailable) {
             return PackageShippingResult::failed('Shipping Error', 'No shipping rates available for this package.');
+        }
+
+        if ($selection->refusedForRequirements()) {
+            return $this->refusedForAmazonRequirements($package, $selection);
         }
 
         if (! $selection->withheldAnything()) {
@@ -1305,6 +1343,67 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             'This package was quoted, but no service it was offered is approved for automated purchase: '
             .$selection->withheldSummary().'. '
             .'Approve it on Map Carrier Services, or ship this package from the Ship page, where a person chooses the rate.',
+        );
+    }
+
+    /**
+     * Nothing met what the order's Amazon connection requires. Said as such,
+     * because "no rates" would send the operator to the carrier when the rates
+     * are right there on the Ship page, marked (`amazon-buy-shipping/16`).
+     */
+    private function refusedForAmazonRequirements(Package $package, UnattendedRateSelection $selection): PackageShippingResult
+    {
+        $requirements = $selection->requirements ?? OfferRequirements::none();
+        $refusedLate = $selection->late?->isNotEmpty() ?? false;
+        $refusedUnprotected = $selection->unprotected?->isNotEmpty() ?? false;
+
+        $missing = match (true) {
+            $refusedLate && $refusedUnprotected => 'arrives on time and is OTDR-protected',
+            $refusedLate => 'arrives by the deliver-by date',
+            default => 'is OTDR-protected',
+        };
+
+        $connection = $requirements->connectionName === null
+            ? 'The Amazon connection this order came from'
+            : "The Amazon connection \"{$requirements->connectionName}\"";
+
+        if ($selection->deadlineMissing) {
+            logger()->info('Refused every rate for an Amazon order that requires on-time delivery but has no deliver-by date', [
+                'package_id' => $package->id,
+            ]);
+
+            return PackageShippingResult::attendedSelectionRequired(
+                'No Deliver-By Date',
+                "{$connection} requires on-time delivery, but this order has no deliver-by date to check a rate against. "
+                .'Ship it from the Ship page, where a person chooses the rate, or give its shipping method a delivery commitment.',
+            );
+        }
+
+        logger()->info('Refused every rate for an Amazon order under its connection\'s offer requirements', [
+            'package_id' => $package->id,
+            'requires_on_time' => $requirements->onTime,
+            'requires_otdr_protection' => $requirements->otdrProtection,
+            'late' => $selection->late?->count() ?? 0,
+            'unprotected' => $selection->unprotected?->count() ?? 0,
+        ]);
+
+        // The requirements are checked only against approved rates, so with a
+        // service withheld the honest claim is about approved rates alone: the
+        // withheld one may well have met them.
+        $approved = $selection->withheldAnything() ? 'Approved ' : '';
+        $scope = $selection->withheldAnything()
+            ? 'none of the rates approved for automated purchase does. Not approved: '
+                .$selection->withheldSummary().', which Map Carrier Services can approve.'
+            : "none of this package's rates does.";
+
+        return PackageShippingResult::attendedSelectionRequired(
+            match (true) {
+                $refusedLate && $refusedUnprotected => "No {$approved}On-Time, Protected Rates",
+                $refusedLate => "No {$approved}On-Time Rates",
+                default => "No {$approved}OTDR-Protected Rates",
+            },
+            "{$connection} requires a rate that {$missing}, and {$scope} "
+            .'Ship it from the Ship page, where a person chooses the rate, or change the requirement on the connection.',
         );
     }
 
