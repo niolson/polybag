@@ -463,6 +463,36 @@ it('auto ships for a shipper whose account enables it even when the browser send
         ->assertNoRedirect();
 });
 
+it('lets a manager toggle their own auto-ship setting from the pack page', function (Role $role): void {
+    $user = User::factory()->create(['role' => $role, 'auto_ship_enabled' => true]);
+    $this->actingAs($user);
+
+    Livewire::test(Pack::class)
+        ->assertSee('Auto Ship: ON')
+        ->call('toggleAutoShip')
+        ->assertReturned(false);
+
+    expect($user->refresh()->auto_ship_enabled)->toBeFalse();
+
+    Livewire::test(Pack::class)
+        ->call('toggleAutoShip')
+        ->assertReturned(true);
+
+    expect($user->refresh()->auto_ship_enabled)->toBeTrue();
+})->with([Role::Manager, Role::Admin]);
+
+it('does not let a shipper toggle their own auto-ship setting', function (): void {
+    $user = User::factory()->create(['role' => Role::User, 'auto_ship_enabled' => true]);
+    $this->actingAs($user);
+
+    Livewire::test(Pack::class)
+        ->assertDontSee('Auto Ship: ON')
+        ->call('toggleAutoShip')
+        ->assertForbidden();
+
+    expect($user->refresh()->auto_ship_enabled)->toBeTrue();
+});
+
 it('shows client name when multi_client_enabled is true', function (): void {
     $client = Client::factory()->create(['name' => 'Acme Corp']);
     $shipment = Shipment::factory()->create(['client_id' => $client->id]);

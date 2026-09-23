@@ -274,6 +274,24 @@ class Pack extends Page
         }
     }
 
+    public function canToggleAutoShip(): bool
+    {
+        return auth()->user()->role->isAtLeast(Role::Manager);
+    }
+
+    /**
+     * Flip the signed-in manager's own auto-ship setting and return the new value.
+     */
+    public function toggleAutoShip(): bool
+    {
+        abort_unless($this->canToggleAutoShip(), 403);
+
+        $user = auth()->user();
+        $user->update(['auto_ship_enabled' => ! $user->auto_ship_enabled]);
+
+        return $user->auto_ship_enabled;
+    }
+
     /**
      * Manual ship - creates package and redirects to Ship page.
      */
