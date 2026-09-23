@@ -51,6 +51,9 @@ class OffAmazonShippingCheck
     /** The code Amazon puts in the 403 for an account that is not set up. */
     private const NOT_SET_UP_CODE = 'A-101';
 
+    /** What the operator is told to do about an account that is not set up. */
+    public const NOT_SET_UP_MESSAGE = 'Amazon refused this account for orders from other channels ('.self::NOT_SET_UP_CODE.'). The seller has to finish Amazon Shipping sign-up in Seller Central first.';
+
     public function __construct(
         private readonly AmazonBuyShippingService $amazon,
     ) {}
@@ -113,11 +116,8 @@ class OffAmazonShippingCheck
             );
         }
 
-        if ($this->isNotSetUp($response)) {
-            return new OffAmazonShippingCheckResult(
-                OffAmazonShippingStatus::NotSetUp,
-                'Amazon refused this account for orders from other channels ('.self::NOT_SET_UP_CODE.'). The seller has to finish Amazon Shipping sign-up in Seller Central first.',
-            );
+        if (self::refusesAccount($response)) {
+            return new OffAmazonShippingCheckResult(OffAmazonShippingStatus::NotSetUp, self::NOT_SET_UP_MESSAGE);
         }
 
         logger()->warning('Amazon gave no answer to an off-Amazon shipping check', [
@@ -152,7 +152,12 @@ class OffAmazonShippingCheck
             && filled($location->country));
     }
 
-    private function isNotSetUp(Response $response): bool
+    /**
+     * Whether Amazon answered an `EXTERNAL` `getRates` with `403 A-101`, the
+     * refusal of an account not set up for Amazon Shipping. Shared with the
+     * adapter, which hears the same answer when it quotes a package.
+     */
+    public static function refusesAccount(Response $response): bool
     {
         if ($response->status() !== 403) {
             return false;

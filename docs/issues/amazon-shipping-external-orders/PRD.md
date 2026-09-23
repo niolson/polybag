@@ -59,8 +59,8 @@ request from it with `403 A-101`. So:
 | 01 | [Probe `EXTERNAL` rating and purchase](issues/01-probe-external-rates-and-purchase.md) | HITL — **done** | — |
 | 02 | [Connections and the import toggle](issues/02-connections-and-import-toggle.md) | AFK — **done** | — |
 | 03 | [Decide how a connection is selected](issues/03-decide-external-connection-routing.md) | HITL — **done** | — |
-| 04 | [Offer Amazon Shipping to other channels](issues/04-offer-amazon-shipping-to-other-channels.md) | AFK | 02, 03 |
-| 05 | [Quote off-Amazon Packages](issues/05-quote-amazon-shipping-for-off-amazon-packages.md) | AFK | 01, 04 |
+| 04 | [Offer Amazon Shipping to other channels](issues/04-offer-amazon-shipping-to-other-channels.md) | AFK — **done** | 02, 03 |
+| 05 | [Quote off-Amazon Packages](issues/05-quote-amazon-shipping-for-off-amazon-packages.md) | AFK — **done** | 01, 04 |
 | 06 | [Buy, track and void off-Amazon Labels](issues/06-buy-track-void-off-amazon-labels.md) | AFK | 05 |
 | 07 | [Batch ship approved off-Amazon services](issues/07-batch-ship-approved-external-services.md) | AFK | 06 |
 | 08 | [Connect an Amazon Shipping-only account](issues/08-connect-amazon-shipping-only-account.md) | HITL | — |

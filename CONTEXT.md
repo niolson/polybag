@@ -38,8 +38,8 @@ Amazon Buy Shipping is the Shipping v2 API used to quote and buy postage. Amazon
 one physical carrier that API can return. For an on-Amazon order (`channelType: AMAZON`), the
 API may return Amazon Shipping, USPS, UPS, FedEx, or another eligible carrier. For an
 off-Amazon order (`channelType: EXTERNAL`), the purchasable carrier is Amazon Shipping.
-PolyBag currently implements only the on-Amazon path; off-Amazon Amazon Shipping is a missing
-capability, not a configured-but-ineligible rate.
+PolyBag quotes both. Off-Amazon Amazon Shipping is sold by the Amazon connection scoped to the
+Package, never by the Shipment's import source.
 _Avoid_: Using "Amazon" without saying whether it means the API/postage source or the carrier
 
 **Service class**:

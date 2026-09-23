@@ -167,9 +167,10 @@ Preserve these domain terms in code and prose — see `CONTEXT.md`. In particula
   Shipments (`channelType: AMAZON`), with tracking and cancellation dispatched back through
   Amazon. Those offers may name Amazon Shipping, USPS, UPS, FedEx, or another carrier. Amazon
   dynamically discovers services; human selection may use an unmapped/unapproved service,
-  while automation requires normalization and explicit approval. Shipping v2 also supports
-  off-Amazon orders (`channelType: EXTERNAL`), for which Amazon Shipping is the carrier, but
-  PolyBag does not implement that path yet
+  while automation requires normalization and explicit approval. Orders from other channels
+  are quoted `channelType: EXTERNAL` on the Amazon connection scoped to sell them Amazon
+  Shipping; buying, tracking and voiding those Labels is not yet verified
+  (`amazon-shipping-external-orders/06`)
 - **Shopify Shipping** — Attended blind Label purchase tied to the Shipment's originating
   Shopify `DataSource`; Shopify may choose the carrier and does not confirm price or service.
   Tracking comes through Shopify; Labels must be voided in the Shopify admin and are then
@@ -180,8 +181,9 @@ Carrier and source adapters live in `app/Services/Carriers/`. Direct accounts re
 `client_id`; Shopify and Amazon marketplace postage bind to the Shipment's originating
 `DataSource`. `CarrierRegistry` remains carrier-policy/direct-adapter lookup, while
 `PostageSourceResolver` and `PostageSourceDispatcher` own source selection and post-purchase
-dispatch. The unimplemented off-Amazon Amazon Shipping path should use an eligible connected
-Amazon `DataSource`; it must not be confused with the existing direct-carrier-account arm.
+dispatch. Off-Amazon Amazon Shipping resolves by scope to a connected Amazon `DataSource`
+(`PostageSourceResolver::offAmazonShippingSourceFor()`); it must not be confused with the
+direct-carrier-account arm, nor with the origin-bound Amazon postage of an Amazon order.
 
 ## Data Import / Export
 

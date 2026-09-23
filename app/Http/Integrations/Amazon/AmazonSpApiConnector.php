@@ -32,6 +32,16 @@ class AmazonSpApiConnector extends Connector
     ) {}
 
     /**
+     * The connection whose credentials this connector sends with, when it was
+     * built for one. A reply is that account's answer, whatever the connection
+     * has become since the request left.
+     */
+    public function dataSourceId(): ?int
+    {
+        return $this->dataSourceId;
+    }
+
+    /**
      * Build from a per-source config array. All credentials (client_id, client_secret,
      * refresh_token) are per-source and stored on the DataSource.
      *
