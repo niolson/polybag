@@ -480,6 +480,9 @@
             @if($multiClientEnabled && $clientName)
                 <x-filament::badge color="primary" class="mr-2">{{ $clientName }}</x-filament::badge>
             @endif
+            @foreach(\App\Enums\AmazonOrderProgram::forShipment($shipment) as $amazonProgram)
+                <x-filament::badge :color="$amazonProgram->getColor()" class="mr-2">{{ $amazonProgram->getLabel() }}</x-filament::badge>
+            @endforeach
             @if($scanToAddMode)
                 <x-filament::badge color="warning" class="mr-2">Scan-to-Add</x-filament::badge>
             @endif

@@ -51,6 +51,16 @@
             <div class="space-y-6">
                 <x-filament::section>
                     <x-slot name="heading">Package Details</x-slot>
+                    @php
+                        $amazonPrograms = \App\Enums\AmazonOrderProgram::forShipment($package->shipment);
+                    @endphp
+                    @if($amazonPrograms !== [])
+                        <x-slot name="afterHeader">
+                            @foreach($amazonPrograms as $amazonProgram)
+                                <x-filament::badge :color="$amazonProgram->getColor()">{{ $amazonProgram->getLabel() }}</x-filament::badge>
+                            @endforeach
+                        </x-slot>
+                    @endif
 
                     <dl class="grid grid-cols-2 gap-4 text-sm">
                         <div>

@@ -299,3 +299,24 @@ it('throttles refreshRates once the per-user limit is exceeded', function (): vo
     $component->call('refreshRates')->assertNotified();
     expect($workflow->calls)->toBe(15);
 });
+
+it('badges an Amazon order with the programs it is enrolled in', function (array $programs, array $seen, array $unseen): void {
+    $package = createShippablePackage();
+    $package->shipment->update(['metadata' => ['amazon_order_id' => '111-2222222-3333333', 'amazon_programs' => $programs]]);
+    app()->instance(PackageShippingWorkflow::class, countingRatesWorkflow());
+
+    $page = Livewire::test(Ship::class, ['package_id' => $package->id]);
+
+    foreach ($seen as $label) {
+        expect($page->html())->toMatch("/fi-badge-label\">\\s*{$label}\\s*</");
+    }
+
+    foreach ($unseen as $label) {
+        expect($page->html())->not->toMatch("/fi-badge-label\">\\s*{$label}\\s*</");
+    }
+})->with([
+    'prime' => [['PRIME'], ['Prime'], ['Premium']],
+    'premium' => [['PREMIUM'], ['Premium'], ['Prime']],
+    'ordinary' => [[], [], ['Prime', 'Premium']],
+    'ship plus' => [['FBM_SHIP_PLUS'], [], ['Prime', 'Premium']],
+]);

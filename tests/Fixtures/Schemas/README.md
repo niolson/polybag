@@ -7,6 +7,7 @@ golden array we wrote by hand at the same time as the code that builds it.
 | File | Source | License |
 |---|---|---|
 | `ordersV0.json` | [`amzn/selling-partner-api-models`](https://github.com/amzn/selling-partner-api-models) — `models/orders-api-model/ordersV0.json` | Apache-2.0 |
+| `orders_2026-01-01.json` | [`amzn/selling-partner-api-models`](https://github.com/amzn/selling-partner-api-models) — `models/orders-api-model/orders_2026-01-01.json` | Apache-2.0 |
 | `shippingV2.json` | [`amzn/selling-partner-api-models`](https://github.com/amzn/selling-partner-api-models) — `models/shipping-api-model/shippingV2.json` | Apache-2.0 |
 | `upsRating.json` | [`UPS-API/api-documentation`](https://github.com/UPS-API/api-documentation) — `Rating.yaml` | MIT |
 | `upsShipping.json` | [`UPS-API/api-documentation`](https://github.com/UPS-API/api-documentation) — `Shipping.yaml` | MIT |
@@ -21,15 +22,15 @@ vendored verbatim in `licenses/` rather than named only in the table above:
 | Notice | Covers |
 |---|---|
 | `licenses/UPS-API-api-documentation-LICENSE.txt` | `upsRating.json`, `upsShipping.json` |
-| `licenses/amzn-selling-partner-api-models-LICENSE.txt` | `ordersV0.json`, `shippingV2.json` |
-| `licenses/amzn-selling-partner-api-models-NOTICE.txt` | `ordersV0.json`, `shippingV2.json` |
+| `licenses/amzn-selling-partner-api-models-LICENSE.txt` | `ordersV0.json`, `orders_2026-01-01.json`, `shippingV2.json` |
+| `licenses/amzn-selling-partner-api-models-NOTICE.txt` | `ordersV0.json`, `orders_2026-01-01.json`, `shippingV2.json` |
 
 MIT requires "the above copyright notice and this permission notice" to be included in all
 copies or substantial portions; Apache-2.0 §4 requires a copy of the License and the
 upstream NOTICE. All three notice files are byte-for-byte copies of their upstream
 originals.
 
-**Both Amazon files are unmodified copies.** The two UPS files are **modified copies**:
+**All three Amazon files are unmodified copies.** The two UPS files are **modified copies**:
 converted from YAML to JSON and passed through the cardinality fix described below. Both
 transformations are mechanical and reproducible from the refresh script — no schema was
 hand-edited to accommodate our request bodies.
@@ -43,6 +44,7 @@ Refresh the Amazon specs with:
 ```bash
 B=https://raw.githubusercontent.com/amzn/selling-partner-api-models/main/models
 curl -sL -o tests/Fixtures/Schemas/ordersV0.json $B/orders-api-model/ordersV0.json
+curl -sL -o tests/Fixtures/Schemas/orders_2026-01-01.json $B/orders-api-model/orders_2026-01-01.json
 curl -sL -o tests/Fixtures/Schemas/shippingV2.json $B/shipping-api-model/shippingV2.json
 ```
 
@@ -185,9 +187,11 @@ That's why `SearchOrders` targets `/orders/2026-01-01/orders` while
 `ConfirmShipment` targets `/orders/v0/orders/{orderId}/shipmentConfirmation` —
 the mismatch is Amazon's, and it's intentional on our side.
 
-If we ever schema-check the *read* side (today those responses are mocked), that
-needs `orders_2026-01-01.json` vendored alongside this file, and
-`assertMatchesSpApiSchema()` takes the document name as its third argument.
+The read side is mocked, but a mocked order can still be checked against
+`orders_2026-01-01.json`'s `Order` schema, so a test order is shaped the way Amazon's
+model says rather than the way the docs say. The two have disagreed about field
+locations in this version before. `tests/Feature/AmazonImportExportTest.php` does this
+for the order-level `programs` list.
 
 ## What `shippingV2` covers
 

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ShippingMethodResource\RelationManagers;
 
+use App\Enums\AmazonOrderProgram;
 use App\Enums\DestinationZone;
 use App\Enums\ShippingRuleAction;
 use App\Models\Channel;
@@ -46,6 +47,7 @@ class ShippingRulesRelationManager extends RelationManager
                         self::destinationStateBlock(),
                         self::channelBlock(),
                         self::residentialBlock(),
+                        self::amazonProgramBlock(),
                     ])
                     ->blockNumbers(false)
                     ->collapsible()
@@ -107,6 +109,7 @@ class ShippingRulesRelationManager extends RelationManager
                 'destination_state' => self::summarizeStates($data),
                 'channel' => self::summarizeChannel($data),
                 'residential' => ($data['is_residential'] ?? false) ? 'Residential' : 'Commercial',
+                'amazon_program' => self::summarizeAmazonProgram($data),
                 default => null,
             };
 
@@ -349,6 +352,33 @@ class ShippingRulesRelationManager extends RelationManager
                     ->label('Is Residential?')
                     ->default(true),
             ]);
+    }
+
+    private static function amazonProgramBlock(): Block
+    {
+        return Block::make('amazon_program')
+            ->label(function (?array $state): string {
+                if ($state === null) {
+                    return 'Amazon Program';
+                }
+
+                return self::summarizeAmazonProgram($state) ?? 'Amazon Program';
+            })
+            ->icon('heroicon-o-star')
+            ->schema([
+                Forms\Components\Select::make('program')
+                    ->label('Amazon order is')
+                    ->options(AmazonOrderProgram::class)
+                    ->helperText('Never matches an order from another channel.')
+                    ->required(),
+            ]);
+    }
+
+    private static function summarizeAmazonProgram(array $data): ?string
+    {
+        $program = AmazonOrderProgram::tryFrom($data['program'] ?? '');
+
+        return $program ? "Amazon {$program->getLabel()}" : null;
     }
 
     private static function usStateOptions(): array

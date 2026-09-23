@@ -684,3 +684,31 @@ it('applies a client-specific rule only to shipments for that client', function 
 
     expect($result->hasPreSelectedRate())->toBeTrue();
 });
+
+it('matches an Amazon program condition only on an order enrolled in that program', function (string $program, ?array $metadata, bool $matches): void {
+    $carrier = Carrier::factory()->create(['name' => 'USPS']);
+    $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
+    $shipment = Shipment::factory()->create(['metadata' => $metadata]);
+
+    ShippingRule::factory()->create([
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+        'conditions' => [
+            ['type' => 'amazon_program', 'data' => ['program' => $program]],
+        ],
+    ]);
+
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBe($matches);
+})->with([
+    'prime rule, prime order' => ['prime', ['amazon_order_id' => '111', 'amazon_programs' => ['PRIME']], true],
+    'prime rule, premium order' => ['prime', ['amazon_order_id' => '111', 'amazon_programs' => ['PREMIUM']], false],
+    'premium rule, premium order' => ['premium', ['amazon_order_id' => '111', 'amazon_programs' => ['AMAZON_BUSINESS', 'PREMIUM']], true],
+    'premium rule, prime order' => ['premium', ['amazon_order_id' => '111', 'amazon_programs' => ['PRIME']], false],
+    'prime rule, ordinary Amazon order' => ['prime', ['amazon_order_id' => '111', 'amazon_programs' => []], false],
+    'prime rule, Ship Plus order' => ['prime', ['amazon_order_id' => '111', 'amazon_programs' => ['FBM_SHIP_PLUS']], false],
+    'prime rule, imported before programs' => ['prime', ['amazon_order_id' => '111'], false],
+    'prime rule, Shopify order' => ['prime', ['shopify_order_id' => 'gid://shopify/Order/1'], false],
+    'premium rule, order with no metadata' => ['premium', null, false],
+]);

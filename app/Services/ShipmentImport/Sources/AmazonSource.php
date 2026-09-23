@@ -572,6 +572,14 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
             '_preserve_existing_fields' => $preserveExistingFields,
             'metadata' => [
                 'amazon_order_id' => $order['orderId'] ?? null,
+                // Order-level only, as Amazon spells them. Items carry their own
+                // `programs` (TRANSPARENCY, SUBSCRIBE_AND_SAVE), which are not
+                // delivery programs. [] means imported with none; a missing key
+                // means imported before programs were recorded.
+                'amazon_programs' => array_values(array_filter(
+                    is_array($order['programs'] ?? null) ? $order['programs'] : [],
+                    'is_string',
+                )),
                 'amazon_order_status' => $fulfillment['fulfillmentStatus'] ?? null,
                 'amazon_created_time' => $order['createdTime'] ?? null,
                 'amazon_sales_channel' => $order['salesChannel'] ?? null,
