@@ -100,3 +100,30 @@ None - can start immediately.
 - **2026-09-24** — Storage settled: `products.is_media`, a boolean, and
   `carrier_services.required_contents`, a nullable enum whose one case is `media`. The
   classes considered and why only one exists are listed under *What to build*.
+- **2026-09-24** — **Implemented** on `feature/media-mail-for-qualifying-packages`
+  (awaiting review; no Media Mail label bought in the sandbox yet).
+  - One qualification rule, `Package::qualifiesFor(ContentClass)`. `PackageData` carries its
+    result as `qualifyingContents`, so it is part of the rate request's fingerprint. Unmarking a
+    product after a Media Mail quote therefore retires the offer. Deploying retires every
+    outstanding offer once, because the fingerprint's shape changed.
+  - The drop is `Shipping\ContentsFilter`, run beside `PackagingFilter` in
+    `getShippingRates()` and on a rule's resolved pre-selected rate. Direct adapters stamp
+    `carrierId` / `carrierServiceId` through the `IdentifiesCatalogServices` concern. It finds
+    the carrier by name until `05`. Where two rows share a code, the oldest wins.
+    `RuleEvaluator` stamps the rule's own rate.
+  - A *Use* rule naming Media Mail, on a Package that does not qualify, falls through to rate
+    shopping. This is the same as a pre-selected rate the packaging rules out (ADR-0005). The
+    Package gets the cheapest acceptable rate the method allows, never Media Mail.
+  - A Media Mail rate dropped for its contents does not mark its source packaging-ineligible
+    for the sole-blind-purchase test. If it did, Shopify could become the sole choice and buy
+    the same Media Mail blind.
+  - `CarrierSeeder` restores `required_contents = media` on every sync, not only when it
+    creates the row.
+  - The Label's `carrier_service_id` restricts deletion. The Offer's two ids are null on
+    delete.
+  - A Package with no shipping method that qualifies may be sold Media Mail by automation,
+    because with no method the allowance is every direct service (decision 12).
+  - **Open:** every logged sandbox response returns Media Mail twice, `SP` under both
+    `MACHINABLE` and `NONSTANDARD`, at one price. Both are shown, and automation takes the
+    first on a tie. Which one a given parcel should be bought as, and whether USPS re-rates
+    the wrong one, is unverified.

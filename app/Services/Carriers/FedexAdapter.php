@@ -32,6 +32,7 @@ use App\Services\Carriers\Concerns\BuildsCustomerReferences;
 use App\Services\Carriers\Concerns\ConsultsCarrierPolicyForOffers;
 use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
 use App\Services\Carriers\Concerns\HasSaturdayDelivery;
+use App\Services\Carriers\Concerns\IdentifiesCatalogServices;
 use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
 use App\Services\SettingsService;
@@ -51,6 +52,7 @@ class FedexAdapter implements DirectCarrierAdapter
     use ConsultsCarrierPolicyForOffers;
     use HasDefaultServiceCapabilities;
     use HasSaturdayDelivery;
+    use IdentifiesCatalogServices;
     use ResolvesCarrierAccount;
     use ResolvesDeliveredAt;
 
@@ -237,11 +239,11 @@ class FedexAdapter implements DirectCarrierAdapter
     public function getRates(RateRequest $request, array $serviceCodes): Collection
     {
         if ($this->quotesInternationalLocally($request)) {
-            return app(FedexSandboxInternationalRates::class)->ratesFor(
+            return $this->withCatalogIdentity(app(FedexSandboxInternationalRates::class)->ratesFor(
                 $request,
                 $serviceCodes,
                 $this->resolveAccount($request->locationId, $request->clientId)?->id,
-            );
+            ));
         }
 
         $prepared = $this->prepareRateRequest($request, $serviceCodes);
@@ -365,7 +367,7 @@ class FedexAdapter implements DirectCarrierAdapter
             $results = $results->merge($oneRateResults);
         }
 
-        return $results;
+        return $this->withCatalogIdentity($results);
     }
 
     /**

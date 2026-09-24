@@ -18,6 +18,7 @@ use App\Enums\ServiceCapability;
 use App\Models\Package;
 use App\Services\Carriers\Concerns\ConsultsCarrierPolicyForOffers;
 use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
+use App\Services\Carriers\Concerns\IdentifiesCatalogServices;
 use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Shipping\PackagingFilter;
 use Illuminate\Support\Collection;
@@ -27,6 +28,7 @@ class FakeCarrierAdapter implements DirectCarrierAdapter
 {
     use ConsultsCarrierPolicyForOffers;
     use HasDefaultServiceCapabilities;
+    use IdentifiesCatalogServices;
 
     // For `resolveAccount()` only: the `isConfigured()` below wins over the
     // trait's, because fake mode quotes with or without an account.
@@ -58,6 +60,9 @@ class FakeCarrierAdapter implements DirectCarrierAdapter
             ['code' => 'USPS_GROUND_ADVANTAGE', 'name' => 'Ground Advantage', 'price' => 8.50, 'transit' => '2-5 Business Days', 'days' => 5],
             ['code' => 'PRIORITY_MAIL', 'name' => 'Priority Mail', 'price' => 12.75, 'transit' => '1-3 Business Days', 'days' => 3],
             ['code' => 'PRIORITY_MAIL_EXPRESS', 'name' => 'Priority Mail Express', 'price' => 28.40, 'transit' => '1-2 Days', 'days' => 1],
+            // Offered only to a Package that qualifies: the catalog row requires
+            // media contents, and the shared filter drops it otherwise.
+            ['code' => 'MEDIA_MAIL', 'name' => 'Media Mail', 'price' => 4.25, 'transit' => '2-8 Business Days', 'days' => 8],
         ],
         'FedEx' => [
             ['code' => 'FEDEX_GROUND', 'name' => 'FedEx Ground', 'price' => 10.25, 'transit' => '1-5 Business Days', 'days' => 5],
@@ -107,7 +112,7 @@ class FakeCarrierAdapter implements DirectCarrierAdapter
         // check exercises the same path fake mode is standing in for.
         $account = $this->resolveAccount($request->locationId, $request->clientId);
 
-        return collect($rates)
+        return $this->withCatalogIdentity(collect($rates)
             ->when(! empty($serviceCodes), fn (Collection $c) => $c->whereIn('code', $serviceCodes))
             ->map(fn (array $rate): RateResponse => new RateResponse(
                 carrier: $this->carrierName,
@@ -119,7 +124,8 @@ class FakeCarrierAdapter implements DirectCarrierAdapter
                 transitTime: $rate['transit'],
                 packagingRequirement: PackagingRequirement::shipperPackaging(),
                 carrierAccountId: $account?->id,
-            ));
+            ))
+            ->values());
     }
 
     public function parseRateResponse(Response $response, RateRequest $request, array $serviceCodes): Collection

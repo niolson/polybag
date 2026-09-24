@@ -63,6 +63,7 @@ class PackageLabel extends Model
         'postage_data_source_id',
         'carrier',
         'normalized_carrier_id',
+        'carrier_service_id',
         'service',
         'requested_service',
         'service_evidence',
@@ -168,6 +169,18 @@ class PackageLabel extends Model
     public function normalizedCarrier(): BelongsTo
     {
         return $this->belongsTo(Carrier::class, 'normalized_carrier_id');
+    }
+
+    /**
+     * The catalog service this Label was bought as. Null for a blind purchase,
+     * whose service Shopify chose, and for a Label bought before the column
+     * existed.
+     *
+     * @return BelongsTo<CarrierService, $this>
+     */
+    public function carrierService(): BelongsTo
+    {
+        return $this->belongsTo(CarrierService::class);
     }
 
     /**

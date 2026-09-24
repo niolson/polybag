@@ -17,6 +17,7 @@ use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 
 class ProductResource extends Resource
@@ -104,12 +105,16 @@ class ProductResource extends Resource
                             ->columnSpanFull(),
                     ]),
                 Section::make('Compliance')
-                    ->description('Flags that trigger special carrier handling requirements.')
+                    ->description('Declarations about the contents that decide which carrier services and special handling a package gets.')
                     // ->collapsed()
                     ->schema([
                         Forms\Components\Toggle::make('contains_alcohol')
                             ->label('Contains Alcohol')
                             ->helperText('Packages containing this product get FedEx rates only (USPS prohibits alcohol; UPS parcel is unsupported), ship with the FedEx alcohol declaration, and automatically require an adult signature.')
+                            ->columnSpanFull(),
+                        Forms\Components\Toggle::make('is_media')
+                            ->label('Media')
+                            ->helperText('Declares that this product qualifies for USPS Media Mail. A package is offered Media Mail only when every item in it is marked. Never set automatically: the seller is responsible for what qualifies.')
                             ->columnSpanFull(),
                         Forms\Components\Select::make('hazmat_class')
                             ->label('Hazmat Classification')
@@ -164,6 +169,13 @@ class ProductResource extends Resource
                     ->trueColor('warning')
                     ->falseIcon('')
                     ->toggleable(isToggledHiddenByDefault: true),
+                Tables\Columns\IconColumn::make('is_media')
+                    ->label('Media')
+                    ->boolean()
+                    ->trueIcon('heroicon-o-book-open')
+                    ->trueColor('info')
+                    ->falseIcon('')
+                    ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('hazmat_class')
                     ->label('Hazmat')
                     ->badge()
@@ -193,13 +205,37 @@ class ProductResource extends Resource
                     ->query(fn ($query) => $query->whereNull('weight')->orWhere('weight', '<=', 0)),
                 Tables\Filters\TernaryFilter::make('contains_alcohol')
                     ->label('Contains Alcohol'),
+                Tables\Filters\TernaryFilter::make('is_media')
+                    ->label('Media'),
                 Tables\Filters\SelectFilter::make('hazmat_class')
                     ->label('Hazmat Class')
                     ->options(HazmatClass::class),
             ])
             ->recordActions([
                 Actions\EditAction::make(),
+            ])
+            ->groupedBulkActions([
+                self::markMediaBulkAction(true),
+                self::markMediaBulkAction(false),
             ]);
+    }
+
+    /**
+     * Mark the selected products as media, or as not media, in one go.
+     */
+    private static function markMediaBulkAction(bool $isMedia): Actions\BulkAction
+    {
+        return Actions\BulkAction::make($isMedia ? 'mark-media' : 'mark-not-media')
+            ->label($isMedia ? 'Mark as media' : 'Mark as not media')
+            ->icon($isMedia ? 'heroicon-o-book-open' : 'heroicon-o-x-circle')
+            ->requiresConfirmation()
+            ->modalDescription($isMedia
+                ? 'Packages whose every item is marked as media may be offered USPS Media Mail. Only mark products that qualify.'
+                : 'Packages containing these products will no longer be offered USPS Media Mail.')
+            ->authorizeIndividualRecords('update')
+            ->action(fn (Collection $records) => $records->each->update(['is_media' => $isMedia]))
+            ->successNotificationTitle($isMedia ? 'Marked as media' : 'Marked as not media')
+            ->deselectRecordsAfterCompletion();
     }
 
     public static function getRelations(): array

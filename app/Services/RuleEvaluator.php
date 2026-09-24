@@ -95,12 +95,16 @@ class RuleEvaluator
                 }
 
                 // A rule names a service, never a packaging (ADR-0005 decision 4).
+                // It does name the catalog service, so the contents drop can
+                // judge a rate an adapter hands back unquoted.
                 $preSelectedRate = new RateResponse(
                     carrier: $carrier->name,
                     serviceCode: $service->service_code,
                     serviceName: $service->name,
                     price: 0.0,
                     packagingRequirement: PackagingRequirement::shipperPackaging(),
+                    carrierServiceId: $service->id,
+                    carrierId: $carrier->id,
                 );
 
                 return new RuleEvaluationResult(

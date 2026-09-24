@@ -3,7 +3,9 @@
 namespace App\DataTransferObjects\Shipping;
 
 use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
+use App\Models\Carrier;
 use App\Models\CarrierAccount;
+use App\Models\CarrierService;
 use App\Models\ShippingOffer;
 use App\Services\RateSelector;
 use Carbon\Carbon;
@@ -17,6 +19,8 @@ readonly class RateResponse
      * @param  ObservedServiceIdentity|null  $observedService  Which discovered service this is an offer of, for the sources that discover one. Null means an authored `CarrierService` quoted from a carrier account, which is every rate that existed before discovery did. A source whose catalog is discovered — Amazon Buy Shipping — must set it: {@see RateSelector::selectBest()} is what decides whether automation may buy this, and it has no other way to ask (ADR-0003 decision 4).
      * @param  PackagingRequirement|null  $packagingRequirement  Which carrier packaging this rate is valid in (ADR-0005 decision 3). Defaults to the shipper's own packaging so that hand-built rates in tests compile unchanged, but every adapter sets it explicitly: the adapter is the only party that knows, and a reader of an adapter should see the decision being made rather than a default being taken.
      * @param  int|null  $carrierAccountId  The {@see CarrierAccount} a direct adapter quoted this on, from the account `ResolvesCarrierAccount` gave it. Recorded on the offer the rate service issues for the rate, so the purchase can refuse when the account that would buy is no longer the one that quoted. Null for a rate resold through a channel — an Amazon offer names a data source instead — and for a fake adapter with no account to resolve.
+     * @param  int|null  $carrierServiceId  The {@see CarrierService} this is a rate for, set by the source that quoted it. A property of the service binds every source that sells it (ADR-0006 decision 10), and this is how the shared filters find the service without looking it up by carrier name and code string. Null when the source quoted something the catalog does not hold.
+     * @param  int|null  $carrierId  The {@see Carrier} expected to carry the parcel. Stored on the offer, so a purchase is dated by it rather than by a carrier-name string a rename could break. Null only for a carrier with no row.
      */
     public function __construct(
         public string $carrier,
@@ -32,6 +36,8 @@ readonly class RateResponse
         public ?ObservedServiceIdentity $observedService = null,
         ?PackagingRequirement $packagingRequirement = null,
         public ?int $carrierAccountId = null,
+        public ?int $carrierServiceId = null,
+        public ?int $carrierId = null,
     ) {
         $this->packagingRequirement = $packagingRequirement ?? PackagingRequirement::shipperPackaging();
     }
@@ -46,27 +52,53 @@ readonly class RateResponse
      */
     public function withOfferId(string $offerId): self
     {
-        return new self(
-            carrier: $this->carrier,
-            serviceCode: $this->serviceCode,
-            serviceName: $this->serviceName,
-            price: $this->price,
-            deliveryCommitment: $this->deliveryCommitment,
-            deliveryDate: $this->deliveryDate,
-            transitTime: $this->transitTime,
-            metadata: $this->metadata,
-            priceUnknown: $this->priceUnknown,
-            offerId: $offerId,
-            observedService: $this->observedService,
-            packagingRequirement: $this->packagingRequirement,
-            carrierAccountId: $this->carrierAccountId,
-        );
+        return $this->copy(['offerId' => $offerId]);
+    }
+
+    /**
+     * This rate, naming the catalog service and carrier it is for.
+     *
+     * For a direct adapter, which reads the ids off its own carrier's catalog
+     * after the carrier has answered, and for a shipping rule, which names a
+     * service it already holds.
+     */
+    public function withCatalogIdentity(?int $carrierId, ?int $carrierServiceId): self
+    {
+        return $this->copy(['carrierId' => $carrierId, 'carrierServiceId' => $carrierServiceId]);
+    }
+
+    /**
+     * Every field carried across with the given ones replaced, so a new field
+     * cannot be forgotten by one of the `with…()` methods above.
+     *
+     * @param  array<string, mixed>  $changes  Constructor arguments by name
+     */
+    private function copy(array $changes): self
+    {
+        return new self(...[
+            'carrier' => $this->carrier,
+            'serviceCode' => $this->serviceCode,
+            'serviceName' => $this->serviceName,
+            'price' => $this->price,
+            'deliveryCommitment' => $this->deliveryCommitment,
+            'deliveryDate' => $this->deliveryDate,
+            'transitTime' => $this->transitTime,
+            'metadata' => $this->metadata,
+            'priceUnknown' => $this->priceUnknown,
+            'offerId' => $this->offerId,
+            'observedService' => $this->observedService,
+            'packagingRequirement' => $this->packagingRequirement,
+            'carrierAccountId' => $this->carrierAccountId,
+            'carrierServiceId' => $this->carrierServiceId,
+            'carrierId' => $this->carrierId,
+            ...$changes,
+        ]);
     }
 
     /**
      * Convert to array format for Livewire serialization.
      *
-     * @return array{carrier: string, serviceCode: string, serviceName: string, price: float, deliveryCommitment: ?string, deliveryDate: ?string, transitTime: ?string, metadata: array<string, mixed>, priceUnknown: bool, offerId: ?string, observedService: ?array{source: string, environment: string, channelType: string, externalCarrierId: string, externalServiceId: string}, packagingRequirement: array{kind: string, packagings: list<string>}, carrierAccountId: ?int}
+     * @return array{carrier: string, serviceCode: string, serviceName: string, price: float, deliveryCommitment: ?string, deliveryDate: ?string, transitTime: ?string, metadata: array<string, mixed>, priceUnknown: bool, offerId: ?string, observedService: ?array{source: string, environment: string, channelType: string, externalCarrierId: string, externalServiceId: string}, packagingRequirement: array{kind: string, packagings: list<string>}, carrierAccountId: ?int, carrierServiceId: ?int, carrierId: ?int}
      */
     public function toArray(): array
     {
@@ -84,6 +116,8 @@ readonly class RateResponse
             'observedService' => $this->observedService?->toArray(),
             'packagingRequirement' => $this->packagingRequirement->toArray(),
             'carrierAccountId' => $this->carrierAccountId,
+            'carrierServiceId' => $this->carrierServiceId,
+            'carrierId' => $this->carrierId,
         ];
     }
 
@@ -94,7 +128,7 @@ readonly class RateResponse
      * requirement existed — reads as the shipper's own packaging, which is the
      * safe direction: it accepts nothing a carrier supplies.
      *
-     * @param  array{carrier: string, serviceCode: string, serviceName: string, price: float, deliveryCommitment: ?string, deliveryDate: ?string, transitTime: ?string, metadata?: array<string, mixed>, priceUnknown?: bool, offerId?: ?string, observedService?: ?array{source: string, environment: string, channelType?: string, externalCarrierId: string, externalServiceId: string}, packagingRequirement?: ?array{kind?: string, packagings?: list<string>}, carrierAccountId?: ?int}  $data
+     * @param  array{carrier: string, serviceCode: string, serviceName: string, price: float, deliveryCommitment: ?string, deliveryDate: ?string, transitTime: ?string, metadata?: array<string, mixed>, priceUnknown?: bool, offerId?: ?string, observedService?: ?array{source: string, environment: string, channelType?: string, externalCarrierId: string, externalServiceId: string}, packagingRequirement?: ?array{kind?: string, packagings?: list<string>}, carrierAccountId?: ?int, carrierServiceId?: ?int, carrierId?: ?int}  $data
      */
     public static function fromArray(array $data): self
     {
@@ -116,6 +150,8 @@ readonly class RateResponse
                 ? PackagingRequirement::fromArray($data['packagingRequirement'])
                 : PackagingRequirement::shipperPackaging(),
             carrierAccountId: isset($data['carrierAccountId']) ? (int) $data['carrierAccountId'] : null,
+            carrierServiceId: isset($data['carrierServiceId']) ? (int) $data['carrierServiceId'] : null,
+            carrierId: isset($data['carrierId']) ? (int) $data['carrierId'] : null,
         );
     }
 

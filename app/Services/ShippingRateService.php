@@ -28,6 +28,7 @@ use App\Models\ShippingOffer;
 use App\Models\SpecialService;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\PostageSources\OfferStore;
+use App\Services\Shipping\ContentsFilter;
 use App\Services\Shipping\PackagingFilter;
 use Carbon\CarbonImmutable;
 use GuzzleHttp\Promise\Utils as PromiseUtils;
@@ -143,9 +144,16 @@ class ShippingRateService
 
         // Before the quote log: a rate the package's packaging rules out was
         // never offered, and must not be logged as one (ADR-0005 decision 4).
-        $rateOptions = PackagingFilter::keepCompatible(
-            $this->fetchRatesConcurrently($carrierTasks, $rateRequest, $shipDates),
-            PackageData::fromPackage($package)->carrierPackaging,
+        // Nor was one for a service whose required contents the package does
+        // not have, such as Media Mail for a parcel that is not all media
+        // (ADR-0006 decision 11).
+        $packageData = PackageData::fromPackage($package);
+        $rateOptions = ContentsFilter::keepQualifying(
+            PackagingFilter::keepCompatible(
+                $this->fetchRatesConcurrently($carrierTasks, $rateRequest, $shipDates),
+                $packageData->carrierPackaging,
+            ),
+            $packageData->qualifyingContents,
         );
 
         $rates = $this->offer($package, $rateOptions, $shipDates, $rateRequest->fingerprint());
@@ -257,6 +265,8 @@ class ShippingRateService
                 carrier: $rate->carrier,
                 postageSource: PostageSource::CarrierAccount,
                 carrierAccountId: $rate->carrierAccountId,
+                carrierId: $rate->carrierId,
+                carrierServiceId: $rate->carrierServiceId,
                 serviceCode: $rate->serviceCode,
                 serviceName: $rate->serviceName,
                 price: $rate->priceUnknown ? null : $rate->price,
@@ -676,6 +686,11 @@ class ShippingRateService
      * returned rate conflicts with the Package's packaging. Empty responses and
      * failures remain conservatively eligible so Shopify cannot become an
      * outage fallback.
+     *
+     * A rate dropped for contents the Package lacks does not count against its
+     * seller here. Were a direct USPS account that quoted only Media Mail read
+     * as ineligible, Shopify could become the sole choice and be bought blind
+     * for the same Media Mail the drop just refused.
      *
      * @param  Collection<int, RateResponse>  $rates
      */

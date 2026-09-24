@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\ContentClass;
 use App\Services\CacheService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -9,6 +10,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
+/**
+ * @property ContentClass|null $required_contents
+ */
 class CarrierService extends Model
 {
     use HasFactory;
@@ -26,6 +30,7 @@ class CarrierService extends Model
         'active',
         'can_ship_to_po_boxes',
         'can_ship_to_military_addresses',
+        'required_contents',
     ];
 
     protected function casts(): array
@@ -34,6 +39,7 @@ class CarrierService extends Model
             'active' => 'boolean',
             'can_ship_to_po_boxes' => 'boolean',
             'can_ship_to_military_addresses' => 'boolean',
+            'required_contents' => ContentClass::class,
         ];
     }
 

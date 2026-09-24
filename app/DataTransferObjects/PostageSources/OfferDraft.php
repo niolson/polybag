@@ -4,7 +4,9 @@ namespace App\DataTransferObjects\PostageSources;
 
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\Enums\PostageSource;
+use App\Models\Carrier;
 use App\Models\CarrierAccount;
+use App\Models\CarrierService;
 use Carbon\CarbonInterface;
 
 /**
@@ -26,6 +28,8 @@ readonly class OfferDraft
      * @param  int|null  $rateQuoteId  The `rate_quotes` row logged for this rate, when rate shopping logged one, so that marking the selected quote is an update by primary key rather than a match on carrier and service code.
      * @param  string|null  $quoteFingerprint  {@see RateRequest::fingerprint()} of the request this price answers. The offer store recomputes it from the package at redemption and refuses on a mismatch: an edit to what the carrier was asked to price makes this a price for a different parcel.
      * @param  string|null  $carrierAccountFingerprint  {@see CarrierAccount::fingerprint()} of the account that quoted a direct rate — its billing identity, not its secrets — so the purchase can refuse when the same account row would now bill someone else. Null for a rate resold through a channel.
+     * @param  int|null  $carrierId  The {@see Carrier} expected to carry the parcel, resolved when the offer is issued, so a purchase restores it from here rather than from a carrier-name string or the browser.
+     * @param  int|null  $carrierServiceId  The {@see CarrierService} this offer is for, when the source quoted one. Restored at purchase and recorded on the Label.
      */
     public function __construct(
         public string $carrier,
@@ -43,5 +47,7 @@ readonly class OfferDraft
         public ?int $rateQuoteId = null,
         public ?string $quoteFingerprint = null,
         public ?string $carrierAccountFingerprint = null,
+        public ?int $carrierId = null,
+        public ?int $carrierServiceId = null,
     ) {}
 }

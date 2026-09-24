@@ -31,6 +31,8 @@ use Illuminate\Support\Str;
  * @property PostageSource $postage_source
  * @property SourceEnvironment $environment
  * @property string $carrier
+ * @property int|null $carrier_id
+ * @property int|null $carrier_service_id
  * @property array<string, mixed>|null $rate_metadata
  * @property array<string, mixed>|null $purchase_context
  * @property string|null $purchase_reference
@@ -56,7 +58,9 @@ class ShippingOffer extends Model
         'postage_data_source_id',
         'rate_quote_id',
         'carrier',
+        'carrier_id',
         'service_code',
+        'carrier_service_id',
         'service_name',
         'price',
         'currency',
@@ -136,6 +140,27 @@ class ShippingOffer extends Model
     public function rateQuote(): BelongsTo
     {
         return $this->belongsTo(RateQuote::class);
+    }
+
+    /**
+     * The carrier expected to carry the parcel, resolved when the offer was
+     * issued, so a rename before purchase changes nothing.
+     *
+     * @return BelongsTo<Carrier, $this>
+     */
+    public function carrierRow(): BelongsTo
+    {
+        return $this->belongsTo(Carrier::class, 'carrier_id');
+    }
+
+    /**
+     * The catalog service this offer is for, when the source quoted one.
+     *
+     * @return BelongsTo<CarrierService, $this>
+     */
+    public function carrierService(): BelongsTo
+    {
+        return $this->belongsTo(CarrierService::class);
     }
 
     /**

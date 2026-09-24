@@ -37,8 +37,10 @@ use App\Services\Carriers\Concerns\BuildsCustomerReferences;
 use App\Services\Carriers\Concerns\ConsultsCarrierPolicyForOffers;
 use App\Services\Carriers\Concerns\DecodesJsonResponses;
 use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
+use App\Services\Carriers\Concerns\IdentifiesCatalogServices;
 use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
+use App\Services\Shipping\ContentsFilter;
 use App\Services\Shipping\PackagingFilter;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -58,6 +60,7 @@ class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
     use ConsultsCarrierPolicyForOffers;
     use DecodesJsonResponses;
     use HasDefaultServiceCapabilities;
+    use IdentifiesCatalogServices;
     use ResolvesCarrierAccount;
     use ResolvesDeliveredAt;
 
@@ -418,7 +421,7 @@ class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
             'requested_codes' => $serviceCodes,
         ]);
 
-        return $results;
+        return $this->withCatalogIdentity($results);
     }
 
     /**
@@ -1249,10 +1252,20 @@ class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
      * single-piece and both cubic tables; Priority Mail Express, domestic and
      * international, prices single-piece under `PA` and has no cubic tier;
      * Parcel Select and the international parcel classes are single-piece
-     * only. Media Mail and Library Mail are parcels too, but content-
-     * restricted, and are deliberately absent; the presort classes never
-     * carry a single-piece indicator. Global Express Guaranteed has never
-     * appeared in a response and is absent until it does.
+     * only. The presort classes never carry a single-piece indicator. Global
+     * Express Guaranteed has never appeared in a response and is absent until
+     * it does.
+     *
+     * Media Mail is single-piece only: across 195 logged sandbox responses
+     * (2026-09-08 to 09-21) it came back as `SP` every time, once `MACHINABLE`
+     * and once `NONSTANDARD`, at one price. It is sold here, and whether a
+     * Package may be offered it is the catalog's question, not this list's:
+     * its `CarrierService` requires media contents, and the shared
+     * {@see ContentsFilter} drops it for a Package that does not qualify
+     * (ADR-0006 decision 10). Library Mail is also a single-piece parcel, but
+     * it is deliberately absent: it takes Media Mail's contents plus a
+     * condition on sender and recipient that nothing here can vouch for, and
+     * it has no catalog service to carry that requirement (decision 11).
      *
      * @var array<string, list<string>>
      */
@@ -1260,6 +1273,7 @@ class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
         'USPS_GROUND_ADVANTAGE' => self::DOMESTIC_PARCEL_INDICATORS,
         'PRIORITY_MAIL' => self::DOMESTIC_PARCEL_INDICATORS,
         'PRIORITY_MAIL_EXPRESS' => ['PA'],
+        'MEDIA_MAIL' => ['SP'],
         'PARCEL_SELECT' => ['SP'],
         'FIRST-CLASS_PACKAGE_INTERNATIONAL_SERVICE' => ['SP'],
         'PRIORITY_MAIL_INTERNATIONAL' => ['SP'],
@@ -1547,7 +1561,7 @@ class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
         }
 
         // Only the mail classes the classifier can place in a packaging —
-        // which excludes Library Mail, Media Mail and the presort classes.
+        // which excludes Library Mail and the presort classes.
         if (! isset(self::SHIPPER_PACKAGING_INDICATORS[$rate['mailClass']])) {
             return false;
         }
