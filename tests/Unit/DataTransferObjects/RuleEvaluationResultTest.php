@@ -17,5 +17,12 @@ it('cannot pre-select a rate and a blind purchase together', function (): void {
     expect(fn (): RuleEvaluationResult => new RuleEvaluationResult(
         preSelectedRate: $rate,
         preSelectedBlindPurchaseId: BlindPurchaseOffer::identifier('Shopify', 'auto'),
-    ))->toThrow(InvalidArgumentException::class, 'either a rate or a blind purchase');
+    ))->toThrow(InvalidArgumentException::class, 'never more than one');
+});
+
+it('cannot pre-select a source alongside a blind purchase', function (): void {
+    expect(fn (): RuleEvaluationResult => new RuleEvaluationResult(
+        preSelectedBlindPurchaseId: BlindPurchaseOffer::identifier('Shopify', 'auto'),
+        preSelectedSource: 'amazon',
+    ))->toThrow(InvalidArgumentException::class, 'never more than one');
 });

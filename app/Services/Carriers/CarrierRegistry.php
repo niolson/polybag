@@ -6,6 +6,7 @@ use App\Contracts\BlindPurchaseSource;
 use App\Contracts\CarrierAdapterInterface;
 use App\Contracts\CarrierPolicy;
 use App\Contracts\DirectCarrierAdapter;
+use App\Contracts\DiscoversServices;
 use App\Contracts\PostageOfferSource;
 use InvalidArgumentException;
 
@@ -93,6 +94,20 @@ class CarrierRegistry
         $adapter = $this->adapterOrNull($carrierName);
 
         return $adapter instanceof BlindPurchaseSource ? $adapter : null;
+    }
+
+    /**
+     * A registered source whose services are discovered per quote, or null.
+     *
+     * A shipping rule naming such a source names the source rather than a
+     * service, and selects among the offers it quotes instead of pre-selecting
+     * a rate for it.
+     */
+    public function discoveringSourceFor(?string $carrierName): ?DiscoversServices
+    {
+        $adapter = $this->adapterOrNull($carrierName);
+
+        return $adapter instanceof DiscoversServices ? $adapter : null;
     }
 
     /**

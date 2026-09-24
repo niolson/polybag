@@ -1,6 +1,10 @@
 <?php
 
+use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
+use App\DataTransferObjects\Shipping\RateResponse;
+use App\Enums\AmazonChannelType;
 use App\Enums\ShippingRuleAction;
+use App\Enums\SourceEnvironment;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\Channel;
@@ -11,6 +15,7 @@ use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
 use App\Models\ShippingRule;
+use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\RuleEvaluator;
 
 it('returns empty result when no rules exist', function (): void {
@@ -712,3 +717,62 @@ it('matches an Amazon program condition only on an order enrolled in that progra
     'prime rule, Shopify order' => ['prime', ['shopify_order_id' => 'gid://shopify/Order/1'], false],
     'premium rule, order with no metadata' => ['premium', null, false],
 ]);
+
+/**
+ * `amazon-buy-shipping/19`: Amazon's catalog row names the source, not a
+ * service, so a rule naming it is applied to the source.
+ */
+function amazonCatalogRow(): CarrierService
+{
+    $amazon = Carrier::factory()->create(['name' => AmazonBuyShippingAdapter::SOURCE_NAME]);
+
+    return CarrierService::factory()->create([
+        'carrier_id' => $amazon->id,
+        'service_code' => AmazonBuyShippingAdapter::CATALOG_SERVICE_CODE,
+    ]);
+}
+
+it('pre-selects the Amazon source, not a rate, for a UseService rule naming Amazon', function (): void {
+    $method = ShippingMethod::factory()->create();
+    $shipment = Shipment::factory()->create(['shipping_method_id' => $method->id]);
+
+    ShippingRule::factory()->create([
+        'shipping_method_id' => $method->id,
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => amazonCatalogRow()->id,
+    ]);
+
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
+
+    expect($result->hasPreSelectedRate())->toBeFalse()
+        ->and($result->hasPreSelectedSource())->toBeTrue()
+        ->and($result->preSelectedSource)->toBe(AmazonBuyShippingAdapter::OBSERVATION_SOURCE);
+});
+
+it('excludes the Amazon source, not its catalog service code, for an ExcludeService rule naming Amazon', function (): void {
+    $method = ShippingMethod::factory()->create();
+    $shipment = Shipment::factory()->create(['shipping_method_id' => $method->id]);
+
+    ShippingRule::factory()->excludeService()->create([
+        'shipping_method_id' => $method->id,
+        'carrier_service_id' => amazonCatalogRow()->id,
+    ]);
+
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
+
+    $identity = fn (string $source): ObservedServiceIdentity => new ObservedServiceIdentity(
+        source: $source,
+        environment: SourceEnvironment::Production,
+        channelType: AmazonChannelType::Amazon,
+        externalCarrierId: 'AMZN_US',
+        externalServiceId: 'std-us-swa-mfn',
+    );
+    $amazonOffer = new RateResponse(carrier: 'USPS', serviceCode: 'GROUND_ADVANTAGE', serviceName: 'Ground Advantage', price: 5.0, observedService: $identity('amazon'));
+    $directRate = new RateResponse(carrier: 'USPS', serviceCode: 'GROUND_ADVANTAGE', serviceName: 'Ground Advantage', price: 6.0);
+
+    expect($result->shouldFilterRates())->toBeTrue()
+        ->and($result->excludedServiceCodes)->toBe([])
+        ->and($result->excludedSources)->toBe([AmazonBuyShippingAdapter::OBSERVATION_SOURCE])
+        ->and($result->excludes($amazonOffer))->toBeTrue()
+        ->and($result->excludes($directRate))->toBeFalse();
+});

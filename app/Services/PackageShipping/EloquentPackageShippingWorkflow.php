@@ -18,6 +18,7 @@ use App\DataTransferObjects\Shipping\OfferRequirements;
 use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\DataTransferObjects\Shipping\RuleEvaluationResult;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\UnattendedRateSelection;
 use App\Enums\PackageStatus;
@@ -40,6 +41,7 @@ use App\Services\RateSelector;
 use App\Services\RuleEvaluator;
 use App\Services\ShippingRateService;
 use App\Services\SpecialServiceResolver;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Exceptions\Request\RequestException;
@@ -69,9 +71,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
         $ruleResult = $this->ruleEvaluator->evaluate($package->shipment, $package);
         if ($ruleResult->shouldFilterRates()) {
-            $rates = $rates->reject(
-                fn (RateResponse $rate): bool => in_array($rate->serviceCode, $ruleResult->excludedServiceCodes, true)
-            );
+            $rates = $rates->reject(fn (RateResponse $rate): bool => $ruleResult->excludes($rate));
         }
 
         $deadline = $package->shipment->getDeliverByDate();
@@ -130,7 +130,9 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             deliverByDate: $deadline?->format('D, M j'),
             allRatesLate: $deadline !== null && $classified->isNotEmpty() && $classified->every(fn (ClassifiedRate $cr): bool => ! $cr->isOnTime),
             exclusions: $exclusions,
-            selectedRateIndex: $this->selectedRateIndex($options, $ruleResult->preSelectedRate ?? null),
+            selectedRateIndex: $ruleResult->hasPreSelectedSource()
+                ? $this->firstRateIndexFromSource($classified, $ruleResult)
+                : $this->selectedRateIndex($options, $ruleResult->preSelectedRate ?? null),
             // Alongside the rates, never among them, and never pre-selected on
             // the attended page: a person must choose and confirm it here.
             blindPurchaseOffers: $this->shippingRateService->getBlindPurchaseOffers($ruleResult->excludedBlindPurchaseIds)
@@ -1151,6 +1153,24 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
     }
 
     /**
+     * The cheapest rate, on time first, from the source a rule names. The
+     * keys of the rate options are those of the classified list, so its first
+     * match is the one the packer sees offered first.
+     *
+     * @param  Collection<int, ClassifiedRate>  $classified
+     */
+    private function firstRateIndexFromSource(Collection $classified, RuleEvaluationResult $ruleResult): ?int
+    {
+        $key = $classified->search(fn (ClassifiedRate $cr): bool => $ruleResult->isFromPreSelectedSource($cr->rate));
+
+        if ($key !== false) {
+            return $key;
+        }
+
+        return $classified->isEmpty() ? null : 0;
+    }
+
+    /**
      * Whether the packer has to be asked before our customs declaration is
      * scaled down to fit the box.
      *
@@ -1219,6 +1239,29 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             }
         }
 
+        $deadline = $package->shipment->getDeliverByDate();
+        $requirements = $this->offerRequirementsFor($package);
+
+        // A rule naming a discovering source buys from that source or not at
+        // all: never another source's rate, and never a blind purchase. Its
+        // offers go through selection like any rate-shopped offer, so an
+        // unapproved service is withheld and named (`amazon-buy-shipping/19`).
+        if ($ruleResult->hasPreSelectedSource()) {
+            $rates = $this->shippingRateService->getShippingRates($package->id)
+                ->reject(fn (RateResponse $rate): bool => $ruleResult->excludes($rate))
+                ->filter(fn (RateResponse $rate): bool => $ruleResult->isFromPreSelectedSource($rate))
+                ->values();
+
+            if ($rates->isEmpty()) {
+                logger()->info('A shipping rule names a source that quoted nothing buyable for this package', [
+                    'package_id' => $package->id,
+                    'source' => $ruleResult->preSelectedSource,
+                ]);
+            }
+
+            return $this->rateSelector->selectForAutomation($rates, $deadline, $clientId, $requirements);
+        }
+
         // Only a source that quotes can resolve a pre-selected rate. A blind
         // selection was handled above without inventing a rate for it.
         $adapter = $ruleResult->hasPreSelectedRate()
@@ -1226,9 +1269,6 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             : null;
 
         $preSelected = $adapter?->resolvePreSelectedRate($ruleResult->preSelectedRate, $package);
-
-        $deadline = $package->shipment->getDeliverByDate();
-        $requirements = $this->offerRequirementsFor($package);
 
         // A rule's choice is still unattended: the shipping method's on-time
         // and protection requirements hold against it too.
@@ -1257,9 +1297,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         $rates = $this->shippingRateService->getShippingRates($package->id);
 
         if ($ruleResult->shouldFilterRates()) {
-            $rates = $rates->reject(
-                fn (RateResponse $rate): bool => in_array($rate->serviceCode, $ruleResult->excludedServiceCodes, true)
-            );
+            $rates = $rates->reject(fn (RateResponse $rate): bool => $ruleResult->excludes($rate));
         }
 
         $selection = $this->rateSelector->selectForAutomation($rates, $deadline, $clientId, $requirements);

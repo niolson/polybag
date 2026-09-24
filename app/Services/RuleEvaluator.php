@@ -38,6 +38,7 @@ class RuleEvaluator
 
         $excludedServiceCodes = [];
         $excludedBlindPurchaseIds = [];
+        $excludedSources = [];
 
         foreach ($rules as $rule) {
             if (! $this->conditionsMatch($rule->conditions, $shipment, $package)) {
@@ -48,9 +49,15 @@ class RuleEvaluator
             $carrier = $service->carrier;
             $action = $rule->getAttribute('action');
             $blindPurchaseSource = $this->carrierRegistry->blindPurchaseSourceFor($carrier->name);
+            // A discovering source's catalog row names the source, not a
+            // service: no offer it quotes carries the row's service code, so
+            // the rule is applied to the source (`amazon-buy-shipping/19`).
+            $discoveringSource = $this->carrierRegistry->discoveringSourceFor($carrier->name);
 
             if ($action === ShippingRuleAction::ExcludeService) {
-                if ($blindPurchaseSource) {
+                if ($discoveringSource) {
+                    $excludedSources[] = $discoveringSource->observationSource();
+                } elseif ($blindPurchaseSource) {
                     $excludedBlindPurchaseIds[] = BlindPurchaseOffer::identifier(
                         $carrier->name,
                         $service->service_code,
@@ -63,6 +70,18 @@ class RuleEvaluator
             }
 
             if ($action === ShippingRuleAction::UseService) {
+                // Its services are discovered per quote, so there is no rate to
+                // pre-select: the caller chooses among what the source quotes,
+                // each offer under its own approval.
+                if ($discoveringSource) {
+                    return new RuleEvaluationResult(
+                        excludedServiceCodes: $excludedServiceCodes,
+                        excludedBlindPurchaseIds: $excludedBlindPurchaseIds,
+                        preSelectedSource: $discoveringSource->observationSource(),
+                        excludedSources: $excludedSources,
+                    );
+                }
+
                 if ($blindPurchaseSource) {
                     return new RuleEvaluationResult(
                         preSelectedBlindPurchaseId: BlindPurchaseOffer::identifier(
@@ -71,6 +90,7 @@ class RuleEvaluator
                         ),
                         excludedServiceCodes: $excludedServiceCodes,
                         excludedBlindPurchaseIds: $excludedBlindPurchaseIds,
+                        excludedSources: $excludedSources,
                     );
                 }
 
@@ -87,6 +107,7 @@ class RuleEvaluator
                     preSelectedRate: $preSelectedRate,
                     excludedServiceCodes: $excludedServiceCodes,
                     excludedBlindPurchaseIds: $excludedBlindPurchaseIds,
+                    excludedSources: $excludedSources,
                 );
             }
         }
@@ -94,6 +115,7 @@ class RuleEvaluator
         return new RuleEvaluationResult(
             excludedServiceCodes: $excludedServiceCodes,
             excludedBlindPurchaseIds: $excludedBlindPurchaseIds,
+            excludedSources: $excludedSources,
         );
     }
 
