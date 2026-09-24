@@ -126,4 +126,5 @@ None - can start immediately.
   - **Open:** every logged sandbox response returns Media Mail twice, `SP` under both
     `MACHINABLE` and `NONSTANDARD`, at one price. Both are shown, and automation takes the
     first on a tie. Which one a given parcel should be bought as, and whether USPS re-rates
-    the wrong one, is unverified.
+    the wrong one, is unverified. Taken up in
+    [`usps-processing-category/01`](../../usps-processing-category/issues/01-classify-parcels-as-machinable-or-nonstandard.md).
