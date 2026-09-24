@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — 2026-09-02; amended 2026-09-22 to permit explicitly configured blind-purchase automation. Depends on ADR-0002.
+Accepted — 2026-09-02; amended 2026-09-22 to permit explicitly configured blind-purchase automation; amended 2026-09-24 (`amazon-buy-shipping/18`) so that approval no longer requires normalization, and may cover a whole carrier or everything a source offers, with exceptions. Depends on ADR-0002.
 
 Drafted 2026-09-01 and revised twice. The first draft modeled Shopify as a discovery source
 alongside Amazon, on the assumption that the purchased service becomes knowable after the fact.
@@ -95,13 +95,31 @@ not be.
 carrier we have no row for — DHL eCommerce, OnTrac — a human either selects an existing
 `CarrierService`, or explicitly creates the `Carrier` and `CarrierService` identities as an act
 of catalog authorship. External discovery must never create either by itself. An offer that
-nobody promotes stays **permanently human-selectable** rather than sitting in a queue; promotion
-is what unlocks automation, and normalization is therefore a precondition of approval, not a
-parallel track.
+nobody promotes stays **permanently human-selectable** rather than sitting in a queue.
+
+Amended 2026-09-24 (`amazon-buy-shipping/18`): as first accepted, promotion was what unlocked
+automation — normalization was a precondition of approval, not a parallel track. It no longer
+is. What a service is called and whether automation may buy it are separate questions, and
+requiring the first answered before the second meant authoring `Carrier` rows for OnTrac and DHL
+only to get past the gate. An unmapped service can be approved, and unmapping a service leaves
+its approvals alone: an approval names the source's own identifiers, which unmapping does not
+change. Normalization stays useful for naming, reports and shipping rules.
 
 **3. Approval is scoped to postage source, client, and environment.** Environment matters
 specifically: Amazon's sandbox and production service identifiers differ, so an approval earned
 in sandbox must not authorize spending in production.
+
+Amended 2026-09-24 (`amazon-buy-shipping/18`): an approval covers **one service, every service of
+one carrier, or everything the source offers** — including services first offered after it was
+granted. An **exception** has the same shapes and the opposite effect. A service is approved when
+at least one approval covers it and no exception does; an exception always wins. "Everything
+except OnTrac" is an approval of everything plus an exception for OnTrac. The three scope axes
+are never wildcarded: there is no approval for every client, and a sandbox approval of everything
+still authorizes nothing in production.
+
+Rejected: **most-specific-wins**, which would allow "no OnTrac, except OnTrac Ground". It makes a
+row's effect depend on which other rows exist, and nobody has asked for that case. Exceptions
+always winning is one rule a seller can hold in their head.
 
 **4. Discovered is not approved.** An unapproved Amazon service is selectable **by a human on
 the Ship page**, where a person sees the price and takes responsibility. It is excluded from

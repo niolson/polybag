@@ -33,8 +33,8 @@ return new class extends Migration
      * a `carrier_service_id`, because what gets bought is Amazon's service, not
      * our name for it: two observed identities may be aliased onto one
      * `CarrierService`, and approving one of them must not vouch for the other.
-     * Normalization is still a precondition — see `ServiceApprovalGate` — it is
-     * just not the subject.
+     * Normalization was then still a precondition, just not the subject;
+     * `amazon-buy-shipping/18` dropped it.
      */
     public function up(): void
     {

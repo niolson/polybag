@@ -76,6 +76,19 @@ class DataSource extends Model
         return $query->where('active', true)->where('import_enabled', true);
     }
 
+    /**
+     * Whether any Amazon connection is active — what Amazon-only settings,
+     * such as OTDR protection and automation approvals, wait on before they
+     * are offered. Nothing Amazon sells can be bought without one.
+     */
+    public static function hasActiveAmazonConnection(): bool
+    {
+        return static::query()
+            ->where('source_type', AmazonSource::class)
+            ->where('active', true)
+            ->exists();
+    }
+
     public function importsOrders(): bool
     {
         return $this->active && $this->import_enabled;

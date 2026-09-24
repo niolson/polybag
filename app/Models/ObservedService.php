@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Enums\SourceEnvironment;
-use App\Filament\Pages\UnmappedObservedServices;
 use App\Services\PostageSources\ObservedServiceMapper;
 use App\Services\PostageSources\ObservedServiceRecorder;
 use Database\Factories\ObservedServiceFactory;
@@ -41,15 +40,6 @@ use Illuminate\Support\Carbon;
  *                                                               the first time a rate for it said it required them. Null until then —
  *                                                               which, for every service seen so far, is still.
  * @property Carbon|null $additional_inputs_schema_seen_at
- * @property-read int|null $environment_approvals_count how many clients have
- *     approved this service for automated spending, in the world this row was
- *     seen in. Not a column and not a relation — approvals are keyed on the
- *     service identity rather than on the sighting, so there is no foreign key
- *     to count through. Present only where a query selects it;
- *     {@see UnmappedObservedServices} does, with a correlated subquery.
- * @property-read int|null $service_approvals_count the same count across every
- *     environment — what unmapping this service would withdraw, since a mapping
- *     spans worlds and the revocation that follows it spans them too.
  */
 class ObservedService extends Model
 {

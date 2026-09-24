@@ -59,8 +59,10 @@ becomes a `CarrierService` only when a human authors one; discovery never create
 _Avoid_: Discovered service, carrier service
 
 **Automation approval**:
-One Client's permission for an observed service to be bought by an unattended workflow in
-one postage-source environment. It requires normalization first and never crosses between
+One Client's permission for observed services to be bought by an unattended workflow in
+one postage-source environment. It covers one service, every service of one carrier, or
+everything the source offers, and an **exception** of the same shape carves services back
+out; an exception always wins. It does not require normalization and never crosses between
 sandbox and production. Human selection does not require it.
 _Avoid_: Service enabled, service active
 

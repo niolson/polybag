@@ -9,7 +9,7 @@ use App\Models\User;
 /**
  * Approving a discovered service is authorizing unattended spending on a
  * client's account, which puts it with the other Admin acts rather than with
- * the Manager-level mapping it depends on.
+ * the Manager-level mapping beside it.
  *
  * The same line `ClientResource` already draws: `clients.blind_purchase_enabled`
  * is the other consent-to-spend flag in the app and it is edited by admins.
@@ -44,13 +44,8 @@ class ServiceApprovalPolicy
     }
 
     /**
-     * Withdrawing approvals wholesale, with no particular row in hand.
-     *
-     * What unmapping a service does: `ObservedServiceMapper::unmap()` revokes
-     * every approval of it, in every environment. That is the same act as
-     * unticking the clients one at a time, so it answers to the same role —
-     * otherwise mapping, which opens at `Manager`, would be a way round this
-     * policy rather than a separate concern from it.
+     * Withdrawing approvals wholesale, with no particular row in hand — what
+     * saving the approvals page with fewer rules than before does.
      */
     public function deleteAny(User $user): bool
     {

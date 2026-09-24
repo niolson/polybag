@@ -251,78 +251,9 @@ it('returns a mapped observation to the unmapped state without deleting catalog 
         ->and(CarrierService::whereKey($carrierService->id)->exists())->toBeTrue();
 });
 
-it('approves a mapped service for the clients that were ticked', function (): void {
-    $observation = ObservedService::factory()->mapped()->create();
-    $approved = Client::factory()->create();
-    $unapproved = Client::factory()->create();
-
-    Livewire::test(UnmappedObservedServices::class)
-        ->filterTable('mapped', true)
-        ->callAction(TestAction::make('approve')->table($observation), [
-            'client_ids' => [$approved->id],
-        ])
-        ->assertNotified();
-
-    $gate = app(ServiceApprovalGate::class);
-
-    expect($gate->approvedClientIds($observation)->all())->toBe([$approved->id])
-        ->and(ServiceApproval::sole()->approved_by_user_id)->toBe(auth()->id())
-        ->and($gate->approved('amazon', $observation->environment, $observation->external_carrier_id, $observation->external_service_id, $unapproved->id))
-        ->toBeFalse();
-});
-
-it('prefills the approval form with the clients already approved', function (): void {
-    $observation = ObservedService::factory()->mapped()->create();
-    $client = Client::factory()->create();
-    Client::factory()->create();
-
-    approveService($observation, $client);
-
-    Livewire::test(UnmappedObservedServices::class)
-        ->filterTable('mapped', true)
-        ->mountAction(TestAction::make('approve')->table($observation))
-        ->assertActionDataSet(['client_ids' => [$client->id]]);
-});
-
-it('withdraws an approval when its client is unticked', function (): void {
-    $observation = ObservedService::factory()->mapped()->create();
-    $client = Client::factory()->create();
-
-    approveService($observation, $client);
-
-    Livewire::test(UnmappedObservedServices::class)
-        ->filterTable('mapped', true)
-        ->callAction(TestAction::make('approve')->table($observation), [
-            'client_ids' => [],
-        ])
-        ->assertNotified();
-
-    expect(ServiceApproval::count())->toBe(0);
-});
-
-it('offers no approval for a service nobody has named', function (): void {
-    // ADR-0003 decision 2: normalization is a precondition of approval, so
-    // there is nothing here to press until the service has been mapped.
-    $unmapped = ObservedService::factory()->create();
-
-    Livewire::test(UnmappedObservedServices::class)
-        ->assertActionHidden(TestAction::make('approve')->table($unmapped));
-});
-
-it('does not offer approval to a manager', function (): void {
-    // Naming a service is a manager's job. Deciding that money may be spent on
-    // it with nobody watching is not.
-    $observation = ObservedService::factory()->mapped()->create();
-
-    $this->actingAs(User::factory()->manager()->create());
-
-    Livewire::test(UnmappedObservedServices::class)
-        ->filterTable('mapped', true)
-        ->assertActionHidden(TestAction::make('approve')->table($observation))
-        ->assertActionVisible(TestAction::make('assign')->table($observation));
-});
-
-it('withdraws approvals along with the mapping they depended on', function (): void {
+it('leaves approvals in place when a service is unmapped', function (): void {
+    // amazon-buy-shipping/18: what a service is called is not whether
+    // automation may buy it.
     $observation = ObservedService::factory()->mapped()->create();
 
     approveService($observation, Client::factory()->create());
@@ -332,19 +263,12 @@ it('withdraws approvals along with the mapping they depended on', function (): v
         ->callAction(TestAction::make('unmap')->table($observation))
         ->assertNotified();
 
-    expect(ServiceApproval::count())->toBe(0)
+    expect(ServiceApproval::count())->toBe(1)
         ->and($observation->fresh()->carrier_service_id)->toBeNull();
 });
-
-it('does not let a manager withdraw approvals by unmapping', function (): void {
-    // Unmapping revokes every approval of the service, which is the same act as
-    // unticking the clients one at a time — and that is admin-only. Mapping
-    // opening at Manager must not be a way round ServiceApprovalPolicy.
+it('lets a manager unmap an approved service, since that withdraws nothing', function (): void {
     $approved = ObservedService::factory()->mapped()->create([
         'external_service_id' => 'USPS_GROUND_ADVANTAGE',
-    ]);
-    $attendedOnly = ObservedService::factory()->mapped()->create([
-        'external_service_id' => 'USPS_PRIORITY_MAIL',
     ]);
 
     approveService($approved, Client::factory()->create());
@@ -353,60 +277,8 @@ it('does not let a manager withdraw approvals by unmapping', function (): void {
 
     Livewire::test(UnmappedObservedServices::class)
         ->filterTable('mapped', true)
-        ->assertActionHidden(TestAction::make('unmap')->table($approved))
-        // Still theirs to press for a service nobody has approved, which is the
-        // ordinary case and their job.
-        ->assertActionVisible(TestAction::make('unmap')->table($attendedOnly));
+        ->assertActionVisible(TestAction::make('unmap')->table($approved));
 });
-
-it('closes the manager unmap route in the other environment too', function (): void {
-    // The approval is in sandbox and the row being unmapped is production. The
-    // mapping — and so the revocation that follows it — spans both, so the
-    // count that gates the button has to as well.
-    $carrierService = CarrierService::factory()->create();
-
-    $production = ObservedService::factory()->mapped($carrierService)->create([
-        'environment' => SourceEnvironment::Production,
-        'external_service_id' => 'USPS_GROUND_ADVANTAGE',
-    ]);
-    $sandbox = ObservedService::factory()->mapped($carrierService)->create([
-        'environment' => SourceEnvironment::Sandbox,
-        'external_service_id' => 'USPS_GROUND_ADVANTAGE',
-    ]);
-
-    approveService($sandbox, Client::factory()->create());
-
-    $this->actingAs(User::factory()->manager()->create());
-
-    Livewire::test(UnmappedObservedServices::class)
-        ->filterTable('mapped', true)
-        ->assertActionHidden(TestAction::make('unmap')->table($production));
-});
-
-it('separates approved services from attended-only ones', function (): void {
-    $approved = ObservedService::factory()->mapped()->create([
-        'external_service_id' => 'USPS_GROUND_ADVANTAGE',
-    ]);
-    $attendedOnly = ObservedService::factory()->mapped()->create([
-        'external_service_id' => 'USPS_PRIORITY_MAIL',
-    ]);
-
-    approveService($approved, Client::factory()->create());
-
-    Livewire::test(UnmappedObservedServices::class)
-        ->filterTable('mapped', true)
-        ->filterTable('approved', true)
-        ->assertCanSeeTableRecords([$approved])
-        ->assertCanNotSeeTableRecords([$attendedOnly])
-        ->assertTableColumnStateSet('environment_approvals_count', '1 client', $approved);
-
-    Livewire::test(UnmappedObservedServices::class)
-        ->filterTable('mapped', true)
-        ->filterTable('approved', false)
-        ->assertCanSeeTableRecords([$attendedOnly])
-        ->assertCanNotSeeTableRecords([$approved]);
-});
-
 it('leaves an unmapped observation alone — no badge, no queue, no error', function (): void {
     ObservedService::factory()
         ->count(3)
