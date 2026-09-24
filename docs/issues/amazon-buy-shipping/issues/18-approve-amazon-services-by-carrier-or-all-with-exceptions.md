@@ -1,6 +1,6 @@
 # Approve Amazon services all at once, by carrier, or one at a time, with exceptions
 
-Status: ready-for-agent
+Status: done — shipped 2026-09-24; approvals are set on the new *Amazon Automation Approvals* page
 
 Repo: `polybag`
 
@@ -87,15 +87,34 @@ case. Exceptions always winning is one rule a seller can hold in their head.
 
 ## Acceptance criteria
 
-- [ ] With `*`/`*` approved, a service never seen before is bought by automation
-- [ ] With `*`/`*` approved and an exception for `ONTRAC`/`*`, no OnTrac service is bought,
+- [x] With `*`/`*` approved, a service never seen before is bought by automation
+- [x] With `*`/`*` approved and an exception for `ONTRAC`/`*`, no OnTrac service is bought,
       and a UPS one is
-- [ ] With `ONTRAC`/`*` approved, every OnTrac service is bought and a UPS one is not
-- [ ] An unmapped service can be approved, and unmapping an approved service leaves it
+- [x] With `ONTRAC`/`*` approved, every OnTrac service is bought and a UPS one is not
+- [x] An unmapped service can be approved, and unmapping an approved service leaves it
       approved
-- [ ] A sandbox `*`/`*` approval does not approve anything in production
-- [ ] Existing per-service approvals behave exactly as before
-- [ ] Rate selection runs one approvals query per quote, not one per rate
+- [x] A sandbox `*`/`*` approval does not approve anything in production
+- [x] Existing per-service approvals behave exactly as before
+- [x] Rate selection runs one approvals query per quote, not one per rate
+
+## As built
+
+- Approvals moved off *Map Carrier Services* onto their own *Amazon Automation Approvals* page
+  (Integrations → *Amazon Approvals*, admin only, hidden while no Amazon connection is
+  active), one client and environment at a time. It lists only the carriers Amazon's help
+  page says Buy Shipping sells to a US seller, plus any service actually offered or named
+  by a rule, and shows service names without Amazon's identifiers. The mapping page
+  lost its *Approve* action, its *Approved for* column and its approval filter: a per-row
+  count of exact rows would have misreported services covered by a wildcard. Unmapping is
+  open to a manager again, since it no longer withdraws anything.
+- The page saves exactly what it shows, through `ServiceApprovalGate::sync()`. A carrier or
+  service named by a rule on file is listed even when that world has not reported it, so a
+  save for an unrelated reason cannot withdraw it unseen.
+- `approvedServiceKeys()`, `syncClients()`, `approvedClientIds()` and `revokeAll()` are gone;
+  `rulesFor()` returns a `ServiceApprovalRules` matcher, and `RateSelector` makes one query
+  per source and environment in the quote.
+- `*` for a service under a carrier wildcard is refused by the model's `saving` hook as well
+  as by `ApprovalRule`.
 
 ## Blocked by
 

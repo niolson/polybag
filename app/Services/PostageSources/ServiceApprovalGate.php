@@ -2,16 +2,16 @@
 
 namespace App\Services\PostageSources;
 
+use App\DataTransferObjects\PostageSources\ApprovalRule;
+use App\DataTransferObjects\PostageSources\ServiceApprovalRules;
+use App\Enums\ApprovalEffect;
 use App\Enums\SourceEnvironment;
-use App\Exceptions\UnnormalizedServiceApprovalException;
 use App\Models\Client;
 use App\Models\ObservedService;
 use App\Models\ServiceApproval;
 use App\Models\ShippingOffer;
 use App\Models\User;
 use App\Services\RateSelector;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
@@ -22,7 +22,9 @@ use Illuminate\Support\Facades\DB;
  * The last of the three concepts decision 2 keeps apart, and the only one that
  * is about money rather than about facts or names. {@see ObservedServiceRecorder}
  * writes what a source reported; {@see ObservedServiceMapper} says what we call
- * it; this says whether an unattended path may buy it.
+ * it; this says whether an unattended path may buy it. Since
+ * `amazon-buy-shipping/18` the three are fully independent: a service nobody
+ * has named can be approved, and unmapping one leaves its approvals alone.
  *
  * **Deny by default, and deny is the whole safety mechanism.** An unapproved
  * service is not hidden and not broken: a packer sees it on the Ship page with
@@ -31,7 +33,11 @@ use Illuminate\Support\Facades\DB;
  * That split — on *who is choosing* — is what makes discovery acceptable at
  * all, so every answer this class gives to an unattended caller starts from no.
  *
- * Three axes of scope, all load-bearing:
+ * An approval covers one service, one carrier's services, or everything the
+ * source offers, and an exception of the same shape carves services back out.
+ * An exception always wins — see {@see ServiceApprovalRules}.
+ *
+ * Three axes of scope, all load-bearing, and none of them wildcarded:
  *
  * - **postage source**, because a service offered through Amazon and the same
  *   service bought directly are two different purchases;
@@ -47,7 +53,7 @@ use Illuminate\Support\Facades\DB;
  */
 class ServiceApprovalGate
 {
-    /** How long a held mapping lock stays valid if the holder dies mid-write. */
+    /** How long a held approvals lock stays valid if the holder dies mid-write. */
     private const LOCK_SECONDS = 10;
 
     /** How long to wait for another writer to finish before giving up. */
@@ -75,59 +81,41 @@ class ServiceApprovalGate
         string $externalServiceId,
         ?int $clientId,
     ): bool {
-        if ($clientId === null) {
-            return false;
-        }
-
-        return ServiceApproval::query()
-            ->forService($source, $environment, $externalCarrierId, $externalServiceId)
-            ->where('client_id', $clientId)
-            ->exists();
+        return $this->rulesFor($source, $environment, $clientId)
+            ->permits($externalCarrierId, $externalServiceId);
     }
 
     /**
-     * Everything this client has approved from one source in one world, keyed
-     * the way {@see ObservedService::serviceKey()} keys a service.
+     * Everything this client has approved and excepted from one source in one
+     * world, in one query.
      *
-     * For filtering a whole rate list against one query rather than one per
-     * offer: an Amazon `getRates` can return several eligible offers, and
+     * For matching a whole rate list rather than asking once per offer: an
+     * Amazon `getRates` can return several eligible offers, and
      * {@see RateSelector} is on the Ship page's hot path.
-     *
-     * @return Collection<int, string>
      */
-    public function approvedServiceKeys(string $source, SourceEnvironment $environment, ?int $clientId): Collection
+    public function rulesFor(string $source, SourceEnvironment $environment, ?int $clientId): ServiceApprovalRules
     {
         if ($clientId === null) {
-            return collect();
+            return ServiceApprovalRules::none();
         }
 
-        return ServiceApproval::query()
-            ->where('source', $source)
-            ->where('environment', $environment)
-            ->where('client_id', $clientId)
-            ->get(['source', 'external_carrier_id', 'external_service_id'])
-            ->map(fn (ServiceApproval $approval): string => ObservedService::serviceKey(
-                $approval->source,
-                $approval->external_carrier_id,
-                $approval->external_service_id,
-            ))
-            ->values();
+        return new ServiceApprovalRules(
+            ServiceApproval::query()
+                ->inWorld($source, $environment)
+                ->where('client_id', $clientId)
+                ->get()
+                ->map(fn (ServiceApproval $approval): ApprovalRule => ApprovalRule::fromApproval($approval))
+                ->values()
+        );
     }
 
     /**
-     * Approve the service an observation names, for one client, in the world
-     * that observation was made in.
+     * Approve the one service an observation names, for one client, in the
+     * world that observation was made in.
      *
-     * Normalization first, always: ADR-0003 decision 2 puts promotion before
-     * approval rather than beside it, and an approval for something nobody has
-     * named would authorize spending on a service no report could describe.
-     *
-     * Taken under {@see ObservedService::MAPPING_LOCK} because the check and
-     * the write straddle a column another operator may be clearing from the
-     * mapping page. Without it, an approval granted in the window between
-     * reading `carrier_service_id` and inserting the row outlives the mapping
-     * that justified it — approved and unnamed, which is the one combination
-     * this class refuses to produce.
+     * Mapped or not: what a service is called is not whether automation may
+     * buy it, and requiring a `Carrier` row for OnTrac only to get past this
+     * method was catalog authoring for its own sake.
      *
      * The approver is required rather than nullable. An approval is a standing
      * permission to spend somebody's money unattended, and one that cannot say
@@ -135,163 +123,35 @@ class ServiceApprovalGate
      * write — a nullable parameter with a convenient default is how that row
      * gets created by accident. Callers that are not a signed-in operator have
      * to name the user they are acting for.
-     *
-     * @throws UnnormalizedServiceApprovalException
      */
     public function grant(ObservedService $observation, Client $client, User $approver): ServiceApproval
     {
-        return Cache::lock(ObservedService::MAPPING_LOCK, self::LOCK_SECONDS)->block(
-            self::LOCK_WAIT_SECONDS,
-            fn (): ServiceApproval => $this->grantUnderLock($observation, $client, $approver),
+        return $this->grantRule(
+            $observation->source,
+            $observation->environment,
+            $client,
+            ApprovalRule::service($observation->external_carrier_id, $observation->external_service_id),
+            $approver,
         );
     }
 
     /**
-     * Withdraw one client's approval.
-     *
-     * Unlocked, unlike {@see grant()}: revocation only ever moves towards the
-     * safe answer, so racing a mapping change cannot produce a state worth
-     * protecting against.
-     *
-     * @return int approvals withdrawn — 0 when there was nothing to withdraw
+     * Write one approval or exception — a service, a carrier, or everything.
      */
-    public function revoke(ObservedService $observation, Client $client): int
-    {
-        return $this->withdraw(
-            $this->scopeFor($observation)->where('client_id', $client->getKey())
-        );
-    }
-
-    /**
-     * Withdraw every client's approval of this service, in every world.
-     *
-     * Called by {@see ObservedServiceMapper::unmap()}, which is why this does
-     * not take {@see ObservedService::MAPPING_LOCK} itself — the mapper is
-     * already holding it and the lock is not reentrant. Unmapping revokes
-     * rather than merely suspending: normalization is the precondition of
-     * approval, so withdrawing the name withdraws the permission, visibly and
-     * with a count, instead of leaving a row that silently means nothing.
-     *
-     * Environment-blind, and this is the one place that is right. A mapping
-     * covers every world the service was seen in
-     * ({@see ObservedService::scopeSameService()}), so unmapping a production
-     * row also unmaps the sandbox one — and a revocation narrower than the
-     * unmapping that triggered it would leave precisely the state this class
-     * refuses to produce: approved, and named nothing.
-     *
-     * @return int approvals withdrawn
-     */
-    public function revokeAll(ObservedService $observation): int
-    {
-        return $this->withdraw(
-            ServiceApproval::query()
-                ->where('source', $observation->source)
-                ->where('external_carrier_id', $observation->external_carrier_id)
-                ->where('external_service_id', $observation->external_service_id)
-        );
-    }
-
-    /**
-     * Set the exact list of clients approved for this service, granting and
-     * revoking as needed.
-     *
-     * What the approval form submits. One lock and one transaction over both
-     * halves, so a half-applied change cannot leave a client approved because
-     * the revoke that was meant to follow failed.
-     *
-     * @param  list<int>  $clientIds
-     * @return array{granted: int, revoked: int}
-     *
-     * @throws UnnormalizedServiceApprovalException
-     */
-    public function syncClients(ObservedService $observation, array $clientIds, User $approver): array
-    {
-        return Cache::lock(ObservedService::MAPPING_LOCK, self::LOCK_SECONDS)->block(
-            self::LOCK_WAIT_SECONDS,
-            function () use ($observation, $clientIds, $approver): array {
-                $wanted = collect($clientIds)->map(fn (int|string $id): int => (int) $id)->unique();
-
-                return DB::transaction(function () use ($observation, $wanted, $approver): array {
-                    $existing = $this->approvedClientIds($observation);
-
-                    $revoked = $existing->diff($wanted)->isEmpty()
-                        ? 0
-                        : $this->withdraw(
-                            $this->scopeFor($observation)
-                                ->whereIn('client_id', $existing->diff($wanted)->all())
-                        );
-
-                    $granted = $wanted->diff($existing);
-
-                    foreach ($granted as $clientId) {
-                        $this->grantUnderLock($observation, Client::findOrFail($clientId), $approver);
-                    }
-
-                    return ['granted' => $granted->count(), 'revoked' => $revoked];
-                });
-            },
-        );
-    }
-
-    /**
-     * The clients that have approved this service in the world it was observed
-     * in.
-     *
-     * @return Collection<int, int>
-     */
-    public function approvedClientIds(ObservedService $observation): Collection
-    {
-        return $this->scopeFor($observation)
-            ->pluck('client_id')
-            ->map(fn (int|string $id): int => (int) $id)
-            ->values();
-    }
-
-    /**
-     * Delete approvals one hydrated model at a time.
-     *
-     * Not `->delete()` on the query. A mass delete never loads a model and so
-     * never fires `deleted`, which is what `AuditableObserver` listens for —
-     * the audit log would have carried every grant of permission to spend money
-     * and no withdrawal of one, which is the half that gets asked about after
-     * the fact.
-     *
-     * The row count is bounded by clients × environments for a single service,
-     * so paying a delete per row buys the audit trail cheaply. Callers that
-     * need the two writes to commit together wrap this in their own
-     * transaction — {@see ObservedServiceMapper::unmap()} does.
-     *
-     * @param  Builder<ServiceApproval>  $query
-     * @return int approvals withdrawn
-     */
-    private function withdraw(Builder $query): int
-    {
-        $approvals = $query->get();
-
-        foreach ($approvals as $approval) {
-            $approval->delete();
-        }
-
-        return $approvals->count();
-    }
-
-    /**
-     * The write half of {@see grant()}, with the lock assumed held.
-     */
-    private function grantUnderLock(ObservedService $observation, Client $client, User $approver): ServiceApproval
-    {
-        if (! $observation->fresh()?->isMapped()) {
-            throw new UnnormalizedServiceApprovalException(
-                "Cannot approve {$observation->displayName()}: map it to a carrier service first."
-            );
-        }
-
+    public function grantRule(
+        string $source,
+        SourceEnvironment $environment,
+        Client $client,
+        ApprovalRule $rule,
+        User $approver,
+    ): ServiceApproval {
         return ServiceApproval::updateOrCreate(
             [
-                'source' => $observation->source,
-                'environment' => $observation->environment,
-                'external_carrier_id' => $observation->external_carrier_id,
-                'external_service_id' => $observation->external_service_id,
+                'source' => $source,
+                'environment' => $environment,
+                'external_carrier_id' => $rule->externalCarrierId,
+                'external_service_id' => $rule->externalServiceId,
+                'effect' => $rule->effect,
                 'client_id' => $client->getKey(),
             ],
             [
@@ -306,21 +166,94 @@ class ServiceApprovalGate
     }
 
     /**
-     * Every approval covering the service this observation names, in its world.
+     * Withdraw one client's approval of the one service an observation names.
      *
-     * Narrower than the scope a mapping covers — see
-     * {@see ServiceApproval::scopeForService()} — by exactly one axis, the
-     * environment.
+     * Only the row naming that service: a carrier or whole-source approval
+     * that also covers it is a different decision, withdrawn on its own.
      *
-     * @return Builder<ServiceApproval>
+     * @return int approvals withdrawn — 0 when there was nothing to withdraw
      */
-    private function scopeFor(ObservedService $observation): Builder
+    public function revoke(ObservedService $observation, Client $client): int
     {
-        return ServiceApproval::query()->forService(
-            $observation->source,
-            $observation->environment,
-            $observation->external_carrier_id,
-            $observation->external_service_id,
+        return $this->withdraw(
+            ServiceApproval::query()
+                ->inWorld($observation->source, $observation->environment)
+                ->where('client_id', $client->getKey())
+                ->where('external_carrier_id', $observation->external_carrier_id)
+                ->where('external_service_id', $observation->external_service_id)
+                ->where('effect', ApprovalEffect::Allow)
+                ->get()
         );
+    }
+
+    /**
+     * Set one client's approvals and exceptions for one source and world to
+     * exactly these, granting and withdrawing as needed.
+     *
+     * What the approvals page submits. One lock and one transaction over both
+     * halves, so a half-applied change cannot leave a service approved because
+     * the exception that was meant to come with it failed to write.
+     *
+     * A rule that is already on file is left as it is, author and date
+     * included: re-saving the form is not re-approving.
+     *
+     * @param  iterable<ApprovalRule>  $rules
+     * @return array{granted: int, revoked: int}
+     */
+    public function sync(
+        string $source,
+        SourceEnvironment $environment,
+        Client $client,
+        iterable $rules,
+        User $approver,
+    ): array {
+        $lock = "service-approvals:{$client->getKey()}:{$source}:{$environment->value}";
+
+        return Cache::lock($lock, self::LOCK_SECONDS)->block(
+            self::LOCK_WAIT_SECONDS,
+            fn (): array => DB::transaction(function () use ($source, $environment, $client, $rules, $approver): array {
+                $wanted = collect($rules)->keyBy(fn (ApprovalRule $rule): string => $rule->key());
+
+                $existing = ServiceApproval::query()
+                    ->inWorld($source, $environment)
+                    ->where('client_id', $client->getKey())
+                    ->get()
+                    ->keyBy(fn (ServiceApproval $approval): string => ApprovalRule::fromApproval($approval)->key());
+
+                $revoked = $this->withdraw($existing->diffKeys($wanted)->values());
+
+                $granted = $wanted->diffKeys($existing);
+
+                foreach ($granted as $rule) {
+                    $this->grantRule($source, $environment, $client, $rule, $approver);
+                }
+
+                return ['granted' => $granted->count(), 'revoked' => $revoked];
+            }),
+        );
+    }
+
+    /**
+     * Delete approvals one hydrated model at a time.
+     *
+     * Not `->delete()` on a query. A mass delete never loads a model and so
+     * never fires `deleted`, which is what `AuditableObserver` listens for —
+     * the audit log would have carried every grant of permission to spend money
+     * and no withdrawal of one, which is the half that gets asked about after
+     * the fact.
+     *
+     * @param  iterable<ServiceApproval>  $approvals
+     * @return int approvals withdrawn
+     */
+    private function withdraw(iterable $approvals): int
+    {
+        $count = 0;
+
+        foreach ($approvals as $approval) {
+            $approval->delete();
+            $count++;
+        }
+
+        return $count;
     }
 }

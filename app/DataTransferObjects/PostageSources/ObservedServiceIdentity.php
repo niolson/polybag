@@ -51,11 +51,11 @@ readonly class ObservedServiceIdentity
     /**
      * The full scope an approval covers, as a single comparable string.
      *
-     * `ObservedService::serviceKey()` plus the environment, because that is
-     * exactly one axis narrower than what an approval is granted for — see
-     * {@see ServiceApproval::scopeForService()}. Comparing on the
-     * service key alone would let a sandbox approval match a production rate,
-     * which is the one collapse ADR-0003 decision 3 exists to prevent.
+     * `ObservedService::serviceKey()` plus the environment, because an
+     * approval is scoped to one environment — see
+     * {@see ServiceApproval::scopeInWorld()}. Comparing on the service key
+     * alone would treat a sandbox offer and a production one as the same
+     * service, which is the one collapse ADR-0003 decision 3 exists to prevent.
      */
     public function approvalKey(): string
     {
@@ -66,8 +66,8 @@ readonly class ObservedServiceIdentity
     }
 
     /**
-     * The same key built from a service key the gate returned, which carries no
-     * environment of its own because the query it came from fixed one.
+     * The same key built from a service key, which carries no environment of
+     * its own.
      */
     public static function approvalKeyFor(SourceEnvironment $environment, string $serviceKey): string
     {

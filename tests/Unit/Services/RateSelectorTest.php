@@ -308,6 +308,79 @@ it('asks the database nothing when no rate names a discovered service', function
     DB::disableQueryLog();
 });
 
+it('buys a service nobody has seen before once everything is approved', function (): void {
+    $client = Client::where('is_default', true)->firstOrFail();
+    ServiceApproval::factory()->everything()->create(['client_id' => $client->id]);
+
+    $best = app(RateSelector::class)->selectBest(
+        collect([makeDiscoveredRate(3.00, 'DHL_PARCEL_GROUND', 'DHL_ECOMMERCE'), makeRate(9.00)]),
+        null,
+        $client->id,
+    );
+
+    expect($best->observedService?->externalServiceId)->toBe('DHL_PARCEL_GROUND');
+});
+
+it('buys UPS and never OnTrac with everything approved except OnTrac', function (): void {
+    $client = Client::where('is_default', true)->firstOrFail();
+    ServiceApproval::factory()->everything()->create(['client_id' => $client->id]);
+    ServiceApproval::factory()->wholeCarrier('ONTRAC')->exception()->create(['client_id' => $client->id]);
+
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([
+            makeDiscoveredRate(3.00, 'ONTRAC_MFN_GROUND', 'ONTRAC'),
+            makeDiscoveredRate(3.50, 'ONTRAC_MFN_SUNRISE', 'ONTRAC'),
+            makeDiscoveredRate(5.00, 'UPS_PTP_GND', 'UPS'),
+        ]),
+        null,
+        $client->id,
+    );
+
+    expect($selection->rate->observedService->externalServiceId)->toBe('UPS_PTP_GND')
+        ->and($selection->withheld->map(fn (RateResponse $rate): string => $rate->observedService->externalCarrierId)->unique()->all())
+        ->toBe(['ONTRAC']);
+});
+
+it('buys every OnTrac service and no UPS one with OnTrac approved', function (): void {
+    $client = Client::where('is_default', true)->firstOrFail();
+    ServiceApproval::factory()->wholeCarrier('ONTRAC')->create(['client_id' => $client->id]);
+
+    $selector = app(RateSelector::class);
+
+    expect($selector->selectBest(collect([makeDiscoveredRate(6.00, 'ONTRAC_MFN_GROUND', 'ONTRAC')]), null, $client->id))->not->toBeNull()
+        ->and($selector->selectBest(collect([makeDiscoveredRate(6.00, 'ONTRAC_MFN_SUNRISE', 'ONTRAC')]), null, $client->id))->not->toBeNull()
+        ->and($selector->selectBest(collect([makeDiscoveredRate(3.00, 'UPS_PTP_GND', 'UPS')]), null, $client->id))->toBeNull();
+});
+
+it('does not let a sandbox approval of everything buy anything in production', function (): void {
+    $client = Client::where('is_default', true)->firstOrFail();
+    ServiceApproval::factory()->everything()->sandbox()->create(['client_id' => $client->id]);
+
+    expect(app(RateSelector::class)->selectBest(collect([makeDiscoveredRate(4.00)]), null, $client->id))->toBeNull();
+});
+
+it('asks for approvals once per quote, not once per rate', function (): void {
+    $client = Client::where('is_default', true)->firstOrFail();
+    ServiceApproval::factory()->everything()->create(['client_id' => $client->id]);
+    ServiceApproval::factory()->wholeCarrier('ONTRAC')->exception()->create(['client_id' => $client->id]);
+
+    $rates = collect([
+        makeDiscoveredRate(3.00, 'ONTRAC_MFN_GROUND', 'ONTRAC'),
+        makeDiscoveredRate(4.00, 'USPS_GROUND_ADVANTAGE', 'USPS'),
+        makeDiscoveredRate(5.00, 'UPS_PTP_GND', 'UPS'),
+        makeDiscoveredRate(6.00, 'UPS_PTP_2ND_DAY_AIR', 'UPS'),
+        makeRate(9.00),
+    ]);
+
+    DB::enableQueryLog();
+
+    app(RateSelector::class)->selectForAutomation($rates, null, $client->id);
+
+    expect(DB::getQueryLog())->toHaveCount(1);
+
+    DB::disableQueryLog();
+});
+
 /*
 |--------------------------------------------------------------------------
 | amazon-buy-shipping/16 — an Amazon connection's offer requirements

@@ -11,7 +11,6 @@ use App\Filament\Resources\ShippingMethodResource\RelationManagers\SpecialServic
 use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\ShippingMethod;
-use App\Services\ShipmentImport\Sources\AmazonSource;
 use BackedEnum;
 use Filament\Actions;
 use Filament\Forms;
@@ -55,23 +54,10 @@ class ShippingMethodResource extends Resource
                             ->label('Require OTDR protection for')
                             ->options(OtdrProtectedOrders::class)
                             ->helperText('For the Amazon orders ticked, only buy offers marked OTDR Protected. A protected label that arrives late does not count against your on-time delivery rate. Requires Shipping Settings Automation and Average Handling Time automation in Seller Central. Without them no offer is protected, and every order this applies to goes to a person.')
-                            ->visible(fn (): bool => self::hasActiveAmazonConnection()),
+                            ->visible(fn (): bool => DataSource::hasActiveAmazonConnection()),
                     ])
                     ->columnSpanFull(),
             ]);
-    }
-
-    /**
-     * OTDR protection is an Amazon Buy Shipping benefit, so the choice is
-     * only offered once there is an Amazon connection to buy through. A
-     * hidden field is not saved, so a method keeps what it had.
-     */
-    private static function hasActiveAmazonConnection(): bool
-    {
-        return DataSource::query()
-            ->where('source_type', AmazonSource::class)
-            ->where('active', true)
-            ->exists();
     }
 
     public static function table(Table $table): Table

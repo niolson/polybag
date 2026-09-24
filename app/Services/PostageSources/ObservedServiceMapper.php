@@ -40,8 +40,6 @@ class ObservedServiceMapper
     /** How long to wait for another writer to finish before giving up. */
     private const LOCK_WAIT_SECONDS = 5;
 
-    public function __construct(private readonly ServiceApprovalGate $approvals) {}
-
     /**
      * Alias an observed identity onto a service we already have a row for.
      *
@@ -99,35 +97,16 @@ class ObservedServiceMapper
      * Return an identity to the unmapped state, which is a valid place for it
      * to stay.
      *
-     * Any approval to spend money on it goes with it. ADR-0003 decision 2 makes
-     * normalization a precondition of approval, so an approval that outlived
-     * the name it was granted against would authorize automated spending on a
-     * service nothing in the catalog describes. Revoking here rather than
-     * teaching the gate to check both is what keeps that a stated invariant
-     * instead of a property two queries have to agree about — and it is why
-     * this runs inside one transaction, and inside the same lock
-     * {@see ServiceApprovalGate::grant()} takes.
+     * Approvals are left alone. What a service is called is not whether
+     * automation may buy it (`amazon-buy-shipping/18`): an approval names the
+     * source's own identifiers, which unmapping does not change, so withdrawing
+     * it here would switch automation off as a side effect of a naming fix.
      *
-     * Deliberately not done by {@see map()}: re-aliasing a service onto a
-     * different `CarrierService` changes what we call it, not what a purchase
-     * buys, and the approval is about the latter.
-     *
-     * @return array{observations: int, approvals: int} rows returned to unmapped, and approvals withdrawn
+     * @return int observations returned to unmapped
      */
-    public function unmap(ObservedService $observation): array
+    public function unmap(ObservedService $observation): int
     {
-        return $this->locked(fn (): array => DB::transaction(function () use ($observation): array {
-            // Both writes or neither. Apart, a mapping update that failed
-            // after the approvals were already committed would leave the
-            // service mapped and silently de-approved — the safe direction,
-            // but a state nobody chose and nothing would ever report.
-            $approvals = $this->approvals->revokeAll($observation);
-
-            return [
-                'observations' => $this->applyMapping($observation, null),
-                'approvals' => $approvals,
-            ];
-        }));
+        return $this->locked(fn (): int => $this->applyMapping($observation, null));
     }
 
     /**

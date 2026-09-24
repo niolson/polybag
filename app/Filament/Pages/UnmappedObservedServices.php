@@ -4,15 +4,11 @@ namespace App\Filament\Pages;
 
 use App\Enums\Role;
 use App\Enums\SourceEnvironment;
-use App\Exceptions\UnnormalizedServiceApprovalException;
 use App\Models\Carrier;
 use App\Models\CarrierService;
-use App\Models\Client;
 use App\Models\Location;
 use App\Models\ObservedService;
-use App\Models\ServiceApproval;
 use App\Services\PostageSources\ObservedServiceMapper;
-use App\Services\PostageSources\ServiceApprovalGate;
 use BackedEnum;
 use Filament\Actions;
 use Filament\Forms;
@@ -23,7 +19,6 @@ use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Grouping\Group;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Str;
 use UnitEnum;
 
@@ -69,15 +64,6 @@ class UnmappedObservedServices extends Page implements HasTable
             ->query(
                 ObservedService::query()
                     ->with('carrierService.carrier')
-                    ->select('observed_services.*')
-                    // Correlated subqueries rather than a lookup per row:
-                    // approvals have no foreign key to hang a relation off,
-                    // being keyed on the identity rather than on the sighting.
-                    // Two of them, because two questions are asked — what this
-                    // row's world has approved, and what unmapping would
-                    // withdraw, which reaches every world.
-                    ->selectSub(static::approvalCountQuery(), 'environment_approvals_count')
-                    ->selectSub(static::serviceApprovalCountQuery(), 'service_approvals_count')
             )
             ->defaultSort('last_seen_at', 'desc')
             ->groups([
@@ -138,15 +124,6 @@ class UnmappedObservedServices extends Page implements HasTable
                     ->label('Mapped to')
                     ->description(fn (ObservedService $record): ?string => $record->carrierService?->carrier?->name)
                     ->placeholder('Unmapped'),
-                Tables\Columns\TextColumn::make('environment_approvals_count')
-                    ->label('Approved for')
-                    ->badge()
-                    ->color('success')
-                    ->tooltip('Clients whose automated shipping may buy this service, in this environment. Everyone else can still choose it by hand on the Ship page.')
-                    ->state(fn (ObservedService $record): ?string => $record->environment_approvals_count > 0
-                        ? trans_choice(':count client|:count clients', $record->environment_approvals_count, ['count' => $record->environment_approvals_count])
-                        : null)
-                    ->placeholder('Attended only'),
             ])
             ->filters([
                 Tables\Filters\TernaryFilter::make('mapped')
@@ -165,19 +142,9 @@ class UnmappedObservedServices extends Page implements HasTable
                     ->options(fn (): array => collect(SourceEnvironment::cases())
                         ->mapWithKeys(fn (SourceEnvironment $environment): array => [$environment->value => $environment->label()])
                         ->all()),
-                Tables\Filters\TernaryFilter::make('approved')
-                    ->label('Approval')
-                    ->placeholder('All')
-                    ->trueLabel('Approved for automation')
-                    ->falseLabel('Attended only')
-                    ->queries(
-                        true: fn ($query) => $query->whereExists(static::approvalExistsQuery()),
-                        false: fn ($query) => $query->whereNotExists(static::approvalExistsQuery()),
-                        blank: fn ($query) => $query,
-                    ),
             ])
             ->emptyStateHeading('Nothing observed yet')
-            ->emptyStateDescription('Services a postage source reports appear here after a rate quote. Leaving one unmapped is fine — nothing depends on it being mapped.')
+            ->emptyStateDescription('Services a postage source reports appear here after a rate quote. Leaving one unmapped is fine — nothing depends on it being mapped, including approval for automated shipping.')
             ->recordActions([
                 Actions\Action::make('assign')
                     ->label('Assign')
@@ -268,84 +235,20 @@ class UnmappedObservedServices extends Page implements HasTable
                             ->send();
                     }),
 
-                Actions\Action::make('approve')
-                    ->label('Approve')
-                    ->icon('heroicon-o-check-badge')
-                    ->color('success')
-                    ->modalHeading('Approve for automated shipping')
-                    ->modalDescription(fn (ObservedService $record): string => "Ticked clients' automated shipping — auto-ship, batch ship, shipping rules — may buy {$record->displayName()} in {$record->environment->label()}. Unticked clients keep it as something a packer chooses by hand, having seen the price.")
-                    ->modalSubmitActionLabel('Save approvals')
-                    // Mapped first: ADR-0003 decision 2 puts normalization
-                    // before approval, so the button is not there to press on
-                    // an identity nobody has named. The gate enforces the same
-                    // thing again, because a form is not a guarantee.
-                    ->visible(fn (ObservedService $record): bool => $record->isMapped()
-                        && auth()->user()->can('create', ServiceApproval::class))
-                    ->schema([
-                        Forms\Components\CheckboxList::make('client_ids')
-                            ->label('Clients')
-                            ->options(fn (): array => static::clientOptions())
-                            ->default(fn (ObservedService $record): array => app(ServiceApprovalGate::class)
-                                ->approvedClientIds($record)
-                                ->all())
-                            ->bulkToggleable()
-                            ->helperText('Unticking withdraws approval; nothing else changes. Approval covers this environment only — sandbox and production identifiers differ, so one never speaks for the other.'),
-                    ])
-                    ->action(function (ObservedService $record, array $data): void {
-                        $approver = auth()->user();
-
-                        try {
-                            $result = app(ServiceApprovalGate::class)->syncClients(
-                                observation: $record,
-                                clientIds: $data['client_ids'] ?? [],
-                                approver: $approver,
-                            );
-                        } catch (UnnormalizedServiceApprovalException $e) {
-                            // Someone unmapped it while this form was open.
-                            Notification::make()->danger()->title('Not approved')->body($e->getMessage())->send();
-
-                            return;
-                        }
-
-                        Notification::make()
-                            ->success()
-                            ->title('Approvals saved')
-                            ->body(static::approvalSummary($result, $record))
-                            ->send();
-                    }),
-
                 Actions\Action::make('unmap')
                     ->label('Unmap')
                     ->icon('heroicon-o-link-slash')
                     ->color('danger')
                     ->requiresConfirmation()
-                    ->modalDescription(fn (ObservedService $record): string => 'The observation stays on file and stays selectable by a person. Only the mapping is removed; no catalog rows are deleted.'
-                        .($record->service_approvals_count > 0
-                            ? ' '.trans_choice(
-                                'This also withdraws :count client approval for automated shipping, in every environment — a service nobody has named cannot be one automation is allowed to buy.|This also withdraws :count client approvals for automated shipping, in every environment — a service nobody has named cannot be one automation is allowed to buy.',
-                                $record->service_approvals_count,
-                                ['count' => $record->service_approvals_count],
-                            )
-                            : ' Nothing has been approved for automated shipping, so nothing is withdrawn.'))
-                    // Unmapping withdraws every approval of the service, which
-                    // is an admin's act — see ServiceApprovalPolicy::deleteAny().
-                    // A manager keeps the button for a service nobody has
-                    // approved, which is the ordinary case and their job.
-                    ->visible(fn (ObservedService $record): bool => $record->isMapped()
-                        && ($record->service_approvals_count === 0
-                            || auth()->user()->can('deleteAny', ServiceApproval::class)))
+                    ->modalDescription('The observation stays on file and stays selectable by a person. Only the mapping is removed; no catalog rows are deleted, and approvals for automated shipping are unchanged.')
+                    ->visible(fn (ObservedService $record): bool => $record->isMapped())
                     ->action(function (ObservedService $record): void {
-                        $result = app(ObservedServiceMapper::class)->unmap($record);
+                        $observations = app(ObservedServiceMapper::class)->unmap($record);
 
                         Notification::make()
                             ->success()
                             ->title('Mapping removed')
-                            ->body(trim(implode(' ', array_filter([
-                                static::coverage($result['observations']),
-                                $result['approvals'] > 0
-                                    ? trans_choice(':count client approval withdrawn.|:count client approvals withdrawn.', $result['approvals'], ['count' => $result['approvals']])
-                                    : null,
-                            ]))) ?: null)
+                            ->body(static::coverage($observations))
                             ->send();
                     }),
             ]);
@@ -384,103 +287,6 @@ class UnmappedObservedServices extends Page implements HasTable
     }
 
     /**
-     * Clients, all of them, including inactive ones.
-     *
-     * Filtering the list to active clients would make the form lie: the
-     * checkbox list submits what it shows, so an approval held by a client that
-     * happens to be inactive would be silently withdrawn by anyone saving this
-     * form for an unrelated reason.
-     *
-     * @return array<int, string>
-     */
-    protected static function clientOptions(): array
-    {
-        return Client::query()
-            ->orderBy('name')
-            ->get(['id', 'name', 'active'])
-            ->mapWithKeys(fn (Client $client): array => [
-                $client->getKey() => $client->name.($client->active ? '' : ' (inactive)'),
-            ])
-            ->all();
-    }
-
-    /**
-     * How many approvals exist for the identity a row names, in the world it
-     * was seen in.
-     *
-     * A correlated subquery rather than a relation: `service_approvals` is
-     * keyed on the service identity, not on the sighting, so there is no
-     * foreign key between the two tables to hang an Eloquent relation on. The
-     * join columns are exactly {@see ServiceApproval::scopeForService()}'s
-     * four.
-     *
-     * @return Builder<ServiceApproval>
-     */
-    protected static function approvalCountQuery(): Builder
-    {
-        return static::approvalExistsQuery()->selectRaw('count(*)');
-    }
-
-    /**
-     * How many approvals unmapping a row would withdraw — every world, not
-     * just this row's.
-     *
-     * `ObservedServiceMapper::unmap()` clears the mapping across environments
-     * and revokes across environments with it, so the count that decides who
-     * may press the button has to be the wider one. The narrower count is what
-     * the column shows, because an approval only ever authorizes spending in
-     * its own world.
-     *
-     * @return Builder<ServiceApproval>
-     */
-    protected static function serviceApprovalCountQuery(): Builder
-    {
-        return ServiceApproval::query()
-            ->selectRaw('count(*)')
-            ->whereColumn('service_approvals.source', 'observed_services.source')
-            ->whereColumn('service_approvals.external_carrier_id', 'observed_services.external_carrier_id')
-            ->whereColumn('service_approvals.external_service_id', 'observed_services.external_service_id');
-    }
-
-    /**
-     * The same correlation, for the approval filter.
-     *
-     * @return Builder<ServiceApproval>
-     */
-    protected static function approvalExistsQuery(): Builder
-    {
-        return ServiceApproval::query()
-            ->whereColumn('service_approvals.source', 'observed_services.source')
-            ->whereColumn('service_approvals.environment', 'observed_services.environment')
-            ->whereColumn('service_approvals.external_carrier_id', 'observed_services.external_carrier_id')
-            ->whereColumn('service_approvals.external_service_id', 'observed_services.external_service_id');
-    }
-
-    /**
-     * What a save actually did, in the operator's terms — approvals are the one
-     * thing on this page that spends money, so "saved" on its own is not enough.
-     *
-     * @param  array{granted: int, revoked: int}  $result
-     */
-    protected static function approvalSummary(array $result, ObservedService $record): string
-    {
-        $environment = $record->environment->label();
-
-        if ($result['granted'] === 0 && $result['revoked'] === 0) {
-            return "No change. {$environment} approvals are as they were.";
-        }
-
-        return trim(implode(' ', array_filter([
-            $result['granted'] > 0
-                ? trans_choice(":count client approved for {$environment}.|:count clients approved for {$environment}.", $result['granted'], ['count' => $result['granted']])
-                : null,
-            $result['revoked'] > 0
-                ? trans_choice(':count approval withdrawn.|:count approvals withdrawn.', $result['revoked'], ['count' => $result['revoked']])
-                : null,
-        ])));
-    }
-
-    /**
      * One mapping can cover the same identity in more than one environment or
      * marketplace, so say when it did rather than leaving it a surprise.
      */
@@ -493,6 +299,6 @@ class UnmappedObservedServices extends Page implements HasTable
 
     public function getSubheading(): ?string
     {
-        return 'Services a postage source has reported. Mapping one gives it a name we already use; leaving it unmapped is a valid end state. Approving a mapped one lets automated shipping buy it for a client — until then it is a choice a packer makes by hand.';
+        return 'Services a postage source has reported. Mapping one gives it a name we already use; leaving it unmapped is a valid end state. Whether automated shipping may buy a service is set separately, under Amazon Approvals.';
     }
 }

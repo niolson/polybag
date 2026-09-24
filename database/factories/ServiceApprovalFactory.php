@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\ApprovalEffect;
 use App\Enums\SourceEnvironment;
 use App\Models\Client;
 use App\Models\ObservedService;
@@ -23,6 +24,7 @@ class ServiceApprovalFactory extends Factory
             'environment' => SourceEnvironment::Production,
             'external_carrier_id' => 'ONTRAC',
             'external_service_id' => 'ONTRAC_MFN_GROUND',
+            'effect' => ApprovalEffect::Allow,
             'client_id' => Client::factory(),
             'approved_by_user_id' => User::factory(),
             // Derived from the user above rather than invented beside it. The
@@ -74,6 +76,38 @@ class ServiceApprovalFactory extends Factory
             'environment' => $observation->environment,
             'external_carrier_id' => $observation->external_carrier_id,
             'external_service_id' => $observation->external_service_id,
+        ]);
+    }
+
+    /**
+     * Every service of one carrier, including ones first seen later.
+     */
+    public function wholeCarrier(string $externalCarrierId = 'ONTRAC'): static
+    {
+        return $this->state(fn (): array => [
+            'external_carrier_id' => $externalCarrierId,
+            'external_service_id' => ServiceApproval::WILDCARD,
+        ]);
+    }
+
+    /**
+     * Everything the source offers, including services first seen later.
+     */
+    public function everything(): static
+    {
+        return $this->state(fn (): array => [
+            'external_carrier_id' => ServiceApproval::WILDCARD,
+            'external_service_id' => ServiceApproval::WILDCARD,
+        ]);
+    }
+
+    /**
+     * An exception rather than an approval.
+     */
+    public function exception(): static
+    {
+        return $this->state(fn (): array => [
+            'effect' => ApprovalEffect::Deny,
         ]);
     }
 

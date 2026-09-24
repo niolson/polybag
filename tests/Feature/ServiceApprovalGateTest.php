@@ -1,8 +1,9 @@
 <?php
 
+use App\DataTransferObjects\PostageSources\ApprovalRule;
+use App\Enums\ApprovalEffect;
 use App\Enums\AuditAction;
 use App\Enums\SourceEnvironment;
-use App\Exceptions\UnnormalizedServiceApprovalException;
 use App\Models\AuditLog;
 use App\Models\CarrierService;
 use App\Models\Client;
@@ -55,17 +56,17 @@ it('approves a mapped service for one client', function (): void {
         ->and($approval->approved_at)->not->toBeNull();
 });
 
-it('refuses to approve a service that has not been normalized', function (): void {
-    // ADR-0003 decision 2: promotion is a precondition of approval, not a
-    // parallel track. Approving something nobody has named would authorize
-    // spending on a service no report could describe.
+it('approves a service nobody has mapped', function (): void {
+    // amazon-buy-shipping/18: what a service is called is not whether
+    // automation may buy it. OnTrac has no Carrier row, and approving it must
+    // not require authoring one.
     $observation = ObservedService::factory()->create();
     $client = Client::factory()->create();
 
-    expect(fn () => $this->gate->grant($observation, $client, $this->approver))
-        ->toThrow(UnnormalizedServiceApprovalException::class);
+    $this->gate->grant($observation, $client, $this->approver);
 
-    expect(ServiceApproval::count())->toBe(0);
+    expect($observation->isMapped())->toBeFalse()
+        ->and($this->gate->approved(...approvalQuestion($observation, $client->id)))->toBeTrue();
 });
 
 it('keeps one client out of another client approval', function (): void {
@@ -130,7 +131,7 @@ it('denies when the caller cannot say whose money it is', function (): void {
     $this->gate->grant($observation, Client::factory()->create(), $this->approver);
 
     expect($this->gate->approved(...approvalQuestion($observation, null)))->toBeFalse()
-        ->and($this->gate->approvedServiceKeys($observation->source, $observation->environment, null))->toBeEmpty();
+        ->and($this->gate->rulesFor($observation->source, $observation->environment, null)->rules)->toBeEmpty();
 });
 
 it('takes effect the moment approval is revoked, with nothing re-quoted', function (): void {
@@ -158,7 +159,7 @@ it('grants again after a revoke without duplicating the row', function (): void 
     expect(ServiceApproval::count())->toBe(1);
 });
 
-it('lists approved services for one client and source in a single question', function (): void {
+it('reads one client\'s rules for one source in a single question', function (): void {
     $client = Client::factory()->create();
     $other = Client::factory()->create();
 
@@ -174,43 +175,72 @@ it('lists approved services for one client and source in a single question', fun
     $this->gate->grant($ground, $client, $this->approver);
     $this->gate->grant($express, $other, $this->approver);
 
-    expect($this->gate->approvedServiceKeys('amazon', SourceEnvironment::Production, $client->id)->all())
-        ->toBe([ObservedService::serviceKey('amazon', 'USPS', 'USPS_GROUND_ADVANTAGE')]);
+    DB::enableQueryLog();
+
+    $rules = $this->gate->rulesFor('amazon', SourceEnvironment::Production, $client->id);
+
+    expect(DB::getQueryLog())->toHaveCount(1)
+        ->and($rules->permits('USPS', 'USPS_GROUND_ADVANTAGE'))->toBeTrue()
+        ->and($rules->permits('USPS', 'USPS_PRIORITY_MAIL_EXPRESS'))->toBeFalse();
+
+    DB::disableQueryLog();
 });
 
-it('sets the approved clients to exactly what was submitted', function (): void {
-    $observation = ObservedService::factory()->mapped()->create();
-    [$kept, $withdrawn, $added] = Client::factory()->count(3)->create();
+it('sets one client\'s rules to exactly what was submitted', function (): void {
+    $client = Client::factory()->create();
+    $other = Client::factory()->create();
 
-    $this->gate->grant($observation, $kept, $this->approver);
-    $this->gate->grant($observation, $withdrawn, $this->approver);
+    $this->gate->grantRule('amazon', SourceEnvironment::Production, $client, ApprovalRule::service('UPS', 'UPS_PTP_GND'), $this->approver);
+    $this->gate->grantRule('amazon', SourceEnvironment::Production, $client, ApprovalRule::service('USPS', 'USPS_GROUND_ADVANTAGE'), $this->approver);
+    // Another client's rule, and this client's rule in another world, are not
+    // this form's to withdraw.
+    $this->gate->grantRule('amazon', SourceEnvironment::Production, $other, ApprovalRule::everything(), $this->approver);
+    $this->gate->grantRule('amazon', SourceEnvironment::Sandbox, $client, ApprovalRule::everything(), $this->approver);
 
-    $result = $this->gate->syncClients($observation, [$kept->id, $added->id], $this->approver);
+    $result = $this->gate->sync('amazon', SourceEnvironment::Production, $client, [
+        ApprovalRule::service('UPS', 'UPS_PTP_GND'),
+        ApprovalRule::everything(),
+        ApprovalRule::carrier('ONTRAC', ApprovalEffect::Deny),
+    ], $this->approver);
 
-    expect($result)->toBe(['granted' => 1, 'revoked' => 1])
-        ->and($this->gate->approvedClientIds($observation)->sort()->values()->all())
-        ->toBe(collect([$kept->id, $added->id])->sort()->values()->all());
+    $rules = $this->gate->rulesFor('amazon', SourceEnvironment::Production, $client->id);
+
+    expect($result)->toBe(['granted' => 2, 'revoked' => 1])
+        ->and($rules->rules->map->key()->sort()->values()->all())->toBe([
+            'allow|*|*',
+            'allow|UPS|UPS_PTP_GND',
+            'deny|ONTRAC|*',
+        ])
+        ->and(ServiceApproval::count())->toBe(5);
 });
 
-it('withdraws every approval when the service is unmapped', function (): void {
-    // Normalization is the precondition, so withdrawing the name withdraws the
-    // permission rather than leaving a row that quietly means nothing.
+it('leaves a rule that is already on file alone when the form is saved again', function (): void {
+    $client = Client::factory()->create();
+    $original = User::factory()->create(['name' => 'Dana Reyes']);
+
+    $this->gate->grantRule('amazon', SourceEnvironment::Production, $client, ApprovalRule::everything(), $original);
+
+    $result = $this->gate->sync('amazon', SourceEnvironment::Production, $client, [ApprovalRule::everything()], $this->approver);
+
+    expect($result)->toBe(['granted' => 0, 'revoked' => 0])
+        ->and(ServiceApproval::sole()->approved_by_name)->toBe('Dana Reyes');
+});
+
+it('leaves a service approved when it is unmapped', function (): void {
+    // amazon-buy-shipping/18: the approval names the source's own identifiers,
+    // which unmapping does not change. Withdrawing it would switch automation
+    // off as a side effect of a naming fix.
     $observation = ObservedService::factory()->mapped()->create();
     $client = Client::factory()->create();
 
     $this->gate->grant($observation, $client, $this->approver);
 
-    $result = app(ObservedServiceMapper::class)->unmap($observation);
-
-    expect($result['approvals'])->toBe(1)
-        ->and(ServiceApproval::count())->toBe(0)
-        ->and($this->gate->approved(...approvalQuestion($observation, $client->id)))->toBeFalse();
+    expect(app(ObservedServiceMapper::class)->unmap($observation))->toBe(1)
+        ->and(ServiceApproval::count())->toBe(1)
+        ->and($this->gate->approved(...approvalQuestion($observation, $client->id)))->toBeTrue();
 });
 
-it('withdraws approvals in every world the unmapping reaches', function (): void {
-    // A mapping spans environments; a revocation narrower than the unmapping
-    // that triggered it would leave a sandbox approval on a service that is no
-    // longer named anything.
+it('leaves approvals alone in every world the unmapping reaches', function (): void {
     $carrierService = CarrierService::factory()->create();
     $client = Client::factory()->create();
 
@@ -230,7 +260,7 @@ it('withdraws approvals in every world the unmapping reaches', function (): void
 
     app(ObservedServiceMapper::class)->unmap($production);
 
-    expect(ServiceApproval::count())->toBe(0)
+    expect(ServiceApproval::count())->toBe(2)
         ->and($sandbox->fresh()->isMapped())->toBeFalse();
 });
 
@@ -272,7 +302,7 @@ it('records who authorized every approval it writes', function (): void {
     // NULL while the foreign key beside it is nullable.
     $observation = ObservedService::factory()->mapped()->create();
 
-    $this->gate->syncClients($observation, [Client::factory()->create()->id], $this->approver);
+    $this->gate->sync($observation->source, $observation->environment, Client::factory()->create(), [ApprovalRule::everything()], $this->approver);
 
     expect(ServiceApproval::sole()->approved_by_name)->toBe($this->approver->name);
 });
@@ -328,7 +358,7 @@ it('records the withdrawal of an approval, not only the granting of one', functi
     expect($entries->all())->toBe([AuditAction::ModelCreated, AuditAction::ModelDeleted]);
 });
 
-it('records a withdrawal made by unmapping', function (): void {
+it('withdraws nothing by unmapping, so there is nothing to record', function (): void {
     $observation = ObservedService::factory()->mapped()->create();
 
     $this->gate->grant($observation, Client::factory()->create(), $this->approver);
@@ -336,26 +366,26 @@ it('records a withdrawal made by unmapping', function (): void {
 
     expect(AuditLog::where('auditable_type', ServiceApproval::class)
         ->where('action', AuditAction::ModelDeleted)
-        ->count())->toBe(1);
+        ->count())->toBe(0);
 });
 
-it('records a withdrawal made by unticking a client', function (): void {
+it('records a withdrawal made by saving fewer rules', function (): void {
     $observation = ObservedService::factory()->mapped()->create();
     $client = Client::factory()->create();
 
     $this->gate->grant($observation, $client, $this->approver);
-    $this->gate->syncClients($observation, [], $this->approver);
+    $this->gate->sync($observation->source, $observation->environment, $client, [], $this->approver);
 
     expect(AuditLog::where('auditable_type', ServiceApproval::class)
         ->where('action', AuditAction::ModelDeleted)
         ->count())->toBe(1);
 });
 
-it('withdraws approvals and clears the mapping in one transaction', function (): void {
-    // Apart, a mapping update that failed after the approvals were already
-    // committed would leave the service mapped and silently de-approved.
-    $observation = ObservedService::factory()->mapped()->create();
-    $this->gate->grant($observation, Client::factory()->create(), $this->approver);
+it('withdraws and grants in one transaction', function (): void {
+    // Apart, an exception that failed to write after the approvals around it
+    // were committed would leave a service approved that was meant not to be.
+    $client = Client::factory()->create();
+    $this->gate->grantRule('amazon', SourceEnvironment::Production, $client, ApprovalRule::service('UPS', 'UPS_PTP_GND'), $this->approver);
 
     $outer = DB::transactionLevel();
     $duringDelete = null;
@@ -364,7 +394,152 @@ it('withdraws approvals and clears the mapping in one transaction', function ():
         $duringDelete ??= DB::transactionLevel();
     });
 
-    app(ObservedServiceMapper::class)->unmap($observation);
+    $this->gate->sync('amazon', SourceEnvironment::Production, $client, [ApprovalRule::everything()], $this->approver);
 
     expect($duringDelete)->toBeGreaterThan($outer);
+});
+
+/*
+|--------------------------------------------------------------------------
+| amazon-buy-shipping/18 — carrier and whole-source approvals, and exceptions
+|--------------------------------------------------------------------------
+*/
+
+/**
+ * @return array{0: string, 1: SourceEnvironment, 2: string, 3: string, 4: int}
+ */
+function serviceQuestion(Client $client, string $carrier, string $service, SourceEnvironment $environment = SourceEnvironment::Production): array
+{
+    return ['amazon', $environment, $carrier, $service, $client->id];
+}
+
+function grantRuleFor(Client $client, ApprovalRule $rule, SourceEnvironment $environment = SourceEnvironment::Production): void
+{
+    app(ServiceApprovalGate::class)->grantRule('amazon', $environment, $client, $rule, User::factory()->create());
+}
+
+it('approves a service never seen before once everything is approved', function (): void {
+    $client = Client::factory()->create();
+    grantRuleFor($client, ApprovalRule::everything());
+
+    expect(ObservedService::count())->toBe(0)
+        ->and($this->gate->approved(...serviceQuestion($client, 'DHL_ECOMMERCE', 'DHL_PARCEL_GROUND')))->toBeTrue();
+});
+
+it('lets an exception for a carrier win over approving everything', function (): void {
+    $client = Client::factory()->create();
+    grantRuleFor($client, ApprovalRule::everything());
+    grantRuleFor($client, ApprovalRule::carrier('ONTRAC', ApprovalEffect::Deny));
+
+    expect($this->gate->approved(...serviceQuestion($client, 'ONTRAC', 'ONTRAC_MFN_GROUND')))->toBeFalse()
+        ->and($this->gate->approved(...serviceQuestion($client, 'ONTRAC', 'ONTRAC_MFN_SUNRISE')))->toBeFalse()
+        ->and($this->gate->approved(...serviceQuestion($client, 'UPS', 'UPS_PTP_GND')))->toBeTrue();
+});
+
+it('approves every service of one carrier and nothing of another', function (): void {
+    $client = Client::factory()->create();
+    grantRuleFor($client, ApprovalRule::carrier('ONTRAC'));
+
+    expect($this->gate->approved(...serviceQuestion($client, 'ONTRAC', 'ONTRAC_MFN_GROUND')))->toBeTrue()
+        ->and($this->gate->approved(...serviceQuestion($client, 'ONTRAC', 'ONTRAC_MFN_SUNRISE')))->toBeTrue()
+        ->and($this->gate->approved(...serviceQuestion($client, 'UPS', 'UPS_PTP_GND')))->toBeFalse();
+});
+
+it('lets an exception for one service win over approving its carrier', function (): void {
+    $client = Client::factory()->create();
+    grantRuleFor($client, ApprovalRule::carrier('ONTRAC'));
+    grantRuleFor($client, ApprovalRule::service('ONTRAC', 'ONTRAC_MFN_SUNRISE', ApprovalEffect::Deny));
+
+    expect($this->gate->approved(...serviceQuestion($client, 'ONTRAC', 'ONTRAC_MFN_GROUND')))->toBeTrue()
+        ->and($this->gate->approved(...serviceQuestion($client, 'ONTRAC', 'ONTRAC_MFN_SUNRISE')))->toBeFalse();
+});
+
+it('does not let a more specific approval win over an exception', function (): void {
+    // Most-specific-wins was rejected: "no OnTrac, except OnTrac Ground" would
+    // make a row's effect depend on which other rows exist.
+    $client = Client::factory()->create();
+    grantRuleFor($client, ApprovalRule::carrier('ONTRAC', ApprovalEffect::Deny));
+    grantRuleFor($client, ApprovalRule::service('ONTRAC', 'ONTRAC_MFN_GROUND'));
+
+    expect($this->gate->approved(...serviceQuestion($client, 'ONTRAC', 'ONTRAC_MFN_GROUND')))->toBeFalse();
+});
+
+it('approves nothing with only exceptions on file', function (): void {
+    $client = Client::factory()->create();
+    grantRuleFor($client, ApprovalRule::carrier('ONTRAC', ApprovalEffect::Deny));
+
+    expect($this->gate->approved(...serviceQuestion($client, 'UPS', 'UPS_PTP_GND')))->toBeFalse();
+});
+
+it('does not let a sandbox approval of everything approve anything in production', function (): void {
+    $client = Client::factory()->create();
+    grantRuleFor($client, ApprovalRule::everything(), SourceEnvironment::Sandbox);
+
+    expect($this->gate->approved(...serviceQuestion($client, 'UPS', 'UPS_PTP_GND', SourceEnvironment::Sandbox)))->toBeTrue()
+        ->and($this->gate->approved(...serviceQuestion($client, 'UPS', 'UPS_PTP_GND')))->toBeFalse();
+});
+
+it('does not let one client\'s approval of everything reach another client', function (): void {
+    grantRuleFor(Client::factory()->create(), ApprovalRule::everything());
+
+    expect($this->gate->approved(...serviceQuestion(Client::factory()->create(), 'UPS', 'UPS_PTP_GND')))->toBeFalse();
+});
+
+it('refuses one service of every carrier', function (): void {
+    expect(fn (): ApprovalRule => ApprovalRule::service(ServiceApproval::WILDCARD, 'UPS_PTP_GND'))
+        ->toThrow(InvalidArgumentException::class);
+
+    expect(fn () => ServiceApproval::factory()->create([
+        'external_carrier_id' => ServiceApproval::WILDCARD,
+        'external_service_id' => 'UPS_PTP_GND',
+    ]))->toThrow(InvalidArgumentException::class);
+});
+
+it('will not store the same wildcard twice', function (): void {
+    // The reason for a `*` sentinel rather than NULL: MySQL treats NULLs as
+    // distinct in a unique index, so NULL wildcards could be duplicated.
+    $approval = ServiceApproval::factory()->everything()->create();
+
+    expect(fn () => ServiceApproval::factory()->everything()->create([
+        'client_id' => $approval->client_id,
+    ]))->toThrow(QueryException::class);
+});
+
+it('holds an approval and an exception of the same scope side by side', function (): void {
+    $client = Client::factory()->create();
+    grantRuleFor($client, ApprovalRule::carrier('ONTRAC'));
+    grantRuleFor($client, ApprovalRule::carrier('ONTRAC', ApprovalEffect::Deny));
+
+    expect(ServiceApproval::count())->toBe(2)
+        ->and($this->gate->approved(...serviceQuestion($client, 'ONTRAC', 'ONTRAC_MFN_GROUND')))->toBeFalse();
+});
+
+it('reads a row written without an effect as an approval', function (): void {
+    // Every row from before exceptions existed was an approval; the column's
+    // default is what keeps them that way.
+    $client = Client::factory()->create();
+
+    DB::table('service_approvals')->insert([
+        'source' => 'amazon',
+        'environment' => 'production',
+        'external_carrier_id' => 'UPS',
+        'external_service_id' => 'UPS_PTP_GND',
+        'client_id' => $client->id,
+        'approved_by_name' => 'Dana Reyes',
+        'approved_at' => now(),
+    ]);
+
+    expect(ServiceApproval::sole()->effect)->toBe(ApprovalEffect::Allow)
+        ->and($this->gate->approved(...serviceQuestion($client, 'UPS', 'UPS_PTP_GND')))->toBeTrue();
+});
+
+it('withdraws only the single-service row when one service is revoked', function (): void {
+    $client = Client::factory()->create();
+    $observation = ObservedService::factory()->create();
+
+    grantRuleFor($client, ApprovalRule::carrier($observation->external_carrier_id));
+    $this->gate->grant($observation, $client, $this->approver);
+
+    expect($this->gate->revoke($observation, $client))->toBe(1)
+        ->and($this->gate->approved(...approvalQuestion($observation, $client->id)))->toBeTrue();
 });

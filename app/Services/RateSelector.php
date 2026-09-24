@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
+use App\DataTransferObjects\PostageSources\ServiceApprovalRules;
 use App\DataTransferObjects\Shipping\ClassifiedRate;
 use App\DataTransferObjects\Shipping\OfferRequirements;
 use App\DataTransferObjects\Shipping\RateResponse;
@@ -157,11 +158,13 @@ class RateSelector
      * which is the opposite of deny-by-default meaning "behaves as it did
      * before discovery existed".
      *
-     * One query per (source, environment) rather than one per rate: an Amazon
-     * `getRates` can return several eligible offers at once, and this runs on
-     * the batch-ship path for every package. A rate list with no discovered
-     * services — every install that has never quoted through a channel — asks
-     * the database nothing at all.
+     * One query per (source, environment) rather than one per rate — in
+     * practice one per quote: an Amazon `getRates` can return several eligible
+     * offers at once, and this runs on the batch-ship path for every package.
+     * Wildcards and exceptions are matched in memory by
+     * {@see ServiceApprovalRules}. A rate list with no discovered services —
+     * every install that has never quoted through a channel — asks the
+     * database nothing at all.
      *
      * @param  Collection<int, RateResponse>  $rates
      * @return array{0: Collection<int, RateResponse>, 1: Collection<int, RateResponse>}
@@ -174,40 +177,36 @@ class RateSelector
             return [$rates, collect()];
         }
 
-        $approved = $clientId === null ? collect() : $this->approvalKeysFor($discovered, $clientId);
+        $rules = $this->rulesFor($discovered, $clientId);
 
-        [$eligible, $withheld] = $rates->partition(
-            fn (RateResponse $rate): bool => $rate->observedService === null
-                || $approved->has($rate->observedService->approvalKey())
-        );
+        [$eligible, $withheld] = $rates->partition(function (RateResponse $rate) use ($rules): bool {
+            $identity = $rate->observedService;
+
+            return $identity === null
+                || $rules[self::worldKey($identity)]->permits($identity->externalCarrierId, $identity->externalServiceId);
+        });
 
         return [$eligible->values(), $withheld->values()];
     }
 
     /**
-     * Everything this client has approved that could match one of these rates,
-     * as a lookup keyed the way {@see ObservedServiceIdentity::approvalKey()}
-     * keys a rate.
+     * This client's approvals for every world these rates were quoted in.
      *
      * @param  Collection<int, RateResponse>  $discovered
-     * @return Collection<string, int>
+     * @return Collection<string, ServiceApprovalRules>
      */
-    private function approvalKeysFor(Collection $discovered, int $clientId): Collection
+    private function rulesFor(Collection $discovered, ?int $clientId): Collection
     {
         return $discovered
-            ->groupBy(fn (RateResponse $rate): string => $rate->observedService->source
-                .'|'.$rate->observedService->environment->value)
-            ->flatMap(function (Collection $group) use ($clientId): Collection {
-                $identity = $group->first()->observedService;
+            ->map(fn (RateResponse $rate): ObservedServiceIdentity => $rate->observedService)
+            ->keyBy(fn (ObservedServiceIdentity $identity): string => self::worldKey($identity))
+            ->map(fn (ObservedServiceIdentity $identity): ServiceApprovalRules => $this->approvals
+                ->rulesFor($identity->source, $identity->environment, $clientId));
+    }
 
-                return $this->approvals
-                    ->approvedServiceKeys($identity->source, $identity->environment, $clientId)
-                    ->map(fn (string $serviceKey): string => ObservedServiceIdentity::approvalKeyFor(
-                        $identity->environment,
-                        $serviceKey,
-                    ));
-            })
-            ->flip();
+    private static function worldKey(ObservedServiceIdentity $identity): string
+    {
+        return $identity->source.'|'.$identity->environment->value;
     }
 
     /**
