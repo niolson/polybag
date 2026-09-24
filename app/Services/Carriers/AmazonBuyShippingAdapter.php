@@ -3,6 +3,7 @@
 namespace App\Services\Carriers;
 
 use App\Contracts\AsyncRateQuoting;
+use App\Contracts\DiscoversServices;
 use App\Contracts\RecoversUnresolvedPurchase;
 use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
 use App\DataTransferObjects\PostageSources\OfferDraft;
@@ -40,6 +41,7 @@ use App\Services\PostageSources\ObservedServiceRecorder;
 use App\Services\PostageSources\OffAmazonShippingCheck;
 use App\Services\PostageSources\OfferStore;
 use App\Services\RateSelector;
+use App\Services\RuleEvaluator;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\Shipping\PackagingFilter;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -86,7 +88,7 @@ use Saloon\Http\Response;
  *   constraint travels on the Package as its carrier packaging (ADR-0005),
  *   and {@see isBuyable()} applies it before an offer is issued.
  */
-class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPurchase
+class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, RecoversUnresolvedPurchase
 {
     /** The name this source is registered and displayed under. */
     public const SOURCE_NAME = 'Amazon';
@@ -406,11 +408,17 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
         ])->save();
     }
 
+    public function observationSource(): string
+    {
+        return self::OBSERVATION_SOURCE;
+    }
+
     /**
-     * Nothing to resolve: an Amazon rate already *is* a specific offer, priced
-     * and tokenized. The variant-picking `UspsAdapter` does here has no analogue
-     * — there is no second call that would narrow one Amazon `rateId` into
-     * another. Only the packaging filter stands between the rule and the buy.
+     * Never reached from a shipping rule: a rule naming Amazon names the
+     * source, and {@see RuleEvaluator} selects among the offers Amazon quotes
+     * rather than pre-selecting a rate for it (`amazon-buy-shipping/19`). Kept
+     * for the contract, and answered the same way a quoted offer would be:
+     * only the packaging filter applies.
      */
     public function resolvePreSelectedRate(RateResponse $rate, Package $package): ?RateResponse
     {

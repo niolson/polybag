@@ -1,6 +1,6 @@
 # A shipping rule that uses the Amazon catalog row can never buy
 
-Status: needs-triage
+Status: done — shipped 2026-09-24; a rule naming Amazon now names the source, for *Use service* and *Exclude service* alike
 
 Repo: `polybag`
 
@@ -41,11 +41,38 @@ shipping method's due-by and OTDR requirements, and the rule's exclusions all ap
 
 ## Acceptance criteria
 
-- [ ] A *Use service* rule naming the Amazon catalog row buys the cheapest acceptable
+- [x] A *Use service* rule naming the Amazon catalog row buys the cheapest acceptable
       approved Amazon offer, and never a rate from another source
-- [ ] An unapproved Amazon offer under such a rule is withheld and named, as in rate shopping
-- [ ] A rate built from a rule never reaches `selectForAutomation()` looking like authored
+- [x] An unapproved Amazon offer under such a rule is withheld and named, as in rate shopping
+- [x] A rate built from a rule never reaches `selectForAutomation()` looking like authored
       configuration when it stands for a discovered source
+- [x] An *Exclude service* rule naming the Amazon catalog row drops Amazon's offers
+
+## Resolution
+
+Decided 2026-09-24:
+
+- **Strict, not a preference.** Under a rule naming Amazon, automation buys an
+  acceptable Amazon offer or nothing. It does not fall back to another source or to a
+  blind purchase, so the rule is a guarantee.
+- **The rule names the source.** A new `DiscoversServices` contract, implemented by
+  `AmazonBuyShippingAdapter`, marks a source whose services are discovered per quote.
+  `RuleEvaluator` returns `preSelectedSource` for such a source instead of making up a
+  price-0 rate. The auto-ship path rate-shops, keeps only offers whose observed-service
+  source matches, applies the rule's exclusions and selects through
+  `selectForAutomation()`. Approval, due-by and OTDR requirements apply as in rate
+  shopping. No rule-built rate for a discovered source exists any more, so criterion 3
+  holds by construction rather than through a guard in `RateSelector`.
+- **Exclusion by source.** Found while scoping this issue: an *Exclude service* rule
+  naming the Amazon row excluded the `AMAZON_BUY_SHIPPING` service code, which no offer
+  carries, so it did nothing. It now excludes by source (`excludedSources`). This applies
+  on the Ship page too.
+- On the Ship page, the rule pre-selects the cheapest Amazon offer, on-time offers first.
+  The packer can still pick any offer.
+
+The test that pinned the old "no purchase" outcome in
+`OffAmazonShippingAutomationTest` now asserts that the offer is withheld and named, with
+a cheaper direct rate present that must not be bought.
 
 ## Blocked by
 

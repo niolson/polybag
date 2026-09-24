@@ -1,5 +1,9 @@
 <?php
 
+use App\Contracts\DirectCarrierAdapter;
+use App\Contracts\PackageShippingWorkflow;
+use App\DataTransferObjects\Shipping\PackagingRequirement;
+use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\AmazonChannelType;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
@@ -7,6 +11,7 @@ use App\Enums\ShippingRuleAction;
 use App\Http\Integrations\Amazon\Requests\GetShippingRates;
 use App\Http\Integrations\Amazon\Requests\PurchaseShipment;
 use App\Jobs\GenerateLabelJob;
+use App\Models\Carrier;
 use App\Models\CarrierAccountScope;
 use App\Models\CarrierService;
 use App\Models\DataSource;
@@ -18,6 +23,7 @@ use App\Models\ServiceApproval;
 use App\Models\ShippingRule;
 use App\Models\User;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
+use App\Services\Carriers\CarrierRegistry;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
@@ -139,16 +145,95 @@ it('lets a shipping rule exclude an off-Amazon service even when it is approved'
     Saloon::assertNotSent(PurchaseShipment::class);
 });
 
-it('does not let a shipping rule that names Amazon buy an unapproved off-Amazon service', function (): void {
+/**
+ * `amazon-buy-shipping/19`: a *Use service* rule naming Amazon's catalog row
+ * names the source, and selects among the offers Amazon quotes.
+ */
+function ruleNamingAmazon(Package $package, ShippingRuleAction $action = ShippingRuleAction::UseService): void
+{
     ShippingRule::factory()->create([
-        'shipping_method_id' => $this->package->shipment->shipping_method_id,
+        'shipping_method_id' => $package->shipment->shipping_method_id,
         'carrier_service_id' => CarrierService::where('service_code', AmazonBuyShippingAdapter::CATALOG_SERVICE_CODE)->value('id'),
-        'action' => ShippingRuleAction::UseService,
+        'action' => $action,
     ]);
+}
+
+/**
+ * A direct carrier on the same shipping method, quoting cheaper than Amazon,
+ * which a rule naming Amazon must never buy.
+ */
+function cheaperDirectRate(Package $package): void
+{
+    $carrier = Carrier::factory()->create(['name' => 'MockCarrier', 'active' => true]);
+    $service = CarrierService::factory()->create([
+        'carrier_id' => $carrier->id,
+        'name' => 'Ground',
+        'service_code' => 'GROUND',
+        'active' => true,
+    ]);
+    $package->shipment->shippingMethod->carrierServices()->attach($service->id);
+
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('isConfigured')->andReturnTrue();
+    $adapter->shouldReceive('prepareRateRequest')->andReturnNull();
+    $adapter->shouldReceive('getRates')->andReturn(collect([
+        new RateResponse(carrier: 'MockCarrier', serviceCode: 'GROUND', serviceName: 'Ground', price: 1.00),
+    ]));
+    $adapter->shouldNotReceive('createShipment');
+
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+}
+
+it('buys the approved Amazon offer under a shipping rule naming Amazon, though another source is cheaper', function (): void {
+    approveAmazonShippingGround($this->package, AmazonChannelType::External);
+    ruleNamingAmazon($this->package);
+    cheaperDirectRate($this->package);
+
+    $item = batchShip($this->package);
+    $package = $this->package->fresh();
+
+    expect($item->status)->toBe(LabelBatchItemStatus::Success)
+        ->and($package->tracking_number)->toBe('TBA123456789000')
+        ->and($package->postage_data_source_id)->toBe($this->connection->id);
+
+    Saloon::assertSent(PurchaseShipment::class);
+});
+
+it('withholds and names an unapproved Amazon offer under a shipping rule naming Amazon, and buys nothing else', function (): void {
+    ruleNamingAmazon($this->package);
+    cheaperDirectRate($this->package);
 
     $item = batchShip($this->package);
 
-    expect($item->status)->toBe(LabelBatchItemStatus::Failed);
+    expect($item->status)->toBe(LabelBatchItemStatus::Failed)
+        ->and($item->error_message)->toContain('approved for automated purchase')
+        ->and($item->error_message)->toContain('Amazon Shipping Ground');
+
+    Saloon::assertNotSent(PurchaseShipment::class);
+});
+
+it('pre-selects the Amazon offer on the Ship page under a shipping rule naming Amazon', function (): void {
+    ruleNamingAmazon($this->package);
+    cheaperDirectRate($this->package);
+
+    $options = app(PackageShippingWorkflow::class)->prepareRates($this->package);
+
+    expect($options->rateOptions)->toHaveCount(2)
+        ->and($options->rateOptions[0]['carrier'])->toBe('MockCarrier')
+        ->and($options->rateOptions[$options->selectedRateIndex]['serviceName'])->toBe('Amazon Shipping Ground');
+});
+
+it('lets a shipping rule excluding Amazon drop its offers, even an approved one', function (): void {
+    approveAmazonShippingGround($this->package, AmazonChannelType::External);
+    ruleNamingAmazon($this->package, ShippingRuleAction::ExcludeService);
+
+    expect(app(PackageShippingWorkflow::class)->prepareRates($this->package)->rateOptions)->toBe([]);
+
+    $item = batchShip($this->package);
+
+    expect($item->status)->toBe(LabelBatchItemStatus::Failed)
+        ->and($item->error_message)->toBe('No shipping rates available for this package.');
 
     Saloon::assertNotSent(PurchaseShipment::class);
 });
