@@ -486,7 +486,7 @@ it('does not let one client\'s approval of everything reach another client', fun
 });
 
 it('refuses one service of every carrier', function (): void {
-    expect(fn () => ApprovalRule::service(ServiceApproval::WILDCARD, 'UPS_PTP_GND'))
+    expect(fn (): ApprovalRule => ApprovalRule::service(ServiceApproval::WILDCARD, 'UPS_PTP_GND'))
         ->toThrow(InvalidArgumentException::class);
 
     expect(fn () => ServiceApproval::factory()->create([
