@@ -64,14 +64,14 @@ function storedRules(Client $client, SourceEnvironment $environment = SourceEnvi
 
 it('renders for an admin, grouped by carrier', function (): void {
     Livewire::test(ServiceApprovals::class)
+        ->assertFormSet(['mode' => ServiceApprovals::MODE_SELECTED])
         ->assertSuccessful()
         ->assertSee('OnTrac')
         ->assertSeeText('UPS Ground')
         // The source's identifiers are for the database, not for the person
         // deciding what automation may buy.
         ->assertDontSeeText('UPS_PTP_GND')
-        ->assertDontSeeText('ONTRAC_MFN_GROUND')
-        ->assertFormSet(['mode' => ServiceApprovals::MODE_SELECTED]);
+        ->assertDontSeeText('ONTRAC_MFN_GROUND');
 });
 
 it('is hidden while no Amazon connection is active', function (): void {
