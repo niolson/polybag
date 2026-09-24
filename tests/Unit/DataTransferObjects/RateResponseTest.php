@@ -3,6 +3,7 @@
 use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\Enums\AmazonChannelType;
 use App\Enums\CarrierPackaging;
 use App\Enums\SourceEnvironment;
 
@@ -66,6 +67,7 @@ it('round-trips the observed service identity, which names a service rather than
         observedService: new ObservedServiceIdentity(
             source: 'amazon',
             environment: SourceEnvironment::Production,
+            channelType: AmazonChannelType::External,
             externalCarrierId: 'ONTRAC',
             externalServiceId: 'ONTRAC_MFN_GROUND',
         ),
@@ -74,7 +76,27 @@ it('round-trips the observed service identity, which names a service rather than
     $restored = RateResponse::fromArray($rate->toArray());
 
     expect($restored->observedService?->approvalKey())->toBe($rate->observedService->approvalKey())
-        ->and($restored->observedService?->environment)->toBe(SourceEnvironment::Production);
+        ->and($restored->observedService?->environment)->toBe(SourceEnvironment::Production)
+        ->and($restored->observedService?->channelType)->toBe(AmazonChannelType::External);
+});
+
+it('reads a rate serialized before channel types existed as an Amazon order\'s', function (): void {
+    $data = (new RateResponse(
+        carrier: 'OnTrac',
+        serviceCode: 'ONTRAC_MFN_GROUND',
+        serviceName: 'OnTrac Ground',
+        price: 5.79,
+        observedService: new ObservedServiceIdentity(
+            source: 'amazon',
+            environment: SourceEnvironment::Production,
+            channelType: AmazonChannelType::Amazon,
+            externalCarrierId: 'ONTRAC',
+            externalServiceId: 'ONTRAC_MFN_GROUND',
+        ),
+    ))->toArray();
+    unset($data['observedService']['channelType']);
+
+    expect(RateResponse::fromArray($data)->observedService?->channelType)->toBe(AmazonChannelType::Amazon);
 });
 
 it('defaults to no observed service, so an authored carrier service is not treated as discovered', function (): void {

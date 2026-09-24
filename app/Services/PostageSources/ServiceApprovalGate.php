@@ -4,6 +4,7 @@ namespace App\Services\PostageSources;
 
 use App\DataTransferObjects\PostageSources\ApprovalRule;
 use App\DataTransferObjects\PostageSources\ServiceApprovalRules;
+use App\Enums\AmazonChannelType;
 use App\Enums\ApprovalEffect;
 use App\Enums\SourceEnvironment;
 use App\Models\Client;
@@ -37,7 +38,7 @@ use Illuminate\Support\Facades\DB;
  * source offers, and an exception of the same shape carves services back out.
  * An exception always wins — see {@see ServiceApprovalRules}.
  *
- * Three axes of scope, all load-bearing, and none of them wildcarded:
+ * Four axes of scope, all load-bearing, and none of them wildcarded:
  *
  * - **postage source**, because a service offered through Amazon and the same
  *   service bought directly are two different purchases;
@@ -45,7 +46,11 @@ use Illuminate\Support\Facades\DB;
  * - **environment**, because Amazon's sandbox returned only Amazon Shipping
  *   where production for the same channel returned OnTrac, UPS and USPS and no
  *   Amazon Shipping at all. An approval earned in sandbox is evidence about
- *   nothing that costs money.
+ *   nothing that costs money;
+ * - **channel type**, because Amazon Shipping sold for an order from another
+ *   channel has its own prices and none of Buy Shipping's protections, so
+ *   consent to buy a service for Amazon orders is not consent to buy it for a
+ *   Shopify order (`amazon-shipping-external-orders/07`).
  *
  * Nothing here is cached. `CacheService` holds carrier services for an hour,
  * which is right for authored configuration and would be wrong here: revoking
@@ -77,23 +82,24 @@ class ServiceApprovalGate
     public function approved(
         string $source,
         SourceEnvironment $environment,
+        AmazonChannelType $channelType,
         string $externalCarrierId,
         string $externalServiceId,
         ?int $clientId,
     ): bool {
-        return $this->rulesFor($source, $environment, $clientId)
+        return $this->rulesFor($source, $environment, $channelType, $clientId)
             ->permits($externalCarrierId, $externalServiceId);
     }
 
     /**
      * Everything this client has approved and excepted from one source in one
-     * world, in one query.
+     * world, for one kind of order, in one query.
      *
      * For matching a whole rate list rather than asking once per offer: an
      * Amazon `getRates` can return several eligible offers, and
      * {@see RateSelector} is on the Ship page's hot path.
      */
-    public function rulesFor(string $source, SourceEnvironment $environment, ?int $clientId): ServiceApprovalRules
+    public function rulesFor(string $source, SourceEnvironment $environment, AmazonChannelType $channelType, ?int $clientId): ServiceApprovalRules
     {
         if ($clientId === null) {
             return ServiceApprovalRules::none();
@@ -101,7 +107,7 @@ class ServiceApprovalGate
 
         return new ServiceApprovalRules(
             ServiceApproval::query()
-                ->inWorld($source, $environment)
+                ->inWorld($source, $environment, $channelType)
                 ->where('client_id', $clientId)
                 ->get()
                 ->map(fn (ServiceApproval $approval): ApprovalRule => ApprovalRule::fromApproval($approval))
@@ -110,8 +116,8 @@ class ServiceApprovalGate
     }
 
     /**
-     * Approve the one service an observation names, for one client, in the
-     * world that observation was made in.
+     * Approve the one service an observation names, for one client and one
+     * kind of order, in the world that observation was made in.
      *
      * Mapped or not: what a service is called is not whether automation may
      * buy it, and requiring a `Carrier` row for OnTrac only to get past this
@@ -124,11 +130,12 @@ class ServiceApprovalGate
      * gets created by accident. Callers that are not a signed-in operator have
      * to name the user they are acting for.
      */
-    public function grant(ObservedService $observation, Client $client, User $approver): ServiceApproval
+    public function grant(ObservedService $observation, AmazonChannelType $channelType, Client $client, User $approver): ServiceApproval
     {
         return $this->grantRule(
             $observation->source,
             $observation->environment,
+            $channelType,
             $client,
             ApprovalRule::service($observation->external_carrier_id, $observation->external_service_id),
             $approver,
@@ -141,6 +148,7 @@ class ServiceApprovalGate
     public function grantRule(
         string $source,
         SourceEnvironment $environment,
+        AmazonChannelType $channelType,
         Client $client,
         ApprovalRule $rule,
         User $approver,
@@ -149,6 +157,7 @@ class ServiceApprovalGate
             [
                 'source' => $source,
                 'environment' => $environment,
+                'channel_type' => $channelType,
                 'external_carrier_id' => $rule->externalCarrierId,
                 'external_service_id' => $rule->externalServiceId,
                 'effect' => $rule->effect,
@@ -166,18 +175,19 @@ class ServiceApprovalGate
     }
 
     /**
-     * Withdraw one client's approval of the one service an observation names.
+     * Withdraw one client's approval of the one service an observation names,
+     * for one kind of order.
      *
      * Only the row naming that service: a carrier or whole-source approval
      * that also covers it is a different decision, withdrawn on its own.
      *
      * @return int approvals withdrawn — 0 when there was nothing to withdraw
      */
-    public function revoke(ObservedService $observation, Client $client): int
+    public function revoke(ObservedService $observation, AmazonChannelType $channelType, Client $client): int
     {
         return $this->withdraw(
             ServiceApproval::query()
-                ->inWorld($observation->source, $observation->environment)
+                ->inWorld($observation->source, $observation->environment, $channelType)
                 ->where('client_id', $client->getKey())
                 ->where('external_carrier_id', $observation->external_carrier_id)
                 ->where('external_service_id', $observation->external_service_id)
@@ -187,8 +197,8 @@ class ServiceApprovalGate
     }
 
     /**
-     * Set one client's approvals and exceptions for one source and world to
-     * exactly these, granting and withdrawing as needed.
+     * Set one client's approvals and exceptions for one source, world and kind
+     * of order to exactly these, granting and withdrawing as needed.
      *
      * What the approvals page submits. One lock and one transaction over both
      * halves, so a half-applied change cannot leave a service approved because
@@ -203,19 +213,20 @@ class ServiceApprovalGate
     public function sync(
         string $source,
         SourceEnvironment $environment,
+        AmazonChannelType $channelType,
         Client $client,
         iterable $rules,
         User $approver,
     ): array {
-        $lock = "service-approvals:{$client->getKey()}:{$source}:{$environment->value}";
+        $lock = "service-approvals:{$client->getKey()}:{$source}:{$environment->value}:{$channelType->value}";
 
         return Cache::lock($lock, self::LOCK_SECONDS)->block(
             self::LOCK_WAIT_SECONDS,
-            fn (): array => DB::transaction(function () use ($source, $environment, $client, $rules, $approver): array {
+            fn (): array => DB::transaction(function () use ($source, $environment, $channelType, $client, $rules, $approver): array {
                 $wanted = collect($rules)->keyBy(fn (ApprovalRule $rule): string => $rule->key());
 
                 $existing = ServiceApproval::query()
-                    ->inWorld($source, $environment)
+                    ->inWorld($source, $environment, $channelType)
                     ->where('client_id', $client->getKey())
                     ->get()
                     ->keyBy(fn (ServiceApproval $approval): string => ApprovalRule::fromApproval($approval)->key());
@@ -225,7 +236,7 @@ class ServiceApprovalGate
                 $granted = $wanted->diffKeys($existing);
 
                 foreach ($granted as $rule) {
-                    $this->grantRule($source, $environment, $client, $rule, $approver);
+                    $this->grantRule($source, $environment, $channelType, $client, $rule, $approver);
                 }
 
                 return ['granted' => $granted->count(), 'revoked' => $revoked];

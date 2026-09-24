@@ -7,6 +7,7 @@ use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\AmazonChannelType;
 use App\Enums\OtdrProtectedOrders;
 use App\Enums\PackageStatus;
 use App\Enums\SourceEnvironment;
@@ -343,6 +344,7 @@ it('claims only approved rates fail when an unapproved service was withheld', fu
             observedService: new ObservedServiceIdentity(
                 source: 'amazon',
                 environment: SourceEnvironment::Production,
+                channelType: AmazonChannelType::Amazon,
                 externalCarrierId: 'UPS',
                 externalServiceId: 'UPS_PTP_GND',
             ),

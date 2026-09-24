@@ -4,6 +4,7 @@ use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
 use App\DataTransferObjects\Shipping\ClassifiedRate;
 use App\DataTransferObjects\Shipping\OfferRequirements;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\Enums\AmazonChannelType;
 use App\Enums\SourceEnvironment;
 use App\Models\Client;
 use App\Models\ServiceApproval;
@@ -178,6 +179,7 @@ function makeDiscoveredRate(
         observedService: new ObservedServiceIdentity(
             source: 'amazon',
             environment: $environment,
+            channelType: AmazonChannelType::Amazon,
             externalCarrierId: $externalCarrierId,
             externalServiceId: $externalServiceId,
         ),
@@ -293,6 +295,7 @@ it('reports the services it withheld rather than just declining to choose', func
         ->and($selection->withheldForLog())->toContain([
             'source' => 'amazon',
             'environment' => 'production',
+            'channel_type' => 'amazon',
             'carrier' => 'ONTRAC',
             'service' => 'ONTRAC_GROUND',
         ]);

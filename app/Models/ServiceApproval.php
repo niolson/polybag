@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\DataTransferObjects\PostageSources\ServiceApprovalRules;
+use App\Enums\AmazonChannelType;
 use App\Enums\ApprovalEffect;
 use App\Enums\SourceEnvironment;
 use App\Services\PostageSources\ServiceApprovalGate;
@@ -16,7 +17,7 @@ use InvalidArgumentException;
 
 /**
  * One client's permission for automation to spend money on discovered
- * services, in one world — or an exception to it.
+ * services, in one world and for one kind of order — or an exception to it.
  *
  * ADR-0003 decision 3, and the third of the three concepts decision 2 keeps
  * apart: {@see ObservedService} is what a source said exists, its
@@ -24,6 +25,11 @@ use InvalidArgumentException;
  * unattended path may buy it. The first two are statements of fact and naming;
  * only this one spends money, which is why it alone is scoped to a client and
  * to an environment.
+ *
+ * The kind of order is Shipping v2's channel type: an approval for Amazon
+ * orders does not cover the same service sold for an order from another
+ * channel, whose price and terms are different
+ * (`amazon-shipping-external-orders/07`).
  *
  * A row covers one service, every service of one carrier (`external_service_id`
  * is {@see WILDCARD}), or everything the source offers (both are). Its
@@ -39,6 +45,7 @@ use InvalidArgumentException;
  *
  * @property string $source
  * @property SourceEnvironment $environment
+ * @property AmazonChannelType $channel_type
  * @property string $external_carrier_id
  * @property string $external_service_id
  * @property ApprovalEffect $effect
@@ -63,6 +70,7 @@ class ServiceApproval extends Model
     protected $fillable = [
         'source',
         'environment',
+        'channel_type',
         'external_carrier_id',
         'external_service_id',
         'effect',
@@ -76,6 +84,7 @@ class ServiceApproval extends Model
     {
         return [
             'environment' => SourceEnvironment::class,
+            'channel_type' => AmazonChannelType::class,
             'effect' => ApprovalEffect::class,
             'approved_at' => 'datetime',
         ];
@@ -123,12 +132,13 @@ class ServiceApproval extends Model
     }
 
     /**
-     * Every row that can bear on a purchase from this source, in this world.
+     * Every row that can bear on a purchase from this source, in this world,
+     * for this kind of order.
      *
-     * One axis narrower than {@see ObservedService::scopeSameService()}, which
-     * a mapping uses, and the extra axis is `environment` — deliberately. A
-     * name is a name in both worlds; a permission to spend is not. Marketplace
-     * is absent from both.
+     * Two axes narrower than {@see ObservedService::scopeSameService()}, which
+     * a mapping uses, and the extra axes are `environment` and `channel_type` —
+     * deliberately. A name is a name in both worlds and on both channels; a
+     * permission to spend is not. Marketplace is absent from both.
      *
      * Not narrowed to a carrier or service: a wildcard row covers services it
      * does not name, so which rows match is decided in memory by
@@ -136,9 +146,10 @@ class ServiceApproval extends Model
      *
      * @param  Builder<$this>  $query
      */
-    public function scopeInWorld(Builder $query, string $source, SourceEnvironment $environment): void
+    public function scopeInWorld(Builder $query, string $source, SourceEnvironment $environment, AmazonChannelType $channelType): void
     {
         $query->where('source', $source)
-            ->where('environment', $environment);
+            ->where('environment', $environment)
+            ->where('channel_type', $channelType);
     }
 }

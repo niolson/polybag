@@ -158,7 +158,7 @@ class RateSelector
      * which is the opposite of deny-by-default meaning "behaves as it did
      * before discovery existed".
      *
-     * One query per (source, environment) rather than one per rate — in
+     * One query per (source, environment, channel type) rather than one per rate — in
      * practice one per quote: an Amazon `getRates` can return several eligible
      * offers at once, and this runs on the batch-ship path for every package.
      * Wildcards and exceptions are matched in memory by
@@ -190,7 +190,8 @@ class RateSelector
     }
 
     /**
-     * This client's approvals for every world these rates were quoted in.
+     * This client's approvals for every world and channel type these rates
+     * were quoted in.
      *
      * @param  Collection<int, RateResponse>  $discovered
      * @return Collection<string, ServiceApprovalRules>
@@ -201,12 +202,12 @@ class RateSelector
             ->map(fn (RateResponse $rate): ObservedServiceIdentity => $rate->observedService)
             ->keyBy(fn (ObservedServiceIdentity $identity): string => self::worldKey($identity))
             ->map(fn (ObservedServiceIdentity $identity): ServiceApprovalRules => $this->approvals
-                ->rulesFor($identity->source, $identity->environment, $clientId));
+                ->rulesFor($identity->source, $identity->environment, $identity->channelType, $clientId));
     }
 
     private static function worldKey(ObservedServiceIdentity $identity): string
     {
-        return $identity->source.'|'.$identity->environment->value;
+        return implode('|', [$identity->source, $identity->environment->value, $identity->channelType->value]);
     }
 
     /**

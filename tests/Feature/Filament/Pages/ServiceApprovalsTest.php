@@ -1,6 +1,7 @@
 <?php
 
 use App\DataTransferObjects\PostageSources\ApprovalRule;
+use App\Enums\AmazonChannelType;
 use App\Enums\ApprovalEffect;
 use App\Enums\Role;
 use App\Enums\SourceEnvironment;
@@ -51,10 +52,13 @@ function carrierKey($component, string $carrierId): string
 /**
  * @return list<string>
  */
-function storedRules(Client $client, SourceEnvironment $environment = SourceEnvironment::Production): array
-{
+function storedRules(
+    Client $client,
+    SourceEnvironment $environment = SourceEnvironment::Production,
+    AmazonChannelType $channelType = AmazonChannelType::Amazon,
+): array {
     return app(ServiceApprovalGate::class)
-        ->rulesFor('amazon', $environment, $client->id)
+        ->rulesFor('amazon', $environment, $channelType, $client->id)
         ->rules
         ->map(fn (ApprovalRule $rule): string => $rule->key())
         ->sort()
@@ -174,8 +178,8 @@ it('writes no exception with nothing to except', function (): void {
 
 it('prefills the form from the rules on file', function (): void {
     $gate = app(ServiceApprovalGate::class);
-    $gate->grantRule('amazon', SourceEnvironment::Production, $this->client, ApprovalRule::everything(), User::factory()->create());
-    $gate->grantRule('amazon', SourceEnvironment::Production, $this->client, ApprovalRule::service('UPS', 'UPS_PTP_GND', ApprovalEffect::Deny), User::factory()->create());
+    $gate->grantRule('amazon', SourceEnvironment::Production, AmazonChannelType::Amazon, $this->client, ApprovalRule::everything(), User::factory()->create());
+    $gate->grantRule('amazon', SourceEnvironment::Production, AmazonChannelType::Amazon, $this->client, ApprovalRule::service('UPS', 'UPS_PTP_GND', ApprovalEffect::Deny), User::factory()->create());
 
     $component = Livewire::test(ServiceApprovals::class);
     $ups = carrierKey($component, 'UPS');
@@ -192,6 +196,7 @@ it('keeps a rule for a service this world has never reported', function (): void
     app(ServiceApprovalGate::class)->grantRule(
         'amazon',
         SourceEnvironment::Production,
+        AmazonChannelType::Amazon,
         $this->client,
         ApprovalRule::service('DHL_ECOMMERCE', 'DHL_PARCEL_GROUND'),
         User::factory()->create(),
@@ -207,7 +212,7 @@ it('keeps a rule for a service this world has never reported', function (): void
 
 it('withdraws approval when a service is unticked', function (): void {
     $observation = ObservedService::where('external_service_id', 'UPS_PTP_GND')->sole();
-    app(ServiceApprovalGate::class)->grant($observation, $this->client, User::factory()->create());
+    app(ServiceApprovalGate::class)->grant($observation, AmazonChannelType::Amazon, $this->client, User::factory()->create());
 
     $component = Livewire::test(ServiceApprovals::class);
     $ups = carrierKey($component, 'UPS');
@@ -235,7 +240,7 @@ it('approves one environment and one client at a time', function (): void {
 
 it('reloads the form for the client picked', function (): void {
     $other = Client::factory()->create();
-    app(ServiceApprovalGate::class)->grantRule('amazon', SourceEnvironment::Production, $other, ApprovalRule::everything(), User::factory()->create());
+    app(ServiceApprovalGate::class)->grantRule('amazon', SourceEnvironment::Production, AmazonChannelType::Amazon, $other, ApprovalRule::everything(), User::factory()->create());
 
     Livewire::test(ServiceApprovals::class)
         ->assertFormSet(['mode' => ServiceApprovals::MODE_SELECTED])
@@ -286,6 +291,7 @@ it('keeps showing a hidden carrier that a rule names, so saving cannot withdraw 
     app(ServiceApprovalGate::class)->grantRule(
         'amazon',
         SourceEnvironment::Production,
+        AmazonChannelType::Amazon,
         $this->client,
         ApprovalRule::carrier('YANWEN'),
         User::factory()->create(),
@@ -308,4 +314,32 @@ it('tells apart two services a carrier reports under the same name', function ()
     Livewire::test(ServiceApprovals::class)
         ->assertSeeText('UPS Ground (UPS_PTP_GND)')
         ->assertSeeText('UPS Ground (UPS_PTP_GND_ALT)');
+});
+
+it('approves orders from other channels separately from Amazon orders', function (): void {
+    app(ServiceApprovalGate::class)->grantRule(
+        'amazon',
+        SourceEnvironment::Production,
+        AmazonChannelType::Amazon,
+        $this->client,
+        ApprovalRule::everything(),
+        User::factory()->create(),
+    );
+
+    $component = Livewire::test(ServiceApprovals::class)
+        ->assertFormSet(['channel_type' => AmazonChannelType::Amazon->value, 'mode' => ServiceApprovals::MODE_ALL])
+        ->fillForm(['channel_type' => AmazonChannelType::External->value])
+        // What is on file for Amazon orders says nothing about other channels.
+        ->assertFormSet(['mode' => ServiceApprovals::MODE_SELECTED]);
+
+    $ups = carrierKey($component, 'UPS');
+
+    $component
+        ->fillForm(["carriers.{$ups}.allow_all" => true])
+        ->call('save')
+        ->assertHasNoFormErrors()
+        ->assertNotified();
+
+    expect(storedRules($this->client, channelType: AmazonChannelType::External))->toBe(['allow|UPS|*'])
+        ->and(storedRules($this->client))->toBe(['allow|*|*']);
 });

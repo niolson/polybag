@@ -8,6 +8,7 @@ use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\AmazonChannelType;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
 use App\Enums\SourceEnvironment;
@@ -61,6 +62,7 @@ function discoveredRate(float $price, string $externalServiceId = 'USPS_GROUND_A
         observedService: new ObservedServiceIdentity(
             source: 'amazon',
             environment: SourceEnvironment::Production,
+            channelType: AmazonChannelType::Amazon,
             externalCarrierId: 'USPS',
             externalServiceId: $externalServiceId,
         ),
@@ -186,7 +188,7 @@ it('refuses to auto ship an unapproved discovered service, and says why', functi
         ->and($result->title)->toBe('No Approved Rates')
         ->and($result->requiresAttendedSelection)->toBeTrue()
         ->and($result->message)->toContain('MockCarrier Ground (via amazon)')
-        ->and($result->message)->toContain('Map Carrier Services')
+        ->and($result->message)->toContain('Amazon Approvals')
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 
