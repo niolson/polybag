@@ -5,6 +5,14 @@
 Accepted — 2026-09-15. Depends on ADR-0003 (an Amazon offer's packaging requirement is read
 off the observed service). Gives `amazon-buy-shipping/08` its answer.
 
+Superseded in part by ADR-0006 (accepted 2026-09-24): the Media Mail half of *Foreseen,
+not decided* on mail content classes. Media Mail is now a service that requires media
+contents. It is qualified by a per-product declaration, never inferred, and a Package
+qualifies only when every item does, as foreseen here. Unlike the note, automation may
+choose it on price for a Package that qualifies, because the contents have been vouched
+for. Bound Printed Matter is not authored. Packaging stays on the rate, as decided here.
+See `0006-carriers-are-carriers-sources-are-policy.md`.
+
 Proposed 2026-09-15 and accepted the same day after four review passes, each of which is
 recorded below and under "Options considered" so that the rejected shapes stay rejected.
 

@@ -10,6 +10,23 @@ per-purchase `package_labels` row, and the `packages` copy becomes the projectio
 active label. Nothing below changes in meaning; where the two rows disagree, the label
 row is authoritative. See `0004-package-label-as-a-record.md`.
 
+Superseded in part by ADR-0006 (accepted 2026-09-24). Two amendments below no longer hold:
+
+- **2026-09-22 amendment:** the off-Amazon scope's `carrier_id` as the `Amazon`
+  postage-source row, and the reason given for it, that an Amazon Shipping carrier row
+  would make a direct account look valid. Amazon Shipping is now a carrier sold directly
+  to orders from other channels. Its account is the scoped connection, and the scope
+  sits on the Amazon Shipping carrier. The rest of that amendment stands: the four
+  precedence bands, `rate_shop` off, the client guard, and never overriding an Amazon
+  order's origin.
+- **2026-09-03 amendment:** Shopify's 8 PM cutoff on the `Shopify` carrier row. The row
+  goes. A Shopify label is dated by the carrier of the service it requests. `auto` is
+  dated by the carrier its connection names, USPS unless changed, which is the policy
+  the 8 PM matched.
+
+The definitions of carrier of record and postage source, and every decision below, stand.
+See `0006-carriers-are-carriers-sources-are-policy.md`.
+
 Clarified 2026-09-22: the Shipping v2 distinction is between on-Amazon
 (`channelType: AMAZON`) and off-Amazon (`channelType: EXTERNAL`) orders. The implemented
 Buy Shipping adapter covers only on-Amazon orders and binds to their originating Amazon

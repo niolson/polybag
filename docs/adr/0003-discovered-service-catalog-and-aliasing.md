@@ -4,6 +4,27 @@
 
 Accepted — 2026-09-02; amended 2026-09-22 to permit explicitly configured blind-purchase automation; amended 2026-09-24 (`amazon-buy-shipping/18`) so that approval no longer requires normalization, and may cover a whole carrier or everything a source offers, with exceptions; amended again 2026-09-24 (`amazon-shipping-external-orders/07`) so that approvals for Amazon orders and for orders from other channels are separate. Depends on ADR-0002.
 
+Superseded in part by ADR-0006 (accepted 2026-09-24). Automation approval is removed:
+the `service_approvals` table, its page and its gate go. What no longer holds:
+
+- Decisions 3 and 4, with their 2026-09-24 amendments. What automation may buy is now the
+  shipping method's allowance, narrowed by the connection's postage setting and by
+  exclude rules.
+- Approval as the third concept of decision 2, with that decision's 2026-09-24
+  amendment. Mapping an observed service onto a service the method lists is now what
+  lets automation buy it.
+- Decision 5's client opt-in, which becomes the Shopify connection's postage setting.
+- The seeded `AMAZON_BUY_SHIPPING` row, through which a shipping method asked Amazon.
+
+The rest stands:
+- discovery applies to Amazon only and never creates catalog rows;
+- observation and normalization stay separate;
+- Shopify is a blind purchase, bought unattended only on an explicit choice;
+- the requested preference is not the service;
+- unmapped is a valid terminal state.
+
+See `0006-carriers-are-carriers-sources-are-policy.md`.
+
 Drafted 2026-09-01 and revised twice. The first draft modeled Shopify as a discovery source
 alongside Amazon, on the assumption that the purchased service becomes knowable after the fact.
 It does not. That assumption is removed here and Shopify is carved out as a different kind of

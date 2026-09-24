@@ -38,9 +38,20 @@ stubbing them, which is what makes "no method could return a `RateResponse`" str
 
 ## The decisions the issue left open
 
-**Automation is excluded structurally, not by permission.** The criterion read "no
+**Automation may buy a blind purchase only on an explicit choice**, and not at all when
+this issue closed.
+- **Since 2026-09-22** (#253, ADR-0003's amendment of that date), auto-ship and batch ship
+  may buy one for an opted-in client, in two cases only:
+  - a shipping rule names it;
+  - it is the shipping method's sole configured, package-eligible choice.
+- It is still never ranked, never returned by `selectBest()`, and never a fallback when
+  another seller's rate call fails.
+- ADR-0006 moves the opt-in to the Shopify connection's postage setting
+  (`carrier-catalog-reset/10`).
+
+What shipped here was stricter, and is kept as the record of it. The criterion read "no
 automated path without a client opt-in", which implies that with the opt-in automation may.
-It is stricter: no automated path reaches a blind purchase at all, because `selectBest()`,
+It was stricter: no automated path reached a blind purchase at all, because `selectBest()`,
 auto-ship, batch ship and shipping rules are typed in `RateResponse` and a
 `BlindPurchaseOffer` is not one. Three places enforce it because they fail differently —
 `RateSelector::selectBest()` now **drops** unpriced rates and returns null (`classify()`
@@ -73,7 +84,9 @@ the fabricated price back one layer down.
 
 - [x] `ShopifyAdapter` no longer implements the interface that could return a `RateResponse`
 - [x] The offer is selectable by a human, with confirmation, and never ranked
-- [x] No automated path can reach it — with or without the opt-in
+- [x] ~~No automated path can reach it — with or without the opt-in~~ Superseded
+      2026-09-22 (#253): only an explicit rule or the method's sole eligible choice, for
+      an opted-in client
 - [x] A hard-required special service excludes Shopify, visibly
 - [x] `ShopifyAdapterTest` and `RateSelectorTest` cover both exclusions
 
@@ -90,3 +103,9 @@ the fabricated price back one layer down.
 
 - `postage-source-split/08` — the adapter interface split this needed
 - `10`, `11` — the service a blind purchase cannot report, and inferring it later
+
+## Comments
+
+- **2026-09-24** — Corrected by `carrier-catalog-reset/01`. The text still said no
+  automated path could reach a blind purchase, two days after #253 let a rule or a sole
+  eligible choice make one.
