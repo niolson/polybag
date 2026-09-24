@@ -1339,7 +1339,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             'No Approved Rates',
             'This package was quoted, but no service it was offered is approved for automated purchase: '
             .$selection->withheldSummary().'. '
-            .'Approve it on Map Carrier Services, or ship this package from the Ship page, where a person chooses the rate.',
+            .'Approve it on Amazon Approvals, or ship this package from the Ship page, where a person chooses the rate.',
         );
     }
 
@@ -1389,7 +1389,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         $approved = $selection->withheldAnything() ? 'Approved ' : '';
         $scope = $selection->withheldAnything()
             ? 'none of the rates approved for automated purchase does. Not approved: '
-                .$selection->withheldSummary().', which Map Carrier Services can approve.'
+                .$selection->withheldSummary().', which Amazon Approvals can approve.'
             : "none of this package's rates does.";
 
         return PackageShippingResult::attendedSelectionRequired(

@@ -1,6 +1,7 @@
 <?php
 
 use App\DataTransferObjects\PostageSources\ServiceObservation;
+use App\Enums\AmazonChannelType;
 use App\Enums\Role;
 use App\Enums\SourceEnvironment;
 use App\Filament\Pages\UnmappedObservedServices;
@@ -25,7 +26,7 @@ uses(RefreshDatabase::class);
  */
 function approveService(ObservedService $observation, Client $client): void
 {
-    app(ServiceApprovalGate::class)->grant($observation, $client, User::factory()->create());
+    app(ServiceApprovalGate::class)->grant($observation, AmazonChannelType::Amazon, $client, User::factory()->create());
 }
 
 beforeEach(function (): void {

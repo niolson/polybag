@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — 2026-09-02; amended 2026-09-22 to permit explicitly configured blind-purchase automation; amended 2026-09-24 (`amazon-buy-shipping/18`) so that approval no longer requires normalization, and may cover a whole carrier or everything a source offers, with exceptions. Depends on ADR-0002.
+Accepted — 2026-09-02; amended 2026-09-22 to permit explicitly configured blind-purchase automation; amended 2026-09-24 (`amazon-buy-shipping/18`) so that approval no longer requires normalization, and may cover a whole carrier or everything a source offers, with exceptions; amended again 2026-09-24 (`amazon-shipping-external-orders/07`) so that approvals for Amazon orders and for orders from other channels are separate. Depends on ADR-0002.
 
 Drafted 2026-09-01 and revised twice. The first draft modeled Shopify as a discovery source
 alongside Amazon, on the assumption that the purchased service becomes knowable after the fact.
@@ -120,6 +120,22 @@ still authorizes nothing in production.
 Rejected: **most-specific-wins**, which would allow "no OnTrac, except OnTrac Ground". It makes a
 row's effect depend on which other rows exist, and nobody has asked for that case. Exceptions
 always winning is one rule a seller can hold in their head.
+
+Amended 2026-09-24 (`amazon-shipping-external-orders/07`): a fourth axis, the **channel type**
+Shipping v2 was asked for. An approval for Amazon orders (`AMAZON`) does not cover the same
+service sold as Amazon Shipping for an order from another channel (`EXTERNAL`), and the reverse.
+The two are different purchases of the same service: off-Amazon Amazon Shipping has its own
+prices and none of Buy Shipping's protections (A-to-z claims, OTDR). A seller who approved
+everything for Amazon orders has not agreed to buy for Shopify orders on those terms. The axis
+is not wildcarded either. Observations and mappings are not split by channel: the service is the
+same one, under the same name.
+
+Rejected: **one approval covering both channels**, which is what shipped until this amendment.
+It meant opting a connection in to selling for other channels also switched on unattended
+spending for those channels, under approvals granted for Amazon orders. Splitting later would
+have been the costly direction, because shared approvals would silently stop covering one
+channel. Existing rows became approvals for Amazon orders, the narrower reading. No production
+account sold off-Amazon yet, so nothing that was running stopped.
 
 **4. Discovered is not approved.** An unapproved Amazon service is selectable **by a human on
 the Ship page**, where a person sees the price and takes responsibility. It is excluded from

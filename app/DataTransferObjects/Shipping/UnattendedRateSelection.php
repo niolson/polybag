@@ -2,8 +2,11 @@
 
 namespace App\DataTransferObjects\Shipping;
 
+use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
+use App\Enums\AmazonChannelType;
 use App\Services\RateSelector;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 
 /**
  * What automation may buy, and what it declined to buy on nobody's authority.
@@ -68,13 +71,24 @@ readonly class UnattendedRateSelection
     {
         return $this->withheld
             ->map(fn (RateResponse $rate): string => trim("{$rate->carrier} {$rate->serviceName}")
-                .($rate->observedService === null ? '' : " (via {$rate->observedService->source})"))
+                .($rate->observedService === null ? '' : ' (via '.self::approvalScope($rate->observedService).')'))
             ->unique()
             ->implode(', ');
     }
 
     /**
-     * @return array<int, array{source: string, environment: string, carrier: string, service: string}>
+     * Where the approval that is missing would be filed. An off-Amazon rate is
+     * said so, because an approval for Amazon orders does not cover it.
+     */
+    private static function approvalScope(ObservedServiceIdentity $identity): string
+    {
+        return $identity->channelType === AmazonChannelType::External
+            ? "{$identity->source}, ".Str::lower($identity->channelType->label())
+            : $identity->source;
+    }
+
+    /**
+     * @return array<int, array{source: string, environment: string, channel_type: string, carrier: string, service: string}>
      */
     public function withheldForLog(): array
     {
@@ -83,6 +97,7 @@ readonly class UnattendedRateSelection
             ->map(fn (RateResponse $rate): array => [
                 'source' => $rate->observedService->source,
                 'environment' => $rate->observedService->environment->value,
+                'channel_type' => $rate->observedService->channelType->value,
                 'carrier' => $rate->observedService->externalCarrierId,
                 'service' => $rate->observedService->externalServiceId,
             ])

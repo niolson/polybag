@@ -9,8 +9,8 @@ use InvalidArgumentException;
 /**
  * One approval or exception, without the scope it is filed under.
  *
- * The source, environment and client are fixed by whoever holds the rule —
- * {@see ServiceApprovalRules} was read for one of each — so what is left is
+ * The source, environment, channel type and client are fixed by whoever holds
+ * the rule — {@see ServiceApprovalRules} was read for one of each — so what is left is
  * what it covers and what it does to it.
  */
 readonly class ApprovalRule

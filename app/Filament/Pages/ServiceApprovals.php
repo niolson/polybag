@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\DataTransferObjects\PostageSources\ApprovalRule;
 use App\DataTransferObjects\PostageSources\ServiceApprovalRules;
+use App\Enums\AmazonChannelType;
 use App\Enums\ApprovalEffect;
 use App\Enums\SourceEnvironment;
 use App\Models\Client;
@@ -34,16 +35,19 @@ use Illuminate\Support\Str;
 use UnitEnum;
 
 /**
- * Which Amazon Buy Shipping services automation may buy, per client and
- * environment — `amazon-buy-shipping/18`.
+ * Which Amazon Buy Shipping services automation may buy, per client,
+ * environment and kind of order — `amazon-buy-shipping/18`.
  *
  * Amazon-only for now, because Amazon is the only postage source that reports
  * services rather than quoting ones we authored: direct carrier accounts buy
  * from the seeded catalog without approval, and Shopify's blind purchase has
  * its own per-client opt-in. The page is hidden while no Amazon connection is
  * active; approvals already on file are kept, and apply again when one is.
- * Off-Amazon Amazon Shipping quotes are filed under the same source, so an
- * approval here covers them too (`amazon-shipping-external-orders/07`).
+ * Amazon orders and orders from other channels, sold Amazon Shipping off
+ * Amazon, are approved separately: the prices and terms differ, so consent to
+ * one is not consent to the other (`amazon-shipping-external-orders/07`). Both
+ * list the same observed services, because observations are not recorded per
+ * channel.
  *
  * Two ways to answer, because sellers want one of two things. *All services*
  * trusts whatever the source offers, including services it starts offering
@@ -119,6 +123,7 @@ class ServiceApprovals extends Page
         $this->loadScope(
             source: AmazonBuyShippingAdapter::OBSERVATION_SOURCE,
             environment: SourceEnvironment::current(),
+            channelType: AmazonChannelType::Amazon,
             clientId: app(ClientContext::class)->id(),
         );
     }
@@ -147,8 +152,18 @@ class ServiceApprovals extends Page
                                 ->live()
                                 ->afterStateUpdated(fn (): null => $this->reloadScope())
                                 ->helperText('Sandbox and production are approved separately. A sandbox approval never authorizes a purchase with real money.'),
+                            Select::make('channel_type')
+                                ->label('Orders')
+                                ->options(fn (): array => collect(AmazonChannelType::cases())
+                                    ->mapWithKeys(fn (AmazonChannelType $channelType): array => [$channelType->value => $channelType->label()])
+                                    ->all())
+                                ->required()
+                                ->selectablePlaceholder(false)
+                                ->live()
+                                ->afterStateUpdated(fn (): null => $this->reloadScope())
+                                ->helperText('Amazon Shipping sold for orders from other channels has its own prices and none of Buy Shipping\'s protections, so it is approved separately.'),
                         ])
-                        ->columns(2),
+                        ->columns(3),
 
                     Section::make('What automation may buy')
                         ->description('Auto-ship, batch ship and shipping rules buy an Amazon service only if it is approved here. Everything else stays on the Ship page for a packer to choose by hand, having seen the price.')
@@ -192,11 +207,13 @@ class ServiceApprovals extends Page
         // Read from the raw state: the dehydrated one is for the rules below.
         $source = AmazonBuyShippingAdapter::OBSERVATION_SOURCE;
         $environment = SourceEnvironment::from($this->data['environment']);
+        $channelType = AmazonChannelType::from($this->data['channel_type']);
         $client = Client::findOrFail($this->data['client_id']);
 
         $result = app(ServiceApprovalGate::class)->sync(
             source: $source,
             environment: $environment,
+            channelType: $channelType,
             client: $client,
             rules: $this->rulesFromState($data),
             approver: auth()->user(),
@@ -205,10 +222,10 @@ class ServiceApprovals extends Page
         Notification::make()
             ->success()
             ->title('Approvals saved')
-            ->body(static::summary($result, $client, $environment))
+            ->body(static::summary($result, $client, $environment, $channelType))
             ->send();
 
-        $this->loadScope($source, $environment, $client->getKey());
+        $this->loadScope($source, $environment, $channelType, $client->getKey());
     }
 
     /**
@@ -305,6 +322,7 @@ class ServiceApprovals extends Page
         $this->loadScope(
             source: AmazonBuyShippingAdapter::OBSERVATION_SOURCE,
             environment: SourceEnvironment::from($this->data['environment'] ?? SourceEnvironment::current()->value),
+            channelType: AmazonChannelType::from($this->data['channel_type'] ?? AmazonChannelType::Amazon->value),
             clientId: (int) $this->data['client_id'],
         );
 
@@ -312,11 +330,12 @@ class ServiceApprovals extends Page
     }
 
     /**
-     * Read one client's rules for one source and world into the form.
+     * Read one client's rules for one source, world and kind of order into the
+     * form.
      */
-    protected function loadScope(string $source, SourceEnvironment $environment, int $clientId): void
+    protected function loadScope(string $source, SourceEnvironment $environment, AmazonChannelType $channelType, int $clientId): void
     {
-        $rules = app(ServiceApprovalGate::class)->rulesFor($source, $environment, $clientId);
+        $rules = app(ServiceApprovalGate::class)->rulesFor($source, $environment, $channelType, $clientId);
 
         $this->carriers = static::carriersFor($source, $environment, $rules);
 
@@ -325,6 +344,7 @@ class ServiceApprovals extends Page
         $this->form->fill([
             'client_id' => $clientId,
             'environment' => $environment->value,
+            'channel_type' => $channelType->value,
             'mode' => $all ? self::MODE_ALL : self::MODE_SELECTED,
             'carriers' => collect($this->carriers)->map(function (array $carrier) use ($rules): array {
                 $of = fn (Collection $side): Collection => $side
@@ -482,9 +502,9 @@ class ServiceApprovals extends Page
      *
      * @param  array{granted: int, revoked: int}  $result
      */
-    protected static function summary(array $result, Client $client, SourceEnvironment $environment): string
+    protected static function summary(array $result, Client $client, SourceEnvironment $environment, AmazonChannelType $channelType): string
     {
-        $scope = "{$client->name}, {$environment->label()}";
+        $scope = "{$client->name}, {$environment->label()}, ".Str::lower($channelType->label());
 
         if ($result['granted'] === 0 && $result['revoked'] === 0) {
             return "No change for {$scope}.";
@@ -504,6 +524,6 @@ class ServiceApprovals extends Page
 
     public function getSubheading(): ?string
     {
-        return 'Which services Amazon Buy Shipping offers that automated shipping may buy, including Amazon Shipping sold for orders from other channels. Approve everything, whole carriers, or single services; an exception always wins. Direct carrier accounts need no approval here.';
+        return 'Which services Amazon Buy Shipping offers that automated shipping may buy, for Amazon orders and, separately, for orders from other channels sold Amazon Shipping. Approve everything, whole carriers, or single services; an exception always wins. Direct carrier accounts need no approval here.';
     }
 }

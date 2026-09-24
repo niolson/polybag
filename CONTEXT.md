@@ -63,7 +63,8 @@ One Client's permission for observed services to be bought by an unattended work
 one postage-source environment. It covers one service, every service of one carrier, or
 everything the source offers, and an **exception** of the same shape carves services back
 out; an exception always wins. It does not require normalization and never crosses between
-sandbox and production. Human selection does not require it.
+sandbox and production, nor between Amazon orders and orders from other channels sold
+Amazon Shipping. Human selection does not require it.
 _Avoid_: Service enabled, service active
 
 **Label**:
@@ -119,7 +120,8 @@ _Avoid_: Report printer (in anything a user reads)
 - A **service class** is satisfied by one or more concrete carrier services; a **blind purchase** satisfies none, because no service is offered.
 - An **observed service** is normalized onto an existing `CarrierService`, or promoted by authoring one. Nothing promotes itself.
 - An **observed service** may be selected by a human without an **automation approval**;
-  shipping rules, auto-ship and batch shipping require approval for that Client and environment.
+  shipping rules, auto-ship and batch shipping require approval for that Client, environment
+  and kind of order (Amazon's own, or another channel's).
 - A **blind purchase** is not an **Offer** — with no price it can never win a comparison, so it never enters one.
 - An **Offer** is claimed atomically before purchase. If the source's answer is ambiguous,
   it remains awaiting confirmation and must be recovered or resolved before another purchase

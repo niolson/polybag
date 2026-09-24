@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\AmazonChannelType;
 use App\Enums\ApprovalEffect;
 use App\Enums\SourceEnvironment;
 use App\Models\Client;
@@ -22,6 +23,7 @@ class ServiceApprovalFactory extends Factory
         return [
             'source' => 'amazon',
             'environment' => SourceEnvironment::Production,
+            'channel_type' => AmazonChannelType::Amazon,
             'external_carrier_id' => 'ONTRAC',
             'external_service_id' => 'ONTRAC_MFN_GROUND',
             'effect' => ApprovalEffect::Allow,
@@ -108,6 +110,16 @@ class ServiceApprovalFactory extends Factory
     {
         return $this->state(fn (): array => [
             'effect' => ApprovalEffect::Deny,
+        ]);
+    }
+
+    /**
+     * For orders from other channels, sold Amazon Shipping off Amazon.
+     */
+    public function offAmazon(): static
+    {
+        return $this->state(fn (): array => [
+            'channel_type' => AmazonChannelType::External,
         ]);
     }
 

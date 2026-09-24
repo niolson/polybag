@@ -17,6 +17,7 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\AmazonChannelType;
 use App\Enums\CarrierPackaging;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\OffAmazonShippingStatus;
@@ -315,7 +316,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
             logger()->warning('Amazon getRates failed', [
                 'package_id' => $package->id,
                 'status' => $response->status(),
-                'channel' => $offAmazon ? 'EXTERNAL' : 'AMAZON',
+                'channel' => ($offAmazon ? AmazonChannelType::External : AmazonChannelType::Amazon)->apiValue(),
                 'errors' => $response->json('errors'),
             ]);
 
@@ -331,6 +332,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
             $package,
             $request,
             $source,
+            $offAmazon ? AmazonChannelType::External : AmazonChannelType::Amazon,
         );
     }
 
@@ -379,7 +381,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
     {
         $request = $response->getRequest();
 
-        return $request instanceof GetShippingRates && $request->channelType() === 'EXTERNAL';
+        return $request instanceof GetShippingRates && $request->channelType() === AmazonChannelType::External->apiValue();
     }
 
     /**
@@ -715,11 +717,13 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
      *
      * Every offer is bound to `$source`, the connection that was asked — for
      * an off-Amazon quote the scoped connection, never the Shipment's import
-     * source.
+     * source. Every rate carries the channel type it was quoted for, because
+     * an approval for Amazon orders does not cover the same service sold for
+     * an order from another channel (`amazon-shipping-external-orders/07`).
      *
      * @return Collection<int, RateResponse>
      */
-    private function ratesFrom(AmazonShippingQuote $quote, Package $package, RateRequest $request, DataSource $source): Collection
+    private function ratesFrom(AmazonShippingQuote $quote, Package $package, RateRequest $request, DataSource $source, AmazonChannelType $channelType): Collection
     {
         $marketplace = app(AmazonBuyShippingService::class)->marketplaceIdFor($source);
 
@@ -733,7 +737,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
         return collect($quote->rates)
             ->filter(fn (array $rate): bool => $this->isBuyable($rate, $request))
             ->map(function (array $rate) use (
-                $package, $observations, $environment, $expiresAt, $offerStore, $quote, $source, $marketplace
+                $package, $observations, $environment, $expiresAt, $offerStore, $quote, $source, $marketplace, $channelType
             ): RateResponse {
                 $carrierId = (string) $rate['carrierId'];
                 $serviceId = (string) $rate['serviceId'];
@@ -787,6 +791,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, RecoversUnresolvedPu
                     observedService: new ObservedServiceIdentity(
                         source: self::OBSERVATION_SOURCE,
                         environment: $environment,
+                        channelType: $channelType,
                         externalCarrierId: $carrierId,
                         externalServiceId: $serviceId,
                     ),
