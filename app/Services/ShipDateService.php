@@ -104,6 +104,25 @@ class ShipDateService
      * it: direct labels, Amazon's offers on this carrier, and Shopify labels
      * dated as this carrier.
      */
+    /**
+     * The last pickup day strictly before a date, within the week before it.
+     *
+     * @param  array<int, int>  $pickupDays
+     */
+    private function getPreviousPickupDay(array $pickupDays, CarbonImmutable $before): CarbonImmutable
+    {
+        $date = $before->subDay();
+
+        for ($i = 0; $i < 7; $i++) {
+            if (in_array($date->dayOfWeek, $pickupDays)) {
+                return $date;
+            }
+            $date = $date->subDay();
+        }
+
+        return $before->subDay();
+    }
+
     public function endShippingDay(Carrier $carrier, ?int $locationId = null): void
     {
         $locationId = $locationId ?? Location::getDefault()?->id;
@@ -137,26 +156,35 @@ class ShipDateService
     }
 
     /**
-     * When the labels now waiting for this carrier at a location began: its
-     * last End of Day there, or the start of today in the location's timezone
-     * if its day has never been ended there.
+     * The carrier's last End of Day at a location, if it ended the batch now
+     * waiting: on or after the pickup day before the current ship date.
      *
-     * End of Day counts a carrier's labels from this moment rather than by
-     * ship date. A label's stored date can come from another carrier's policy,
-     * as a Shopify `auto` label dated by the connection's carrier does, and
-     * would then never equal this carrier's current date.
+     * End of Day counts a label under its carrier if its ship date is the
+     * carrier's current one, or it was bought after this moment. The second
+     * test catches a label whose date came from another carrier's policy, as
+     * a Shopify `auto` label dated by the connection's carrier does, when
+     * this carrier's day has already moved on. An End of Day older than the
+     * last pickup ended some earlier batch, not this one, so it is ignored
+     * rather than letting everything since then count. Null when the day has
+     * never been ended there, which leaves the ship date alone to decide.
      */
-    public function batchStartedAt(Carrier $carrier, ?int $locationId = null): CarbonImmutable
+    public function lastEndOfDayForCurrentBatch(Carrier $carrier, ?int $locationId = null): ?CarbonImmutable
     {
-        $lastEndOfDay = $this->getPivot($carrier, $locationId)?->last_end_of_day_at;
+        $pivot = $this->getPivot($carrier, $locationId);
 
-        if ($lastEndOfDay) {
-            return CarbonImmutable::parse($lastEndOfDay);
+        if (! $pivot?->last_end_of_day_at) {
+            return null;
         }
 
         $location = $this->resolveLocation($locationId);
+        $tz = $location !== null ? $location->timezone : 'America/New_York';
+        $lastEndOfDay = CarbonImmutable::parse($pivot->last_end_of_day_at);
+        $previousPickupDay = $this->getPreviousPickupDay(
+            $this->pickupDaysFor($pivot),
+            $this->getShipDate($carrier, $locationId),
+        );
 
-        return CarbonImmutable::today($location !== null ? $location->timezone : 'America/New_York');
+        return $lastEndOfDay->tz($tz)->startOfDay()->gte($previousPickupDay) ? $lastEndOfDay : null;
     }
 
     /**

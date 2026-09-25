@@ -334,6 +334,60 @@ describe('End of Day', function (): void {
         expect($count())->toBe(1);
     });
 
+    it('counts labels dated today before the carrier day has ever been ended', function (): void {
+        // Nobody has ever pressed End of Day for USPS. Tuesday 21:00 is after
+        // its 8 PM cutoff, so that label is dated Wednesday.
+        Package::factory()->shipped()->create([
+            'carrier' => Carrier::USPS,
+            'shipped_at' => CarbonImmutable::parse('2026-03-31 21:00', 'America/New_York'),
+            'ship_date' => '2026-04-01',
+        ]);
+        Package::factory()->shipped()->create([
+            'carrier' => Carrier::USPS,
+            'shipped_at' => CarbonImmutable::parse('2026-03-31 15:00', 'America/New_York'),
+            'ship_date' => '2026-03-31',
+        ]);
+
+        $usps = collect(Livewire::test(EndOfDay::class)->get('carrierSummary'))->firstWhere('carrier', Carrier::USPS);
+
+        expect($usps['package_count'])->toBe(1);
+    });
+
+    it('counts weekend labels dated Monday on Monday', function (): void {
+        Package::factory()->shipped()->create([
+            'carrier' => Carrier::USPS,
+            'shipped_at' => CarbonImmutable::parse('2026-04-04 11:00', 'America/New_York'),
+            'ship_date' => '2026-04-06',
+        ]);
+
+        $now = CarbonImmutable::parse('2026-04-06 10:00', 'America/New_York');
+        Carbon::setTestNow($now);
+        CarbonImmutable::setTestNow($now);
+
+        $usps = collect(Livewire::test(EndOfDay::class)->get('carrierSummary'))->firstWhere('carrier', Carrier::USPS);
+
+        expect($usps['package_count'])->toBe(1);
+    });
+
+    it('ignores an End of Day older than the last pickup', function (): void {
+        // Ended two weeks ago and never since: the labels bought in between
+        // went out on earlier pickups and are not today's.
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-03-18 18:00', 'America/New_York'));
+        app(ShipDateService::class)->endShippingDay($this->usps);
+
+        onWednesdayAt('10:00');
+        Package::factory()->shipped()->create([
+            'carrier' => Carrier::USPS,
+            'shipped_at' => CarbonImmutable::parse('2026-03-25 11:00', 'America/New_York'),
+            'ship_date' => '2026-03-25',
+        ]);
+        Package::factory()->shipped()->create(['carrier' => Carrier::USPS]);
+
+        $usps = collect(Livewire::test(EndOfDay::class)->get('carrierSummary'))->firstWhere('carrier', Carrier::USPS);
+
+        expect($usps['package_count'])->toBe(1);
+    });
+
     it('counts an Amazon label under the carrier that carries it', function (): void {
         Package::factory()->shipped()->create([
             'carrier' => 'US Postal Service',

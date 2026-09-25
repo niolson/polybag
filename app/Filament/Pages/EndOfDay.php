@@ -64,11 +64,12 @@ class EndOfDay extends Page
      * with no direct integration, such as OnTrac, is listed too, so its day
      * can be ended.
      *
-     * The package count is the carrier's labels bought since its day was last
-     * ended, by carrier of record and from any source: a Shopify `auto` label
-     * dated by USPS that Shopify put on UPS counts under UPS, whose driver
-     * takes it. It is not matched by ship date, because that label's date
-     * came from USPS's policy and need not equal UPS's current date.
+     * The package count is by carrier of record, from any source: a Shopify
+     * `auto` label dated by USPS that Shopify put on UPS counts under UPS,
+     * whose driver takes it. A label counts if its ship date is the carrier's
+     * current one, or it was bought since the carrier's day was ended for the
+     * current batch. The second test is for that `auto` label: its date came
+     * from USPS's policy and need not equal UPS's current date.
      *
      * The manifest count stays by ship date and direct labels only, because
      * a manifest is created on our own carrier account for one ship date.
@@ -96,8 +97,13 @@ class EndOfDay extends Page
                 // on the manifest count below.
                 $supportsManifest = $registry->policyFor($carrier->name)?->supportsCarrierManifest() ?? false;
 
+                $endedAt = $shipDateService->lastEndOfDayForCurrentBatch($carrier, $locationId);
+
                 $packageCount = $this->shippedPackages($carrier, $locationId)
-                    ->where('shipped_at', '>', $shipDateService->batchStartedAt($carrier, $locationId)->setTimezone(config('app.timezone')))
+                    ->where(fn (Builder $query): Builder => $query
+                        ->whereDate('ship_date', $shipDate)
+                        ->when($endedAt, fn (Builder $query): Builder => $query
+                            ->orWhere('shipped_at', '>', $endedAt->setTimezone(config('app.timezone')))))
                     ->count();
 
                 $unmanifestedCount = $supportsManifest

@@ -50,10 +50,11 @@ source.
   - The package count per carrier covers every label that carrier carries, from any
     source, read by `normalized_carrier_id` (the carrier of record) rather than by
     `packages.carrier`. A Shopify label dated as USPS that Shopify put on UPS counts
-    under UPS, because the UPS driver takes it. It counts the labels bought since the
-    carrier's last End of Day at the location, or since the start of today, rather
-    than matching ship dates: that label's date came from USPS's policy and need not
-    equal UPS's current date. The manifest count and the manifest action stay
+    under UPS, because the UPS driver takes it. A label counts if its ship date is the
+    carrier's current one, or it was bought after the carrier's last End of Day at the
+    location, as long as that End of Day was on or after the pickup day before the
+    current ship date. The second test covers that label, whose date came from
+    USPS's policy and need not equal UPS's current date. The manifest count and the manifest action stay
     direct labels only, and appear only where the carrier's integration supports a
     manifest.
   - Ending a carrier's day moves the date of everything it dates, whichever source sells
@@ -122,3 +123,11 @@ source.
   is on Thursday, so neither row counted it. The count is now by carrier of record since
   the carrier's last End of Day (`ShipDateService::batchStartedAt()`). The manifest query
   still matches by ship date and takes direct labels only.
+- **2026-09-25** — A second review found problems with counting only from the last End
+  of Day. When a day had never been ended, labels dated today but bought after
+  yesterday's cutoff or over the weekend were missed. An End of Day weeks old counted
+  everything since. The count now takes both: the ship date matches the carrier's
+  current one, or the label was bought after an End of Day that ended the current batch
+  (`ShipDateService::lastEndOfDayForCurrentBatch()`). One gap remains: if nobody ended
+  UPS's day, and UPS's date differs from USPS's by cutoff or pickup days, a USPS-dated
+  `auto` label on UPS is not counted.
