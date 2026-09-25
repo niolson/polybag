@@ -461,7 +461,8 @@ it('does not let a rule pre-selecting Shopify Media Mail buy it for a package th
         'carrier_service_id' => $mediaMail->id,
     ]);
 
-    $adapter = Mockery::mock(ShopifyAdapter::class)->makePartial();
+    $adapter = Mockery::mock(ShopifyAdapter::class);
+    $adapter->makePartial();
     $adapter->shouldNotReceive('createShipment');
     app(CarrierRegistry::class)->registerInstance('Shopify', $adapter);
 

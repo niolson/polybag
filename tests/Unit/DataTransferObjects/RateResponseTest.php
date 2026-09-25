@@ -70,7 +70,8 @@ it('round-trips whether a rate is content-restricted, and keeps it behind an off
 
     expect(RateResponse::fromArray($rate->toArray())->contentRestricted)->toBeTrue()
         ->and($rate->withOfferId('01K4XJ5S8ZQ7V6R3N2M1P0T9AB')->contentRestricted)->toBeTrue()
-        ->and(RateResponse::fromArray([...$rate->toArray(), 'contentRestricted' => null])->contentRestricted)->toBeFalse();
+        // An array serialized before the flag existed reads as unrestricted.
+        ->and(RateResponse::fromArray(array_diff_key($rate->toArray(), ['contentRestricted' => true]))->contentRestricted)->toBeFalse();
 });
 
 it('round-trips the catalog service and carrier it names', function (): void {
