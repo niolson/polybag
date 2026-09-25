@@ -12,6 +12,13 @@ export default defineConfig(({ mode }) => {
         },
     };
 
+    // Chrome freezes hidden tabs and closes their websockets; Vite's client
+    // answers a closed socket with a full reload. VITE_HMR=false drops the
+    // socket, at the cost of refreshing by hand after a Blade or CSS edit.
+    if (env.VITE_HMR === 'false') {
+        serverConfig.ws = false;
+    }
+
     if (env.VITE_DEV_HOST) {
         serverConfig.host = env.VITE_DEV_HOST;
     }
