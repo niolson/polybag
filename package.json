@@ -23,6 +23,6 @@
   },
   "dependencies": {
     "jsbarcode": "^3.12.3",
-    "qz-tray": "^2.2.6"
+    "qz-tray": "^2.3.0"
   }
 }
