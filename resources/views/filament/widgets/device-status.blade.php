@@ -1,5 +1,4 @@
 <x-filament-widgets::widget>
-    <x-printer-settings-script />
     <div
         x-data="{
             printer: null,

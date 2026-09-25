@@ -28,6 +28,7 @@ use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\HtmlString;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 
@@ -105,6 +106,12 @@ class AppPanelProvider extends PanelProvider
                     app(SettingsService::class)->get('sandbox_mode', false) => '<span class="text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950 px-2 py-0.5 rounded-full">(sandbox mode)</span>',
                     default => '',
                 },
+            )
+            // Lazy widgets and action modals arrive through Livewire updates, which do
+            // not run inline <script> tags, so PrinterSettings must be on every page.
+            ->renderHook(
+                PanelsRenderHook::HEAD_END,
+                fn (): string => Blade::render('<x-printer-settings-script />'),
             )
             ->middleware([
                 EncryptCookies::class,

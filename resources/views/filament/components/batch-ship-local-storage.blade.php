@@ -1,5 +1,3 @@
-<x-printer-settings-script />
-
 <div
     x-init="
         $wire.set('mountedActions.0.data.label_format', PrinterSettings.labelFormat());

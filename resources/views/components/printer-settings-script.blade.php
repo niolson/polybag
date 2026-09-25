@@ -7,8 +7,9 @@
     printers may be the same physical device; they are separate settings because
     a raw queue is easy to create in Windows and a driver that accepts raw is not.
 
-    Included by <x-qz-tray-script> and by the few pages that read printer state
-    without printing. Safe to include more than once.
+    Loaded on every panel page by a HEAD_END render hook in AppPanelProvider, since
+    lazy widgets and action modals arrive through Livewire updates that do not run
+    inline scripts. Also included by <x-qz-tray-script>. Safe to include more than once.
 --}}
 <script>
     if (typeof window.PrinterSettings === 'undefined') {
