@@ -15,7 +15,8 @@ same date lists every change and why.
 
 Amended 2026-09-25 (`carrier-catalog-reset/05`): the `carriers.adapter` key is dropped.
 System carriers' names are locked instead, and an operator-owned `display_name` carries
-what an operator would have renamed. See decision 1 and option F.
+what an operator would have renamed. See decision 1 and option F. Decision 4 is clarified
+to match (`carrier-catalog-reset/06`).
 
 Supersedes in part:
 
@@ -155,6 +156,12 @@ services it can sell:
   kept for the Ship page, mapped or not.
 
 Catalog special-service scoping applies to direct tasks only (decision 10).
+
+*Amended 2026-09-25* (`carrier-catalog-reset/06`). Since decision 1's amendment, a
+resolved source's adapter is still found in `CarrierRegistry` by its carrier's locked
+`name`. "Nothing finds a source by a carrier's name" means that no caller hands
+`resolve()` a list of carrier names, and rating does not group a method's services by
+carrier to decide whom to ask.
 
 **5. The shipping method holds the unattended allowance.** Beside its due-by and OTDR
 settings it gains a source policy:
