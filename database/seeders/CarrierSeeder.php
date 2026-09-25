@@ -171,7 +171,9 @@ class CarrierSeeder extends Seeder
             ['name' => "Shopify's USPS Ground Advantage", 'service_code' => 'usps:GroundAdvantage'],
             ['name' => "Shopify's USPS Priority Mail", 'service_code' => 'usps:Priority'],
             ['name' => "Shopify's USPS Priority Mail Express", 'service_code' => 'usps:PriorityExpress'],
-            ['name' => "Shopify's USPS Media Mail", 'service_code' => 'usps:MediaMail'],
+            // The media requirement binds every source that sells Media Mail,
+            // not only our own USPS account (ADR-0006 decision 10).
+            ['name' => "Shopify's USPS Media Mail", 'service_code' => 'usps:MediaMail', 'required_contents' => ContentClass::Media],
             ['name' => "Shopify's USPS First Class Package International", 'service_code' => 'usps:FirstClassPackageInternationalService'],
             ['name' => "Shopify's USPS Priority Mail International", 'service_code' => 'usps:PriorityMailInternational'],
             ['name' => "Shopify's USPS Priority Mail Express International", 'service_code' => 'usps:PriorityMailExpressInternational'],
@@ -205,14 +207,21 @@ class CarrierSeeder extends Seeder
             $isGroundSaver = in_array($service['service_code'], ['ups_shipping:92', 'ups_shipping:93'], true);
             $isUsps = str_starts_with($service['service_code'], 'usps:');
 
-            $shopify->carrierServices()->firstOrCreate(
+            $requiredContents = $service['required_contents'] ?? null;
+
+            $row = $shopify->carrierServices()->firstOrCreate(
                 ['service_code' => $service['service_code']],
                 [
                     'name' => $service['name'],
                     'can_ship_to_po_boxes' => $isUsps || $isGroundSaver,
                     'can_ship_to_military_addresses' => $isUsps || $isGroundSaver,
+                    'required_contents' => $requiredContents,
                 ],
             );
+
+            if ($requiredContents !== null && $row->required_contents !== $requiredContents) {
+                $row->update(['required_contents' => $requiredContents]);
+            }
         }
 
         // This hook asks Amazon for Buy Shipping against the seller's own Amazon

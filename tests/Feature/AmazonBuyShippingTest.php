@@ -571,19 +571,133 @@ it('offers nothing for a Package in UPS packaging, which Amazon never quotes for
     expect(amazonAdapter()->getRates(RateRequest::fromPackage($upsPak), []))->toBeEmpty();
 });
 
-it('drops Media Mail and Bound Printed Matter offers', function (): void {
-    Saloon::fake([GetShippingRates::class => amazonRatesResponse([
+/**
+ * The four content-restricted services Amazon has been seen to name, for
+ * `carrier-catalog-reset/04`. No capture has ever returned one as eligible —
+ * Amazon refused all of them for the products in the order — so these are
+ * fixtures shaped like the eligible USPS offers beside them.
+ *
+ * @return array<int, array<string, mixed>>
+ */
+function amazonContentRestrictedRates(): array
+{
+    return [
         amazonUspsRateFor('USPS_PTP_MM', 'USPS Media Mail'),
         amazonUspsRateFor('USPS_PTP_BPM', 'USPS Bound Printed Matter'),
         amazonUspsRateFor('UPS_PTP_SUREPOST_MEDIA', 'UPS SurePost Media Mail'),
         amazonUspsRateFor('UPS_PTP_SUREPOST_BPM', 'UPS SurePost Bound Printed Matter'),
-    ])]);
+    ];
+}
+
+/**
+ * Mark every product in the Package as media, so it qualifies for Media Mail.
+ */
+function amazonMediaPackage(Package $package): Package
+{
+    $package->packageItems->each(fn (PackageItem $item) => $item->product->update(['is_media' => true]));
+
+    return $package->fresh();
+}
+
+it('drops Media Mail for a package that does not qualify, and keeps Bound Printed Matter as attended-only', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse(amazonContentRestrictedRates())]);
 
     $package = amazonPackageIn($this->package, BoxSizeType::BOX);
 
-    // Nothing on a Package can say its contents qualify, and misdeclared Media
-    // Mail is a postal offence.
-    expect(amazonAdapter()->getRates(RateRequest::fromPackage($package), []))->toBeEmpty();
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($package), []);
+
+    expect($rates->pluck('serviceCode')->all())->toBe(['USPS_PTP_BPM'])
+        ->and($rates->first()->contentRestricted)->toBeTrue()
+        // No offer is issued for a rate nobody is shown.
+        ->and(ShippingOffer::where('package_id', $package->id)->pluck('service_code')->all())->toBe(['USPS_PTP_BPM'])
+        // The catalog still learns every one of them exists.
+        ->and(ObservedService::whereIn('external_service_id', [
+            'USPS_PTP_MM', 'USPS_PTP_BPM', 'UPS_PTP_SUREPOST_MEDIA', 'UPS_PTP_SUREPOST_BPM',
+        ])->count())->toBe(4);
+});
+
+it('offers unmapped Media Mail to a package whose items are all media, and still drops both SurePost services', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse(amazonContentRestrictedRates())]);
+
+    $package = amazonMediaPackage(amazonPackageIn($this->package, BoxSizeType::BOX));
+
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($package), [])->keyBy('serviceCode');
+
+    expect($rates->keys()->all())->toBe(['USPS_PTP_MM', 'USPS_PTP_BPM'])
+        ->and($rates['USPS_PTP_MM']->contentRestricted)->toBeFalse()
+        // Unmapped: it names no catalog service until `11` maps it.
+        ->and($rates['USPS_PTP_MM']->carrierServiceId)->toBeNull()
+        // Bound Printed Matter stays attended-only, qualifying or not: nothing
+        // vouches for bound printed matter.
+        ->and($rates['USPS_PTP_BPM']->contentRestricted)->toBeTrue();
+});
+
+it('holds mapped Media Mail to the requirement of the service it is mapped to', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse([
+        amazonUspsRateFor('USPS_PTP_MM', 'USPS Media Mail'),
+        amazonUspsRateFor('USPS_PTP_GAH', 'USPS Ground Advantage (1 - 70 lb)'),
+    ])]);
+
+    $package = amazonPackageIn($this->package, BoxSizeType::BOX);
+    amazonAdapter()->getRates(RateRequest::fromPackage($package), []);
+
+    $usps = Carrier::factory()->usps()->create();
+    $mediaMail = CarrierService::factory()->uspsMediaMail()->for($usps)->create();
+    app(ObservedServiceMapper::class)->map(
+        ObservedService::where('external_service_id', 'USPS_PTP_MM')->firstOrFail(),
+        $mediaMail,
+    );
+
+    expect(amazonAdapter()->getRates(RateRequest::fromPackage($package), [])->pluck('serviceCode')->all())
+        ->toBe(['USPS_PTP_GAH']);
+
+    $media = amazonMediaPackage($package);
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($media), [])->keyBy('serviceCode');
+    $offer = ShippingOffer::where('public_id', $rates['MEDIA_MAIL']->offerId)->sole();
+
+    expect($rates->keys()->all())->toBe(['MEDIA_MAIL', 'USPS_PTP_GAH'])
+        ->and($rates['MEDIA_MAIL']->carrierServiceId)->toBe($mediaMail->id)
+        ->and($rates['MEDIA_MAIL']->carrierId)->toBe($usps->id)
+        ->and($offer->carrier_service_id)->toBe($mediaMail->id)
+        ->and($offer->carrier_id)->toBe($usps->id);
+});
+
+it('drops an offer mapped to a service that requires media, whatever Amazon calls it', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    amazonAdapter()->getRates(RateRequest::fromPackage($this->package), []);
+
+    $mediaMail = CarrierService::factory()->uspsMediaMail()->for(Carrier::factory()->usps()->create())->create();
+    app(ObservedServiceMapper::class)->map(
+        ObservedService::where('external_carrier_id', 'ONTRAC')->firstOrFail(),
+        $mediaMail,
+    );
+
+    expect(amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->pluck('carrier')->all())
+        ->toBe(['UPS']);
+});
+
+it('names the carrier of every offer, mapped or not, and stores it with the offer', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    $ups = Carrier::factory()->ups()->create();
+    $ontrac = Carrier::factory()->create(['name' => 'OnTrac']);
+
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->keyBy('carrier');
+
+    expect($rates['OnTrac']->carrierId)->toBe($ontrac->id)
+        ->and($rates['UPS']->carrierId)->toBe($ups->id)
+        ->and($rates->every(fn (RateResponse $rate): bool => $rate->carrierServiceId === null))->toBeTrue()
+        ->and(ShippingOffer::where('public_id', $rates['OnTrac']->offerId)->value('carrier_id'))->toBe($ontrac->id)
+        ->and(ShippingOffer::where('public_id', $rates['UPS']->offerId)->value('carrier_id'))->toBe($ups->id);
+});
+
+it('names no carrier for an offer whose carrier has no row', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->keyBy('carrier');
+
+    expect($rates['OnTrac']->carrierId)->toBeNull();
 });
 
 it('keeps Ground Advantage, Priority Mail and Priority Mail Cubic', function (): void {

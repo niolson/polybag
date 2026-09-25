@@ -103,6 +103,12 @@ class RateSelector
      * is late, so it refuses none, except an Amazon order, which refuses every
      * rate rather than passing them all the way {@see classify()} does.
      *
+     * A content-restricted rate is refused before approval is asked about. It
+     * is valid only for contents nothing in PolyBag vouches for, so no
+     * approval, not even one of everything, can make automation the party
+     * that vouches (ADR-0006 decision 10). It is kept for the Ship page and
+     * named in the result as its own refusal, never as a missing approval.
+     *
      * @param  Collection<int, RateResponse>  $rates
      */
     public function selectForAutomation(
@@ -113,7 +119,9 @@ class RateSelector
     ): UnattendedRateSelection {
         $requirements ??= OfferRequirements::none();
 
-        [$eligible, $withheld] = $this->partitionByApproval($rates, $clientId);
+        [$contentRestricted, $unrestricted] = $rates->partition(fn (RateResponse $rate): bool => $rate->contentRestricted);
+
+        [$eligible, $withheld] = $this->partitionByApproval($unrestricted->values(), $clientId);
 
         $classified = $this->classify(
             $eligible->reject(fn (RateResponse $rate): bool => $rate->priceUnknown),
@@ -138,6 +146,7 @@ class RateSelector
             rate: $acceptable?->rate,
             withheld: $withheld,
             attendedAlternativeAvailable: $withheld->isNotEmpty()
+                || $contentRestricted->isNotEmpty()
                 || $late->isNotEmpty()
                 || $unprotected->isNotEmpty()
                 || $eligible->contains(fn (RateResponse $rate): bool => $rate->priceUnknown),
@@ -145,6 +154,7 @@ class RateSelector
             unprotected: $unprotected,
             requirements: $requirements,
             deadlineMissing: $requirements->deadlineRequired && $deadline === null,
+            contentRestricted: $contentRestricted->values(),
         );
     }
 

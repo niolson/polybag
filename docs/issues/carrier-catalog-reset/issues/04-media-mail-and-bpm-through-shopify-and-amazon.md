@@ -1,6 +1,6 @@
 # Media Mail and Bound Printed Matter through Shopify and Amazon
 
-Status: needs-triage
+Status: ready-for-agent
 
 Repo: `polybag`
 
@@ -39,14 +39,22 @@ for it.
     not qualify. `11` removes that fallback.
   - Amazon's own product check still runs, so an offer shown has passed both checks.
 - **Amazon, Bound Printed Matter.**
-  - Stop dropping `USPS_PTP_BPM`. Every captured response refuses it for "The shipping
-    service is not available for the products in the order."
+  - Stop dropping `USPS_PTP_BPM`. Six of the eight captures that list it refuse it for
+    "The shipping service is not available for the products in the order." The other two
+    refuse it, and Media Mail beside it, with the generic "The selected shipping service
+    cannot be purchased; please try a different selection…".
   - **Show it, but never buy it unattended.** It carries no catalog service, and nothing
     in PolyBag vouches for the contents. Amazon's product classes do not match
     eligibility exactly. The rate is marked attended-only, and `RateSelector` withholds
     it whatever the approvals say, including an approval of everything. From `13` it
     also overrides the method's *any service*. The refusal names the content
     restriction.
+  - **How.** `RateResponse` gains an attended-only flag, carried through `toArray()` /
+    `fromArray()` so a rate restored from its Offer keeps it. `UnattendedRateSelection`
+    gains its own `contentRestricted` refusal beside `late` and `unprotected`, and counts
+    towards `attendedAlternativeAvailable`. Not `withheld`: that one reads "not approved"
+    and points at Amazon Approvals, and no approval can release this rate. The unattended
+    result names it the way `refusedForMethodRequirements()` names an unprotected rate.
   - Keep `UPS_PTP_SUREPOST_BPM` dropped for good. Ground Saver BPM is not authored, and
     nothing shows that Amazon checks products for it.
   - Keep `UPS_PTP_SUREPOST_MEDIA` dropped until `11` maps it to UPS Ground Saver Media,
@@ -58,7 +66,14 @@ for it.
     (dropped) and `USPS_PTP_BPM` (attended-only).
   - A dropped offer is still recorded as an observation.
 - **Correct the record.** Append a dated comment to `amazon-buy-shipping/12`. It said the
-  delivery promise had excluded Media Mail and BPM; the captures give a product reason.
+  delivery promise had excluded Media Mail and BPM. Six of the eight captures in
+  `.scratch/amazon-shipping-v2/` that list them give a product reason instead. The two
+  `probe-09` quotes for `112-2122617-2225806` and `114-6201360-7304251` give only the
+  generic "cannot be purchased", so say "most", not "every".
+- **Tested with fixtures only.** No capture has ever returned `USPS_PTP_MM` or
+  `USPS_PTP_BPM` as eligible, so the Amazon criteria below are proven with fixture
+  responses, not in the sandbox. Record that in the done comment, as `02` recorded what it
+  had not verified live.
 
 ## Acceptance criteria
 
@@ -68,7 +83,8 @@ for it.
 - [ ] An Amazon order's `USPS_PTP_MM` offer is shown for a qualifying Package. For one
       that does not qualify it is dropped, mapped or not, with no `ShippingOffer` row
 - [ ] `USPS_PTP_BPM` offers appear on the Ship page, and automation withholds them even
-      under an approval of everything, naming the content restriction
+      under an approval of everything, naming the content restriction. The refusal is
+      not reported as a missing approval
 - [ ] `UPS_PTP_SUREPOST_MEDIA` and `UPS_PTP_SUREPOST_BPM` are still dropped, the first
       until `11` maps it
 - [ ] Observations are still recorded for dropped offers
@@ -88,3 +104,34 @@ for it.
   service*. The Amazon offer's carrier and service ids moved here from `07`.
 - **2026-09-24** — `UPS_PTP_SUREPOST_MEDIA` stays dropped only until `11` authors UPS
   Ground Saver Media (`95`) with the media requirement and maps it.
+- **2026-09-25** — Triaged `ready-for-agent` after a check against the code. Corrected
+  "every captured response" to six of eight: two `probe-09` quotes refuse MM and BPM with
+  Amazon's generic message. Added the attended-only plumbing, a `contentRestricted`
+  refusal rather than `withheld`. Noted that the Amazon side can only be tested with
+  fixtures, because neither service has ever come back eligible.
+- **2026-09-25** — **Implemented** on `feature/media-mail-and-bpm-through-shopify-and-amazon`
+  (awaiting review; tested with fixtures only).
+  - **Shopify.** `ShopifyAdapter::blindPurchaseOffers()` reads `required_contents` off the
+    same catalog row that names the offer, and asks `Package::qualifiesFor()`. A stale
+    selection and a rule's pre-selection both re-derive the offers, so both are refused
+    with no further code. `CarrierSeeder` sets `usps:MediaMail` to `media` and restores it
+    on every sync, as it does for the direct row.
+  - **Amazon.** `carriesPermittedContent()` takes the mapped service and the request. The
+    requirement is the mapped `CarrierService`'s. If there is none, it comes from
+    `UNMAPPED_REQUIRED_CONTENTS`, which holds only `USPS_PTP_MM` and which `11` removes.
+    `CONTENT_RESTRICTED_SERVICES` is now decision 10's exception list:
+    - `USPS_PTP_BPM` is attended-only.
+    - Both SurePost identifiers are dropped.
+
+    Every offer carries `carrierId`, from the mapping or `CarrierNormalizer` (cached per
+    quote), and `carrierServiceId` when mapped. Both are stored on the Offer.
+  - **Attended-only.** `RateResponse::$contentRestricted`. `RateSelector` partitions those
+    rates out before it asks about approvals, into
+    `UnattendedRateSelection::$contentRestricted`. Alone, they refuse as *Content-Restricted
+    Rates Only*. Beside an unapproved or a late rate, the other message gains a sentence
+    naming them, so nobody goes looking for an approval that would release them.
+  - **Untested live.** No capture has returned `USPS_PTP_MM` or `USPS_PTP_BPM` as eligible,
+    so the Amazon side is proven with fixture responses only.
+  - The Ship page shows a content-restricted rate like any other, with no marker. If
+    packers need a cue to check the contents, that is follow-up UI work.
+

@@ -21,6 +21,7 @@ readonly class RateResponse
      * @param  int|null  $carrierAccountId  The {@see CarrierAccount} a direct adapter quoted this on, from the account `ResolvesCarrierAccount` gave it. Recorded on the offer the rate service issues for the rate, so the purchase can refuse when the account that would buy is no longer the one that quoted. Null for a rate resold through a channel — an Amazon offer names a data source instead — and for a fake adapter with no account to resolve.
      * @param  int|null  $carrierServiceId  The {@see CarrierService} this is a rate for, set by the source that quoted it. A property of the service binds every source that sells it (ADR-0006 decision 10), and this is how the shared filters find the service without looking it up by carrier name and code string. Null when the source quoted something the catalog does not hold.
      * @param  int|null  $carrierId  The {@see Carrier} expected to carry the parcel. Stored on the offer, so a purchase is dated by it rather than by a carrier-name string a rename could break. Null only for a carrier with no row.
+     * @param  bool  $contentRestricted  Valid only for contents nothing in PolyBag vouches for, so only a person may choose it. Shown on the Ship page, and withheld from automation by {@see RateSelector::selectForAutomation()} whatever the approvals say. Amazon's Bound Printed Matter is the one case (ADR-0006 decision 10).
      */
     public function __construct(
         public string $carrier,
@@ -38,6 +39,7 @@ readonly class RateResponse
         public ?int $carrierAccountId = null,
         public ?int $carrierServiceId = null,
         public ?int $carrierId = null,
+        public bool $contentRestricted = false,
     ) {
         $this->packagingRequirement = $packagingRequirement ?? PackagingRequirement::shipperPackaging();
     }
@@ -91,6 +93,7 @@ readonly class RateResponse
             'carrierAccountId' => $this->carrierAccountId,
             'carrierServiceId' => $this->carrierServiceId,
             'carrierId' => $this->carrierId,
+            'contentRestricted' => $this->contentRestricted,
             ...$changes,
         ]);
     }
@@ -98,7 +101,7 @@ readonly class RateResponse
     /**
      * Convert to array format for Livewire serialization.
      *
-     * @return array{carrier: string, serviceCode: string, serviceName: string, price: float, deliveryCommitment: ?string, deliveryDate: ?string, transitTime: ?string, metadata: array<string, mixed>, priceUnknown: bool, offerId: ?string, observedService: ?array{source: string, environment: string, channelType: string, externalCarrierId: string, externalServiceId: string}, packagingRequirement: array{kind: string, packagings: list<string>}, carrierAccountId: ?int, carrierServiceId: ?int, carrierId: ?int}
+     * @return array{carrier: string, serviceCode: string, serviceName: string, price: float, deliveryCommitment: ?string, deliveryDate: ?string, transitTime: ?string, metadata: array<string, mixed>, priceUnknown: bool, offerId: ?string, observedService: ?array{source: string, environment: string, channelType: string, externalCarrierId: string, externalServiceId: string}, packagingRequirement: array{kind: string, packagings: list<string>}, carrierAccountId: ?int, carrierServiceId: ?int, carrierId: ?int, contentRestricted: bool}
      */
     public function toArray(): array
     {
@@ -118,6 +121,7 @@ readonly class RateResponse
             'carrierAccountId' => $this->carrierAccountId,
             'carrierServiceId' => $this->carrierServiceId,
             'carrierId' => $this->carrierId,
+            'contentRestricted' => $this->contentRestricted,
         ];
     }
 
@@ -128,7 +132,7 @@ readonly class RateResponse
      * requirement existed — reads as the shipper's own packaging, which is the
      * safe direction: it accepts nothing a carrier supplies.
      *
-     * @param  array{carrier: string, serviceCode: string, serviceName: string, price: float, deliveryCommitment: ?string, deliveryDate: ?string, transitTime: ?string, metadata?: array<string, mixed>, priceUnknown?: bool, offerId?: ?string, observedService?: ?array{source: string, environment: string, channelType?: string, externalCarrierId: string, externalServiceId: string}, packagingRequirement?: ?array{kind?: string, packagings?: list<string>}, carrierAccountId?: ?int, carrierServiceId?: ?int, carrierId?: ?int}  $data
+     * @param  array{carrier: string, serviceCode: string, serviceName: string, price: float, deliveryCommitment: ?string, deliveryDate: ?string, transitTime: ?string, metadata?: array<string, mixed>, priceUnknown?: bool, offerId?: ?string, observedService?: ?array{source: string, environment: string, channelType?: string, externalCarrierId: string, externalServiceId: string}, packagingRequirement?: ?array{kind?: string, packagings?: list<string>}, carrierAccountId?: ?int, carrierServiceId?: ?int, carrierId?: ?int, contentRestricted?: bool}  $data
      */
     public static function fromArray(array $data): self
     {
@@ -152,6 +156,7 @@ readonly class RateResponse
             carrierAccountId: isset($data['carrierAccountId']) ? (int) $data['carrierAccountId'] : null,
             carrierServiceId: isset($data['carrierServiceId']) ? (int) $data['carrierServiceId'] : null,
             carrierId: isset($data['carrierId']) ? (int) $data['carrierId'] : null,
+            contentRestricted: (bool) ($data['contentRestricted'] ?? false),
         );
     }
 

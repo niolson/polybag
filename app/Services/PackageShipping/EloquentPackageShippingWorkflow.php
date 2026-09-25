@@ -1354,6 +1354,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             unprotected: $selection->unprotected,
             requirements: $selection->requirements,
             deadlineMissing: $selection->deadlineMissing,
+            contentRestricted: $selection->contentRestricted,
         );
     }
 
@@ -1384,8 +1385,24 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             return PackageShippingResult::failed('Shipping Error', 'No shipping rates available for this package.');
         }
 
+        if ($selection->contentRestrictedAnything()) {
+            logger()->info('Withheld a content-restricted rate from automated purchase', [
+                'package_id' => $package->id,
+                'content_restricted' => $selection->contentRestrictedSummary(),
+            ]);
+        }
+
         if ($selection->refusedForRequirements()) {
             return $this->refusedForMethodRequirements($package, $selection);
+        }
+
+        if (! $selection->withheldAnything() && $selection->contentRestrictedAnything()) {
+            return PackageShippingResult::attendedSelectionRequired(
+                'Content-Restricted Rates Only',
+                'This package was quoted, but automation never buys '.$selection->contentRestrictedSummary()
+                .': the service is valid only for restricted contents, and nothing in PolyBag vouches for what this package holds. '
+                .'Ship it from the Ship page, where a person checks the contents and chooses the rate.',
+            );
         }
 
         if (! $selection->withheldAnything()) {
@@ -1405,8 +1422,22 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             'No Approved Rates',
             'This package was quoted, but no service it was offered is approved for automated purchase: '
             .$selection->withheldSummary().'. '
+            .$this->contentRestrictionNote($selection)
             .'Approve it on Amazon Approvals, or ship this package from the Ship page, where a person chooses the rate.',
         );
+    }
+
+    /**
+     * A sentence naming the content-restricted rates beside another refusal,
+     * so an operator approving services does not go looking for an approval
+     * that would release them. None would.
+     */
+    private function contentRestrictionNote(UnattendedRateSelection $selection): string
+    {
+        return $selection->contentRestrictedAnything()
+            ? 'Automation also never buys '.$selection->contentRestrictedSummary()
+                .', which is valid only for restricted contents nothing in PolyBag vouches for. '
+            : '';
     }
 
     /**
@@ -1465,6 +1496,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 default => "No {$approved}OTDR-Protected Rates",
             },
             "{$method} requires a rate that {$missing}, and {$scope} "
+            .$this->contentRestrictionNote($selection)
             .'Ship it from the Ship page, where a person chooses the rate, or change the requirement on the shipping method.',
         );
     }

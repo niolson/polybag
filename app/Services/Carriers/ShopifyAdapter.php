@@ -21,6 +21,7 @@ use App\Models\DataSource;
 use App\Models\Package;
 use App\Services\ServiceInference\ServiceInferrer;
 use App\Services\ShipmentImport\Sources\ShopifySource;
+use App\Services\Shipping\ContentsFilter;
 use App\Services\ShopifyShippingLabelService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -152,12 +153,19 @@ class ShopifyAdapter implements BlindPurchaseSource
     /**
      * What Shopify will sell for this package, priceless.
      *
-     * Four gates, and none of them is an error worth telling a packer about:
+     * Five gates, and none of them is an error worth telling a packer about:
      * the client has to have opted into blind purchase (ADR-0003 decision 5),
      * the shipment has to have come from a live Shopify data source with a
      * fulfillment order to buy against, no label can have been bought against
-     * that fulfillment order already, and the selection has to be one we
-     * actually catalogue.
+     * that fulfillment order already, the selection has to be one we
+     * actually catalogue, and the Package has to qualify for any contents
+     * that catalogue row requires.
+     *
+     * The last is Media Mail's rule, which binds Shopify as it binds our own
+     * USPS account (ADR-0006 decision 10). A blind offer has no rate for
+     * {@see ContentsFilter} to read, so the requirement is read here, off the
+     * same row that names the offer. The purchase re-derives these offers, so
+     * a stale Media Mail selection, or a rule's, is refused there too.
      *
      * The opt-in is checked here rather than in `ShippingRateService` because
      * it is a fact about this kind of purchase, not about rate shopping: there
@@ -189,24 +197,36 @@ class ShopifyAdapter implements BlindPurchaseSource
             return collect();
         }
 
-        $names = CarrierService::query()
+        $services = CarrierService::query()
             ->whereHas('carrier', fn ($query) => $query->where('name', self::CARRIER_NAME))
             ->whereIn('service_code', $serviceCodes)
-            ->pluck('name', 'service_code');
+            ->get(['service_code', 'name', 'required_contents'])
+            ->keyBy('service_code');
 
         $dataSourceId = $labelService->dataSourceFor($package)?->id;
 
         return collect($serviceCodes)
-            ->filter(fn (string $code): bool => $names->has($code))
+            ->filter(fn (string $code): bool => $services->has($code))
             ->filter(fn (string $code): bool => $this->weightAllows($code, (float) $package->weight))
+            ->filter(fn (string $code): bool => $this->contentsAllow($services->get($code), $package))
             ->map(fn (string $code): BlindPurchaseOffer => new BlindPurchaseOffer(
                 source: self::CARRIER_NAME,
                 sourceLabel: self::SOURCE_LABEL,
                 serviceCode: $code,
-                selectionLabel: (string) $names->get($code),
+                selectionLabel: (string) $services->get($code)->name,
                 postageDataSourceId: $dataSourceId,
             ))
             ->values();
+    }
+
+    /**
+     * Whether the Package qualifies for the contents this service requires, if
+     * any — {@see Package::qualifiesFor()}, the one rule every source calls.
+     */
+    private function contentsAllow(CarrierService $service, Package $package): bool
+    {
+        return $service->required_contents === null
+            || $package->qualifiesFor($service->required_contents);
     }
 
     /**
