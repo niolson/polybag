@@ -9,6 +9,7 @@ use App\Models\Product;
 use App\Models\ShippingMethod;
 use App\Models\ShippingMethodAlias;
 use App\Services\ClientContext;
+use Illuminate\Support\Facades\Log;
 
 class ImportReferenceResolver
 {
@@ -98,6 +99,7 @@ class ImportReferenceResolver
                 'description' => $itemData['description'] ?? null,
                 'barcode' => $itemData['barcode'] ?? null,
                 'weight' => $itemData['weight'] ?? null,
+                'is_media' => $this->mediaFlagFrom($itemData, $sku),
             ], fn ($value): bool => $value !== null);
 
             $product = Product::firstOrNew([
@@ -127,6 +129,39 @@ class ImportReferenceResolver
             'created' => false,
             'updated' => false,
         ];
+    }
+
+    /**
+     * Read the seller's media declaration from a mapped `is_media` column. Null — the
+     * field unmapped, the column NULL, or a value we cannot read — leaves the product's
+     * flag as it is, so an import never clears a flag someone set by hand.
+     *
+     * @param  array<string, mixed>  $itemData
+     */
+    private function mediaFlagFrom(array $itemData, string $sku): ?bool
+    {
+        $value = $itemData['is_media'] ?? null;
+
+        if ($value === null || is_bool($value)) {
+            return $value;
+        }
+
+        $normalized = is_scalar($value) ? strtolower(trim((string) $value)) : null;
+
+        if (in_array($normalized, ['1', 'true', 't', 'yes', 'y', 'on'], true)) {
+            return true;
+        }
+
+        if (in_array($normalized, ['0', 'false', 'f', 'no', 'n', 'off'], true)) {
+            return false;
+        }
+
+        Log::warning('Unrecognised media flag on import; product flag left unchanged', [
+            'sku' => $sku,
+            'value' => is_scalar($value) ? $value : get_debug_type($value),
+        ]);
+
+        return null;
     }
 
     private function ensureWarm(?Client $client = null): void

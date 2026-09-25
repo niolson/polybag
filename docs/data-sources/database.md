@@ -415,6 +415,7 @@ out of the box:
 | `metadata` | shipment | JSON-encoded as stored |
 | `location_id` | shipment | PolyBag's numeric `Location` ID, not a name or the ERP's warehouse code |
 | `source_item_id` | item | A stable per-line key. Without it, re-imports match lines by product, so two lines of the same SKU collapse. |
+| `is_media` | item | Written to the Product, like `weight`. Marks it as media, so a Package of only media items can be sold USPS Media Mail. Reads `1`/`0`, `true`/`false`, `t`/`f`, `yes`/`no`, `y`/`n` and `on`/`off`, in any case. A NULL or any other value leaves the flag unchanged, and other values log a warning. Unmapped, an import never clears a flag set by hand. |
 
 ### Overriding the mapping
 

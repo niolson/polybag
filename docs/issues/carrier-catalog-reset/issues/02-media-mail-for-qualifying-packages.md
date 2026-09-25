@@ -1,6 +1,6 @@
 # Mark products as media, and sell direct USPS Media Mail only to Packages that qualify
 
-Status: needs-triage
+Status: done
 
 Repo: `polybag`
 
@@ -128,3 +128,5 @@ None - can start immediately.
     first on a tie. Which one a given parcel should be bought as, and whether USPS re-rates
     the wrong one, is unverified. Taken up in
     [`usps-processing-category/01`](../../usps-processing-category/issues/01-classify-parcels-as-machinable-or-nonstandard.md).
+- **2026-09-25** — **Done.** Merged in #271, and a direct USPS Media Mail label was
+  bought and printed with the service listed on the shipping method.
