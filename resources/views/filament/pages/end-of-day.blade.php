@@ -55,7 +55,7 @@
                                     <td class="px-4 py-3 text-right space-x-2">
                                         @if($summary['supports_manifest'] && $summary['unmanifested_count'] > 0)
                                             <x-filament::button
-                                                wire:click="generateManifest('{{ $summary['carrier'] }}')"
+                                                wire:click="generateManifest({{ $summary['carrier_id'] }})"
                                                 icon="heroicon-o-document-arrow-down"
                                                 size="sm"
                                             >
@@ -63,7 +63,7 @@
                                             </x-filament::button>
                                         @endif
                                         <x-filament::button
-                                            wire:click="endShippingDay('{{ $summary['carrier'] }}')"
+                                            wire:click="endShippingDay({{ $summary['carrier_id'] }})"
                                             wire:confirm="End {{ $summary['label'] }} shipping day? Ship date will advance from {{ $summary['ship_date'] }} to {{ $summary['next_ship_date'] }}."
                                             icon="heroicon-o-sun"
                                             size="sm"

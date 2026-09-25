@@ -198,7 +198,7 @@ it('quotes a direct rate behind an offer that records everything the purchase ne
         ->where('service_code', $rate->serviceCode)
         ->firstOrFail();
 
-    $shipDay = app(ShipDateService::class)->getShipDate('USPS', $package->location_id);
+    $shipDay = app(ShipDateService::class)->getShipDate(Carrier::where('name', Carrier::USPS)->first(), $package->location_id);
 
     expect($offer->package_id)->toBe($package->id)
         ->and($offer->postage_source)->toBe(PostageSource::CarrierAccount)
@@ -241,7 +241,10 @@ it('windows a direct offer on the day the carrier was quoted for, read once', fu
     $quotedFor = CarbonImmutable::now('America/New_York')->addDays(3)->startOfDay();
 
     $this->partialMock(ShipDateService::class, function (MockInterface $mock) use ($quotedFor): void {
-        $mock->shouldReceive('getShipDate')->once()->with('USPS', Mockery::any())->andReturn($quotedFor);
+        $mock->shouldReceive('getShipDate')
+            ->once()
+            ->with(Mockery::on(fn (?Carrier $carrier): bool => $carrier?->name === Carrier::USPS), Mockery::any())
+            ->andReturn($quotedFor);
     });
 
     $rates = app(ShippingRateService::class)->getShippingRates($package->id);

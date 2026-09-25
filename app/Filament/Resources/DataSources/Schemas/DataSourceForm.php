@@ -7,12 +7,15 @@ use App\Enums\ImportExistingBehavior;
 use App\Enums\OffAmazonShippingStatus;
 use App\Enums\ScheduleInterval;
 use App\Filament\Pages\Settings as SettingsPage;
+use App\Models\Carrier;
 use App\Models\CarrierAccountScope;
 use App\Models\Channel;
 use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\ShippingMethod;
+use App\Services\Carriers\AmazonBuyShippingAdapter;
+use App\Services\Carriers\ShopifyAdapter;
 use App\Services\OAuthService;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\DataSourceFactory;
@@ -180,6 +183,26 @@ class DataSourceForm
                     Toggle::make('settings.export_enabled')
                         ->label('Write Fulfillment Back to Shopify')
                         ->default(false),
+
+                    Select::make('settings.'.DataSource::SHIP_DATE_CARRIER_SETTING)
+                        ->label("Date Shopify's choice as")
+                        ->options(fn (): array => Carrier::query()
+                            ->active()
+                            ->whereNotIn('name', [ShopifyAdapter::CARRIER_NAME, AmazonBuyShippingAdapter::SOURCE_NAME])
+                            ->orderBy('name')
+                            ->get()
+                            ->mapWithKeys(fn (Carrier $carrier): array => [$carrier->id => $carrier->label()])
+                            ->all())
+                        // A connection saved before the setting existed has none,
+                        // and is dated by USPS: show that rather than a blank.
+                        ->afterStateHydrated(function (Select $component, mixed $state): void {
+                            if (blank($state)) {
+                                $component->state(Carrier::query()->where('name', Carrier::USPS)->value('id'));
+                            }
+                        })
+                        ->dehydrateStateUsing(fn (mixed $state): ?int => filled($state) ? (int) $state : null)
+                        ->selectablePlaceholder(false)
+                        ->helperText('When Shopify picks the carrier, the label is dated by this carrier\'s pickup cutoff and pickup days, and ending its shipping day moves it. Falls back to USPS if this carrier is removed.'),
                 ])
                 ->visible(fn (Get $get): bool => $get('source_type') === ShopifySource::class)
                 ->columns(2),

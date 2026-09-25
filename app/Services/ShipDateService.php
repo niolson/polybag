@@ -14,7 +14,7 @@ class ShipDateService
      *
      * Mon–Fri is a deliberate policy rather than a placeholder, and it applies to
      * every carrier: nothing seeds a `carrier_location` row, so this is what USPS,
-     * FedEx and Shopify alike run on until an operator says otherwise. Saturday
+     * FedEx and OnTrac alike run on until an operator says otherwise. Saturday
      * pickup varies by warehouse, which is the case the per-location config exists
      * to serve, so seeding Mon–Sat globally would assert something about every
      * install that is only true of some. See ADR-0002.
@@ -25,9 +25,17 @@ class ShipDateService
      */
     private const DEFAULT_PICKUP_DAYS = [1, 2, 3, 4, 5]; // Mon-Fri
 
-    public function getShipDate(string $carrierName, ?int $locationId = null): CarbonImmutable
+    /**
+     * The date a label goes out on, for the carrier expected to carry it.
+     *
+     * Takes the carrier row, never a name: the purchase is dated by the carrier
+     * resolved when its offer was issued, so a rename between quote and
+     * purchase changes nothing (ADR-0006, guideline 12). Null is a carrier with
+     * no row — one Amazon names that nobody has seeded — and gets no cutoff
+     * and the default pickup days.
+     */
+    public function getShipDate(?Carrier $carrier, ?int $locationId = null): CarbonImmutable
     {
-        $carrier = $this->normalize($carrierName);
         $location = $this->resolveLocation($locationId);
         $tz = $location?->timezone ?? 'America/New_York';
         $pivot = $this->getPivot($carrier, $locationId);
@@ -41,10 +49,8 @@ class ShipDateService
             return $this->getNextPickupDay($pickupDays, $today);
         }
 
-        // The cutoff is a property of the carrier row, so it survives an operator
-        // renaming that carrier: the normalized identity carries the policy, not
-        // the display name it happens to have today. A carrier that normalizes to
-        // nothing, or one with no cutoff configured, simply has no cutoff.
+        // The cutoff is a property of the carrier row. A carrier with no row, or
+        // one with no cutoff configured, simply has no cutoff.
         $cutoffHour = $carrier?->pickup_cutoff_hour;
 
         if ($cutoffHour !== null && $now->hour >= $cutoffHour) {
@@ -59,18 +65,20 @@ class ShipDateService
         return $this->getNextPickupDay($pickupDays, $today);
     }
 
-    public function getNextPickupDay(array|string $pickupDaysOrCarrier, CarbonImmutable|int|null $afterOrLocationId = null, ?CarbonImmutable $after = null): CarbonImmutable
+    /**
+     * @param  array<int, int>|Carrier|null  $pickupDaysOrCarrier
+     */
+    public function getNextPickupDay(array|Carrier|null $pickupDaysOrCarrier, CarbonImmutable|int|null $afterOrLocationId = null, ?CarbonImmutable $after = null): CarbonImmutable
     {
         // Support both calling conventions:
         // getNextPickupDay(array $pickupDays, CarbonImmutable $after)
-        // getNextPickupDay(string $carrierName, ?int $locationId, ?CarbonImmutable $after)
-        if (is_string($pickupDaysOrCarrier)) {
-            $carrierName = $pickupDaysOrCarrier;
-            $locationId = $afterOrLocationId;
+        // getNextPickupDay(?Carrier $carrier, ?int $locationId, ?CarbonImmutable $after)
+        if (! is_array($pickupDaysOrCarrier)) {
+            $locationId = is_int($afterOrLocationId) ? $afterOrLocationId : null;
             $location = $this->resolveLocation($locationId);
             $tz = $location?->timezone ?? 'America/New_York';
             $afterDate = $after ?? CarbonImmutable::today($tz);
-            $pickupDays = $this->pickupDaysFor($this->getPivot($this->normalize($carrierName), $locationId));
+            $pickupDays = $this->pickupDaysFor($this->getPivot($pickupDaysOrCarrier, $locationId));
         } else {
             $pickupDays = $pickupDaysOrCarrier;
             $afterDate = $afterOrLocationId instanceof CarbonImmutable ? $afterOrLocationId : CarbonImmutable::today();
@@ -89,17 +97,37 @@ class ShipDateService
         return $afterDate->addDay();
     }
 
-    public function endShippingDay(string $carrierName, ?int $locationId = null): void
+    /**
+     * End a carrier's shipping day at a location.
+     *
+     * Moves the date of everything the carrier dates, whichever source sells
+     * it: direct labels, Amazon's offers on this carrier, and Shopify labels
+     * dated as this carrier.
+     */
+    /**
+     * The last pickup day strictly before a date, within the week before it.
+     *
+     * @param  array<int, int>  $pickupDays
+     */
+    private function getPreviousPickupDay(array $pickupDays, CarbonImmutable $before): CarbonImmutable
+    {
+        $date = $before->subDay();
+
+        for ($i = 0; $i < 7; $i++) {
+            if (in_array($date->dayOfWeek, $pickupDays)) {
+                return $date;
+            }
+            $date = $date->subDay();
+        }
+
+        return $before->subDay();
+    }
+
+    public function endShippingDay(Carrier $carrier, ?int $locationId = null): void
     {
         $locationId = $locationId ?? Location::getDefault()?->id;
 
         if (! $locationId) {
-            return;
-        }
-
-        $carrier = $this->normalize($carrierName);
-
-        if (! $carrier) {
             return;
         }
 
@@ -128,23 +156,43 @@ class ShipDateService
     }
 
     /**
-     * @return array<int, int>
+     * The carrier's last End of Day at a location, if it ended the batch now
+     * waiting: on or after the pickup day before the current ship date.
+     *
+     * End of Day counts a label under its carrier if its ship date is the
+     * carrier's current one, or it was bought after this moment. The second
+     * test catches a label whose date came from another carrier's policy, as
+     * a Shopify `auto` label dated by the connection's carrier does, when
+     * this carrier's day has already moved on. An End of Day older than the
+     * last pickup ended some earlier batch, not this one, so it is ignored
+     * rather than letting everything since then count. Null when the day has
+     * never been ended there, which leaves the ship date alone to decide.
      */
-    public function getPickupDays(string $carrierName, ?int $locationId = null): array
+    public function lastEndOfDayForCurrentBatch(Carrier $carrier, ?int $locationId = null): ?CarbonImmutable
     {
-        return $this->pickupDaysFor($this->getPivot($this->normalize($carrierName), $locationId));
+        $pivot = $this->getPivot($carrier, $locationId);
+
+        if (! $pivot?->last_end_of_day_at) {
+            return null;
+        }
+
+        $location = $this->resolveLocation($locationId);
+        $tz = $location !== null ? $location->timezone : 'America/New_York';
+        $lastEndOfDay = CarbonImmutable::parse($pivot->last_end_of_day_at);
+        $previousPickupDay = $this->getPreviousPickupDay(
+            $this->pickupDaysFor($pivot),
+            $this->getShipDate($carrier, $locationId),
+        );
+
+        return $lastEndOfDay->tz($tz)->startOfDay()->gte($previousPickupDay) ? $lastEndOfDay : null;
     }
 
     /**
-     * Resolve the carrier identity a policy lookup should be keyed on. Runs before
-     * every pivot and cutoff lookup so that a source's spelling — `US Postal
-     * Service`, whatever Amazon returns in `carrierName` — cannot decide whether a
-     * carrier rule applies. Resolving to nothing is a valid terminal state: an
-     * unmapped carrier simply has no policy of ours.
+     * @return array<int, int>
      */
-    private function normalize(string $carrierName): ?Carrier
+    public function getPickupDays(?Carrier $carrier, ?int $locationId = null): array
     {
-        return app(CarrierNormalizer::class)->resolve($carrierName);
+        return $this->pickupDaysFor($this->getPivot($carrier, $locationId));
     }
 
     /**

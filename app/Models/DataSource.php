@@ -21,6 +21,9 @@ class DataSource extends Model
     /** @var list<string> Keys that belong in the encrypted secret_settings column. */
     public const SECRET_SETTINGS_KEYS = ['oauth_access_token', 'client_id', 'client_secret', 'refresh_token', 'db_password'];
 
+    /** The `settings` key naming the carrier Shopify's own choice is dated by. */
+    public const SHIP_DATE_CARRIER_SETTING = 'ship_date_carrier_id';
+
     protected $table = 'data_sources';
 
     protected $fillable = [
@@ -92,6 +95,28 @@ class DataSource extends Model
     public function importsOrders(): bool
     {
         return $this->active && $this->import_enabled;
+    }
+
+    /**
+     * The carrier a purchase Shopify chooses the carrier for is dated by — the
+     * connection's *Date Shopify's choice as* (ADR-0006, guideline 12).
+     *
+     * Only Shopify `auto` has no carrier before it is bought, so its cutoff
+     * and pickup days are borrowed from the carrier it most likely goes out
+     * on. The setting is a carrier id in `settings` with no foreign key, so a
+     * carrier since deleted or deactivated falls back to USPS, whose policy
+     * the old `Shopify` row copied. Null only when there is no USPS row
+     * either, which leaves the date on the no-carrier fallback.
+     */
+    public function shipDateCarrier(): ?Carrier
+    {
+        $carrierId = ($this->settings ?? [])[self::SHIP_DATE_CARRIER_SETTING] ?? null;
+
+        $carrier = filled($carrierId)
+            ? Carrier::query()->active()->find((int) $carrierId)
+            : null;
+
+        return $carrier ?? Carrier::query()->where('name', Carrier::USPS)->first();
     }
 
     public function secret(string $key): mixed

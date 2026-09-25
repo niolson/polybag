@@ -1,7 +1,6 @@
 <?php
 
 use App\Models\Carrier;
-use App\Models\CarrierAlias;
 use App\Models\Location;
 use App\Services\Carriers\ShopifyAdapter;
 use App\Services\ShipDateService;
@@ -22,7 +21,7 @@ it('advances USPS shipments to the next pickup day after the cutoff hour', funct
     $carrier = Carrier::factory()->usps()->create();
     $carrier->locations()->attach($location->id, ['pickup_days' => json_encode([1, 2, 3, 4, 5])]);
 
-    $shipDate = app(ShipDateService::class)->getShipDate('USPS');
+    $shipDate = app(ShipDateService::class)->getShipDate($carrier);
 
     expect($shipDate->toDateString())->toBe('2026-04-02');
 });
@@ -35,7 +34,7 @@ it('keeps non-USPS carriers on the current pickup day after the cutoff hour', fu
     $carrier = Carrier::factory()->create(['name' => 'FedEx']);
     $carrier->locations()->attach($location->id, ['pickup_days' => json_encode([1, 2, 3, 4, 5])]);
 
-    $shipDate = app(ShipDateService::class)->getShipDate('FedEx');
+    $shipDate = app(ShipDateService::class)->getShipDate($carrier);
 
     expect($shipDate->toDateString())->toBe('2026-04-01');
 });
@@ -51,7 +50,7 @@ it('advances to the next pickup day after end of day has already been run', func
         'last_end_of_day_at' => Carbon::now('America/New_York'),
     ]);
 
-    $shipDate = app(ShipDateService::class)->getShipDate('USPS');
+    $shipDate = app(ShipDateService::class)->getShipDate($carrier);
 
     expect($shipDate->toDateString())->toBe('2026-04-02');
 });
@@ -63,7 +62,7 @@ it('creates a carrier-location end-of-day record when one does not exist', funct
     $location = Location::getDefault();
     $carrier = Carrier::factory()->create(['name' => 'UPS']);
 
-    app(ShipDateService::class)->endShippingDay('UPS', $location->id);
+    app(ShipDateService::class)->endShippingDay($carrier, $location->id);
 
     $pivotRecord = $carrier->locations()
         ->where('locations.id', $location->id)
@@ -74,21 +73,7 @@ it('creates a carrier-location end-of-day record when one does not exist', funct
         ->and(Carbon::parse($pivotRecord->last_end_of_day_at)->setTimezone('America/New_York')->toDateTimeString())->toBe('2026-04-01 16:15:00');
 });
 
-it('applies the USPS cutoff to a carrier name that only normalizes to USPS', function (): void {
-    Carbon::setTestNow(Carbon::parse('2026-04-01 20:30:00', 'America/New_York'));
-    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-04-01 20:30:00', 'America/New_York'));
-
-    $location = Location::getDefault();
-    $carrier = Carrier::factory()->usps()->create();
-    $carrier->locations()->attach($location->id, ['pickup_days' => json_encode([1, 2, 3, 4, 5])]);
-    CarrierAlias::create(['carrier_id' => $carrier->id, 'alias' => 'US Postal Service']);
-
-    $shipDate = app(ShipDateService::class)->getShipDate('US Postal Service');
-
-    expect($shipDate->toDateString())->toBe('2026-04-02');
-});
-
-it('reads pickup days through the normalized carrier identity', function (): void {
+it('reads pickup days from the carrier row it is handed', function (): void {
     Carbon::setTestNow(Carbon::parse('2026-04-01 10:00:00', 'America/New_York'));
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-04-01 10:00:00', 'America/New_York'));
 
@@ -96,25 +81,23 @@ it('reads pickup days through the normalized carrier identity', function (): voi
     $carrier = Carrier::factory()->create(['name' => 'UPS']);
     // Wednesday (3) is deliberately not a pickup day for this carrier.
     $carrier->locations()->attach($location->id, ['pickup_days' => json_encode([1, 2, 4, 5])]);
-    CarrierAlias::create(['carrier_id' => $carrier->id, 'alias' => 'United Parcel Service']);
 
-    $shipDate = app(ShipDateService::class)->getShipDate('United Parcel Service');
+    $shipDate = app(ShipDateService::class)->getShipDate($carrier);
 
     expect($shipDate->toDateString())->toBe('2026-04-02')
-        ->and(app(ShipDateService::class)->getPickupDays('United Parcel Service'))->toBe([1, 2, 4, 5]);
+        ->and(app(ShipDateService::class)->getPickupDays($carrier))->toBe([1, 2, 4, 5]);
 });
 
-it('ends the shipping day for a carrier named by an alias', function (): void {
+it('ends the shipping day for the carrier row it is handed', function (): void {
     Carbon::setTestNow(Carbon::parse('2026-04-01 16:15:00', 'America/New_York'));
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-04-01 16:15:00', 'America/New_York'));
 
     $location = Location::getDefault();
     $carrier = Carrier::factory()->create(['name' => 'FedEx']);
-    CarrierAlias::create(['carrier_id' => $carrier->id, 'alias' => 'Federal Express']);
 
-    app(ShipDateService::class)->endShippingDay('Federal Express', $location->id);
+    app(ShipDateService::class)->endShippingDay($carrier, $location->id);
 
-    expect(app(ShipDateService::class)->getShipDate('FedEx', $location->id)->toDateString())->toBe('2026-04-02');
+    expect(app(ShipDateService::class)->getShipDate($carrier, $location->id)->toDateString())->toBe('2026-04-02');
 });
 
 it('keeps the cutoff with the carrier identity when the carrier is renamed', function (): void {
@@ -125,62 +108,34 @@ it('keeps the cutoff with the carrier identity when the carrier is renamed', fun
     $carrier = Carrier::factory()->usps()->create();
     $carrier->locations()->attach($location->id, ['pickup_days' => json_encode([1, 2, 3, 4, 5])]);
 
-    // An operator retitles the carrier in the admin. The row — and so the
-    // normalized identity a shipped package points at — is unchanged.
-    $carrier->update(['name' => 'United States Postal Service']);
+    // An operator relabels the carrier in the admin. The row — and so the
+    // identity an offer stored — is unchanged.
+    $carrier->update(['display_name' => 'United States Postal Service']);
 
-    $shipDate = app(ShipDateService::class)->getShipDate('United States Postal Service');
-
-    expect($shipDate->toDateString())->toBe('2026-04-02');
-});
-
-it('applies the Shopify cutoff, which cannot be derived from a carrier known only after purchase', function (): void {
-    Carbon::setTestNow(Carbon::parse('2026-04-01 20:30:00', 'America/New_York'));
-    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-04-01 20:30:00', 'America/New_York'));
-
-    $location = Location::getDefault();
-    $carrier = Carrier::factory()->shopify()->create();
-    $carrier->locations()->attach($location->id, ['pickup_days' => json_encode([1, 2, 3, 4, 5])]);
-
-    $shipDate = app(ShipDateService::class)->getShipDate(ShopifyAdapter::CARRIER_NAME);
+    $shipDate = app(ShipDateService::class)->getShipDate($carrier->fresh());
 
     expect($shipDate->toDateString())->toBe('2026-04-02');
 });
 
-it('takes the Shopify cutoff from the seeded carrier row, not from a branch in the service', function (): void {
+it('no longer reads a cutoff from the Shopify row', function (): void {
     Carbon::setTestNow(Carbon::parse('2026-04-01 20:30:00', 'America/New_York'));
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-04-01 20:30:00', 'America/New_York'));
 
     Location::getDefault();
     (new CarrierSeeder)->run();
 
-    expect(Carrier::query()->where('name', ShopifyAdapter::CARRIER_NAME)->value('pickup_cutoff_hour'))->toBe(20)
-        ->and(app(ShipDateService::class)->getShipDate(ShopifyAdapter::CARRIER_NAME)->toDateString())->toBe('2026-04-02');
+    // Nothing is dated by the row any more: a Shopify label is dated by the
+    // carrier its connection names (`carrier-catalog-reset/08`).
+    expect(Carrier::query()->where('name', ShopifyAdapter::CARRIER_NAME)->value('pickup_cutoff_hour'))->toBeNull();
 });
 
-it('gives Shopify no cutoff when no Shopify carrier row exists, which is also when no label can be bought', function (): void {
+it('leaves a carrier with no row on the current pickup day', function (): void {
     Carbon::setTestNow(Carbon::parse('2026-04-01 20:30:00', 'America/New_York'));
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-04-01 20:30:00', 'America/New_York'));
 
     Location::getDefault();
 
-    // ShopifyAdapter::getRates() only advertises services hanging off this row, so
-    // a missing row means no Shopify rate is offered and no Shopify label is bought.
-    // The date it would have produced is therefore unreachable rather than wrong.
-    expect(Carrier::query()->where('name', ShopifyAdapter::CARRIER_NAME)->exists())->toBeFalse();
-
-    $shipDate = app(ShipDateService::class)->getShipDate(ShopifyAdapter::CARRIER_NAME);
-
-    expect($shipDate->toDateString())->toBe('2026-04-01');
-});
-
-it('leaves a carrier that normalizes to nothing on the current pickup day', function (): void {
-    Carbon::setTestNow(Carbon::parse('2026-04-01 20:30:00', 'America/New_York'));
-    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-04-01 20:30:00', 'America/New_York'));
-
-    Location::getDefault();
-
-    $shipDate = app(ShipDateService::class)->getShipDate('Poste Italiane');
+    $shipDate = app(ShipDateService::class)->getShipDate(null);
 
     expect($shipDate->toDateString())->toBe('2026-04-01');
 });
@@ -192,9 +147,9 @@ it('picks up Monday through Friday at a location nobody has configured', functio
     Carbon::setTestNow(Carbon::parse('2026-04-04 10:00:00', 'America/New_York'));
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-04-04 10:00:00', 'America/New_York'));
 
-    Carrier::factory()->usps()->create();
+    $carrier = Carrier::factory()->usps()->create();
 
-    expect(app(ShipDateService::class)->getShipDate('USPS')->toDateString())->toBe('2026-04-06');
+    expect(app(ShipDateService::class)->getShipDate($carrier)->toDateString())->toBe('2026-04-06');
 });
 
 it('falls back to the default when a carrier is configured with no pickup days at all', function (): void {
@@ -207,7 +162,7 @@ it('falls back to the default when a carrier is configured with no pickup days a
     $carrier = Carrier::factory()->usps()->create();
     $carrier->locations()->attach($location->id, ['pickup_days' => json_encode([])]);
 
-    expect(app(ShipDateService::class)->getShipDate('USPS')->toDateString())->toBe('2026-04-06');
+    expect(app(ShipDateService::class)->getShipDate($carrier)->toDateString())->toBe('2026-04-06');
 });
 
 it('keeps a Saturday pickup an operator configured for this location', function (): void {
@@ -218,28 +173,7 @@ it('keeps a Saturday pickup an operator configured for this location', function 
     $carrier = Carrier::factory()->usps()->create();
     $carrier->locations()->attach($location->id, ['pickup_days' => json_encode([1, 2, 3, 4, 5, 6])]);
 
-    expect(app(ShipDateService::class)->getShipDate('USPS')->toDateString())->toBe('2026-04-04');
-});
-
-it('gives Shopify the same Saturday treatment as any other carrier', function (): void {
-    // Shopify is not a special case here: it takes the default like everything
-    // else, and reaches Saturday through the same per-location config.
-    Carbon::setTestNow(Carbon::parse('2026-04-04 10:00:00', 'America/New_York'));
-    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-04-04 10:00:00', 'America/New_York'));
-
-    (new CarrierSeeder)->run();
-
-    $service = app(ShipDateService::class);
-
-    expect($service->getShipDate(ShopifyAdapter::CARRIER_NAME)->toDateString())->toBe('2026-04-06');
-
-    Carrier::query()
-        ->where('name', ShopifyAdapter::CARRIER_NAME)
-        ->first()
-        ->locations()
-        ->attach(Location::getDefault()->id, ['pickup_days' => json_encode([1, 2, 3, 4, 5, 6])]);
-
-    expect($service->getShipDate(ShopifyAdapter::CARRIER_NAME)->toDateString())->toBe('2026-04-04');
+    expect(app(ShipDateService::class)->getShipDate($carrier)->toDateString())->toBe('2026-04-04');
 });
 
 it('returns a carrier whose pickup days were removed to the default, not to no pickups at all', function (): void {
@@ -256,9 +190,9 @@ it('returns a carrier whose pickup days were removed to the default, not to no p
 
     $service = app(ShipDateService::class);
 
-    expect($service->getShipDate('USPS')->toDateString())->toBe('2026-04-04');
+    expect($service->getShipDate($carrier)->toDateString())->toBe('2026-04-04');
 
     $carrier->locations()->detach($location->id);
 
-    expect($service->getShipDate('USPS')->toDateString())->toBe('2026-04-06');
+    expect($service->getShipDate($carrier)->toDateString())->toBe('2026-04-06');
 });

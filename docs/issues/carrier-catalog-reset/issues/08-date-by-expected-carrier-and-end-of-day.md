@@ -1,6 +1,6 @@
 # Date every purchase by the carrier expected to carry it, and list every carrier on End of Day
 
-Status: needs-triage
+Status: done
 
 Repo: `polybag`
 
@@ -25,6 +25,10 @@ source.
     row, so a rename between quote and purchase changes nothing.
   - Quoting reads the same carrier for the ship date a direct task is quoted for, and for
     the offer's window.
+  - Quoting stops dating Shopify and Amazon tasks by source name, which reads the two
+    fake rows. `blindPurchaseOffersFor()` dates Shopify's request by the connection's
+    *Date Shopify's choice as*. `shipDatesFor()` gives the Amazon task no date: `getRates`
+    sends none, and each Amazon offer carries Amazon's own 10-minute window.
 - **Shopify.** The Shopify connection gains *Date Shopify's choice as*, a carrier select
   that defaults to USPS. It sits on the connection form, which is Admin-only.
   - Until `09`, every Shopify blind offer is dated by it. That keeps Shopify's behaviour:
@@ -32,6 +36,8 @@ source.
   - From `09`, only `auto` is. An offer requesting a service is dated by that service's
     carrier.
   - Nothing reads the `Shopify` row's `pickup_cutoff_hour` any more.
+  - The setting is a carrier id in the connection's `settings`, with no foreign key. If
+    that carrier is deleted or inactive, it falls back to USPS.
 - **A carrier with no row** keeps today's fallback: no cutoff, Monday to Friday. That
   covers a cross-border carrier nobody has seeded, which Amazon may name on an
   international lane.
@@ -41,8 +47,14 @@ source.
   - The two fake rows leave it, because nothing is dated by them any more. Exclude them by
     `ShopifyAdapter::CARRIER_NAME` and `AmazonBuyShippingAdapter::SOURCE_NAME`, marked
     transitional in the code, until `09` and `12` remove the rows.
-  - The package count per carrier covers every label that carrier dates, from any source,
-    read by `normalized_carrier_id` rather than by `packages.carrier`. The manifest count and the manifest action stay
+  - The package count per carrier covers every label that carrier carries, from any
+    source, read by `normalized_carrier_id` (the carrier of record) rather than by
+    `packages.carrier`. A Shopify label dated as USPS that Shopify put on UPS counts
+    under UPS, because the UPS driver takes it. A label counts if its ship date is the
+    carrier's current one, or it was bought after the carrier's last End of Day at the
+    location, as long as that End of Day was on or after the pickup day before the
+    current ship date. The second test covers that label, whose date came from
+    USPS's policy and need not equal UPS's current date. The manifest count and the manifest action stay
     direct labels only, and appear only where the carrier's integration supports a
     manifest.
   - Ending a carrier's day moves the date of everything it dates, whichever source sells
@@ -51,17 +63,20 @@ source.
 
 ## Acceptance criteria
 
-- [ ] A Shopify blind purchase is dated today before USPS's cutoff and the next pickup day
+- [x] A Shopify blind purchase is dated today before USPS's cutoff and the next pickup day
       after it, read through the connection's *Date Shopify's choice as*
-- [ ] Pointing that setting at UPS dates Shopify purchases by UPS's policy
-- [ ] An unmapped Amazon offer is dated by the carrier Amazon names, and one whose
+- [x] Pointing that setting at UPS dates Shopify purchases by UPS's policy
+- [x] An unmapped Amazon offer is dated by the carrier Amazon names, and one whose
       carrier has no row gets no cutoff
-- [ ] A mapped Amazon offer is dated by its carrier, so USPS for Ground Advantage
-- [ ] Renaming a carrier between quote and purchase does not change the date
-- [ ] End of Day lists OnTrac and Amazon Shipping once they exist, and neither fake row
-- [ ] Ending USPS's day moves the next date for direct USPS, Amazon's USPS and Shopify
+- [x] A mapped Amazon offer is dated by its carrier, so USPS for Ground Advantage
+- [x] Renaming a carrier between quote and purchase does not change the date
+- [x] End of Day lists OnTrac and Amazon Shipping once they exist, and neither fake row
+- [x] Ending USPS's day moves the next date for direct USPS, Amazon's USPS and Shopify
       labels dated as USPS
-- [ ] Nothing reads the `Shopify` row's cutoff
+- [x] Nothing reads the `Shopify` row's cutoff
+- [x] Quoting reads neither fake row: Shopify's request is dated through the connection's
+      setting, and the Amazon task gets no date
+- [x] *Date Shopify's choice as* pointing at a deleted or inactive carrier dates by USPS
 
 ## Blocked by
 
@@ -88,3 +103,31 @@ source.
   can point at any carrier if one is ever wanted.
 - **2026-09-25** — `05` no longer moves End of Day to `normalized_carrier_id` or keeps a
   transitional list. Both are done here (ADR-0006, 2026-09-25 amendment).
+- **2026-09-25** — Ready for an agent. Three things were settled against the code. The End
+  of Day count is by carrier of record: no data is missing, because Shopify's
+  `trackingCompany` sets `normalized_carrier_id` and `ship_date` is the date we sent as
+  `shippingDatetime`. The quote-time dates for Shopify and Amazon no longer read the fake
+  rows. The Shopify setting falls back to USPS.
+- **2026-09-25** — Done. `ShipDateService` takes a `Carrier` row, or null for a carrier
+  with no row. A rated purchase is dated by the offer's `carrier_id`, and a blind one by
+  `DataSource::shipDateCarrier()`. Quoting dates a direct task by its carrier and Shopify
+  through the connection, and sends Amazon no date. End of Day works by carrier id,
+  counts by `normalized_carrier_id`, and leaves the two fake rows out. The `Shopify` row
+  is seeded with no cutoff. The `shipped()` package factory now sets
+  `normalized_carrier_id`, as a real purchase does. The `ShipDateService` tests that
+  covered alias normalization and the `Shopify` row's cutoff were rewritten for carrier
+  rows, or replaced in `ShipDateByExpectedCarrierTest`.
+- **2026-09-25** — Code review found that matching the count by ship date dropped a
+  Shopify `auto` label from every row when its carrier's date had moved on. For example,
+  UPS's day is ended at 4 PM, and a label dated Wednesday by USPS comes back as UPS: UPS
+  is on Thursday, so neither row counted it. The count is now by carrier of record since
+  the carrier's last End of Day (`ShipDateService::batchStartedAt()`). The manifest query
+  still matches by ship date and takes direct labels only.
+- **2026-09-25** — A second review found problems with counting only from the last End
+  of Day. When a day had never been ended, labels dated today but bought after
+  yesterday's cutoff or over the weekend were missed. An End of Day weeks old counted
+  everything since. The count now takes both: the ship date matches the carrier's
+  current one, or the label was bought after an End of Day that ended the current batch
+  (`ShipDateService::lastEndOfDayForCurrentBatch()`). One gap remains: if nobody ended
+  UPS's day, and UPS's date differs from USPS's by cutoff or pickup days, a USPS-dated
+  `auto` label on UPS is not counted.

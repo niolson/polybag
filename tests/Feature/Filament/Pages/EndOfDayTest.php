@@ -45,7 +45,7 @@ it('shows unmanifested count for USPS packages shipped today', function (): void
         });
 });
 
-it('excludes USPS packages bought through Shopify from the unmanifested count', function (): void {
+it('counts a USPS package bought through Shopify, but not as one to manifest', function (): void {
     Carrier::factory()->create(['name' => 'USPS', 'active' => true]);
 
     Package::factory()->shipped()->create([
@@ -59,7 +59,7 @@ it('excludes USPS packages bought through Shopify from the unmanifested count', 
         ->assertSet('carrierSummary', function ($value): bool {
             $usps = collect($value)->firstWhere('carrier', 'USPS');
 
-            return $usps['package_count'] === 0
+            return $usps['package_count'] === 1
                 && $usps['unmanifested_count'] === 0;
         });
 });
@@ -163,7 +163,7 @@ it('endShippingDay advances the ship date', function (): void {
 
     $initialDate = collect($component->get('carrierSummary'))->firstWhere('carrier', 'FedEx')['ship_date'];
 
-    $component->call('endShippingDay', 'FedEx')
+    $component->call('endShippingDay', Carrier::where('name', 'FedEx')->value('id'))
         ->assertNotified();
 
     $newDate = collect($component->get('carrierSummary'))->firstWhere('carrier', 'FedEx')['ship_date'];
