@@ -24,6 +24,7 @@ use App\Enums\ContentClass;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\OffAmazonShippingStatus;
 use App\Enums\PostageSource;
+use App\Enums\PostageSourceKind;
 use App\Enums\ServiceCapability;
 use App\Enums\ServiceEvidence;
 use App\Enums\SourceEnvironment;
@@ -39,6 +40,7 @@ use App\Models\DataSource;
 use App\Models\ObservedService;
 use App\Models\Package;
 use App\Models\ShippingOffer;
+use App\Models\SourceServiceMapping;
 use App\Services\AmazonBuyShippingService;
 use App\Services\CarrierNormalizer;
 use App\Services\PostageSources\ObservedServiceRecorder;
@@ -49,7 +51,6 @@ use App\Services\RuleEvaluator;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\Shipping\ContentsFilter;
 use App\Services\Shipping\PackagingFilter;
-use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Exceptions\Request\FatalRequestException;
@@ -103,9 +104,11 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
      *
      * Lower case, matching {@see AmazonSource::getDestinationName()} and the
      * `observed_services.source` column, which is not the same string as the
-     * registry name above — one is an identifier, the other is a label.
+     * registry name above — one is an identifier, the other is a label. It is
+     * also the source kind mappings are keyed on, so an observation finds its
+     * mapping.
      */
-    public const OBSERVATION_SOURCE = 'amazon';
+    public const OBSERVATION_SOURCE = PostageSourceKind::Amazon->value;
 
     /**
      * The one seeded `CarrierService` under the `Amazon` carrier.
@@ -768,6 +771,10 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
         $observations = $this->record($quote, $marketplace);
         $this->recordAdditionalInputsSchemas($quote, $source, $observations);
 
+        // Only an eligible rate can become an offer, so only those need a name.
+        $mappings = SourceServiceMapping::forIdentities(PostageSourceKind::Amazon, collect($quote->rates)
+            ->map(fn (array $rate): array => [(string) ($rate['carrierId'] ?? ''), (string) ($rate['serviceId'] ?? '')]));
+
         $environment = SourceEnvironment::current();
         $expiresAt = now()->addSeconds(AmazonBuyShippingService::OFFER_WINDOW_SECONDS);
         $offerStore = app(OfferStore::class);
@@ -775,13 +782,13 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
         $catalogCarrierId = $this->catalogCarrierResolver();
 
         return collect($quote->rates)
-            ->filter(fn (array $rate): bool => $this->isBuyable($rate, $request, $this->mappedService($rate, $observations)))
+            ->filter(fn (array $rate): bool => $this->isBuyable($rate, $request, $this->mappedService($rate, $mappings)))
             ->map(function (array $rate) use (
-                $package, $observations, $environment, $expiresAt, $offerStore, $quote, $source, $marketplace, $channelType, $catalogCarrierId
+                $package, $mappings, $environment, $expiresAt, $offerStore, $quote, $source, $marketplace, $channelType, $catalogCarrierId
             ): RateResponse {
                 $carrierId = (string) $rate['carrierId'];
                 $serviceId = (string) $rate['serviceId'];
-                $mapped = $this->mappedService($rate, $observations);
+                $mapped = $this->mappedService($rate, $mappings);
 
                 // The catalog identity ADR-0006 decision 10 binds requirements
                 // to. The service only when somebody mapped it; the carrier
@@ -856,12 +863,11 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
      * The catalog service somebody mapped this offer's identity to, if any.
      *
      * @param  array<string, mixed>  $rate
-     * @param  Collection<string, ObservedService>  $observations  keyed by service key
+     * @param  Collection<string, SourceServiceMapping>  $mappings  keyed by {@see SourceServiceMapping::key()}
      */
-    private function mappedService(array $rate, Collection $observations): ?CarrierService
+    private function mappedService(array $rate, Collection $mappings): ?CarrierService
     {
-        return $observations->get(ObservedService::serviceKey(
-            self::OBSERVATION_SOURCE,
+        return $mappings->get(SourceServiceMapping::key(
             (string) ($rate['carrierId'] ?? ''),
             (string) ($rate['serviceId'] ?? ''),
         ))?->carrierService;
@@ -918,11 +924,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
                 ->map(fn (array $rate): ServiceObservation => $observation($rate, false)))
             ->filter(fn (ServiceObservation $o): bool => $o->externalCarrierId !== '' && $o->externalServiceId !== '');
 
-        // The recorder hands back plain rows; the mapping and its carrier are
-        // what turn an identity into a name, and they are loaded once here
-        // rather than lazily per rate.
-        return EloquentCollection::make(app(ObservedServiceRecorder::class)->record($observations))
-            ->load('carrierService.carrier')
+        return app(ObservedServiceRecorder::class)->record($observations)
             ->keyBy(fn (ObservedService $service): string => ObservedService::serviceKey(
                 $service->source,
                 $service->external_carrier_id,

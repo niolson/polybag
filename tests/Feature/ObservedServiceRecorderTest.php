@@ -1,14 +1,15 @@
 <?php
 
 use App\DataTransferObjects\PostageSources\ServiceObservation;
+use App\Enums\PostageSourceKind;
 use App\Enums\SourceEnvironment;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\ObservedService;
 use App\Models\Setting;
+use App\Models\SourceServiceMapping;
 use App\Services\PostageSources\ObservedServiceRecorder;
 use App\Services\SettingsService;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 function observation(
@@ -140,7 +141,7 @@ it('carries a human mapping onto the same service seen in another environment', 
     $carrierService = CarrierService::factory()->create();
 
     app(ObservedServiceRecorder::class)->record([observation()]);
-    ObservedService::sole()->update(['carrier_service_id' => $carrierService->id]);
+    SourceServiceMapping::map(PostageSourceKind::Amazon, 'ONTRAC', 'ONTRAC_MFN_GROUND', $carrierService->id);
 
     Setting::updateOrCreate(['key' => 'sandbox_mode'], ['value' => '1', 'type' => 'boolean', 'group' => 'system']);
     app(SettingsService::class)->clearCache();
@@ -152,20 +153,20 @@ it('carries a human mapping onto the same service seen in another environment', 
     // row that nobody ever decided anything about, and it would sit unmapped
     // for good.
     expect(ObservedService::count())->toBe(2)
-        ->and(ObservedService::pluck('carrier_service_id')->unique()->all())
+        ->and(ObservedService::all()->map(fn (ObservedService $service): ?int => $service->mapping()?->carrier_service_id)->unique()->all())
         ->toBe([$carrierService->id]);
 });
 
-it('carries a human mapping onto the same service seen in another marketplace', function (): void {
+it('finds a human mapping for the same service seen in another marketplace', function (): void {
     $carrierService = CarrierService::factory()->create();
 
     app(ObservedServiceRecorder::class)->record([observation()]);
-    ObservedService::sole()->update(['carrier_service_id' => $carrierService->id]);
+    SourceServiceMapping::map(PostageSourceKind::Amazon, 'ONTRAC', 'ONTRAC_MFN_GROUND', $carrierService->id);
 
     app(ObservedServiceRecorder::class)->record([observation(marketplace: 'A2EUQ1WTGCTBG2')]);
 
     expect(ObservedService::count())->toBe(2)
-        ->and(ObservedService::where('marketplace', 'A2EUQ1WTGCTBG2')->sole()->carrier_service_id)
+        ->and(ObservedService::where('marketplace', 'A2EUQ1WTGCTBG2')->sole()->mapping()->carrier_service_id)
         ->toBe($carrierService->id);
 });
 
@@ -173,7 +174,7 @@ it('leaves a new identity unmapped when nobody has named that service', function
     $carrierService = CarrierService::factory()->create();
 
     app(ObservedServiceRecorder::class)->record([observation()]);
-    ObservedService::sole()->update(['carrier_service_id' => $carrierService->id]);
+    SourceServiceMapping::map(PostageSourceKind::Amazon, 'ONTRAC', 'ONTRAC_MFN_GROUND', $carrierService->id);
 
     // A different service from the same carrier, and the same service code
     // under a different carrier: neither is the service that was mapped.
@@ -182,49 +183,30 @@ it('leaves a new identity unmapped when nobody has named that service', function
         observation(carrierId: 'UPS', carrierName: 'UPS'),
     ]);
 
-    expect(ObservedService::whereNull('carrier_service_id')->count())->toBe(2);
+    expect(ObservedService::query()->unmapped()->count())->toBe(2);
 });
 
-it('reads and inserts a mapping under one lock', function (): void {
-    $heldDuringInsert = null;
+it('never writes a mapping, and has no lock left to take', function (): void {
+    $carrierService = CarrierService::factory()->create();
+    SourceServiceMapping::map(PostageSourceKind::Amazon, 'ONTRAC', 'ONTRAC_MFN_GROUND', $carrierService->id);
 
-    DB::listen(function ($query) use (&$heldDuringInsert): void {
-        if (! str_contains($query->sql, 'insert') || ! str_contains($query->sql, 'observed_services')) {
-            return;
-        }
+    $mappingWrites = 0;
 
-        // Non-reentrant, so failing to take it here is the assertion: the
-        // insert is running inside the lock the mapping page also takes.
-        $lock = Cache::lock(ObservedService::MAPPING_LOCK, 10);
-        $acquired = $lock->get();
-        $heldDuringInsert ??= ! $acquired;
-
-        if ($acquired) {
-            $lock->release();
+    DB::listen(function ($query) use (&$mappingWrites): void {
+        if (str_contains($query->sql, 'source_service_mappings') && preg_match('/^\s*(insert|update|delete)/i', $query->sql)) {
+            $mappingWrites++;
         }
     });
 
-    app(ObservedServiceRecorder::class)->record([observation()]);
+    app(ObservedServiceRecorder::class)->record([
+        observation(),
+        observation(marketplace: 'A2EUQ1WTGCTBG2'),
+        observation(serviceId: 'ONTRAC_MFN_SUNRISE'),
+    ]);
 
-    expect($heldDuringInsert)->toBeTrue();
-});
-
-it('does not reach for the lock when a quote brings back nothing new', function (): void {
-    $recorder = app(ObservedServiceRecorder::class);
-    $recorder->record([observation()]);
-
-    // The ordinary quote: every identity already on file, so the insert path —
-    // and its lock — is never entered. Holding the lock must not stall it.
-    $lock = Cache::lock(ObservedService::MAPPING_LOCK, 10);
-    expect($lock->get())->toBeTrue();
-
-    try {
-        $recorder->record([observation()]);
-    } finally {
-        $lock->release();
-    }
-
-    expect(ObservedService::sole()->observation_count)->toBe(2);
+    expect($mappingWrites)->toBe(0)
+        ->and(SourceServiceMapping::sole()->carrier_service_id)->toBe($carrierService->id)
+        ->and(defined(ObservedService::class.'::MAPPING_LOCK'))->toBeFalse();
 });
 
 it('carries through a renamed service without losing its identity', function (): void {

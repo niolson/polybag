@@ -124,8 +124,8 @@ describe('manager role access', function (): void {
         Livewire::test(UnmappedShippingReferences::class)->assertSuccessful();
     });
 
-    it('can access observed services mapping page', function (): void {
-        Livewire::test(UnmappedObservedServices::class)->assertSuccessful();
+    it('cannot access observed services mapping page, which is Admin-only', function (): void {
+        Livewire::test(UnmappedObservedServices::class)->assertForbidden();
     });
 
     it('can access end of day page', function (): void {

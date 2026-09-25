@@ -5,9 +5,9 @@ namespace App\Services\PostageSources;
 use App\DataTransferObjects\PostageSources\ServiceObservation;
 use App\Enums\SourceEnvironment;
 use App\Models\ObservedService;
+use App\Models\SourceServiceMapping;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Cache;
 
 /**
  * Writes what a postage source reported into the durable identity store.
@@ -21,20 +21,12 @@ use Illuminate\Support\Facades\Cache;
  * is explicit that promotion into the authored catalog is a human act; this
  * class only ever records that an identity was seen.
  *
- * The one thing it does carry across is a mapping a human already made — a new
- * row for a service someone has named inherits that name, because a mapping is
- * about the service and not about the sighting. That makes this the second
- * writer of `carrier_service_id`, so the read and the insert are taken under
- * {@see ObservedService::MAPPING_LOCK} together. See {@see existingMappings()}.
+ * Nor does it name anything. A mapping is one {@see SourceServiceMapping} row
+ * per service, written only by {@see ObservedServiceMapper}, so a new sighting
+ * of a mapped service is mapped the moment it is inserted, with nothing to copy.
  */
 class ObservedServiceRecorder
 {
-    /** How long a held mapping lock stays valid if the holder dies mid-write. */
-    private const LOCK_SECONDS = 10;
-
-    /** How long to wait for the mapping page to finish a write before giving up. */
-    private const LOCK_WAIT_SECONDS = 5;
-
     /**
      * @param  iterable<ServiceObservation>  $observations
      * @return Collection<int, ObservedService>
@@ -133,30 +125,6 @@ class ObservedServiceRecorder
             return;
         }
 
-        // Read and insert under one lock. Apart, an operator mapping a service
-        // in the window between them lands on rows that already exist and never
-        // on the one being inserted, and an operator unmapping in the same
-        // window is overwritten by a value read a moment before it was
-        // withdrawn. Either way the new row disagrees with the last decision a
-        // human made, silently and for good. See {@see ObservedService::MAPPING_LOCK}.
-        Cache::lock(ObservedService::MAPPING_LOCK, self::LOCK_SECONDS)->block(
-            self::LOCK_WAIT_SECONDS,
-            function () use ($new, $environment, $now): void {
-                $this->insertNew($new, $this->existingMappings($new), $environment, $now);
-            },
-        );
-    }
-
-    /**
-     * @param  Collection<int, ServiceObservation>  $new
-     * @param  Collection<string, int>  $mappings
-     */
-    private function insertNew(
-        Collection $new,
-        Collection $mappings,
-        SourceEnvironment $environment,
-        CarbonInterface $now,
-    ): void {
         // insertOrIgnore rather than insert: two packers quoting the same
         // parcel at once both find the identity missing, and the unique
         // index is what settles it. Losing that race is not an error.
@@ -169,7 +137,6 @@ class ObservedServiceRecorder
                 'external_carrier_name' => $observation->externalCarrierName,
                 'external_service_id' => $observation->externalServiceId,
                 'external_service_name' => $observation->externalServiceName,
-                'carrier_service_id' => $mappings->get($this->serviceKey($observation)),
                 'first_seen_at' => $now,
                 'last_seen_at' => $now,
                 // Zero, not one: the increment below is what counts this
@@ -179,48 +146,6 @@ class ObservedServiceRecorder
                 'updated_at' => $now,
             ])->all(),
         );
-    }
-
-    /**
-     * Mappings a human has already made for these services, in whatever
-     * environment or marketplace they made them.
-     *
-     * Without this, a mapping would only ever cover the rows that existed when
-     * it was made: map Amazon's `USPS/USPS_GROUND_ADVANTAGE` in production
-     * today, flip to sandbox tomorrow, and the same service arrives as a new
-     * identity with nothing on it — permanently unmapped through no decision of
-     * anyone's. {@see ObservedService::scopeSameService()} defines the scope
-     * both halves read.
-     *
-     * This is not discovery creating catalog rows. It copies a `carrier_service_id`
-     * a person already chose onto another sighting of the service they chose it
-     * for; it cannot produce an identifier nobody authored.
-     *
-     * One extra query, and only when a quote brought back a service we have
-     * never recorded — the ordinary case inserts nothing and never gets here.
-     *
-     * @param  Collection<int, ServiceObservation>  $observations
-     * @return Collection<string, int> carrier_service_id keyed by service
-     */
-    private function existingMappings(Collection $observations): Collection
-    {
-        return ObservedService::query()
-            ->whereIn('source', $observations->pluck('source')->unique()->all())
-            ->whereIn('external_carrier_id', $observations->pluck('externalCarrierId')->unique()->all())
-            ->whereIn('external_service_id', $observations->pluck('externalServiceId')->unique()->all())
-            ->whereNotNull('carrier_service_id')
-            // Same independent-whereIn caveat as existingIdentities(): rows for
-            // cross terms nobody observed come back too. Harmless here — they
-            // key under their own service and are never looked up — and the
-            // mapper keeps every row for one service on one carrier service, so
-            // duplicate keys cannot disagree.
-            ->get(['source', 'external_carrier_id', 'external_service_id', 'carrier_service_id'])
-            ->keyBy(fn (ObservedService $service): string => ObservedService::serviceKey(
-                $service->source,
-                $service->external_carrier_id,
-                $service->external_service_id,
-            ))
-            ->map(fn (ObservedService $service): int => $service->carrier_service_id);
     }
 
     /**
@@ -295,18 +220,5 @@ class ObservedServiceRecorder
             $observation->externalCarrierId,
             $observation->externalServiceId,
         ]);
-    }
-
-    /**
-     * The identity key without the marketplace — the scope a mapping covers,
-     * as opposed to the scope a row is deduplicated on.
-     */
-    private function serviceKey(ServiceObservation $observation): string
-    {
-        return ObservedService::serviceKey(
-            $observation->source,
-            $observation->externalCarrierId,
-            $observation->externalServiceId,
-        );
     }
 }

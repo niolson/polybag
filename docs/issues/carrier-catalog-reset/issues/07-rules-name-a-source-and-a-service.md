@@ -20,6 +20,9 @@ every OnTrac offer.
 - **Schema.** Replace the columns outright; there is no data to carry.
   - `source`: *direct*, *Shopify*, *Amazon Buy Shipping*, *any priced source* (*Use*
     only), or *any source* (*Exclude* only).
+    The three named sources are the `PostageSourceKind` cases (`direct`, `shopify`,
+    `amazon`) that `14` introduces. The two *any* values belong to rules alone, not to the
+    enum. Whichever of `07` and `14` lands first creates the enum.
   - The service is either one `carrier_service_id` or an explicit *any*, stored as its
     own value. A null service never stands for *any*.
   - `carrier_id`, for *Exclude* only.
@@ -100,3 +103,6 @@ every OnTrac offer.
   could not express one. The explicit *any*, the restricting foreign keys, the
   no-method allowance and the Ship page default came from the same review.
   `RateResponse::$carrierServiceId` moved to `02` and `04`.
+- **2026-09-25** — Named `PostageSourceKind` as the source of the three named sources,
+  so rules, the source mapping table (`14`) and the method's source policy (`09`) share
+  one list of kinds.

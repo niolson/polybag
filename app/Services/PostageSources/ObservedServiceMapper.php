@@ -6,10 +6,7 @@ use App\Filament\Pages\UnmappedObservedServices;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\ObservedService;
-use Closure;
-use Illuminate\Contracts\Cache\LockTimeoutException;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\Cache;
+use App\Models\SourceServiceMapping;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -28,18 +25,11 @@ use Illuminate\Support\Facades\DB;
  * all" means in practice. Leaving an identity unmapped forever is a valid
  * terminal state (decision 8), so there is no queue and no backfill.
  *
- * Every write here runs under {@see ObservedService::MAPPING_LOCK}, because the
- * recorder writes the same column from the other direction and the two
- * interleaved leave a row permanently disagreeing with the last decision made.
+ * A decision is one {@see SourceServiceMapping} row, written or removed here
+ * and nowhere else. Observations are never touched.
  */
 class ObservedServiceMapper
 {
-    /** How long a held mapping lock stays valid if the holder dies mid-write. */
-    private const LOCK_SECONDS = 10;
-
-    /** How long to wait for another writer to finish before giving up. */
-    private const LOCK_WAIT_SECONDS = 5;
-
     /**
      * Alias an observed identity onto a service we already have a row for.
      *
@@ -47,7 +37,9 @@ class ObservedServiceMapper
      */
     public function map(ObservedService $observation, CarrierService $carrierService): int
     {
-        return $this->locked(fn (): int => $this->applyMapping($observation, $carrierService->getKey()));
+        $this->writeMapping($observation, $carrierService);
+
+        return $this->coverage($observation);
     }
 
     /**
@@ -69,14 +61,14 @@ class ObservedServiceMapper
         bool $canShipToPoBoxes = false,
         bool $canShipToMilitaryAddresses = false,
     ): int {
-        return $this->locked(fn (): int => DB::transaction(function () use (
+        DB::transaction(function () use (
             $observation,
             $carrier,
             $serviceCode,
             $serviceName,
             $canShipToPoBoxes,
             $canShipToMilitaryAddresses,
-        ): int {
+        ): void {
             $carrierService = CarrierService::create([
                 'carrier_id' => $carrier->getKey(),
                 'service_code' => $serviceCode,
@@ -86,11 +78,10 @@ class ObservedServiceMapper
                 'can_ship_to_military_addresses' => $canShipToMilitaryAddresses,
             ]);
 
-            // applyMapping, not map: the lock is already held and is not
-            // reentrant, so calling the public method here would deadlock
-            // against this very call.
-            return $this->applyMapping($observation, $carrierService->getKey());
-        }));
+            $this->writeMapping($observation, $carrierService);
+        });
+
+        return $this->coverage($observation);
     }
 
     /**
@@ -106,58 +97,32 @@ class ObservedServiceMapper
      */
     public function unmap(ObservedService $observation): int
     {
-        return $this->locked(fn (): int => $this->applyMapping($observation, null));
+        SourceServiceMapping::query()
+            ->forIdentity($observation->sourceKind(), $observation->external_carrier_id, $observation->external_service_id)
+            ->delete();
+
+        return $this->coverage($observation);
     }
 
-    /**
-     * Every row naming the same service, whatever world it was seen in — see
-     * {@see ObservedService::scopeSameService()} for why that is the scope a
-     * mapping covers.
-     *
-     * Rows observed *after* this runs are not reached by any update, so
-     * {@see ObservedServiceRecorder} reads the same scope when it inserts one.
-     * Without that, a service mapped today would come back unmapped the first
-     * time it is seen in another environment or marketplace.
-     *
-     * @return Builder<ObservedService>
-     */
-    private function sameIdentity(ObservedService $observation): Builder
+    private function writeMapping(ObservedService $observation, CarrierService $carrierService): void
     {
-        return ObservedService::query()->sameService(
-            $observation->source,
+        SourceServiceMapping::map(
+            $observation->sourceKind(),
             $observation->external_carrier_id,
             $observation->external_service_id,
+            $carrierService->getKey(),
         );
     }
 
     /**
-     * One unconditional write over the whole scope, which is what lets the
-     * recorder cooperate with a single lock rather than a merge: whatever the
-     * last decision was, every row for the service carries it.
-     *
-     * @return int observations the decision now covers
+     * How many observations one mapping names — one per environment and
+     * marketplace the service has been seen in — so the page can say when a
+     * decision reached more than the row it was made on.
      */
-    private function applyMapping(ObservedService $observation, ?int $carrierServiceId): int
+    private function coverage(ObservedService $observation): int
     {
-        return $this->sameIdentity($observation)
-            ->update(['carrier_service_id' => $carrierServiceId]);
-    }
-
-    /**
-     * @template TReturn
-     *
-     * @param  Closure(): TReturn  $callback
-     * @return TReturn
-     *
-     * @throws LockTimeoutException
-     */
-    private function locked(Closure $callback): mixed
-    {
-        // Waits rather than refusing: the holder is either another operator's
-        // single UPDATE or a recorder insert, both of which are over in
-        // milliseconds, and a mapping that silently did not happen is worse
-        // than one that took a moment.
-        return Cache::lock(ObservedService::MAPPING_LOCK, self::LOCK_SECONDS)
-            ->block(self::LOCK_WAIT_SECONDS, $callback);
+        return ObservedService::query()
+            ->sameService($observation->source, $observation->external_carrier_id, $observation->external_service_id)
+            ->count();
     }
 }

@@ -10,6 +10,7 @@ use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\ObservedService;
 use App\Models\ServiceApproval;
+use App\Models\SourceServiceMapping;
 use App\Models\User;
 use App\Services\PostageSources\ServiceApprovalGate;
 use App\Services\ShipmentImport\Sources\AmazonSource;
@@ -155,7 +156,7 @@ it('approves an unmapped service one at a time', function (): void {
         ->call('save');
 
     expect(storedRules($this->client))->toBe(['allow|UPS|UPS_PTP_GND'])
-        ->and(ObservedService::query()->whereNotNull('carrier_service_id')->exists())->toBeFalse();
+        ->and(SourceServiceMapping::query()->exists())->toBeFalse();
 });
 
 it('writes no exception with nothing to except', function (): void {
