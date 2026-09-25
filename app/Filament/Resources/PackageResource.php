@@ -10,6 +10,7 @@ use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\PackageResource\Pages;
 use App\Filament\Resources\PackageResource\RelationManagers\PackageItemsRelationManager;
 use App\Filament\Support\CarrierLogoColumn;
+use App\Models\Carrier;
 use App\Models\Client;
 use App\Models\Location;
 use App\Models\Package;
@@ -374,9 +375,9 @@ class PackageResource extends Resource
                     ->label('Tracking Status'),
                 Tables\Filters\SelectFilter::make('carrier')
                     ->options([
-                        'USPS' => 'USPS',
-                        'FedEx' => 'FedEx',
-                        'UPS' => 'UPS',
+                        Carrier::USPS => Carrier::USPS,
+                        Carrier::FEDEX => Carrier::FEDEX,
+                        Carrier::UPS => Carrier::UPS,
                         'shopify_shipping' => 'Shopify Shipping',
                         'amazon_buy_shipping' => 'Amazon Buy Shipping',
                     ])

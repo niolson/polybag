@@ -55,7 +55,7 @@ class FedexRunEtdTestCase extends Command
             return self::FAILURE;
         }
 
-        $carrierId = Carrier::where('name', 'FedEx')->value('id');
+        $carrierId = Carrier::where('name', Carrier::FEDEX)->value('id');
         $account = $carrierId
             ? CarrierAccount::active()->where('carrier_id', $carrierId)->first()
             : null;
@@ -356,7 +356,7 @@ class FedexRunEtdTestCase extends Command
                 'shipment_id' => $shipment->id,
                 'status' => PackageStatus::Shipped,
                 'postage_source' => PostageSource::CarrierAccount,
-                'carrier' => 'FedEx',
+                'carrier' => Carrier::FEDEX,
                 'service' => data_get($shipResponse, 'output.transactionShipments.0.serviceType', 'IntegratorUS09'),
                 // FedEx names the service it sold in its own ship response.
                 'service_evidence' => ServiceEvidence::Confirmed,

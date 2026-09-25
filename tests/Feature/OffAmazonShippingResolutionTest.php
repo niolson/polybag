@@ -250,7 +250,8 @@ describe('scope rules', function (): void {
 
     it('refuses a carrier account scope on the Amazon row', function (): void {
         $amazon = Carrier::firstOrCreate(['name' => AmazonBuyShippingAdapter::SOURCE_NAME]);
-        $account = CarrierAccount::factory()->create(['carrier_id' => $amazon->id]);
+        // A legacy row: the model now refuses an account on the Amazon carrier.
+        $account = CarrierAccount::withoutEvents(fn () => CarrierAccount::factory()->create(['carrier_id' => $amazon->id]));
 
         expect(fn () => CarrierAccountScope::create(['carrier_account_id' => $account->id]))
             ->toThrow(DomainException::class);

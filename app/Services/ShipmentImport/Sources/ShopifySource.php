@@ -9,6 +9,7 @@ use App\DataTransferObjects\ShipmentImport\ShopifyFulfillmentOrderIdentity;
 use App\Exceptions\PermanentExportException;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Http\Integrations\Shopify\ShopifyConnector;
+use App\Models\Carrier;
 use App\Models\DataSource;
 use App\Services\ShipmentImport\ShopifyFulfillmentOrderRepointer;
 use App\Services\ShopifyGoodsFingerprint;
@@ -53,9 +54,9 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
     private array $orderCache = [];
 
     private const CARRIER_MAP = [
-        'USPS' => 'USPS',
-        'FedEx' => 'FedEx',
-        'UPS' => 'UPS',
+        'USPS' => Carrier::USPS,
+        'FedEx' => Carrier::FEDEX,
+        'UPS' => Carrier::UPS,
         'DHL' => 'DHL Express',
     ];
 

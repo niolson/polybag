@@ -68,7 +68,7 @@ class CarrierServiceResource extends Resource
     {
         return $table
             ->columns([
-                CarrierLogoColumn::make('carrier.name', fn ($record) => $record->carrier?->name)
+                CarrierLogoColumn::make('carrier.name', fn ($record) => $record->carrier)
                     ->sortable(),
                 Tables\Columns\TextColumn::make('name')
                     ->searchable(),

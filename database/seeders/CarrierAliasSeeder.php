@@ -15,9 +15,9 @@ class CarrierAliasSeeder extends Seeder
     public function run(): void
     {
         $aliases = [
-            'USPS' => ['US Postal Service', 'United States Postal Service'],
-            'FedEx' => ['Federal Express'],
-            'UPS' => ['United Parcel Service'],
+            Carrier::USPS => ['US Postal Service', 'United States Postal Service'],
+            Carrier::FEDEX => ['Federal Express'],
+            Carrier::UPS => ['United Parcel Service'],
         ];
 
         foreach ($aliases as $carrierName => $carrierAliases) {

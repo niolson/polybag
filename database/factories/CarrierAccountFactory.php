@@ -14,7 +14,11 @@ class CarrierAccountFactory extends Factory
     public function definition(): array
     {
         return [
-            'carrier_id' => Carrier::factory(),
+            // Only a direct carrier can have an account, and carrier names are
+            // unique, so reuse the row when the test already made it.
+            'carrier_id' => fn (): int => Carrier::firstOrCreate([
+                'name' => fake()->randomElement([Carrier::USPS, Carrier::FEDEX, Carrier::UPS]),
+            ])->id,
             'name' => fake()->words(3, true),
             'active' => true,
         ];
@@ -23,7 +27,7 @@ class CarrierAccountFactory extends Factory
     public function usps(): static
     {
         return $this->state(fn () => [
-            'carrier_id' => Carrier::factory()->usps(),
+            'carrier_id' => fn (): int => Carrier::firstOrCreate(['name' => Carrier::USPS], ['pickup_cutoff_hour' => 20])->id,
             'name' => 'USPS Account',
             'credentials' => [
                 'crid' => fake()->numerify('########'),
@@ -36,7 +40,7 @@ class CarrierAccountFactory extends Factory
     public function fedex(): static
     {
         return $this->state(fn () => [
-            'carrier_id' => Carrier::factory()->fedex(),
+            'carrier_id' => fn (): int => Carrier::firstOrCreate(['name' => Carrier::FEDEX])->id,
             'name' => 'FedEx Account',
         ]);
     }

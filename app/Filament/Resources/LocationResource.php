@@ -34,7 +34,7 @@ class LocationResource extends Resource
     public static function hasActiveFedexCarrier(): bool
     {
         return Carrier::active()
-            ->where('name', 'FedEx')
+            ->where('name', Carrier::FEDEX)
             ->exists();
     }
 
@@ -125,7 +125,7 @@ class LocationResource extends Resource
                                     ->options(fn () => CarrierAccount::with('carrier')
                                         ->where('active', true)
                                         ->get()
-                                        ->mapWithKeys(fn ($a): array => [$a->id => "[{$a->carrier->name}] {$a->name}"]))
+                                        ->mapWithKeys(fn ($a): array => [$a->id => "[{$a->carrier->label()}] {$a->name}"]))
                                     ->required(),
 
                             ])

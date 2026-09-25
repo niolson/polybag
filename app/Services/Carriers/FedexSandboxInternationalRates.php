@@ -5,6 +5,7 @@ namespace App\Services\Carriers;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\Models\Carrier;
 use App\Models\CarrierService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -87,7 +88,7 @@ class FedexSandboxInternationalRates
             $days = $service['transitDays'];
 
             return new RateResponse(
-                carrier: 'FedEx',
+                carrier: Carrier::FEDEX,
                 serviceCode: $code,
                 serviceName: $names[$code] ?? $service['name'],
                 price: round($service['base'] + ($service['perPound'] * ceil($weight)), 2),
@@ -118,7 +119,7 @@ class FedexSandboxInternationalRates
     {
         return CarrierService::query()
             ->whereIn('service_code', $serviceCodes)
-            ->whereHas('carrier', fn (Builder $query) => $query->where('name', 'FedEx'))
+            ->whereHas('carrier', fn (Builder $query) => $query->where('name', Carrier::FEDEX))
             ->pluck('name', 'service_code')
             ->all();
     }

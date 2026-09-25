@@ -33,7 +33,7 @@ class EndOfDay extends Page
 
     protected string $view = 'filament.pages.end-of-day';
 
-    /** @var array<int, array{carrier: string, package_count: int, unmanifested_count: int, supports_manifest: bool, ship_date: string, next_ship_date: string}> */
+    /** @var array<int, array{carrier: string, label: string, package_count: int, unmanifested_count: int, supports_manifest: bool, ship_date: string, next_ship_date: string}> */
     public array $carrierSummary = [];
 
     public ?int $locationId = null;
@@ -97,6 +97,7 @@ class EndOfDay extends Page
 
                 return [
                     'carrier' => $carrier->name,
+                    'label' => $carrier->label(),
                     'package_count' => $packageCount,
                     'unmanifested_count' => $unmanifestedCount,
                     'supports_manifest' => $supportsManifest,

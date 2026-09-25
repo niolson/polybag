@@ -71,7 +71,7 @@ class SpecialServiceResource extends Resource
                         $byCarrier = $record->carrierServices()
                             ->with('carrier')
                             ->get()
-                            ->groupBy(fn ($carrierService) => $carrierService->carrier->name);
+                            ->groupBy(fn ($carrierService) => $carrierService->carrier->label());
 
                         if ($byCarrier->isEmpty()) {
                             return 'Unrestricted';
@@ -83,7 +83,7 @@ class SpecialServiceResource extends Resource
                     })
                     ->tooltip(function (SpecialService $record): ?string {
                         $names = $record->carrierServices()->with('carrier')->get()
-                            ->map(fn ($carrierService): string => $carrierService->carrier->name.': '.$carrierService->name);
+                            ->map(fn ($carrierService): string => $carrierService->carrier->label().': '.$carrierService->name);
 
                         return $names->isEmpty() ? null : $names->implode(', ');
                     })

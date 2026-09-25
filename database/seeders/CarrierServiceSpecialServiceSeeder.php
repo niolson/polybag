@@ -37,7 +37,7 @@ class CarrierServiceSpecialServiceSeeder extends Seeder
         $scopesByCode = [
             // Mirrors the adapters' operational day maps (SATURDAY_DELIVERY_DAY_MAP)
             'saturday_delivery' => [
-                'FedEx' => [
+                Carrier::FEDEX => [
                     'FIRST_OVERNIGHT' => null,
                     'PRIORITY_OVERNIGHT' => null,
                     'STANDARD_OVERNIGHT' => null,
@@ -46,7 +46,7 @@ class CarrierServiceSpecialServiceSeeder extends Seeder
                     'EXPRESS_SAVER' => null,
                     'FEDEX_EXPRESS_SAVER' => null,
                 ],
-                'UPS' => [
+                Carrier::UPS => [
                     '14' => null, // Next Day Air Early
                     '01' => null, // Next Day Air
                     '13' => null, // Next Day Air Saver
@@ -59,11 +59,11 @@ class CarrierServiceSpecialServiceSeeder extends Seeder
             // uses code 981, not wired). FedEx DIRECT: US addresses, Canada
             // only via FedEx Ground; Ground Economy has no signature options.
             'signature_required' => [
-                'USPS' => [
+                Carrier::USPS => [
                     'USPS_GROUND_ADVANTAGE' => null,
                     'PRIORITY_MAIL' => null,
                 ],
-                'FedEx' => [
+                Carrier::FEDEX => [
                     ...$fedexUsOnlyDomestic,
                     'FEDEX_GROUND' => ['US', 'CA'],
                 ],
@@ -71,12 +71,12 @@ class CarrierServiceSpecialServiceSeeder extends Seeder
 
             // USPS 922 is STC-valid for GA, PM and PME. FedEx ADULT is US-only.
             'adult_signature_required' => [
-                'USPS' => [
+                Carrier::USPS => [
                     'USPS_GROUND_ADVANTAGE' => null,
                     'PRIORITY_MAIL' => null,
                     'PRIORITY_MAIL_EXPRESS' => null,
                 ],
-                'FedEx' => [
+                Carrier::FEDEX => [
                     ...$fedexUsOnlyDomestic,
                     'FEDEX_GROUND' => ['US'],
                 ],
@@ -87,7 +87,7 @@ class CarrierServiceSpecialServiceSeeder extends Seeder
             // enum. UPS/FedEx declared value is unrestricted (caps enforced at
             // rate time via declaredValueCap()).
             'declared_value' => [
-                'USPS' => [
+                Carrier::USPS => [
                     'USPS_GROUND_ADVANTAGE' => null,
                     'PRIORITY_MAIL' => null,
                     'PRIORITY_MAIL_INTERNATIONAL' => null,
@@ -97,7 +97,7 @@ class CarrierServiceSpecialServiceSeeder extends Seeder
             // FedEx-only (USPS prohibits, UPS parcel unsupported — capability
             // maps). Ground Economy (SmartPost) does not accept alcohol.
             'alcohol' => [
-                'FedEx' => [
+                Carrier::FEDEX => [
                     'GROUND_HOME_DELIVERY' => null,
                     'FEDEX_GROUND' => null,
                     'PRIORITY_OVERNIGHT' => null,
@@ -113,12 +113,12 @@ class CarrierServiceSpecialServiceSeeder extends Seeder
             // Section II in-equipment batteries may ship by air (Pub 52);
             // USPS 818 is domestic-only. FedEx Ground Economy excluded.
             'lithium_battery_in_equipment' => [
-                'USPS' => [
+                Carrier::USPS => [
                     'USPS_GROUND_ADVANTAGE' => null,
                     'PRIORITY_MAIL' => null,
                     'PRIORITY_MAIL_EXPRESS' => null,
                 ],
-                'FedEx' => [
+                Carrier::FEDEX => [
                     'GROUND_HOME_DELIVERY' => null,
                     'FEDEX_GROUND' => null,
                     'PRIORITY_OVERNIGHT' => null,
@@ -134,20 +134,20 @@ class CarrierServiceSpecialServiceSeeder extends Seeder
             // availability probe (2026-07-09) confirmed STANDALONE_BATTERY is
             // not offered on any FedEx service.
             'lithium_battery_standalone' => [
-                'USPS' => [
+                Carrier::USPS => [
                     'USPS_GROUND_ADVANTAGE' => null,
                 ],
             ],
 
             // Ground-network services only, on every carrier.
             'lithium_battery_ground_only' => [
-                'USPS' => [
+                Carrier::USPS => [
                     'USPS_GROUND_ADVANTAGE' => null,
                 ],
-                'UPS' => [
+                Carrier::UPS => [
                     '03' => null, // Ground
                 ],
-                'FedEx' => [
+                Carrier::FEDEX => [
                     'GROUND_HOME_DELIVERY' => null,
                     'FEDEX_GROUND' => null,
                 ],

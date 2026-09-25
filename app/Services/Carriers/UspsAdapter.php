@@ -4,6 +4,7 @@ namespace App\Services\Carriers;
 
 use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\RecoversUnresolvedPurchase;
+use App\Contracts\UsesCarrierAccount;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\PackageData;
@@ -31,6 +32,7 @@ use App\Http\Integrations\USPS\Requests\ShippingOptions;
 use App\Http\Integrations\USPS\Requests\TrackShipment;
 use App\Http\Integrations\USPS\Responses\LabelResponse;
 use App\Http\Integrations\USPS\USPSConnector;
+use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Package;
 use App\Services\Carriers\Concerns\BuildsCustomerReferences;
@@ -54,7 +56,7 @@ use Saloon\Exceptions\Request\Statuses\ForbiddenException;
 use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
 
-class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
+class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, UsesCarrierAccount
 {
     use BuildsCustomerReferences;
     use ConsultsCarrierPolicyForOffers;
@@ -223,7 +225,7 @@ class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
 
     public function getCarrierName(): string
     {
-        return 'USPS';
+        return Carrier::USPS;
     }
 
     /**
@@ -340,7 +342,7 @@ class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
 
         return new PreparedRateRequest(
             pendingRequest: $pendingRequest,
-            carrierName: 'USPS',
+            carrierName: Carrier::USPS,
         );
     }
 
@@ -402,7 +404,7 @@ class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
                 ];
 
                 $results->push(new RateResponse(
-                    carrier: 'USPS',
+                    carrier: Carrier::USPS,
                     serviceCode: $rate['mailClass'],
                     serviceName: $rate['description'] ?? $rate['mailClass'],
                     price: (float) ($rateOption['totalBasePrice'] ?? 0),
@@ -635,7 +637,7 @@ class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
         return ShipResponse::success(
             trackingNumber: $trackingNumber,
             cost: (float) ($response->metadata['postage'] ?? $request->selectedRate->price),
-            carrier: 'USPS',
+            carrier: Carrier::USPS,
             service: $request->selectedRate->serviceName,
             labelData: $response->label,
             // The same orientation the purchase path records for each API.
@@ -865,7 +867,7 @@ class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
             return ShipResponse::success(
                 trackingNumber: $response->metadata['trackingNumber'],
                 cost: (float) ($response->metadata['postage'] ?? $request->selectedRate->price),
-                carrier: 'USPS',
+                carrier: Carrier::USPS,
                 service: $request->selectedRate->serviceName,
                 labelData: $response->label,
                 labelFormat: $request->labelFormat,
@@ -1006,7 +1008,7 @@ class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
             return ShipResponse::success(
                 trackingNumber: $trackingNumber,
                 cost: (float) ($response->metadata['postage'] ?? $request->selectedRate->price),
-                carrier: 'USPS',
+                carrier: Carrier::USPS,
                 service: $request->selectedRate->serviceName,
                 labelData: $response->label,
                 labelOrientation: 'landscape',
@@ -1237,7 +1239,7 @@ class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
             return PackagingRequirement::shipperPackaging();
         }
 
-        throw new UnclassifiablePackagingException('USPS', "USPS rate indicator {$rateIndicator} under {$mailClass} is not one PolyBag can place in a packaging.");
+        throw new UnclassifiablePackagingException(Carrier::USPS, "USPS rate indicator {$rateIndicator} under {$mailClass} is not one PolyBag can place in a packaging.");
     }
 
     /**

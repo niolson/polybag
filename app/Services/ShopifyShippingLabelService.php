@@ -11,6 +11,7 @@ use App\Exceptions\Carriers\ShopifyLabelPurchaseException;
 use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Http\Integrations\Shopify\ShopifyConnector;
+use App\Models\Carrier;
 use App\Models\DataSource;
 use App\Models\Package;
 use App\Services\PostageSources\PostageSourceResolver;
@@ -45,8 +46,8 @@ class ShopifyShippingLabelService
      * resolves by coincidence and hides that the others do not.
      */
     public const CARRIER_NAMES = [
-        'usps' => 'USPS',
-        'ups_shipping' => 'UPS',
+        'usps' => Carrier::USPS,
+        'ups_shipping' => Carrier::UPS,
         'dhl_express' => 'DHL Express',
         'canada_post' => 'Canada Post',
     ];

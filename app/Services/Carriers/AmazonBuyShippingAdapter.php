@@ -33,6 +33,7 @@ use App\Exceptions\Carriers\CarrierUnavailableException;
 use App\Exceptions\MissingAmazonOrderItemsException;
 use App\Http\Integrations\Amazon\AmazonSpApiConnector;
 use App\Http\Integrations\Amazon\Requests\GetShippingRates;
+use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\DataSource;
 use App\Models\ObservedService;
@@ -553,7 +554,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
         if (preg_match('/_ONE_RATE(?:_|$)/', $serviceId) === 1) {
             return PackagingRequirement::anyOf(...array_filter(
                 CarrierPackaging::cases(),
-                fn (CarrierPackaging $packaging): bool => $packaging->carrier() === 'FedEx',
+                fn (CarrierPackaging $packaging): bool => $packaging->carrier() === Carrier::FEDEX,
             ));
         }
 

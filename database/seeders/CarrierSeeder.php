@@ -15,9 +15,9 @@ class CarrierSeeder extends Seeder
      */
     public function run(): void
     {
-        // The cutoff hangs off the carrier row rather than a name-keyed table in
-        // code, so renaming a carrier cannot silently drop its pickup policy.
-        $usps = Carrier::firstOrCreate(['name' => 'USPS'], ['pickup_cutoff_hour' => 20]);
+        // Every carrier seeded here is a system carrier: its name is fixed, so
+        // this finds the same row on every start (ADR-0006 decision 1).
+        $usps = Carrier::seedSystem(Carrier::USPS, ['pickup_cutoff_hour' => 20]);
         foreach ([
             ['name' => 'Ground Advantage', 'service_code' => 'USPS_GROUND_ADVANTAGE'],
             ['name' => 'Priority Mail', 'service_code' => 'PRIORITY_MAIL'],
@@ -53,7 +53,7 @@ class CarrierSeeder extends Seeder
             }
         }
 
-        $fedex = Carrier::firstOrCreate(['name' => 'FedEx']);
+        $fedex = Carrier::seedSystem(Carrier::FEDEX);
         foreach ([
             ['name' => 'FedEx Home Delivery®', 'service_code' => 'GROUND_HOME_DELIVERY'],
             ['name' => 'FedEx Ground®', 'service_code' => 'FEDEX_GROUND'],
@@ -86,7 +86,7 @@ class CarrierSeeder extends Seeder
             );
         }
 
-        $ups = Carrier::firstOrCreate(['name' => 'UPS']);
+        $ups = Carrier::seedSystem(Carrier::UPS);
         foreach ([
             ['name' => 'UPS Ground', 'service_code' => '03'],
             ['name' => 'UPS 3 Day Select', 'service_code' => '12'],
@@ -151,10 +151,7 @@ class CarrierSeeder extends Seeder
         // mutation, so no carrier-derived cutoff can apply — see ADR-0002. The
         // cutoff lives on the row like every other carrier's rather than as a
         // special case in ShipDateService.
-        $shopify = Carrier::firstOrCreate(
-            ['name' => ShopifyAdapter::CARRIER_NAME],
-            ['pickup_cutoff_hour' => 20],
-        );
+        $shopify = Carrier::seedSystem(ShopifyAdapter::CARRIER_NAME, ['pickup_cutoff_hour' => 20]);
         $shopify->carrierServices()->firstOrCreate(
             ['service_code' => ShopifyAdapter::AUTO_SERVICE_CODE],
             [
@@ -239,7 +236,7 @@ class CarrierSeeder extends Seeder
         // No pickup cutoff: the carrier of record differs per offer and its own
         // row carries the cutoff, which is the point of normalizing the carrier
         // separately from the postage source.
-        $amazon = Carrier::firstOrCreate(['name' => AmazonBuyShippingAdapter::SOURCE_NAME]);
+        $amazon = Carrier::seedSystem(AmazonBuyShippingAdapter::SOURCE_NAME);
         $amazon->carrierServices()->firstOrCreate(
             ['service_code' => AmazonBuyShippingAdapter::CATALOG_SERVICE_CODE],
             [

@@ -387,7 +387,8 @@ describe('direct accounts on the Amazon row', function (): void {
 
     it('have their scopes removed by the migration', function (): void {
         $amazon = Carrier::firstOrCreate(['name' => AmazonBuyShippingAdapter::SOURCE_NAME]);
-        $account = CarrierAccount::factory()->create(['carrier_id' => $amazon->id]);
+        // A legacy row: the model now refuses an account on the Amazon carrier.
+        $account = CarrierAccount::withoutEvents(fn () => CarrierAccount::factory()->create(['carrier_id' => $amazon->id]));
         $legacyId = DB::table('carrier_account_scopes')->insertGetId([
             'carrier_account_id' => $account->id,
             'carrier_id' => $amazon->id,

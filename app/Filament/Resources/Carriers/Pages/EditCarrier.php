@@ -16,6 +16,7 @@ class EditCarrier extends EditRecord
     {
         return [
             DeleteAction::make()
+                ->hidden(fn (): bool => $this->carrier()->is_system)
                 ->before(function (DeleteAction $action): void {
                     if ($this->carrier()->normalizedPackages()->exists()) {
                         Notification::make()
@@ -28,6 +29,11 @@ class EditCarrier extends EditRecord
                     }
                 }),
         ];
+    }
+
+    public function getRecordTitle(): string
+    {
+        return $this->carrier()->label();
     }
 
     private function carrier(): Carrier

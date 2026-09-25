@@ -20,8 +20,8 @@ signs off the table below before it is seeded.
 
 - **Catalog.**
   - Seed `Amazon Shipping` with *Amazon Shipping Ground*, `service_code`
-    `std-us-swa-mfn`, the code Amazon returns for it in the sandbox. Its adapter key is
-    set in `15`, which sells it directly.
+    `std-us-swa-mfn`, the code Amazon returns for it in the sandbox. `15` registers
+    its direct adapter under this name.
   - Seed `OnTrac` (no adapter) with *OnTrac Ground*. Take its `service_code` from OnTrac's
     own API documentation when seeding, not from Amazon's identifier and not from memory,
     so a later direct integration needs no remapping.
@@ -58,8 +58,8 @@ signs off the table below before it is seeded.
     - Shopify does not sell it: its *Preferred services* screen has no Ground Saver Media.
     - Ground Saver BPM (`94`) is not authored, as no Bound Printed Matter is (ADR-0006
       decision 11).
-  - These carriers and services go in `CarrierSeeder`, found by name because they have
-    no adapter (`05`). Deactivate rather than delete one that is not wanted: the
+  - These carriers and services go in `CarrierSeeder`, found by name and marked
+    `is_system` (`05`), so their names are fixed. Deactivate rather than delete one that is not wanted: the
     reference-data sync on every start would recreate a deleted row.
 - **Mappings are seeded once, by migration.** A mapping authorizes from `13` on, and the
   reference-data sync would restore one an Admin had removed on the next start. The
@@ -154,7 +154,7 @@ Questions for the sign-off:
 
 ## Blocked by
 
-- [`05`](05-key-direct-integrations-by-carrier-adapter.md), for carriers with no adapter
+- [`05`](05-lock-system-carrier-names.md), for system carriers
 - [`14`](14-one-source-mapping-table.md), which creates the table and moves the mappings
   into it
 

@@ -13,6 +13,10 @@ connection default. *Exclude* rules can name a carrier, the source policy on a m
 an Admin-only table of its own, and seeded mappings are written once by migration. The PRD's comment of the
 same date lists every change and why.
 
+Amended 2026-09-25 (`carrier-catalog-reset/05`): the `carriers.adapter` key is dropped.
+System carriers' names are locked instead, and an operator-owned `display_name` carries
+what an operator would have renamed. See decision 1 and option F.
+
 Supersedes in part:
 
 - **ADR-0002.** The 2026-09-22 amendment's choice of the `Amazon` postage-source row as the
@@ -76,17 +80,31 @@ There are no production tenants, so none of this needs a migration path.
 - `Amazon Shipping`, `OnTrac` and `DHL Express` are seeded as carriers, with the services
   each is known to sell: Amazon Shipping Ground, OnTrac Ground and DHL Express Worldwide.
   Seeding is authoring, not discovery (ADR-0003 decision 2).
-- A nullable, unique `carriers.adapter` key names the direct integration: `usps`, `ups`,
-  `fedex` or `amazon_shipping`. `CarrierRegistry` is keyed by it rather than by name, and
-  seeders find carriers by it, so a rename survives the reference-data sync that runs on
-  every start.
-- **A carrier with an adapter is sold directly.** The account for USPS, UPS and FedEx is a
+- **A system carrier's name is fixed.** Every carrier the seeders create is marked
+  `is_system`. Its `name` cannot be changed and the row cannot be deleted, only
+  deactivated. So the name is a stable key for `CarrierRegistry`, the seeders, alias
+  matching and ship dates, and the reference-data sync that runs on every start finds
+  the same row each time. `carriers.name` is unique. A carrier an operator creates is
+  custom: it can be renamed and deleted, and has no direct integration.
+- **What an operator sees is `display_name`**, nullable and operator-owned, falling back
+  to `name`. It covers a rebrand or house style. The UI shows it; nothing that leaves
+  the app or matches incoming text uses it. A rebrand of our own is a data migration
+  of `name`.
+
+  *Amended 2026-09-25.* As first accepted, a nullable, unique `carriers.adapter` key
+  (`usps`, `ups`, `fedex`, `amazon_shipping`) named the direct integration, and the
+  registry and seeders were to move from names to it. Each review of the code found more
+  name lookups, including one that stopped a renamed carrier's account counting as
+  configured. The key also left carriers with no adapter found by name, so a renamed
+  OnTrac would still have come back as a duplicate. Locking the name makes every lookup
+  correct as written, and covers every seeded carrier.
+- **A carrier with a registered direct adapter is sold directly.** The account for USPS, UPS and FedEx is a
   `CarrierAccount`. For Amazon Shipping it is an Amazon connection opted in to selling
   for other channels, chosen by a scope row on the Amazon Shipping carrier (ADR-0002's
   2026-09-22 amendment, on a different carrier row). The Carrier Account form sends
   Amazon Shipping to Connections.
-- **A carrier with no adapter** (OnTrac, DHL Express) is reached only through Shopify or
-  Amazon Buy Shipping. No account can be created for it, and no direct adapter is asked.
+- **A carrier with no direct adapter** (OnTrac, DHL Express, any custom carrier) is
+  reached only through Shopify or Amazon Buy Shipping. No account can be created for it, and no direct adapter is asked.
 - **End of Day lists every active carrier**, with or without an adapter, because every
   carrier dates labels (decision 9). A manifest is offered only where the integration
   supports one.
@@ -339,8 +357,15 @@ blocked by the schema, and the reset unblocks it. Rejected: it multiplies the me
 configuration. "Amazon's USPS but not our account's" is a rule.
 
 **F. A "no direct integration" boolean, or deriving it from the registry by name.**
-Rejected for the `adapter` key. A boolean says nothing about which adapter. The name is
-editable, so deriving from it already breaks rating when UPS is renamed.
+Rejected at first for the `adapter` key. A boolean says nothing about which adapter, and
+the name was editable, so deriving from it broke rating when UPS was renamed.
+
+*Amended 2026-09-25:* deriving it from the registry by name is now the decision, because
+a system carrier's name is fixed (decision 1). The `adapter` key was rejected for three
+reasons. It meant moving about thirty name lookups for a rename nobody needed. It left
+carriers with no adapter exposed to the duplicate-row bug. And `display_name` answers the
+wish to relabel a carrier without touching its key. Lost: "which carriers are sold
+directly" is no longer a column you can query. The registry answers it.
 
 **G. Shopify codes as constants on the adapter.** Rejected. Deciding which sources can
 sell a service needs one query across every source.
@@ -418,13 +443,14 @@ Easier:
 - Ship dates follow the pickup the parcel actually makes, including Shopify-bought and
   Amazon-bought labels, and End of Day ends one day per carrier.
 - Media Mail is available from every source, and only for contents that qualify.
-- A carrier rename no longer breaks rating.
+- A carrier rename can no longer break rating, because a system carrier cannot be
+  renamed. An operator relabels it with `display_name`.
 
 Harder:
 
 - Rating, rules, ship dates, End of Day, the scope row and the seeded catalog all change
-  together. Tests register fakes by carrier name in eighteen files, and about twenty call
-  sites look carriers up by name.
+  together.
+- A carrier rebrand on our side is a data migration of `name`, not a seeder edit.
 - The mapping page and the method's source policy carry authority they did not have
   before.
 - Sellers must mark products as media before Media Mail appears, including for Amazon

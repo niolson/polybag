@@ -29,7 +29,7 @@ class CarrierServicesRelationManager extends RelationManager
         return $table
             ->recordTitleAttribute('name')
             ->columns([
-                CarrierLogoColumn::make('carrier.name', fn ($record) => $record->carrier?->name),
+                CarrierLogoColumn::make('carrier.name', fn ($record) => $record->carrier),
                 Tables\Columns\TextColumn::make('service_code'),
                 Tables\Columns\TextColumn::make('name'),
             ])

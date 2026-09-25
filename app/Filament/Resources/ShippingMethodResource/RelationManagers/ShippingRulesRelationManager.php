@@ -32,7 +32,7 @@ class ShippingRulesRelationManager extends RelationManager
                     ->required(),
                 Forms\Components\Select::make('carrier_service_id')
                     ->relationship('carrierService', 'name')
-                    ->getOptionLabelFromRecordUsing(fn ($record): string => "{$record->carrier->name} — {$record->name}")
+                    ->getOptionLabelFromRecordUsing(fn ($record): string => "{$record->carrier->label()} — {$record->name}")
                     ->searchable()
                     ->preload()
                     ->required(),
@@ -68,7 +68,7 @@ class ShippingRulesRelationManager extends RelationManager
                     ->badge(),
                 Tables\Columns\TextColumn::make('carrierService.name')
                     ->label('Carrier Service')
-                    ->formatStateUsing(fn ($state, $record): string => "{$record->carrierService->carrier->name} — {$state}"),
+                    ->formatStateUsing(fn ($state, $record): string => "{$record->carrierService->carrier->label()} — {$state}"),
                 Tables\Columns\ToggleColumn::make('enabled'),
                 Tables\Columns\TextColumn::make('conditions_summary')
                     ->label('Conditions')
