@@ -1,6 +1,6 @@
 # One source mapping table; Amazon's mappings move into it
 
-Status: needs-triage
+Status: done
 
 Repo: `polybag`
 
@@ -13,8 +13,8 @@ Repo: `polybag`
 ## What to build
 
 The table every source's codes map through, on its own, so the Shopify work (`09`) and
-the Amazon seed (`11`) can each proceed without the other. Amazon's existing mappings move
-into it, and the mapping page becomes Admin-only ahead of the day a mapping authorizes
+the Amazon seed (`11`) can each proceed without the other. Amazon's mappings move into
+it, and the mapping page becomes Admin-only ahead of the day a mapping authorizes
 spend (`13`).
 
 - **The table.** `(source kind, external carrier id, external service id) →
@@ -28,6 +28,9 @@ spend (`13`).
     so there is one list of kinds. A new channel source is a new case in it.
   - `carrier_service_id` restricts deletion, as a rule's does (`07`). A service that a
     mapping names is deactivated, not deleted, because deleting would silently unmap it.
+  - The service delete action refuses with a message naming the mapping, as it does
+    today for a shipping rule, so the restricting key is never reached as a database
+    error.
 - **Amazon's mappings move.**
   - An Amazon row is inward, and several identifiers may name one service.
   - `observed_services.carrier_service_id` goes. `ObservedServiceMapper` writes the
@@ -35,8 +38,9 @@ spend (`13`).
     so `ObservedService::MAPPING_LOCK` and the race it serializes go too.
   - Observations become a record of what was seen, and the adapter reads mappings from
     the table. `RateResponse::$carrierServiceId` for an Amazon offer (`04`) reads it too.
-  - Existing mappings are carried over by the same migration. This is the one move in the
-    reset that has local data worth keeping, and it is a straight copy.
+  - Nothing is carried over. No install holds a mapping, not local and not the demo
+    tenants, so the migration drops `observed_services.carrier_service_id` without copying
+    it.
 - **The mapping page** (*Map Carrier Services*) becomes Admin-only. It lists
   observations and writes mapping rows. A mapping only names a service until `13`, but it
   authorizes from then on, and the page should not change hands on the day it starts to
@@ -46,13 +50,14 @@ spend (`13`).
 
 ## Acceptance criteria
 
-- [ ] Mapping and unmapping on the page write and remove one mapping row, and leave
+- [x] Mapping and unmapping on the page write and remove one mapping row, and leave
       observations untouched
-- [ ] A mapping made before this issue still names the same service after it
-- [ ] Only an Admin can open the mapping page
-- [ ] `ObservedService::MAPPING_LOCK` is gone, and the recorder never writes a mapping
-- [ ] A second Shopify row for the same `CarrierService` is refused by the database
-- [ ] Approvals behave as before
+- [x] Only an Admin can open the mapping page
+- [x] `ObservedService::MAPPING_LOCK` is gone, and the recorder never writes a mapping
+- [x] A second Shopify row for the same `CarrierService` is refused by the database
+- [x] Deleting a service that a mapping names is refused with a message naming the
+      mapping, not a database error
+- [x] Approvals behave as before
 
 ## Blocked by
 
@@ -63,3 +68,17 @@ None - can start immediately.
 - **2026-09-24** — Opened in the second review, from the halves of `09` and `11` that
   created and filled the table, so that `11` no longer waits behind `06` → `07` → `08` →
   `09`.
+- **2026-09-25** — No install holds an Amazon mapping (local and the demo tenants were
+  checked), so the migration drops the column instead of copying it, and the criterion
+  about keeping earlier mappings is gone.
+- **2026-09-25** — Triaged ready. Added the delete refusal. The key used to null on
+  delete, so the delete action's guard, which checks only shipping rules, would have let
+  the new restriction surface as a server error.
+- **2026-09-25** — Done. The table is `source_service_mappings` (`SourceServiceMapping`),
+  and `PostageSourceKind` is in `app/Enums/`. Two things came up during the work:
+  - `SourceServiceMapping::map()` is an update-or-insert, not an upsert. MySQL's
+    `ON DUPLICATE KEY UPDATE` fires on any unique key, so on MySQL an upsert turned a second
+    Shopify code for a service into a silent rewrite of the first row, where SQLite raised an
+    error. This was verified against MySQL 8.4.
+  - The carrier delete action gained the same refusal. Deleting a carrier cascades to its
+    services, so a mapped service would otherwise have surfaced there as a database error.

@@ -55,7 +55,9 @@ class UnmappedObservedServices extends Page implements HasTable
 
     public static function canAccess(): bool
     {
-        return auth()->user()->role->isAtLeast(Role::Manager);
+        // Admin, not Manager: from `carrier-catalog-reset/13` a mapping
+        // authorizes spend, and the page should not change hands that day.
+        return auth()->user()->role->isAtLeast(Role::Admin);
     }
 
     public function table(Table $table): Table
@@ -63,7 +65,8 @@ class UnmappedObservedServices extends Page implements HasTable
         return $table
             ->query(
                 ObservedService::query()
-                    ->with('carrierService.carrier')
+                    ->withMapping()
+                    ->with('mappedCarrierService.carrier')
             )
             ->defaultSort('last_seen_at', 'desc')
             ->groups([
@@ -120,9 +123,9 @@ class UnmappedObservedServices extends Page implements HasTable
                     ->label('Last seen')
                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->sortable(),
-                Tables\Columns\TextColumn::make('carrierService.name')
+                Tables\Columns\TextColumn::make('mappedCarrierService.name')
                     ->label('Mapped to')
-                    ->description(fn (ObservedService $record): ?string => $record->carrierService?->carrier?->label())
+                    ->description(fn (ObservedService $record): ?string => $record->mappedCarrierService?->carrier?->label())
                     ->placeholder('Unmapped'),
             ])
             ->filters([
@@ -132,8 +135,8 @@ class UnmappedObservedServices extends Page implements HasTable
                     ->trueLabel('Mapped')
                     ->falseLabel('Unmapped')
                     ->queries(
-                        true: fn ($query) => $query->whereNotNull('carrier_service_id'),
-                        false: fn ($query) => $query->whereNull('carrier_service_id'),
+                        true: fn ($query) => $query->whereNot(fn ($query) => $query->unmapped()),
+                        false: fn ($query) => $query->unmapped(),
                         blank: fn ($query) => $query,
                     )
                     ->default(false),
@@ -154,7 +157,7 @@ class UnmappedObservedServices extends Page implements HasTable
                         Forms\Components\Select::make('carrier_service_id')
                             ->label('Carrier Service')
                             ->options(fn (): array => static::carrierServiceOptions())
-                            ->default(fn (ObservedService $record): ?int => $record->carrier_service_id)
+                            ->default(fn (ObservedService $record): ?int => $record->mapped_carrier_service_id)
                             ->searchable()
                             ->required(),
                     ])
@@ -241,7 +244,7 @@ class UnmappedObservedServices extends Page implements HasTable
                     ->color('danger')
                     ->requiresConfirmation()
                     ->modalDescription('The observation stays on file and stays selectable by a person. Only the mapping is removed; no catalog rows are deleted, and approvals for automated shipping are unchanged.')
-                    ->visible(fn (ObservedService $record): bool => $record->isMapped())
+                    ->visible(fn (ObservedService $record): bool => $record->mapped_carrier_service_id !== null)
                     ->action(function (ObservedService $record): void {
                         $observations = app(ObservedServiceMapper::class)->unmap($record);
 
@@ -293,7 +296,7 @@ class UnmappedObservedServices extends Page implements HasTable
     protected static function coverage(int $observations): ?string
     {
         return $observations > 1
-            ? "{$observations} observations of this service updated."
+            ? "Applies to all {$observations} observations of this service."
             : null;
     }
 

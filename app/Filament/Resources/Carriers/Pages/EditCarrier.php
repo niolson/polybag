@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Carriers\Pages;
 
 use App\Filament\Resources\Carriers\CarrierResource;
 use App\Models\Carrier;
+use App\Models\SourceServiceMapping;
 use Filament\Actions\DeleteAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
@@ -22,6 +23,24 @@ class EditCarrier extends EditRecord
                         Notification::make()
                             ->title('Cannot delete carrier')
                             ->body('This carrier is recorded on shipped packages. Deactivate it instead.')
+                            ->danger()
+                            ->send();
+
+                        $action->cancel();
+
+                        return;
+                    }
+
+                    // Deleting the carrier deletes its services, which a
+                    // mapping's foreign key refuses.
+                    $mapping = SourceServiceMapping::query()
+                        ->whereIn('carrier_service_id', $this->carrier()->carrierServices()->select('id'))
+                        ->first();
+
+                    if ($mapping instanceof SourceServiceMapping) {
+                        Notification::make()
+                            ->title('Cannot delete carrier')
+                            ->body("{$mapping->describe()} is mapped to one of this carrier's services. Unmap it on Map Carrier Services, or deactivate the carrier instead.")
                             ->danger()
                             ->send();
 

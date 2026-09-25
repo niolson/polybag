@@ -2,6 +2,7 @@
 
 use App\DataTransferObjects\PostageSources\ServiceObservation;
 use App\Enums\AmazonChannelType;
+use App\Enums\PostageSourceKind;
 use App\Enums\Role;
 use App\Enums\SourceEnvironment;
 use App\Filament\Pages\UnmappedObservedServices;
@@ -10,12 +11,12 @@ use App\Models\CarrierService;
 use App\Models\Client;
 use App\Models\ObservedService;
 use App\Models\ServiceApproval;
+use App\Models\SourceServiceMapping;
 use App\Models\User;
 use App\Services\PostageSources\ObservedServiceRecorder;
 use App\Services\PostageSources\ServiceApprovalGate;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
@@ -77,7 +78,12 @@ it('aliases an observed service onto an existing carrier service', function (): 
         ])
         ->assertNotified();
 
-    expect($observation->fresh()->carrier_service_id)->toBe($carrierService->id);
+    $mapping = SourceServiceMapping::sole();
+
+    expect($mapping->source_kind)->toBe(PostageSourceKind::Amazon)
+        ->and($mapping->external_carrier_id)->toBe('USPS')
+        ->and($mapping->external_service_id)->toBe('USPS_GROUND_ADVANTAGE')
+        ->and($mapping->carrier_service_id)->toBe($carrierService->id);
 });
 
 it('carries one mapping across the environments the same service was seen in', function (): void {
@@ -105,9 +111,10 @@ it('carries one mapping across the environments the same service was seen in', f
             'carrier_service_id' => $carrierService->id,
         ]);
 
-    expect($production->fresh()->carrier_service_id)->toBe($carrierService->id)
-        ->and($sandbox->fresh()->carrier_service_id)->toBe($carrierService->id)
-        ->and($otherService->fresh()->carrier_service_id)->toBeNull();
+    expect(SourceServiceMapping::count())->toBe(1)
+        ->and($production->mapping()->carrier_service_id)->toBe($carrierService->id)
+        ->and($sandbox->mapping()->carrier_service_id)->toBe($carrierService->id)
+        ->and($otherService->isMapped())->toBeFalse();
 });
 
 it('holds a mapping over a service first seen elsewhere after it was mapped', function (): void {
@@ -125,9 +132,8 @@ it('holds a mapping over a service first seen elsewhere after it was mapped', fu
             'carrier_service_id' => $carrierService->id,
         ]);
 
-    // The update reached the rows that existed. This is the other half: the
-    // recorder has to read the same scope, or the next marketplace to report
-    // this service arrives unmapped and the decision is quietly lost.
+    // One row names the service, so a marketplace that reports it later is
+    // mapped the moment it is recorded, with nothing copied onto it.
     app(ObservedServiceRecorder::class)->record([
         new ServiceObservation(
             source: 'amazon',
@@ -138,31 +144,20 @@ it('holds a mapping over a service first seen elsewhere after it was mapped', fu
         ),
     ]);
 
-    expect(ObservedService::where('marketplace', 'A2EUQ1WTGCTBG2')->sole()->carrier_service_id)
+    expect(ObservedService::where('marketplace', 'A2EUQ1WTGCTBG2')->sole()->mapping()->carrier_service_id)
         ->toBe($carrierService->id);
 });
 
-it('writes a mapping under the same lock the recorder takes', function (): void {
+it('writes one mapping row and leaves observations untouched', function (): void {
     $carrierService = CarrierService::factory()->create();
     $observation = ObservedService::factory()->create();
+    $before = $observation->fresh()->getAttributes();
 
-    $heldDuringUpdate = null;
+    $observationWrites = 0;
 
-    DB::listen(function ($query) use (&$heldDuringUpdate): void {
-        if (! str_contains($query->sql, 'update') || ! str_contains($query->sql, 'observed_services')) {
-            return;
-        }
-
-        // The other half of the recorder's assertion. Both sides write
-        // carrier_service_id, so both have to take the one lock — a rename on
-        // either side that missed the other would put the race back with
-        // nothing failing to show it.
-        $lock = Cache::lock(ObservedService::MAPPING_LOCK, 10);
-        $acquired = $lock->get();
-        $heldDuringUpdate ??= ! $acquired;
-
-        if ($acquired) {
-            $lock->release();
+    DB::listen(function ($query) use (&$observationWrites): void {
+        if (str_contains($query->sql, 'observed_services') && preg_match('/^\s*(insert|update|delete)/i', $query->sql)) {
+            $observationWrites++;
         }
     });
 
@@ -171,7 +166,22 @@ it('writes a mapping under the same lock the recorder takes', function (): void 
             'carrier_service_id' => $carrierService->id,
         ]);
 
-    expect($heldDuringUpdate)->toBeTrue();
+    expect($observationWrites)->toBe(0)
+        ->and(SourceServiceMapping::count())->toBe(1)
+        ->and($observation->fresh()->getAttributes())->toBe($before);
+});
+
+it('replaces a mapping rather than adding a second row', function (): void {
+    $observation = ObservedService::factory()->mapped()->create();
+    $replacement = CarrierService::factory()->create();
+
+    Livewire::test(UnmappedObservedServices::class)
+        ->filterTable('mapped', true)
+        ->callAction(TestAction::make('assign')->table($observation), [
+            'carrier_service_id' => $replacement->id,
+        ]);
+
+    expect(SourceServiceMapping::sole()->carrier_service_id)->toBe($replacement->id);
 });
 
 it('promotes an observation for an unknown carrier by authoring the carrier and the service', function (): void {
@@ -208,7 +218,7 @@ it('promotes an observation for an unknown carrier by authoring the carrier and 
 
     expect($carrierService->carrier_id)->toBe($carrier->id)
         ->and($carrierService->name)->toBe('OnTrac Ground')
-        ->and($observation->fresh()->carrier_service_id)->toBe($carrierService->id);
+        ->and($observation->mapping()->carrier_service_id)->toBe($carrierService->id);
 });
 
 it('prefills the authoring form from what the source reported', function (): void {
@@ -229,13 +239,21 @@ it('prefills the authoring form from what the source reported', function (): voi
         ]);
 });
 
-it('does not offer catalog authoring to a manager', function (): void {
-    $observation = ObservedService::factory()->create();
-
+it('refuses the page to a manager, because from carrier-catalog-reset/13 a mapping authorizes spend', function (): void {
     $this->actingAs(User::factory()->manager()->create());
 
+    expect(UnmappedObservedServices::canAccess())->toBeFalse();
+
+    $this->get(UnmappedObservedServices::getUrl())->assertForbidden();
+});
+
+it('offers an admin every mapping action', function (): void {
+    $observation = ObservedService::factory()->create();
+
+    expect(UnmappedObservedServices::canAccess())->toBeTrue();
+
     Livewire::test(UnmappedObservedServices::class)
-        ->assertActionHidden(TestAction::make('author')->table($observation))
+        ->assertActionVisible(TestAction::make('author')->table($observation))
         ->assertActionVisible(TestAction::make('assign')->table($observation));
 });
 
@@ -248,7 +266,8 @@ it('returns a mapped observation to the unmapped state without deleting catalog 
         ->callAction(TestAction::make('unmap')->table($observation))
         ->assertNotified();
 
-    expect($observation->fresh()->carrier_service_id)->toBeNull()
+    expect(SourceServiceMapping::count())->toBe(0)
+        ->and($observation->fresh())->not->toBeNull()
         ->and(CarrierService::whereKey($carrierService->id)->exists())->toBeTrue();
 });
 
@@ -265,16 +284,14 @@ it('leaves approvals in place when a service is unmapped', function (): void {
         ->assertNotified();
 
     expect(ServiceApproval::count())->toBe(1)
-        ->and($observation->fresh()->carrier_service_id)->toBeNull();
+        ->and($observation->isMapped())->toBeFalse();
 });
-it('lets a manager unmap an approved service, since that withdraws nothing', function (): void {
+it('offers to unmap an approved service, since that withdraws nothing', function (): void {
     $approved = ObservedService::factory()->mapped()->create([
         'external_service_id' => 'USPS_GROUND_ADVANTAGE',
     ]);
 
     approveService($approved, Client::factory()->create());
-
-    $this->actingAs(User::factory()->manager()->create());
 
     Livewire::test(UnmappedObservedServices::class)
         ->filterTable('mapped', true)

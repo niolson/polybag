@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Enums\SourceEnvironment;
 use App\Models\CarrierService;
 use App\Models\ObservedService;
+use App\Models\SourceServiceMapping;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -31,11 +32,20 @@ class ObservedServiceFactory extends Factory
         ];
     }
 
+    /**
+     * Mapped through a {@see SourceServiceMapping} row, which covers every
+     * observation of the same service.
+     */
     public function mapped(?CarrierService $carrierService = null): static
     {
-        return $this->state(fn (): array => [
-            'carrier_service_id' => $carrierService?->id ?? CarrierService::factory(),
-        ]);
+        return $this->afterCreating(function (ObservedService $observation) use ($carrierService): void {
+            SourceServiceMapping::map(
+                $observation->sourceKind(),
+                $observation->external_carrier_id,
+                $observation->external_service_id,
+                ($carrierService ?? CarrierService::factory()->create())->getKey(),
+            );
+        });
     }
 
     /**
