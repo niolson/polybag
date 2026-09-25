@@ -2,6 +2,7 @@
 
 namespace App\Services\Carriers\Concerns;
 
+use App\DataTransferObjects\Shipping\RateRequest;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\ShippingOffer;
@@ -24,6 +25,19 @@ trait ResolvesCarrierAccount
         return $carrierId
             ? CarrierAccount::resolveForShipment($carrierId, $locationId, $clientId)->first()
             : null;
+    }
+
+    /**
+     * The account to rate this request on.
+     *
+     * Rate shopping hands over the account `PostageSourceResolver` resolved,
+     * so the source it asked is the account that quotes (ADR-0006 decision 4).
+     * A request built anywhere else carries none, and is resolved here the way
+     * it always was.
+     */
+    private function ratingAccount(RateRequest $request): ?CarrierAccount
+    {
+        return $request->carrierAccount ?? $this->resolveAccount($request->locationId, $request->clientId);
     }
 
     /**

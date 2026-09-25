@@ -650,7 +650,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         // Required", rather than a bare "not available". Only exclusions naming
         // this source are relevant; another carrier's is somebody else's news.
         $exclusion = collect($this->shippingRateService->getExclusions())
-            ->first(fn (array $entry): bool => $entry['carrier'] === $requested->source);
+            ->first(fn (array $entry): bool => $entry['source'] === $requested->source);
 
         logger()->warning('Refused a blind purchase that is not on offer for this package', [
             'package_id' => $package->id,

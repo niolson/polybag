@@ -25,6 +25,7 @@ use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierService;
+use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\PackageItem;
 use App\Models\Product;
@@ -33,6 +34,7 @@ use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\SpecialService;
+use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\UspsAdapter;
 use App\Services\SettingsService;
@@ -798,6 +800,7 @@ it('explains when a carrier cannot rate an unmeasured package', function (): voi
     expect($rates)->toBeEmpty()
         ->and($service->getExclusions())->toBe([[
             'carrier' => 'UPS',
+            'source' => 'UPS',
             'reason' => 'UPS requires valid package dimensions before rates can be requested.',
         ]]);
 });
@@ -1621,7 +1624,7 @@ it('ignores product compliance flags while their special service is inactive', f
  * ask at quote time and no promise it can keep.
  */
 it('excludes a Shopify offer, visibly, when the shipment hard-requires a special service', function (): void {
-    createShopifyDataSource([], ['oauth_access_token' => 'shpat_test_token']);
+    $shop = createShopifyDataSource([], ['oauth_access_token' => 'shpat_test_token']);
 
     $signature = createScopedSpecialService('signature_required', 'Signature Required');
 
@@ -1637,6 +1640,7 @@ it('excludes a Shopify offer, visibly, when the shipment hard-requires a special
 
     $shipment = Shipment::factory()->for($shippingMethod)->create([
         'postal_code' => '90210',
+        'data_source_id' => $shop->id,
         'metadata' => ['shopify_fulfillment_order_id' => 'gid://shopify/FulfillmentOrder/12345'],
     ]);
     $package = Package::factory()->for($shipment)->create();
@@ -1830,15 +1834,32 @@ it('parses concurrent rate responses from an async source that is not a carrier'
     $registry = app(CarrierRegistry::class);
 
     // Two configured sources, so the service takes the concurrent path rather
-    // than the single-request shortcut. Neither is a DirectCarrierAdapter.
-    $registry->registerInstance('USPS', new AsyncOfferSourceStub('USPS'));
-    $registry->registerInstance('FedEx', new AsyncOfferSourceStub('FedEx'));
+    // than the single-request shortcut: the order's Amazon connection, which is
+    // not a DirectCarrierAdapter, and a direct carrier beside it.
+    $registry->registerInstance(AmazonBuyShippingAdapter::SOURCE_NAME, new AsyncOfferSourceStub('Amazon'));
+
+    $usps = Mockery::mock(DirectCarrierAdapter::class);
+    $usps->shouldReceive('isConfigured')->andReturnTrue();
+    $usps->shouldReceive('prepareRateRequest')->once()->andReturn(new PreparedRateRequest(
+        (new StubRateConnector)->createPendingRequest(new StubRateRequest),
+        'USPS',
+    ));
+    $usps->shouldReceive('parseRateResponse')->once()->andReturnUsing(fn (Response $response): Collection => collect([
+        new RateResponse('USPS', 'ASYNC_PARSED', 'Parsed from the concurrent send', (float) $response->json('price')),
+    ]));
+    $usps->shouldNotReceive('getRates');
+    $registry->registerInstance('USPS', $usps);
+    $registry->registerInstance('FedEx', new AsyncOfferSourceStub('FedEx', configured: false));
     $registry->registerInstance('UPS', new AsyncOfferSourceStub('UPS', configured: false));
-    $registry->registerInstance('Shopify', new AsyncOfferSourceStub('Shopify', configured: false));
 
     app()->instance(GuzzleSender::class, new CannedGuzzleSender);
 
-    $shipment = Shipment::factory()->create(['shipping_method_id' => null, 'postal_code' => '90210']);
+    $amazon = DataSource::factory()->amazon()->create(['active' => true]);
+    $shipment = Shipment::factory()->create([
+        'shipping_method_id' => null,
+        'postal_code' => '90210',
+        'data_source_id' => $amazon->id,
+    ]);
     $package = Package::factory()->for($shipment)->create();
 
     $rates = app(ShippingRateService::class)->getShippingRates($package->id);
@@ -1847,6 +1868,6 @@ it('parses concurrent rate responses from an async source that is not a carrier'
     // the source was refused the async path for not being a carrier.
     expect($rates)->toHaveCount(2)
         ->and($rates->pluck('serviceCode')->all())->each->toBe('ASYNC_PARSED')
-        ->and($rates->pluck('carrier')->sort()->values()->all())->toBe(['FedEx', 'USPS'])
+        ->and($rates->pluck('carrier')->sort()->values()->all())->toBe(['Amazon', 'USPS'])
         ->and($rates[0]->price)->toBe(12.75);
 });

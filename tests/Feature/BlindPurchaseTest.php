@@ -41,6 +41,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
 use Mockery\MockInterface;
+use Saloon\Laravel\Facades\Saloon;
 
 /**
  * Shopify Shipping as ADR-0003 decisions 5 and 6 govern it: a priceless offer
@@ -181,6 +182,33 @@ it('refuses a blind purchase when the shipment hard-requires a special service',
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 
     $source->shouldNotHaveReceived('createShipment');
+});
+
+it('gives the refusal its reason when the Shopify row carries a display name', function (): void {
+    $package = blindPurchasePackage();
+    allowBlindPurchase($package);
+    registerBlindSource();
+    Carrier::where('name', ShopifyAdapter::CARRIER_NAME)->update(['display_name' => 'Shopify Shipping']);
+
+    $signature = SpecialService::create([
+        'code' => 'signature_required',
+        'name' => 'Signature Required',
+        'scope' => 'shipment',
+        'category' => 'delivery',
+        'requires_value' => false,
+        'active' => true,
+    ]);
+    $package->shipment->shippingMethod->specialServices()->attach($signature->id, ['mode' => 'required']);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(blindOffer: shopifyBlindOffer()),
+    );
+
+    // Matched by the source's registry name, while the text names it as the
+    // operator labelled it.
+    expect($result->success)->toBeFalse()
+        ->and($result->message)->toBe('Shopify Shipping cannot guarantee Signature Required — it picks the carrier and service after the label is bought.');
 });
 
 it('refuses a selection the source never advertised', function (): void {
@@ -409,6 +437,35 @@ it('does not use a blind purchase as an outage fallback for a mixed shipping met
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 
     $source->shouldNotHaveReceived('createShipment');
+});
+
+it('auto-ships the sole blind choice when a configured direct account sells none of the method services', function (): void {
+    // ADR-0006 decision 3: a direct account sells a service only when its
+    // integration supports the code. USPS Connect Local is not a single-parcel
+    // class the USPS integration prices, so the account is no seller here,
+    // and Shopify is the method's only source for this package.
+    $package = blindPurchasePackage();
+    $account = createUspsAccount();
+    $package->shipment->shippingMethod->carrierServices()->attach(
+        CarrierService::factory()->for($account->carrier)->create([
+            'name' => 'USPS Connect Local',
+            'service_code' => 'USPS_CONNECT_LOCAL',
+        ])->id,
+    );
+    allowBlindPurchase($package);
+    $source = registerBlindSource();
+    $source->shouldReceive('createShipment')->once()->andReturn(blindShipResponse());
+    Saloon::fake([]);
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package->fresh(),
+        new PackageAutoShippingRequest(cleanupOnFailure: false),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
+
+    Saloon::assertNothingSent();
 });
 
 it('auto-ships the sole blind choice when another source returns only packaging-incompatible rates', function (): void {

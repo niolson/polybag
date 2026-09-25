@@ -114,9 +114,10 @@ class BatchLabelService
      * check still stands behind this one, with the rate in hand.
      *
      * "Could rate-shop" is rate shopping's own answer,
-     * {@see ShippingRateService::sellersForShippingMethod()}, so an
-     * unconfigured carrier or one whose services cannot reach this
-     * destination does not count as a way out that the batch does not have.
+     * {@see ShippingRateService::sellersForShipment()}, so an unconfigured
+     * carrier, one whose services cannot reach this destination, or a channel
+     * the shipment did not come from does not count as a way out that the
+     * batch does not have.
      */
     private function everyCarrierReturnsASeparateCustomsDocument(Shipment $shipment): bool
     {
@@ -135,7 +136,7 @@ class BatchLabelService
             return false;
         }
 
-        $sellers = app(ShippingRateService::class)->sellersForShippingMethod($shipment->shippingMethod, $to);
+        $sellers = app(ShippingRateService::class)->sellersForShipment($shipment, $origin->id, $to);
 
         return $sellers->isNotEmpty()
             && $sellers->every(fn (PostageOfferSource $seller): bool => $seller->customsDocumentDelivery($from, $to)->needsReportPrinter());

@@ -5,8 +5,11 @@ namespace App\Services;
 use App\Contracts\AsyncRateQuoting;
 use App\Contracts\BlindPurchaseSource;
 use App\Contracts\CarrierAdapterInterface;
+use App\Contracts\DeclaresSellableServices;
 use App\Contracts\PostageOfferSource;
 use App\DataTransferObjects\PostageSources\OfferDraft;
+use App\DataTransferObjects\PostageSources\PostageSourceCandidate;
+use App\DataTransferObjects\PostageSources\PostageSourceResolution;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\PackageData;
@@ -19,15 +22,22 @@ use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Exceptions\Carriers\CarrierUnavailableException;
 use App\Exceptions\InvalidPackageDimensionsException;
 use App\Exceptions\NoActiveCarrierServicesException;
+use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierService;
 use App\Models\CarrierServiceSpecialService;
 use App\Models\Package;
+use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\ShippingOffer;
 use App\Models\SpecialService;
+use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\Carriers\CarrierRegistry;
+use App\Services\Carriers\ShopifyAdapter;
 use App\Services\PostageSources\OfferStore;
+use App\Services\PostageSources\PostageSourceResolver;
+use App\Services\ShipmentImport\Sources\AmazonSource;
+use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\Shipping\ContentsFilter;
 use App\Services\Shipping\PackagingFilter;
 use Carbon\CarbonImmutable;
@@ -36,13 +46,17 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Saloon\Http\Senders\GuzzleSender;
 
+/**
+ * @phpstan-type RatingTask array{key: string, source: string, label: string, carrierAccount: CarrierAccount|null, serviceCodes: array<int, string>, specialServiceCodes: array<int, string>}
+ */
 class ShippingRateService
 {
     /**
-     * Carriers excluded from the last getShippingRates() call due to prohibited services.
-     * Keyed by carrier name, value is the human-readable reason.
+     * Sources excluded from the last getShippingRates() call, keyed by the
+     * source instance's key. `carrier` is what an operator reads, `source` the
+     * registry name a caller can match on.
      *
-     * @var array<string, string>
+     * @var array<string, array{carrier: string, source: string, reason: string}>
      */
     private array $exclusions = [];
 
@@ -59,19 +73,20 @@ class ShippingRateService
     private Collection $blindPurchaseOffers;
 
     /**
-     * Configured sellers represented by the last getShippingRates() task set.
+     * Configured sellers represented by the last getShippingRates() task set:
+     * each task's key, and the registry name of the source behind it.
      *
-     * @var array<int, string>
+     * @var array<string, string>
      */
-    private array $configuredSourceNames = [];
+    private array $configuredSources = [];
 
     /**
-     * Configured sellers whose successful response contained rates, but none
-     * compatible with the Package's packaging.
+     * Keys of configured sellers whose successful response contained rates,
+     * but none compatible with the Package's packaging.
      *
      * @var array<int, string>
      */
-    private array $packagingIneligibleSourceNames = [];
+    private array $packagingIneligibleSourceKeys = [];
 
     /** Package owning the configured-source and blind-offer snapshot. */
     private ?int $ratedPackageId = null;
@@ -100,18 +115,16 @@ class ShippingRateService
     }
 
     /**
-     * Returns carriers excluded from the last getShippingRates() call.
-     * Each entry is ['carrier' => string, 'reason' => string].
+     * Returns sources excluded from the last getShippingRates() call.
      *
-     * @return array<int, array{carrier: string, reason: string}>
+     * `carrier` names the source as an operator reads it: a carrier's label,
+     * or the name of the channel's catalog row. `source` is its registry name.
+     *
+     * @return array<int, array{carrier: string, source: string, reason: string}>
      */
     public function getExclusions(): array
     {
-        return array_map(
-            fn ($carrier, $reason): array => ['carrier' => $carrier, 'reason' => $reason],
-            array_keys($this->exclusions),
-            $this->exclusions,
-        );
+        return array_values($this->exclusions);
     }
 
     /**
@@ -123,8 +136,8 @@ class ShippingRateService
      */
     public function getShippingRates(int $packageId): Collection
     {
-        $this->configuredSourceNames = [];
-        $this->packagingIneligibleSourceNames = [];
+        $this->configuredSources = [];
+        $this->packagingIneligibleSourceKeys = [];
         $this->ratedPackageId = null;
         $this->ratedShippingMethodId = null;
 
@@ -133,30 +146,37 @@ class ShippingRateService
 
         $destination = AddressData::fromShipment($package->shipment);
         $rateRequest = RateRequest::fromPackage($package, $destination);
-        $carrierTasks = $this->buildCarrierTasks($package, $rateRequest, $destination);
+        $tasks = $this->buildRatingTasks($package, $rateRequest, $destination);
 
-        // One ship date per carrier, read once and used twice: the carrier is
+        // One ship date per task, read once and used twice: the source is
         // quoted for it, and the offer's window ends with it. Reading it again
-        // after the carrier calls would let a pickup cutoff or an End of Day
-        // run in between hand the offer a later day than the one it was
-        // priced for.
-        $shipDates = $this->shipDatesFor($carrierTasks, $rateRequest->locationId);
+        // after the calls would let a pickup cutoff or an End of Day run in
+        // between hand the offer a later day than the one it was priced for.
+        $shipDates = $this->shipDatesFor($tasks, $rateRequest->locationId);
 
         // Before the quote log: a rate the package's packaging rules out was
         // never offered, and must not be logged as one (ADR-0005 decision 4).
         // Nor was one for a service whose required contents the package does
         // not have, such as Media Mail for a parcel that is not all media
-        // (ADR-0006 decision 11).
+        // (ADR-0006 decision 11). Each rate keeps the key of the task that
+        // quoted it, so its offer is windowed on that task's date.
         $packageData = PackageData::fromPackage($package);
-        $rateOptions = ContentsFilter::keepQualifying(
-            PackagingFilter::keepCompatible(
-                $this->fetchRatesConcurrently($carrierTasks, $rateRequest, $shipDates),
-                $packageData->carrierPackaging,
-            ),
-            $packageData->qualifyingContents,
-        );
+        $rateOptions = collect();
+        $rateTaskKeys = [];
 
-        $rates = $this->offer($package, $rateOptions, $shipDates, $rateRequest->fingerprint());
+        foreach ($this->fetchRatesConcurrently($tasks, $rateRequest, $shipDates) as $taskKey => $taskRates) {
+            $kept = ContentsFilter::keepQualifying(
+                PackagingFilter::keepCompatible($taskRates, $packageData->carrierPackaging),
+                $packageData->qualifyingContents,
+            );
+
+            foreach ($kept as $rate) {
+                $rateOptions->push($rate);
+                $rateTaskKeys[] = $taskKey;
+            }
+        }
+
+        $rates = $this->offer($package, $rateOptions, $rateTaskKeys, $shipDates, $rateRequest->fingerprint());
         $this->ratedPackageId = $package->id;
         $this->ratedShippingMethodId = $package->shipment?->shipping_method_id;
 
@@ -164,18 +184,23 @@ class ShippingRateService
     }
 
     /**
-     * The ship date each carrier in these tasks will be quoted for.
+     * The ship date each task will be quoted for, by task key.
      *
-     * @param  array<int, array{name: string, serviceCodes: array<string>, specialServiceCodes: array<string>}>  $carrierTasks
+     * Still chosen by the source's registry name, one read per name, until
+     * `carrier-catalog-reset/08` dates by the carrier expected to carry it.
+     *
+     * @param  array<int, RatingTask>  $tasks
      * @return array<string, CarbonImmutable>
      */
-    private function shipDatesFor(array $carrierTasks, ?int $locationId): array
+    private function shipDatesFor(array $tasks, ?int $locationId): array
     {
         $shipDateService = app(ShipDateService::class);
+        $bySource = [];
         $shipDates = [];
 
-        foreach ($carrierTasks as $task) {
-            $shipDates[$task['name']] ??= $shipDateService->getShipDate($task['name'], $locationId);
+        foreach ($tasks as $task) {
+            $bySource[$task['source']] ??= $shipDateService->getShipDate($task['source'], $locationId);
+            $shipDates[$task['key']] = $bySource[$task['source']];
         }
 
         return $shipDates;
@@ -213,11 +238,12 @@ class ShippingRateService
      * offer is what the purchase needs.
      *
      * @param  Collection<int, RateResponse>  $rates
-     * @param  array<string, CarbonImmutable>  $shipDates  The date each carrier was quoted for, by carrier name
+     * @param  array<int, string>  $rateTaskKeys  The key of the task that quoted each rate, by position
+     * @param  array<string, CarbonImmutable>  $shipDates  The date each task was quoted for, by task key
      * @param  string  $quoteFingerprint  {@see RateRequest::fingerprint()} of the request every rate here answers
      * @return Collection<int, RateResponse>
      */
-    private function offer(Package $package, Collection $rates, array $shipDates, string $quoteFingerprint): Collection
+    private function offer(Package $package, Collection $rates, array $rateTaskKeys, array $shipDates, string $quoteFingerprint): Collection
     {
         $rates = $rates->values();
 
@@ -239,9 +265,8 @@ class ShippingRateService
         }
 
         $offerStore = app(OfferStore::class);
-        $shipDateService = app(ShipDateService::class);
 
-        return $rates->map(function (RateResponse $rate, int $index) use ($package, $quoteIds, $offerStore, $shipDateService, &$shipDates, $quoteFingerprint, $accountFingerprints): RateResponse {
+        return $rates->map(function (RateResponse $rate, int $index) use ($package, $quoteIds, $offerStore, $rateTaskKeys, $shipDates, $quoteFingerprint, $accountFingerprints): RateResponse {
             $quoteId = $quoteIds[$index] ?? null;
 
             if ($rate->offerId !== null) {
@@ -256,11 +281,6 @@ class ShippingRateService
                 return $rate;
             }
 
-            // A rate normally names the carrier it was asked of. One that does
-            // not — an adapter answering under a different carrier name — is
-            // windowed on a date read now, which is the best available.
-            $shipDates[$rate->carrier] ??= $shipDateService->getShipDate($rate->carrier, $package->location_id);
-
             $offer = $offerStore->issue($package, new OfferDraft(
                 carrier: $rate->carrier,
                 postageSource: PostageSource::CarrierAccount,
@@ -274,7 +294,7 @@ class ShippingRateService
                 // The packaging requirement travels with the metadata so the
                 // purchase-time check classifies what the server quoted.
                 rateMetadata: $rate->packagingRequirement->intoRateMetadata($rate->metadata),
-                expiresAt: $shipDates[$rate->carrier]->endOfDay(),
+                expiresAt: $shipDates[$rateTaskKeys[$index]]->endOfDay(),
                 rateQuoteId: $quoteId,
                 quoteFingerprint: $quoteFingerprint,
                 carrierAccountFingerprint: $accountFingerprints->get($rate->carrierAccountId),
@@ -295,7 +315,7 @@ class ShippingRateService
      * selection) — while `fetchRatesConcurrently()` and its carrier calls are
      * skipped, because no rate is wanted and no money may be spent finding one.
      *
-     * Sharing `buildCarrierTasks()` with quoting is the point: an offer is
+     * Sharing `buildRatingTasks()` with quoting is the point: an offer is
      * eligible here exactly when it would have been advertised there, rather
      * than under a second copy of the rules that can drift from the first.
      *
@@ -305,8 +325,8 @@ class ShippingRateService
      */
     public function blindPurchaseOffersFor(Package $package): Collection
     {
-        $this->configuredSourceNames = [];
-        $this->packagingIneligibleSourceNames = [];
+        $this->configuredSources = [];
+        $this->packagingIneligibleSourceKeys = [];
         $this->ratedPackageId = null;
         $this->ratedShippingMethodId = null;
 
@@ -315,8 +335,8 @@ class ShippingRateService
         $registry = app(CarrierRegistry::class);
         $shipDateService = app(ShipDateService::class);
 
-        foreach ($this->buildCarrierTasks($package, $rateRequest, $destination) as $task) {
-            $source = $registry->blindPurchaseSourceFor($task['name']);
+        foreach ($this->buildRatingTasks($package, $rateRequest, $destination) as $task) {
+            $source = $registry->blindPurchaseSourceFor($task['source']);
 
             if (! $source || ! $source->isConfigured()) {
                 continue;
@@ -324,7 +344,7 @@ class ShippingRateService
 
             $this->blindPurchaseOffers = $this->blindPurchaseOffers->merge($source->blindPurchaseOffers(
                 $rateRequest
-                    ->withShipDate($shipDateService->getShipDate($task['name'], $rateRequest->locationId))
+                    ->withShipDate($shipDateService->getShipDate($task['source'], $rateRequest->locationId))
                     ->withSpecialServiceCodes($task['specialServiceCodes']),
                 $task['serviceCodes'],
             ));
@@ -336,10 +356,13 @@ class ShippingRateService
     /**
      * The sole blind purchase automation may infer from a ShippingMethod.
      *
-     * This is based on configured, package-eligible sellers, not on which rate
-     * calls happened to return an answer. A configured direct seller therefore
-     * prevents Shopify becoming a fallback during an outage. A shipping rule
-     * can make a more specific choice separately.
+     * This is based on the configured sources that can sell one of the
+     * method's services for this package, not on which rate calls happened to
+     * return an answer. A configured direct seller therefore prevents Shopify
+     * becoming a fallback during an outage, while a direct account whose
+     * integration sells none of the method's services is no seller at all
+     * (ADR-0006 decision 3). A shipping rule can make a more specific choice
+     * separately.
      *
      * @param  array<int, string>  $excludedIds
      *
@@ -353,16 +376,16 @@ class ShippingRateService
 
         $registry = app(CarrierRegistry::class);
 
-        $eligibleSourceNames = array_values(array_diff(
-            $this->configuredSourceNames,
-            $this->packagingIneligibleSourceNames,
+        $eligibleSources = array_values(array_diff_key(
+            $this->configuredSources,
+            array_flip($this->packagingIneligibleSourceKeys),
         ));
 
-        if ($this->ratedShippingMethodId === null || count($eligibleSourceNames) !== 1) {
+        if ($this->ratedShippingMethodId === null || count($eligibleSources) !== 1) {
             return null;
         }
 
-        $source = $registry->blindPurchaseSourceFor($eligibleSourceNames[0]);
+        $source = $registry->blindPurchaseSourceFor($eligibleSources[0]);
 
         if (! $source) {
             return null;
@@ -376,14 +399,19 @@ class ShippingRateService
     /**
      * Which sources may be asked for this package, and with what.
      *
+     * Source-first (ADR-0006 decision 4): the package's postage sources are
+     * resolved once, then each is given the method's services it can sell and
+     * the special services it can apply. A source that can sell none of them
+     * gets no task.
+     *
      * Resets the exclusions and offers recorded from any earlier call, so a
      * caller reads the reasons belonging to the tasks it just built.
      *
-     * @return array<int, array{name: string, serviceCodes: array<string>, specialServiceCodes: array<string>}>
+     * @return array<int, RatingTask>
      *
      * @throws NoActiveCarrierServicesException
      */
-    private function buildCarrierTasks(
+    private function buildRatingTasks(
         Package $package,
         RateRequest $rateRequest,
         AddressData $destination,
@@ -409,66 +437,35 @@ class ShippingRateService
         $serviceNames = SpecialService::whereIn('code', [...$requiredCodes, ...$defaultCodes])
             ->pluck('name', 'code');
 
-        $carrierTasks = [];
+        $methodServices = null;
 
         if ($shippingMethod) {
-            $activeCarrierServices = $this->getActiveCarrierServices($shippingMethod, $destination);
+            $methodServices = $this->getActiveCarrierServices($shippingMethod, $destination);
 
-            if ($activeCarrierServices->isEmpty()) {
+            if ($methodServices->isEmpty()) {
                 throw new NoActiveCarrierServicesException($shippingMethod->name);
             }
 
             logger()->debug('ShippingRateService: Getting rates', [
                 'package_id' => $package->id,
                 'shipping_method' => $shippingMethod->name,
-                'active_carrier_services_count' => $activeCarrierServices->count(),
-                'carrier_services' => $activeCarrierServices->pluck('service_code', 'name')->toArray(),
+                'active_carrier_services_count' => $methodServices->count(),
+                'carrier_services' => $methodServices->pluck('service_code', 'name')->toArray(),
             ]);
-
-            $carrierServicesByCarrier = $activeCarrierServices->groupBy('carrier_id');
-
-            foreach ($carrierServicesByCarrier as $services) {
-                $task = $this->buildCarrierTask(
-                    $services->first()->carrier->name,
-                    $services,
-                    $requiredCodes,
-                    $defaultCodes,
-                    $scopeMap,
-                    $serviceNames,
-                    $rateRequest,
-                );
-
-                if ($task) {
-                    $carrierTasks[] = $task;
-                }
-            }
-
-            return $carrierTasks;
+        } else {
+            logger()->debug('ShippingRateService: No shipping method assigned, asking every source', [
+                'package_id' => $package->id,
+            ]);
         }
 
-        logger()->debug('ShippingRateService: No shipping method assigned, querying all configured carriers', [
-            'package_id' => $package->id,
-        ]);
+        $sources = app(PostageSourceResolver::class)->resolve($package, $shippingMethod);
+        $tasks = [];
 
-        $restrictedDestination = $destination->isPoBox() || $destination->isMilitary();
-
-        foreach (array_keys(app(CarrierRegistry::class)->getConfiguredAdapters()) as $name) {
-            $services = $this->getActiveCarrierServicesForCarrierName($name, $destination);
-
-            if ($restrictedDestination && $services->isEmpty()) {
-                // No cataloged service for this carrier is known to reach a PO
-                // Box / military destination -- querying it blind risks a
-                // carrier-side reject (e.g. UPS 400s on a military "AE" state).
-                logger()->debug("ShippingRateService: {$name} has no cataloged service for this destination, skipping", [
-                    'package_id' => $package->id,
-                ]);
-
-                continue;
-            }
-
-            $task = $this->buildCarrierTask(
-                $name,
-                $services,
+        foreach ($this->assignServices($sources, $methodServices, $destination) as $assignment) {
+            $task = $this->buildTask(
+                $assignment['candidate'],
+                $assignment['source'],
+                $assignment['services'],
                 $requiredCodes,
                 $defaultCodes,
                 $scopeMap,
@@ -477,60 +474,147 @@ class ShippingRateService
             );
 
             if ($task) {
-                $carrierTasks[] = $task;
+                $tasks[] = $task;
             }
         }
 
-        return $carrierTasks;
+        return $tasks;
     }
 
     /**
-     * Fetch rates from multiple carriers concurrently using a shared Guzzle sender.
+     * The services each resolved source can sell (ADR-0006 decision 3).
      *
-     * @param  array<int, array{name: string, serviceCodes: array<string>, specialServiceCodes: array<string>}>  $carrierTasks
-     * @param  array<string, CarbonImmutable>  $shipDates  The date to quote each carrier for, by carrier name
-     * @return Collection<int, RateResponse>
+     * - A direct account sells its carrier's services that its integration
+     *   supports ({@see DeclaresSellableServices}).
+     * - Shopify sells what its catalog rows name, until
+     *   `carrier-catalog-reset/09`.
+     * - Amazon, for its own orders or off-Amazon, is asked when the method
+     *   lists its row, until `carrier-catalog-reset/12`.
+     *
+     * With a method, a source that sells none of its services is left out.
+     * With none, every source is asked with no service list, except that a PO
+     * Box or military destination asks only a source with a cataloged service
+     * known to reach it: querying one blind risks a carrier-side reject (UPS
+     * 400s on a military "AE" state).
+     *
+     * @param  Collection<int, CarrierService>|null  $methodServices  null when there is no shipping method
+     * @return array<int, array{candidate: PostageSourceCandidate, source: string, services: Collection<int, CarrierService>}>
      */
-    private function fetchRatesConcurrently(array $carrierTasks, RateRequest $rateRequest, array $shipDates): Collection
+    private function assignServices(PostageSourceResolution $sources, ?Collection $methodServices, AddressData $destination): array
     {
-        $rateOptions = collect();
+        $registry = app(CarrierRegistry::class);
+        $restrictedDestination = $destination->isPoBox() || $destination->isMilitary();
+        $assignments = [];
+
+        foreach ($sources->candidates as $candidate) {
+            $sourceName = $this->registryNameFor($candidate);
+
+            if ($sourceName === null || ! $registry->has($sourceName)) {
+                continue;
+            }
+
+            $services = $methodServices !== null
+                ? $methodServices->filter(fn (CarrierService $service): bool => $service->carrier?->name === $sourceName)
+                : $this->getActiveCarrierServicesForCarrierName($sourceName, $destination);
+
+            $adapter = $candidate->isDirect() ? $registry->directAdapterFor($sourceName) : null;
+
+            if ($adapter instanceof DeclaresSellableServices) {
+                $services = $services->filter(fn (CarrierService $service): bool => $adapter->sellsService($service->service_code));
+            }
+
+            if ($services->isEmpty() && ($methodServices !== null || $restrictedDestination)) {
+                if ($methodServices === null) {
+                    logger()->debug("ShippingRateService: {$sourceName} has no cataloged service for this destination, skipping");
+                }
+
+                continue;
+            }
+
+            $assignments[] = [
+                'candidate' => $candidate,
+                'source' => $sourceName,
+                'services' => $services->values(),
+            ];
+        }
+
+        return $assignments;
+    }
+
+    /**
+     * The name a resolved source's adapter is registered under.
+     *
+     * A direct carrier's fixed name is the registry's key (ADR-0006 decision
+     * 1, as amended). The channel sources are still registered as the
+     * `Shopify` and `Amazon` rows they pose as, until
+     * `carrier-catalog-reset/09` and `12` remove them.
+     */
+    private function registryNameFor(PostageSourceCandidate $candidate): ?string
+    {
+        if ($candidate->isDirect()) {
+            return $candidate->carrier;
+        }
+
+        return match ($candidate->dataSourceType) {
+            ShopifySource::class => ShopifyAdapter::CARRIER_NAME,
+            AmazonSource::class => AmazonBuyShippingAdapter::SOURCE_NAME,
+            default => null,
+        };
+    }
+
+    /**
+     * Fetch rates from every task concurrently using a shared Guzzle sender.
+     *
+     * Each direct task is rated on the account its source resolved, handed
+     * over on the request rather than stored on the adapter: the registry
+     * shares one adapter instance between tasks.
+     *
+     * @param  array<int, RatingTask>  $tasks
+     * @param  array<string, CarbonImmutable>  $shipDates  The date to quote each task for, by task key
+     * @return array<string, Collection<int, RateResponse>> Rates by the key of the task that quoted them, in the order they arrived
+     */
+    private function fetchRatesConcurrently(array $tasks, RateRequest $rateRequest, array $shipDates): array
+    {
+        $ratesByTask = [];
         $preparedRequests = [];
         $taskMeta = [];
 
         $registry = app(CarrierRegistry::class);
 
         // Phase 1: Prepare all requests (authenticate connectors, build request bodies)
-        foreach ($carrierTasks as $task) {
-            $carrierName = $task['name'];
+        foreach ($tasks as $task) {
+            $key = $task['key'];
+            $sourceName = $task['source'];
             $serviceCodes = $task['serviceCodes'];
 
             try {
-                if (! $registry->has($carrierName)) {
-                    logger()->warning("ShippingRateService: Unknown carrier {$carrierName}");
+                if (! $registry->has($sourceName)) {
+                    logger()->warning("ShippingRateService: Unknown carrier {$sourceName}");
 
                     continue;
                 }
 
-                $adapter = $registry->get($carrierName);
+                $adapter = $registry->get($sourceName);
 
                 if (! $adapter->isConfigured()) {
-                    logger()->warning("ShippingRateService: {$carrierName} is not configured");
+                    logger()->warning("ShippingRateService: {$sourceName} is not configured");
 
                     continue;
                 }
 
-                $this->configuredSourceNames[] = $carrierName;
+                $this->configuredSources[$key] = $sourceName;
 
-                $carrierRateRequest = $rateRequest
-                    ->withShipDate($shipDates[$carrierName])
-                    ->withSpecialServiceCodes($task['specialServiceCodes']);
+                $taskRateRequest = $rateRequest
+                    ->withShipDate($shipDates[$key])
+                    ->withSpecialServiceCodes($task['specialServiceCodes'])
+                    ->withCarrierAccount($task['carrierAccount']);
 
                 if ($adapter instanceof AsyncRateQuoting) {
-                    $prepared = $adapter->prepareRateRequest($carrierRateRequest, $serviceCodes);
+                    $prepared = $adapter->prepareRateRequest($taskRateRequest, $serviceCodes);
 
                     if ($prepared) {
-                        $preparedRequests[$carrierName] = $prepared;
-                        $taskMeta[$carrierName] = ['adapter' => $adapter, 'serviceCodes' => $serviceCodes, 'rateRequest' => $carrierRateRequest];
+                        $preparedRequests[$key] = $prepared;
+                        $taskMeta[$key] = ['task' => $task, 'adapter' => $adapter, 'serviceCodes' => $serviceCodes, 'rateRequest' => $taskRateRequest];
 
                         continue;
                     }
@@ -542,7 +626,7 @@ class ShippingRateService
                 // collection it could honestly sit.
                 if ($adapter instanceof BlindPurchaseSource) {
                     $this->blindPurchaseOffers = $this->blindPurchaseOffers->merge(
-                        $adapter->blindPurchaseOffers($carrierRateRequest, $serviceCodes)
+                        $adapter->blindPurchaseOffers($taskRateRequest, $serviceCodes)
                     );
 
                     continue;
@@ -553,37 +637,37 @@ class ShippingRateService
                 // got this far can reach the parse phase below, which is why the
                 // two halves of AsyncRateQuoting travel together.
                 if ($adapter instanceof CarrierAdapterInterface) {
-                    $rates = $adapter->getRates($carrierRateRequest, $serviceCodes);
-                    $this->recordPackagingEligibility($carrierName, $rates, $carrierRateRequest);
-                    $rateOptions->push(...$rates);
+                    $rates = $adapter->getRates($taskRateRequest, $serviceCodes);
+                    $this->recordPackagingEligibility($key, $rates, $taskRateRequest);
+                    $ratesByTask[$key] = $rates;
                 }
             } catch (CarrierUnavailableException $e) {
-                $this->recordUnavailable($carrierName, $e);
+                $this->recordUnavailable($task, $e);
             } catch (InvalidPackageDimensionsException $e) {
-                $this->exclusions[$carrierName] = $carrierName.' requires valid package dimensions before rates can be requested.';
+                $this->exclude($task, $task['label'].' requires valid package dimensions before rates can be requested.');
 
-                logger()->warning("ShippingRateService: {$carrierName} cannot rate an unmeasured package", [
-                    'carrier' => $carrierName,
+                logger()->warning("ShippingRateService: {$sourceName} cannot rate an unmeasured package", [
+                    'carrier' => $sourceName,
                     'error' => $e->getMessage(),
                 ]);
             } catch (CarrierRateFetchException $e) {
                 $loggedException = $e->getPrevious() ?? $e;
 
-                logger()->error("ShippingRateService: {$carrierName} rate fetch failed", [
-                    'carrier' => $carrierName,
+                logger()->error("ShippingRateService: {$sourceName} rate fetch failed", [
+                    'carrier' => $sourceName,
                     'exception' => $loggedException::class,
                     'error' => $e->getMessage(),
                 ]);
             } catch (\Exception $e) {
-                logger()->error("ShippingRateService: {$carrierName} prepare error", [
-                    'carrier' => $carrierName,
+                logger()->error("ShippingRateService: {$sourceName} prepare error", [
+                    'carrier' => $sourceName,
                     'exception' => $e::class,
                     'error' => $e->getMessage(),
                 ]);
             }
         }
 
-        // Fall back to synchronous sends when only one carrier needs an API call (no
+        // Fall back to synchronous sends when only one source needs an API call (no
         // concurrency overhead needed) or when any request has a fake/mock response set
         // (Saloon faking bypasses the sender, so the shared GuzzleSender can't handle it).
         $hasFakeResponses = collect($preparedRequests)->contains(
@@ -591,27 +675,28 @@ class ShippingRateService
         );
 
         if (count($preparedRequests) <= 1 || $hasFakeResponses) {
-            foreach ($preparedRequests as $carrierName => $prepared) {
-                $meta = $taskMeta[$carrierName];
+            foreach (array_keys($preparedRequests) as $key) {
+                $meta = $taskMeta[$key];
+                $sourceName = $meta['task']['source'];
 
                 try {
                     $rates = $meta['adapter']->getRates($meta['rateRequest'], $meta['serviceCodes']);
-                    $this->recordPackagingEligibility($carrierName, $rates, $meta['rateRequest']);
-                    $rateOptions->push(...$rates);
+                    $this->recordPackagingEligibility($key, $rates, $meta['rateRequest']);
+                    $ratesByTask[$key] = $rates;
                 } catch (CarrierUnavailableException $e) {
-                    $this->recordUnavailable($carrierName, $e);
+                    $this->recordUnavailable($meta['task'], $e);
                 } catch (CarrierRateFetchException $e) {
                     $loggedException = $e->getPrevious() ?? $e;
 
-                    logger()->error("ShippingRateService: {$carrierName} rate fetch failed", [
-                        'carrier' => $carrierName,
+                    logger()->error("ShippingRateService: {$sourceName} rate fetch failed", [
+                        'carrier' => $sourceName,
                         'exception' => $loggedException::class,
                         'error' => $e->getMessage(),
                     ]);
                 }
             }
 
-            return $rateOptions;
+            return $ratesByTask;
         }
 
         // Phase 2: Send all requests concurrently through a shared Guzzle sender.
@@ -621,16 +706,17 @@ class ShippingRateService
         $sharedSender = app(GuzzleSender::class);
         $promises = [];
 
-        foreach ($preparedRequests as $carrierName => $prepared) {
-            logger()->debug("ShippingRateService: Sending async rate request to {$carrierName}");
-            $promises[$carrierName] = $sharedSender->sendAsync($prepared->pendingRequest);
+        foreach ($preparedRequests as $key => $prepared) {
+            logger()->debug("ShippingRateService: Sending async rate request to {$taskMeta[$key]['task']['source']}");
+            $promises[$key] = $sharedSender->sendAsync($prepared->pendingRequest);
         }
 
         $results = PromiseUtils::settle($promises)->wait();
 
         // Phase 3: Parse responses
-        foreach ($results as $carrierName => $result) {
-            $meta = $taskMeta[$carrierName];
+        foreach ($results as $key => $result) {
+            $meta = $taskMeta[$key];
+            $sourceName = $meta['task']['source'];
 
             if ($result['state'] === 'fulfilled') {
                 try {
@@ -640,29 +726,29 @@ class ShippingRateService
                         $meta['serviceCodes'],
                     );
 
-                    logger()->debug("ShippingRateService: Got {$carrierName} rates", [
+                    logger()->debug("ShippingRateService: Got {$sourceName} rates", [
                         'rates_count' => $rates->count(),
                     ]);
 
-                    $this->recordPackagingEligibility($carrierName, $rates, $meta['rateRequest']);
-                    $rateOptions->push(...$rates);
+                    $this->recordPackagingEligibility($key, $rates, $meta['rateRequest']);
+                    $ratesByTask[$key] = $rates;
                 } catch (CarrierUnavailableException $e) {
-                    $this->recordUnavailable($carrierName, $e);
+                    $this->recordUnavailable($meta['task'], $e);
                 } catch (\Exception $e) {
-                    logger()->error("ShippingRateService: {$carrierName} parse error", [
-                        'carrier' => $carrierName,
+                    logger()->error("ShippingRateService: {$sourceName} parse error", [
+                        'carrier' => $sourceName,
                         'exception' => $e::class,
                         'error' => $e->getMessage(),
                     ]);
                 }
             } else {
-                logger()->error("ShippingRateService: {$carrierName} request failed", [
+                logger()->error("ShippingRateService: {$sourceName} request failed", [
                     'error' => $result['reason']?->getMessage() ?? 'Unknown error',
                 ]);
             }
         }
 
-        return $rateOptions;
+        return $ratesByTask;
     }
 
     /**
@@ -670,15 +756,32 @@ class ShippingRateService
      * up — an Amazon connection not signed up for Amazon Shipping, say. That
      * is not a failed request: it has no offers, and the packer is told why
      * beside the rates rather than left to wonder where they went.
+     *
+     * @param  array{key: string, source: string, label: string}  $task
      */
-    private function recordUnavailable(string $sourceName, CarrierUnavailableException $e): void
+    private function recordUnavailable(array $task, CarrierUnavailableException $e): void
     {
-        $this->exclusions[$sourceName] = $e->getMessage();
+        $this->exclude($task, $e->getMessage());
 
-        logger()->warning("ShippingRateService: {$sourceName} is unavailable", [
-            'carrier' => $sourceName,
+        logger()->warning("ShippingRateService: {$task['source']} is unavailable", [
+            'carrier' => $task['source'],
             'reason' => $e->getMessage(),
         ]);
+    }
+
+    /**
+     * Record why a source was not asked, or answered nothing, keyed by its
+     * source instance.
+     *
+     * @param  array{key: string, source: string, label: string}  $task
+     */
+    private function exclude(array $task, string $reason): void
+    {
+        $this->exclusions[$task['key']] = [
+            'carrier' => $task['label'],
+            'source' => $task['source'],
+            'reason' => $reason,
+        ];
     }
 
     /**
@@ -694,7 +797,7 @@ class ShippingRateService
      *
      * @param  Collection<int, RateResponse>  $rates
      */
-    private function recordPackagingEligibility(string $sourceName, Collection $rates, RateRequest $rateRequest): void
+    private function recordPackagingEligibility(string $taskKey, Collection $rates, RateRequest $rateRequest): void
     {
         if ($rates->isEmpty()) {
             return;
@@ -703,19 +806,25 @@ class ShippingRateService
         $carrierPackaging = $rateRequest->packages[0]->carrierPackaging ?? null;
 
         if (PackagingFilter::keepCompatible($rates, $carrierPackaging)->isEmpty()) {
-            $this->packagingIneligibleSourceNames[] = $sourceName;
+            $this->packagingIneligibleSourceKeys[] = $taskKey;
         }
     }
 
     /**
-     * Build the rate task for one carrier, applying capability and carrier-service
+     * Build the rate task for one source, applying capability and carrier-service
      * scope checks. Hard-required codes (shipping-method required mode + product
      * compliance) drop carrier services that aren't scoped for them and exclude
-     * the carrier entirely when nothing survives (or the carrier prohibits /
+     * the source entirely when nothing survives (or the source prohibits /
      * hasn't implemented the code). Default-mode codes never drop a carrier
-     * service — the code is stripped from the carrier's request instead.
+     * service — the code is stripped from the source's request instead.
      *
-     * Returns null (recording the reason in $this->exclusions) when the carrier
+     * Catalog scoping applies to direct sources only (ADR-0006 decision 10):
+     * it records what our own integrations can request. Shopify cannot
+     * guarantee a special service at all, and Amazon's offers are judged one
+     * by one on the value-added services each returns (ADR-0002 decision 8).
+     * Capability and declared-value checks apply to every source.
+     *
+     * Returns null (recording the reason in $this->exclusions) when the source
      * is excluded.
      *
      * @param  Collection<int, CarrierService>  $services  Empty when no shipping method is assigned
@@ -723,10 +832,11 @@ class ShippingRateService
      * @param  array<int, string>  $defaultCodes
      * @param  array<string, array<int, array<int, array<int, string>|null>>>  $scopeMap
      * @param  Collection<string, string>  $serviceNames
-     * @return array{name: string, serviceCodes: array<int, string>, specialServiceCodes: array<int, string>}|null
+     * @return RatingTask|null
      */
-    private function buildCarrierTask(
-        string $carrierName,
+    private function buildTask(
+        PostageSourceCandidate $candidate,
+        string $sourceName,
         Collection $services,
         array $requiredCodes,
         array $defaultCodes,
@@ -737,8 +847,11 @@ class ShippingRateService
         $destinationCountry = $rateRequest->destinationCountry;
         $registry = app(CarrierRegistry::class);
         $specialServiceCodes = [];
+        $scoped = $candidate->isDirect();
+        $label = Carrier::labelForName($sourceName);
+        $task = ['key' => $candidate->key(), 'source' => $sourceName, 'label' => $label];
 
-        $adapter = $registry->has($carrierName) ? $registry->get($carrierName) : null;
+        $adapter = $registry->has($sourceName) ? $registry->get($sourceName) : null;
 
         foreach ($requiredCodes as $code) {
             $capability = $adapter?->offerCapability($code);
@@ -747,22 +860,22 @@ class ShippingRateService
                 // Prohibited, Unguaranteed and NotImplemented all exclude: a
                 // hard-required service the offer can't actually apply must not
                 // be skipped.
-                $this->exclusions[$carrierName] = $this->requiredServiceExclusion(
+                $this->exclude($task, $this->requiredServiceExclusion(
                     $capability,
-                    $carrierName,
+                    $label,
                     $serviceNames->get($code, $code),
-                );
+                ));
 
                 return null;
             }
 
-            if ($capReason = $this->declaredValueCapViolation($code, $adapter, $rateRequest, $carrierName)) {
-                $this->exclusions[$carrierName] = $capReason;
+            if ($capReason = $this->declaredValueCapViolation($code, $adapter, $rateRequest, $label)) {
+                $this->exclude($task, $capReason);
 
                 return null;
             }
 
-            $carrierScopes = $this->scopesForCarrier($scopeMap, $code, $services);
+            $carrierScopes = $scoped ? $this->scopesForCarrier($scopeMap, $code, $services) : null;
 
             if ($carrierScopes !== null) {
                 $services = $services->filter(
@@ -770,7 +883,7 @@ class ShippingRateService
                 );
 
                 if ($services->isEmpty()) {
-                    $this->exclusions[$carrierName] = $carrierName.' has no services that support '.$serviceNames->get($code, $code).' for this destination.';
+                    $this->exclude($task, $label.' has no services that support '.$serviceNames->get($code, $code).' for this destination.');
 
                     return null;
                 }
@@ -784,7 +897,7 @@ class ShippingRateService
                 $capability = $adapter->offerCapability($code);
 
                 if ($capability === ServiceCapability::Prohibited) {
-                    $this->exclusions[$carrierName] = $carrierName.' does not support '.$serviceNames->get($code, $code).'.';
+                    $this->exclude($task, $label.' does not support '.$serviceNames->get($code, $code).'.');
 
                     return null;
                 }
@@ -796,20 +909,20 @@ class ShippingRateService
                 }
             }
 
-            if ($capReason = $this->declaredValueCapViolation($code, $adapter, $rateRequest, $carrierName)) {
+            if ($capReason = $this->declaredValueCapViolation($code, $adapter, $rateRequest, $label)) {
                 // Stripping a default declared value silently would under-insure
-                // the package — exclude the carrier visibly instead.
-                $this->exclusions[$carrierName] = $capReason;
+                // the package — exclude the source visibly instead.
+                $this->exclude($task, $capReason);
 
                 return null;
             }
 
-            $carrierScopes = $this->scopesForCarrier($scopeMap, $code, $services);
+            $carrierScopes = $scoped ? $this->scopesForCarrier($scopeMap, $code, $services) : null;
 
             if ($carrierScopes !== null && $services->doesntContain(
                 fn (CarrierService $service): bool => $this->scopeAllows($carrierScopes, $service->id, $destinationCountry)
             )) {
-                logger()->debug("ShippingRateService: {$carrierName} has no services scoped for default service {$code}, requesting rates without it");
+                logger()->debug("ShippingRateService: {$sourceName} has no services scoped for default service {$code}, requesting rates without it");
 
                 continue;
             }
@@ -818,7 +931,8 @@ class ShippingRateService
         }
 
         return [
-            'name' => $carrierName,
+            ...$task,
+            'carrierAccount' => $candidate->carrierAccount,
             'serviceCodes' => $services->pluck('service_code')->values()->all(),
             'specialServiceCodes' => $specialServiceCodes,
         ];
@@ -833,22 +947,22 @@ class ShippingRateService
      * carrier setting to change. The problem is that nobody has picked the
      * carrier yet.
      */
-    private function requiredServiceExclusion(ServiceCapability $capability, string $carrierName, string $serviceName): string
+    private function requiredServiceExclusion(ServiceCapability $capability, string $sourceLabel, string $serviceName): string
     {
         return $capability === ServiceCapability::Unguaranteed
-            ? $carrierName.' cannot guarantee '.$serviceName.' — it picks the carrier and service after the label is bought.'
-            : $carrierName.' does not support '.$serviceName.'.';
+            ? $sourceLabel.' cannot guarantee '.$serviceName.' — it picks the carrier and service after the label is bought.'
+            : $sourceLabel.' does not support '.$serviceName.'.';
     }
 
     /**
-     * Exclusion reason when the package's declared value exceeds the carrier's
+     * Exclusion reason when the package's declared value exceeds the source's
      * cap, or null when the code isn't declared_value / no cap applies.
      */
     private function declaredValueCapViolation(
         string $code,
         ?PostageOfferSource $adapter,
         RateRequest $rateRequest,
-        string $carrierName,
+        string $sourceLabel,
     ): ?string {
         if ($code !== 'declared_value' || ! $adapter) {
             return null;
@@ -863,7 +977,7 @@ class ShippingRateService
 
         return sprintf(
             '%s cannot declare a value of $%s — its maximum is $%s.',
-            $carrierName,
+            $sourceLabel,
             number_format((float) $amount, 2),
             number_format($cap, 0),
         );
@@ -942,30 +1056,44 @@ class ShippingRateService
     }
 
     /**
-     * The sources rate shopping would ask for this shipping method and
-     * destination: the carriers of its active services that can reach the
-     * destination, with a registered, configured adapter behind them.
+     * The sources rate shopping would ask for this shipment, before it has a
+     * Package: those that resolve for it and can sell one of its method's
+     * services at this destination, with a configured adapter behind them.
      *
-     * The same two filters {@see buildCarrierTasks()} and the task runner
-     * apply — {@see getActiveCarrierServices()} and `isConfigured()` — so a
-     * caller deciding ahead of a purchase what the purchase could buy reads
-     * the same set the purchase will. `BatchLabelService` asks this before a
-     * batch starts, for the report printer skip: an unconfigured carrier, or
-     * one whose services cannot reach a PO Box or military address, would
-     * otherwise count as an option the batch does not actually have.
+     * The same resolution and service assignment {@see buildRatingTasks()}
+     * uses, and the same `isConfigured()` the task runner checks, so a caller
+     * deciding ahead of a purchase what the purchase could buy reads the set
+     * the purchase will. `BatchLabelService` asks this before a batch starts,
+     * for the report printer skip: an unconfigured carrier, one whose services
+     * cannot reach a PO Box or military address, or a channel the shipment did
+     * not come from would otherwise count as an option the batch does not
+     * actually have.
      *
      * Special-service exclusions are not applied here; they are per-package
      * and resolved once the rate request exists.
      *
      * @return Collection<int, PostageOfferSource>
      */
-    public function sellersForShippingMethod(ShippingMethod $shippingMethod, AddressData $destination): Collection
+    public function sellersForShipment(Shipment $shipment, ?int $locationId, AddressData $destination): Collection
     {
         $registry = app(CarrierRegistry::class);
+        $shippingMethod = $shipment->shippingMethod;
 
-        return $this->getActiveCarrierServices($shippingMethod, $destination)
-            ->map(fn (CarrierService $service): ?string => $service->carrier?->name)
-            ->filter(fn (?string $name): bool => $name !== null && $registry->has($name))
+        // The Package the batch is about to prepare, so the shipment resolves
+        // exactly as its rating will.
+        $package = new Package;
+        $package->location_id = $locationId;
+        $package->setRelation('shipment', $shipment);
+
+        $sources = app(PostageSourceResolver::class)->resolve($package, $shippingMethod);
+        $methodServices = $shippingMethod ? $this->getActiveCarrierServices($shippingMethod, $destination) : null;
+
+        if ($methodServices?->isEmpty()) {
+            return collect();
+        }
+
+        return collect($this->assignServices($sources, $methodServices, $destination))
+            ->pluck('source')
             ->unique()
             ->map(fn (string $name): PostageOfferSource => $registry->get($name))
             ->filter(fn (PostageOfferSource $seller): bool => $seller->isConfigured())

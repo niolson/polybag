@@ -14,11 +14,13 @@ use App\Enums\ServiceCapability;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierAccountScope;
+use App\Models\CarrierService;
 use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\Shipment;
+use App\Models\ShippingMethod;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\ShopifyAdapter;
 use App\Services\PostageSources\PostageSourceResolver;
@@ -28,8 +30,8 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 
 /**
- * ADR-0002 decision 9: which postage source instance is asked, and how a tie
- * between two of them is resolved — or refused.
+ * ADR-0002 decision 9 and ADR-0006 decision 4: which postage source instances
+ * are asked for a package.
  */
 function packageFrom(?DataSource $source = null, array $shipment = [], array $package = []): Package
 {
@@ -189,7 +191,8 @@ describe('channel binding', function (): void {
         expect($channel?->kind)->toBe(PostageSource::PostageDataSource)
             ->and($channel?->postageDataSourceId)->toBe($source->id)
             ->and($channel?->carrier)->toBeNull()
-            ->and($resolution->forCarrier('USPS'))->toBeEmpty();
+            ->and($resolution->candidates->filter(fn ($candidate): bool => $candidate->carrier === null)->values()->all())
+            ->toBe([$channel]);
     });
 
     it('answers the Shopify label service through the same rule rather than its own', function (): void {
@@ -223,7 +226,7 @@ describe('carrier account precedence', function (): void {
 
         $package = packageFrom(shipment: ['client_id' => $this->client->id], package: ['location_id' => null]);
 
-        $candidates = app(PostageSourceResolver::class)->resolve($package, ['USPS'])->forCarrier('USPS');
+        $candidates = app(PostageSourceResolver::class)->resolve($package)->forCarrier('USPS');
 
         expect($candidates)->toHaveCount(1)
             ->and($candidates->first()->carrierAccountId)->toBe($clientOwn->id)
@@ -247,7 +250,7 @@ describe('carrier account precedence', function (): void {
         );
 
         $winner = fn (): ?int => app(PostageSourceResolver::class)
-            ->resolve($package->refresh(), ['USPS'])
+            ->resolve($package->refresh())
             ->forCarrier('USPS')
             ->first()?->carrierAccountId;
 
@@ -277,11 +280,11 @@ describe('carrier account precedence', function (): void {
 
         // Both accounts could sell USPS postage. Asking both is a second API
         // call on the packer's critical path, so it stays opt-in.
-        expect(app(PostageSourceResolver::class)->resolve($package, ['USPS'])->forCarrier('USPS'))
+        expect(app(PostageSourceResolver::class)->resolve($package)->forCarrier('USPS'))
             ->toHaveCount(1);
     });
 
-    it('quotes both when the winning scope opts into rate shopping', function (): void {
+    it('quotes the first account only, even when the winning scope opts into rate shopping', function (): void {
         $winner = ($this->account)('Location + client USPS');
         $locationDefault = ($this->account)('Location USPS');
 
@@ -293,9 +296,12 @@ describe('carrier account precedence', function (): void {
             package: ['location_id' => $this->location->id],
         );
 
-        $candidates = app(PostageSourceResolver::class)->resolve($package, ['USPS'])->forCarrier('USPS');
+        $candidates = app(PostageSourceResolver::class)->resolve($package)->forCarrier('USPS');
 
-        expect($candidates->pluck('carrierAccountId')->all())->toBe([$winner->id, $locationDefault->id]);
+        // The purchase path checks an offer against the first account only, so
+        // an offer from the second would be refused as "Carrier Account
+        // Changed" (ADR-0006, *Foreseen, not decided*).
+        expect($candidates->pluck('carrierAccountId')->all())->toBe([$winner->id]);
     });
 
     it('ignores an inactive account and falls through to the next scope', function (): void {
@@ -308,96 +314,70 @@ describe('carrier account precedence', function (): void {
 
         $package = packageFrom(shipment: ['client_id' => $this->client->id], package: ['location_id' => null]);
 
-        expect(app(PostageSourceResolver::class)->resolve($package, ['USPS'])->forCarrier('USPS')->first()?->carrierAccountId)
+        expect(app(PostageSourceResolver::class)->resolve($package)->forCarrier('USPS')->first()?->carrierAccountId)
             ->toBe($global->id);
     });
 
-    it('offers no candidate for a carrier nothing is scoped to', function (): void {
+    it('offers a carrier nothing is scoped to with no account', function (): void {
         Carrier::firstOrCreate(['name' => 'FedEx']);
 
-        $resolution = app(PostageSourceResolver::class)->resolve(packageFrom(), ['FedEx', 'Nonexistent']);
+        // The integration is still asked, as it always was: a real one quotes
+        // nothing without an account, and a fake carrier quotes anyway.
+        $fedex = app(PostageSourceResolver::class)->resolve(packageFrom())->forCarrier('FedEx');
 
-        expect($resolution->candidates)->toBeEmpty()
-            ->and($resolution->hasConflicts())->toBeFalse();
+        expect($fedex)->toHaveCount(1)
+            ->and($fedex->first()->carrierAccountId)->toBeNull()
+            ->and($fedex->first()->kind)->toBe(PostageSource::CarrierAccount);
+    });
+
+    it('resolves only the direct carriers a shipping method needs', function (): void {
+        $global = ($this->account)('Global USPS');
+        scopeAccountTo($global, null, null);
+
+        $method = ShippingMethod::factory()->create();
+        $method->carrierServices()->attach(CarrierService::factory()->uspsGroundAdvantage()->for($this->carrier)->create());
+        $method->carrierServices()->attach(
+            CarrierService::factory()->for(Carrier::firstOrCreate(['name' => ShopifyAdapter::CARRIER_NAME]))->create()
+        );
+
+        $resolution = app(PostageSourceResolver::class)->resolve(packageFrom(), $method);
+
+        // Shopify's row is on the method, but it is no direct carrier: its
+        // postage comes from the order's own connection, if at all.
+        expect($resolution->candidates->pluck('carrier')->all())->toBe(['USPS'])
+            ->and($resolution->forCarrier('USPS')->first()?->carrierAccountId)->toBe($global->id);
     });
 });
 
-describe('unresolvable ties', function (): void {
-    it('refuses to buy through a resale channel as though it were a carrier account', function (): void {
-        $shopifyCarrier = Carrier::firstOrCreate(['name' => ShopifyAdapter::CARRIER_NAME]);
-        $source = createShopifyDataSource();
-
-        // Shopify holds a Carrier row so its offers have services to hang off.
-        // An account scoped to that row claims we buy postage from a storefront
-        // the way we buy it from USPS, which would leave two sources claiming
-        // one carrier with nothing to choose between them.
-        // A legacy row: the model now refuses an account on the Shopify carrier.
-        scopeAccountTo(CarrierAccount::withoutEvents(fn () => CarrierAccount::create([
-            'carrier_id' => $shopifyCarrier->id,
-            'name' => 'Shopify account',
-            'active' => true,
-        ])), null, null);
-
-        $resolution = app(PostageSourceResolver::class)
-            ->resolve(packageFrom($source), [ShopifyAdapter::CARRIER_NAME]);
-
-        expect($resolution->forCarrier(ShopifyAdapter::CARRIER_NAME))->toBeEmpty()
-            ->and($resolution->hasConflicts())->toBeTrue()
-            ->and($resolution->conflicts[0]['carrier'])->toBe(ShopifyAdapter::CARRIER_NAME)
-            ->and($resolution->conflicts[0]['reason'])->toContain('buys postage from')
-            // The channel source is still the answer for that package; only the
-            // account masquerading as a carrier is refused.
-            ->and($resolution->channel()?->postageDataSourceId)->toBe($source->id);
-    });
-
-    it('leaves a conflict on one carrier from affecting another', function (): void {
-        $shopifyCarrier = Carrier::firstOrCreate(['name' => ShopifyAdapter::CARRIER_NAME]);
-        // A legacy row: the model now refuses an account on the Shopify carrier.
-        scopeAccountTo(CarrierAccount::withoutEvents(fn () => CarrierAccount::create([
-            'carrier_id' => $shopifyCarrier->id,
-            'name' => 'Shopify account',
-            'active' => true,
-        ])), null, null);
-
-        $usps = createUspsAccount();
-
-        $resolution = app(PostageSourceResolver::class)
-            ->resolve(packageFrom(), ['USPS', ShopifyAdapter::CARRIER_NAME]);
-
-        expect($resolution->conflicts)->toHaveCount(1)
-            ->and($resolution->forCarrier('USPS')->first()?->carrierAccountId)->toBe($usps->id);
-    });
-
-    it('refuses an account scoped to a carrier we hold policy for but no account with', function (): void {
-        // The finding this guards: DirectCarrierAdapter extends CarrierPolicy,
-        // so policyFor() would wave this through on the strength of knowing DHL
-        // Express's cutoffs — and CarrierAccountPostageSource would then throw
-        // from directAdapterOrFail() the first time somebody voided the label.
+describe('accounts on carriers we do not sell directly', function (): void {
+    it('never reads an account left on a resale channel or a policy-only carrier', function (): void {
+        // Rows made before `CarrierAccount` refused them. Only carriers with a
+        // direct integration are walked, so neither is read, nor reported: a
+        // policy-only carrier's policy is not an account we can buy on, and
+        // Shopify's postage comes from the order's connection.
         app(CarrierRegistry::class)->register(
             PolicyOnlyCarrierAdapter::CARRIER_NAME,
             PolicyOnlyCarrierAdapter::class,
         );
 
-        $registry = app(CarrierRegistry::class);
-        $carrier = Carrier::firstOrCreate(['name' => PolicyOnlyCarrierAdapter::CARRIER_NAME]);
+        foreach ([ShopifyAdapter::CARRIER_NAME, PolicyOnlyCarrierAdapter::CARRIER_NAME] as $name) {
+            scopeAccountTo(CarrierAccount::withoutEvents(fn () => CarrierAccount::create([
+                'carrier_id' => Carrier::firstOrCreate(['name' => $name])->id,
+                'name' => "{$name} account",
+                'active' => true,
+            ])), null, null);
+        }
 
-        // A legacy row: the model now refuses an account on a carrier with no
-        // integration that uses one.
-        scopeAccountTo(CarrierAccount::withoutEvents(fn () => CarrierAccount::create([
-            'carrier_id' => $carrier->id,
-            'name' => 'DHL Express account',
-            'active' => true,
-        ])), null, null);
+        $source = createShopifyDataSource();
+        $resolution = app(PostageSourceResolver::class)->resolve(packageFrom($source));
 
-        $resolution = app(PostageSourceResolver::class)
-            ->resolve(packageFrom(), [PolicyOnlyCarrierAdapter::CARRIER_NAME]);
-
-        expect($registry->policyFor(PolicyOnlyCarrierAdapter::CARRIER_NAME))->not->toBeNull()
-            ->and($registry->directAdapterFor(PolicyOnlyCarrierAdapter::CARRIER_NAME))->toBeNull()
+        expect($resolution->forCarrier(ShopifyAdapter::CARRIER_NAME))->toBeEmpty()
             ->and($resolution->forCarrier(PolicyOnlyCarrierAdapter::CARRIER_NAME))->toBeEmpty()
-            ->and($resolution->conflicts[0]['reason'])->toContain('buys postage from');
+            ->and($resolution->channel()?->postageDataSourceId)->toBe($source->id);
     });
+});
 
+describe('unresolvable ties', function (): void {
     it('cannot be given two accounts at one precedence to arbitrate between', function (): void {
         $carrier = Carrier::firstOrCreate(['name' => 'USPS']);
         $client = Client::factory()->create();
