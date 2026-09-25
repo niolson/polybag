@@ -3,6 +3,7 @@
 namespace App\DataTransferObjects\Shipping;
 
 use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
+use App\Enums\PostageSourceKind;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierService;
@@ -42,6 +43,17 @@ readonly class RateResponse
         public bool $contentRestricted = false,
     ) {
         $this->packagingRequirement = $packagingRequirement ?? PackagingRequirement::shipperPackaging();
+    }
+
+    /**
+     * The kind of source that quoted this rate. A discovering source says so
+     * on the offer; every other rate was quoted on a carrier account.
+     */
+    public function sourceKind(): PostageSourceKind
+    {
+        return $this->observedService !== null
+            ? PostageSourceKind::from($this->observedService->source)
+            : PostageSourceKind::Direct;
     }
 
     /**

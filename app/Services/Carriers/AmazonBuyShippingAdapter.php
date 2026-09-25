@@ -449,7 +449,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
     /**
      * Never reached from a shipping rule: a rule naming Amazon names the
      * source, and {@see RuleEvaluator} selects among the offers Amazon quotes
-     * rather than pre-selecting a rate for it (`amazon-buy-shipping/19`). Kept
+     * rather than pre-selecting a rate for it (`carrier-catalog-reset/07`). Kept
      * for the contract, and answered the same way a quoted offer would be:
      * only the packaging filter applies.
      */

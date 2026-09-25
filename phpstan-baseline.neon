@@ -616,12 +616,6 @@ parameters:
 			message: '#^Cannot access property \$id on Illuminate\\Database\\Eloquent\\Model\|int\|string\.$#'
 			identifier: property.nonObject
 			count: 1
-			path: app/Filament/Resources/CarrierServiceResource/Pages/EditCarrierService.php
-
-		-
-			message: '#^Cannot access property \$id on Illuminate\\Database\\Eloquent\\Model\|int\|string\.$#'
-			identifier: property.nonObject
-			count: 1
 			path: app/Filament/Resources/ChannelResource/Pages/EditChannel.php
 
 		-

@@ -1,6 +1,6 @@
 # Shipping rules name a source and a service
 
-Status: needs-triage
+Status: done
 
 Repo: `polybag`
 
@@ -17,12 +17,13 @@ can be bought three ways. A *Use* rule picks within what the shipping method all
 no longer grants anything. An *Exclude* rule can name a carrier, so "never OnTrac" means
 every OnTrac offer.
 
-- **Schema.** Replace the columns outright; there is no data to carry.
+- **Schema.** Replace the columns outright; there is no data to carry. No shipping rules
+  exist locally or on any server tenant (checked 2026-09-25).
   - `source`: *direct*, *Shopify*, *Amazon Buy Shipping*, *any priced source* (*Use*
     only), or *any source* (*Exclude* only).
     The three named sources are the `PostageSourceKind` cases (`direct`, `shopify`,
-    `amazon`) that `14` introduces. The two *any* values belong to rules alone, not to the
-    enum. Whichever of `07` and `14` lands first creates the enum.
+    `amazon`) that `14` introduced. The two *any* values belong to rules alone, not to the
+    enum.
   - The service is either one `carrier_service_id` or an explicit *any*, stored as its
     own value. A null service never stands for *any*.
   - `carrier_id`, for *Exclude* only.
@@ -31,6 +32,13 @@ every OnTrac offer.
     would vanish. A `nullOnDelete` beside a nullable column would be worse: it would widen
     "Use UPS Ground" into "Use anything". A carrier or service that a rule names cannot be
     deleted until the rule changes; deactivate it instead.
+  - **Refuse in the UI as well, naming the rule.** The foreign key alone only produces a
+    database error. Follow the `before()` guards already on the delete actions.
+    - `EditCarrierService` already refuses when a rule exists, but with a generic
+      message. Name the rule.
+    - `EditCarrier` checks shipped packages and source mappings but not rules. Add a
+      check for a rule naming the carrier itself (`carrier_id`) or any of its services,
+      since deleting the carrier deletes its services.
 - **What a *Use* rule can say.**
   - *Direct, UPS Ground* buys direct UPS Ground and never Amazon's.
   - *Any priced source, USPS Ground Advantage* rate-shops that service across direct
@@ -54,6 +62,20 @@ every OnTrac offer.
 - ***Use* picks within the allowance.**
   - The rule form for a method lists only the method's services and the sources the
     method allows. A rule with no method lists every service.
+  - **Until `09` and `12`, the sources a method allows come from today's signals.** The
+    source-policy table (`shipping_method_postage_sources`) doesn't exist yet: `09`
+    creates it, and `09` and `12` are both blocked by this issue. Until then:
+    - *Direct* is always allowed.
+    - *Amazon Buy Shipping* is allowed when the method lists the `Amazon` hook row
+      (`AmazonBuyShippingAdapter::CATALOG_SERVICE_CODE`). *Amazon Buy Shipping, any* on
+      a method applies only then.
+    - *Shopify* is allowed when the method lists a service under the `Shopify` carrier.
+      *Shopify, a service* names one of those `Shopify`-carrier rows. It names a real
+      catalog service only from `09`.
+    - *Any priced source* is allowed when *Direct* or *Amazon Buy Shipping* is.
+
+    Keep this derivation in one place, so `09` and `12` can swap it for the table's
+    rows without touching the form or `RuleEvaluator`.
   - When a rule with no method is evaluated for a shipment that has one, a service the
     method does not list is skipped, not bought.
   - **A shipment with no method** has the allowance of ADR-0006 decision 12: every direct
@@ -72,23 +94,24 @@ every OnTrac offer.
 
 ## Acceptance criteria
 
-- [ ] *Direct, UPS Ground* never buys Amazon's UPS Ground, even when it is cheaper, and the
+- [x] *Direct, UPS Ground* never buys Amazon's UPS Ground, even when it is cheaper, and the
       Ship page highlights the direct rate
-- [ ] *Any priced source, USPS Ground Advantage* buys the cheaper of direct and Amazon's
+- [x] *Any priced source, USPS Ground Advantage* buys the cheaper of direct and Amazon's
       mapped Ground Advantage, and never a blind purchase
-- [ ] *Amazon Buy Shipping, any* behaves as `amazon-buy-shipping/19` does
-- [ ] *Shopify, a service* still pre-selects that blind offer
-- [ ] A *Use* rule naming a service the shipment's method does not list buys nothing,
+- [x] *Amazon Buy Shipping, any* behaves as `amazon-buy-shipping/19` does
+- [x] *Shopify, a service* still pre-selects that blind offer
+- [x] A *Use* rule naming a service the shipment's method does not list buys nothing,
       and automation falls through to rate shopping
-- [ ] On a shipment with no method, a global *Use* rule naming a direct service still buys
+- [x] On a shipment with no method, a global *Use* rule naming a direct service still buys
       it, and one naming Amazon or Shopify is skipped
-- [ ] *Exclude, any source, UPS Ground* removes direct and Amazon-mapped UPS Ground from
+- [x] *Exclude, any source, UPS Ground* removes direct and Amazon-mapped UPS Ground from
       the Ship page and from automation
-- [ ] *Exclude, Amazon Buy Shipping, carrier OnTrac* removes an unmapped OnTrac offer as
-      well as OnTrac Ground
-- [ ] Deleting a service or carrier that a rule names is refused with a message naming
+- [x] *Exclude, Amazon Buy Shipping, carrier OnTrac* removes an unmapped OnTrac offer as
+      well as OnTrac Ground. No OnTrac carrier is seeded until `11`, so the test creates
+      the carrier and its `ONTRAC` alias itself. `11` is not a blocker
+- [x] Deleting a service or carrier that a rule names is refused with a message naming
       the rule
-- [ ] The rule form lists only the method's services
+- [x] The rule form lists only the method's services
 
 ## Blocked by
 
@@ -106,3 +129,26 @@ every OnTrac offer.
 - **2026-09-25** — Named `PostageSourceKind` as the source of the three named sources,
   so rules, the source mapping table (`14`) and the method's source policy (`09`) share
   one list of kinds.
+- **2026-09-25** — Triage: ready. Added the interim source allowance, derived from the
+  hook rows, because `09` and `12`, which create the source policy, are blocked by this
+  issue. Also added the UI delete guards and the OnTrac test fixture, and confirmed there
+  are no rules to carry.
+- **2026-09-25** — Done. Notes from building it:
+  - `shipping_rules` was dropped and recreated rather than altered. `source` is a
+    `ShippingRuleSource`, whose three named cases are the `PostageSourceKind` cases.
+    `any_service` is a boolean beside a nullable `carrier_service_id`. The model refuses a
+    rule that names neither, both, or a source its action cannot name.
+  - A *Use* rule may leave the service open only for Amazon Buy Shipping. *Direct, any*
+    and *any priced source, any* have no use the issue names, so they aren't offered.
+  - `MethodSourceAllowance` is the one place the interim allowance is derived, as asked.
+    `09` and `12` replace `kindsFor()` and leave the form and `RuleEvaluator` alone.
+  - *Amazon Buy Shipping, a service* and *any*: strict, as `amazon-buy-shipping/19`.
+    *Any priced source*: when no source quotes the service, automation falls through to
+    rate shopping, as a pre-selected direct service with no packaging variant already
+    did.
+  - Until `09`, a Shopify blind purchase has no carrier row. An *Exclude* rule naming a
+    carrier matches one only when that carrier is the `Shopify` row itself.
+  - `CarrierRegistry::discoveringSourceFor()` had no caller left and is removed.
+    `ShippingRateService::getBlindPurchaseOffers()` and
+    `soleBlindPurchaseOfferForAutomation()` take the rule result's predicate instead of a
+    list of ids, so a carrier or source exclusion reaches blind offers.

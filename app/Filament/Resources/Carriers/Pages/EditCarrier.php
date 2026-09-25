@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Carriers\Pages;
 
 use App\Filament\Resources\Carriers\CarrierResource;
 use App\Models\Carrier;
+use App\Models\ShippingRule;
 use App\Models\SourceServiceMapping;
 use Filament\Actions\DeleteAction;
 use Filament\Notifications\Notification;
@@ -23,6 +24,22 @@ class EditCarrier extends EditRecord
                         Notification::make()
                             ->title('Cannot delete carrier')
                             ->body('This carrier is recorded on shipped packages. Deactivate it instead.')
+                            ->danger()
+                            ->send();
+
+                        $action->cancel();
+
+                        return;
+                    }
+
+                    // A rule's foreign keys restrict deletion of the carrier
+                    // and of the services deleted with it.
+                    $rule = ShippingRule::query()->with('shippingMethod')->namingCarrier($this->carrier())->first();
+
+                    if ($rule instanceof ShippingRule) {
+                        Notification::make()
+                            ->title('Cannot delete carrier')
+                            ->body("The shipping rule {$rule->describe()} names this carrier or one of its services. Change the rule, or deactivate the carrier instead.")
                             ->danger()
                             ->send();
 

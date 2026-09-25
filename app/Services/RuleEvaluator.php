@@ -7,18 +7,31 @@ use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\RuleEvaluationResult;
+use App\DataTransferObjects\Shipping\RuleExclusion;
+use App\DataTransferObjects\Shipping\RuleRateScope;
 use App\Enums\AmazonOrderProgram;
 use App\Enums\DestinationZone;
+use App\Enums\PostageSourceKind;
 use App\Enums\ShippingRuleAction;
+use App\Enums\ShippingRuleSource;
 use App\Models\Package;
 use App\Models\Shipment;
+use App\Models\ShippingMethod;
 use App\Models\ShippingRule;
-use App\Services\Carriers\CarrierRegistry;
+use App\Services\PostageSources\MethodSourceAllowance;
 
+/**
+ * Which rules apply to a shipment, and what they choose and exclude.
+ *
+ * A rule names its source and its service (`carrier-catalog-reset/07`), so
+ * nothing here asks what kind of source a catalog row poses as. A *Use* rule
+ * picks within what the shipment's method allows ({@see MethodSourceAllowance})
+ * and is skipped, not bought, when it names something outside that.
+ */
 class RuleEvaluator
 {
     public function __construct(
-        private readonly CarrierRegistry $carrierRegistry,
+        private readonly MethodSourceAllowance $allowance,
     ) {}
 
     public function evaluate(Shipment $shipment, ?Package $package = null): RuleEvaluationResult
@@ -33,93 +46,108 @@ class RuleEvaluator
                 $query->whereNull('client_id')
                     ->orWhere('client_id', $shipment->client_id);
             })
-            ->with('carrierService.carrier')
+            ->with(['carrierService.carrier', 'carrier'])
             ->get();
 
-        $excludedServiceCodes = [];
-        $excludedBlindPurchaseIds = [];
-        $excludedSources = [];
+        $shipment->loadMissing('shippingMethod');
+        $method = $shipment->shippingMethod;
+        $exclusions = [];
 
         foreach ($rules as $rule) {
             if (! $this->conditionsMatch($rule->conditions, $shipment, $package)) {
                 continue;
             }
 
-            $service = $rule->carrierService;
-            $carrier = $service->carrier;
-            $action = $rule->getAttribute('action');
-            $blindPurchaseSource = $this->carrierRegistry->blindPurchaseSourceFor($carrier->name);
-            // A discovering source's catalog row names the source, not a
-            // service: no offer it quotes carries the row's service code, so
-            // the rule is applied to the source (`amazon-buy-shipping/19`).
-            $discoveringSource = $this->carrierRegistry->discoveringSourceFor($carrier->name);
-
-            if ($action === ShippingRuleAction::ExcludeService) {
-                if ($discoveringSource) {
-                    $excludedSources[] = $discoveringSource->observationSource();
-                } elseif ($blindPurchaseSource) {
-                    $excludedBlindPurchaseIds[] = BlindPurchaseOffer::identifier(
-                        $carrier->name,
-                        $service->service_code,
-                    );
-                } else {
-                    $excludedServiceCodes[] = $service->service_code;
-                }
+            if ($rule->action === ShippingRuleAction::ExcludeService) {
+                $exclusions[] = $this->exclusionFor($rule);
 
                 continue;
             }
 
-            if ($action === ShippingRuleAction::UseService) {
-                // Its services are discovered per quote, so there is no rate to
-                // pre-select: the caller chooses among what the source quotes,
-                // each offer under its own approval.
-                if ($discoveringSource) {
-                    return new RuleEvaluationResult(
-                        excludedServiceCodes: $excludedServiceCodes,
-                        excludedBlindPurchaseIds: $excludedBlindPurchaseIds,
-                        preSelectedSource: $discoveringSource->observationSource(),
-                        excludedSources: $excludedSources,
-                    );
-                }
+            if (! $this->allowance->permits($rule, $method)) {
+                logger()->debug('Skipped a shipping rule naming something the shipping method does not allow', [
+                    'shipping_rule_id' => $rule->id,
+                    'shipment_id' => $shipment->id,
+                    'shipping_method_id' => $method?->id,
+                ]);
 
-                if ($blindPurchaseSource) {
-                    return new RuleEvaluationResult(
-                        preSelectedBlindPurchaseId: BlindPurchaseOffer::identifier(
-                            $carrier->name,
-                            $service->service_code,
-                        ),
-                        excludedServiceCodes: $excludedServiceCodes,
-                        excludedBlindPurchaseIds: $excludedBlindPurchaseIds,
-                        excludedSources: $excludedSources,
-                    );
-                }
+                continue;
+            }
 
-                // A rule names a service, never a packaging (ADR-0005 decision 4).
-                // It does name the catalog service, so the contents drop can
-                // judge a rate an adapter hands back unquoted.
-                $preSelectedRate = new RateResponse(
-                    carrier: $carrier->name,
+            return $this->useResult($rule, $method, $exclusions);
+        }
+
+        return new RuleEvaluationResult(exclusions: $exclusions);
+    }
+
+    /**
+     * @param  list<RuleExclusion>  $exclusions
+     */
+    private function useResult(ShippingRule $rule, ?ShippingMethod $method, array $exclusions): RuleEvaluationResult
+    {
+        $service = $rule->carrierService;
+
+        return match ($rule->source) {
+            // A blind purchase has no rate to pre-select, and nothing invents
+            // one (ADR-0003 decision 5).
+            ShippingRuleSource::Shopify => new RuleEvaluationResult(
+                preSelectedBlindPurchaseId: BlindPurchaseOffer::identifier($service->carrier->name, $service->service_code),
+                exclusions: $exclusions,
+            ),
+
+            // A rule names a service, never a packaging (ADR-0005 decision 4).
+            // It does name the catalog service, so the contents drop can judge
+            // a rate an adapter hands back unquoted.
+            ShippingRuleSource::Direct => new RuleEvaluationResult(
+                preSelectedRate: new RateResponse(
+                    carrier: $service->carrier->name,
                     serviceCode: $service->service_code,
                     serviceName: $service->name,
                     price: 0.0,
                     packagingRequirement: PackagingRequirement::shipperPackaging(),
                     carrierServiceId: $service->id,
-                    carrierId: $carrier->id,
-                );
+                    carrierId: $service->carrier_id,
+                ),
+                exclusions: $exclusions,
+            ),
 
-                return new RuleEvaluationResult(
-                    preSelectedRate: $preSelectedRate,
-                    excludedServiceCodes: $excludedServiceCodes,
-                    excludedBlindPurchaseIds: $excludedBlindPurchaseIds,
-                    excludedSources: $excludedSources,
-                );
-            }
-        }
+            // Amazon's services are discovered per quote, so there is no rate
+            // to pre-select: the caller chooses among what it quotes. An
+            // acceptable Amazon offer or nothing (`amazon-buy-shipping/19`).
+            ShippingRuleSource::Amazon => new RuleEvaluationResult(
+                preSelectedScope: new RuleRateScope(
+                    kinds: [PostageSourceKind::Amazon],
+                    carrierServiceId: $rule->any_service ? null : $service?->id,
+                    strict: true,
+                ),
+                exclusions: $exclusions,
+            ),
 
-        return new RuleEvaluationResult(
-            excludedServiceCodes: $excludedServiceCodes,
-            excludedBlindPurchaseIds: $excludedBlindPurchaseIds,
-            excludedSources: $excludedSources,
+            ShippingRuleSource::AnyPriced => new RuleEvaluationResult(
+                preSelectedScope: new RuleRateScope(
+                    kinds: $this->allowance->pricedKindsFor($method),
+                    carrierServiceId: $service->id,
+                    strict: false,
+                ),
+                exclusions: $exclusions,
+            ),
+
+            ShippingRuleSource::Any => throw new \LogicException('A Use rule cannot name any source.'),
+        };
+    }
+
+    private function exclusionFor(ShippingRule $rule): RuleExclusion
+    {
+        $service = $rule->any_service ? null : $rule->carrierService;
+
+        return new RuleExclusion(
+            kind: $rule->source->kind(),
+            carrierId: $rule->carrier_id,
+            carrierServiceId: $service?->id,
+            carrierName: $rule->carrier?->name,
+            blindPurchaseId: $service !== null
+                ? BlindPurchaseOffer::identifier($service->carrier->name, $service->service_code)
+                : null,
         );
     }
 
