@@ -1,6 +1,6 @@
 # Media Mail and Bound Printed Matter through Shopify and Amazon
 
-Status: ready-for-agent
+Status: done
 
 Repo: `polybag`
 
@@ -134,4 +134,7 @@ for it.
     so the Amazon side is proven with fixture responses only.
   - The Ship page shows a content-restricted rate like any other, with no marker. If
     packers need a cue to check the contents, that is follow-up UI work.
-
+- **2026-09-25** — **Done.** Merged in #274. A Shopify Media Mail label was bought through
+  PolyBag for a qualifying Package. The Amazon side is still proven only with fixture
+  responses, because Amazon has never offered `USPS_PTP_MM` or `USPS_PTP_BPM` to this
+  account.
