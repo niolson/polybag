@@ -26,6 +26,7 @@ use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierService;
 use App\Models\CarrierServiceSpecialService;
+use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
@@ -48,7 +49,7 @@ use Illuminate\Support\Collection;
 use Saloon\Http\Senders\GuzzleSender;
 
 /**
- * @phpstan-type RatingTask array{key: string, source: string, label: string, carrierAccount: CarrierAccount|null, serviceCodes: array<int, string>, specialServiceCodes: array<int, string>}
+ * @phpstan-type RatingTask array{key: string, source: string, label: string, candidate: PostageSourceCandidate, carrierAccount: CarrierAccount|null, serviceCodes: array<int, string>, specialServiceCodes: array<int, string>}
  */
 class ShippingRateService
 {
@@ -185,21 +186,34 @@ class ShippingRateService
     /**
      * The ship date each task will be quoted for, by task key.
      *
-     * Still chosen by the source's registry name, one read per name, until
-     * `carrier-catalog-reset/08` dates by the carrier expected to carry it.
+     * Dated by the carrier expected to carry the parcel (ADR-0006, guideline
+     * 12). A direct task is its carrier. Shopify is the carrier its
+     * connection's *Date Shopify's choice as* names. An Amazon task gets no
+     * date: `getRates` sends none, each offer carries Amazon's own window, and
+     * the purchase is dated by the carrier the offer names.
      *
      * @param  array<int, RatingTask>  $tasks
-     * @return array<string, CarbonImmutable>
+     * @return array<string, CarbonImmutable|null>
      */
     private function shipDatesFor(array $tasks, ?int $locationId): array
     {
         $shipDateService = app(ShipDateService::class);
-        $bySource = [];
         $shipDates = [];
 
         foreach ($tasks as $task) {
-            $bySource[$task['source']] ??= $shipDateService->getShipDate($task['source'], $locationId);
-            $shipDates[$task['key']] = $bySource[$task['source']];
+            $candidate = $task['candidate'];
+
+            $shipDates[$task['key']] = match (true) {
+                $candidate->isDirect() => $shipDateService->getShipDate(
+                    Carrier::query()->where('name', $candidate->carrier)->first(),
+                    $locationId,
+                ),
+                $candidate->isChannel() && $candidate->dataSourceType === ShopifySource::class => $shipDateService->getShipDate(
+                    DataSource::find($candidate->postageDataSourceId)?->shipDateCarrier(),
+                    $locationId,
+                ),
+                default => null,
+            };
         }
 
         return $shipDates;
@@ -238,7 +252,7 @@ class ShippingRateService
      *
      * @param  Collection<int, RateResponse>  $rates
      * @param  array<int, string>  $rateTaskKeys  The key of the task that quoted each rate, by position
-     * @param  array<string, CarbonImmutable>  $shipDates  The date each task was quoted for, by task key
+     * @param  array<string, CarbonImmutable|null>  $shipDates  The date each task was quoted for, by task key
      * @param  string  $quoteFingerprint  {@see RateRequest::fingerprint()} of the request every rate here answers
      * @return Collection<int, RateResponse>
      */
@@ -293,7 +307,7 @@ class ShippingRateService
                 // The packaging requirement travels with the metadata so the
                 // purchase-time check classifies what the server quoted.
                 rateMetadata: $rate->packagingRequirement->intoRateMetadata($rate->metadata),
-                expiresAt: $shipDates[$rateTaskKeys[$index]]->endOfDay(),
+                expiresAt: $shipDates[$rateTaskKeys[$index]]?->endOfDay(),
                 rateQuoteId: $quoteId,
                 quoteFingerprint: $quoteFingerprint,
                 carrierAccountFingerprint: $accountFingerprints->get($rate->carrierAccountId),
@@ -332,9 +346,10 @@ class ShippingRateService
         $destination = AddressData::fromShipment($package->shipment);
         $rateRequest = RateRequest::fromPackage($package, $destination);
         $registry = app(CarrierRegistry::class);
-        $shipDateService = app(ShipDateService::class);
+        $tasks = $this->buildRatingTasks($package, $rateRequest, $destination);
+        $shipDates = $this->shipDatesFor($tasks, $rateRequest->locationId);
 
-        foreach ($this->buildRatingTasks($package, $rateRequest, $destination) as $task) {
+        foreach ($tasks as $task) {
             $source = $registry->blindPurchaseSourceFor($task['source']);
 
             if (! $source || ! $source->isConfigured()) {
@@ -343,7 +358,7 @@ class ShippingRateService
 
             $this->blindPurchaseOffers = $this->blindPurchaseOffers->merge($source->blindPurchaseOffers(
                 $rateRequest
-                    ->withShipDate($shipDateService->getShipDate($task['source'], $rateRequest->locationId))
+                    ->withShipDate($shipDates[$task['key']])
                     ->withSpecialServiceCodes($task['specialServiceCodes']),
                 $task['serviceCodes'],
             ));
@@ -569,7 +584,7 @@ class ShippingRateService
      * shares one adapter instance between tasks.
      *
      * @param  array<int, RatingTask>  $tasks
-     * @param  array<string, CarbonImmutable>  $shipDates  The date to quote each task for, by task key
+     * @param  array<string, CarbonImmutable|null>  $shipDates  The date to quote each task for, by task key; null where the source takes none
      * @return array<string, Collection<int, RateResponse>> Rates by the key of the task that quoted them, in the order they arrived
      */
     private function fetchRatesConcurrently(array $tasks, RateRequest $rateRequest, array $shipDates): array
@@ -931,6 +946,7 @@ class ShippingRateService
 
         return [
             ...$task,
+            'candidate' => $candidate,
             'carrierAccount' => $candidate->carrierAccount,
             'serviceCodes' => $services->pluck('service_code')->values()->all(),
             'specialServiceCodes' => $specialServiceCodes,

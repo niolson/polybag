@@ -6,6 +6,7 @@ use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
 use App\Models\BoxSize;
+use App\Models\Carrier;
 use App\Models\Location;
 use App\Models\Manifest;
 use App\Models\Package;
@@ -69,9 +70,12 @@ class PackageFactory extends Factory
 
     public function shipped(): static
     {
-        return $this->state(fn () => [
+        return $this->state(fn (): array => [
             'tracking_number' => fake()->regexify('[0-9]{20}'),
             'carrier' => fake()->randomElement(['USPS', 'FedEx']),
+            // Resolved at purchase from what the source reported, as
+            // `Package::markShipped()` does; null for a carrier with no row.
+            'normalized_carrier_id' => fn (array $attributes): ?int => Carrier::query()->where('name', $attributes['carrier'])->value('id'),
             'service' => 'Ground',
             // A direct carrier reports the service it sold, so the fixture says
             // so rather than leaving a service with no evidence (ADR-0003).
@@ -97,7 +101,7 @@ class PackageFactory extends Factory
      */
     public function withCustomsForm(): static
     {
-        return $this->shipped()->state(fn () => [
+        return $this->shipped()->state(fn (): array => [
             'customs_form_data' => base64_encode('mock-customs-form-pdf'),
             'customs_form_format' => 'pdf',
         ]);
@@ -109,7 +113,7 @@ class PackageFactory extends Factory
      */
     public function withLabel(): static
     {
-        return $this->state(fn () => [
+        return $this->state(fn (): array => [
             'label_data' => base64_encode('mock-label-pdf'),
             'label_orientation' => 'portrait',
         ]);
@@ -120,7 +124,7 @@ class PackageFactory extends Factory
      */
     public function usps(): static
     {
-        return $this->shipped()->state(fn () => [
+        return $this->shipped()->state(fn (): array => [
             'carrier' => 'USPS',
             'service' => 'Priority Mail',
             'tracking_number' => fake()->regexify('94[0-9]{20}'),
@@ -132,7 +136,7 @@ class PackageFactory extends Factory
      */
     public function fedex(): static
     {
-        return $this->shipped()->state(fn () => [
+        return $this->shipped()->state(fn (): array => [
             'carrier' => 'FedEx',
             'service' => 'FedEx Ground',
             'tracking_number' => fake()->regexify('[0-9]{12}'),
@@ -144,7 +148,7 @@ class PackageFactory extends Factory
      */
     public function withBoxSize(): static
     {
-        return $this->state(fn () => [
+        return $this->state(fn (): array => [
             'box_size_id' => BoxSize::factory(),
         ]);
     }
@@ -154,7 +158,7 @@ class PackageFactory extends Factory
      */
     public function exported(): static
     {
-        return $this->shipped()->state(fn () => [
+        return $this->shipped()->state(fn (): array => [
             'exported' => true,
         ]);
     }
@@ -164,7 +168,7 @@ class PackageFactory extends Factory
      */
     public function manifested(): static
     {
-        return $this->shipped()->state(fn () => [
+        return $this->shipped()->state(fn (): array => [
             'manifest_id' => Manifest::factory(),
         ]);
     }

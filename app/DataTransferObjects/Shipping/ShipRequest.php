@@ -3,6 +3,8 @@
 namespace App\DataTransferObjects\Shipping;
 
 use App\Enums\ServiceCapability;
+use App\Models\Carrier;
+use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\ShippingOffer;
 use App\Services\LabelReferenceResolver;
@@ -263,7 +265,15 @@ readonly class ShipRequest
             ? AddressData::fromLocation($package->location)
             : AddressData::fromConfig();
 
-        $shipDate = app(ShipDateService::class)->getShipDate($rate->carrier, $package->location_id);
+        // Dated by the carrier resolved when the offer was issued, never by a
+        // name string: a rename between quote and purchase changes nothing. An
+        // offer is the server's copy, so it wins over the rate; a rate built
+        // server-side with no offer carries the same identity itself.
+        $carrierId = $offer !== null ? $offer->carrier_id : $rate->carrierId;
+        $shipDate = app(ShipDateService::class)->getShipDate(
+            $carrierId !== null ? Carrier::find($carrierId) : null,
+            $package->location_id,
+        );
 
         $resolver = app(SpecialServiceResolver::class);
         $specialServiceCodes = $resolver->resolveForPackageAndRate($package, $rate);
@@ -300,9 +310,9 @@ readonly class ShipRequest
      * an unconstrained selection cannot promise to apply it — see
      * {@see ServiceCapability::Unguaranteed}.
      *
-     * The ship date is still resolved through `ShipDateService` under the
-     * source's name, which is where Shopify's own pickup and cutoff policy is
-     * configured.
+     * The ship date follows the carrier the connection's *Date Shopify's
+     * choice as* names, USPS unless changed — the carrier Shopify is expected
+     * to put the parcel on, since it names none before purchase.
      */
     public static function fromPackageAndBlindOffer(
         Package $package,
@@ -332,10 +342,28 @@ readonly class ShipRequest
             labelDpi: $labelDpi,
             locationId: $package->location_id,
             clientId: $package->shipment->client_id,
-            shipDate: app(ShipDateService::class)->getShipDate($offer->source, $package->location_id),
+            shipDate: app(ShipDateService::class)->getShipDate(
+                self::shipDateCarrierForBlindOffer($offer),
+                $package->location_id,
+            ),
             references: app(LabelReferenceResolver::class)->forPackage($package),
             packageId: $package->id,
             blindOffer: $offer,
         );
+    }
+
+    /**
+     * The carrier a blind purchase is dated by: its connection's setting, or
+     * USPS's policy when the offer names no connection.
+     */
+    private static function shipDateCarrierForBlindOffer(BlindPurchaseOffer $offer): ?Carrier
+    {
+        $dataSource = $offer->postageDataSourceId !== null
+            ? DataSource::find($offer->postageDataSourceId)
+            : null;
+
+        return $dataSource !== null
+            ? $dataSource->shipDateCarrier()
+            : Carrier::query()->where('name', Carrier::USPS)->first();
     }
 }

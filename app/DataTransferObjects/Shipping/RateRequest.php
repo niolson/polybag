@@ -201,7 +201,7 @@ readonly class RateRequest
         );
     }
 
-    public function withShipDate(CarbonImmutable $date): self
+    public function withShipDate(?CarbonImmutable $date): self
     {
         return new self(
             originPostalCode: $this->originPostalCode,

@@ -3,6 +3,7 @@
 use App\Enums\PostageSource;
 use App\Filament\Pages\EndOfDay;
 use App\Http\Integrations\USPS\Requests\ScanForm;
+use App\Models\Carrier;
 use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\Setting;
@@ -66,32 +67,37 @@ it('generateManifest creates manifest and dispatches print event', function (): 
     fakeUspsManifestResponse($account->id);
 
     Livewire::test(EndOfDay::class)
-        ->call('generateManifest', 'USPS')
+        ->call('generateManifest', Carrier::where('name', Carrier::USPS)->value('id'))
         ->assertDispatched('print-report')
         ->assertNotified();
 });
 
 it('generateManifest shows error on failure', function (): void {
+    Carrier::factory()->create(['name' => Carrier::FEDEX]);
+
     Package::factory()->shipped()->create([
         'carrier' => 'FedEx',
         'tracking_number' => '789000100001',
     ]);
 
     Livewire::test(EndOfDay::class)
-        ->call('generateManifest', 'FedEx')
+        ->call('generateManifest', Carrier::where('name', Carrier::FEDEX)->value('id'))
         ->assertNotDispatched('print-report')
         ->assertNotified();
 });
 
 it('generateManifest shows warning when no packages for carrier', function (): void {
+    Carrier::factory()->usps()->create();
+
     Livewire::test(EndOfDay::class)
-        ->call('generateManifest', 'USPS')
+        ->call('generateManifest', Carrier::where('name', Carrier::USPS)->value('id'))
         ->assertNotDispatched('print-report')
         ->assertNotified();
 });
 
 it('does not manifest a USPS package bought through Shopify', function (): void {
     Saloon::fake([]);
+    Carrier::factory()->usps()->create();
 
     Package::factory()->shipped()->create([
         'carrier' => 'USPS',
@@ -101,7 +107,7 @@ it('does not manifest a USPS package bought through Shopify', function (): void 
     ]);
 
     Livewire::test(EndOfDay::class)
-        ->call('generateManifest', 'USPS')
+        ->call('generateManifest', Carrier::where('name', Carrier::USPS)->value('id'))
         ->assertNotDispatched('print-report')
         ->assertNotified();
 
@@ -122,7 +128,7 @@ it('generateManifest suppresses printing when suppress_printing setting is true'
     fakeUspsManifestResponse($account->id);
 
     Livewire::test(EndOfDay::class)
-        ->call('generateManifest', 'USPS')
+        ->call('generateManifest', Carrier::where('name', Carrier::USPS)->value('id'))
         ->assertNotDispatched('print-report')
         ->assertNotified();
 });

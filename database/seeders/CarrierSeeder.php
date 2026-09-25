@@ -146,12 +146,10 @@ class CarrierSeeder extends Seeder
         // All are matched case-sensitively: `priority` finds no rate where
         // `Priority` does.
         //
-        // The cutoff is 8 PM, matching USPS. Shopify does not reveal which carrier it picked
-        // until after purchase, and `shippingDatetime` goes out *in* the purchase
-        // mutation, so no carrier-derived cutoff can apply — see ADR-0002. The
-        // cutoff lives on the row like every other carrier's rather than as a
-        // special case in ShipDateService.
-        $shopify = Carrier::seedSystem(ShopifyAdapter::CARRIER_NAME, ['pickup_cutoff_hour' => 20]);
+        // No cutoff: nothing is dated by this row. A Shopify label is dated by the
+        // carrier its connection's *Date Shopify's choice as* names, USPS unless
+        // changed (`carrier-catalog-reset/08`), and the row itself leaves in `09`.
+        $shopify = Carrier::seedSystem(ShopifyAdapter::CARRIER_NAME);
         $shopify->carrierServices()->firstOrCreate(
             ['service_code' => ShopifyAdapter::AUTO_SERVICE_CODE],
             [

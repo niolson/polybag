@@ -1,6 +1,6 @@
 # Date every purchase by the carrier expected to carry it, and list every carrier on End of Day
 
-Status: ready-for-agent
+Status: done
 
 Repo: `polybag`
 
@@ -60,20 +60,20 @@ source.
 
 ## Acceptance criteria
 
-- [ ] A Shopify blind purchase is dated today before USPS's cutoff and the next pickup day
+- [x] A Shopify blind purchase is dated today before USPS's cutoff and the next pickup day
       after it, read through the connection's *Date Shopify's choice as*
-- [ ] Pointing that setting at UPS dates Shopify purchases by UPS's policy
-- [ ] An unmapped Amazon offer is dated by the carrier Amazon names, and one whose
+- [x] Pointing that setting at UPS dates Shopify purchases by UPS's policy
+- [x] An unmapped Amazon offer is dated by the carrier Amazon names, and one whose
       carrier has no row gets no cutoff
-- [ ] A mapped Amazon offer is dated by its carrier, so USPS for Ground Advantage
-- [ ] Renaming a carrier between quote and purchase does not change the date
-- [ ] End of Day lists OnTrac and Amazon Shipping once they exist, and neither fake row
-- [ ] Ending USPS's day moves the next date for direct USPS, Amazon's USPS and Shopify
+- [x] A mapped Amazon offer is dated by its carrier, so USPS for Ground Advantage
+- [x] Renaming a carrier between quote and purchase does not change the date
+- [x] End of Day lists OnTrac and Amazon Shipping once they exist, and neither fake row
+- [x] Ending USPS's day moves the next date for direct USPS, Amazon's USPS and Shopify
       labels dated as USPS
-- [ ] Nothing reads the `Shopify` row's cutoff
-- [ ] Quoting reads neither fake row: Shopify's request is dated through the connection's
+- [x] Nothing reads the `Shopify` row's cutoff
+- [x] Quoting reads neither fake row: Shopify's request is dated through the connection's
       setting, and the Amazon task gets no date
-- [ ] *Date Shopify's choice as* pointing at a deleted or inactive carrier dates by USPS
+- [x] *Date Shopify's choice as* pointing at a deleted or inactive carrier dates by USPS
 
 ## Blocked by
 
@@ -105,3 +105,12 @@ source.
   `trackingCompany` sets `normalized_carrier_id` and `ship_date` is the date we sent as
   `shippingDatetime`. The quote-time dates for Shopify and Amazon no longer read the fake
   rows. The Shopify setting falls back to USPS.
+- **2026-09-25** — Done. `ShipDateService` takes a `Carrier` row, or null for a carrier
+  with no row. A rated purchase is dated by the offer's `carrier_id`, and a blind one by
+  `DataSource::shipDateCarrier()`. Quoting dates a direct task by its carrier and Shopify
+  through the connection, and sends Amazon no date. End of Day works by carrier id,
+  counts by `normalized_carrier_id`, and leaves the two fake rows out. The `Shopify` row
+  is seeded with no cutoff. The `shipped()` package factory now sets
+  `normalized_carrier_id`, as a real purchase does. The `ShipDateService` tests that
+  covered alias normalization and the `Shopify` row's cutoff were rewritten for carrier
+  rows, or replaced in `ShipDateByExpectedCarrierTest`.
