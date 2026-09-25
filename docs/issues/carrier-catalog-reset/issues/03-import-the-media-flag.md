@@ -1,6 +1,6 @@
 # Import the media flag through a connection's field mapping
 
-Status: needs-triage
+Status: done
 
 Repo: `polybag`
 
@@ -30,12 +30,24 @@ PRD. It is not part of this issue.
 
 ## Acceptance criteria
 
-- [ ] With the media field mapped, an import creates and updates products with the flag
+- [x] With the media field mapped, an import creates and updates products with the flag
       set from the source row
-- [ ] With it unmapped, an import leaves an existing product's flag untouched
-- [ ] An unrecognised value leaves the flag unchanged and does not fail the import
-- [ ] The Database driver reference documents the field
+- [x] With it unmapped, an import leaves an existing product's flag untouched
+- [x] An unrecognised value leaves the flag unchanged and does not fail the import
+- [x] The Database driver reference documents the field
 
 ## Blocked by
 
 - [`02`](02-media-mail-for-qualifying-packages.md)
+
+## Comments
+
+- **2026-09-25** — **Implemented.** A column mapped to `is_media` in
+  `field_mapping.shipment_item` is read by `ImportReferenceResolver` and written to the
+  product alongside `barcode` and `weight`, so like them it applies only while
+  `auto_update_products` is on. It reads `1`/`0`, `true`/`false`, `t`/`f`, `yes`/`no`,
+  `y`/`n` and `on`/`off`, in any case and trimmed. A NULL column is treated as unmapped and
+  logs nothing. Any other value, including an empty string, leaves the flag alone and logs
+  a warning, since an empty string may mean "unknown" and must not clear a flag set by hand.
+  The warning goes to the application log, not the import run's error list, because the
+  resolver has no run recorder.
