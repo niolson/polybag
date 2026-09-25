@@ -228,9 +228,9 @@ trait HasFedexRegistration
             ->label(fn (): string => filled($this->record?->secret('child_key')) ? 'Reconnect FedEx Account' : 'Connect FedEx Account')
             ->icon('heroicon-o-link')
             ->color(fn (): string => filled($this->record?->secret('child_key')) ? 'warning' : 'primary')
-            ->visible(fn (): bool => $this->record?->carrier?->name === 'FedEx')
+            ->visible(fn (): bool => $this->record?->carrier?->name === Carrier::FEDEX)
             ->modalHeading(fn (): HtmlString => new HtmlString(
-                '<span class="flex items-center gap-2"><img src="'.Carrier::logoUrlForName('FedEx').'" alt="FedEx" class="h-8 inline-block">'
+                '<span class="flex items-center gap-2"><img src="'.Carrier::logoUrlForName(Carrier::FEDEX).'" alt="FedEx" class="h-8 inline-block">'
                     .(filled($this->record?->secret('child_key')) ? 'Reconnect FedEx Account' : 'Connect FedEx Account')
                     .'</span>'
             ))
@@ -509,7 +509,7 @@ trait HasFedexRegistration
             ->label('Disconnect FedEx')
             ->icon('heroicon-o-x-mark')
             ->color('danger')
-            ->visible(fn (): bool => $this->record?->carrier?->name === 'FedEx' && filled($this->record?->secret('child_key')))
+            ->visible(fn (): bool => $this->record?->carrier?->name === Carrier::FEDEX && filled($this->record?->secret('child_key')))
             ->requiresConfirmation()
             ->modalHeading('Disconnect FedEx Account')
             ->modalDescription('This will remove your FedEx child credentials. You can reconnect anytime.')

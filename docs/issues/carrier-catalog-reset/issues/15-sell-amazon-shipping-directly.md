@@ -19,8 +19,8 @@ Shipping v2 is the only API Amazon Shipping has. A method lists Amazon Shipping 
 the scoped connection is its account, and automation buys it like any listed direct
 service. Buy Shipping keeps Amazon's own orders.
 
-- **The carrier.** Amazon Shipping (seeded in `11`) gets `adapter = amazon_shipping`. A
-  direct adapter is registered under that key.
+- **The carrier.** Amazon Shipping (seeded in `11`) is a system carrier, so its name is
+  fixed (`05`). A direct adapter is registered under that name.
 - **The account is the scoped connection.** Nothing about routing changes except the
   carrier row (ADR-0002's 2026-09-22 amendment): four precedence bands, `rate_shop`
   always off, and a client's own connection scoped only to that client.
@@ -84,7 +84,7 @@ service. Buy Shipping keeps Amazon's own orders.
 
 ## Blocked by
 
-- [`05`](05-key-direct-integrations-by-carrier-adapter.md)
+- [`05`](05-lock-system-carrier-names.md)
 - [`06`](06-rate-source-first.md)
 - [`11`](11-seed-amazon-shipping-ontrac-and-amazon-mappings.md), which seeds the carrier
 

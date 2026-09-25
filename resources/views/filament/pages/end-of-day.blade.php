@@ -36,7 +36,7 @@
                         <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
                             @foreach($carrierSummary as $summary)
                                 <tr class="hover:bg-gray-50 dark:hover:bg-white/5 transition-colors">
-                                    <td class="px-4 py-3 font-medium">{{ $summary['carrier'] }}</td>
+                                    <td class="px-4 py-3 font-medium">{{ $summary['label'] }}</td>
                                     <td class="px-4 py-3">
                                         <span class="font-medium">{{ $summary['ship_date'] }}</span>
                                     </td>
@@ -64,7 +64,7 @@
                                         @endif
                                         <x-filament::button
                                             wire:click="endShippingDay('{{ $summary['carrier'] }}')"
-                                            wire:confirm="End {{ $summary['carrier'] }} shipping day? Ship date will advance from {{ $summary['ship_date'] }} to {{ $summary['next_ship_date'] }}."
+                                            wire:confirm="End {{ $summary['label'] }} shipping day? Ship date will advance from {{ $summary['ship_date'] }} to {{ $summary['next_ship_date'] }}."
                                             icon="heroicon-o-sun"
                                             size="sm"
                                             color="info"

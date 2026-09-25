@@ -6,7 +6,7 @@ use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Client;
 use App\Models\Location;
-use App\Services\Carriers\AmazonBuyShippingAdapter;
+use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\UspsAdapter;
 use App\Services\OAuthService;
 use App\Services\SettingsService;
@@ -32,12 +32,14 @@ class CarrierAccountForm
                     ->schema([
                         Select::make('carrier_id')
                             ->label('Carrier')
-                            // Amazon postage is bought through an Amazon connection, never a
-                            // direct account (ADR-0002, 2026-09-22 amendment). An existing
-                            // record still shows its own carrier.
+                            // Only carriers whose integration keeps its account here. Shopify
+                            // and Amazon postage is bought through a connection (ADR-0002,
+                            // 2026-09-22 amendment). An existing record still shows its own
+                            // carrier.
                             ->options(fn (string $operation) => Carrier::active()
-                                ->when($operation !== 'edit', fn ($query) => $query->where('name', '!=', AmazonBuyShippingAdapter::SOURCE_NAME))
-                                ->pluck('name', 'id'))
+                                ->when($operation !== 'edit', fn ($query) => $query->whereIn('name', CarrierRegistry::carrierAccountCarrierNames()))
+                                ->get()
+                                ->mapWithKeys(fn (Carrier $carrier): array => [$carrier->id => $carrier->label()]))
                             ->required()
                             // Fixed once saved. The credentials below are issued
                             // by this carrier and mean nothing to another one, so
@@ -58,7 +60,7 @@ class CarrierAccountForm
                                 $carrier = Carrier::find($state);
 
                                 if ($carrier && CarrierAccount::where('carrier_id', $state)->doesntExist()) {
-                                    $set('name', $carrier->name.' Default');
+                                    $set('name', $carrier->label().' Default');
                                 }
                             }),
                         TextInput::make('name')
@@ -97,7 +99,7 @@ class CarrierAccountForm
                             ->helperText('Leave blank to auto-populate from the OAuth token.')
                             ->maxLength(50),
                     ])
-                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === 'USPS')
+                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === Carrier::USPS)
                     ->columns(2)
                     ->collapsible(),
 
@@ -117,7 +119,7 @@ class CarrierAccountForm
                             ->afterStateHydrated(fn ($component) => $component->state(null))
                             ->dehydrated(fn ($state): bool => filled($state)),
                     ])
-                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === 'USPS')
+                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === Carrier::USPS)
                     ->columns(2)
                     ->collapsed()
                     ->collapsible(),
@@ -149,7 +151,7 @@ class CarrierAccountForm
                                 && $record->credential('child_env') === 'sandbox')
                             ->afterStateHydrated(fn ($component, ?CarrierAccount $record) => $component->state($record?->fedexAccountNumber('sandbox'))),
                     ])
-                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === 'FedEx')
+                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === Carrier::FEDEX)
                     ->columns(2)
                     ->collapsible(),
 
@@ -181,7 +183,7 @@ class CarrierAccountForm
                             ->afterStateHydrated(fn ($component) => $component->state(null))
                             ->dehydrated(fn ($state): bool => filled($state)),
                     ])
-                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === 'FedEx')
+                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === Carrier::FEDEX)
                     ->columns(2)
                     ->collapsed()
                     ->collapsible(),
@@ -232,7 +234,7 @@ class CarrierAccountForm
                             ->maxLength(50)
                             ->afterStateHydrated(fn ($component, ?CarrierAccount $record) => $component->state($record?->credential('account_number'))),
                     ])
-                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === 'UPS')
+                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === Carrier::UPS)
                     ->collapsible(),
 
                 Section::make('Advanced / API App Credentials')
@@ -251,7 +253,7 @@ class CarrierAccountForm
                             ->afterStateHydrated(fn ($component) => $component->state(null))
                             ->dehydrated(fn ($state): bool => filled($state)),
                     ])
-                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === 'UPS')
+                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === Carrier::UPS)
                     ->columns(2)
                     ->collapsed()
                     ->collapsible(),

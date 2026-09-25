@@ -129,7 +129,7 @@ class UspsAddressValidator implements AddressValidationInterface
      */
     protected function resolveAccount(Shipment $shipment): ?CarrierAccount
     {
-        $carrierId = Carrier::where('name', 'USPS')->value('id');
+        $carrierId = Carrier::where('name', Carrier::USPS)->value('id');
 
         return $carrierId
             ? CarrierAccount::resolveForShipment($carrierId, null, $shipment->client_id)->first()

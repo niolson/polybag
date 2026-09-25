@@ -128,7 +128,7 @@ class AppServiceProvider extends ServiceProvider
         if (config('app.fake_carriers')) {
             $registry = app(CarrierRegistry::class);
 
-            foreach (['USPS', 'FedEx', 'UPS'] as $carrier) {
+            foreach ([Carrier::USPS, Carrier::FEDEX, Carrier::UPS] as $carrier) {
                 $registry->registerInstance($carrier, new FakeCarrierAdapter($carrier));
             }
         }

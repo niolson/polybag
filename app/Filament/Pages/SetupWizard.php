@@ -86,12 +86,12 @@ class SetupWizard extends Page
             'location_timezone' => $location?->timezone ?? 'America/New_York',
 
             // Step 2: Carriers
-            'carrier_usps_active' => Carrier::where('name', 'USPS')->value('active') ?? false,
-            'carrier_usps_services' => CarrierService::whereHas('carrier', fn ($q) => $q->where('name', 'USPS'))->where('active', true)->pluck('id')->toArray(),
-            'carrier_fedex_active' => Carrier::where('name', 'FedEx')->value('active') ?? false,
-            'carrier_fedex_services' => CarrierService::whereHas('carrier', fn ($q) => $q->where('name', 'FedEx'))->where('active', true)->pluck('id')->toArray(),
-            'carrier_ups_active' => Carrier::where('name', 'UPS')->value('active') ?? false,
-            'carrier_ups_services' => CarrierService::whereHas('carrier', fn ($q) => $q->where('name', 'UPS'))->where('active', true)->pluck('id')->toArray(),
+            'carrier_usps_active' => Carrier::where('name', Carrier::USPS)->value('active') ?? false,
+            'carrier_usps_services' => CarrierService::whereHas('carrier', fn ($q) => $q->where('name', Carrier::USPS))->where('active', true)->pluck('id')->toArray(),
+            'carrier_fedex_active' => Carrier::where('name', Carrier::FEDEX)->value('active') ?? false,
+            'carrier_fedex_services' => CarrierService::whereHas('carrier', fn ($q) => $q->where('name', Carrier::FEDEX))->where('active', true)->pluck('id')->toArray(),
+            'carrier_ups_active' => Carrier::where('name', Carrier::UPS)->value('active') ?? false,
+            'carrier_ups_services' => CarrierService::whereHas('carrier', fn ($q) => $q->where('name', Carrier::UPS))->where('active', true)->pluck('id')->toArray(),
 
             // Step 3: Box sizes (repeater is for new additions only)
             'prepopulate_box_sizes' => false,
@@ -203,9 +203,9 @@ class SetupWizard extends Page
             ->icon('heroicon-o-truck')
             ->description('Select carriers and services to enable')
             ->schema([
-                $this->carrierSection('USPS', 'usps'),
-                $this->carrierSection('FedEx', 'fedex'),
-                $this->carrierSection('UPS', 'ups'),
+                $this->carrierSection(Carrier::USPS, 'usps'),
+                $this->carrierSection(Carrier::FEDEX, 'fedex'),
+                $this->carrierSection(Carrier::UPS, 'ups'),
             ])
             ->afterValidation(function (): void {
                 $this->saveCarriers();
@@ -383,7 +383,7 @@ class SetupWizard extends Page
                                         ->where('active', true)
                                         ->with('carrier')
                                         ->get()
-                                        ->groupBy(fn ($cs) => $cs->carrier->name)
+                                        ->groupBy(fn ($cs) => $cs->carrier->label())
                                         ->flatMap(fn ($services, $carrier) => $services->mapWithKeys(
                                             fn ($cs): array => [$cs->id => "{$carrier}: {$cs->name}"]
                                         ))
@@ -615,15 +615,18 @@ class SetupWizard extends Page
                             ->filter(fn (CarrierAccount $a): bool => $a->connectionStatus() === 'Needs Setup');
 
                         $items = $incomplete->map(function (CarrierAccount $account): string {
-                            $url = CarrierAccountResource::getUrl('edit', ['record' => $account->id]);
-                            $verb = $account->carrier->name === 'FedEx' ? 'Register' : 'Connect';
+                            // Escaped: the display name and the account's carrier are operator-edited.
+                            $url = e(CarrierAccountResource::getUrl('edit', ['record' => $account->id]));
+                            $verb = $account->carrier->name === Carrier::FEDEX ? 'Register' : 'Connect';
+                            $carrierLabel = e($account->carrier->label());
 
-                            return "<li><a href=\"{$url}\" class=\"text-primary-600 hover:underline font-medium\">{$verb} {$account->carrier->name}</a> — credentials required before shipping</li>";
+                            return "<li><a href=\"{$url}\" class=\"text-primary-600 hover:underline font-medium\">{$verb} {$carrierLabel}</a> — credentials required before shipping</li>";
                         })->values()->all();
 
                         if ($source = DataSource::importing()->first()) {
-                            $url = DataSourceResource::getUrl('edit', ['record' => $source->id]);
-                            $items[] = "<li><a href=\"{$url}\" class=\"text-primary-600 hover:underline font-medium\">Finish configuring {$source->name}</a> — credentials, queries, and connection test</li>";
+                            $url = e(DataSourceResource::getUrl('edit', ['record' => $source->id]));
+                            $sourceName = e($source->name);
+                            $items[] = "<li><a href=\"{$url}\" class=\"text-primary-600 hover:underline font-medium\">Finish configuring {$sourceName}</a> — credentials, queries, and connection test</li>";
                         }
 
                         $items[] = '<li class="text-gray-500">Configure your printer &amp; scale in <strong>Device Settings</strong> on each workstation</li>';
@@ -692,7 +695,7 @@ class SetupWizard extends Page
     {
         $data = $this->form->getState();
 
-        foreach (['USPS' => 'usps', 'FedEx' => 'fedex', 'UPS' => 'ups'] as $name => $key) {
+        foreach ([Carrier::USPS => 'usps', Carrier::FEDEX => 'fedex', Carrier::UPS => 'ups'] as $name => $key) {
             $active = $data["carrier_{$key}_active"] ?? false;
             $selectedServices = $data["carrier_{$key}_services"] ?? [];
 
@@ -715,7 +718,7 @@ class SetupWizard extends Page
 
         // Create a default CarrierAccount + global (null,null) scope for each
         // newly-enabled carrier so resolveForShipment() can find the account.
-        foreach (['USPS', 'FedEx', 'UPS'] as $carrierName) {
+        foreach ([Carrier::USPS, Carrier::FEDEX, Carrier::UPS] as $carrierName) {
             $carrier = Carrier::where('name', $carrierName)->first();
             if (! $carrier?->active) {
                 continue;

@@ -2,6 +2,7 @@
 
 namespace App\Enums;
 
+use App\Models\Carrier;
 use Filament\Support\Contracts\HasLabel;
 
 /**
@@ -100,7 +101,7 @@ enum CarrierPackaging: string implements HasLabel
             self::UspsLargeFlatRateBox,
             self::UspsExpressFlatRateEnvelope,
             self::UspsExpressLegalFlatRateEnvelope,
-            self::UspsExpressPaddedFlatRateEnvelope => 'USPS',
+            self::UspsExpressPaddedFlatRateEnvelope => Carrier::USPS,
             self::FedexEnvelope,
             self::FedexPak,
             self::FedexTube,
@@ -111,14 +112,14 @@ enum CarrierPackaging: string implements HasLabel
             self::FedexLargeBox,
             self::FedexExtraLargeBox,
             self::Fedex10kgBox,
-            self::Fedex25kgBox => 'FedEx',
+            self::Fedex25kgBox => Carrier::FEDEX,
             self::UpsLetter,
             self::UpsPak,
             self::UpsTube,
             self::UpsExpressBox,
             self::UpsExpressBoxSmall,
             self::UpsExpressBoxMedium,
-            self::UpsExpressBoxLarge => 'UPS',
+            self::UpsExpressBoxLarge => Carrier::UPS,
         };
     }
 

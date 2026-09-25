@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\CarrierServiceResource\Pages;
 
 use App\Filament\Resources\CarrierServiceResource;
+use App\Models\Carrier;
 use App\Models\CarrierService;
 use Filament\Actions;
 use Filament\Resources\Pages\ListRecords;
@@ -21,7 +22,7 @@ class ListCarrierServices extends ListRecords
 
     public function getFooter(): ?View
     {
-        $hasFedex = CarrierService::whereHas('carrier', fn ($q) => $q->where('name', 'FedEx'))->exists();
+        $hasFedex = CarrierService::whereHas('carrier', fn ($q) => $q->where('name', Carrier::FEDEX))->exists();
 
         if (! $hasFedex) {
             return null;

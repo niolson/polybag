@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Http\Integrations\Fedex\FedexConnector;
+use App\Services\Carriers\CarrierRegistry;
 use App\Services\SettingsService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -11,6 +12,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Cache;
+use InvalidArgumentException;
 
 class CarrierAccount extends Model
 {
@@ -48,6 +50,23 @@ class CarrierAccount extends Model
 
     protected static function booted(): void
     {
+        // Only a carrier whose integration keeps its account here can have
+        // one. Shopify, Amazon, carriers reached only through a channel, and
+        // Amazon Shipping (whose account is a connection) cannot.
+        static::saving(function (CarrierAccount $account): void {
+            if (! $account->isDirty('carrier_id')) {
+                return;
+            }
+
+            $carrierName = Carrier::query()->whereKey($account->carrier_id)->value('name');
+
+            if (! is_string($carrierName) || ! CarrierRegistry::takesCarrierAccount($carrierName)) {
+                throw new InvalidArgumentException(
+                    ($carrierName ?? 'This carrier').' has no direct integration that uses a carrier account.',
+                );
+            }
+        });
+
         static::saved(function (CarrierAccount $account): void {
             if ($account->wasChanged('carrier_id')) {
                 $account->restampScopes();
@@ -183,8 +202,8 @@ class CarrierAccount extends Model
     public function connectionStatus(): string
     {
         return match ($this->carrier?->name) {
-            'USPS', 'UPS' => filled($this->secret('oauth_token')) ? 'Connected' : 'Needs Setup',
-            'FedEx' => $this->hasUsableCredentials() ? 'Connected' : 'Needs Setup',
+            Carrier::USPS, Carrier::UPS => filled($this->secret('oauth_token')) ? 'Connected' : 'Needs Setup',
+            Carrier::FEDEX => $this->hasUsableCredentials() ? 'Connected' : 'Needs Setup',
             default => 'Active',
         };
     }
@@ -192,12 +211,12 @@ class CarrierAccount extends Model
     public function hasUsableCredentials(): bool
     {
         return match ($this->carrier?->name) {
-            'FedEx' => filled($this->fedexAccountNumber())
+            Carrier::FEDEX => filled($this->fedexAccountNumber())
                 && (
                     $this->hasFedexChildCredentialsForActiveEnvironment()
                     || $this->hasDirectFedexCredentials()
                 ),
-            'USPS' => filled($this->credential('crid'))
+            Carrier::USPS => filled($this->credential('crid'))
                 && (
                     filled($this->secret('oauth_token'))
                     || (
@@ -205,7 +224,7 @@ class CarrierAccount extends Model
                         && filled($this->secret('client_secret'))
                     )
                 ),
-            'UPS' => filled($this->credential('account_number'))
+            Carrier::UPS => filled($this->credential('account_number'))
                 && (
                     filled($this->secret('oauth_token'))
                     || (

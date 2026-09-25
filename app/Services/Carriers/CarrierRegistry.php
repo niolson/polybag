@@ -8,6 +8,8 @@ use App\Contracts\CarrierPolicy;
 use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\DiscoversServices;
 use App\Contracts\PostageOfferSource;
+use App\Contracts\UsesCarrierAccount;
+use App\Models\Carrier;
 use InvalidArgumentException;
 
 class CarrierRegistry
@@ -22,15 +24,25 @@ class CarrierRegistry
      */
     protected array $instances = [];
 
+    /**
+     * Adapters by carrier name. A system carrier's name is fixed, so it is a
+     * stable key (ADR-0006 decision 1, as amended 2026-09-25). The `Shopify`
+     * and `Amazon` entries are sources posing as carriers, and are
+     * transitional until `carrier-catalog-reset/09` and `12` remove the rows.
+     *
+     * @var array<string, class-string<PostageOfferSource>>
+     */
+    private const DEFAULT_ADAPTERS = [
+        Carrier::USPS => UspsAdapter::class,
+        Carrier::FEDEX => FedexAdapter::class,
+        Carrier::UPS => UpsAdapter::class,
+        ShopifyAdapter::CARRIER_NAME => ShopifyAdapter::class,
+        AmazonBuyShippingAdapter::SOURCE_NAME => AmazonBuyShippingAdapter::class,
+    ];
+
     public function __construct()
     {
-        $this->adapters = [
-            'USPS' => UspsAdapter::class,
-            'FedEx' => FedexAdapter::class,
-            'UPS' => UpsAdapter::class,
-            ShopifyAdapter::CARRIER_NAME => ShopifyAdapter::class,
-            AmazonBuyShippingAdapter::SOURCE_NAME => AmazonBuyShippingAdapter::class,
-        ];
+        $this->adapters = self::DEFAULT_ADAPTERS;
     }
 
     /**
@@ -163,6 +175,33 @@ class CarrierRegistry
     }
 
     /**
+     * Whether a carrier's integration keeps its account as a `CarrierAccount`.
+     *
+     * Asked of the shipped integration, not of whatever is registered now, so
+     * a test fake or `FAKE_CARRIERS` never changes which carriers may have an
+     * account.
+     */
+    public static function takesCarrierAccount(string $carrierName): bool
+    {
+        $adapterClass = self::DEFAULT_ADAPTERS[$carrierName] ?? null;
+
+        return $adapterClass !== null && is_subclass_of($adapterClass, UsesCarrierAccount::class);
+    }
+
+    /**
+     * Carrier names whose integration keeps its account as a `CarrierAccount`.
+     *
+     * @return list<string>
+     */
+    public static function carrierAccountCarrierNames(): array
+    {
+        return array_values(array_filter(
+            array_keys(self::DEFAULT_ADAPTERS),
+            self::takesCarrierAccount(...),
+        ));
+    }
+
+    /**
      * Get all registered carrier names.
      *
      * @return array<string>
@@ -213,13 +252,7 @@ class CarrierRegistry
      */
     public function reset(): void
     {
-        $this->adapters = [
-            'USPS' => UspsAdapter::class,
-            'FedEx' => FedexAdapter::class,
-            'UPS' => UpsAdapter::class,
-            ShopifyAdapter::CARRIER_NAME => ShopifyAdapter::class,
-            AmazonBuyShippingAdapter::SOURCE_NAME => AmazonBuyShippingAdapter::class,
-        ];
+        $this->adapters = self::DEFAULT_ADAPTERS;
         $this->instances = [];
     }
 }

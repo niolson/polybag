@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
+use App\Models\Carrier;
 use App\Models\PackageLabel;
 use App\Models\Shipment;
 use Illuminate\Console\Command;
@@ -256,7 +257,7 @@ class GenerateTestData extends Command
     {
         // carrier name => [weight (out of 100), services => [[code, name, weight, costMin, costMax]]]
         $this->carrierConfig = [
-            'USPS' => [
+            Carrier::USPS => [
                 'weight' => 65,
                 'services' => [
                     ['code' => 'USPS_GROUND_ADVANTAGE', 'name' => 'Ground Advantage', 'weight' => 60, 'costMin' => 4.00, 'costMax' => 12.00],
@@ -264,7 +265,7 @@ class GenerateTestData extends Command
                     ['code' => 'PRIORITY_MAIL_EXPRESS', 'name' => 'Priority Mail Express', 'weight' => 10, 'costMin' => 22.00, 'costMax' => 45.00],
                 ],
             ],
-            'FedEx' => [
+            Carrier::FEDEX => [
                 'weight' => 25,
                 'services' => [
                     ['code' => 'GROUND_HOME_DELIVERY', 'name' => 'FedEx Ground Home Delivery', 'weight' => 50, 'costMin' => 7.00, 'costMax' => 18.00],
@@ -272,7 +273,7 @@ class GenerateTestData extends Command
                     ['code' => 'FEDEX_EXPRESS_SAVER', 'name' => 'FedEx Express Saver', 'weight' => 20, 'costMin' => 15.00, 'costMax' => 35.00],
                 ],
             ],
-            'UPS' => [
+            Carrier::UPS => [
                 'weight' => 10,
                 'services' => [
                     ['code' => '03', 'name' => 'UPS Ground', 'weight' => 60, 'costMin' => 8.00, 'costMax' => 20.00],
@@ -637,7 +638,7 @@ class GenerateTestData extends Command
             }
         }
 
-        return 'USPS';
+        return Carrier::USPS;
     }
 
     private function pickService(string $carrier): array
@@ -674,9 +675,9 @@ class GenerateTestData extends Command
     private function generateTrackingNumber(string $carrier): string
     {
         return match ($carrier) {
-            'USPS' => '94'.$this->randomDigits(20),
-            'FedEx' => $this->randomDigits(12),
-            'UPS' => '1Z'.$this->randomAlphanumeric(6).$this->randomDigits(10),
+            Carrier::USPS => '94'.$this->randomDigits(20),
+            Carrier::FEDEX => $this->randomDigits(12),
+            Carrier::UPS => '1Z'.$this->randomAlphanumeric(6).$this->randomDigits(10),
             default => $this->randomDigits(20),
         };
     }

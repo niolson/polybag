@@ -10,6 +10,7 @@ use App\Http\Integrations\Fedex\FedexConnector;
 use App\Http\Integrations\Fedex\Requests\CreateFreightShipment;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Http\Integrations\Fedex\Requests\Rates;
+use App\Models\Carrier;
 use App\Models\Package;
 use App\Models\PackageLabel;
 use App\Models\Shipment;
@@ -242,7 +243,7 @@ class FedexTestCaseRunner
                 'shipment_id' => $shipment->id,
                 'status' => PackageStatus::Shipped,
                 'postage_source' => PostageSource::CarrierAccount,
-                'carrier' => 'FedEx',
+                'carrier' => Carrier::FEDEX,
                 'service' => data_get($body, 'output.transactionShipments.0.serviceType', $testCase->description),
                 // FedEx names the service it sold in its own ship response.
                 'service_evidence' => ServiceEvidence::Confirmed,

@@ -199,7 +199,7 @@ readonly class RateResponse
         }
 
         // Fall back to commitment name or transit time
-        $detail = $this->carrier === 'USPS'
+        $detail = $this->carrier === Carrier::USPS
             ? ($this->deliveryCommitment ?? '')
             : ($this->transitTime ?? '');
 

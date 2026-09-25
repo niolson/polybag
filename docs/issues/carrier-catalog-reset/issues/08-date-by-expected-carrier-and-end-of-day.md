@@ -38,10 +38,11 @@ source.
 - **End of Day.**
   - It lists every active carrier, with or without an adapter, so OnTrac and Amazon
     Shipping (from `11`) have a day that can be ended.
-  - The two fake rows leave it, through `05`'s transitional list, because nothing is
-    dated by them any more.
+  - The two fake rows leave it, because nothing is dated by them any more. Exclude them by
+    `ShopifyAdapter::CARRIER_NAME` and `AmazonBuyShippingAdapter::SOURCE_NAME`, marked
+    transitional in the code, until `09` and `12` remove the rows.
   - The package count per carrier covers every label that carrier dates, from any source,
-    read by `normalized_carrier_id` (`05`). The manifest count and the manifest action stay
+    read by `normalized_carrier_id` rather than by `packages.carrier`. The manifest count and the manifest action stay
     direct labels only, and appear only where the carrier's integration supports a
     manifest.
   - Ending a carrier's day moves the date of everything it dates, whichever source sells
@@ -67,8 +68,8 @@ source.
 - [`02`](02-media-mail-for-qualifying-packages.md) and
   [`04`](04-media-mail-and-bpm-through-shopify-and-amazon.md), which store the carrier on
   every offer
-- [`05`](05-key-direct-integrations-by-carrier-adapter.md), for `normalized_carrier_id` on
-  End of Day and the transitional list
+- [`05`](05-lock-system-carrier-names.md), which fixes the names End of Day and ship
+  dates look carriers up by
 
 ## Comments
 
@@ -85,3 +86,5 @@ source.
 
   What is given up is a cutoff for Shopify that differs from every carrier's. The setting
   can point at any carrier if one is ever wanted.
+- **2026-09-25** — `05` no longer moves End of Day to `normalized_carrier_id` or keeps a
+  transitional list. Both are done here (ADR-0006, 2026-09-25 amendment).

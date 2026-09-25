@@ -122,7 +122,7 @@ class UnmappedObservedServices extends Page implements HasTable
                     ->sortable(),
                 Tables\Columns\TextColumn::make('carrierService.name')
                     ->label('Mapped to')
-                    ->description(fn (ObservedService $record): ?string => $record->carrierService?->carrier?->name)
+                    ->description(fn (ObservedService $record): ?string => $record->carrierService?->carrier?->label())
                     ->placeholder('Unmapped'),
             ])
             ->filters([
@@ -230,7 +230,7 @@ class UnmappedObservedServices extends Page implements HasTable
 
                         Notification::make()
                             ->success()
-                            ->title("Created {$carrier->name} {$data['name']}")
+                            ->title("Created {$carrier->label()} {$data['name']}")
                             ->body(static::coverage($mapped))
                             ->send();
                     }),
@@ -265,9 +265,9 @@ class UnmappedObservedServices extends Page implements HasTable
         return CarrierService::query()
             ->with('carrier')
             ->get()
-            ->sortBy(fn (CarrierService $service): string => $service->carrier->name.' '.$service->name)
+            ->sortBy(fn (CarrierService $service): string => $service->carrier->label().' '.$service->name)
             ->mapWithKeys(fn (CarrierService $service): array => [
-                $service->getKey() => trim($service->carrier->name.' — '.$service->name),
+                $service->getKey() => trim($service->carrier->label().' — '.$service->name),
             ])
             ->all();
     }

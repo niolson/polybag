@@ -50,7 +50,7 @@ class FedexRunConsolidationTestCase extends Command
             return self::FAILURE;
         }
 
-        $carrierId = Carrier::where('name', 'FedEx')->value('id');
+        $carrierId = Carrier::where('name', Carrier::FEDEX)->value('id');
         $account = $carrierId
             ? CarrierAccount::active()->where('carrier_id', $carrierId)->first()
             : null;

@@ -3,6 +3,7 @@
 namespace App\Services\Carriers;
 
 use App\Contracts\DirectCarrierAdapter;
+use App\Contracts\UsesCarrierAccount;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\PackageData;
@@ -25,6 +26,7 @@ use App\Http\Integrations\Fedex\Requests\CancelShipment as CancelShipmentRequest
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Http\Integrations\Fedex\Requests\Rates;
 use App\Http\Integrations\Fedex\Requests\TrackShipment;
+use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Location;
 use App\Models\Package;
@@ -46,7 +48,7 @@ use Saloon\Exceptions\Request\Statuses\GatewayTimeoutException;
 use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
 
-class FedexAdapter implements DirectCarrierAdapter
+class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
 {
     use BuildsCustomerReferences;
     use ConsultsCarrierPolicyForOffers;
@@ -228,7 +230,7 @@ class FedexAdapter implements DirectCarrierAdapter
 
     public function getCarrierName(): string
     {
-        return 'FedEx';
+        return Carrier::FEDEX;
     }
 
     public function supportsTracking(): bool
@@ -287,7 +289,7 @@ class FedexAdapter implements DirectCarrierAdapter
 
         return new PreparedRateRequest(
             pendingRequest: $pendingRequest,
-            carrierName: 'FedEx',
+            carrierName: Carrier::FEDEX,
         );
     }
 
@@ -753,7 +755,7 @@ class FedexAdapter implements DirectCarrierAdapter
             return ShipResponse::success(
                 trackingNumber: $trackingNumber,
                 cost: (float) $totalCharge,
-                carrier: 'FedEx',
+                carrier: Carrier::FEDEX,
                 service: $request->selectedRate->serviceName,
                 labelData: $labelData,
                 labelFormat: $request->labelFormat,
@@ -1159,7 +1161,7 @@ class FedexAdapter implements DirectCarrierAdapter
             ];
 
             $results->push(new RateResponse(
-                carrier: 'FedEx',
+                carrier: Carrier::FEDEX,
                 serviceCode: $detail['serviceType'],
                 serviceName: $detail['serviceName'] ?? $detail['serviceType'],
                 price: (float) ($ratedShipmentDetails['totalNetCharge'] ?? 0),
@@ -1344,7 +1346,7 @@ class FedexAdapter implements DirectCarrierAdapter
             ];
 
             $results->push(new RateResponse(
-                carrier: 'FedEx',
+                carrier: Carrier::FEDEX,
                 serviceCode: $serviceType,
                 serviceName: $serviceName,
                 price: (float) ($ratedShipmentDetails['totalNetCharge'] ?? 0),

@@ -16,6 +16,9 @@ class CarrierLogoColumn
      * @param  string  $name  Filament column name
      * @param  \Closure|string|null  $state  Optional closure or attribute path to resolve the carrier name.
      *                                       If omitted the column name is used to read the value from $record.
+     *                                       A closure may return a `Carrier`: its name finds the logo and
+     *                                       its label is the text shown. A name string is shown as the
+     *                                       label of the carrier row it names, if any.
      */
     public static function make(string $name, \Closure|string|null $state = null): TextColumn
     {
@@ -23,23 +26,26 @@ class CarrierLogoColumn
             ->label('Carrier')
             ->html()
             ->state(function ($record) use ($name, $state): string {
-                $carrierName = match (true) {
+                $carrier = match (true) {
                     $state instanceof \Closure => ($state)($record),
                     is_string($state) => data_get($record, $state),
                     default => data_get($record, $name),
                 };
 
-                if (! $carrierName) {
+                if (! $carrier) {
                     return '—';
                 }
+
+                $carrierName = $carrier instanceof Carrier ? $carrier->name : (string) $carrier;
+                $carrierLabel = $carrier instanceof Carrier ? $carrier->label() : Carrier::labelForName($carrierName);
 
                 $logoUrl = Carrier::logoUrlForName($carrierName);
 
                 if ($logoUrl) {
-                    return '<img src="'.e($logoUrl).'" alt="'.e($carrierName).'" class="h-7 max-w-[4rem] object-contain object-left">';
+                    return '<img src="'.e($logoUrl).'" alt="'.e($carrierLabel).'" title="'.e($carrierLabel).'" class="h-7 max-w-[4rem] object-contain object-left">';
                 }
 
-                return '<span class="inline-flex items-center h-7">'.e($carrierName).'</span>';
+                return '<span class="inline-flex items-center h-7">'.e($carrierLabel).'</span>';
             });
     }
 }

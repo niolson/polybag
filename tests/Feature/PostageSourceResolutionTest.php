@@ -331,11 +331,12 @@ describe('unresolvable ties', function (): void {
         // An account scoped to that row claims we buy postage from a storefront
         // the way we buy it from USPS, which would leave two sources claiming
         // one carrier with nothing to choose between them.
-        scopeAccountTo(CarrierAccount::create([
+        // A legacy row: the model now refuses an account on the Shopify carrier.
+        scopeAccountTo(CarrierAccount::withoutEvents(fn () => CarrierAccount::create([
             'carrier_id' => $shopifyCarrier->id,
             'name' => 'Shopify account',
             'active' => true,
-        ]), null, null);
+        ])), null, null);
 
         $resolution = app(PostageSourceResolver::class)
             ->resolve(packageFrom($source), [ShopifyAdapter::CARRIER_NAME]);
@@ -351,11 +352,12 @@ describe('unresolvable ties', function (): void {
 
     it('leaves a conflict on one carrier from affecting another', function (): void {
         $shopifyCarrier = Carrier::firstOrCreate(['name' => ShopifyAdapter::CARRIER_NAME]);
-        scopeAccountTo(CarrierAccount::create([
+        // A legacy row: the model now refuses an account on the Shopify carrier.
+        scopeAccountTo(CarrierAccount::withoutEvents(fn () => CarrierAccount::create([
             'carrier_id' => $shopifyCarrier->id,
             'name' => 'Shopify account',
             'active' => true,
-        ]), null, null);
+        ])), null, null);
 
         $usps = createUspsAccount();
 
@@ -379,11 +381,13 @@ describe('unresolvable ties', function (): void {
         $registry = app(CarrierRegistry::class);
         $carrier = Carrier::firstOrCreate(['name' => PolicyOnlyCarrierAdapter::CARRIER_NAME]);
 
-        scopeAccountTo(CarrierAccount::create([
+        // A legacy row: the model now refuses an account on a carrier with no
+        // integration that uses one.
+        scopeAccountTo(CarrierAccount::withoutEvents(fn () => CarrierAccount::create([
             'carrier_id' => $carrier->id,
             'name' => 'DHL Express account',
             'active' => true,
-        ]), null, null);
+        ])), null, null);
 
         $resolution = app(PostageSourceResolver::class)
             ->resolve(packageFrom(), [PolicyOnlyCarrierAdapter::CARRIER_NAME]);

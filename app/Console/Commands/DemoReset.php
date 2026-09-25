@@ -7,6 +7,7 @@ use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
 use App\Enums\ShipmentStatus;
 use App\Models\BoxSize;
+use App\Models\Carrier;
 use App\Models\Channel;
 use App\Models\ChannelAlias;
 use App\Models\DataSource;
@@ -72,7 +73,7 @@ class DemoReset extends Command
      * Mirrors app:generate-test-data so demo charts show a believable carrier mix.
      */
     private const CARRIER_CONFIG = [
-        'USPS' => [
+        Carrier::USPS => [
             'weight' => 60,
             'services' => [
                 ['code' => 'USPS_GROUND_ADVANTAGE', 'name' => 'Ground Advantage', 'weight' => 60, 'costMin' => 4.00, 'costMax' => 12.00],
@@ -80,14 +81,14 @@ class DemoReset extends Command
                 ['code' => 'PRIORITY_MAIL_EXPRESS', 'name' => 'Priority Mail Express', 'weight' => 10, 'costMin' => 22.00, 'costMax' => 45.00],
             ],
         ],
-        'FedEx' => [
+        Carrier::FEDEX => [
             'weight' => 20,
             'services' => [
                 ['code' => 'GROUND_HOME_DELIVERY', 'name' => 'FedEx Ground Home Delivery', 'weight' => 60, 'costMin' => 7.00, 'costMax' => 18.00],
                 ['code' => 'FEDEX_GROUND', 'name' => 'FedEx Ground', 'weight' => 40, 'costMin' => 8.00, 'costMax' => 20.00],
             ],
         ],
-        'UPS' => [
+        Carrier::UPS => [
             'weight' => 20,
             'services' => [
                 ['code' => '03', 'name' => 'UPS Ground', 'weight' => 70, 'costMin' => 8.00, 'costMax' => 20.00],
@@ -541,7 +542,7 @@ class DemoReset extends Command
             }
         }
 
-        return 'USPS';
+        return Carrier::USPS;
     }
 
     /**
@@ -567,9 +568,9 @@ class DemoReset extends Command
     private function generateTrackingNumber(string $carrier): string
     {
         return match ($carrier) {
-            'USPS' => '94'.$this->randomDigits(20),
-            'FedEx' => $this->randomDigits(12),
-            'UPS' => '1Z'.$this->randomAlphanumeric(6).$this->randomDigits(10),
+            Carrier::USPS => '94'.$this->randomDigits(20),
+            Carrier::FEDEX => $this->randomDigits(12),
+            Carrier::UPS => '1Z'.$this->randomAlphanumeric(6).$this->randomDigits(10),
             default => $this->randomDigits(20),
         };
     }

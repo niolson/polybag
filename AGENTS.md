@@ -92,7 +92,10 @@ Server-operations tooling for our own hosted deployment lives in a separate priv
 - **ShippingOffer** / **Offer** — Ephemeral, package-bound purchase authority for a quoted
   rate. Its opaque public ID may cross browser state; purchase tokens and source identity do not
 - **Carrier** / **CarrierService** — Authored carrier and service catalog used for policy and
-  normalization; external discovery never silently creates either
+  normalization; external discovery never silently creates either. A seeded carrier is
+  `is_system`: its `name` is the key the registry, seeders and alias matching use, so it
+  can never be renamed or deleted. The UI shows `Carrier::label()` (`display_name`, an
+  operator-owned relabel, else `name`); use the `Carrier::USPS`/`UPS`/`FEDEX` constants
 - **ObservedService** / **ServiceApproval** — Amazon-reported service identity and the
   separate, client/environment-scoped permission for unattended purchasing
 - **CarrierAccount** — Per-carrier API credentials; supports multiple accounts per carrier with OAuth

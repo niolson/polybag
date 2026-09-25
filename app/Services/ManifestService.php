@@ -59,8 +59,8 @@ class ManifestService
         }
 
         return match ($carrier) {
-            'USPS' => $this->createUspsManifest($packages, $shipDate, $locationId),
-            'FedEx' => $this->createFedexManifest(),
+            Carrier::USPS => $this->createUspsManifest($packages, $shipDate, $locationId),
+            Carrier::FEDEX => $this->createFedexManifest(),
             default => ManifestResponse::failure("Unsupported carrier: {$carrier}"),
         };
     }
@@ -76,7 +76,7 @@ class ManifestService
             return $package->carrierAccount;
         }
 
-        $carrierId = Carrier::where('name', 'USPS')->value('id');
+        $carrierId = Carrier::where('name', Carrier::USPS)->value('id');
 
         return $carrierId
             ? CarrierAccount::resolveForShipment(
@@ -150,7 +150,7 @@ class ManifestService
 
             return ManifestResponse::success(
                 manifestNumber: $combinedNumber,
-                carrier: 'USPS',
+                carrier: Carrier::USPS,
                 image: $lastImage,
             );
         } catch (\Exception $e) {
@@ -191,7 +191,7 @@ class ManifestService
 
                 // Create a placeholder manifest for externally manifested packages
                 $externalManifest = Manifest::create([
-                    'carrier' => 'USPS',
+                    'carrier' => Carrier::USPS,
                     'location_id' => $locationId,
                     'manifest_number' => 'EXTERNAL-'.now()->format('YmdHis'),
                     'manifest_date' => now()->toDateString(),
@@ -230,7 +230,7 @@ class ManifestService
 
             $manifest = DB::transaction(function () use ($manifestNumber, $image, $remainingPackages, $locationId) {
                 $manifest = Manifest::create([
-                    'carrier' => 'USPS',
+                    'carrier' => Carrier::USPS,
                     'location_id' => $locationId,
                     'manifest_number' => $manifestNumber,
                     'image' => $image,

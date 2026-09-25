@@ -4,6 +4,7 @@ namespace App\Services\Carriers;
 
 use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\RecoversUnresolvedPurchase;
+use App\Contracts\UsesCarrierAccount;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\CustomsItem;
@@ -28,6 +29,7 @@ use App\Http\Integrations\Ups\Requests\Rate;
 use App\Http\Integrations\Ups\Requests\TrackShipment;
 use App\Http\Integrations\Ups\Requests\VoidShipment;
 use App\Http\Integrations\Ups\UpsConnector;
+use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Package;
 use App\Services\Carriers\Concerns\BuildsCustomerReferences;
@@ -48,7 +50,7 @@ use Saloon\Exceptions\Request\ServerException;
 use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
 
-class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
+class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, UsesCarrierAccount
 {
     use BuildsCustomerReferences;
     use ConsultsCarrierPolicyForOffers;
@@ -232,7 +234,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
 
     public function getCarrierName(): string
     {
-        return 'UPS';
+        return Carrier::UPS;
     }
 
     public function getRates(RateRequest $request, array $serviceCodes): Collection
@@ -251,7 +253,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
 
             return $this->parseRateResponse($response, $request, $serviceCodes);
         } catch (\Exception $e) {
-            throw new CarrierRateFetchException('UPS', $e);
+            throw new CarrierRateFetchException(Carrier::UPS, $e);
         }
     }
 
@@ -268,7 +270,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
 
         return new PreparedRateRequest(
             pendingRequest: $pendingRequest,
-            carrierName: 'UPS',
+            carrierName: Carrier::UPS,
         );
     }
 
@@ -486,7 +488,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
             ];
 
             $results->push(new RateResponse(
-                carrier: 'UPS',
+                carrier: Carrier::UPS,
                 serviceCode: $serviceCode,
                 serviceName: $serviceName,
                 price: $totalCharges,
@@ -724,7 +726,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
             return ShipResponse::success(
                 trackingNumber: $trackingNumber,
                 cost: $totalCharge,
-                carrier: 'UPS',
+                carrier: Carrier::UPS,
                 service: $request->selectedRate->serviceName,
                 customsFormData: $customsFormData,
                 labelData: $labelData,
@@ -872,7 +874,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
         );
 
         if ($packaging === null) {
-            throw new UnclassifiablePackagingException('UPS', "UPS packaging code {$sent} is not one PolyBag can place in a packaging.");
+            throw new UnclassifiablePackagingException(Carrier::UPS, "UPS packaging code {$sent} is not one PolyBag can place in a packaging.");
         }
 
         return PackagingRequirement::exactly($packaging);
@@ -1159,7 +1161,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
         return ShipResponse::success(
             trackingNumber: $trackingNumber,
             cost: (float) $request->selectedRate->price,
-            carrier: 'UPS',
+            carrier: Carrier::UPS,
             service: $request->selectedRate->serviceName,
             labelData: $labelData,
             labelOrientation: $isZpl ? 'portrait' : 'landscape',

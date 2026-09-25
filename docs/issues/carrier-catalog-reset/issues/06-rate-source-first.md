@@ -77,7 +77,7 @@ carrier's name any more, and every later slice builds on that.
 
 ## Blocked by
 
-- [`05`](05-key-direct-integrations-by-carrier-adapter.md)
+- [`05`](05-lock-system-carrier-names.md)
 
 ## Comments
 

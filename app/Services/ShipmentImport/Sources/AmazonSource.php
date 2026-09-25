@@ -10,6 +10,7 @@ use App\Http\Integrations\Amazon\AmazonSpApiConnector;
 use App\Http\Integrations\Amazon\Requests\ConfirmShipment;
 use App\Http\Integrations\Amazon\Requests\SearchCatalogItems;
 use App\Http\Integrations\Amazon\Requests\SearchOrders;
+use App\Models\Carrier;
 use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\Product;
@@ -56,10 +57,10 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
     private const SEARCH_ORDERS_PAGE_SIZE = 100;
 
     private const CARRIER_MAP = [
-        'USPS' => 'USPS',
-        'FEDEX' => 'FedEx',
-        'FedEx' => 'FedEx',
-        'UPS' => 'UPS',
+        'USPS' => Carrier::USPS,
+        'FEDEX' => Carrier::FEDEX,
+        'FedEx' => Carrier::FEDEX,
+        'UPS' => Carrier::UPS,
         'DHL' => 'DHL',
     ];
 

@@ -3,6 +3,7 @@
 namespace App\Services\Carriers;
 
 use App\Contracts\DirectCarrierAdapter;
+use App\Contracts\UsesCarrierAccount;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\PackageData;
@@ -15,6 +16,7 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\ServiceCapability;
+use App\Models\Carrier;
 use App\Models\Package;
 use App\Services\Carriers\Concerns\ConsultsCarrierPolicyForOffers;
 use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
@@ -24,7 +26,7 @@ use App\Services\Shipping\PackagingFilter;
 use Illuminate\Support\Collection;
 use Saloon\Http\Response;
 
-class FakeCarrierAdapter implements DirectCarrierAdapter
+class FakeCarrierAdapter implements DirectCarrierAdapter, UsesCarrierAccount
 {
     use ConsultsCarrierPolicyForOffers;
     use HasDefaultServiceCapabilities;
@@ -56,7 +58,7 @@ class FakeCarrierAdapter implements DirectCarrierAdapter
      * @var array<string, array<int, array{code: string, name: string, price: float, transit: string, days: int}>>
      */
     private const RATES = [
-        'USPS' => [
+        Carrier::USPS => [
             ['code' => 'USPS_GROUND_ADVANTAGE', 'name' => 'Ground Advantage', 'price' => 8.50, 'transit' => '2-5 Business Days', 'days' => 5],
             ['code' => 'PRIORITY_MAIL', 'name' => 'Priority Mail', 'price' => 12.75, 'transit' => '1-3 Business Days', 'days' => 3],
             ['code' => 'PRIORITY_MAIL_EXPRESS', 'name' => 'Priority Mail Express', 'price' => 28.40, 'transit' => '1-2 Days', 'days' => 1],
@@ -64,12 +66,12 @@ class FakeCarrierAdapter implements DirectCarrierAdapter
             // media contents, and the shared filter drops it otherwise.
             ['code' => 'MEDIA_MAIL', 'name' => 'Media Mail', 'price' => 4.25, 'transit' => '2-8 Business Days', 'days' => 8],
         ],
-        'FedEx' => [
+        Carrier::FEDEX => [
             ['code' => 'FEDEX_GROUND', 'name' => 'FedEx Ground', 'price' => 10.25, 'transit' => '1-5 Business Days', 'days' => 5],
             ['code' => 'FEDEX_EXPRESS_SAVER', 'name' => 'FedEx Express Saver', 'price' => 18.90, 'transit' => '3 Business Days', 'days' => 3],
             ['code' => 'FEDEX_2_DAY', 'name' => 'FedEx 2Day', 'price' => 24.50, 'transit' => '2 Business Days', 'days' => 2],
         ],
-        'UPS' => [
+        Carrier::UPS => [
             ['code' => '03', 'name' => 'UPS Ground', 'price' => 11.00, 'transit' => '1-5 Business Days', 'days' => 5],
             ['code' => '12', 'name' => 'UPS 3 Day Select', 'price' => 19.75, 'transit' => '3 Business Days', 'days' => 3],
             ['code' => '02', 'name' => 'UPS 2nd Day Air', 'price' => 26.30, 'transit' => '2 Business Days', 'days' => 2],
@@ -78,9 +80,9 @@ class FakeCarrierAdapter implements DirectCarrierAdapter
 
     /** @var array<string, string> */
     private const TRACKING_PREFIXES = [
-        'USPS' => '9400',
-        'FedEx' => '7489',
-        'UPS' => '1Z99',
+        Carrier::USPS => '9400',
+        Carrier::FEDEX => '7489',
+        Carrier::UPS => '1Z99',
     ];
 
     public function __construct(
