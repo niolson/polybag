@@ -64,10 +64,14 @@ class EndOfDay extends Page
      * with no direct integration, such as OnTrac, is listed too, so its day
      * can be ended.
      *
-     * The package count is by carrier of record, from any source: a Shopify
-     * label dated as USPS that Shopify put on UPS counts under UPS, whose
-     * driver takes it. The manifest count stays direct labels only, because
-     * a manifest is created on our own carrier account.
+     * The package count is the carrier's labels bought since its day was last
+     * ended, by carrier of record and from any source: a Shopify `auto` label
+     * dated by USPS that Shopify put on UPS counts under UPS, whose driver
+     * takes it. It is not matched by ship date, because that label's date
+     * came from USPS's policy and need not equal UPS's current date.
+     *
+     * The manifest count stays by ship date and direct labels only, because
+     * a manifest is created on our own carrier account for one ship date.
      */
     public function loadData(): void
     {
@@ -92,15 +96,13 @@ class EndOfDay extends Page
                 // on the manifest count below.
                 $supportsManifest = $registry->policyFor($carrier->name)?->supportsCarrierManifest() ?? false;
 
-                $packageCount = $this->shippedPackages($carrier, $shipDate, $locationId)->count();
+                $packageCount = $this->shippedPackages($carrier, $locationId)
+                    ->where('shipped_at', '>', $shipDateService->batchStartedAt($carrier, $locationId)->setTimezone(config('app.timezone')))
+                    ->count();
 
-                $unmanifestedCount = 0;
-                if ($supportsManifest && $packageCount > 0) {
-                    $unmanifestedCount = $this->shippedPackages($carrier, $shipDate, $locationId)
-                        ->boughtOnCarrierAccount()
-                        ->whereNull('manifest_id')
-                        ->count();
-                }
+                $unmanifestedCount = $supportsManifest
+                    ? $this->manifestablePackages($carrier, $shipDate, $locationId)->count()
+                    : 0;
 
                 return [
                     'carrier_id' => $carrier->id,
@@ -165,10 +167,7 @@ class EndOfDay extends Page
         $locationId = $multiLocation ? $this->locationId : null;
         $shipDate = app(ShipDateService::class)->getShipDate($carrier, $locationId);
 
-        $packages = $this->shippedPackages($carrier, $shipDate, $locationId)
-            ->boughtOnCarrierAccount()
-            ->whereNull('manifest_id')
-            ->get();
+        $packages = $this->manifestablePackages($carrier, $shipDate, $locationId)->get();
 
         if ($packages->isEmpty()) {
             $this->notifyWarning('No Packages', "No packages to manifest for {$carrier->label()}.");
@@ -194,20 +193,33 @@ class EndOfDay extends Page
     }
 
     /**
-     * Shipped labels this carrier carries with the given ship date, read by
-     * the carrier of record rather than by the name a source reported. The
-     * location is null unless multi-location is on.
+     * Shipped labels this carrier carries, read by the carrier of record
+     * rather than by the name a source reported. The location is null unless
+     * multi-location is on.
      *
      * @return Builder<Package>
      */
-    private function shippedPackages(Carrier $carrier, CarbonImmutable $shipDate, ?int $locationId): Builder
+    private function shippedPackages(Carrier $carrier, ?int $locationId): Builder
     {
         return Package::query()
             ->where('normalized_carrier_id', $carrier->id)
             ->where('status', PackageStatus::Shipped)
             ->whereNotNull('tracking_number')
-            ->whereDate('ship_date', $shipDate)
             ->when($locationId, fn ($q) => $q->where('location_id', $locationId));
+    }
+
+    /**
+     * The labels a manifest for this ship date would take: bought on our own
+     * carrier account and on no manifest yet.
+     *
+     * @return Builder<Package>
+     */
+    private function manifestablePackages(Carrier $carrier, CarbonImmutable $shipDate, ?int $locationId): Builder
+    {
+        return $this->shippedPackages($carrier, $locationId)
+            ->boughtOnCarrierAccount()
+            ->whereNull('manifest_id')
+            ->whereDate('ship_date', $shipDate);
     }
 
     public function reprintManifest(int $manifestId): void

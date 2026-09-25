@@ -137,6 +137,29 @@ class ShipDateService
     }
 
     /**
+     * When the labels now waiting for this carrier at a location began: its
+     * last End of Day there, or the start of today in the location's timezone
+     * if its day has never been ended there.
+     *
+     * End of Day counts a carrier's labels from this moment rather than by
+     * ship date. A label's stored date can come from another carrier's policy,
+     * as a Shopify `auto` label dated by the connection's carrier does, and
+     * would then never equal this carrier's current date.
+     */
+    public function batchStartedAt(Carrier $carrier, ?int $locationId = null): CarbonImmutable
+    {
+        $lastEndOfDay = $this->getPivot($carrier, $locationId)?->last_end_of_day_at;
+
+        if ($lastEndOfDay) {
+            return CarbonImmutable::parse($lastEndOfDay);
+        }
+
+        $location = $this->resolveLocation($locationId);
+
+        return CarbonImmutable::today($location !== null ? $location->timezone : 'America/New_York');
+    }
+
+    /**
      * @return array<int, int>
      */
     public function getPickupDays(?Carrier $carrier, ?int $locationId = null): array

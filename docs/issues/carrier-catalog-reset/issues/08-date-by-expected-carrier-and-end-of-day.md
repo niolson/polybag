@@ -50,8 +50,10 @@ source.
   - The package count per carrier covers every label that carrier carries, from any
     source, read by `normalized_carrier_id` (the carrier of record) rather than by
     `packages.carrier`. A Shopify label dated as USPS that Shopify put on UPS counts
-    under UPS, because the UPS driver takes it. The two carriers' dates can differ by a
-    day, which ADR-0002 already tolerates for an override. The manifest count and the manifest action stay
+    under UPS, because the UPS driver takes it. It counts the labels bought since the
+    carrier's last End of Day at the location, or since the start of today, rather
+    than matching ship dates: that label's date came from USPS's policy and need not
+    equal UPS's current date. The manifest count and the manifest action stay
     direct labels only, and appear only where the carrier's integration supports a
     manifest.
   - Ending a carrier's day moves the date of everything it dates, whichever source sells
@@ -114,3 +116,9 @@ source.
   `normalized_carrier_id`, as a real purchase does. The `ShipDateService` tests that
   covered alias normalization and the `Shopify` row's cutoff were rewritten for carrier
   rows, or replaced in `ShipDateByExpectedCarrierTest`.
+- **2026-09-25** — Code review found that matching the count by ship date dropped a
+  Shopify `auto` label from every row when its carrier's date had moved on. For example,
+  UPS's day is ended at 4 PM, and a label dated Wednesday by USPS comes back as UPS: UPS
+  is on Thursday, so neither row counted it. The count is now by carrier of record since
+  the carrier's last End of Day (`ShipDateService::batchStartedAt()`). The manifest query
+  still matches by ship date and takes direct labels only.
