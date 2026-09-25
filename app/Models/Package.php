@@ -5,6 +5,7 @@ namespace App\Models;
 use App\DataTransferObjects\PackageLabels\VoidedLabel;
 use App\DataTransferObjects\Shipping\ServiceInference;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\ContentClass;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
@@ -542,6 +543,44 @@ class Package extends Model
     }
 
     /**
+     * Whether this Package may be offered a service that requires these
+     * contents — ADR-0006 decision 11.
+     *
+     * The one place the rule lives, for every source that sells such a
+     * service. A Package qualifies only when it has at least one item and every
+     * item is a product the seller declared as the class. An item with no
+     * product never qualifies, and neither does a Package with no items, such
+     * as one from Manual Ship: nothing in it has been vouched for.
+     */
+    public function qualifiesFor(ContentClass $contents): bool
+    {
+        $this->loadMissing('packageItems.product');
+
+        return $this->packageItems->isNotEmpty()
+            && $this->packageItems->every(
+                fn (PackageItem $item): bool => $item->product !== null && $contents->isDeclaredBy($item->product)
+            );
+    }
+
+    /**
+     * The content classes this Package qualifies for, in case order.
+     *
+     * @return list<ContentClass>
+     */
+    public function qualifyingContents(): array
+    {
+        $qualifying = [];
+
+        foreach (ContentClass::cases() as $contents) {
+            if ($this->qualifiesFor($contents)) {
+                $qualifying[] = $contents;
+            }
+        }
+
+        return $qualifying;
+    }
+
+    /**
      * Compute whether there's a weight mismatch (>10% discrepancy)
      * between the actual package weight and the expected weight
      * based on the packed products.
@@ -570,16 +609,18 @@ class Package extends Model
      * so the caller passes the discriminator rather than letting it be inferred
      * from whichever pointer happens to be set. See ADR-0002.
      *
+     * @param  int|null  $carrierServiceId  The catalog service the Label was bought as, from the server's copy of the rate. Recorded on the Label only. Null for a blind purchase: what Shopify was asked for stays the requested preference (ADR-0003 decision 7).
+     *
      * @throws \InvalidArgumentException If the postage source and the response's pointers disagree, or the service evidence contradicts the service value
      * @throws \RuntimeException If the package state changed (optimistic locking)
      */
-    public function markShipped(ShipResponse $response, PostageSource $postageSource, ?int $shippedByUserId = null): void
+    public function markShipped(ShipResponse $response, PostageSource $postageSource, ?int $shippedByUserId = null, ?int $carrierServiceId = null): void
     {
         // Before the transaction, so a rejected provenance writes nothing at all.
         $this->assertProvenanceIsConsistent($postageSource, $response);
         $this->assertServiceEvidenceIsConsistent($response);
 
-        DB::transaction(function () use ($response, $postageSource, $shippedByUserId): void {
+        DB::transaction(function () use ($response, $postageSource, $shippedByUserId, $carrierServiceId): void {
             $normalizedCarrierId = app(CarrierNormalizer::class)->resolve($response->carrier)?->id;
 
             // Carriers that record facts of their own (Shopify reports which
@@ -658,6 +699,7 @@ class Package extends Model
             // recorded on the package without its row.
             DB::table('package_labels')->insert(PackageLabel::projectionFrom($projected) + [
                 'package_id' => $this->id,
+                'carrier_service_id' => $carrierServiceId,
                 'source_label_reference' => $response->sourceLabelReference,
                 'created_at' => $now,
                 'updated_at' => $now,

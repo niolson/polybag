@@ -30,6 +30,7 @@ class Product extends Model
         'country_of_origin',
         'active',
         'contains_alcohol',
+        'is_media',
         'hazmat_class',
         'bin_location',
     ];
@@ -41,6 +42,7 @@ class Product extends Model
             'handling_surcharge' => 'decimal:2',
             'active' => 'boolean',
             'contains_alcohol' => 'boolean',
+            'is_media' => 'boolean',
             'hazmat_class' => HazmatClass::class,
         ];
     }

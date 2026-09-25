@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\ContentClass;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -36,6 +37,21 @@ class CarrierServiceFactory extends Factory
         return $this->state(fn () => [
             'name' => 'Priority Mail',
             'service_code' => 'PRIORITY_MAIL',
+        ]);
+    }
+
+    /**
+     * USPS Media Mail as `CarrierSeeder` authors it: offered only to a Package
+     * whose every item is a product marked as media.
+     */
+    public function uspsMediaMail(): static
+    {
+        return $this->state(fn () => [
+            'name' => 'Media Mail',
+            'service_code' => 'MEDIA_MAIL',
+            'can_ship_to_po_boxes' => true,
+            'can_ship_to_military_addresses' => true,
+            'required_contents' => ContentClass::Media,
         ]);
     }
 

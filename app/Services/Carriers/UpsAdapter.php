@@ -34,6 +34,7 @@ use App\Services\Carriers\Concerns\BuildsCustomerReferences;
 use App\Services\Carriers\Concerns\ConsultsCarrierPolicyForOffers;
 use App\Services\Carriers\Concerns\DecodesJsonResponses;
 use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
+use App\Services\Carriers\Concerns\IdentifiesCatalogServices;
 use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
 use App\Services\Shipping\PackagingFilter;
@@ -53,6 +54,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
     use ConsultsCarrierPolicyForOffers;
     use DecodesJsonResponses;
     use HasDefaultServiceCapabilities;
+    use IdentifiesCatalogServices;
     use ResolvesCarrierAccount;
     use ResolvesDeliveredAt;
 
@@ -286,14 +288,14 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase
             'body' => $response->json(),
         ]);
 
-        return $this->extractRateDetails(
+        return $this->withCatalogIdentity($this->extractRateDetails(
             $response,
             $serviceCodes,
             $this->packagingCodeFor($request->packages[0]->carrierPackaging),
             $request->hasSpecialService('saturday_delivery'),
             // The account the offer will record as having quoted this price.
             $this->resolveAccount($request->locationId, $request->clientId)?->id,
-        );
+        ));
     }
 
     public function supportsTracking(): bool

@@ -39,6 +39,7 @@ use App\Services\PostageSources\PostageSourceResolver;
 use App\Services\RateQuoteLogger;
 use App\Services\RateSelector;
 use App\Services\RuleEvaluator;
+use App\Services\Shipping\ContentsFilter;
 use App\Services\ShippingRateService;
 use App\Services\SpecialServiceResolver;
 use Illuminate\Support\Collection;
@@ -445,7 +446,15 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
             $this->recordPurchaseAgainstOffer($offer, $response->trackingNumber);
 
-            $package->markShipped($response, $response->postageSource, $request->userId);
+            // The catalog service comes off the server's copy of the rate:
+            // the offer for a Ship-page purchase, the rate service or the
+            // rule for automation. A blind purchase records none.
+            $package->markShipped(
+                $response,
+                $response->postageSource,
+                $request->userId,
+                $blindOffer === null ? $selectedRate?->carrierServiceId : null,
+            );
 
             return PackageShippingResult::shipped($response, $selectedRate, $package);
         } catch (MissingDeclaredValueException $e) {
@@ -848,7 +857,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         ]);
 
         $this->recordPurchaseAgainstOffer($offer, $response->trackingNumber);
-        $package->markShipped($response, $response->postageSource, $request->userId);
+        $package->markShipped($response, $response->postageSource, $request->userId, $offer->carrier_service_id);
 
         return PackageShippingResult::shipped($response, null, $package);
     }
@@ -1045,9 +1054,11 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
     /**
      * The rate as the server knows it, for an offer the browser only named.
      *
-     * Carrier, service, price and rate metadata all come off the stored offer;
-     * the delivery commitment and transit time are carried through because they
-     * are display text that cannot change what is bought.
+     * Carrier, service, price and rate metadata all come off the stored offer,
+     * and so do the catalog service and carrier ids the Label records and the
+     * purchase is dated by; the delivery commitment and transit time are
+     * carried through because they are display text that cannot change what
+     * is bought.
      *
      * The metadata matters more than it looks. FedEx reads
      * `metadata['serviceType']` with no fallback and USPS reads `mailClass`,
@@ -1076,6 +1087,8 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             offerId: $offer->public_id,
             packagingRequirement: PackagingRequirement::fromRateMetadata($metadata),
             carrierAccountId: $offer->carrier_account_id,
+            carrierServiceId: $offer->carrier_service_id,
+            carrierId: $offer->carrier_id,
         );
     }
 
@@ -1268,7 +1281,15 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             ? $this->carrierRegistry->quotingAdapterFor($ruleResult->preSelectedRate->carrier)
             : null;
 
-        $preSelected = $adapter?->resolvePreSelectedRate($ruleResult->preSelectedRate, $package);
+        $resolved = $adapter?->resolvePreSelectedRate($ruleResult->preSelectedRate, $package);
+
+        // A rule names a service, and cannot vouch for the contents it
+        // requires: a *Use* rule naming Media Mail buys it only for a Package
+        // that qualifies, the same drop rate shopping applies (ADR-0006
+        // decision 11). Run here because pre-selection never rate-shops.
+        $preSelected = $resolved instanceof RateResponse
+            ? ContentsFilter::keepQualifying(collect([$resolved]), $package->qualifyingContents())->first()
+            : null;
 
         // A rule's choice is still unattended: the shipping method's on-time
         // and protection requirements hold against it too.
@@ -1282,10 +1303,17 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         }
 
         // The adapter found no variant of the pre-selected service this
-        // Package's packaging can use (ADR-0005 decision 4). Not a failure:
-        // rate shopping runs the same filter on real rates, and the rule's
+        // Package's packaging can use (ADR-0005 decision 4), or the service
+        // requires contents the Package does not have. Not a failure: rate
+        // shopping runs the same filters on real rates, and the rule's
         // exclusions still apply there.
-        if ($adapter) {
+        if ($resolved instanceof RateResponse) {
+            logger()->info('Pre-selected service requires contents this package does not qualify for; rate shopping instead', [
+                'package_id' => $package->id,
+                'carrier' => $ruleResult->preSelectedRate->carrier,
+                'service_code' => $ruleResult->preSelectedRate->serviceCode,
+            ]);
+        } elseif ($adapter) {
             logger()->info('Pre-selected service has no variant for this packaging; rate shopping instead', [
                 'package_id' => $package->id,
                 'carrier' => $ruleResult->preSelectedRate->carrier,

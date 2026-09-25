@@ -24,4 +24,12 @@ class ProductFactory extends Factory
             'weight' => fake()->randomFloat(2, 0.1, 10),
         ];
     }
+
+    /**
+     * Declared by the seller as media, so it qualifies for USPS Media Mail.
+     */
+    public function media(): static
+    {
+        return $this->state(fn () => ['is_media' => true]);
+    }
 }

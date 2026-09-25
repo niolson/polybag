@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Enums\ContentClass;
 use App\Filament\Resources\CarrierServiceResource\Pages;
 use App\Filament\Support\CarrierLogoColumn;
 use App\Models\CarrierService;
@@ -51,6 +52,15 @@ class CarrierServiceResource extends Resource
                     ->label('Can ship to military addresses')
                     ->default(false)
                     ->helperText('APO/FPO/DPO addresses require USPS for the final leg, same as PO Boxes.'),
+                // Authored by the carrier catalog seed, which restores it on
+                // every start, so it is shown rather than edited.
+                Forms\Components\Select::make('required_contents')
+                    ->label('Requires contents')
+                    ->options(ContentClass::class)
+                    ->placeholder('Any contents')
+                    ->disabled()
+                    ->helperText('Offered only to a package whose every item is a product marked with these contents.')
+                    ->visible(fn (?CarrierService $record): bool => $record?->required_contents !== null),
             ]);
     }
 
@@ -77,6 +87,11 @@ class CarrierServiceResource extends Resource
                     ->label('Military')
                     ->boolean()
                     ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+                Tables\Columns\TextColumn::make('required_contents')
+                    ->label('Requires')
+                    ->badge()
+                    ->placeholder('—')
                     ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\IconColumn::make('carrier.active')
                     ->label('Carrier Active')

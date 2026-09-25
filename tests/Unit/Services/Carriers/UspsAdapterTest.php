@@ -22,6 +22,7 @@ use App\Http\Integrations\USPS\Requests\ShippingOptions;
 use App\Http\Integrations\USPS\Requests\TrackShipment;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
+use App\Models\CarrierService;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShippingOffer;
@@ -970,6 +971,56 @@ it('keeps the flat-rate indicators for a box as exactly the packaging USPS price
         ->and($byPair['PRIORITY_MAIL_EXPRESS/FP'])->toEqual(PackagingRequirement::exactly(CarrierPackaging::UspsExpressPaddedFlatRateEnvelope));
 });
 
+it('sells Media Mail as single-piece in the packer\'s own packaging, and never Library Mail', function (): void {
+    // The shape of every logged sandbox `search` response from 2026-09-08 to
+    // 09-21: Media Mail and Library Mail each come back as `SP`, once
+    // MACHINABLE and once NONSTANDARD, and Bound Printed Matter only presorted.
+    fakeUspsSearch([
+        ['MEDIA_MAIL', 'SP', 'MACHINABLE', 5.13],
+        ['MEDIA_MAIL', 'SP', 'NONSTANDARD', 5.13],
+        ['LIBRARY_MAIL', 'SP', 'MACHINABLE', 4.87],
+        ['LIBRARY_MAIL', 'SP', 'NONSTANDARD', 4.87],
+        ['BOUND_PRINTED_MATTER', 'PR', 'MACHINABLE', 2.67],
+    ]);
+
+    $request = new RateRequest(
+        originPostalCode: '90210',
+        destinationPostalCode: '10001',
+        packages: [new PackageData(weight: 1.15, length: 9, width: 6, height: 2, boxType: BoxSizeType::BOX)],
+    );
+
+    $rates = $this->adapter->getRates($request, []);
+
+    expect($rates->pluck('serviceCode')->all())->toBe(['MEDIA_MAIL', 'MEDIA_MAIL'])
+        ->and($rates->pluck('metadata.processingCategory')->all())->toBe(['MACHINABLE', 'NONSTANDARD'])
+        ->and($rates->every(fn (RateResponse $rate): bool => $rate->packagingRequirement->isShipperPackaging()))->toBeTrue();
+});
+
+it('names the catalog service and carrier on every rate it returns', function (): void {
+    $usps = Carrier::where('name', 'USPS')->sole();
+    $mediaMail = CarrierService::factory()->uspsMediaMail()->for($usps)->create();
+
+    fakeUspsSearch([
+        ['MEDIA_MAIL', 'SP', 'MACHINABLE', 5.13],
+        // A class the catalog does not hold, quoted as it would be with no
+        // shipping method: it keeps its carrier and names no service.
+        ['PARCEL_SELECT', 'SP', 'MACHINABLE', 6.30],
+    ]);
+
+    $request = new RateRequest(
+        originPostalCode: '90210',
+        destinationPostalCode: '10001',
+        packages: [new PackageData(weight: 1.15, length: 9, width: 6, height: 2)],
+    );
+
+    $rates = $this->adapter->getRates($request, [])->keyBy('serviceCode');
+
+    expect($rates['MEDIA_MAIL']->carrierServiceId)->toBe($mediaMail->id)
+        ->and($rates['MEDIA_MAIL']->carrierId)->toBe($usps->id)
+        ->and($rates['PARCEL_SELECT']->carrierServiceId)->toBeNull()
+        ->and($rates['PARCEL_SELECT']->carrierId)->toBe($usps->id);
+});
+
 it('drops the APO large box and holiday envelope prices rather than offer a box twice', function (): void {
     // PM is the large flat rate box at the APO/FPO/DPO price and comes back
     // for any destination, cheaper than PL; E7 is the Express legal envelope
@@ -1063,7 +1114,7 @@ it('refuses to classify an indicator it does not sell instead of defaulting it',
     'APO large box price' => ['PRIORITY_MAIL', 'PM'],
     'holiday envelope price' => ['PRIORITY_MAIL_EXPRESS', 'E7'],
     'a Priority Mail envelope under Ground Advantage' => ['USPS_GROUND_ADVANTAGE', 'FE'],
-    'single-piece on a class rate shopping excludes' => ['MEDIA_MAIL', 'SP'],
+    'single-piece on a class rate shopping excludes' => ['LIBRARY_MAIL', 'SP'],
     'single-piece on a presort class' => ['BOUND_PRINTED_MATTER', 'SP'],
     'a class USPS does not have' => ['PRIORITY_MAIL_CUBIC', 'CP'],
     'the Express single-piece indicator on Ground Advantage' => ['USPS_GROUND_ADVANTAGE', 'PA'],

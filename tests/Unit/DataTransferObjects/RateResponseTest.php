@@ -47,7 +47,54 @@ it('carries nothing that could buy a label on its own', function (): void {
         // Which account quoted it — a number the offer already records, and
         // nothing the purchase reads back off the browser.
         'carrierAccountId',
+        // Which catalog service and carrier it is for. Descriptive, and
+        // restored from the offer at purchase like the price
+        // (`carrier-catalog-reset/02`).
+        'carrierServiceId',
+        'carrierId',
     ]);
+});
+
+it('round-trips the catalog service and carrier it names', function (): void {
+    $rate = (new RateResponse(
+        carrier: 'USPS',
+        serviceCode: 'MEDIA_MAIL',
+        serviceName: 'Media Mail Machinable Single-piece',
+        price: 5.13,
+    ))->withCatalogIdentity(carrierId: 3, carrierServiceId: 17);
+
+    $restored = RateResponse::fromArray($rate->toArray());
+
+    expect($restored->carrierServiceId)->toBe(17)
+        ->and($restored->carrierId)->toBe(3);
+});
+
+it('keeps its catalog identity when an offer is put behind it', function (): void {
+    $rate = (new RateResponse(
+        carrier: 'USPS',
+        serviceCode: 'MEDIA_MAIL',
+        serviceName: 'Media Mail Machinable Single-piece',
+        price: 5.13,
+        carrierAccountId: 9,
+    ))->withCatalogIdentity(carrierId: 3, carrierServiceId: 17)->withOfferId('01K4XJ5S8ZQ7V6R3N2M1P0T9AB');
+
+    expect($rate->carrierServiceId)->toBe(17)
+        ->and($rate->carrierId)->toBe(3)
+        ->and($rate->carrierAccountId)->toBe(9)
+        ->and($rate->offerId)->toBe('01K4XJ5S8ZQ7V6R3N2M1P0T9AB');
+});
+
+it('names no catalog service when told it has none', function (): void {
+    $rate = (new RateResponse(
+        carrier: 'USPS',
+        serviceCode: 'PARCEL_SELECT',
+        serviceName: 'Parcel Select',
+        price: 6.30,
+        carrierServiceId: 17,
+    ))->withCatalogIdentity(carrierId: 3, carrierServiceId: null);
+
+    expect($rate->carrierServiceId)->toBeNull()
+        ->and($rate->carrierId)->toBe(3);
 });
 
 it('round-trips the observed service identity, which names a service rather than authorizing one', function (): void {

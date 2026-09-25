@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Enums\ContentClass;
 use App\Models\Carrier;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\Carriers\ShopifyAdapter;
@@ -22,18 +23,34 @@ class CarrierSeeder extends Seeder
             ['name' => 'Priority Mail', 'service_code' => 'PRIORITY_MAIL'],
             ['name' => 'Priority Mail Express', 'service_code' => 'PRIORITY_MAIL_EXPRESS'],
             ['name' => 'Priority Mail International', 'service_code' => 'PRIORITY_MAIL_INTERNATIONAL'],
+            // Offered only to a Package whose every item is a product the
+            // seller marked as media (ADR-0006 decision 11). Library Mail and
+            // Bound Printed Matter are not authored.
+            ['name' => 'Media Mail', 'service_code' => 'MEDIA_MAIL', 'required_contents' => ContentClass::Media],
         ] as $service) {
+            $requiredContents = $service['required_contents'] ?? null;
+
             // Every USPS service is USPS -- there's no scenario in this app
             // where a USPS service should be blocked from a PO Box or a
             // military address.
-            $usps->carrierServices()->firstOrCreate(
+            $row = $usps->carrierServices()->firstOrCreate(
                 ['service_code' => $service['service_code']],
                 [
                     'name' => $service['name'],
                     'can_ship_to_po_boxes' => true,
                     'can_ship_to_military_addresses' => true,
+                    'required_contents' => $requiredContents,
                 ],
             );
+
+            // A content requirement is what keeps the service off a parcel
+            // that does not qualify, so it is restored on every sync rather
+            // than only written when the row is created: a row an operator
+            // made by hand before this was seeded would otherwise sell Media
+            // Mail for anything.
+            if ($requiredContents !== null && $row->required_contents !== $requiredContents) {
+                $row->update(['required_contents' => $requiredContents]);
+            }
         }
 
         $fedex = Carrier::firstOrCreate(['name' => 'FedEx']);

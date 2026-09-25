@@ -93,7 +93,10 @@ it('buys nothing until the packer confirms the blind purchase', function (): voi
     $page->call('confirmBlindPurchase');
     expect($package->fresh()->status)->toBe(PackageStatus::Shipped)
         ->and($package->fresh()->cost)->toBeNull()
-        ->and($package->fresh()->service)->toBeNull();
+        ->and($package->fresh()->service)->toBeNull()
+        // What Shopify was asked for is a preference, never the service
+        // bought, so the Label names no catalog service (ADR-0003 decision 7).
+        ->and($package->fresh()->activeLabel->carrier_service_id)->toBeNull();
 });
 
 it('buys the offer the page advertised, not a rate the browser described', function (): void {
@@ -369,7 +372,8 @@ it('auto-ships a blind purchase when it is the shipping methods sole eligible ch
 
     expect($result->success)->toBeTrue()
         ->and($package->fresh()->status)->toBe(PackageStatus::Shipped)
-        ->and($package->fresh()->cost)->toBeNull();
+        ->and($package->fresh()->cost)->toBeNull()
+        ->and($package->fresh()->activeLabel->carrier_service_id)->toBeNull();
 });
 
 it('does not infer a sole blind purchase without a shipping method', function (): void {
