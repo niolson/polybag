@@ -270,3 +270,114 @@ it('records the approval refusal on a batch ship item rather than failing silent
     expect($item->fresh()->status)->toBe(LabelBatchItemStatus::Failed)
         ->and($item->fresh()->error_message)->toContain('approved for automated purchase');
 });
+
+/*
+|--------------------------------------------------------------------------
+| carrier-catalog-reset/04 — content-restricted is never automated
+|--------------------------------------------------------------------------
+|
+| Amazon's Bound Printed Matter is shown to a packer and never bought on
+| nobody's behalf, because nothing in PolyBag vouches for the contents. An
+| approval cannot change that, so the refusal must not read as one.
+|
+*/
+
+function contentRestrictedRate(float $price): RateResponse
+{
+    return new RateResponse(
+        carrier: 'MockCarrier',
+        serviceCode: 'USPS_PTP_BPM',
+        serviceName: 'Bound Printed Matter',
+        price: $price,
+        observedService: new ObservedServiceIdentity(
+            source: 'amazon',
+            environment: SourceEnvironment::Production,
+            channelType: AmazonChannelType::Amazon,
+            externalCarrierId: 'USPS',
+            externalServiceId: 'USPS_PTP_BPM',
+        ),
+        contentRestricted: true,
+    );
+}
+
+function approveEverythingForAutomation(Package $package): ServiceApproval
+{
+    return ServiceApproval::factory()->create([
+        'source' => 'amazon',
+        'environment' => SourceEnvironment::Production,
+        'external_carrier_id' => ServiceApproval::WILDCARD,
+        'external_service_id' => ServiceApproval::WILDCARD,
+        'client_id' => $package->shipment->client_id,
+    ]);
+}
+
+it('lists a content-restricted rate on the Ship page', function (): void {
+    $package = packageForDiscoveredQuote();
+    registerQuotingAdapter([contentRestrictedRate(3.00)]);
+
+    $options = app(PackageShippingWorkflow::class)->prepareRates($package);
+
+    expect($options->rateOptions)->toHaveCount(1)
+        ->and($options->rateOptions[0]['serviceCode'])->toBe('USPS_PTP_BPM')
+        ->and($options->rateOptions[0]['contentRestricted'])->toBeTrue();
+});
+
+it('never auto ships a content-restricted rate, even under an approval of everything, and names the restriction', function (): void {
+    $this->actingAs($user = User::factory()->create());
+    $package = packageForDiscoveredQuote();
+    approveEverythingForAutomation($package);
+    registerQuotingAdapter([contentRestrictedRate(3.00)]);
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package,
+        new PackageAutoShippingRequest(userId: $user->id, cleanupOnFailure: false),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Content-Restricted Rates Only')
+        ->and($result->requiresAttendedSelection)->toBeTrue()
+        ->and($result->message)->toContain('MockCarrier Bound Printed Matter')
+        ->and($result->message)->toContain('restricted contents')
+        // No approval would release it, so the operator is not sent to one.
+        ->and($result->message)->not->toContain('Amazon Approvals')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});
+
+it('passes over a cheaper content-restricted rate for one automation may buy', function (): void {
+    $this->actingAs($user = User::factory()->create());
+    $package = packageForDiscoveredQuote();
+    approveEverythingForAutomation($package);
+    registerQuotingAdapter([
+        contentRestrictedRate(3.00),
+        new RateResponse('MockCarrier', 'GROUND', 'Ground', 9.00),
+    ], ShipResponse::success(
+        trackingNumber: 'APPROVED123',
+        cost: 9.00,
+        carrier: 'MockCarrier',
+        service: 'Ground',
+        labelData: base64_encode('label'),
+    ));
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package,
+        new PackageAutoShippingRequest(userId: $user->id, cleanupOnFailure: false),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($package->fresh()->cost)->toEqual(9.00);
+});
+
+it('names a content-restricted rate beside an unapproved one, apart from the approvals', function (): void {
+    $this->actingAs($user = User::factory()->create());
+    $package = packageForDiscoveredQuote();
+    registerQuotingAdapter([contentRestrictedRate(3.00), discoveredRate(4.00)]);
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package,
+        new PackageAutoShippingRequest(userId: $user->id, cleanupOnFailure: false),
+    );
+
+    expect($result->title)->toBe('No Approved Rates')
+        ->and($result->message)->toContain('approved for automated purchase: MockCarrier Ground (via amazon).')
+        ->and($result->message)->toContain('Automation also never buys MockCarrier Bound Printed Matter');
+});

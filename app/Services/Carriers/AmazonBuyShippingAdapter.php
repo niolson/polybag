@@ -20,6 +20,7 @@ use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\AmazonChannelType;
 use App\Enums\CarrierPackaging;
+use App\Enums\ContentClass;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\OffAmazonShippingStatus;
 use App\Enums\PostageSource;
@@ -32,17 +33,20 @@ use App\Exceptions\Carriers\CarrierUnavailableException;
 use App\Exceptions\MissingAmazonOrderItemsException;
 use App\Http\Integrations\Amazon\AmazonSpApiConnector;
 use App\Http\Integrations\Amazon\Requests\GetShippingRates;
+use App\Models\CarrierService;
 use App\Models\DataSource;
 use App\Models\ObservedService;
 use App\Models\Package;
 use App\Models\ShippingOffer;
 use App\Services\AmazonBuyShippingService;
+use App\Services\CarrierNormalizer;
 use App\Services\PostageSources\ObservedServiceRecorder;
 use App\Services\PostageSources\OffAmazonShippingCheck;
 use App\Services\PostageSources\OfferStore;
 use App\Services\RateSelector;
 use App\Services\RuleEvaluator;
 use App\Services\ShipmentImport\Sources\AmazonSource;
+use App\Services\Shipping\ContentsFilter;
 use App\Services\Shipping\PackagingFilter;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
@@ -150,18 +154,43 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
     ];
 
     /**
-     * Services valid only for specific contents — Media Mail and Bound Printed
-     * Matter — which nothing on a Package can yet vouch for. Misdeclared Media
-     * Mail is a postal offence, so these are dropped outright by
-     * {@see carriesPermittedContent()}.
+     * ADR-0006 decision 10's exception: Amazon identifiers with a known content
+     * restriction and no catalog service to carry it. Everywhere else the
+     * requirement is the mapped `CarrierService`'s, read by
+     * {@see carriesPermittedContent()}; these have nothing to map to.
      *
-     * @var list<string>
+     * - `USPS_PTP_BPM` is shown but never bought unattended. Amazon checks the
+     *   order's products for it (most captures refuse it for "The shipping
+     *   service is not available for the products in the order."), but its
+     *   product classes do not match eligibility exactly, and nothing in
+     *   PolyBag vouches for the contents. So only a person may choose it.
+     * - `UPS_PTP_SUREPOST_BPM` is dropped for good. Ground Saver BPM is not
+     *   authored, and nothing shows that Amazon checks products for it.
+     * - `UPS_PTP_SUREPOST_MEDIA` is dropped until `11` maps it to UPS Ground
+     *   Saver Media, whose media requirement guards it from then on.
+     *
+     * @var array<string, string>
      */
     private const CONTENT_RESTRICTED_SERVICES = [
-        'USPS_PTP_MM',
-        'USPS_PTP_BPM',
-        'UPS_PTP_SUREPOST_MEDIA',
-        'UPS_PTP_SUREPOST_BPM',
+        'USPS_PTP_BPM' => self::ATTENDED_ONLY_FOR_CONTENTS,
+        'UPS_PTP_SUREPOST_BPM' => self::DROP_FOR_CONTENTS,
+        'UPS_PTP_SUREPOST_MEDIA' => self::DROP_FOR_CONTENTS,
+    ];
+
+    private const DROP_FOR_CONTENTS = 'drop';
+
+    private const ATTENDED_ONLY_FOR_CONTENTS = 'attended-only';
+
+    /**
+     * What an unmapped Amazon service requires, by identifier, until `11`
+     * seeds Amazon's known mappings and removes this fallback. Without it an
+     * unmapped Media Mail offer would name no catalog service, carry no
+     * requirement, and be shown for any Package.
+     *
+     * @var array<string, ContentClass>
+     */
+    private const UNMAPPED_REQUIRED_CONTENTS = [
+        'USPS_PTP_MM' => ContentClass::Media,
     ];
 
     public function getCarrierName(): string
@@ -742,15 +771,23 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
         $expiresAt = now()->addSeconds(AmazonBuyShippingService::OFFER_WINDOW_SECONDS);
         $offerStore = app(OfferStore::class);
 
+        $catalogCarrierId = $this->catalogCarrierResolver();
+
         return collect($quote->rates)
-            ->filter(fn (array $rate): bool => $this->isBuyable($rate, $request))
+            ->filter(fn (array $rate): bool => $this->isBuyable($rate, $request, $this->mappedService($rate, $observations)))
             ->map(function (array $rate) use (
-                $package, $observations, $environment, $expiresAt, $offerStore, $quote, $source, $marketplace, $channelType
+                $package, $observations, $environment, $expiresAt, $offerStore, $quote, $source, $marketplace, $channelType, $catalogCarrierId
             ): RateResponse {
                 $carrierId = (string) $rate['carrierId'];
                 $serviceId = (string) $rate['serviceId'];
-                $mapped = $observations->get(ObservedService::serviceKey(self::OBSERVATION_SOURCE, $carrierId, $serviceId))
-                    ?->carrierService;
+                $mapped = $this->mappedService($rate, $observations);
+
+                // The catalog identity ADR-0006 decision 10 binds requirements
+                // to. The service only when somebody mapped it; the carrier
+                // from Amazon's own name for it, mapped or not, so an unmapped
+                // offer still says who carries it.
+                $carrierServiceId = $mapped?->id;
+                $normalizedCarrierId = $mapped->carrier_id ?? $catalogCarrierId((string) ($rate['carrierName'] ?? $carrierId));
 
                 $carrier = $mapped?->carrier->name ?? (string) ($rate['carrierName'] ?? $carrierId);
                 $serviceName = $mapped->name ?? (string) ($rate['serviceName'] ?? $serviceId);
@@ -780,6 +817,8 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
                     ],
                     expiresAt: $expiresAt,
                     marketplace: $marketplace,
+                    carrierId: $normalizedCarrierId,
+                    carrierServiceId: $carrierServiceId,
                     // No quote fingerprint here: the request in hand is the
                     // per-carrier one, with codes Amazon cannot express
                     // dropped, and would not match the package-level request
@@ -804,9 +843,49 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
                         externalServiceId: $serviceId,
                     ),
                     packagingRequirement: $packagingRequirement,
+                    carrierServiceId: $carrierServiceId,
+                    carrierId: $normalizedCarrierId,
+                    contentRestricted: (self::CONTENT_RESTRICTED_SERVICES[$serviceId] ?? null) === self::ATTENDED_ONLY_FOR_CONTENTS,
                 );
             })
             ->values();
+    }
+
+    /**
+     * The catalog service somebody mapped this offer's identity to, if any.
+     *
+     * @param  array<string, mixed>  $rate
+     * @param  Collection<string, ObservedService>  $observations  keyed by service key
+     */
+    private function mappedService(array $rate, Collection $observations): ?CarrierService
+    {
+        return $observations->get(ObservedService::serviceKey(
+            self::OBSERVATION_SOURCE,
+            (string) ($rate['carrierId'] ?? ''),
+            (string) ($rate['serviceId'] ?? ''),
+        ))?->carrierService;
+    }
+
+    /**
+     * Resolves Amazon's carrier name to a `Carrier` id, once per name per
+     * quote: a reply names two or three carriers across several offers, and
+     * {@see CarrierNormalizer::resolve()} reads the carrier table each call.
+     * Null only for a carrier with no row and no alias.
+     *
+     * @return \Closure(string): ?int
+     */
+    private function catalogCarrierResolver(): \Closure
+    {
+        $normalizer = app(CarrierNormalizer::class);
+        $resolved = [];
+
+        return function (string $carrierName) use ($normalizer, &$resolved): ?int {
+            if (! array_key_exists($carrierName, $resolved)) {
+                $resolved[$carrierName] = $normalizer->resolve($carrierName)?->id;
+            }
+
+            return $resolved[$carrierName];
+        };
     }
 
     /**
@@ -929,14 +1008,14 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
      * (ADR-0005 decision 5). Thirteen of the live run's thirty-five offers
      * would otherwise have been rows for rates nobody was shown.
      */
-    private function isBuyable(array $rate, RateRequest $request): bool
+    private function isBuyable(array $rate, RateRequest $request, ?CarrierService $mapped): bool
     {
         return $this->hasPrintableDocument($rate)
             && $this->needsNoAdditionalInputs($rate)
             && $this->honoursRequiredServices($rate, $request)
             && $this->answersRequiredGroupsForFree($rate, $request)
             && $this->fitsThePackaging($rate, $request)
-            && $this->carriesPermittedContent($rate);
+            && $this->carriesPermittedContent($rate, $request, $mapped);
     }
 
     /**
@@ -1061,14 +1140,39 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
     }
 
     /**
-     * Drop an offer for content the Package cannot vouch for — Media Mail and
-     * Bound Printed Matter, always, until the app can say a Package's contents
-     * qualify. Content classes are deferred past ADR-0005 to a later ADR; this
-     * is `amazon-buy-shipping/12`'s rule 3, which outlives its rules 1 and 2.
+     * Drop an offer whose service requires contents the Package does not
+     * qualify for — ADR-0006 decisions 10 and 11.
+     *
+     * The requirement is the mapped `CarrierService`'s, the same one
+     * {@see ContentsFilter} reads for a direct rate, so Media Mail bought
+     * through Amazon is held to the rule our own USPS account is. Until `11`
+     * maps Amazon's Media Mail, {@see UNMAPPED_REQUIRED_CONTENTS} gates it by
+     * identifier, so an unmapped offer is never shown for a Package that does
+     * not qualify. Amazon's own product check has already run, so an offer
+     * kept here has passed both.
+     *
+     * The identifiers with a restriction and no catalog service are the
+     * exception on {@see CONTENT_RESTRICTED_SERVICES}: two are dropped here,
+     * and Bound Printed Matter is kept and marked attended-only instead.
+     *
+     * It runs here, beside {@see fitsThePackaging()}, rather than being left
+     * to `ShippingRateService`, for the reason on {@see isBuyable()}: no
+     * {@see ShippingOffer} may be issued for a rate nobody is shown.
+     *
+     * @param  array<string, mixed>  $rate
      */
-    private function carriesPermittedContent(array $rate): bool
+    private function carriesPermittedContent(array $rate, RateRequest $request, ?CarrierService $mapped): bool
     {
-        return ! in_array((string) ($rate['serviceId'] ?? ''), self::CONTENT_RESTRICTED_SERVICES, true);
+        $serviceId = (string) ($rate['serviceId'] ?? '');
+
+        if ((self::CONTENT_RESTRICTED_SERVICES[$serviceId] ?? null) === self::DROP_FOR_CONTENTS) {
+            return false;
+        }
+
+        $required = $mapped->required_contents ?? self::UNMAPPED_REQUIRED_CONTENTS[$serviceId] ?? null;
+
+        return $required === null
+            || in_array($required, $request->packages[0]->qualifyingContents ?? [], true);
     }
 
     /**

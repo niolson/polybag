@@ -33,6 +33,7 @@ readonly class UnattendedRateSelection
      * @param  Collection<int, RateResponse>|null  $unprotected  Approved rates refused because the shipping method requires OTDR protection
      * @param  OfferRequirements|null  $requirements  What the order's shipping method required, if anything
      * @param  bool  $deadlineMissing  Whether on-time delivery was required of an Amazon order with no due-by date, so no rate could meet it
+     * @param  Collection<int, RateResponse>|null  $contentRestricted  Rates refused because they are valid only for contents nothing in PolyBag vouches for. Not `withheld`: no approval can release them
      */
     public function __construct(
         public ?RateResponse $rate,
@@ -43,6 +44,7 @@ readonly class UnattendedRateSelection
         public ?Collection $unprotected = null,
         public ?OfferRequirements $requirements = null,
         public bool $deadlineMissing = false,
+        public ?Collection $contentRestricted = null,
     ) {
         if ($rate !== null && $blindOffer !== null) {
             throw new \InvalidArgumentException('Unattended shipping may select either a rate or a blind purchase, never both.');
@@ -56,6 +58,22 @@ readonly class UnattendedRateSelection
     public function refusedForRequirements(): bool
     {
         return ($this->late?->isNotEmpty() ?? false) || ($this->unprotected?->isNotEmpty() ?? false);
+    }
+
+    public function contentRestrictedAnything(): bool
+    {
+        return $this->contentRestricted?->isNotEmpty() ?? false;
+    }
+
+    /**
+     * The content-restricted services as an operator would name them.
+     */
+    public function contentRestrictedSummary(): string
+    {
+        return ($this->contentRestricted ?? collect())
+            ->map(fn (RateResponse $rate): string => trim("{$rate->carrier} {$rate->serviceName}"))
+            ->unique()
+            ->implode(', ');
     }
 
     public function withheldAnything(): bool

@@ -52,7 +52,25 @@ it('carries nothing that could buy a label on its own', function (): void {
         // (`carrier-catalog-reset/02`).
         'carrierServiceId',
         'carrierId',
+        // Whether only a person may choose it. Display only: automation never
+        // reads browser state, and a purchase restores its rate from the
+        // offer (`carrier-catalog-reset/04`).
+        'contentRestricted',
     ]);
+});
+
+it('round-trips whether a rate is content-restricted, and keeps it behind an offer', function (): void {
+    $rate = new RateResponse(
+        carrier: 'USPS',
+        serviceCode: 'USPS_PTP_BPM',
+        serviceName: 'USPS Bound Printed Matter',
+        price: 4.10,
+        contentRestricted: true,
+    );
+
+    expect(RateResponse::fromArray($rate->toArray())->contentRestricted)->toBeTrue()
+        ->and($rate->withOfferId('01K4XJ5S8ZQ7V6R3N2M1P0T9AB')->contentRestricted)->toBeTrue()
+        ->and(RateResponse::fromArray([...$rate->toArray(), 'contentRestricted' => null])->contentRestricted)->toBeFalse();
 });
 
 it('round-trips the catalog service and carrier it names', function (): void {
