@@ -36,7 +36,7 @@ it('refuses a second Shopify code for a service when mapping, rather than rewrit
 
     SourceServiceMapping::map(PostageSourceKind::Shopify, 'usps', 'usps_ground_advantage', $service->id);
 
-    expect(fn () => SourceServiceMapping::map(PostageSourceKind::Shopify, 'usps', 'usps_other', $service->id))
+    expect(fn (): SourceServiceMapping => SourceServiceMapping::map(PostageSourceKind::Shopify, 'usps', 'usps_other', $service->id))
         ->toThrow(QueryException::class)
         ->and(SourceServiceMapping::sole()->external_service_id)->toBe('usps_ground_advantage');
 });
