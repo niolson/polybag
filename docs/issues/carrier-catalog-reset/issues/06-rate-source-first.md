@@ -1,6 +1,6 @@
 # Rate source-first through `PostageSourceResolver`
 
-Status: needs-triage
+Status: done
 
 Repo: `polybag`
 
@@ -9,14 +9,23 @@ Repo: `polybag`
 ## Parent
 
 [PRD](../PRD.md), *Rating* and *Which sources can sell a service*. ADR-0006 decisions 3,
-4 and 10.
+4 and 10, and decision 1 as amended 2026-09-25.
 
 ## What to build
 
 Rating resolves the package's postage sources first, then asks each one for the
 method's services it can sell. Behaviour does not change while the `Shopify` and
-`Amazon` rows still exist. What changes is that nothing finds a source through a
-carrier's name any more, and every later slice builds on that.
+`Amazon` rows still exist, with the one exception the second acceptance criterion names.
+What changes is that no caller hands the resolver a list of carrier names any more, and
+rating no longer groups a method's services by carrier to decide whom to ask. Every later
+slice builds on that.
+
+**What "by name" still means.** A system carrier's `name` is fixed since `05`, and it is
+the registry's key (ADR-0006 decision 1 and option F, as amended). Once a source instance
+is resolved, its adapter is still found with `CarrierRegistry` by the carrier's `name`,
+and the `Shopify` and `Amazon` entries stay registered under `ShopifyAdapter::CARRIER_NAME`
+and `AmazonBuyShippingAdapter::SOURCE_NAME` until `09` and `12`. That is not what this
+issue removes.
 
 - **`PostageSourceResolver::resolve()` becomes the entry point.** It takes the package
   and its shipping method (or none), not carrier names. It returns source instances:
@@ -24,7 +33,9 @@ carrier's name any more, and every later slice builds on that.
   - the connection scoped for off-Amazon Amazon Shipping, until `15` makes it Amazon
     Shipping's direct account;
   - the resolved account of each direct carrier the method needs, or of every direct
-    carrier when there is no method.
+    carrier when there is no method. "Direct" means the carrier has a registered
+    `DirectCarrierAdapter`. Carriers are found from the method's services by id, or, with
+    no method, from the registry's direct adapters by their locked names.
 
   Nothing in the app calls `resolve()` today.
 - **One direct account per carrier, as today.** `resolve()` returns every account of a
@@ -33,19 +44,45 @@ carrier's name any more, and every later slice builds on that.
   account only, so an offer from a second account would be refused as "Carrier Account
   Changed". Keep the first account. Quoting every account of a `rate_shop` scope is its
   own work (ADR-0006, *Foreseen, not decided*).
-- **The account travels with the call.** Direct adapters are handed the resolved account
-  for rating, instead of resolving it themselves through `ResolvesCarrierAccount`. Pass
-  it with each call rather than storing it on the adapter: `CarrierRegistry` caches one
-  instance per adapter, and concurrent tasks share it.
+- **The account travels with the call, for rating only.** Direct adapters are handed the
+  resolved account for rating, instead of resolving it themselves through
+  `ResolvesCarrierAccount`. Pass it with each call rather than storing it on the adapter:
+  `CarrierRegistry` caches one instance per adapter, and concurrent tasks share it.
+  - Carry it on `RateRequest` (a `withCarrierAccount()` like `withShipDate()`), so the
+    three rating entry points (`getRates`, `prepareRateRequest`, `parseRateResponse`)
+    keep their signatures. It must stay out of `RateRequest::fingerprint()`: the offer's
+    quote fingerprint is computed from the package-level request and must not change.
+  - The rate's `carrierAccountId` comes from the account passed in. Today FedEx and UPS
+    call `resolveAccount()` again to fill it (`FedexAdapter` around line 247,
+    `UpsAdapter` around line 299).
+  - Everything else keeps `ResolvesCarrierAccount` as it is: purchase, recovery,
+    `resolvePreSelectedRate()`, customs, void, tracking and `isConfigured()`. Passing the
+    account to the purchase is `amazon-buy-shipping/03`'s deferred work, not this.
+  - `FakeCarrierAdapter` reads the passed account too, so the tests exercise it.
 - **Which sources sell a service** is decided per service:
   - A direct account sells a service when its adapter supports the code. Add an adapter
-    method for that question. For USPS, the answer is `SHIPPER_PACKAGING_INDICATORS`.
+    method for that question. For USPS, the answer is the keys of
+    `SHIPPER_PACKAGING_INDICATORS`. UPS and FedEx answer yes for any code of their own
+    carrier's catalog, so their behaviour does not change.
   - Shopify sells what its catalog rows name, until `09`.
-  - Amazon is asked when the method lists the hook row, until `12`.
+  - Amazon is asked when the method lists the hook row, until `12`. The gate covers both
+    Amazon instances: the order's own Amazon connection and the off-Amazon scoped
+    connection. With no method, both are asked as today when Amazon is configured.
+    Without the gate, off-Amazon Amazon Shipping would be quoted on every method.
+  - `AmazonBuyShippingAdapter` keeps choosing its connection through
+    `AmazonBuyShippingService::quotingSourceFor()` until `12` and `15`. The resolved
+    instance decides whether the Amazon task exists and how it is keyed. It is not yet
+    handed to the adapter.
 - **One task per source instance.**
   - Ship dates, exclusions, prepared requests, `configuredSourceNames` and
     `packagingIneligibleSourceNames` are keyed by source instance, not carrier name.
-  - Exclusion messages still read naturally to an operator.
+  - `offer()` reads a rate's ship date by `$rate->carrier` today. Give it the key of the
+    task that quoted the rate, so it uses the date that task was quoted for and never
+    reads the date again. `08` then changes how the date is chosen.
+  - Exclusion messages still read naturally to an operator. They are UI text, so they
+    name a source by `Carrier::labelForName()` (`05`): a direct carrier's label, and for
+    a channel the label of the `Shopify` or `Amazon` row it is registered as, until `09`
+    and `12`.
 - **Catalog special-service scoping applies to direct tasks only** (ADR-0006 decision
   10). It never reaches the other two today, and must not start to:
   - Shopify's `offerCapability()` is always `Unguaranteed`. A required special service
@@ -53,31 +90,50 @@ carrier's name any more, and every later slice builds on that.
   - Amazon ignores the service list it is asked with, so scoping mapped services could
     only exclude Amazon outright. Its offers are judged one by one on the value-added
     services each returns (`honoursRequiredServices()`, ADR-0002 decision 8).
+  - The capability and declared-value checks (`offerCapability()`,
+    `offerDeclaredValueCap()`) still run for every source, as today.
 - **The same resolution serves every caller.** `sellersForShippingMethod()` (the batch
   report-printer check) and `blindPurchaseOffersFor()` read it, so eligibility has one
   definition.
 - **The sole-choice test for blind purchase** counts sources that can sell a method
   service for this package, not configured adapters.
-- **Remove the resale-channel conflict from `resolve()`.** After `05` it cannot be
-  reached.
+- **Remove the resale-channel conflict from `resolve()`.** `resolve()` now looks up
+  accounts only for carriers with a direct adapter, so an account on the `Shopify`,
+  `Amazon` or a policy-only carrier row is never read. Such rows are no longer reported;
+  they are ignored. Since `05` none can be saved, and there are no production tenants.
+  - `PostageSourceResolution` loses `conflicts` and `hasConflicts()`.
+  - The three `unresolvable ties` tests in `tests/Feature/PostageSourceResolutionTest.php`
+    that assert a conflict go: *refuses to buy through a resale channel as though it were
+    a carrier account*, *leaves a conflict on one carrier from affecting another*, and
+    *refuses an account scoped to a carrier we hold policy for but no account with*.
+    Replace them with one test that such a legacy account (inserted with model events
+    off) yields no candidate. The maintainer approved removing them on 2026-09-25. The
+    fourth test in that block (*cannot be given two accounts at one precedence*) stays.
 
 ## Acceptance criteria
 
-- [ ] Rating, blind-offer, batch-ship and auto-ship behaviour is unchanged, and the
-      existing suite passes
-- [ ] On a method whose only service a configured direct account cannot sell, that
+- [x] Rating, blind-offer, batch-ship and auto-ship behaviour is unchanged apart from the
+      next criterion, and the existing suite passes
+- [x] On a method whose only service a configured direct account cannot sell, that
       account does not count as a seller, so a Shopify blind offer can be the sole
-      choice
-- [ ] A quote calls `resolve()` once, and nothing in `ShippingRateService` finds a source
-      by a carrier's name
-- [ ] A `rate_shop` scope still quotes one account per carrier, and its offer is bought
+      choice. This is the one intended behaviour change
+- [x] A quote calls `resolve()` once. `resolve()` takes no carrier names, and
+      `ShippingRateService` never groups services by carrier name to choose whom to ask.
+      Adapter lookup by a resolved carrier's locked name is allowed
+- [x] A direct adapter rates on the account it is handed, and a rate's
+      `carrierAccountId` is that account. Offer quote fingerprints are unchanged
+- [x] A `rate_shop` scope still quotes one account per carrier, and its offer is bought
       without an account-changed refusal
-- [ ] Special-service scoping is applied only to direct tasks. A signature-required
+- [x] A method that does not list the Amazon row gets no off-Amazon Amazon Shipping
+      offer, even with a scoped connection
+- [x] Special-service scoping is applied only to direct tasks. A signature-required
       shipment still gets the Amazon offers that carry the signature group
+- [x] With `display_name` set on a carrier, its exclusion message shows the display name
+- [x] A legacy carrier account on the `Shopify` row yields no candidate and no error
 
 ## Blocked by
 
-- [`05`](05-lock-system-carrier-names.md)
+- [`05`](05-lock-system-carrier-names.md) (done)
 
 ## Comments
 
@@ -86,3 +142,53 @@ carrier's name any more, and every later slice builds on that.
   only exclude the source wholesale. The `rate_shop` behaviour was pinned, because
   source-first resolution would otherwise have started quoting accounts the purchase
   path then refuses.
+- **2026-09-25** — Re-reviewed against the code after `05` shipped. `05` kept the registry
+  keyed by locked carrier names, so "nothing finds a source through a carrier's name"
+  could not be met as written. It now means no carrier-name list into `resolve()` and no
+  grouping by carrier to choose sources; adapter lookup by a locked name stays. ADR-0006
+  decision 4 was amended to match. Also settled:
+  - the account rides on `RateRequest`, outside the fingerprint, and only for rating;
+  - the Amazon hook-row gate covers the off-Amazon instance too, and the Amazon adapter
+    keeps choosing its own connection until `12` and `15`;
+  - UPS and FedEx sell any code of their own catalog;
+  - `offer()` reads the ship date by task key;
+  - exclusion messages use `label()`;
+  - the sole-choice change is named as the one intended behaviour change.
+
+  The conflict removal is reachable-by-construction, not only by `05`'s guard, and the
+  three conflict tests are replaced with the maintainer's approval. Now
+  `ready-for-agent`.
+- **2026-09-25** — Done on `feature/rate-source-first`.
+  - `PostageSourceResolver::resolve(Package, ?ShippingMethod)` returns the channel
+    connection, the off-Amazon connection, and one candidate per direct carrier with its
+    first resolved account. `ShippingRateService::buildRatingTasks()` calls it once,
+    assigns each candidate the method's services it can sell (`assignServices()`), and
+    builds one task per candidate, keyed by `PostageSourceCandidate::key()`.
+  - **A deviation from the text above:** a direct carrier with no account that resolves
+    for the package is still a candidate, with a null account. `FakeCarrierAdapter`
+    quotes without one, and so do the many test adapters registered with no account. A
+    real integration quotes nothing without an account, as before, and still counts
+    toward the sole-choice test while `isConfigured()`, as before.
+  - The account rides on `RateRequest::withCarrierAccount()`, outside the fingerprint.
+    Adapters read it through `ResolvesCarrierAccount::ratingAccount()`, which falls back
+    to their own resolution for requests built elsewhere.
+  - Only USPS declares which services it sells, through the new optional
+    `DeclaresSellableServices` contract. An adapter that does not declare it sells every
+    code. It is not on `DirectCarrierAdapter`, because dozens of strict mocks of that
+    interface would then fail.
+  - Exclusions gained a `source` key (the registry name), and the blind-purchase
+    refusal matches on it, so a display name on the `Shopify` row does not break it.
+  - `sellersForShippingMethod()` became `sellersForShipment()`. It resolves an unsaved
+    Package for the batch's origin, so a channel the shipment did not come from no longer
+    counts toward the report-printer skip.
+  - Beyond the named sole-choice change, sole choice now also ignores a source that
+    cannot sell to this package at all. For example, a configured Amazon connection
+    with no off-Amazon scope, on a Shopify order whose method lists the Amazon row, no
+    longer stops Shopify being the sole choice.
+  - Tests: `tests/Feature/SourceFirstRatingTest.php` covers the acceptance criteria. A
+    sole-choice test and a display-name refusal test were added to `BlindPurchaseTest`.
+    The three conflict tests were replaced by one test that a legacy account is never
+    read, and the rate-shop resolver test now pins the first account. Three rating tests
+    were adjusted to the new model: the Shopify exclusion test now links its shipment to
+    the connection, and the concurrent-path test uses a non-direct Amazon source beside a
+    direct carrier.

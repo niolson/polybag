@@ -2,6 +2,7 @@
 
 namespace App\DataTransferObjects\Shipping;
 
+use App\Models\CarrierAccount;
 use App\Models\Package;
 use App\Services\SpecialServiceResolver;
 use Carbon\CarbonImmutable;
@@ -12,7 +13,8 @@ readonly class RateRequest
      * @param  array<PackageData>  $packages
      * @param  array<int, string>  $specialServiceCodes
      * @param  array<string, array<string, mixed>>  $specialServiceConfig  Per-code config values (e.g. declared_value amount)
-     * @param  int|null  $shippingMethodId  The shipping method the package is quoted under. No adapter reads it — it is eligibility, not price: `ShippingRateService::buildCarrierTasks()` derives from the method which carriers are asked at all and which of their services, so a method swap changes the price *list* without changing any price on it. It is here so that {@see fingerprint()} covers that: an offer quoted under a method that permitted its carrier must not stay spendable once the shipment moves to one that does not.
+     * @param  int|null  $shippingMethodId  The shipping method the package is quoted under. No adapter reads it — it is eligibility, not price: `ShippingRateService::buildRatingTasks()` derives from the method which sources are asked at all and which of their services, so a method swap changes the price *list* without changing any price on it. It is here so that {@see fingerprint()} covers that: an offer quoted under a method that permitted its carrier must not stay spendable once the shipment moves to one that does not.
+     * @param  CarrierAccount|null  $carrierAccount  The account a direct adapter rates on, resolved by `PostageSourceResolver` and handed over per call rather than stored on the adapter, which the registry shares between tasks. Null when nobody resolved one, and a direct adapter then resolves it as it always has. Left out of {@see fingerprint()}: which account quoted is bound separately, by the offer's account id and billing fingerprint.
      */
     public function __construct(
         public string $originPostalCode,
@@ -35,6 +37,7 @@ readonly class RateRequest
         public ?int $shippingMethodId = null,
         public ?string $destinationStreetAddress = null,
         public ?string $destinationStreetAddress2 = null,
+        public ?CarrierAccount $carrierAccount = null,
     ) {}
 
     public static function fromPackage(Package $package, ?AddressData $destination = null): self
@@ -89,9 +92,10 @@ readonly class RateRequest
      * parent, so a quantity or declared-value edit moved nothing, while any
      * parent save retired every offer for no reason.
      *
-     * Two inputs are left out. The ship date is set per carrier after
+     * Three inputs are left out. The ship date is set per carrier after
      * `fromPackage()` and is the offer's window, not its identity; the
-     * package id is already the row's `package_id`. The shipping method is
+     * package id is already the row's `package_id`; and the carrier account
+     * is set per source, and bound on the offer by its own id and fingerprint. The shipping method is
      * kept in even though no carrier prices on it: it decides which carriers
      * and services are on the list at all, so a swap to a method that
      * excludes the quoted carrier changes the list this price belongs to.
@@ -102,7 +106,7 @@ readonly class RateRequest
     public function fingerprint(): string
     {
         $inputs = get_object_vars($this);
-        unset($inputs['shipDate'], $inputs['packageId']);
+        unset($inputs['shipDate'], $inputs['packageId'], $inputs['carrierAccount']);
 
         return hash('sha256', json_encode(self::canonical($inputs), JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION));
     }
@@ -193,6 +197,7 @@ readonly class RateRequest
             shippingMethodId: $this->shippingMethodId,
             destinationStreetAddress: $this->destinationStreetAddress,
             destinationStreetAddress2: $this->destinationStreetAddress2,
+            carrierAccount: $this->carrierAccount,
         );
     }
 
@@ -219,6 +224,37 @@ readonly class RateRequest
             shippingMethodId: $this->shippingMethodId,
             destinationStreetAddress: $this->destinationStreetAddress,
             destinationStreetAddress2: $this->destinationStreetAddress2,
+            carrierAccount: $this->carrierAccount,
+        );
+    }
+
+    /**
+     * The same request, to be rated on this account.
+     */
+    public function withCarrierAccount(?CarrierAccount $account): self
+    {
+        return new self(
+            originPostalCode: $this->originPostalCode,
+            destinationPostalCode: $this->destinationPostalCode,
+            originCountry: $this->originCountry,
+            destinationCountry: $this->destinationCountry,
+            destinationCity: $this->destinationCity,
+            destinationStateOrProvince: $this->destinationStateOrProvince,
+            residential: $this->residential,
+            packages: $this->packages,
+            specialServiceCodes: $this->specialServiceCodes,
+            locationId: $this->locationId,
+            clientId: $this->clientId,
+            shipDate: $this->shipDate,
+            specialServiceConfig: $this->specialServiceConfig,
+            originCity: $this->originCity,
+            originStateOrProvince: $this->originStateOrProvince,
+            contentsValue: $this->contentsValue,
+            packageId: $this->packageId,
+            shippingMethodId: $this->shippingMethodId,
+            destinationStreetAddress: $this->destinationStreetAddress,
+            destinationStreetAddress2: $this->destinationStreetAddress2,
+            carrierAccount: $account,
         );
     }
 }

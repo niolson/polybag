@@ -109,10 +109,10 @@ class FakeCarrierAdapter implements DirectCarrierAdapter, UsesCarrierAccount
     {
         $rates = self::RATES[$this->carrierName] ?? [];
 
-        // Resolved the way a real adapter resolves it, so the offer the rate
-        // service issues records the account — and the purchase's account
-        // check exercises the same path fake mode is standing in for.
-        $account = $this->resolveAccount($request->locationId, $request->clientId);
+        // Taken the way a real adapter takes it, so the offer the rate service
+        // issues records the account — and the purchase's account check
+        // exercises the same path fake mode is standing in for.
+        $account = $this->ratingAccount($request);
 
         return $this->withCatalogIdentity(collect($rates)
             ->when(! empty($serviceCodes), fn (Collection $c) => $c->whereIn('code', $serviceCodes))

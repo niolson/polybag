@@ -1,6 +1,7 @@
 <?php
 
 use App\DataTransferObjects\PostageSources\PostageSourceCandidate;
+use App\DataTransferObjects\PostageSources\PostageSourceResolution;
 use App\Enums\OffAmazonShippingStatus;
 use App\Enums\PostageSource;
 use App\Models\Carrier;
@@ -13,6 +14,7 @@ use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\PostageSources\PostageSourceResolver;
+use Illuminate\Support\Collection;
 
 /**
  * ADR-0002's 2026-09-22 amendment: which Amazon connection sells Amazon
@@ -38,6 +40,19 @@ function scopeConnectionTo(DataSource $source, ?Location $location = null, ?Clie
         'location_id' => $location?->id,
         'client_id' => $client?->id,
     ]);
+}
+
+/**
+ * The candidates bought through a connection, leaving out the direct carriers
+ * every package with no shipping method also resolves.
+ *
+ * @return Collection<int, PostageSourceCandidate>
+ */
+function connectionCandidates(PostageSourceResolution $resolution): Collection
+{
+    return $resolution->candidates
+        ->reject(fn (PostageSourceCandidate $candidate): bool => $candidate->isDirect())
+        ->values();
 }
 
 function offAmazonCandidate(Package $package): ?PostageSourceCandidate
@@ -111,9 +126,9 @@ describe('resolution', function (): void {
         $connection = DataSource::factory()->unassigned()->offeringOffAmazonShipping()->create();
         scopeConnectionTo($connection);
 
-        $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage(), []);
+        $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage());
 
-        expect($resolution->candidates)->toHaveCount(1);
+        expect(connectionCandidates($resolution))->toHaveCount(1);
     });
 
     it('never offers a scoped connection to an Amazon order', function (): void {
@@ -134,7 +149,7 @@ describe('resolution', function (): void {
 
         $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage($origin));
 
-        expect($resolution->candidates)->toBeEmpty();
+        expect(connectionCandidates($resolution))->toBeEmpty();
     });
 
     it('recognizes an Amazon order by its order ID once its connection is gone', function (): void {
@@ -191,7 +206,7 @@ describe('the off-Amazon candidate', function (): void {
         scopeConnectionTo($connection);
 
         $shopify = createShopifyDataSource();
-        $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage($shopify), ['Amazon']);
+        $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage($shopify));
         $candidate = offAmazonCandidate(offAmazonPackage($shopify));
 
         // Still returned when Amazon said the account is not set up, so the
@@ -211,7 +226,7 @@ describe('the off-Amazon candidate', function (): void {
 
         $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage(DataSource::factory()->create()));
 
-        expect($resolution->candidates)->toHaveCount(1)
+        expect(connectionCandidates($resolution))->toHaveCount(1)
             ->and($resolution->channel())->toBeNull();
     });
 });

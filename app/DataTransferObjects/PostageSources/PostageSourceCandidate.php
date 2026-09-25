@@ -20,6 +20,10 @@ use App\Models\DataSource;
  * channel source precisely because a blind-purchase offer has no carrier until
  * the label comes back (ADR-0003 decisions 5 and 6).
  *
+ * A direct candidate is a carrier's integration and the account it rates on.
+ * The account is null when none resolves for this package: a real integration
+ * then quotes nothing, as it always has, while fake carriers quote without one.
+ *
  * An off-Amazon candidate is an Amazon connection selling Amazon Shipping for
  * an order from another channel (`channelType: EXTERNAL`). It is bought through
  * a connection, so its kind is still `PostageDataSource`, but it is not channel
@@ -35,15 +39,22 @@ readonly class PostageSourceCandidate
         public ?int $postageDataSourceId = null,
         public bool $offAmazon = false,
         public ?OffAmazonShippingStatus $offAmazonShippingStatus = null,
+        public ?CarrierAccount $carrierAccount = null,
+        public ?string $dataSourceType = null,
     ) {}
 
-    public static function fromCarrierAccount(CarrierAccount $account, string $carrier): self
+    /**
+     * A carrier sold directly, on the account that resolves for the package,
+     * if one does.
+     */
+    public static function forDirectCarrier(string $carrier, ?CarrierAccount $account): self
     {
         return new self(
             kind: PostageSource::CarrierAccount,
-            name: (string) $account->name,
+            name: $account !== null ? (string) $account->name : $carrier,
             carrier: $carrier,
-            carrierAccountId: $account->id,
+            carrierAccountId: $account?->id,
+            carrierAccount: $account,
         );
     }
 
@@ -53,6 +64,7 @@ readonly class PostageSourceCandidate
             kind: PostageSource::PostageDataSource,
             name: (string) $source->name,
             postageDataSourceId: $source->id,
+            dataSourceType: $source->source_type,
         );
     }
 
@@ -72,7 +84,29 @@ readonly class PostageSourceCandidate
             postageDataSourceId: $source->id,
             offAmazon: true,
             offAmazonShippingStatus: $source->off_amazon_shipping_status,
+            dataSourceType: $source->source_type,
         );
+    }
+
+    public function isDirect(): bool
+    {
+        return $this->kind === PostageSource::CarrierAccount;
+    }
+
+    /**
+     * What identifies this instance among the package's sources, so rating
+     * keys its task, ship date and exclusions by the source and not by a
+     * carrier's name.
+     */
+    public function key(): string
+    {
+        return match (true) {
+            $this->isDirect() => $this->carrierAccountId !== null
+                ? "carrier-account:{$this->carrierAccountId}"
+                : "carrier:{$this->carrier}",
+            $this->offAmazon => "connection:{$this->postageDataSourceId}:off-amazon",
+            default => "connection:{$this->postageDataSourceId}",
+        };
     }
 
     /**

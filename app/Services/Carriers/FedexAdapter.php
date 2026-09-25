@@ -244,7 +244,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
             return $this->withCatalogIdentity(app(FedexSandboxInternationalRates::class)->ratesFor(
                 $request,
                 $serviceCodes,
-                $this->resolveAccount($request->locationId, $request->clientId)?->id,
+                $this->ratingAccount($request)?->id,
             ));
         }
 
@@ -254,7 +254,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
             return collect();
         }
 
-        $account = $this->resolveAccount($request->locationId, $request->clientId);
+        $account = $this->ratingAccount($request);
         $connector = $this->resolveConnector($account);
         $apiRequest = $this->buildRateApiRequest($this->adjustRequestForSaturday($request, $serviceCodes), $serviceCodes, $account);
 
@@ -282,7 +282,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
             return null;
         }
 
-        $account = $this->resolveAccount($request->locationId, $request->clientId);
+        $account = $this->ratingAccount($request);
         $connector = $this->resolveConnector($account);
         $apiRequest = $this->buildRateApiRequest($this->adjustRequestForSaturday($request, $serviceCodes), $serviceCodes, $account);
         $pendingRequest = $connector->createPendingRequest($apiRequest);
@@ -295,7 +295,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
 
     public function parseRateResponse(Response $response, RateRequest $request, array $serviceCodes): Collection
     {
-        $account = $this->resolveAccount($request->locationId, $request->clientId);
+        $account = $this->ratingAccount($request);
 
         if (! $response->successful()) {
             // If Saturday delivery was requested, retry without it

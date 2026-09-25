@@ -8,6 +8,7 @@ use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\DataSource;
 use App\Models\Package;
+use App\Models\ShippingMethod;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\ShipmentImport\AmazonOrderItems;
 use App\Services\ShipmentImport\Sources\AmazonSource;
@@ -122,38 +123,40 @@ class PostageSourceResolver
     }
 
     /**
-     * Every source eligible to sell this package a label: the bound channel
+     * Every source that could sell this package a label: the bound channel
      * source, the connection scoped to sell off-Amazon Amazon Shipping, then
-     * one carrier account per named carrier.
+     * one per direct carrier (ADR-0006 decision 4).
      *
-     * Carriers are named by the caller because it already knows which ones it
-     * is about to quote — the shipping method's services, or every configured
-     * adapter when there is no method. Resolving is not free (a query and a
-     * precedence walk per carrier), and resolving carriers nobody asked about
-     * would spend it for nothing.
+     * The direct carriers are those the shipping method's active services
+     * name, or every carrier with a direct integration when there is no
+     * method. Which of a method's services each source then sells is rating's
+     * question, not this one's.
      *
-     * One source per carrier comes out of this, unless the winning scope opted
-     * into rate shopping. It is not enforced here on top of the scope walk,
-     * because it cannot be violated there: `carrier_account_scopes` is unique
-     * on `(carrier_id, location_key, client_key)`, so each of the four
-     * precedence bands holds at most one scope and the walk has nothing to
-     * arbitrate. That constraint, not a check in this class, is what makes
-     * "never an arbitrary pick" true for direct carriers.
+     * Each direct carrier gets the first account its scopes resolve, and null
+     * when none does. A `rate_shop` scope still yields one account: the
+     * purchase path checks an offer against the first account only, so an
+     * offer from a second would be refused as "Carrier Account Changed"
+     * (ADR-0006, *Foreseen, not decided*). One account per band is not
+     * enforced here either, because it cannot be violated:
+     * `carrier_account_scopes` is unique on `(carrier_id, location_key,
+     * client_key)`, so each precedence band holds at most one scope and the
+     * walk has nothing to arbitrate.
      *
-     * @param  array<int, string>  $carrierNames
+     * Only carriers with a direct integration are walked, so an account left
+     * on a resale channel's or a policy-only carrier's row, from before
+     * `CarrierAccount` refused them, is never read.
      */
-    public function resolve(Package $package, array $carrierNames = []): PostageSourceResolution
+    public function resolve(Package $package, ?ShippingMethod $shippingMethod = null): PostageSourceResolution
     {
         /** @var Collection<int, PostageSourceCandidate> $candidates */
         $candidates = new Collection;
-        $conflicts = [];
 
         if ($channel = $this->channelSourceFor($package)) {
             $candidates->push(PostageSourceCandidate::fromDataSource($channel));
         }
 
-        // Always asked, like the channel arm, because no carrier name selects
-        // it: the offer's carrier is whatever Amazon Shipping quotes.
+        // Always resolved, like the channel arm: no carrier on the method
+        // selects it, since each offer names whichever carrier Amazon quotes.
         if ($offAmazon = $this->offAmazonShippingSourceFor($package)) {
             $candidates->push(PostageSourceCandidate::forOffAmazonShipping($offAmazon));
         }
@@ -162,55 +165,52 @@ class PostageSourceResolver
         $locationId = $package->location_id;
         $clientId = $package->shipment?->client_id;
 
-        $names = array_values(array_unique($carrierNames));
-        $carrierIds = Carrier::whereIn('name', $names)->pluck('id', 'name');
+        foreach ($this->directCarriers($shippingMethod) as $carrierName => $carrierId) {
+            $account = $carrierId === null
+                ? null
+                : CarrierAccount::resolveForShipment($carrierId, $locationId, $clientId)->first();
 
-        foreach ($names as $carrierName) {
-            $carrierId = $carrierIds->get($carrierName);
-
-            if ($carrierId === null) {
-                continue;
-            }
-
-            $accounts = CarrierAccount::resolveForShipment($carrierId, $locationId, $clientId);
-
-            if ($accounts->isEmpty()) {
-                continue;
-            }
-
-            // Asked as `directAdapterFor()` and not `policyFor()`, because the
-            // candidate about to be emitted is a claim that we can *buy* here,
-            // and holding a carrier's policy is not holding an account with it.
-            // The two coincide for every adapter registered today, so this is
-            // the weaker predicate only by luck; the pairing that has to hold is
-            // with `CarrierAccountPostageSource`, which resolves the same
-            // package through `directAdapterOrFail()` when the time comes to
-            // void or track it. Resolving on the looser question would promise a
-            // packer an offer that throws on the way back out.
-            //
-            // Two kinds of carrier row fail it. A resale channel holds one so
-            // its offers have services to hang off — an account scoped there
-            // claims we buy postage from a storefront the way we buy it from
-            // USPS, when its postage comes from the data source above, on the
-            // merchant's own account. A policy-only carrier holds one so the
-            // cutoffs and manifest behavior of a courier Shopify picked come out
-            // right (ADR-0002 option D), and we buy nothing from it at all.
-            // Either way two sources would claim one carrier, and neither may be
-            // picked over the other.
-            if (! $this->carrierRegistry->directAdapterFor($carrierName)) {
-                $conflicts[] = [
-                    'carrier' => $carrierName,
-                    'reason' => "No account of ours buys postage from {$carrierName}, so the carrier account scoped to it cannot sell this label. Remove it in Carrier Accounts — a carrier row also exists for carriers we only hold policy for, and for resale channels like Shopify, whose postage resolves to the data source the shipment came from instead.",
-                ];
-
-                continue;
-            }
-
-            foreach ($accounts as $account) {
-                $candidates->push(PostageSourceCandidate::fromCarrierAccount($account, $carrierName));
-            }
+            $candidates->push(PostageSourceCandidate::forDirectCarrier($carrierName, $account));
         }
 
-        return new PostageSourceResolution($candidates, $conflicts);
+        return new PostageSourceResolution($candidates);
+    }
+
+    /**
+     * The carriers sold directly that this method needs, by their fixed name,
+     * with each one's carrier row id, or null for a registered integration
+     * with no row.
+     *
+     * Asked as `directAdapterFor()` and not `policyFor()`, because a candidate
+     * is a claim that we can *buy* here, and the pairing that has to hold is
+     * with `CarrierAccountPostageSource`, which voids and tracks through
+     * `directAdapterOrFail()`.
+     *
+     * @return array<string, int|null>
+     */
+    private function directCarriers(?ShippingMethod $shippingMethod): array
+    {
+        if ($shippingMethod !== null) {
+            return $shippingMethod->carrierServices()
+                ->active()
+                ->withActiveCarrier()
+                ->with('carrier')
+                ->get()
+                ->pluck('carrier')
+                ->unique('id')
+                ->filter(fn (Carrier $carrier): bool => $this->carrierRegistry->directAdapterFor($carrier->name) !== null)
+                ->mapWithKeys(fn (Carrier $carrier): array => [$carrier->name => $carrier->id])
+                ->all();
+        }
+
+        $names = array_values(array_filter(
+            $this->carrierRegistry->getCarrierNames(),
+            fn (string $name): bool => $this->carrierRegistry->directAdapterFor($name) !== null,
+        ));
+        $ids = Carrier::whereIn('name', $names)->pluck('id', 'name');
+
+        return collect($names)
+            ->mapWithKeys(fn (string $name): array => [$name => $ids->get($name)])
+            ->all();
     }
 }

@@ -247,7 +247,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
             }
 
             $connector = $this->resolveConnector(
-                $this->resolveAccount($request->locationId, $request->clientId)
+                $this->ratingAccount($request)
             );
             $response = $connector->send($this->buildRateApiRequest($request));
 
@@ -264,7 +264,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
         }
 
         $connector = $this->resolveConnector(
-            $this->resolveAccount($request->locationId, $request->clientId)
+            $this->ratingAccount($request)
         );
         $pendingRequest = $connector->createPendingRequest($this->buildRateApiRequest($request));
 
@@ -296,7 +296,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
             $this->packagingCodeFor($request->packages[0]->carrierPackaging),
             $request->hasSpecialService('saturday_delivery'),
             // The account the offer will record as having quoted this price.
-            $this->resolveAccount($request->locationId, $request->clientId)?->id,
+            $this->ratingAccount($request)?->id,
         ));
     }
 

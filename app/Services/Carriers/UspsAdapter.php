@@ -2,6 +2,7 @@
 
 namespace App\Services\Carriers;
 
+use App\Contracts\DeclaresSellableServices;
 use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\RecoversUnresolvedPurchase;
 use App\Contracts\UsesCarrierAccount;
@@ -56,7 +57,7 @@ use Saloon\Exceptions\Request\Statuses\ForbiddenException;
 use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
 
-class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, UsesCarrierAccount
+class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, RecoversUnresolvedPurchase, UsesCarrierAccount
 {
     use BuildsCustomerReferences;
     use ConsultsCarrierPolicyForOffers;
@@ -65,6 +66,17 @@ class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, U
     use IdentifiesCatalogServices;
     use ResolvesCarrierAccount;
     use ResolvesDeliveredAt;
+
+    /**
+     * The mail classes this integration can sell a single parcel under: the
+     * ones {@see self::SHIPPER_PACKAGING_INDICATORS} prices. A class that is
+     * not there is dropped from every response, so an account asked only for
+     * it would quote nothing and still count as a seller.
+     */
+    public function sellsService(string $serviceCode): bool
+    {
+        return array_key_exists($serviceCode, self::SHIPPER_PACKAGING_INDICATORS);
+    }
 
     public function serviceCapability(string $serviceCode): ServiceCapability
     {
@@ -309,7 +321,7 @@ class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, U
             return collect();
         }
 
-        $account = $this->resolveAccount($request->locationId, $request->clientId);
+        $account = $this->ratingAccount($request);
         $connector = USPSConnector::getAuthenticatedConnector($account);
         $apiRequest = $this->buildRateApiRequest($request, $account);
 
@@ -335,7 +347,7 @@ class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, U
             return null;
         }
 
-        $account = $this->resolveAccount($request->locationId, $request->clientId);
+        $account = $this->ratingAccount($request);
         $connector = USPSConnector::getAuthenticatedConnector($account);
         $apiRequest = $this->buildRateApiRequest($request, $account);
         $pendingRequest = $connector->createPendingRequest($apiRequest);
@@ -377,11 +389,11 @@ class UspsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, U
         $results = collect();
         $totalApiRates = 0;
 
-        // Resolved again here rather than carried from prepareRateRequest():
-        // the async path parses in a different call from the one that
-        // prepared, and the account is what the offer records as having
-        // quoted this price.
-        $account = $this->resolveAccount($request->locationId, $request->clientId);
+        // Read from the request again rather than carried from
+        // prepareRateRequest(): the async path parses in a different call from
+        // the one that prepared, and the account is what the offer records as
+        // having quoted this price.
+        $account = $this->ratingAccount($request);
 
         foreach ($pricingOptions[0]['shippingOptions'] ?? [] as $shippingOption) {
             foreach ($shippingOption['rateOptions'] ?? [] as $rateOption) {
