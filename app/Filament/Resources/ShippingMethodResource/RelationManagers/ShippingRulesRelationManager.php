@@ -5,16 +5,24 @@ namespace App\Filament\Resources\ShippingMethodResource\RelationManagers;
 use App\Enums\AmazonOrderProgram;
 use App\Enums\DestinationZone;
 use App\Enums\ShippingRuleAction;
+use App\Enums\ShippingRuleSource;
+use App\Models\Carrier;
+use App\Models\CarrierService;
 use App\Models\Channel;
+use App\Models\ShippingMethod;
+use App\Models\ShippingRule;
+use App\Services\PostageSources\MethodSourceAllowance;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Forms\Components\Builder;
 use Filament\Forms\Components\Builder\Block;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Support\Collection;
 
 class ShippingRulesRelationManager extends RelationManager
 {
@@ -29,13 +37,51 @@ class ShippingRulesRelationManager extends RelationManager
                     ->maxLength(255),
                 Forms\Components\Select::make('action')
                     ->options(ShippingRuleAction::class)
-                    ->required(),
-                Forms\Components\Select::make('carrier_service_id')
-                    ->relationship('carrierService', 'name')
-                    ->getOptionLabelFromRecordUsing(fn ($record): string => "{$record->carrier->label()} — {$record->name}")
+                    ->required()
+                    ->live()
+                    ->afterStateUpdated(function (Set $set): void {
+                        $set('source', null);
+                        $set('carrier_id', null);
+                        $set('any_service', false);
+                    }),
+                Forms\Components\Select::make('source')
+                    ->helperText('Where a Use rule buys, or which purchases an Exclude rule matches. A Use rule picks within what this method allows.')
+                    ->options(fn (Get $get): array => $this->sourceOptions(self::actionFrom($get)))
+                    ->required()
+                    ->live()
+                    ->afterStateUpdated(function (Set $set): void {
+                        $set('carrier_service_id', null);
+                        $set('any_service', false);
+                    }),
+                Forms\Components\Select::make('carrier_id')
+                    ->label('Carrier')
+                    ->helperText('Matches every offer this carrier carries, including services nobody has mapped.')
+                    ->options(fn (): array => Carrier::query()->orderBy('name')->get()->mapWithKeys(fn (Carrier $carrier): array => [$carrier->id => $carrier->label()])->all())
                     ->searchable()
-                    ->preload()
-                    ->required(),
+                    ->live()
+                    // A rate has one carrier, so a service of another carrier
+                    // would leave the rule matching nothing.
+                    ->afterStateUpdated(function (Get $get, Set $set, mixed $state): void {
+                        $serviceId = $get('carrier_service_id');
+
+                        if ($state !== null && $serviceId !== null && (int) CarrierService::whereKey($serviceId)->value('carrier_id') !== (int) $state) {
+                            $set('carrier_service_id', null);
+                        }
+                    })
+                    ->visible(fn (Get $get): bool => self::actionFrom($get) === ShippingRuleAction::ExcludeService)
+                    // An Exclude rule must name something: with any source and
+                    // any service, the carrier is all that is left.
+                    ->required(fn (Get $get): bool => self::sourceFrom($get) === ShippingRuleSource::Any && (bool) $get('any_service')),
+                Forms\Components\Toggle::make('any_service')
+                    ->label('Any service')
+                    ->live()
+                    ->visible(fn (Get $get): bool => self::allowsAnyService(self::actionFrom($get), self::sourceFrom($get))),
+                Forms\Components\Select::make('carrier_service_id')
+                    ->label('Service')
+                    ->options(fn (Get $get): array => $this->serviceOptions(self::sourceFrom($get), self::carrierIdFrom($get)))
+                    ->searchable()
+                    ->hidden(fn (Get $get): bool => (bool) $get('any_service'))
+                    ->required(fn (Get $get): bool => ! $get('any_service')),
                 Forms\Components\Toggle::make('enabled')
                     ->default(true),
                 Builder::make('conditions')
@@ -66,9 +112,9 @@ class ShippingRulesRelationManager extends RelationManager
                     ->searchable(),
                 Tables\Columns\TextColumn::make('action')
                     ->badge(),
-                Tables\Columns\TextColumn::make('carrierService.name')
-                    ->label('Carrier Service')
-                    ->formatStateUsing(fn ($state, $record): string => "{$record->carrierService->carrier->label()} — {$state}"),
+                Tables\Columns\TextColumn::make('target')
+                    ->label('Source and service')
+                    ->state(fn (ShippingRule $record): string => $record->describeTarget()),
                 Tables\Columns\ToggleColumn::make('enabled'),
                 Tables\Columns\TextColumn::make('conditions_summary')
                     ->label('Conditions')
@@ -77,16 +123,117 @@ class ShippingRulesRelationManager extends RelationManager
             ])
             ->headerActions([
                 Actions\CreateAction::make()
+                    ->mutateDataUsing(fn (array $data): array => self::normalizeTarget($data))
                     ->slideOver(),
             ])
             ->recordActions([
                 Actions\EditAction::make()
+                    ->mutateDataUsing(fn (array $data): array => self::normalizeTarget($data))
                     ->slideOver(),
                 Actions\DeleteAction::make(),
             ])
             ->groupedBulkActions([
                 Actions\DeleteBulkAction::make(),
             ]);
+    }
+
+    /**
+     * Clear what the chosen action and source cannot say, so a field hidden
+     * after it was filled is never saved.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    public static function normalizeTarget(array $data): array
+    {
+        $action = self::asAction($data['action'] ?? null);
+        $source = self::asSource($data['source'] ?? null);
+
+        $data['any_service'] = self::allowsAnyService($action, $source) && ($data['any_service'] ?? false);
+
+        if ($data['any_service']) {
+            $data['carrier_service_id'] = null;
+        }
+
+        if ($action !== ShippingRuleAction::ExcludeService) {
+            $data['carrier_id'] = null;
+        }
+
+        return $data;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function sourceOptions(?ShippingRuleAction $action): array
+    {
+        if ($action === null) {
+            return [];
+        }
+
+        return collect(app(MethodSourceAllowance::class)->ruleSourcesFor($this->method(), $action))
+            ->mapWithKeys(fn (ShippingRuleSource $source): array => [$source->value => $source->getLabel()])
+            ->all();
+    }
+
+    /**
+     * Only the method's services: a rule picks within what the method allows.
+     *
+     * @return array<int, string>
+     */
+    private function serviceOptions(?ShippingRuleSource $source, ?int $carrierId): array
+    {
+        return app(MethodSourceAllowance::class)
+            ->serviceOptionsFor($this->method(), $source)
+            ->when($carrierId !== null, fn (Collection $services): Collection => $services->where('carrier_id', $carrierId))
+            ->mapWithKeys(fn (CarrierService $service): array => [$service->id => "{$service->carrier->label()} — {$service->name}"])
+            ->all();
+    }
+
+    private function method(): ShippingMethod
+    {
+        /** @var ShippingMethod */
+        return $this->getOwnerRecord();
+    }
+
+    /**
+     * An *Exclude* rule may leave the service open. A *Use* rule may only for
+     * Amazon Buy Shipping, whose services are discovered per quote.
+     */
+    private static function allowsAnyService(?ShippingRuleAction $action, ?ShippingRuleSource $source): bool
+    {
+        return $action === ShippingRuleAction::ExcludeService
+            || ($action === ShippingRuleAction::UseService && $source === ShippingRuleSource::Amazon);
+    }
+
+    private static function actionFrom(Get $get): ?ShippingRuleAction
+    {
+        return self::asAction($get('action'));
+    }
+
+    /**
+     * The carrier an *Exclude* rule names; a *Use* rule names none.
+     */
+    private static function carrierIdFrom(Get $get): ?int
+    {
+        $carrierId = $get('carrier_id');
+
+        return self::actionFrom($get) === ShippingRuleAction::ExcludeService && filled($carrierId) ? (int) $carrierId : null;
+    }
+
+    private static function sourceFrom(Get $get): ?ShippingRuleSource
+    {
+        return self::asSource($get('source'));
+    }
+
+    private static function asAction(mixed $action): ?ShippingRuleAction
+    {
+        return $action instanceof ShippingRuleAction ? $action : ShippingRuleAction::tryFrom((string) $action);
+    }
+
+    private static function asSource(mixed $source): ?ShippingRuleSource
+    {
+        return $source instanceof ShippingRuleSource ? $source : ShippingRuleSource::tryFrom((string) $source);
     }
 
     public static function summarizeConditions(mixed $conditions): ?string

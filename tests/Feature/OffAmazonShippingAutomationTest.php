@@ -8,6 +8,7 @@ use App\Enums\AmazonChannelType;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
 use App\Enums\ShippingRuleAction;
+use App\Enums\ShippingRuleSource;
 use App\Http\Integrations\Amazon\Requests\GetShippingRates;
 use App\Http\Integrations\Amazon\Requests\PurchaseShipment;
 use App\Jobs\GenerateLabelJob;
@@ -22,7 +23,6 @@ use App\Models\Package;
 use App\Models\ServiceApproval;
 use App\Models\ShippingRule;
 use App\Models\User;
-use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\Carriers\CarrierRegistry;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Faking\MockResponse;
@@ -146,14 +146,13 @@ it('lets a shipping rule exclude an off-Amazon service even when it is approved'
 });
 
 /**
- * `amazon-buy-shipping/19`: a *Use service* rule naming Amazon's catalog row
- * names the source, and selects among the offers Amazon quotes.
+ * *Amazon Buy Shipping, any*: selects among the offers Amazon quotes
+ * (`amazon-buy-shipping/19`, `carrier-catalog-reset/07`).
  */
 function ruleNamingAmazon(Package $package, ShippingRuleAction $action = ShippingRuleAction::UseService): void
 {
-    ShippingRule::factory()->create([
+    ShippingRule::factory()->source(ShippingRuleSource::Amazon)->anyService()->create([
         'shipping_method_id' => $package->shipment->shipping_method_id,
-        'carrier_service_id' => CarrierService::where('service_code', AmazonBuyShippingAdapter::CATALOG_SERVICE_CODE)->value('id'),
         'action' => $action,
     ]);
 }

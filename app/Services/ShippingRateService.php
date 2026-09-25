@@ -41,6 +41,7 @@ use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\Shipping\ContentsFilter;
 use App\Services\Shipping\PackagingFilter;
 use Carbon\CarbonImmutable;
+use Closure;
 use GuzzleHttp\Promise\Utils as PromiseUtils;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -100,18 +101,16 @@ class ShippingRateService
     }
 
     /**
-     * @param  array<int, string>  $excludedIds
+     * @param  (Closure(BlindPurchaseOffer): bool)|null  $excludes  Whether a shipping rule excludes the offer
      * @return Collection<int, BlindPurchaseOffer>
      */
-    public function getBlindPurchaseOffers(array $excludedIds = []): Collection
+    public function getBlindPurchaseOffers(?Closure $excludes = null): Collection
     {
-        if ($excludedIds === []) {
+        if ($excludes === null) {
             return $this->blindPurchaseOffers;
         }
 
-        return $this->blindPurchaseOffers
-            ->reject(fn (BlindPurchaseOffer $offer): bool => in_array($offer->id(), $excludedIds, true))
-            ->values();
+        return $this->blindPurchaseOffers->reject($excludes)->values();
     }
 
     /**
@@ -364,11 +363,11 @@ class ShippingRateService
      * (ADR-0006 decision 3). A shipping rule can make a more specific choice
      * separately.
      *
-     * @param  array<int, string>  $excludedIds
+     * @param  (Closure(BlindPurchaseOffer): bool)|null  $excludes  Whether a shipping rule excludes the offer
      *
      * @throws \LogicException when no completed rate snapshot exists for this package
      */
-    public function soleBlindPurchaseOfferForAutomation(int $packageId, array $excludedIds = []): ?BlindPurchaseOffer
+    public function soleBlindPurchaseOfferForAutomation(int $packageId, ?Closure $excludes = null): ?BlindPurchaseOffer
     {
         if ($this->ratedPackageId !== $packageId) {
             throw new \LogicException('soleBlindPurchaseOfferForAutomation() must follow getShippingRates() for the same package.');
@@ -391,7 +390,7 @@ class ShippingRateService
             return null;
         }
 
-        $offers = $this->getBlindPurchaseOffers($excludedIds);
+        $offers = $this->getBlindPurchaseOffers($excludes);
 
         return $offers->count() === 1 ? $offers->first() : null;
     }

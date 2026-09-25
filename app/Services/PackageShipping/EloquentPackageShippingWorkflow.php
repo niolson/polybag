@@ -131,12 +131,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             deliverByDate: $deadline?->format('D, M j'),
             allRatesLate: $deadline !== null && $classified->isNotEmpty() && $classified->every(fn (ClassifiedRate $cr): bool => ! $cr->isOnTime),
             exclusions: $exclusions,
-            selectedRateIndex: $ruleResult->hasPreSelectedSource()
-                ? $this->firstRateIndexFromSource($classified, $ruleResult)
-                : $this->selectedRateIndex($options, $ruleResult->preSelectedRate ?? null),
+            selectedRateIndex: $this->selectedRateIndex($classified, $ruleResult),
             // Alongside the rates, never among them, and never pre-selected on
             // the attended page: a person must choose and confirm it here.
-            blindPurchaseOffers: $this->shippingRateService->getBlindPurchaseOffers($ruleResult->excludedBlindPurchaseIds)
+            blindPurchaseOffers: $this->shippingRateService->getBlindPurchaseOffers($ruleResult->excludesBlindOffer(...))
                 ->map(fn (BlindPurchaseOffer $offer): array => $offer->toArray())
                 ->values()
                 ->all(),
@@ -626,9 +624,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             $advertised = $this->shippingRateService->blindPurchaseOffersFor($package);
 
             $ruleResult = $this->ruleEvaluator->evaluate($package->shipment, $package);
-            $advertised = $advertised->reject(
-                fn (BlindPurchaseOffer $offer): bool => in_array($offer->id(), $ruleResult->excludedBlindPurchaseIds, true)
-            );
+            $advertised = $advertised->reject($ruleResult->excludesBlindOffer(...));
         } catch (\Exception $e) {
             logger()->error('Could not re-derive blind purchase offers before buying', [
                 'package_id' => $package->id,
@@ -1133,54 +1129,26 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
     }
 
     /**
-     * Which rate a shipping rule pre-selected, in this list.
+     * The rate the Ship page highlights by default.
      *
-     * The offer identifier wins when there is one, which is the collision
-     * ADR-0002 decision 4 named: the same carrier and service code can now
-     * arrive twice in one list — once quoted directly and once resold through a
-     * channel — and they are different purchases at different prices. Carrier
-     * plus service code remains the fallback, because a rule pre-selects a rate
-     * that was resolved separately and may carry no offer of its own.
-     *
-     * @param  array<int, array<string, mixed>>  $rateOptions
-     */
-    private function selectedRateIndex(array $rateOptions, ?RateResponse $preSelectedRate): ?int
-    {
-        if (! $preSelectedRate) {
-            return $rateOptions === [] ? null : 0;
-        }
-
-        foreach ($rateOptions as $key => $rateArray) {
-            if ($preSelectedRate->offerId !== null && ($rateArray['offerId'] ?? null) === $preSelectedRate->offerId) {
-                return $key;
-            }
-        }
-
-        foreach ($rateOptions as $key => $rateArray) {
-            if ($rateArray['carrier'] === $preSelectedRate->carrier && $rateArray['serviceCode'] === $preSelectedRate->serviceCode) {
-                return $key;
-            }
-        }
-
-        return $rateOptions === [] ? null : 0;
-    }
-
-    /**
-     * The cheapest rate, on time first, from the source a rule names. The
-     * keys of the rate options are those of the classified list, so its first
-     * match is the one the packer sees offered first.
+     * A rule's choice, matched on its source and catalog service rather than
+     * on carrier and code: a mapped Amazon offer carries the mapped carrier
+     * and code, so *Direct, UPS Ground* would otherwise highlight Amazon's.
+     * The keys of the rate options are those of the classified list, so its
+     * first match is the one the packer sees offered first. Without a rule's
+     * choice, the first rate.
      *
      * @param  Collection<int, ClassifiedRate>  $classified
      */
-    private function firstRateIndexFromSource(Collection $classified, RuleEvaluationResult $ruleResult): ?int
+    private function selectedRateIndex(Collection $classified, RuleEvaluationResult $ruleResult): ?int
     {
-        $key = $classified->search(fn (ClassifiedRate $cr): bool => $ruleResult->isFromPreSelectedSource($cr->rate));
+        $key = $classified->search(fn (ClassifiedRate $cr): bool => $ruleResult->isPreSelected($cr->rate));
 
         if ($key !== false) {
             return $key;
         }
 
-        return $classified->isEmpty() ? null : 0;
+        return $classified->isEmpty() ? null : $classified->keys()->first();
     }
 
     /**
@@ -1240,7 +1208,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         if ($ruleResult->hasPreSelectedBlindPurchase()) {
             $blindOffer = $this->shippingRateService
                 ->blindPurchaseOffersFor($package)
-                ->reject(fn (BlindPurchaseOffer $offer): bool => in_array($offer->id(), $ruleResult->excludedBlindPurchaseIds, true))
+                ->reject($ruleResult->excludesBlindOffer(...))
                 ->first(fn (BlindPurchaseOffer $offer): bool => $offer->id() === $ruleResult->preSelectedBlindPurchaseId);
 
             if ($blindOffer) {
@@ -1255,24 +1223,37 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         $deadline = $package->shipment->getDeliverByDate();
         $requirements = $this->offerRequirementsFor($package);
 
-        // A rule naming a discovering source buys from that source or not at
-        // all: never another source's rate, and never a blind purchase. Its
-        // offers go through selection like any rate-shopped offer, so an
-        // unapproved service is withheld and named (`amazon-buy-shipping/19`).
-        if ($ruleResult->hasPreSelectedSource()) {
-            $rates = $this->shippingRateService->getShippingRates($package->id)
+        // A rule naming a scope of quoted rates selects among them like any
+        // rate-shopped offer, so an unapproved service is withheld and named.
+        // Never a blind purchase. A rule naming Amazon buys from Amazon or not
+        // at all (`amazon-buy-shipping/19`); *any priced source* with nothing
+        // quoted in scope falls through to rate shopping, as a pre-selected
+        // direct service with no variant does below.
+        $quoted = null;
+
+        if ($ruleResult->hasPreSelectedScope()) {
+            $scope = $ruleResult->preSelectedScope;
+            $quoted = $this->shippingRateService->getShippingRates($package->id);
+            $rates = $quoted
                 ->reject(fn (RateResponse $rate): bool => $ruleResult->excludes($rate))
-                ->filter(fn (RateResponse $rate): bool => $ruleResult->isFromPreSelectedSource($rate))
+                ->filter(fn (RateResponse $rate): bool => $scope->matches($rate))
                 ->values();
 
-            if ($rates->isEmpty()) {
-                logger()->info('A shipping rule names a source that quoted nothing buyable for this package', [
-                    'package_id' => $package->id,
-                    'source' => $ruleResult->preSelectedSource,
-                ]);
+            if ($rates->isNotEmpty() || $scope->strict) {
+                if ($rates->isEmpty()) {
+                    logger()->info('A shipping rule names a source that quoted nothing buyable for this package', [
+                        'package_id' => $package->id,
+                        ...$scope->toLogContext(),
+                    ]);
+                }
+
+                return $this->rateSelector->selectForAutomation($rates, $deadline, $clientId, $requirements);
             }
 
-            return $this->rateSelector->selectForAutomation($rates, $deadline, $clientId, $requirements);
+            logger()->info('A shipping rule names a service no source quoted for this package; rate shopping instead', [
+                'package_id' => $package->id,
+                ...$scope->toLogContext(),
+            ]);
         }
 
         // Only a source that quotes can resolve a pre-selected rate. A blind
@@ -1322,7 +1303,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             ]);
         }
 
-        $rates = $this->shippingRateService->getShippingRates($package->id);
+        $rates = $quoted ?? $this->shippingRateService->getShippingRates($package->id);
 
         if ($ruleResult->shouldFilterRates()) {
             $rates = $rates->reject(fn (RateResponse $rate): bool => $ruleResult->excludes($rate));
@@ -1333,7 +1314,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         if ($selection->rate === null) {
             $blindOffer = $this->shippingRateService->soleBlindPurchaseOfferForAutomation(
                 $package->id,
-                $ruleResult->excludedBlindPurchaseIds,
+                $ruleResult->excludesBlindOffer(...),
             );
 
             if ($blindOffer) {
@@ -1349,7 +1330,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             rate: $selection->rate,
             withheld: $selection->withheld,
             attendedAlternativeAvailable: $selection->attendedAlternativeAvailable
-                || $this->shippingRateService->getBlindPurchaseOffers($ruleResult->excludedBlindPurchaseIds)->isNotEmpty(),
+                || $this->shippingRateService->getBlindPurchaseOffers($ruleResult->excludesBlindOffer(...))->isNotEmpty(),
             late: $selection->late,
             unprotected: $selection->unprotected,
             requirements: $selection->requirements,

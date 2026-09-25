@@ -18,6 +18,7 @@ use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
 use App\Enums\ServiceEvidence;
 use App\Enums\ShippingRuleAction;
+use App\Enums\ShippingRuleSource;
 use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Filament\Pages\Ship;
 use App\Models\Carrier;
@@ -492,7 +493,7 @@ it('excludes a blind purchase selected by an exclude service rule', function ():
     $source = registerBlindSource();
 
     $shopifyService = CarrierService::whereHas('carrier', fn ($query) => $query->where('name', 'Shopify'))->firstOrFail();
-    ShippingRule::factory()->create([
+    ShippingRule::factory()->source(ShippingRuleSource::Shopify)->create([
         'shipping_method_id' => $package->shipment->shipping_method_id,
         'action' => ShippingRuleAction::ExcludeService,
         'carrier_service_id' => $shopifyService->id,
@@ -519,7 +520,7 @@ it('applies package weight conditions when excluding an attended blind purchase'
     registerBlindSource();
 
     $shopifyService = CarrierService::whereHas('carrier', fn ($query) => $query->where('name', 'Shopify'))->firstOrFail();
-    ShippingRule::factory()->create([
+    ShippingRule::factory()->source(ShippingRuleSource::Shopify)->create([
         'shipping_method_id' => $package->shipment->shipping_method_id,
         'action' => ShippingRuleAction::ExcludeService,
         'carrier_service_id' => $shopifyService->id,
@@ -539,7 +540,7 @@ it('refuses a forged purchase request for a rule-excluded blind offer', function
     $source = registerBlindSource();
 
     $shopifyService = CarrierService::whereHas('carrier', fn ($query) => $query->where('name', 'Shopify'))->firstOrFail();
-    ShippingRule::factory()->create([
+    ShippingRule::factory()->source(ShippingRuleSource::Shopify)->create([
         'shipping_method_id' => $package->shipment->shipping_method_id,
         'action' => ShippingRuleAction::ExcludeService,
         'carrier_service_id' => $shopifyService->id,
@@ -661,7 +662,7 @@ it('represents a shipping rule that pre-selects a blind purchase', function (): 
     $package = blindPurchasePackage();
     $shopifyService = CarrierService::whereHas('carrier', fn ($query) => $query->where('name', 'Shopify'))->firstOrFail();
 
-    ShippingRule::factory()->create([
+    ShippingRule::factory()->source(ShippingRuleSource::Shopify)->create([
         'shipping_method_id' => $package->shipment->shipping_method_id,
         'action' => ShippingRuleAction::UseService,
         'carrier_service_id' => $shopifyService->id,
@@ -681,7 +682,7 @@ it('auto-ships a blind purchase selected by a rule on a mixed shipping method', 
     $source->shouldReceive('createShipment')->once()->andReturn(blindShipResponse());
 
     $shopifyService = CarrierService::whereHas('carrier', fn ($query) => $query->where('name', 'Shopify'))->firstOrFail();
-    ShippingRule::factory()->create([
+    ShippingRule::factory()->source(ShippingRuleSource::Shopify)->create([
         'shipping_method_id' => $package->shipment->shipping_method_id,
         'action' => ShippingRuleAction::UseService,
         'carrier_service_id' => $shopifyService->id,
