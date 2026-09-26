@@ -2040,3 +2040,43 @@ it('reads a customs form off the offering regardless of which print option is ch
         ->and($service->documentSpecification(amazonInternationalRate()['supportedDocumentSpecifications'], 'pdf', null)['requestedDocumentTypes'])->toBe(['LABEL', 'CUSTOM_FORM'])
         ->and($service->documentSpecification(amazonInternationalRate()['supportedDocumentSpecifications'], 'zpl', 300)['requestedDocumentTypes'])->toBe(['LABEL', 'CUSTOM_FORM']);
 });
+
+it('drops an offer whose mapped service cannot reach a PO Box', function (): void {
+    $this->seed(ReferenceDataSeeder::class);
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse([
+        ...amazonEligibleRates(),
+        amazonUspsRateFor('USPS_PTP_GAH', 'USPS Ground Advantage (1 - 70 lb)'),
+    ])]);
+
+    $this->package->shipment->update(['address1' => 'PO Box 123', 'validated_address1' => null, 'validated_address2' => null, 'validated_carrier_route' => null]);
+    $package = $this->package->fresh();
+
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($package), []);
+
+    // OnTrac Ground and UPS Next Day Air Saver cannot reach a PO Box, so
+    // neither is shown, nor holds an offer.
+    expect($rates->pluck('carrier')->all())->toBe([Carrier::USPS])
+        ->and(ShippingOffer::where('package_id', $package->id)->count())->toBe(1);
+});
+
+it('drops an offer whose mapped service cannot reach a military address', function (): void {
+    $this->seed(ReferenceDataSeeder::class);
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse([
+        ...amazonEligibleRates(),
+        amazonUspsRateFor('USPS_PTP_GAH', 'USPS Ground Advantage (1 - 70 lb)'),
+    ])]);
+
+    $this->package->shipment->update(['city' => 'APO', 'state_or_province' => 'AE', 'validated_city' => null, 'validated_state_or_province' => null]);
+
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($this->package->fresh()), []);
+
+    expect($rates->pluck('carrier')->all())->toBe([Carrier::USPS]);
+});
+
+it('keeps an unmapped offer for a PO Box, having no catalog service to read', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    $this->package->shipment->update(['address1' => 'PO Box 123', 'validated_address1' => null, 'validated_address2' => null, 'validated_carrier_route' => null]);
+
+    expect(amazonAdapter()->getRates(RateRequest::fromPackage($this->package->fresh()), []))->toHaveCount(2);
+});

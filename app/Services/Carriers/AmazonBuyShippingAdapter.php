@@ -8,6 +8,7 @@ use App\Contracts\RecoversUnresolvedPurchase;
 use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
 use App\DataTransferObjects\PostageSources\OfferDraft;
 use App\DataTransferObjects\PostageSources\ServiceObservation;
+use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\AmazonPurchasedLabel;
 use App\DataTransferObjects\Shipping\AmazonShippingQuote;
 use App\DataTransferObjects\Shipping\PackageData;
@@ -627,9 +628,10 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
         $offerStore = app(OfferStore::class);
 
         $catalogCarrierId = $this->catalogCarrierResolver();
+        $destination = AddressData::fromShipment($package->shipment);
 
         return collect($quote->rates)
-            ->filter(fn (array $rate): bool => $this->isBuyable($rate, $request, $this->mappedService($rate, $mappings)))
+            ->filter(fn (array $rate): bool => $this->isBuyable($rate, $request, $destination, $this->mappedService($rate, $mappings)))
             ->map(function (array $rate) use (
                 $package, $mappings, $expiresAt, $offerStore, $quote, $source, $marketplace, $catalogCarrierId
             ): RateResponse {
@@ -844,7 +846,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
      *
      * Four filters that would otherwise fail the *purchase* rather than the
      * quote — after the packer has committed and, for the second one, after
-     * the offer has been spent — and two that would fail at the carrier's
+     * the offer has been spent — and three that would fail at the carrier's
      * acceptance counter, after the label is on the parcel.
      *
      * The packaging predicate is the shared one, {@see PackagingRequirement::accepts()},
@@ -856,14 +858,34 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
      * (ADR-0005 decision 5). Thirteen of the live run's thirty-five offers
      * would otherwise have been rows for rates nobody was shown.
      */
-    private function isBuyable(array $rate, RateRequest $request, ?CarrierService $mapped): bool
+    private function isBuyable(array $rate, RateRequest $request, AddressData $destination, ?CarrierService $mapped): bool
     {
         return $this->hasPrintableDocument($rate)
             && $this->needsNoAdditionalInputs($rate)
             && $this->honoursRequiredServices($rate, $request)
             && $this->answersRequiredGroupsForFree($rate, $this->wantedValueAddedServices($request))
             && $this->fitsThePackaging($rate, $request)
-            && $this->carriesPermittedContent($rate, $request, $mapped);
+            && $this->carriesPermittedContent($rate, $request, $mapped)
+            && $this->reachesTheDestination($destination, $mapped);
+    }
+
+    /**
+     * Drop an offer whose mapped service cannot reach a PO Box or military
+     * address the shipment is going to — ADR-0006 decision 10.
+     *
+     * The same flags {@see ShippingRateService} reads before it asks a direct
+     * account for a service. Amazon is not asked for services, so they are
+     * checked on what it returns instead. An unmapped offer has no catalog
+     * service to read them from, and is kept, as it is for contents.
+     */
+    private function reachesTheDestination(AddressData $destination, ?CarrierService $mapped): bool
+    {
+        if ($mapped === null) {
+            return true;
+        }
+
+        return ($mapped->can_ship_to_po_boxes || ! $destination->isPoBox())
+            && ($mapped->can_ship_to_military_addresses || ! $destination->isMilitary());
     }
 
     /**

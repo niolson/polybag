@@ -8,9 +8,11 @@ use App\Filament\Resources\ShippingMethodResource\Pages\EditShippingMethod;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\ShippingRulesRelationManager;
 use App\Models\Carrier;
 use App\Models\CarrierService;
+use App\Models\Client;
 use App\Models\ShippingMethod;
 use App\Models\ShippingRule;
 use App\Models\User;
+use App\Services\SettingsService;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\Testing\TestAction;
@@ -262,4 +264,108 @@ it('clears a service of another carrier when the carrier changes', function (): 
         ])
         ->fillForm(['carrier_id' => $onTrac->id])
         ->assertFormSet(['carrier_service_id' => null]);
+});
+
+it('offers an Exclude rule services the method does not list', function (): void {
+    $method = ShippingMethod::factory()->create();
+    $listed = CarrierService::factory()->uspsPriority()->create();
+    $unlisted = CarrierService::factory()->upsGround()->create();
+    $method->carrierServices()->attach($listed);
+
+    rulesManager($method)
+        ->mountAction(TestAction::make(CreateAction::class)->table())
+        ->fillForm([
+            'action' => ShippingRuleAction::ExcludeService->value,
+            'source' => ShippingRuleSource::Amazon->value,
+        ])
+        ->assertFormFieldExists('carrier_service_id', function (Select $field) use ($listed, $unlisted): bool {
+            $options = $field->getOptions();
+
+            return array_key_exists($listed->id, $options) && array_key_exists($unlisted->id, $options);
+        });
+});
+
+it('creates an Exclude rule naming a service the method does not list', function (): void {
+    $method = ShippingMethod::factory()->create();
+    $method->carrierServices()->attach(CarrierService::factory()->uspsPriority()->create());
+    $upsGround = CarrierService::factory()->upsGround()->create();
+
+    rulesManager($method)
+        ->callAction(TestAction::make(CreateAction::class)->table(), [
+            'name' => 'Everything but UPS Ground',
+            'action' => ShippingRuleAction::ExcludeService->value,
+            'source' => ShippingRuleSource::Amazon->value,
+            'carrier_service_id' => $upsGround->id,
+            'enabled' => true,
+        ])
+        ->assertHasNoFormErrors();
+
+    expect(ShippingRule::where('shipping_method_id', $method->id)->sole()->carrier_service_id)->toBe($upsGround->id);
+});
+
+it('refuses a Use rule naming a service the method does not list', function (): void {
+    $method = ShippingMethod::factory()->create();
+    $method->carrierServices()->attach(CarrierService::factory()->uspsPriority()->create());
+    $upsGround = CarrierService::factory()->upsGround()->create();
+
+    rulesManager($method)
+        ->callAction(TestAction::make(CreateAction::class)->table(), [
+            'name' => 'UPS Ground',
+            'action' => ShippingRuleAction::UseService->value,
+            'source' => ShippingRuleSource::Direct->value,
+            'carrier_service_id' => $upsGround->id,
+        ])
+        ->assertHasFormErrors(['carrier_service_id']);
+
+    expect(ShippingRule::query()->exists())->toBeFalse();
+});
+
+it('creates a rule for one client when multi-client is enabled', function (): void {
+    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    $client = Client::factory()->create();
+    $method = ShippingMethod::factory()->create();
+    $service = CarrierService::factory()->uspsPriority()->create();
+    $method->carrierServices()->attach($service);
+
+    rulesManager($method)
+        ->assertTableColumnVisible('client.name')
+        ->callAction(TestAction::make(CreateAction::class)->table(), [
+            'name' => 'Acme goes Priority',
+            'action' => ShippingRuleAction::UseService->value,
+            'source' => ShippingRuleSource::Direct->value,
+            'carrier_service_id' => $service->id,
+            'client_id' => $client->id,
+            'enabled' => true,
+        ])
+        ->assertHasNoFormErrors();
+
+    expect(ShippingRule::where('shipping_method_id', $method->id)->sole()->client_id)->toBe($client->id);
+});
+
+it('leaves a rule for every client when no client is chosen', function (): void {
+    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    $method = ShippingMethod::factory()->create();
+    $service = CarrierService::factory()->uspsPriority()->create();
+    $method->carrierServices()->attach($service);
+
+    rulesManager($method)
+        ->callAction(TestAction::make(CreateAction::class)->table(), [
+            'name' => 'Priority',
+            'action' => ShippingRuleAction::UseService->value,
+            'source' => ShippingRuleSource::Direct->value,
+            'carrier_service_id' => $service->id,
+            'enabled' => true,
+        ])
+        ->assertHasNoFormErrors();
+
+    expect(ShippingRule::where('shipping_method_id', $method->id)->sole()->client_id)->toBeNull();
+});
+
+it('hides the client selector when multi-client is disabled', function (): void {
+    $method = ShippingMethod::factory()->create();
+
+    rulesManager($method)
+        ->assertTableColumnHidden('client.name')
+        ->mountAction(TestAction::make(CreateAction::class)->table())
+        ->assertFormFieldHidden('client_id');
 });
