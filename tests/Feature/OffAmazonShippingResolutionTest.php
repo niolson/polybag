@@ -45,8 +45,21 @@ function scopeConnectionTo(DataSource $source, ?Location $location = null, ?Clie
 }
 
 /**
- * The candidates bought through a connection, leaving out the direct carriers
- * every package with no shipping method also resolves.
+ * A method selling Amazon Shipping directly: its `direct` row, on by default,
+ * and Amazon Shipping Ground listed. A package is only ever resolved for a
+ * method (`carrier-catalog-reset/16`).
+ */
+function amazonShippingMethod(): ShippingMethod
+{
+    $method = ShippingMethod::factory()->create();
+    $method->carrierServices()->attach(amazonShippingGround()->id);
+
+    return $method;
+}
+
+/**
+ * The candidates bought through a connection, leaving out any direct carrier
+ * the method also resolves.
  *
  * @return Collection<int, PostageSourceCandidate>
  */
@@ -59,7 +72,7 @@ function connectionCandidates(PostageSourceResolution $resolution): Collection
 
 function offAmazonCandidate(Package $package): ?PostageSourceCandidate
 {
-    return app(PostageSourceResolver::class)->resolve($package->refresh())
+    return app(PostageSourceResolver::class)->resolve($package->refresh(), amazonShippingMethod())
         ->candidates
         ->first(fn (PostageSourceCandidate $candidate): bool => $candidate->offAmazon);
 }
@@ -116,7 +129,7 @@ describe('resolution', function (): void {
         scopeConnectionTo($b, client: $this->client);
 
         $candidates = app(PostageSourceResolver::class)
-            ->resolve(offAmazonPackage(client: $this->client))
+            ->resolve(offAmazonPackage(client: $this->client), amazonShippingMethod())
             ->candidates
             ->filter(fn (PostageSourceCandidate $candidate): bool => $candidate->offAmazon);
 
@@ -128,7 +141,7 @@ describe('resolution', function (): void {
         $connection = DataSource::factory()->unassigned()->offeringOffAmazonShipping()->create();
         scopeConnectionTo($connection);
 
-        $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage());
+        $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage(), amazonShippingMethod());
 
         expect(connectionCandidates($resolution))->toHaveCount(1);
     });
@@ -141,7 +154,7 @@ describe('resolution', function (): void {
         $package = offAmazonPackage($origin, $this->client);
 
         expect(offAmazonCandidate($package))->toBeNull()
-            ->and(app(PostageSourceResolver::class)->resolve($package)->channel()?->postageDataSourceId)->toBe($origin->id);
+            ->and(app(PostageSourceResolver::class)->resolve($package, amazonShippingMethod())->channel()?->postageDataSourceId)->toBe($origin->id);
     });
 
     it('never offers a scoped connection to an Amazon order whose connection is inactive', function (): void {
@@ -149,7 +162,7 @@ describe('resolution', function (): void {
         $other = DataSource::factory()->unassigned()->offeringOffAmazonShipping()->create();
         scopeConnectionTo($other);
 
-        $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage($origin));
+        $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage($origin), amazonShippingMethod());
 
         expect(connectionCandidates($resolution))->toBeEmpty();
     });
@@ -209,7 +222,7 @@ describe('the off-Amazon candidate', function (): void {
 
         $shopify = createShopifyDataSource();
         $shopify->update(['postage_setting' => PostageSetting::PackerOnly]);
-        $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage($shopify));
+        $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage($shopify), amazonShippingMethod());
         $candidate = offAmazonCandidate(offAmazonPackage($shopify));
 
         // Still returned when Amazon said the account is not set up, so the
@@ -228,7 +241,7 @@ describe('the off-Amazon candidate', function (): void {
         $connection = DataSource::factory()->unassigned()->offeringOffAmazonShipping()->create();
         scopeConnectionTo($connection);
 
-        $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage(DataSource::factory()->create()));
+        $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage(DataSource::factory()->create()), amazonShippingMethod());
 
         expect(connectionCandidates($resolution))->toHaveCount(1)
             ->and($resolution->channel())->toBeNull();
@@ -278,7 +291,7 @@ describe('the postage setting', function (): void {
     it('does not ask a connection that does not sell postage for its own Amazon orders', function (): void {
         $connection = DataSource::factory()->amazon()->sellingPostage(PostageSetting::DoesNotSell)->create();
 
-        $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage($connection));
+        $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage($connection), amazonShippingMethod());
 
         expect($resolution->channel())->toBeNull();
     });

@@ -202,7 +202,7 @@ class ShipmentImportService
 
                 $clientOverride = null;
                 if ($clientColumn && isset($data['_client_column_value'])) {
-                    $clientOverride = $this->resolveClientByName((string) $data['_client_column_value']);
+                    $clientOverride = Client::findByImportName((string) $data['_client_column_value']);
                 }
 
                 $prepared = $this->rowPreparer->prepare($data, $this->importSource, $clientOverride);
@@ -290,11 +290,6 @@ class ShipmentImportService
      * Look up a Client by name for multi-client database imports.
      * Returns null (no client scoping) when the name doesn't match any record.
      */
-    private function resolveClientByName(string $name): ?Client
-    {
-        return Client::whereRaw('LOWER(name) = ?', [strtolower(trim($name))])->first();
-    }
-
     private function markSourceRecordExported(string $sourceRecordId, array $data): void
     {
         try {

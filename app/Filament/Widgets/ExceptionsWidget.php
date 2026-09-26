@@ -29,7 +29,8 @@ class ExceptionsWidget extends BaseWidget
 
     protected function getStats(): array
     {
-        $counts = Cache::remember('widget:exceptions', 300, fn (): array => $this->queryCounts());
+        // v2 added `needs_shipping_method`; an entry cached before it would lack the key.
+        $counts = Cache::remember('widget:exceptions:v2', 300, fn (): array => $this->queryCounts());
 
         return [
             Stat::make('Undeliverable Shipments', $counts['undeliverable'])
@@ -52,6 +53,11 @@ class ExceptionsWidget extends BaseWidget
                 ->descriptionIcon('heroicon-m-clock')
                 ->color($counts['stuck_pre_transit'] > 0 ? 'warning' : 'success')
                 ->url(PackageResource::getUrl('index').'?tracking_tab='.TrackingStatus::PreTransit->value),
+            Stat::make('Needs Shipping Method', $counts['needs_shipping_method'])
+                ->description('Open shipments no label can be bought for')
+                ->descriptionIcon('heroicon-m-exclamation-circle')
+                ->color($counts['needs_shipping_method'] > 0 ? 'warning' : 'success')
+                ->url(ShipmentResource::needsShippingMethodUrl()),
             Stat::make('Unmapped Shipping References', $counts['unmapped_references'])
                 ->description('Last 90 days, need mapping')
                 ->descriptionIcon('heroicon-m-link')
@@ -79,6 +85,7 @@ class ExceptionsWidget extends BaseWidget
                 ->whereNull('shipping_method_id')
                 ->distinct('shipping_method_reference')
                 ->count('shipping_method_reference'),
+            'needs_shipping_method' => Shipment::query()->needingShippingMethod()->count(),
             'tracking_exceptions' => Package::query()
                 ->where('status', PackageStatus::Shipped)
                 ->where('tracking_status', TrackingStatus::Exception)

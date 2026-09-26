@@ -47,9 +47,9 @@ class FakeCarrierAdapter implements DirectCarrierAdapter, UsesCarrierAccount
      * by `CarrierSeeder`, because `ShippingRateService` hands
      * {@see self::getRates()} the codes the shipping method allows and the
      * filter below drops anything that does not match. A made-up code is
-     * not a harmless placeholder — it quotes only when no shipping method is
-     * assigned and silently vanishes the rest of the time, so fake mode shows
-     * fewer rates than it should with nothing to say why.
+     * not a harmless placeholder — no shipping method can list it, so it
+     * silently vanishes and fake mode shows fewer rates than it should with
+     * nothing to say why.
      *
      * The UPS codes are numeric on purpose. That is what UPS itself uses and
      * what the catalog stores; spelling them `UPS_GROUND` reads better and

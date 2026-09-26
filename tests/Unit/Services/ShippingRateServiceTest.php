@@ -35,6 +35,7 @@ use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\ShippingMethodPostageSource;
+use App\Models\ShippingOffer;
 use App\Models\SourceServiceMapping;
 use App\Models\SpecialService;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
@@ -359,7 +360,7 @@ it('filters out non-applicable USPS rate options', function (): void {
         ->and($rates[0]->price)->toBe(8.50);
 });
 
-it('falls back to all configured carriers when shipment has no shipping method', function (): void {
+it('rates nothing and issues no offers when the shipment has no shipping method', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         ShippingOptions::class => MockResponse::make([
@@ -409,9 +410,9 @@ it('falls back to all configured carriers when shipment has no shipping method',
     Setting::updateOrCreate(['key' => 'fedex.account_number'], ['value' => 'test', 'type' => 'string']);
     app(SettingsService::class)->clearCache();
 
-    // Create shipment with NO shipping method
-    $shipment = Shipment::factory()->create([
-        'shipping_method_id' => null,
+    // Both carriers are configured and would quote; nothing is asked, because
+    // nothing is bought for a shipment with no method (`carrier-catalog-reset/16`).
+    $shipment = Shipment::factory()->withoutShippingMethod()->create([
         'postal_code' => '90210',
     ]);
     $package = Package::factory()
@@ -423,14 +424,17 @@ it('falls back to all configured carriers when shipment has no shipping method',
             'length' => 10,
         ]);
 
-    $rates = app(ShippingRateService::class)->getShippingRates($package->id);
+    $service = app(ShippingRateService::class);
+    $rates = $service->getShippingRates($package->id);
 
     expect($rates)->toBeInstanceOf(Collection::class)
-        ->and($rates)->toHaveCount(2);
+        ->and($rates)->toBeEmpty()
+        ->and($service->getBlindPurchaseOffers())->toBeEmpty()
+        ->and(ShippingOffer::count())->toBe(0)
+        ->and($service->sellersForShipment($shipment, $package->location_id, AddressData::fromShipment($shipment)))->toBeEmpty();
 
-    $carriers = $rates->pluck('carrier')->toArray();
-    expect($carriers)->toContain('USPS')
-        ->and($carriers)->toContain('FedEx');
+    Saloon::assertNotSent(ShippingOptions::class);
+    Saloon::assertNotSent(FedexRates::class);
 });
 
 it('only returns rates for configured service codes', function (): void {
@@ -1431,7 +1435,7 @@ it('throws when no carrier services can ship to a PO Box destination', function 
         ->toThrow(NoActiveCarrierServicesException::class, "No active carrier services available for shipping method 'Ground Only'");
 });
 
-it('excludes carrier services that cannot ship to PO Boxes when no shipping method is assigned', function (): void {
+it('asks no carrier for a PO Box shipment with no shipping method', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         ShippingOptions::class => fakeUspsGroundAdvantageRate(),
@@ -1457,13 +1461,11 @@ it('excludes carrier services that cannot ship to PO Boxes when no shipping meth
     Setting::updateOrCreate(['key' => 'fedex.account_number'], ['value' => 'test', 'type' => 'string']);
     app(SettingsService::class)->clearCache();
 
-    // Cataloged, but not attached to any shipping method -- the fallback path
-    // looks these up by carrier name, not via a ShippingMethod relation.
+    // Cataloged, and capable of a PO Box; still not asked without a method.
     CarrierService::factory()->uspsGroundAdvantage()->for($this->uspsCarrier)->create(['can_ship_to_po_boxes' => true]);
     CarrierService::factory()->fedexGround()->for($this->fedexCarrier)->create(['can_ship_to_po_boxes' => false]);
 
-    $shipment = Shipment::factory()->create([
-        'shipping_method_id' => null,
+    $shipment = Shipment::factory()->withoutShippingMethod()->create([
         'address1' => 'PO Box 456',
         'postal_code' => '90210',
     ]);
@@ -1471,13 +1473,13 @@ it('excludes carrier services that cannot ship to PO Boxes when no shipping meth
 
     $rates = app(ShippingRateService::class)->getShippingRates($package->id);
 
-    expect($rates)->toHaveCount(1)
-        ->and($rates[0]->carrier)->toBe('USPS');
+    expect($rates)->toBeEmpty();
 
+    Saloon::assertNotSent(ShippingOptions::class);
     Saloon::assertNotSent(FedexRates::class);
 });
 
-it('excludes carrier services that cannot ship to military addresses when no shipping method is assigned', function (): void {
+it('asks no carrier for a military shipment with no shipping method', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         ShippingOptions::class => fakeUspsGroundAdvantageRate(),
@@ -1506,11 +1508,9 @@ it('excludes carrier services that cannot ship to military addresses when no shi
     CarrierService::factory()->uspsGroundAdvantage()->for($this->uspsCarrier)->create(['can_ship_to_military_addresses' => true]);
     CarrierService::factory()->fedexGround()->for($this->fedexCarrier)->create(['can_ship_to_military_addresses' => false]);
 
-    // This is the exact real-world failure that motivated this fix: UPS (and
-    // FedEx Ground) reject a military "AE" state outright rather than simply
-    // returning no rate.
-    $shipment = Shipment::factory()->create([
-        'shipping_method_id' => null,
+    // No carrier is asked blind for a military "AE" state, which UPS and
+    // FedEx Ground reject outright: with no method, none is asked at all.
+    $shipment = Shipment::factory()->withoutShippingMethod()->create([
         'city' => 'APO',
         'state_or_province' => 'AE',
         'postal_code' => '09143',
@@ -1519,13 +1519,13 @@ it('excludes carrier services that cannot ship to military addresses when no shi
 
     $rates = app(ShippingRateService::class)->getShippingRates($package->id);
 
-    expect($rates)->toHaveCount(1)
-        ->and($rates[0]->carrier)->toBe('USPS');
+    expect($rates)->toBeEmpty();
 
+    Saloon::assertNotSent(ShippingOptions::class);
     Saloon::assertNotSent(FedexRates::class);
 });
 
-it('skips a carrier with no cataloged service at all for a PO Box destination in the fallback path', function (): void {
+it('asks no carrier, cataloged or not, for a PO Box shipment with no shipping method', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         ShippingOptions::class => fakeUspsGroundAdvantageRate(),
@@ -1539,12 +1539,10 @@ it('skips a carrier with no cataloged service at all for a PO Box destination in
     Setting::updateOrCreate(['key' => 'fedex.account_number'], ['value' => 'test', 'type' => 'string']);
     app(SettingsService::class)->clearCache();
 
-    // USPS is cataloged and capable; FedEx has no catalog rows at all, so
-    // there's nothing to confirm it can reach this destination.
+    // USPS is cataloged and capable; FedEx has no catalog rows at all.
     CarrierService::factory()->uspsGroundAdvantage()->for($this->uspsCarrier)->create(['can_ship_to_po_boxes' => true]);
 
-    $shipment = Shipment::factory()->create([
-        'shipping_method_id' => null,
+    $shipment = Shipment::factory()->withoutShippingMethod()->create([
         'address1' => 'PO Box 789',
         'postal_code' => '90210',
     ]);
@@ -1552,9 +1550,9 @@ it('skips a carrier with no cataloged service at all for a PO Box destination in
 
     $rates = app(ShippingRateService::class)->getShippingRates($package->id);
 
-    expect($rates)->toHaveCount(1)
-        ->and($rates[0]->carrier)->toBe('USPS');
+    expect($rates)->toBeEmpty();
 
+    Saloon::assertNotSent(ShippingOptions::class);
     Saloon::assertNotSent(FedexRates::class);
 });
 

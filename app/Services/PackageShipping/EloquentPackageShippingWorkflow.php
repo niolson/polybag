@@ -30,6 +30,7 @@ use App\Exceptions\ZeroValueCustomsItemException;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Package;
+use App\Models\Shipment;
 use App\Models\ShippingOffer;
 use App\Models\SpecialService;
 use App\Services\Carriers\CarrierRegistry;
@@ -298,6 +299,13 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             );
         }
 
+        // Nothing is bought for a shipment with no shipping method, whatever a
+        // stale page or an old Offer says (`carrier-catalog-reset/16`). Read
+        // from the database for the same reason as the check above.
+        if (Shipment::query()->whereKey($package->shipment_id)->value('shipping_method_id') === null) {
+            return PackageShippingResult::shippingMethodRequired();
+        }
+
         // Nothing is spent on a package that already has a purchase nobody can
         // account for. An offer consumed without the source either confirming
         // or declining may have bought a label we never recorded, and a second
@@ -535,6 +543,12 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
     public function autoShip(Package $package, PackageAutoShippingRequest $request): PackageShippingResult
     {
+        // Before any quote: a shipment with no method is not rated, and the
+        // remedy is a person choosing one on the Ship page.
+        if ($package->shipment()->value('shipping_method_id') === null) {
+            return PackageShippingResult::shippingMethodRequired();
+        }
+
         try {
             $selection = $this->selectedRateForAutoShip($package);
             $selectedRate = $selection->rate;
@@ -1239,7 +1253,8 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         $package->loadMissing(['packageItems.product', 'packageItems.shipmentItem', 'shipment.shippingMethod']);
 
         $ruleResult = $this->ruleEvaluator->evaluate($package->shipment, $package);
-        $method = $package->shipment?->shippingMethod;
+        $method = $package->shipment->shippingMethod
+            ?? throw new \LogicException('autoShip() refuses a shipment with no shipping method before selecting a rate.');
         $channel = $this->postageSourceResolver->channelSourceFor($package);
         $blindAllowed = $channel?->postageSetting()->allowsAutomation() ?? false;
 
@@ -1506,7 +1521,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
     {
         return $selection->shippingMethodName !== null
             ? "the shipping method \"{$selection->shippingMethodName}\""
-            : 'a shipment with no shipping method';
+            : 'the shipping method';
     }
 
     /**

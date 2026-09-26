@@ -43,6 +43,22 @@ function packageFrom(?DataSource $source = null, array $shipment = [], array $pa
     ], $package));
 }
 
+/**
+ * A method listing one service of each named carrier. A package is only ever
+ * resolved for a method (`carrier-catalog-reset/16`), and the direct carriers
+ * asked are the ones its services name.
+ */
+function directMethodFor(string ...$carrierNames): ShippingMethod
+{
+    $method = ShippingMethod::factory()->create();
+
+    foreach ($carrierNames as $name) {
+        $method->carrierServices()->attach(CarrierService::factory()->for(Carrier::firstOrCreate(['name' => $name]))->create());
+    }
+
+    return $method;
+}
+
 function scopeAccountTo(CarrierAccount $account, ?Location $location, ?Client $client, bool $rateShop = false): CarrierAccountScope
 {
     return CarrierAccountScope::create([
@@ -185,7 +201,7 @@ describe('channel binding', function (): void {
         $source = createShopifyDataSource();
         $source->update(['postage_setting' => PostageSetting::PackerOnly]);
 
-        $resolution = app(PostageSourceResolver::class)->resolve(packageFrom($source));
+        $resolution = app(PostageSourceResolver::class)->resolve(packageFrom($source), directMethodFor('USPS'));
         $channel = $resolution->channel();
 
         // A blind-purchase offer names no carrier until the label comes back,
@@ -228,7 +244,7 @@ describe('carrier account precedence', function (): void {
 
         $package = packageFrom(shipment: ['client_id' => $this->client->id], package: ['location_id' => null]);
 
-        $candidates = app(PostageSourceResolver::class)->resolve($package)->forCarrier('USPS');
+        $candidates = app(PostageSourceResolver::class)->resolve($package, directMethodFor('USPS'))->forCarrier('USPS');
 
         expect($candidates)->toHaveCount(1)
             ->and($candidates->first()->carrierAccountId)->toBe($clientOwn->id)
@@ -251,8 +267,9 @@ describe('carrier account precedence', function (): void {
             package: ['location_id' => $this->location->id],
         );
 
+        $method = directMethodFor('USPS');
         $winner = fn (): ?int => app(PostageSourceResolver::class)
-            ->resolve($package->refresh())
+            ->resolve($package->refresh(), $method)
             ->forCarrier('USPS')
             ->first()?->carrierAccountId;
 
@@ -282,7 +299,7 @@ describe('carrier account precedence', function (): void {
 
         // Both accounts could sell USPS postage. Asking both is a second API
         // call on the packer's critical path, so it stays opt-in.
-        expect(app(PostageSourceResolver::class)->resolve($package)->forCarrier('USPS'))
+        expect(app(PostageSourceResolver::class)->resolve($package, directMethodFor('USPS'))->forCarrier('USPS'))
             ->toHaveCount(1);
     });
 
@@ -298,7 +315,7 @@ describe('carrier account precedence', function (): void {
             package: ['location_id' => $this->location->id],
         );
 
-        $candidates = app(PostageSourceResolver::class)->resolve($package)->forCarrier('USPS');
+        $candidates = app(PostageSourceResolver::class)->resolve($package, directMethodFor('USPS'))->forCarrier('USPS');
 
         // The purchase path checks an offer against the first account only, so
         // an offer from the second would be refused as "Carrier Account
@@ -316,7 +333,7 @@ describe('carrier account precedence', function (): void {
 
         $package = packageFrom(shipment: ['client_id' => $this->client->id], package: ['location_id' => null]);
 
-        expect(app(PostageSourceResolver::class)->resolve($package)->forCarrier('USPS')->first()?->carrierAccountId)
+        expect(app(PostageSourceResolver::class)->resolve($package, directMethodFor('USPS'))->forCarrier('USPS')->first()?->carrierAccountId)
             ->toBe($global->id);
     });
 
@@ -325,7 +342,7 @@ describe('carrier account precedence', function (): void {
 
         // The integration is still asked, as it always was: a real one quotes
         // nothing without an account, and a fake carrier quotes anyway.
-        $fedex = app(PostageSourceResolver::class)->resolve(packageFrom())->forCarrier('FedEx');
+        $fedex = app(PostageSourceResolver::class)->resolve(packageFrom(), directMethodFor('FedEx'))->forCarrier('FedEx');
 
         expect($fedex)->toHaveCount(1)
             ->and($fedex->first()->carrierAccountId)->toBeNull()
@@ -372,7 +389,10 @@ describe('accounts on carriers we do not sell directly', function (): void {
 
         $source = createShopifyDataSource();
         $source->update(['postage_setting' => PostageSetting::PackerOnly]);
-        $resolution = app(PostageSourceResolver::class)->resolve(packageFrom($source));
+        // The method lists a service of each, so only the direct-integration
+        // filter keeps their accounts out.
+        $method = directMethodFor(ShopifyAdapter::CARRIER_NAME, PolicyOnlyCarrierAdapter::CARRIER_NAME);
+        $resolution = app(PostageSourceResolver::class)->resolve(packageFrom($source), $method);
 
         expect($resolution->forCarrier(ShopifyAdapter::CARRIER_NAME))->toBeEmpty()
             ->and($resolution->forCarrier(PolicyOnlyCarrierAdapter::CARRIER_NAME))->toBeEmpty()

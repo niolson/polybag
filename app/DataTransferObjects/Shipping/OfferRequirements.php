@@ -12,9 +12,10 @@ use App\Models\Shipment;
  * included: the due-by date is the method's speed guarantee whoever sells the
  * Label, and only a Buy Shipping offer can be OTDR-protected. Protection is
  * only ever required of Amazon's own orders, since nothing else counts toward
- * the account's OTDR. A Shipment with no method requires {@see none()}, which
- * is automation as it was before: on-time rates first, the cheapest late one
- * when nothing is on time.
+ * the account's OTDR. A Shipment with no method is never rated or bought for
+ * (`carrier-catalog-reset/16`), so it has no requirements to read. {@see none()}
+ * is what a caller with no requirements to apply passes: on-time rates first,
+ * the cheapest late one when nothing is on time.
  *
  * Only automation reads this. The Ship page lists every rate for a person to
  * choose, marked, whatever the method requires.
@@ -39,13 +40,13 @@ readonly class OfferRequirements
         return new self;
     }
 
-    public static function forShipment(?Shipment $shipment, bool $isAmazonOrder): self
+    /**
+     * @throws \LogicException for a shipment with no shipping method, which nothing buys for
+     */
+    public static function forShipment(Shipment $shipment, bool $isAmazonOrder): self
     {
-        $method = $shipment?->shippingMethod;
-
-        if ($method === null) {
-            return self::none();
-        }
+        $method = $shipment->shippingMethod
+            ?? throw new \LogicException('A shipment with no shipping method has no offer requirements: nothing is bought for it.');
 
         $onTime = $method->excludes_late_rates ?? true;
 

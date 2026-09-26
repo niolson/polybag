@@ -8,6 +8,7 @@ use App\Models\LabelBatchItem;
 use App\Models\Shipment;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
@@ -61,4 +62,20 @@ it('shows unmapped shipping references count', function (): void {
     Livewire::actingAs($user)
         ->test(ExceptionsWidget::class)
         ->assertSee('Unmapped Shipping References');
+});
+
+it('renders when an entry cached before the shipping method count still exists', function (): void {
+    // The shape cached under the old key, before `needs_shipping_method`.
+    Cache::put('widget:exceptions', [
+        'undeliverable' => 0,
+        'failed_batch_items' => 0,
+        'unmapped_references' => 0,
+        'tracking_exceptions' => 0,
+        'stuck_pre_transit' => 0,
+    ], 300);
+    Shipment::factory()->withoutShippingMethod()->create();
+
+    Livewire::actingAs(User::factory()->create())
+        ->test(ExceptionsWidget::class)
+        ->assertSee('Needs Shipping Method');
 });

@@ -129,6 +129,16 @@ class Pack extends Page
                 return;
             }
 
+            // Packing is physical work and the method can be fixed after, so
+            // this warns rather than refuses. The label cannot be bought until
+            // one is chosen (`carrier-catalog-reset/16`).
+            if ($this->shipment->needsShippingMethod()) {
+                $this->notifyWarning(
+                    'No Shipping Method',
+                    "Shipment {$this->shipment->shipment_reference} has no shipping method. It can be packed, but a label cannot be bought until one is chosen.",
+                );
+            }
+
             $this->clientName = $this->multiClientEnabled
                 ? $this->shipment->client?->name
                 : null;

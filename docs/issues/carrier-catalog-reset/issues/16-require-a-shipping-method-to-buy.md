@@ -1,6 +1,6 @@
 # A shipment needs a shipping method before a label is bought
 
-Status: ready-for-agent
+Status: done
 
 Repo: `polybag`
 
@@ -51,8 +51,13 @@ A shipment with no shipping method cannot have a label bought. It can still be p
     `sellsAmazonShippingDirectly()`'s null branch.
   - `ShippingRateService::assignServices()` loses the unfiltered query, the PO Box and
     military guard that exists only because of it, and Amazon Shipping's
-    `allDestinations` case. Check each before deleting: some may still serve a method
-    whose services are all inactive.
+    `allDestinations` case, and `getActiveCarrierServicesForCarrierName()` goes with
+    them. All of it is dead once a method is present: `$methodServices` is then never
+    null, and a method whose services are all inactive is already handled in
+    `buildRatingTasks()`, which throws `NoActiveCarrierServicesException` unless Shopify
+    `auto` or Amazon Buy Shipping may still sell.
+  - `ShippingRateService::sellersForShipment()`, which `BatchLabelService` asks before a
+    batch starts, loses its own null-method branch.
   - `MethodSourceAllowance::kindsFor(null)`, `RuleEvaluator` and `OfferRequirements`
     lose their null-method cases. A *rule* with no method still applies to every method.
     Only a *shipment* with no method goes.
@@ -64,26 +69,27 @@ A shipment with no shipping method cannot have a label bought. It can still be p
 - **Existing open shipments** with no method need no migration. They show as needing a
   method. There are no production tenants.
 - **Docs.** Amend ADR-0006: decision 12 and the *Allowance* row of the terminology table.
-  Replace the PRD's *No shipping method* section and question 4 with a pointer here.
+  Replace the PRD's *No shipping method* section and question 4 with a pointer here, and
+  the *Use* bullet in *Rules* that sends a no-method shipment to that section. The
+  changelog entry that mentions *No shipping method* stays, as history.
 
 ## Acceptance criteria
 
-- [ ] A package whose shipment has no method gets no rates and no Offers, and a purchase
+- [x] A package whose shipment has no method gets no rates and no Offers, and a purchase
       for it is refused on the server
-- [ ] It can be packed, and the Pack page says a method is missing
-- [ ] The Ship page offers a method picker, and choosing a method rates the package
-- [ ] Batch Ship skips it with a reason
-- [ ] Manual Ship cannot create a shipment with no method
-- [ ] The Shipments list can filter to shipments needing a method
-- [ ] No code path rates or buys for a null method
-- [ ] `demo:reset` and the seeders leave no open shipment without a method
-- [ ] ADR-0006 and the PRD record the change
+- [x] It can be packed, and the Pack page says a method is missing
+- [x] The Ship page offers a method picker, and choosing a method rates the package
+- [x] Batch Ship skips it with a reason
+- [x] Manual Ship cannot create a shipment with no method
+- [x] The Shipments list can filter to shipments needing a method
+- [x] No code path rates or buys for a null method
+- [x] `demo:reset` and the seeders leave no open shipment without a method
+- [x] ADR-0006 and the PRD record the change
 
 ## Blocked by
 
-Nothing. It touches the same null-method branches as
-[`12`](12-method-asks-amazon-through-source-policy.md), which takes the no-method case
-for Amazon Buy Shipping to "not asked" first, so whichever lands second rebases.
+Nothing. [`12`](12-method-asks-amazon-through-source-policy.md), which touched the same
+null-method branches, has landed.
 
 ## Comments
 
@@ -92,3 +98,33 @@ for Amazon Buy Shipping to "not asked" first, so whichever lands second rebases.
   maintainer's answer was that no method should block shipping altogether, since
   rate-shopping everything was a testing convenience. Supersedes PRD question 4, decided
   2026-09-24.
+- **2026-09-26** — Readiness review against `main`. `12` has landed; the dead branches in
+  `assignServices()` were checked and named; `sellersForShipment()` and the PRD's *Rules*
+  bullet were added to the list. About 40 test lines use `withoutShippingMethod()`.
+- **2026-09-26** — Done. `Shipment::needsShippingMethod()` is the check. Rating returns no
+  tasks for a shipment without one, so no rates, Offers or blind offers; the purchase
+  path refuses it from the database (*Shipping Method Required*), blind purchases
+  included, and `autoShip()` refuses before quoting and sends the packer to the Ship page
+  with the package kept. Pack warns and badges; the Ship page shows the problem and, to
+  whoever may edit the shipment, a picker that saves the method and rates. Batch Ship
+  already skipped it. Manual Ship requires a method. The Shipments list has a *Needs
+  shipping method* badge and filter, and the Exceptions widget a *Needs Shipping Method*
+  stat linking to it; the unmapped-references stat still links to its own page, where the
+  fix is made.
+  - Removed: the resolver's every-carrier branch and `sellsAmazonShippingDirectly()`'s
+    null case, `assignServices()`' unfiltered query and PO Box/military guard,
+    `getActiveCarrierServicesForCarrierName()`, `sellersForShipment()`'s null branch, the
+    null cases in `MethodSourceAllowance` and `RateSelector`, and `OfferRequirements`'s
+    (now a `LogicException`). `RuleEvaluator` picks no *Use* rule for a shipment with no
+    method and keeps its exclusions.
+  - `ShipmentSeeder` gives US shipments *Standard Ground* and others *International
+    Economy*. `demo:reset` now refuses, before wiping anything, when the import window
+    holds an unmapped or empty shipping method reference, where it used to warn. It
+    resolves each row as the import does: against the client its `client_column` names
+    (`Client::findByImportName()`, shared with the importer), through
+    `ImportReferenceResolver`.
+  - The Exceptions widget's cache key is now `widget:exceptions:v2`, so an entry cached
+    before the new count cannot be read without it.
+  - Tests: the no-method rating tests assert the block; the rule-condition tests use a
+    shipment whose method lists the services they create. Two `RateSelectorTest` cases
+    about the no-method allowance were dropped, as the type now makes that call impossible.

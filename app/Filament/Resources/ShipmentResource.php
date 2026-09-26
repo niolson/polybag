@@ -57,6 +57,19 @@ class ShipmentResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'shipment_reference';
 
+    /**
+     * The URL of the Shipments list filtered to open shipments with no method.
+     */
+    public static function needsShippingMethodUrl(): string
+    {
+        return static::getUrl('index', ['filters' => ['needs_shipping_method' => ['isActive' => true]]]);
+    }
+
+    private static function flagsMissingMethod(Shipment $record): bool
+    {
+        return $record->status === ShipmentStatus::Open && $record->needsShippingMethod();
+    }
+
     public static function getNavigationBadge(): ?string
     {
         $count = Cache::remember('shipments_open_count', 60, function () {
@@ -226,8 +239,13 @@ class ShipmentResource extends Resource
                 Tables\Columns\TextColumn::make('company')
                     ->placeholder('—')
                     ->toggleable(),
+                // A missing method blocks buying a label (`carrier-catalog-reset/16`),
+                // so it is flagged, not left blank. Only an open shipment needs one.
                 Tables\Columns\TextColumn::make('shippingMethod.name')
-                    ->label('Shipping Method'),
+                    ->label('Shipping Method')
+                    ->default(fn (Shipment $record): ?string => self::flagsMissingMethod($record) ? 'Needs shipping method' : null)
+                    ->badge(fn (Shipment $record): bool => self::flagsMissingMethod($record))
+                    ->color(fn (Shipment $record): ?string => self::flagsMissingMethod($record) ? 'warning' : null),
                 Tables\Columns\TextColumn::make('deliver_by')
                     ->label('Deliver By')
                     ->date(timezone: Location::timezone())
@@ -287,6 +305,10 @@ class ShipmentResource extends Resource
                     ->relationship('shippingMethod', 'name')
                     ->label('Shipping Method')
                     ->preload(),
+                Tables\Filters\Filter::make('needs_shipping_method')
+                    ->label('Needs shipping method')
+                    ->toggle()
+                    ->query(fn (Builder $query): Builder => $query->scopes('needingShippingMethod')),
                 Tables\Filters\Filter::make('created_at')
                     ->form([
                         Forms\Components\DatePicker::make('created_from')
@@ -320,6 +342,7 @@ class ShipmentResource extends Resource
                 app(SettingsService::class)->get('multi_client_enabled', false) ? $filters['client'] : null,
                 $filters['channel'],
                 $filters['shipping_method'],
+                $filters['needs_shipping_method'],
                 $filters['created_at'],
             ])))
             ->defaultSort('created_at', 'desc')

@@ -68,8 +68,8 @@ Shipping's row says *services on this method* (the default: an Amazon offer mapp
 service) or *any service* (every Amazon offer, unmapped ones included). The connection's
 **postage setting** and shipping rules narrow it, and a deactivated service or carrier is
 never in it, whatever the row says; nothing widens it. It is the same in sandbox
-and production. With no shipping method, it is every direct service. Human selection does not
-require it.
+and production. With no shipping method, it is nothing: a shipment needs a method before any
+Label is bought, by a person or by automation. Human selection does not otherwise require it.
 _Avoid_: Approval, service enabled, service active
 
 **Postage setting**:

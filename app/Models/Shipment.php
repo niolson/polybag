@@ -14,6 +14,7 @@ use App\Services\PickBatchService;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -188,6 +189,27 @@ class Shipment extends Model
 
         return (bool) $settings->get('picking_enabled', false)
             && (bool) $settings->get('require_picking_before_shipping', false);
+    }
+
+    /**
+     * Whether this shipment has no shipping method, so nothing may be bought
+     * for it (`carrier-catalog-reset/16`). It can still be packed.
+     *
+     * Worked out, never stored: a stored state would have to follow every
+     * method assignment and every alias that resolves an import.
+     */
+    public function needsShippingMethod(): bool
+    {
+        return $this->shipping_method_id === null;
+    }
+
+    /**
+     * Open shipments with no shipping method: the *Needs shipping method* view
+     * on the Shipments list and the Exceptions widget.
+     */
+    public function scopeNeedingShippingMethod(Builder $query): Builder
+    {
+        return $query->where('status', ShipmentStatus::Open)->whereNull('shipping_method_id');
     }
 
     /**

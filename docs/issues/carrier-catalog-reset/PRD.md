@@ -572,8 +572,8 @@ source kind that may sell for the method:
 - ***Use* picks within the method's allowance.** The form lists only the method's services
   and the sources the method allows. This is a behaviour change: today a rule can name any
   service, and a rule with no method applies to every method. A shipment with no method
-  has the allowance under [No shipping method](#no-shipping-method): every direct service.
-  So a global *Use* rule naming a direct service still applies to it, as today.
+  allows nothing, so no *Use* rule picks for it (see
+  [No shipping method](#no-shipping-method)).
 - ***Exclude* matches a source, a carrier, a service, or any combination.** It no longer
   matches the service-code string. A carrier matches every offer it carries, mapped or
   not, so "everything except OnTrac" excludes OnTrac services Amazon first offers later.
@@ -607,15 +607,13 @@ source kind that may sell for the method:
 
 ### No shipping method
 
-- Every eligible priced source is asked, unfiltered, as today. Shopify offers nothing, as
-  today, because there are no services to offer it for.
-- The allowance is every direct service. Automation buys direct rates as today. It never
-  buys from Amazon Buy Shipping, and never blind. Today an approval covers Amazon here.
-- A *Use* rule picks within that allowance, so a global rule naming a direct service
-  still buys it for a shipment with no method.
-- An Amazon order whose service level has no alias reaches this case only when its
-  connection has no default method. `AmazonSource` falls back to the connection's
-  configured method (`_shipping_method_fallback`).
+*Replaced 2026-09-26* by [`16`](issues/16-require-a-shipping-method-to-buy.md): a shipment
+with no shipping method is not rated and cannot have a Label bought. It can still be
+packed. ADR-0006 decision 12 records the change.
+
+An Amazon order whose service level has no alias reaches this case only when its
+connection has no default method. `AmazonSource` falls back to the connection's configured
+method (`_shipping_method_fallback`).
 
 ### Removed
 
@@ -705,9 +703,10 @@ on the rule and two on the connection.
    2026-09-24:* no. The
    sole-choice rule is generalized: Shopify is the only eligible source and yields one
    offer. `auto` with no services listed covers "let Shopify choose".
-4. **What does "no shipping method" rate against?** *Decided 2026-09-24:* every eligible priced source, as
-   today. Shopify offers nothing and Amazon is never automated (see
-   [No shipping method](#no-shipping-method)).
+4. **What does "no shipping method" rate against?** *Superseded 2026-09-26:* nothing. A shipment
+   with no method is not rated and cannot have a Label bought; see
+   [`16`](issues/16-require-a-shipping-method-to-buy.md). Decided 2026-09-24 as every eligible
+   priced source.
 5. **Can one mapping table cover both sources?** *Decided 2026-09-24:* yes, if it runs in two directions, with
    the constraint each direction needs (see [Source mapping](#source-mapping)). One table
    is also what [which sources can sell a service](#which-sources-can-sell-a-service)

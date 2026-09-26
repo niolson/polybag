@@ -67,7 +67,10 @@ class RuleEvaluator
                 continue;
             }
 
-            if (! $this->allowance->permits($rule, $method)) {
+            // A shipment with no method is allowed nothing, so no *Use* rule
+            // picks for it (`carrier-catalog-reset/16`). Its exclusions still
+            // stand; they narrow nothing that is there.
+            if ($method === null || ! $this->allowance->permits($rule, $method)) {
                 logger()->debug('Skipped a shipping rule naming something the shipping method does not allow', [
                     'shipping_rule_id' => $rule->id,
                     'shipment_id' => $shipment->id,
@@ -86,7 +89,7 @@ class RuleEvaluator
     /**
      * @param  list<RuleExclusion>  $exclusions
      */
-    private function useResult(ShippingRule $rule, ?ShippingMethod $method, array $exclusions): RuleEvaluationResult
+    private function useResult(ShippingRule $rule, ShippingMethod $method, array $exclusions): RuleEvaluationResult
     {
         $service = $rule->carrierService;
 

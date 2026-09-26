@@ -24,7 +24,9 @@ use Illuminate\Support\Collection;
  * - Amazon Buy Shipping is allowed by its `amazon` row
  *   (`carrier-catalog-reset/12`), for Amazon's own orders only.
  *
- * A shipment with no method is allowed every direct service, and nothing else.
+ * A shipment with no method is allowed nothing: nothing is bought for it
+ * until one is chosen (`carrier-catalog-reset/16`). A *rule* with no method
+ * still applies to every method, and is checked against the shipment's.
  */
 class MethodSourceAllowance
 {
@@ -33,12 +35,8 @@ class MethodSourceAllowance
      *
      * @return list<PostageSourceKind>
      */
-    public function kindsFor(?ShippingMethod $method): array
+    public function kindsFor(ShippingMethod $method): array
     {
-        if ($method === null) {
-            return [PostageSourceKind::Direct];
-        }
-
         return array_values(array_filter(
             PostageSourceKind::cases(),
             fn (PostageSourceKind $kind): bool => $method->allowsSource($kind),
@@ -51,7 +49,7 @@ class MethodSourceAllowance
      *
      * @return list<PostageSourceKind>
      */
-    public function pricedKindsFor(?ShippingMethod $method): array
+    public function pricedKindsFor(ShippingMethod $method): array
     {
         return array_values(array_filter(
             $this->kindsFor($method),
@@ -64,7 +62,7 @@ class MethodSourceAllowance
      *
      * @return list<ShippingRuleSource>
      */
-    public function ruleSourcesFor(?ShippingMethod $method, ShippingRuleAction $action): array
+    public function ruleSourcesFor(ShippingMethod $method, ShippingRuleAction $action): array
     {
         if ($action === ShippingRuleAction::ExcludeService) {
             return ShippingRuleSource::casesFor($action);
@@ -83,11 +81,11 @@ class MethodSourceAllowance
      * Amazon Buy Shipping, whose services are discovered per quote, or Shopify
      * when the method allows its own choice (`auto`).
      */
-    public function allowsAnyServiceFor(?ShippingMethod $method, ?ShippingRuleSource $source): bool
+    public function allowsAnyServiceFor(ShippingMethod $method, ?ShippingRuleSource $source): bool
     {
         return match ($source) {
             ShippingRuleSource::Amazon => true,
-            ShippingRuleSource::Shopify => $method?->allowsUnlistedServices(PostageSourceKind::Shopify) ?? false,
+            ShippingRuleSource::Shopify => $method->allowsUnlistedServices(PostageSourceKind::Shopify),
             default => false,
         };
     }
@@ -98,7 +96,7 @@ class MethodSourceAllowance
      * Evaluated against the shipment's method, not the rule's: a rule with no
      * method still picks only within what the shipment's method lists.
      */
-    public function permits(ShippingRule $rule, ?ShippingMethod $method): bool
+    public function permits(ShippingRule $rule, ShippingMethod $method): bool
     {
         $source = $rule->source;
         $kind = $source->kind();
@@ -125,7 +123,7 @@ class MethodSourceAllowance
             return false;
         }
 
-        return $method === null || $this->listedServices($method)->contains('id', $service->id);
+        return $this->listedServices($method)->contains('id', $service->id);
     }
 
     /**
@@ -133,11 +131,9 @@ class MethodSourceAllowance
      *
      * @return Collection<int, CarrierService>
      */
-    public function serviceOptionsFor(?ShippingMethod $method, ?ShippingRuleSource $source): Collection
+    public function serviceOptionsFor(ShippingMethod $method, ?ShippingRuleSource $source): Collection
     {
-        $services = $method !== null
-            ? $this->listedServices($method)
-            : CarrierService::query()->with('carrier')->get();
+        $services = $this->listedServices($method);
 
         if ($source === ShippingRuleSource::Shopify) {
             $mapped = SourceServiceMapping::forServices(PostageSourceKind::Shopify, $services->pluck('id'));

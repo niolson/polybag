@@ -12,6 +12,7 @@ use App\Enums\Role;
 use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Concerns\PrintsLabels;
 use App\Models\Package;
+use App\Models\ShippingMethod;
 use App\Services\ShipmentLocationGuard;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -20,6 +21,7 @@ use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Session;
+use Illuminate\Validation\Rule;
 
 class Ship extends Page
 {
@@ -108,6 +110,12 @@ class Ship extends Page
     /** The refusal to show in that prompt — it is the only place both weights are named. */
     public ?string $declaredWeightMessage = null;
 
+    /**
+     * The method chosen on this page for a shipment that has none. Nothing is
+     * rated until one is saved to the shipment (`carrier-catalog-reset/16`).
+     */
+    public ?int $shippingMethodId = null;
+
     public function mount($package_id = null): void
     {
         $this->returnUrl = Session::pull('ship_return_url', '/pack');
@@ -139,6 +147,20 @@ class Ship extends Page
             return;
         }
 
+        // Nothing is rated for a shipment with no method. The page shows the
+        // problem, and a method picker to whoever may edit the shipment.
+        if ($this->needsShippingMethod()) {
+            return;
+        }
+
+        $this->rate();
+    }
+
+    /**
+     * Quote the package on mount, or once a method has been chosen for it.
+     */
+    private function rate(): void
+    {
         try {
             $options = $this->prepareCachedRates();
         } catch (LockTimeoutException) {
@@ -191,9 +213,61 @@ class Ship extends Page
         return $this->package?->status === PackageStatus::Shipped;
     }
 
+    public function needsShippingMethod(): bool
+    {
+        return $this->package?->shipment?->needsShippingMethod() ?? false;
+    }
+
+    /**
+     * Whether this user may choose the method here: whoever may edit the
+     * shipment.
+     */
+    public function canAssignShippingMethod(): bool
+    {
+        return $this->package?->shipment !== null
+            && (auth()->user()?->can('update', $this->package->shipment) ?? false);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function getShippingMethodOptions(): array
+    {
+        return ShippingMethod::query()
+            ->where('active', true)
+            ->orderBy('name')
+            ->pluck('name', 'id')
+            ->all();
+    }
+
+    /**
+     * Save the chosen method to the shipment and rate the package with it.
+     */
+    public function assignShippingMethod(): void
+    {
+        if (! $this->package || ! $this->needsShippingMethod()) {
+            return;
+        }
+
+        $shipment = $this->package->shipment;
+
+        $this->authorize('update', $shipment);
+
+        $this->validate([
+            'shippingMethodId' => ['required', Rule::exists('shipping_methods', 'id')->where('active', true)],
+        ], [], ['shippingMethodId' => 'shipping method']);
+
+        $shipment->update(['shipping_method_id' => $this->shippingMethodId]);
+        $shipment->load('shippingMethod');
+
+        $this->notifySuccess('Shipping Method Set', "Rating with {$shipment->shippingMethod->name}.");
+
+        $this->rate();
+    }
+
     public function refreshRates(): void
     {
-        if (! $this->package) {
+        if (! $this->package || $this->needsShippingMethod()) {
             return;
         }
 

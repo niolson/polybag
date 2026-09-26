@@ -22,7 +22,11 @@ class ShipmentSeeder extends Seeder
             ['active' => true]
         );
 
-        $shippingMethod = ShippingMethod::first();
+        // Every shipment gets a method: nothing is bought for one without
+        // (`carrier-catalog-reset/16`). International ones get the method
+        // that lists international services.
+        $domesticMethod = ShippingMethod::where('name', 'Standard Ground')->first() ?? ShippingMethod::firstOrFail();
+        $internationalMethod = ShippingMethod::where('name', 'International Economy')->first() ?? $domesticMethod;
 
         $shipments = [
             // ===== VALID ADDRESSES - Should validate exactly =====
@@ -520,7 +524,7 @@ class ShipmentSeeder extends Seeder
                 [
                     ...$shipmentData,
                     'client_id' => $defaultClientId,
-                    'shipping_method_id' => $shippingMethod?->id,
+                    'shipping_method_id' => ($shipmentData['country'] ?? 'US') === 'US' ? $domesticMethod->id : $internationalMethod->id,
                     'channel_id' => $channel->id,
                 ],
             );

@@ -128,13 +128,11 @@ it('never quotes Media Mail to a package that does not qualify, and leaves no of
     'no items at all' => fn (): array => [],
 ]);
 
-it('never quotes Media Mail to a package that does not qualify when it has no shipping method', function (): void {
-    $package = mediaMailPackage([Product::factory()->create()], onMethod: false);
+it('quotes nothing, Media Mail included, to a package with no shipping method', function (): void {
+    $package = mediaMailPackage([Product::factory()->media()->create()], onMethod: false);
 
-    $codes = app(ShippingRateService::class)->getShippingRates($package->id)->pluck('serviceCode');
-
-    expect($codes)->toContain('USPS_GROUND_ADVANTAGE')
-        ->and($codes)->not->toContain('MEDIA_MAIL');
+    expect(app(ShippingRateService::class)->getShippingRates($package->id))->toBeEmpty()
+        ->and(ShippingOffer::where('package_id', $package->id)->exists())->toBeFalse();
 });
 
 it('quotes a direct USPS Media Mail rate, and never Library Mail', function (): void {

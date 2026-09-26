@@ -134,11 +134,11 @@ class PostageSourceResolver
      * the connection, because that is what an Offer and a Label record as the
      * postage source, but it is asked only where a direct carrier would be:
      * when the method has its `direct` row and lists an Amazon Shipping
-     * service, or when there is no method.
+     * service.
      *
      * The direct carriers are those the shipping method's active services
-     * name, or every carrier with a direct integration when there is no
-     * method. A method without its `direct` policy row gets none: direct is on
+     * name. There is always a method: a shipment without one is not rated
+     * (`carrier-catalog-reset/16`). A method without its `direct` policy row gets none: direct is on
      * by default, and deleting the row turns it off
      * (`carrier-catalog-reset/09`). Which of a method's services each source
      * then sells is rating's question, not this one's.
@@ -157,7 +157,7 @@ class PostageSourceResolver
      * on a resale channel's or a policy-only carrier's row, from before
      * `CarrierAccount` refused them, is never read.
      */
-    public function resolve(Package $package, ?ShippingMethod $shippingMethod = null): PostageSourceResolution
+    public function resolve(Package $package, ShippingMethod $shippingMethod): PostageSourceResolution
     {
         /** @var Collection<int, PostageSourceCandidate> $candidates */
         $candidates = new Collection;
@@ -180,9 +180,7 @@ class PostageSourceResolver
         $clientId = $package->shipment?->client_id;
 
         foreach ($this->directCarriers($shippingMethod) as $carrierName => $carrierId) {
-            $account = $carrierId === null
-                ? null
-                : CarrierAccount::resolveForShipment($carrierId, $locationId, $clientId)->first();
+            $account = CarrierAccount::resolveForShipment($carrierId, $locationId, $clientId)->first();
 
             $candidates->push(PostageSourceCandidate::forDirectCarrier($carrierName, $account));
         }
@@ -191,16 +189,11 @@ class PostageSourceResolver
     }
 
     /**
-     * Whether this method would buy Amazon Shipping directly: with no method,
-     * which allows every direct service, or with its `direct` row and an
-     * active Amazon Shipping service listed.
+     * Whether this method would buy Amazon Shipping directly: with its
+     * `direct` row and an active Amazon Shipping service listed.
      */
-    private function sellsAmazonShippingDirectly(?ShippingMethod $shippingMethod): bool
+    private function sellsAmazonShippingDirectly(ShippingMethod $shippingMethod): bool
     {
-        if ($shippingMethod === null) {
-            return true;
-        }
-
         return $shippingMethod->allowsSource(PostageSourceKind::Direct)
             && $shippingMethod->carrierServices()
                 ->active()
@@ -211,8 +204,7 @@ class PostageSourceResolver
 
     /**
      * The carriers sold directly that this method needs, by their fixed name,
-     * with each one's carrier row id, or null for a registered integration
-     * with no row.
+     * with each one's carrier row id.
      *
      * Asked as `directAdapterFor()` and not `policyFor()`, because a candidate
      * is a claim that we can *buy* here, and the pairing that has to hold is
@@ -221,35 +213,23 @@ class PostageSourceResolver
      * connection, not a `CarrierAccount`, and is asked through the connection
      * candidate above.
      *
-     * @return array<string, int|null>
+     * @return array<string, int>
      */
-    private function directCarriers(?ShippingMethod $shippingMethod): array
+    private function directCarriers(ShippingMethod $shippingMethod): array
     {
-        if ($shippingMethod !== null && ! $shippingMethod->allowsSource(PostageSourceKind::Direct)) {
+        if (! $shippingMethod->allowsSource(PostageSourceKind::Direct)) {
             return [];
         }
 
-        if ($shippingMethod !== null) {
-            return $shippingMethod->carrierServices()
-                ->active()
-                ->withActiveCarrier()
-                ->with('carrier')
-                ->get()
-                ->pluck('carrier')
-                ->unique('id')
-                ->filter(fn (Carrier $carrier): bool => $this->carrierRegistry->directAdapterFor($carrier->name) !== null)
-                ->mapWithKeys(fn (Carrier $carrier): array => [$carrier->name => $carrier->id])
-                ->all();
-        }
-
-        $names = array_values(array_filter(
-            $this->carrierRegistry->getCarrierNames(),
-            fn (string $name): bool => $this->carrierRegistry->directAdapterFor($name) !== null,
-        ));
-        $ids = Carrier::whereIn('name', $names)->pluck('id', 'name');
-
-        return collect($names)
-            ->mapWithKeys(fn (string $name): array => [$name => $ids->get($name)])
+        return $shippingMethod->carrierServices()
+            ->active()
+            ->withActiveCarrier()
+            ->with('carrier')
+            ->get()
+            ->pluck('carrier')
+            ->unique('id')
+            ->filter(fn (Carrier $carrier): bool => $this->carrierRegistry->directAdapterFor($carrier->name) !== null)
+            ->mapWithKeys(fn (Carrier $carrier): array => [$carrier->name => $carrier->id])
             ->all();
     }
 }

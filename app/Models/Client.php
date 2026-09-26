@@ -36,6 +36,15 @@ class Client extends Model
         'label_reference_source',
     ];
 
+    /**
+     * The client an import row names in a source's `client_column`, matched by
+     * name, ignoring case and surrounding space.
+     */
+    public static function findByImportName(string $name): ?self
+    {
+        return self::query()->whereRaw('LOWER(name) = ?', [strtolower(trim($name))])->first();
+    }
+
     public function hasReturnAddress(): bool
     {
         return filled($this->return_address1) && filled($this->return_city) && filled($this->return_postal_code);
