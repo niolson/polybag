@@ -30,6 +30,7 @@ use App\Models\Product;
 use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
+use App\Models\ShippingMethodPostageSource;
 use App\Models\ShippingOffer;
 use App\Services\AmazonBuyShippingService;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
@@ -797,19 +798,13 @@ function amazonCarrierPackagingCatalog(): array
 /**
  * Put the Package's shipment on a shipping method that asks Amazon, so that
  * {@see ShippingRateService::getShippingRates()} — and its shared
- * {@see PackagingFilter} — is what quotes it. The one seeded catalog row is
- * the hook; the rates come back under whichever carrier Amazon names.
+ * {@see PackagingFilter} — is what quotes it. The method's `amazon` policy row
+ * asks; the rates come back under whichever carrier Amazon names.
  */
 function amazonShippingMethodFor(Package $package): void
 {
-    $amazon = Carrier::firstOrCreate(['name' => AmazonBuyShippingAdapter::SOURCE_NAME], ['active' => true]);
-    $catalog = $amazon->carrierServices()->create([
-        'name' => 'Amazon Buy Shipping rates',
-        'service_code' => AmazonBuyShippingAdapter::CATALOG_SERVICE_CODE,
-        'active' => true,
-    ]);
     $method = ShippingMethod::factory()->create();
-    $method->carrierServices()->attach($catalog->id);
+    ShippingMethodPostageSource::factory()->amazon()->for($method)->create();
 
     $package->shipment->update(['shipping_method_id' => $method->id]);
 }

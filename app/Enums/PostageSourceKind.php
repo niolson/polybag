@@ -37,16 +37,33 @@ enum PostageSourceKind: string
      * What a shipping method's policy row for this kind may say about selling
      * beyond the method's listed services — `carrier-catalog-reset/09`.
      *
-     * A direct account sells only what the method lists. Shopify may be left
-     * to choose (`auto`), and Amazon Buy Shipping to sell any service (`13`).
+     * A direct account sells only what the method lists, and Shopify may be
+     * left to choose (`auto`). Amazon Buy Shipping takes only `none` until
+     * `carrier-catalog-reset/13` makes automation read the row, and allows
+     * *Any service* in the same change.
      *
      * @return list<UnlistedServices>
      */
     public function acceptedUnlistedServices(): array
     {
         return match ($this) {
-            self::Direct => [UnlistedServices::None],
-            self::Shopify, self::Amazon => [UnlistedServices::None, UnlistedServices::Any],
+            self::Direct, self::Amazon => [UnlistedServices::None],
+            self::Shopify => [UnlistedServices::None, UnlistedServices::Any],
+        };
+    }
+
+    /**
+     * What a row of this kind sells when it does not allow unlisted services.
+     *
+     * Amazon Buy Shipping's `none` does not mean the listed services yet: the
+     * Ship page still shows every offer Amazon returns, and automation buys
+     * what an approval allows (`carrier-catalog-reset/12`, until `13`).
+     */
+    public function listedServicesLabel(): string
+    {
+        return match ($this) {
+            self::Direct, self::Shopify => 'Listed services only',
+            self::Amazon => 'All Amazon services (approvals gate automation)',
         };
     }
 

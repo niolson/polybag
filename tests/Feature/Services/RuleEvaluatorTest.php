@@ -20,7 +20,6 @@ use App\Models\ShippingMethod;
 use App\Models\ShippingMethodPostageSource;
 use App\Models\ShippingRule;
 use App\Models\SourceServiceMapping;
-use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\Carriers\ShopifyAdapter;
 use App\Services\RuleEvaluator;
 
@@ -788,16 +787,6 @@ function ruleAmazonOffer(?CarrierService $service, float $price = 4.0, ?int $car
     );
 }
 
-function ruleAmazonHookRow(): CarrierService
-{
-    $amazon = Carrier::firstOrCreate(['name' => AmazonBuyShippingAdapter::SOURCE_NAME]);
-
-    return CarrierService::firstOrCreate([
-        'carrier_id' => $amazon->id,
-        'service_code' => AmazonBuyShippingAdapter::CATALOG_SERVICE_CODE,
-    ], ['name' => 'Amazon Buy Shipping']);
-}
-
 /**
  * A catalog service Shopify sells, under the Shopify mapping `$shopifyCode`.
  */
@@ -845,9 +834,23 @@ function ruleMethodListing(array $services): ShippingMethod
     return $method;
 }
 
+/**
+ * A method listing these services that also asks Amazon Buy Shipping, through
+ * its `amazon` policy row (`carrier-catalog-reset/12`).
+ *
+ * @param  array<int, CarrierService>  $services
+ */
+function ruleMethodAskingAmazon(array $services): ShippingMethod
+{
+    $method = ruleMethodListing($services);
+    ShippingMethodPostageSource::factory()->amazon()->for($method)->create();
+
+    return $method;
+}
+
 it('pre-selects the direct rate for Direct, UPS Ground, never Amazon\'s', function (): void {
     $ground = ruleUpsGround();
-    $method = ruleMethodListing([$ground, ruleAmazonHookRow()]);
+    $method = ruleMethodAskingAmazon([$ground]);
     $shipment = Shipment::factory()->create(['shipping_method_id' => $method->id]);
 
     ShippingRule::factory()->source(ShippingRuleSource::Direct)->create([
@@ -865,7 +868,7 @@ it('pre-selects the direct rate for Direct, UPS Ground, never Amazon\'s', functi
 
 it('rate-shops one service across direct and Amazon for Any priced source', function (): void {
     $ground = ruleUpsGround();
-    $method = ruleMethodListing([$ground, ruleAmazonHookRow()]);
+    $method = ruleMethodAskingAmazon([$ground]);
     $shipment = Shipment::factory()->create(['shipping_method_id' => $method->id]);
 
     ShippingRule::factory()->source(ShippingRuleSource::AnyPriced)->create([
@@ -900,7 +903,7 @@ it('leaves Amazon out of Any priced source when the method does not allow it', f
 });
 
 it('selects strictly among Amazon offers for Amazon Buy Shipping, any', function (): void {
-    $method = ruleMethodListing([ruleAmazonHookRow()]);
+    $method = ruleMethodAskingAmazon([]);
     $shipment = Shipment::factory()->create(['shipping_method_id' => $method->id]);
 
     ShippingRule::factory()->source(ShippingRuleSource::Amazon)->anyService()->create([
@@ -1011,13 +1014,13 @@ it('allows a shipment with no method every direct service and nothing else', fun
         ->and($result->preSelectedRate->carrierServiceId)->toBe($ground->id);
 });
 
-it('never lets a direct Use rule name a channel\'s catalog row', function (): void {
-    $method = ruleMethodListing([ruleAmazonHookRow()]);
+it('never lets a direct Use rule reach a service a method only asks Amazon for', function (): void {
+    $method = ruleMethodAskingAmazon([]);
     $shipment = Shipment::factory()->create(['shipping_method_id' => $method->id]);
 
     ShippingRule::factory()->create([
         'shipping_method_id' => $method->id,
-        'carrier_service_id' => ruleAmazonHookRow()->id,
+        'carrier_service_id' => ruleUpsGround()->id,
     ]);
 
     expect(app(RuleEvaluator::class)->evaluate($shipment)->hasPreSelectedRate())->toBeFalse();

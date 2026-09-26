@@ -465,8 +465,12 @@ class ShippingRateService
         if ($shippingMethod) {
             $methodServices = $this->getActiveCarrierServices($shippingMethod, $destination);
 
-            // A method may list nothing when Shopify may choose for itself.
-            if ($methodServices->isEmpty() && ! $shippingMethod->allowsUnlistedServices(PostageSourceKind::Shopify)) {
+            // A method may list nothing when Shopify may choose for itself, or
+            // when it asks Amazon Buy Shipping, whose services are discovered
+            // per quote.
+            if ($methodServices->isEmpty()
+                && ! $shippingMethod->allowsUnlistedServices(PostageSourceKind::Shopify)
+                && ! $shippingMethod->allowsSource(PostageSourceKind::Amazon)) {
                 throw new NoActiveCarrierServicesException($shippingMethod->name);
             }
 
@@ -515,7 +519,7 @@ class ShippingRateService
      * - Shopify sells the method's services it has a mapping for, and `auto`
      *   when the method allows its own choice ({@see assignShopify()}).
      * - Amazon Buy Shipping, for Amazon's own orders, is asked when the method
-     *   lists its row, until `carrier-catalog-reset/12`.
+     *   has its `amazon` row ({@see assignAmazonBuyShipping()}).
      * - Amazon Shipping sold to other channels sells the method's Amazon
      *   Shipping services, like a direct carrier, through the scoped
      *   connection (`carrier-catalog-reset/15`).
@@ -544,6 +548,16 @@ class ShippingRateService
 
             if ($candidate->isChannel() && $candidate->dataSourceType === ShopifySource::class) {
                 $assignment = $this->assignShopify($candidate, $sourceName, $shippingMethod, $methodServices);
+
+                if ($assignment !== null) {
+                    $assignments[] = $assignment;
+                }
+
+                continue;
+            }
+
+            if ($candidate->isChannel() && $candidate->dataSourceType === AmazonSource::class) {
+                $assignment = $this->assignAmazonBuyShipping($candidate, $sourceName, $shippingMethod);
 
                 if ($assignment !== null) {
                     $assignments[] = $assignment;
@@ -630,13 +644,37 @@ class ShippingRateService
     }
 
     /**
+     * What Amazon Buy Shipping is asked for on this method, or null when it is
+     * not asked (`carrier-catalog-reset/12`).
+     *
+     * Only with the method's `amazon` policy row. It is handed no services:
+     * `getRates` takes no service filter, and what Amazon offers is discovered
+     * per quote. With no method there is no policy to allow it, so it is not
+     * asked, as Shopify is not.
+     *
+     * @return ServiceAssignment|null
+     */
+    private function assignAmazonBuyShipping(PostageSourceCandidate $candidate, string $sourceName, ?ShippingMethod $shippingMethod): ?array
+    {
+        if ($shippingMethod === null || ! $shippingMethod->allowsSource(PostageSourceKind::Amazon)) {
+            return null;
+        }
+
+        return [
+            'candidate' => $candidate,
+            'source' => $sourceName,
+            'services' => collect(),
+            'serviceCodes' => [],
+        ];
+    }
+
+    /**
      * The name a resolved source's adapter is registered under.
      *
      * A direct carrier's fixed name is the registry's key (ADR-0006 decision
-     * 1, as amended). Shopify is registered under a name no carrier row
-     * carries (`carrier-catalog-reset/09`). Amazon Buy Shipping is still
-     * registered as the `Amazon` row it poses as, until
-     * `carrier-catalog-reset/12` removes it. An Amazon connection scoped to
+     * 1, as amended). Shopify and Amazon Buy Shipping are registered under
+     * names no carrier row carries (`carrier-catalog-reset/09` and `12`). An
+     * Amazon connection scoped to
      * sell Amazon Shipping to other channels is that carrier's adapter
      * (`carrier-catalog-reset/15`).
      */

@@ -68,8 +68,7 @@ class PostageSourcesRelationManager extends RelationManager
                     ->label('Beyond listed services')
                     ->state(fn (ShippingMethodPostageSource $record): ?string => $record->allowsUnlistedServices()
                         ? $record->source_kind->unlistedServicesLabel()
-                        : null)
-                    ->placeholder('Listed services only'),
+                        : $record->source_kind->listedServicesLabel()),
             ])
             ->headerActions([
                 Actions\CreateAction::make(),
@@ -84,16 +83,13 @@ class PostageSourcesRelationManager extends RelationManager
     }
 
     /**
-     * The kinds a row here governs. Amazon Buy Shipping is still allowed by the
-     * `Amazon` hook row the method lists, so an Amazon row would change nothing;
-     * it is offered once `carrier-catalog-reset/12` makes the row govern it.
+     * The kinds a row here governs.
      *
      * @return array<string, string>
      */
     public static function kindOptions(): array
     {
         return collect(PostageSourceKind::cases())
-            ->reject(fn (PostageSourceKind $kind): bool => $kind === PostageSourceKind::Amazon)
             ->mapWithKeys(fn (PostageSourceKind $kind): array => [$kind->value => $kind->label()])
             ->all();
     }

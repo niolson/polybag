@@ -304,7 +304,7 @@ describe('the source policy', function (): void {
             ->and($method->fresh()->allowsUnlistedServices(PostageSourceKind::Shopify))->toBeTrue();
     });
 
-    it('does not offer an Amazon row, which would change nothing until 12', function (): void {
+    it('offers a row for every source kind, Amazon Buy Shipping included since 12', function (): void {
         $method = ShippingMethod::factory()->create();
 
         Livewire::test(PostageSourcesRelationManager::class, [
@@ -315,6 +315,7 @@ describe('the source policy', function (): void {
             ->assertFormFieldExists('source_kind', fn (Select $field): bool => array_keys($field->getOptions()) === [
                 PostageSourceKind::Direct->value,
                 PostageSourceKind::Shopify->value,
+                PostageSourceKind::Amazon->value,
             ]);
     });
 

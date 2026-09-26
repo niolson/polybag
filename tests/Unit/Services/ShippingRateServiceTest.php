@@ -1848,9 +1848,17 @@ it('parses concurrent rate responses from an async source that is not a carrier'
 
     app()->instance(GuzzleSender::class, new CannedGuzzleSender);
 
+    // A method listing a USPS service and asking Amazon Buy Shipping
+    // (`carrier-catalog-reset/12`).
+    $shippingMethod = ShippingMethod::factory()->create();
+    $shippingMethod->carrierServices()->attach(CarrierService::factory()->uspsGroundAdvantage()->create([
+        'carrier_id' => Carrier::firstOrCreate(['name' => Carrier::USPS])->id,
+    ])->id);
+    ShippingMethodPostageSource::factory()->amazon()->for($shippingMethod)->create();
+
     $amazon = DataSource::factory()->amazon()->create(['active' => true]);
     $shipment = Shipment::factory()->create([
-        'shipping_method_id' => null,
+        'shipping_method_id' => $shippingMethod->id,
         'postal_code' => '90210',
         'data_source_id' => $amazon->id,
     ]);

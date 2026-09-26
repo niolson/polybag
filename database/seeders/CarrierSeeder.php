@@ -4,7 +4,6 @@ namespace Database\Seeders;
 
 use App\Enums\ContentClass;
 use App\Models\Carrier;
-use App\Services\Carriers\AmazonBuyShippingAdapter;
 use Illuminate\Database\Seeder;
 
 class CarrierSeeder extends Seeder
@@ -186,33 +185,6 @@ class CarrierSeeder extends Seeder
                 'name' => 'OnTrac Ground',
                 'can_ship_to_po_boxes' => false,
                 'can_ship_to_military_addresses' => false,
-            ],
-        );
-
-        // This hook asks Amazon for Buy Shipping against the seller's own Amazon
-        // order (`channelType: AMAZON`). Amazon Shipping on an order from
-        // another channel is the Amazon Shipping carrier above, sold directly.
-        // Unlike every carrier above, this catalog is *discovered*: one
-        // `getRates` came back naming 108 services across fifteen carriers, and
-        // nothing may create a `CarrierService` from that (ADR-0003 decision
-        // 2). So exactly one row is seeded, and it is not a service — it is the
-        // hook a shipping method needs in order to ask Amazon at all. What
-        // comes back is priced per offer under whichever carrier is carrying
-        // it, and is named through Map Carrier Services if anyone wants it
-        // named.
-        //
-        // No pickup cutoff: the carrier of record differs per offer and its own
-        // row carries the cutoff, which is the point of normalizing the carrier
-        // separately from the postage source.
-        $amazon = Carrier::seedSystem(AmazonBuyShippingAdapter::SOURCE_NAME);
-        $amazon->carrierServices()->firstOrCreate(
-            ['service_code' => AmazonBuyShippingAdapter::CATALOG_SERVICE_CODE],
-            [
-                'name' => 'Amazon Buy Shipping rates',
-                // Amazon resells USPS, which reaches both; whether any given
-                // parcel is eligible is settled per order by `getRates`.
-                'can_ship_to_po_boxes' => true,
-                'can_ship_to_military_addresses' => true,
             ],
         );
     }

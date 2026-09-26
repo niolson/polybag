@@ -135,10 +135,12 @@ describe('the reference-data sync', function (): void {
                 Carrier::FEDEX,
                 Carrier::UPS,
                 Carrier::DHL_EXPRESS,
-                AmazonBuyShippingAdapter::SOURCE_NAME,
+                Carrier::AMAZON_SHIPPING,
             )
-            // Shopify is a source, not a carrier (`carrier-catalog-reset/09`).
-            ->and(Carrier::query()->pluck('name')->all())->not->toContain('Shopify');
+            // Shopify and Amazon Buy Shipping are sources, not carriers
+            // (`carrier-catalog-reset/09` and `12`).
+            ->and(Carrier::query()->pluck('name')->all())->not->toContain('Shopify')
+            ->and(Carrier::query()->pluck('name')->all())->not->toContain(AmazonBuyShippingAdapter::SOURCE_NAME);
     });
 
     it('adopts a custom carrier an operator made under a seeded name', function (): void {
