@@ -14,6 +14,7 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CarrierPackaging;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PackageStatus;
+use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
 use App\Enums\ServiceEvidence;
@@ -48,7 +49,8 @@ use Saloon\Laravel\Facades\Saloon;
 
 /**
  * Shopify Shipping as ADR-0003 decisions 5 and 6 govern it: a priceless offer
- * presented beside the rates, and only for a client that has opted in. A person
+ * presented beside the rates, and only from a connection whose postage setting
+ * sells it (ADR-0006 decision 6). A person
  * confirms an attended choice; automation requires an explicit rule or a sole
  * eligible configured selection.
  */
@@ -141,7 +143,7 @@ it('selects one thing at a time', function (): void {
         ->assertSet('selectedBlindOfferId', null);
 });
 
-it('refuses a blind purchase for a client that has not opted in', function (): void {
+it('refuses a blind purchase from a connection that does not sell postage', function (): void {
     $package = blindPurchasePackage();
     $source = registerBlindSource();
 
@@ -151,7 +153,94 @@ it('refuses a blind purchase for a client that has not opted in', function (): v
     );
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Blind Purchase Not Enabled')
+        ->and($result->title)->toBe('Connection Does Not Sell Postage')
+        ->and($result->message)->toContain('"Shopify Test"')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+
+    $source->shouldNotHaveReceived('createShipment');
+});
+
+/*
+|--------------------------------------------------------------------------
+| carrier-catalog-reset/10 — the connection's postage setting
+|--------------------------------------------------------------------------
+|
+| Consent to blind purchase lives on the Shopify connection. It only narrows:
+| the shipping method still has to allow Shopify.
+|
+*/
+
+it('does not ask a connection that does not sell postage', function (): void {
+    $package = blindPurchasePackage(withUspsRate: true);
+    registerUspsRate();
+    $source = registerBlindSource();
+
+    $options = app(PackageShippingWorkflow::class)->prepareRates($package);
+
+    expect($options->rateOptions)->toHaveCount(1)
+        ->and($options->blindPurchaseOffers)->toBe([]);
+
+    $source->shouldNotHaveReceived('blindPurchaseOffers');
+});
+
+it('shows a packer-only connection\'s offer and lets a packer buy it', function (): void {
+    $package = blindPurchasePackage();
+    setPostageSetting($package, PostageSetting::PackerOnly);
+    $source = registerBlindSource();
+    $source->shouldReceive('createShipment')->once()->andReturn(blindShipResponse());
+
+    $options = app(PackageShippingWorkflow::class)->prepareRates($package);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(blindOffer: shopifyBlindOffer()),
+    );
+
+    expect($options->blindPurchaseOffers)->toHaveCount(1)
+        ->and($result->success)->toBeTrue()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
+});
+
+it('keeps a packer-only connection\'s sole blind choice from automation, naming the setting', function (): void {
+    $package = blindPurchasePackage();
+    setPostageSetting($package, PostageSetting::PackerOnly);
+    $source = registerBlindSource();
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package,
+        new PackageAutoShippingRequest(cleanupOnFailure: false),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->requiresAttendedSelection)->toBeTrue()
+        ->and($result->title)->toBe('Connection Sells to Packers Only')
+        ->and($result->message)->toContain('"Shopify Test"')
+        ->and($result->message)->toContain('Packer and automation')
+        ->and($result->message)->not->toContain('Amazon Approvals')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+
+    $source->shouldNotHaveReceived('createShipment');
+});
+
+it('keeps a packer-only connection\'s offer from a rule that selects it', function (): void {
+    $package = blindPurchasePackage();
+    setPostageSetting($package, PostageSetting::PackerOnly);
+    $source = registerBlindSource();
+
+    ShippingRule::factory()->source(ShippingRuleSource::Shopify)->create([
+        'shipping_method_id' => $package->shipment->shipping_method_id,
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => null,
+        'any_service' => true,
+    ]);
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package,
+        new PackageAutoShippingRequest(cleanupOnFailure: false),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Connection Sells to Packers Only')
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 
     $source->shouldNotHaveReceived('createShipment');

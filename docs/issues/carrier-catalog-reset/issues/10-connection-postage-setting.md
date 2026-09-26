@@ -1,6 +1,6 @@
 # A connection's postage setting replaces the client blind-purchase opt-in
 
-Status: needs-triage
+Status: done
 
 Repo: `polybag`
 
@@ -40,18 +40,42 @@ method, or until `13` the approvals, would not.
   toggle, the single-client toggle in Settings, the checks in `ShopifyAdapter` and
   `EloquentPackageShippingWorkflow`, and the reference in `ServiceApprovalPolicy`'s
   docblock.
+- **Migrate existing connections so nothing changes on deploy.** The defaults above are
+  for new connections only. The migration sets existing ones from today's behaviour
+  before dropping the column:
+  - An Amazon connection gets *packer and automation*, since approvals are today's only
+    gate. *Packer only* here would silently stop approved automation.
+  - A Shopify connection whose client has `blind_purchase_enabled` gets *packer and
+    automation*, since the opt-in allowed both the Ship page and automation. Every other
+    Shopify connection gets *does not sell postage*.
+  - A shared Shopify connection, with no client, had its consent read from each
+    shipment's client. It gets *packer and automation* when every client with orders
+    from it opted in. Otherwise it gets *does not sell postage*, and the migration logs
+    a warning when some of those clients had opted in: selling for them would spend for
+    the clients who had not.
+- **Refusals name the setting.**
+  - Unattended: a *packer only* refusal is its own result in `nothingToBuyUnattended`,
+    decided before approvals are asked about. It names the connection and its setting,
+    never "No Approved Rates" or Amazon Approvals.
+  - Attended: `resolveBlindOffer`'s consent message points at the connection's postage
+    setting instead of "Enable it on the client".
+- **Tests.** `allowBlindPurchase()` in `tests/Pest.php` and `ClientFactory`'s opt-in state
+  become a way to set a connection's postage setting.
 
 ## Acceptance criteria
 
-- [ ] A Shopify connection set to *does not sell postage* produces no blind offers
-- [ ] Set to *packer only*, its offers show but no rule, batch or sole choice buys one
-- [ ] Set to *packer and automation*, automation behaves as the opt-in did
-- [ ] An Amazon connection set to *packer only* has its Amazon orders' offers shown and
+- [x] A Shopify connection set to *does not sell postage* produces no blind offers
+- [x] Set to *packer only*, its offers show but no rule, batch or sole choice buys one
+- [x] Set to *packer and automation*, automation behaves as the opt-in did
+- [x] An Amazon connection set to *packer only* has its Amazon orders' offers shown and
       refused unattended, with the setting named, even when approved
-- [ ] Set to *packer and automation*, approvals still decide until `13`
-- [ ] The postage setting does not change what a connection sells to orders from other
+- [x] Set to *packer and automation*, approvals still decide until `13`
+- [x] The postage setting does not change what a connection sells to orders from other
       channels
-- [ ] `clients.blind_purchase_enabled` no longer exists
+- [x] `clients.blind_purchase_enabled` no longer exists
+- [x] After the migration, an install's attended and unattended purchasing is unchanged:
+      approved Amazon services still buy unattended, and opted-in clients' Shopify
+      connections still sell blind, including through a rule or sole choice
 
 ## Blocked by
 
@@ -62,3 +86,16 @@ None - can start immediately.
 - **2026-09-24** — Second review: the setting no longer governs orders from other
   channels. Amazon Shipping for them becomes a direct sale in `15` (ADR-0006 option M),
   and `offers_off_amazon_shipping` is its switch.
+- **2026-09-26** — Readiness review: added the migration of existing connections, since
+  the new-connection defaults would have stopped approved Amazon automation on deploy.
+  Also added where the refusals are worded and the test helper changes. Ready for agent.
+- **2026-09-26** — Done. The setting is `data_sources.postage_setting` (`PostageSetting`).
+  *Does not sell* drops the connection from `PostageSourceResolver::resolve()`. *Packer
+  only* is enforced in `RateSelector::selectForAutomation()` for Amazon order rates,
+  before approvals, and in `selectedRateForAutoShip()` for Shopify's rule and sole
+  choice. Its refusal is "Connection Sells to Packers Only".
+- **2026-09-26** — Code review: a shared Shopify connection serving only opted-in
+  clients would have lost its offers, so it now carries forward, as above. An Amazon
+  offer quoted before its connection was set to *does not sell postage* could still be
+  bought. The purchase now checks the setting again for an Amazon order's own postage
+  (`AmazonBuyShippingService::sellingSourceFor()`).

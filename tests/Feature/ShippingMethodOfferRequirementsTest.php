@@ -332,7 +332,7 @@ it('no longer keeps the requirements on the Amazon connection', function (): voi
 });
 
 it('claims only approved rates fail when an unapproved service was withheld', function (): void {
-    $package = packageForOrderFrom(DataSource::factory()->amazon()->create());
+    $package = packageForOrderFrom(DataSource::factory()->amazon()->sellingPostage()->create());
     registerRequirementsAdapter([
         requirementsRate(6.00, Carbon::parse('+5 days')->toDateString()),
         new RateResponse(

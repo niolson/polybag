@@ -20,8 +20,9 @@ use Illuminate\Support\Collection;
  *
  * Nothing here produces a {@see RateResponse}, so blind purchases never enter
  * price comparison. Automation may buy one only when a shipping rule names it
- * or it is the ShippingMethod's sole configured, package-eligible choice. The
- * offers are advertised only for a client that has opted into blind purchase.
+ * or it is the ShippingMethod's sole configured, package-eligible choice, and
+ * the connection's postage setting allows automation. The offers are advertised
+ * only by a connection whose postage setting sells (ADR-0006 decision 6).
  */
 interface BlindPurchaseSource extends PostageOfferSource
 {
@@ -29,7 +30,7 @@ interface BlindPurchaseSource extends PostageOfferSource
      * What this source will sell for the request's package, priceless.
      *
      * Empty is the normal answer: a package this source cannot buy for, a
-     * client that has not opted in, or a selection this source does not
+     * connection that does not sell postage, or a selection this source does not
      * advertise. It is never an error, and never a reason to warn a packer.
      *
      * @param  array<string>  $serviceCodes  Preferences the caller is willing to ask for

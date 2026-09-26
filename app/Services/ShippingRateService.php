@@ -327,7 +327,7 @@ class ShippingRateService
      * The purchase path's answer to "was this ever offered?". Everything that
      * decides eligibility runs again — the shipping method's services, the
      * destination, special-service capability, and each source's own gates
-     * (client opt-in, a fulfillment order to buy against, a catalogued
+     * (the connection's postage setting, a fulfillment order to buy against, a catalogued
      * selection) — while `fetchRatesConcurrently()` and its carrier calls are
      * skipped, because no rate is wanted and no money may be spent finding one.
      *

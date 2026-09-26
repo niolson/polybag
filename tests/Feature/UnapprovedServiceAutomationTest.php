@@ -11,12 +11,14 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\AmazonChannelType;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
+use App\Enums\PostageSetting;
 use App\Enums\SourceEnvironment;
 use App\Jobs\GenerateLabelJob;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\Client;
+use App\Models\DataSource;
 use App\Models\LabelBatch;
 use App\Models\LabelBatchItem;
 use App\Models\Package;
@@ -269,6 +271,105 @@ it('records the approval refusal on a batch ship item rather than failing silent
 
     expect($item->fresh()->status)->toBe(LabelBatchItemStatus::Failed)
         ->and($item->fresh()->error_message)->toContain('approved for automated purchase');
+});
+
+/*
+|--------------------------------------------------------------------------
+| carrier-catalog-reset/10 — the connection's postage setting
+|--------------------------------------------------------------------------
+|
+| An Amazon connection set to *packer only* keeps its Amazon orders' offers
+| from automation even when approved. *Packer and automation* leaves the
+| decision to the approvals, until `13`.
+|
+*/
+
+function orderFromAmazonConnection(Package $package, PostageSetting $setting): DataSource
+{
+    $connection = DataSource::factory()->amazon()->sellingPostage($setting)->create(['name' => 'Amazon US']);
+    $package->shipment->update(['data_source_id' => $connection->id]);
+
+    // An Amazon order must have a due-by date to be checked for lateness,
+    // which is not what these tests are about.
+    $package->shipment->shippingMethod->update(['excludes_late_rates' => false]);
+
+    return $connection;
+}
+
+it('shows a packer-only connection\'s approved offer and refuses it unattended, naming the setting', function (): void {
+    $this->actingAs($user = User::factory()->create());
+    $package = packageForDiscoveredQuote();
+    orderFromAmazonConnection($package, PostageSetting::PackerOnly);
+    approveForAutomation($package);
+    registerQuotingAdapter([discoveredRate(4.00)]);
+
+    $options = app(PackageShippingWorkflow::class)->prepareRates($package->fresh());
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package->fresh(),
+        new PackageAutoShippingRequest(userId: $user->id, cleanupOnFailure: false),
+    );
+
+    expect($options->rateOptions)->toHaveCount(1)
+        ->and($result->success)->toBeFalse()
+        ->and($result->requiresAttendedSelection)->toBeTrue()
+        ->and($result->title)->toBe('Connection Sells to Packers Only')
+        ->and($result->message)->toContain('MockCarrier Ground')
+        ->and($result->message)->toContain('"Amazon US"')
+        ->and($result->message)->not->toContain('Amazon Approvals')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});
+
+it('leaves a packer-and-automation connection\'s unapproved offer to the approvals', function (): void {
+    $this->actingAs($user = User::factory()->create());
+    $package = packageForDiscoveredQuote();
+    orderFromAmazonConnection($package, PostageSetting::PackerAndAutomation);
+    registerQuotingAdapter([discoveredRate(4.00)]);
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package->fresh(),
+        new PackageAutoShippingRequest(userId: $user->id, cleanupOnFailure: false),
+    );
+
+    expect($result->title)->toBe('No Approved Rates')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});
+
+it('auto ships a packer-and-automation connection\'s approved offer', function (): void {
+    $this->actingAs($user = User::factory()->create());
+    $package = packageForDiscoveredQuote();
+    orderFromAmazonConnection($package, PostageSetting::PackerAndAutomation);
+    approveForAutomation($package);
+    registerQuotingAdapter([discoveredRate(4.00)]);
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package->fresh(),
+        new PackageAutoShippingRequest(userId: $user->id, cleanupOnFailure: false),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
+});
+
+it('records the postage setting refusal on a batch ship item', function (): void {
+    $user = User::factory()->create();
+    $package = packageForDiscoveredQuote();
+    orderFromAmazonConnection($package, PostageSetting::PackerOnly);
+    approveForAutomation($package);
+    registerQuotingAdapter([discoveredRate(4.00)]);
+
+    $batch = LabelBatch::factory()->create(['user_id' => $user->id]);
+    $item = LabelBatchItem::factory()->create([
+        'label_batch_id' => $batch->id,
+        'shipment_id' => $package->shipment_id,
+        'package_id' => $package->id,
+        'status' => LabelBatchItemStatus::Pending,
+    ]);
+
+    (new GenerateLabelJob($item->id, 'pdf', null))->handle();
+
+    expect($item->fresh()->status)->toBe(LabelBatchItemStatus::Failed)
+        ->and($item->fresh()->error_message)->toContain('sells postage to a packer only');
 });
 
 /*

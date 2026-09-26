@@ -3,6 +3,7 @@
 use App\DataTransferObjects\PostageSources\PostageSourceCandidate;
 use App\DataTransferObjects\PostageSources\PostageSourceResolution;
 use App\Enums\OffAmazonShippingStatus;
+use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
@@ -206,6 +207,7 @@ describe('the off-Amazon candidate', function (): void {
         scopeConnectionTo($connection);
 
         $shopify = createShopifyDataSource();
+        $shopify->update(['postage_setting' => PostageSetting::PackerOnly]);
         $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage($shopify));
         $candidate = offAmazonCandidate(offAmazonPackage($shopify));
 
@@ -229,6 +231,26 @@ describe('the off-Amazon candidate', function (): void {
         expect(connectionCandidates($resolution))->toHaveCount(1)
             ->and($resolution->channel())->toBeNull();
     });
+});
+
+describe('the postage setting', function (): void {
+    it('does not ask a connection that does not sell postage for its own Amazon orders', function (): void {
+        $connection = DataSource::factory()->amazon()->sellingPostage(PostageSetting::DoesNotSell)->create();
+
+        $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage($connection));
+
+        expect($resolution->channel())->toBeNull();
+    });
+
+    it('does not change what a connection sells to orders from other channels', function (PostageSetting $setting): void {
+        $connection = DataSource::factory()->unassigned()->offeringOffAmazonShipping()->sellingPostage($setting)->create();
+        scopeConnectionTo($connection);
+
+        expect(offAmazonCandidate(offAmazonPackage())?->postageDataSourceId)->toBe($connection->id);
+    })->with([
+        'does not sell' => PostageSetting::DoesNotSell,
+        'packer only' => PostageSetting::PackerOnly,
+    ]);
 });
 
 describe('scope rules', function (): void {

@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Enums\OffAmazonShippingStatus;
+use App\Enums\PostageSetting;
 use App\Models\DataSource;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\DatabaseSource;
@@ -51,6 +52,15 @@ class DataSourceFactory extends Factory
                 'channel_name' => 'Amazon',
             ],
         ]);
+    }
+
+    /**
+     * A Shopify or Amazon connection with this postage setting (ADR-0006
+     * decision 6). Without it, a connection gets its driver's default.
+     */
+    public function sellingPostage(PostageSetting $setting = PostageSetting::PackerAndAutomation): static
+    {
+        return $this->state(['postage_setting' => $setting]);
     }
 
     /**

@@ -323,7 +323,7 @@ class AmazonBuyShippingService
      */
     public function purchase(Package $package, ShippingOffer $offer, ShipRequest $request): AmazonPurchasedLabel
     {
-        $source = $this->sellingSourceFor($offer);
+        $source = $this->sellingSourceFor($package, $offer);
         $payload = $this->buildPurchasePayload($offer, $request);
 
         $response = $this->connectorFor($source)->send(
@@ -391,9 +391,16 @@ class AmazonBuyShippingService
      * recording A as its provenance. Amazon would refuse, but a refusal that
      * only happens because Amazon happened to check is not the guarantee.
      *
+     * The connection's postage setting is checked again too, for an Amazon
+     * order's own postage: an offer quoted before an admin set the connection
+     * not to sell postage must not stay spendable (ADR-0006 decision 6). An
+     * Amazon order is only ever quoted on its own connection, so it is always
+     * that postage. Amazon Shipping for an order from another channel is not
+     * governed by the setting and is not checked.
+     *
      * @throws AmazonLabelPurchaseException which resolves the offer: nothing was bought
      */
-    private function sellingSourceFor(ShippingOffer $offer): DataSource
+    private function sellingSourceFor(Package $package, ShippingOffer $offer): DataSource
     {
         $offer->loadMissing('postageDataSource');
 
@@ -403,6 +410,13 @@ class AmazonBuyShippingService
             throw new AmazonLabelPurchaseException(
                 'The Amazon account this rate was quoted on is no longer available, so its postage cannot be bought. '
                 .'Get rates again.'
+            );
+        }
+
+        if (! $source->postageSetting()->sells() && $this->postageSourceResolver->isAmazonOrder($package)) {
+            throw new AmazonLabelPurchaseException(
+                "The connection \"{$source->name}\" is set not to sell postage, so this rate cannot be bought. "
+                .'Change its postage setting under Integrations → Connections, or choose another rate.'
             );
         }
 

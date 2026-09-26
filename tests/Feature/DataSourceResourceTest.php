@@ -2,6 +2,7 @@
 
 use App\Enums\AmazonMarketplace;
 use App\Enums\AuditAction;
+use App\Enums\PostageSetting;
 use App\Enums\Role;
 use App\Filament\Resources\DataSources\DataSourceResource;
 use App\Filament\Resources\DataSources\Pages\CreateDataSource;
@@ -101,6 +102,35 @@ it('shows client and global export table columns in multi-client mode', function
     Livewire::test(ListDataSources::class)
         ->assertTableColumnVisible('client.name')
         ->assertTableColumnVisible('global_export');
+});
+
+// ── Postage setting (carrier-catalog-reset/10) ───────────────────────────────
+
+it('offers the postage setting on Shopify and Amazon connections only, with each driver\'s default', function (): void {
+    $this->actingAs($this->admin);
+
+    Livewire::test(CreateDataSource::class)
+        ->fillForm(['source_type' => ShopifySource::class])
+        ->assertFormFieldVisible('postage_setting')
+        ->assertSchemaStateSet(['postage_setting' => PostageSetting::DoesNotSell])
+        ->fillForm(['source_type' => AmazonSource::class])
+        ->assertFormFieldVisible('postage_setting')
+        ->assertSchemaStateSet(['postage_setting' => PostageSetting::PackerOnly])
+        ->fillForm(['source_type' => DatabaseSource::class])
+        ->assertFormFieldHidden('postage_setting');
+});
+
+it('saves a connection\'s postage setting', function (): void {
+    $this->actingAs($this->admin);
+    $connection = DataSource::factory()->shopify()->importDisabled()->create();
+
+    Livewire::test(EditDataSource::class, ['record' => $connection->id])
+        ->assertSchemaStateSet(['postage_setting' => PostageSetting::DoesNotSell])
+        ->fillForm(['postage_setting' => PostageSetting::PackerOnly->value])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($connection->refresh()->postage_setting)->toBe(PostageSetting::PackerOnly);
 });
 
 // ── Manual import trigger ─────────────────────────────────────────────────────

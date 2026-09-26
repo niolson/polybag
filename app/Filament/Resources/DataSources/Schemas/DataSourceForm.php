@@ -5,6 +5,7 @@ namespace App\Filament\Resources\DataSources\Schemas;
 use App\Enums\AmazonMarketplace;
 use App\Enums\ImportExistingBehavior;
 use App\Enums\OffAmazonShippingStatus;
+use App\Enums\PostageSetting;
 use App\Enums\ScheduleInterval;
 use App\Filament\Pages\Settings as SettingsPage;
 use App\Models\Carrier;
@@ -89,6 +90,7 @@ class DataSourceForm
                         ->options(self::DRIVERS)
                         ->required()
                         ->live()
+                        ->afterStateUpdated(fn (Set $set, ?string $state): mixed => $set('postage_setting', PostageSetting::defaultFor($state)))
                         ->disabled(fn (?DataSource $record) => $record?->exists)
                         ->dehydrated(),
 
@@ -119,6 +121,24 @@ class DataSourceForm
                         ->visible(self::importsOrders(...)),
                 ])
                 ->columns(2),
+
+            Section::make('Postage')
+                ->description(fn (Get $get): string => $get('source_type') === AmazonSource::class
+                    ? 'Whether this connection sells Amazon Buy Shipping for its own Amazon orders. Amazon Shipping for orders from other channels is set separately, below.'
+                    : 'Whether this connection sells Shopify Shipping for its own orders.')
+                ->schema([
+                    Select::make('postage_setting')
+                        ->label('Postage Setting')
+                        ->options(PostageSetting::class)
+                        ->default(fn (Get $get): ?PostageSetting => PostageSetting::defaultFor($get('source_type')))
+                        ->required()
+                        ->selectablePlaceholder(false)
+                        ->helperText(fn (Get $get): string => $get('source_type') === AmazonSource::class
+                            ? 'Packer only shows Amazon\'s offers on the Ship page and keeps them from auto-ship, batch ship and shipping rules, whatever Amazon Approvals says. Packer and automation lets automation buy the services Amazon Approvals allows. The shipping method still decides whether Amazon is asked.'
+                            : 'Shopify Shipping reaches USPS Connect eCommerce rates without an account of our own, but reports no price or service, and no carrier until the label comes back. Its labels cannot be voided from PolyBag. Packer only shows it on the Ship page. Packer and automation also lets auto-ship and batch ship buy it, when a shipping rule selects it or it is the shipping method\'s sole eligible choice.')
+                        ->columnSpanFull(),
+                ])
+                ->visible(fn (Get $get): bool => PostageSetting::defaultFor($get('source_type')) !== null),
 
             // ── Shopify ────────────────────────────────────────────────────────────
 

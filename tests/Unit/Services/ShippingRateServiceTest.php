@@ -1628,6 +1628,7 @@ it('ignores product compliance flags while their special service is inactive', f
  */
 it('excludes a Shopify offer, visibly, when the shipment hard-requires a special service', function (): void {
     $shop = createShopifyDataSource([], ['oauth_access_token' => 'shpat_test_token']);
+    allowBlindPurchase();
 
     $signature = createScopedSpecialService('signature_required', 'Signature Required');
 

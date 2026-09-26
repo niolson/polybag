@@ -4,6 +4,7 @@ use App\Contracts\PackageLabelWorkflow;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\PackageStatus;
+use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
 use App\Http\Integrations\Amazon\AmazonSpApiConnector;
@@ -129,6 +130,26 @@ it('buys a Shopify order\'s Amazon Shipping label on the scoped connection and r
     Saloon::assertSent(fn (PurchaseShipment $request, $response): bool => sentByConnection($response->getPendingRequest(), $this->connection)
         && $request->body()->all()['rateId'] === 'b1a4a1f0-0c4f-4a47-9d2e-5c6f0a1e7a11'
         && $request->body()->all()['requestToken'] === 'amzn1.rq.external-request-token');
+});
+
+it('buys Amazon Shipping for an order from another channel whatever the connection\'s postage setting', function (): void {
+    Saloon::fake([
+        GetShippingRates::class => externalRatesResponse(),
+        PurchaseShipment::class => externalPurchaseResponse(),
+    ]);
+
+    $rate = quoteExternalRate($this->package);
+
+    // The setting governs only the connection's own Amazon orders.
+    $this->connection->update(['postage_setting' => PostageSetting::DoesNotSell]);
+
+    $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(
+        selectedRate: $rate,
+        labelFormat: 'pdf',
+    ));
+
+    expect($result->success)->toBeTrue()
+        ->and($this->package->fresh()->postage_data_source_id)->toBe($this->connection->id);
 });
 
 it('buys the label alone, unjoined, in each format the sandbox offered', function (string $workstationFormat, ?int $dpi, array $offered, string $bought, ?int $boughtDpi, string $recorded): void {

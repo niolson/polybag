@@ -5,8 +5,10 @@ use App\DataTransferObjects\Shipping\ClassifiedRate;
 use App\DataTransferObjects\Shipping\OfferRequirements;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\AmazonChannelType;
+use App\Enums\PostageSetting;
 use App\Enums\SourceEnvironment;
 use App\Models\Client;
+use App\Models\DataSource;
 use App\Models\ServiceApproval;
 use App\Services\RateSelector;
 use Carbon\Carbon;
@@ -299,6 +301,75 @@ it('reports the services it withheld rather than just declining to choose', func
             'carrier' => 'ONTRAC',
             'service' => 'ONTRAC_GROUND',
         ]);
+});
+
+it('holds a packer-only connection\'s Amazon order offers before asking about approvals', function (): void {
+    $client = Client::where('is_default', true)->firstOrFail();
+    ServiceApproval::factory()->everything()->create(['client_id' => $client->id]);
+    $connection = DataSource::factory()->amazon()->sellingPostage(PostageSetting::PackerOnly)->create(['name' => 'Amazon US']);
+
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([makeDiscoveredRate(4.00), makeRate(9.00)]),
+        null,
+        $client->id,
+        channelSource: $connection,
+    );
+
+    expect($selection->rate?->price)->toBe(9.00)
+        ->and($selection->withheld)->toBeEmpty()
+        ->and($selection->heldByPostageSetting)->toHaveCount(1)
+        ->and($selection->heldByPostageSettingSummary())->toBe('USPS Ground Advantage')
+        ->and($selection->postageSettingConnection)->toBe('Amazon US')
+        ->and($selection->attendedAlternativeAvailable)->toBeTrue();
+});
+
+it('leaves a packer-and-automation connection\'s offers to the approvals', function (): void {
+    $client = Client::where('is_default', true)->firstOrFail();
+    ServiceApproval::factory()->everything()->create(['client_id' => $client->id]);
+    $connection = DataSource::factory()->amazon()->sellingPostage(PostageSetting::PackerAndAutomation)->create();
+
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([makeDiscoveredRate(4.00), makeRate(9.00)]),
+        null,
+        $client->id,
+        channelSource: $connection,
+    );
+
+    expect($selection->rate?->price)->toBe(4.00)
+        ->and($selection->heldByPostageSettingAnything())->toBeFalse();
+});
+
+it('never holds Amazon Shipping sold to an order from another channel', function (): void {
+    $client = Client::where('is_default', true)->firstOrFail();
+    ServiceApproval::factory()->everything()->create([
+        'client_id' => $client->id,
+        'channel_type' => AmazonChannelType::External,
+    ]);
+    $connection = DataSource::factory()->amazon()->sellingPostage(PostageSetting::PackerOnly)->create();
+
+    $external = new RateResponse(
+        carrier: 'Amazon Shipping',
+        serviceCode: 'SWA-US-GROUND',
+        serviceName: 'Ground',
+        price: 4.00,
+        observedService: new ObservedServiceIdentity(
+            source: 'amazon',
+            environment: SourceEnvironment::Production,
+            channelType: AmazonChannelType::External,
+            externalCarrierId: 'AMZN_US',
+            externalServiceId: 'SWA-US-GROUND',
+        ),
+    );
+
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([$external]),
+        null,
+        $client->id,
+        channelSource: $connection,
+    );
+
+    expect($selection->rate?->price)->toBe(4.00)
+        ->and($selection->heldByPostageSettingAnything())->toBeFalse();
 });
 
 it('asks the database nothing when no rate names a discovered service', function (): void {

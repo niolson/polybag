@@ -11,8 +11,8 @@ use App\Models\User;
  * client's account, which puts it with the other Admin acts rather than with
  * the Manager-level mapping beside it.
  *
- * The same line `ClientResource` already draws: `clients.blind_purchase_enabled`
- * is the other consent-to-spend flag in the app and it is edited by admins.
+ * The same line the connection form already draws: a connection's postage
+ * setting is the other consent to spend in the app, and only admins edit it.
  * Naming a service is a manager's job; deciding money may be spent on it
  * without anyone watching is not.
  */

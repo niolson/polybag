@@ -8,6 +8,9 @@ use App\DataTransferObjects\Shipping\ClassifiedRate;
 use App\DataTransferObjects\Shipping\OfferRequirements;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\UnattendedRateSelection;
+use App\Enums\AmazonChannelType;
+use App\Enums\PostageSourceKind;
+use App\Models\DataSource;
 use App\Services\PostageSources\ServiceApprovalGate;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
@@ -109,17 +112,26 @@ class RateSelector
      * that vouches (ADR-0006 decision 10). It is kept for the Ship page and
      * named in the result as its own refusal, never as a missing approval.
      *
+     * So is Amazon Buy Shipping for an Amazon order whose connection sells
+     * postage to a packer only (ADR-0006 decision 6). It is refused before
+     * approval is asked about, because the setting only narrows: an approval
+     * cannot release what the connection refuses to automation.
+     *
      * @param  Collection<int, RateResponse>  $rates
+     * @param  DataSource|null  $channelSource  The package's channel connection, whose postage setting governs the Amazon Buy Shipping it sells for its own orders
      */
     public function selectForAutomation(
         Collection $rates,
         ?Carbon $deadline,
         ?int $clientId,
         ?OfferRequirements $requirements = null,
+        ?DataSource $channelSource = null,
     ): UnattendedRateSelection {
         $requirements ??= OfferRequirements::none();
 
         [$contentRestricted, $unrestricted] = $rates->partition(fn (RateResponse $rate): bool => $rate->contentRestricted);
+
+        [$heldBySetting, $unrestricted] = $this->partitionByPostageSetting($unrestricted->values(), $channelSource);
 
         [$eligible, $withheld] = $this->partitionByApproval($unrestricted->values(), $clientId);
 
@@ -147,6 +159,7 @@ class RateSelector
             withheld: $withheld,
             attendedAlternativeAvailable: $withheld->isNotEmpty()
                 || $contentRestricted->isNotEmpty()
+                || $heldBySetting->isNotEmpty()
                 || $late->isNotEmpty()
                 || $unprotected->isNotEmpty()
                 || $eligible->contains(fn (RateResponse $rate): bool => $rate->priceUnknown),
@@ -155,7 +168,31 @@ class RateSelector
             requirements: $requirements,
             deadlineMissing: $requirements->deadlineRequired && $deadline === null,
             contentRestricted: $contentRestricted->values(),
+            heldByPostageSetting: $heldBySetting,
+            postageSettingConnection: $heldBySetting->isNotEmpty() ? $channelSource?->name : null,
         );
+    }
+
+    /**
+     * Split off the Amazon Buy Shipping rates for the connection's own orders
+     * that its postage setting keeps from automation.
+     *
+     * Only `AMAZON`-channel rates: Amazon Shipping sold to an order from
+     * another channel is a direct sale no postage setting covers.
+     *
+     * @param  Collection<int, RateResponse>  $rates
+     * @return array{0: Collection<int, RateResponse>, 1: Collection<int, RateResponse>} held, then the rest
+     */
+    private function partitionByPostageSetting(Collection $rates, ?DataSource $channelSource): array
+    {
+        if ($channelSource === null || ! $channelSource->isAmazon() || $channelSource->postageSetting()->allowsAutomation()) {
+            return [collect(), $rates];
+        }
+
+        [$held, $rest] = $rates->partition(fn (RateResponse $rate): bool => $rate->sourceKind() === PostageSourceKind::Amazon
+            && $rate->observedService?->channelType === AmazonChannelType::Amazon);
+
+        return [$held->values(), $rest->values()];
     }
 
     /**
