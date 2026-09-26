@@ -46,8 +46,8 @@ use Saloon\Http\Response;
  * A direct sale on a connection's account. It sells one carrier through one
  * account, priced and known before purchase, the way UPS does, so its rates
  * are direct rates: a shipping method lists Amazon Shipping Ground, a rule
- * names *Direct, Amazon Shipping Ground*, and automation buys it without an
- * approval. The account is the Amazon connection a scope chooses
+ * names *Direct, Amazon Shipping Ground*, and automation buys it under the
+ * method's `direct` row. The account is the Amazon connection a scope chooses
  * ({@see DataSource::resolveOffAmazonShipping()}), because Shipping v2 is the
  * only API Amazon Shipping has and its credentials are the seller's.
  *

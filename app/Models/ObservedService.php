@@ -21,7 +21,7 @@ use Illuminate\Support\Carbon;
  * account with, and no adapter — be recorded at all.
  *
  * Being observed says nothing about whether automation may spend money on it.
- * That is approval, and it is a separate concept again (ADR-0003 decision 3).
+ * The shipping method's allowance decides that (`carrier-catalog-reset/13`).
  *
  * Nor does it say what we call the service. That is a {@see SourceServiceMapping}
  * row, one per service rather than one per sighting (`carrier-catalog-reset/14`).
@@ -173,9 +173,8 @@ class ObservedService extends Model
      *
      * Deliberately narrower than the five-part identity this table is keyed
      * on: environment and marketplace are dropped. Amazon's sandbox and
-     * production catalogs disagree about what is *offered*, and an approval to
-     * spend money is scoped to one of them (ADR-0003 decision 3) — but a name
-     * is not an approval. If both worlds report
+     * production catalogs disagree about what is *offered*, but a name does
+     * not change between them. If both worlds report
      * `USPS/USPS_GROUND_ADVANTAGE`, that is one service under one name.
      *
      * This is the scope a {@see SourceServiceMapping} covers, which

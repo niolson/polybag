@@ -133,7 +133,7 @@ class DataSourceForm
                         ->required()
                         ->selectablePlaceholder(false)
                         ->helperText(fn (Get $get): string => $get('source_type') === AmazonSource::class
-                            ? 'Packer only shows Amazon\'s offers on the Ship page and keeps them from auto-ship, batch ship and shipping rules, whatever Amazon Approvals says. Packer and automation lets automation buy the services Amazon Approvals allows. The shipping method still decides whether Amazon is asked.'
+                            ? 'Packer only shows Amazon\'s offers on the Ship page and keeps them from auto-ship, batch ship and shipping rules, whatever the shipping method allows. Packer and automation lets automation buy the services the shipping method allows. The shipping method still decides whether Amazon is asked.'
                             : 'Shopify Shipping reaches USPS Connect eCommerce rates without an account of our own, but reports no price or service, and no carrier until the label comes back. Its labels cannot be voided from PolyBag. Packer only shows it on the Ship page. Packer and automation also lets auto-ship and batch ship buy it, when a shipping rule selects it or it is the shipping method\'s sole eligible choice.')
                         ->columnSpanFull(),
                 ])

@@ -4,7 +4,6 @@ use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
-use App\Enums\AmazonChannelType;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
 use App\Enums\ShippingRuleAction;
@@ -19,7 +18,6 @@ use App\Models\DataSource;
 use App\Models\LabelBatch;
 use App\Models\LabelBatchItem;
 use App\Models\Package;
-use App\Models\ServiceApproval;
 use App\Models\ShippingRule;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
@@ -29,9 +27,9 @@ use Saloon\Laravel\Facades\Saloon;
 
 /**
  * `carrier-catalog-reset/15`: Amazon Shipping sold to an order from another
- * channel is a direct rate. Batch ship buys it like UPS Ground, with no
- * approval, and a rule names it as *Direct, Amazon Shipping Ground*. This
- * replaces `amazon-shipping-external-orders/07`'s approval for other channels.
+ * channel is a direct rate. Batch ship buys it like UPS Ground, under the
+ * method's `direct` row, and a rule names it as *Direct, Amazon Shipping
+ * Ground*.
  */
 beforeEach(function (): void {
     Cache::put('amazon_sp_api_access_token_'.md5('external-refresh-token'), 'external-access-token', 3600);
@@ -61,16 +59,6 @@ beforeEach(function (): void {
         ]]),
     ]);
 });
-
-function approveAmazonShippingGround(Package $package, AmazonChannelType $channelType): void
-{
-    ServiceApproval::factory()->create([
-        'channel_type' => $channelType,
-        'external_carrier_id' => 'AMZN_US',
-        'external_service_id' => 'std-us-swa-mfn',
-        'client_id' => $package->shipment->client_id,
-    ]);
-}
 
 function batchShip(Package $package): LabelBatchItem
 {
@@ -122,12 +110,11 @@ function ruleNamingAmazonShippingGround(Package $package, ShippingRuleAction $ac
     ]);
 }
 
-it('batch ships a non-Amazon order on Amazon Shipping Ground unattended, with no approval', function (): void {
+it('batch ships a non-Amazon order on Amazon Shipping Ground unattended, under the method\'s direct row', function (): void {
     $item = batchShip($this->package);
     $package = $this->package->fresh();
 
     expect($item->status)->toBe(LabelBatchItemStatus::Success)
-        ->and(ServiceApproval::count())->toBe(0)
         ->and($package->status)->toBe(PackageStatus::Shipped)
         ->and($package->carrier)->toBe(Carrier::AMAZON_SHIPPING)
         ->and($package->tracking_number)->toBe('TBA123456789000')
@@ -136,15 +123,6 @@ it('batch ships a non-Amazon order on Amazon Shipping Ground unattended, with no
     Saloon::assertSent(fn (object $request): bool => $request instanceof GetShippingRates && $request->channelType() === 'EXTERNAL');
     Saloon::assertSent(PurchaseShipment::class);
 });
-
-it('reads no approval for other channels, whichever channel it names', function (AmazonChannelType $channelType): void {
-    approveAmazonShippingGround($this->package, $channelType);
-
-    expect(batchShip($this->package)->status)->toBe(LabelBatchItemStatus::Success);
-})->with([
-    'Amazon orders' => AmazonChannelType::Amazon,
-    'other channels' => AmazonChannelType::External,
-]);
 
 it('buys Amazon Shipping Ground under a Direct rule naming it, though another direct rate is cheaper', function (): void {
     ruleNamingAmazonShippingGround($this->package);

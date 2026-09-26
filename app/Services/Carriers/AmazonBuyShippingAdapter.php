@@ -17,13 +17,11 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
-use App\Enums\AmazonChannelType;
 use App\Enums\CarrierPackaging;
 use App\Enums\PostageSource;
 use App\Enums\PostageSourceKind;
 use App\Enums\ServiceCapability;
 use App\Enums\ServiceEvidence;
-use App\Enums\SourceEnvironment;
 use App\Exceptions\Carriers\AmazonLabelPurchaseException;
 use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Exceptions\MissingAmazonOrderItemsException;
@@ -70,11 +68,10 @@ use Saloon\Http\Response;
  *
  * - **Every rate carries an {@see ObservedServiceIdentity}.** Amazon's catalog
  *   is discovered, not authored, and that identity is the only thing that tells
- *   {@see RateSelector::selectBest()} it is looking at a discovered service. A
- *   rate that arrived without one would read as seeded configuration and could
- *   win an unattended purchase nobody approved (ADR-0003 decision 4). It is
- *   built from the same four values handed to {@see ObservedServiceRecorder},
- *   so the gate and the store cannot disagree about what was seen.
+ *   {@see RateSelector::selectForAutomation()} the rate is Buy Shipping's. A
+ *   rate that arrived without one would read as a direct rate and be judged by
+ *   the method's `direct` row instead of its `amazon` row
+ *   (`carrier-catalog-reset/13`).
  * - **Every rate carries a {@see ShippingOffer}.** `rateId` and `requestToken`
  *   are opaque and expire, so the price a packer clicked is only buyable
  *   through the row that holds them (ADR-0002 decision 4).
@@ -96,7 +93,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
     public const SOURCE_NAME = 'Amazon';
 
     /**
-     * The key observations and approvals are filed under.
+     * The key observations are filed under.
      *
      * Lower case, matching {@see AmazonSource::getDestinationName()} and the
      * `observed_services.source` column, which is not the same string as the
@@ -626,7 +623,6 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
         $mappings = SourceServiceMapping::forIdentities(PostageSourceKind::Amazon, collect($quote->rates)
             ->map(fn (array $rate): array => [(string) ($rate['carrierId'] ?? ''), (string) ($rate['serviceId'] ?? '')]));
 
-        $environment = SourceEnvironment::current();
         $expiresAt = now()->addSeconds(AmazonBuyShippingService::OFFER_WINDOW_SECONDS);
         $offerStore = app(OfferStore::class);
 
@@ -635,7 +631,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
         return collect($quote->rates)
             ->filter(fn (array $rate): bool => $this->isBuyable($rate, $request, $this->mappedService($rate, $mappings)))
             ->map(function (array $rate) use (
-                $package, $mappings, $environment, $expiresAt, $offerStore, $quote, $source, $marketplace, $catalogCarrierId
+                $package, $mappings, $expiresAt, $offerStore, $quote, $source, $marketplace, $catalogCarrierId
             ): RateResponse {
                 $carrierId = (string) $rate['carrierId'];
                 $serviceId = (string) $rate['serviceId'];
@@ -696,8 +692,6 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
                     offerId: $offer->public_id,
                     observedService: new ObservedServiceIdentity(
                         source: self::OBSERVATION_SOURCE,
-                        environment: $environment,
-                        channelType: AmazonChannelType::Amazon,
                         externalCarrierId: $carrierId,
                         externalServiceId: $serviceId,
                     ),
@@ -752,7 +746,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
      * The ineligible array is the larger half and the more valuable one — 102
      * services across fourteen carriers in the production run, against six
      * eligible. Its reason codes are `UNKNOWN` on every entry, so only identity
-     * is taken from it; what it buys is a catalog to map and approve *before* a
+     * is taken from it; what it buys is a catalog to map *before* a
      * parcel that qualifies turns up.
      *
      * @return Collection<string, ObservedService> keyed by service key

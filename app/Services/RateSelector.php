@@ -2,25 +2,18 @@
 
 namespace App\Services;
 
-use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
-use App\DataTransferObjects\PostageSources\ServiceApprovalRules;
 use App\DataTransferObjects\Shipping\ClassifiedRate;
 use App\DataTransferObjects\Shipping\OfferRequirements;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\UnattendedRateSelection;
-use App\Enums\AmazonChannelType;
 use App\Enums\PostageSourceKind;
 use App\Models\DataSource;
-use App\Services\PostageSources\ServiceApprovalGate;
+use App\Models\ShippingMethod;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 
 class RateSelector
 {
-    public function __construct(
-        private readonly ServiceApprovalGate $approvals,
-    ) {}
-
     /**
      * Classify and sort rates into on-time then late, each group sorted cheapest first.
      * "On-time" requires a known delivery date on or before the deadline.
@@ -66,64 +59,63 @@ class RateSelector
      * price nobody has seen, on nobody's authority, because the alternatives
      * happened to be unavailable.
      *
-     * A discovered service nobody has approved is refused for the same reason
-     * and by the same rule — see {@see selectForAutomation()}, which is this
-     * method with the refusals kept rather than dropped.
-     *
-     * The client is a required argument with no default. It is what an approval
-     * is granted *by*, so a parameter that filled itself in would be a way to
-     * spend one client's authorization on another client's parcel; null is
-     * accepted and denies every discovered service, because a package with no
-     * client is a caller that has lost track of whose money this is.
+     * A rate outside the shipping method's allowance is refused for the same
+     * reason and by the same rule — see {@see selectForAutomation()}, which is
+     * this method with the refusals kept rather than dropped.
      *
      * @param  Collection<int, RateResponse>  $rates
+     * @param  ShippingMethod|null  $method  The shipment's shipping method, whose postage-source rows are the allowance
      */
-    public function selectBest(Collection $rates, ?Carbon $deadline, ?int $clientId): ?RateResponse
+    public function selectBest(Collection $rates, ?Carbon $deadline, ?ShippingMethod $method): ?RateResponse
     {
-        return $this->selectForAutomation($rates, $deadline, $clientId)->rate;
+        return $this->selectForAutomation($rates, $deadline, $method)->rate;
     }
 
     /**
      * The same selection, with the rates it refused to consider.
      *
-     * ADR-0003 decision 4 splits on who is choosing: an unapproved service stays
-     * on the Ship page for a packer who sees the price and takes responsibility,
-     * and is unreachable from auto-ship, batch ship, shipping rules and
-     * {@see selectBest()}. This is the one place that split is enforced, so that
-     * approving a service makes it eligible in all four without a code change.
+     * Who is choosing decides what may be bought. Every quoted offer stays on
+     * the Ship page for a packer who sees the price and takes responsibility.
+     * Auto-ship, batch ship and shipping rules buy only within the shipping
+     * method's allowance (ADR-0006 decisions 5 and 8,
+     * `carrier-catalog-reset/13`). This is the one place that is enforced.
      *
      * The refusals come back because a batch that reports "no rates available"
-     * for a package that was quoted three sends an operator to the carrier, when
-     * the actual answer is that an administrator has not approved the service
-     * yet.
+     * for a package that was quoted three sends an operator to the carrier,
+     * when the actual answer is that the shipping method does not allow what
+     * was quoted.
      *
      * The order's shipping method can also require that the rate arrive by
      * the due-by date, or, for an Amazon order, be OTDR-protected, or both
      * (`amazon-buy-shipping/17`). A rate that fails either is refused the same
-     * way an unapproved one is: kept for the Ship page, named in the result.
-     * With neither required, a late rate is still bought when nothing is on
-     * time, as before. An order with no due-by date cannot show that any rate
-     * is late, so it refuses none, except an Amazon order, which refuses every
-     * rate rather than passing them all the way {@see classify()} does.
+     * way one outside the allowance is: kept for the Ship page, named in the
+     * result. With neither required, a late rate is still bought when nothing
+     * is on time, as before. An order with no due-by date cannot show that any
+     * rate is late, so it refuses none, except an Amazon order, which refuses
+     * every rate rather than passing them all the way {@see classify()} does.
      *
-     * A content-restricted rate is refused before approval is asked about. It
-     * is valid only for contents nothing in PolyBag vouches for, so no
-     * approval, not even one of everything, can make automation the party
-     * that vouches (ADR-0006 decision 10). It is kept for the Ship page and
-     * named in the result as its own refusal, never as a missing approval.
+     * A content-restricted rate is refused before the allowance is asked
+     * about. It is valid only for contents nothing in PolyBag vouches for, so
+     * no allowance, not even *any service*, can make automation the party that
+     * vouches (ADR-0006 decision 10). It is kept for the Ship page and named in
+     * the result as its own refusal.
+     *
+     * So is a rate naming a catalog service or carrier somebody deactivated,
+     * which no allowance releases either.
      *
      * So is Amazon Buy Shipping for an Amazon order whose connection sells
-     * postage to a packer only (ADR-0006 decision 6). It is refused before
-     * approval is asked about, because the setting only narrows: an approval
-     * cannot release what the connection refuses to automation.
+     * postage to a packer only (ADR-0006 decision 6). The setting only
+     * narrows: the method cannot release what the connection refuses to
+     * automation.
      *
      * @param  Collection<int, RateResponse>  $rates
+     * @param  ShippingMethod|null  $method  The shipment's shipping method, whose postage-source rows are the allowance
      * @param  DataSource|null  $channelSource  The package's channel connection, whose postage setting governs the Amazon Buy Shipping it sells for its own orders
      */
     public function selectForAutomation(
         Collection $rates,
         ?Carbon $deadline,
-        ?int $clientId,
+        ?ShippingMethod $method,
         ?OfferRequirements $requirements = null,
         ?DataSource $channelSource = null,
     ): UnattendedRateSelection {
@@ -133,7 +125,10 @@ class RateSelector
 
         [$heldBySetting, $unrestricted] = $this->partitionByPostageSetting($unrestricted->values(), $channelSource);
 
-        [$eligible, $withheld] = $this->partitionByApproval($unrestricted->values(), $clientId);
+        $inactive = InactiveCatalog::among($unrestricted);
+        [$deactivated, $unrestricted] = $unrestricted->partition(fn (RateResponse $rate): bool => $inactive->includes($rate));
+
+        [$eligible, $notAllowed] = $this->partitionByAllowance($unrestricted->values(), $method);
 
         $classified = $this->classify(
             $eligible->reject(fn (RateResponse $rate): bool => $rate->priceUnknown),
@@ -156,8 +151,10 @@ class RateSelector
 
         return new UnattendedRateSelection(
             rate: $acceptable?->rate,
-            withheld: $withheld,
-            attendedAlternativeAvailable: $withheld->isNotEmpty()
+            notAllowed: $notAllowed,
+            shippingMethodName: $method?->name,
+            // Not a deactivated rate: the Ship page will not sell it either.
+            attendedAlternativeAvailable: $notAllowed->isNotEmpty()
                 || $contentRestricted->isNotEmpty()
                 || $heldBySetting->isNotEmpty()
                 || $late->isNotEmpty()
@@ -168,6 +165,7 @@ class RateSelector
             requirements: $requirements,
             deadlineMissing: $requirements->deadlineRequired && $deadline === null,
             contentRestricted: $contentRestricted->values(),
+            deactivated: $deactivated->values(),
             heldByPostageSetting: $heldBySetting,
             postageSettingConnection: $heldBySetting->isNotEmpty() ? $channelSource?->name : null,
         );
@@ -177,8 +175,9 @@ class RateSelector
      * Split off the Amazon Buy Shipping rates for the connection's own orders
      * that its postage setting keeps from automation.
      *
-     * Only `AMAZON`-channel rates: Amazon Shipping sold to an order from
-     * another channel is a direct sale no postage setting covers.
+     * Amazon Shipping sold to an order from another channel is a direct rate
+     * (`carrier-catalog-reset/15`), which no postage setting covers, so only
+     * the Buy Shipping kind is held.
      *
      * @param  Collection<int, RateResponse>  $rates
      * @return array{0: Collection<int, RateResponse>, 1: Collection<int, RateResponse>} held, then the rest
@@ -189,72 +188,57 @@ class RateSelector
             return [collect(), $rates];
         }
 
-        [$held, $rest] = $rates->partition(fn (RateResponse $rate): bool => $rate->sourceKind() === PostageSourceKind::Amazon
-            && $rate->observedService?->channelType === AmazonChannelType::Amazon);
+        [$held, $rest] = $rates->partition(fn (RateResponse $rate): bool => $rate->sourceKind() === PostageSourceKind::Amazon);
 
         return [$held->values(), $rest->values()];
     }
 
     /**
-     * Split rates into the ones automation may buy and the ones it may not.
+     * Split rates into the ones the shipping method allows automation to buy
+     * and the ones it does not.
      *
-     * A rate naming no observed service is authored configuration — a seeded
-     * `CarrierService` quoted on an account we hold — and passes untouched.
-     * Approval governs *discovered* services, and gating the seeded catalog on
-     * it would stop an install that has approved nothing from buying anything,
-     * which is the opposite of deny-by-default meaning "behaves as it did
-     * before discovery existed".
+     * One check for every source kind. A rate passes when the method has a
+     * postage-source row for its kind, and its service is one the method lists
+     * or that row allows unlisted services. The connection's postage setting,
+     * the other half of the allowance, was applied first. A Shopify blind
+     * purchase is not a rate and never arrives here: the explicit-choice rule
+     * governs it (`carrier-catalog-reset/09`).
      *
-     * One query per (source, environment, channel type) rather than one per rate — in
-     * practice one per quote: an Amazon `getRates` can return several eligible
-     * offers at once, and this runs on the batch-ship path for every package.
-     * Wildcards and exceptions are matched in memory by
-     * {@see ServiceApprovalRules}. A rate list with no discovered services —
-     * every install that has never quoted through a channel — asks the
-     * database nothing at all.
+     * A shipment with no method is allowed every direct service and nothing
+     * else, so automation never buys through Amazon Buy Shipping for it.
+     *
+     * An inactive listed service does not count as listed. A rate naming one
+     * never gets here: {@see InactiveCatalog} refused it first.
+     *
+     * The method's rows and service ids are read once, not per rate: this runs
+     * on the batch-ship path for every package.
      *
      * @param  Collection<int, RateResponse>  $rates
-     * @return array{0: Collection<int, RateResponse>, 1: Collection<int, RateResponse>}
+     * @return array{0: Collection<int, RateResponse>, 1: Collection<int, RateResponse>} allowed, then not
      */
-    private function partitionByApproval(Collection $rates, ?int $clientId): array
+    private function partitionByAllowance(Collection $rates, ?ShippingMethod $method): array
     {
-        $discovered = $rates->filter(fn (RateResponse $rate): bool => $rate->observedService !== null);
+        if ($method === null) {
+            [$allowed, $notAllowed] = $rates->partition(fn (RateResponse $rate): bool => $rate->sourceKind() === PostageSourceKind::Direct);
 
-        if ($discovered->isEmpty()) {
-            return [$rates, collect()];
+            return [$allowed->values(), $notAllowed->values()];
         }
 
-        $rules = $this->rulesFor($discovered, $clientId);
+        $method->loadMissing('postageSources');
+        $listed = $method->carrierServices()
+            ->active()
+            ->withActiveCarrier()
+            ->pluck('carrier_services.id')
+            ->all();
 
-        [$eligible, $withheld] = $rates->partition(function (RateResponse $rate) use ($rules): bool {
-            $identity = $rate->observedService;
+        [$allowed, $notAllowed] = $rates->partition(function (RateResponse $rate) use ($method, $listed): bool {
+            $row = $method->postageSourceFor($rate->sourceKind());
 
-            return $identity === null
-                || $rules[self::worldKey($identity)]->permits($identity->externalCarrierId, $identity->externalServiceId);
+            return $row !== null
+                && ($row->allowsUnlistedServices() || in_array($rate->carrierServiceId, $listed, true));
         });
 
-        return [$eligible->values(), $withheld->values()];
-    }
-
-    /**
-     * This client's approvals for every world and channel type these rates
-     * were quoted in.
-     *
-     * @param  Collection<int, RateResponse>  $discovered
-     * @return Collection<string, ServiceApprovalRules>
-     */
-    private function rulesFor(Collection $discovered, ?int $clientId): Collection
-    {
-        return $discovered
-            ->map(fn (RateResponse $rate): ObservedServiceIdentity => $rate->observedService)
-            ->keyBy(fn (ObservedServiceIdentity $identity): string => self::worldKey($identity))
-            ->map(fn (ObservedServiceIdentity $identity): ServiceApprovalRules => $this->approvals
-                ->rulesFor($identity->source, $identity->environment, $identity->channelType, $clientId));
-    }
-
-    private static function worldKey(ObservedServiceIdentity $identity): string
-    {
-        return implode('|', [$identity->source, $identity->environment->value, $identity->channelType->value]);
+        return [$allowed->values(), $notAllowed->values()];
     }
 
     /**

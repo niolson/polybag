@@ -239,9 +239,9 @@ Shipping account can only be scoped to that client (ADR-0002).
 
 - **Environment is not a dimension.** Mappings and allowances apply in sandbox and
   production alike, as direct services always have. Offers stay bound to the environment
-  they were quoted in. *Any service* and `auto` have no fixed list, so switching the
-  shared sandbox setting to production names the methods that allow them before it takes
-  effect.
+  they were quoted in. No guard sits on switching between them: only a development install
+  switches, while a demo stays on sandbox APIs and a live install on production
+  (`carrier-catalog-reset/13`).
 - **Channel is separated by source.** Amazon's own orders buy through Buy Shipping. Orders
   from other channels buy Amazon Shipping directly. A rule's channel condition can narrow
   either.

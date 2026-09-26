@@ -49,7 +49,10 @@ class PostageSourcesRelationManager extends RelationManager
                 // so nobody sees the shared name.
                 Forms\Components\Toggle::make('unlisted_services')
                     ->label(fn (Get $get): string => self::kindFrom($get)?->unlistedServicesLabel() ?? '')
-                    ->helperText('Lets this source sell beyond the services the method lists.')
+                    ->helperText(fn (Get $get): string => match (self::kindFrom($get)) {
+                        PostageSourceKind::Amazon => 'Lets automation buy any service Amazon offers, including ones not mapped to a catalog service. The Ship page shows every offer either way.',
+                        default => 'Lets this source sell beyond the services the method lists.',
+                    })
                     ->formatStateUsing(fn (mixed $state): bool => self::asUnlisted($state) === UnlistedServices::Any)
                     ->dehydrateStateUsing(fn (bool $state): UnlistedServices => $state ? UnlistedServices::Any : UnlistedServices::None)
                     ->visible(fn (Get $get): bool => in_array(UnlistedServices::Any, self::kindFrom($get)?->acceptedUnlistedServices() ?? [], true)),

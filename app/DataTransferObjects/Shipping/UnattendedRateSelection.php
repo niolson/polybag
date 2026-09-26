@@ -2,22 +2,19 @@
 
 namespace App\DataTransferObjects\Shipping;
 
-use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
-use App\Enums\AmazonChannelType;
 use App\Services\RateSelector;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Str;
 
 /**
  * What automation may buy, and what it declined to buy on nobody's authority.
  *
  * {@see RateSelector::selectBest()} answers only the first half, because that
  * is the answer the ADR names and a caller must not be able to get a rate out
- * of it that nobody approved. The second half is here so that the refusal can
- * be reported rather than presented as "no rates available" — a packer told
- * that goes looking at the carrier, when what actually happened is that a
- * service was quoted and an administrator has not approved it (ADR-0003
- * decision 4).
+ * of it that the shipping method does not allow. The second half is here so
+ * that the refusal can be reported rather than presented as "no rates
+ * available" — a packer told that goes looking at the carrier, when what
+ * actually happened is that a service was quoted and the shipping method does
+ * not allow automation to buy it (`carrier-catalog-reset/13`).
  *
  * Both halves come out of one pass, so reporting the reason costs no extra
  * query on a batch of several hundred labels.
@@ -27,20 +24,23 @@ readonly class UnattendedRateSelection
     /**
      * @param  RateResponse|null  $rate  The quoted rate to buy
      * @param  BlindPurchaseOffer|null  $blindOffer  The explicitly authorized blind purchase to buy
-     * @param  Collection<int, RateResponse>  $withheld  Rates that were quoted and are not approved for automated purchase
+     * @param  Collection<int, RateResponse>  $notAllowed  Rates that were quoted and are outside the shipping method's allowance
+     * @param  string|null  $shippingMethodName  The shipping method whose allowance they are outside, for refusal messages
      * @param  bool  $attendedAlternativeAvailable  Whether a person can make a choice automation is forbidden to make
-     * @param  Collection<int, RateResponse>|null  $late  Approved rates refused because the shipping method excludes late rates
-     * @param  Collection<int, RateResponse>|null  $unprotected  Approved rates refused because the shipping method requires OTDR protection
+     * @param  Collection<int, RateResponse>|null  $late  Allowed rates refused because the shipping method excludes late rates
+     * @param  Collection<int, RateResponse>|null  $unprotected  Allowed rates refused because the shipping method requires OTDR protection
      * @param  OfferRequirements|null  $requirements  What the order's shipping method required, if anything
      * @param  bool  $deadlineMissing  Whether on-time delivery was required of an Amazon order with no due-by date, so no rate could meet it
-     * @param  Collection<int, RateResponse>|null  $contentRestricted  Rates refused because they are valid only for contents nothing in PolyBag vouches for. Not `withheld`: no approval can release them
-     * @param  Collection<int, RateResponse>|null  $heldByPostageSetting  Rates refused because the connection sells postage to a packer only (ADR-0006 decision 6). Decided before approvals, so not `withheld`: no approval can release them
+     * @param  Collection<int, RateResponse>|null  $contentRestricted  Rates refused because they are valid only for contents nothing in PolyBag vouches for. Not `notAllowed`: no allowance can release them
+     * @param  Collection<int, RateResponse>|null  $deactivated  Rates refused because they name a catalog service or carrier somebody deactivated. Not `notAllowed`: no allowance can release them
+     * @param  Collection<int, RateResponse>|null  $heldByPostageSetting  Rates refused because the connection sells postage to a packer only (ADR-0006 decision 6). Decided before the allowance, so not `notAllowed`: no method can release them
      * @param  Collection<int, BlindPurchaseOffer>|null  $blindOffersHeldByPostageSetting  Blind offers a rule or the sole-choice rule would have bought, refused for the same reason
      * @param  string|null  $postageSettingConnection  The name of the connection whose postage setting held them
      */
     public function __construct(
         public ?RateResponse $rate,
-        public Collection $withheld,
+        public Collection $notAllowed,
+        public ?string $shippingMethodName = null,
         public ?BlindPurchaseOffer $blindOffer = null,
         public bool $attendedAlternativeAvailable = false,
         public ?Collection $late = null,
@@ -48,6 +48,7 @@ readonly class UnattendedRateSelection
         public ?OfferRequirements $requirements = null,
         public bool $deadlineMissing = false,
         public ?Collection $contentRestricted = null,
+        public ?Collection $deactivated = null,
         public ?Collection $heldByPostageSetting = null,
         public ?Collection $blindOffersHeldByPostageSetting = null,
         public ?string $postageSettingConnection = null,
@@ -77,6 +78,22 @@ readonly class UnattendedRateSelection
     public function contentRestrictedSummary(): string
     {
         return ($this->contentRestricted ?? collect())
+            ->map(fn (RateResponse $rate): string => trim("{$rate->carrier} {$rate->serviceName}"))
+            ->unique()
+            ->implode(', ');
+    }
+
+    public function deactivatedAnything(): bool
+    {
+        return $this->deactivated?->isNotEmpty() ?? false;
+    }
+
+    /**
+     * The deactivated services as an operator would name them.
+     */
+    public function deactivatedSummary(): string
+    {
+        return ($this->deactivated ?? collect())
             ->map(fn (RateResponse $rate): string => trim("{$rate->carrier} {$rate->serviceName}"))
             ->unique()
             ->implode(', ');
@@ -116,7 +133,8 @@ readonly class UnattendedRateSelection
 
         return new self(
             rate: $this->rate,
-            withheld: $this->withheld,
+            notAllowed: $this->notAllowed,
+            shippingMethodName: $this->shippingMethodName,
             blindOffer: $this->blindOffer,
             attendedAlternativeAvailable: true,
             late: $this->late,
@@ -124,54 +142,42 @@ readonly class UnattendedRateSelection
             requirements: $this->requirements,
             deadlineMissing: $this->deadlineMissing,
             contentRestricted: $this->contentRestricted,
+            deactivated: $this->deactivated,
             heldByPostageSetting: $this->heldByPostageSetting,
             blindOffersHeldByPostageSetting: ($this->blindOffersHeldByPostageSetting ?? collect())->merge($offers)->values(),
             postageSettingConnection: $connection,
         );
     }
 
-    public function withheldAnything(): bool
+    public function notAllowedAnything(): bool
     {
-        return $this->withheld->isNotEmpty();
+        return $this->notAllowed->isNotEmpty();
     }
 
     /**
-     * The withheld services as an operator would name them, for a notification
-     * and for the log line beside it.
+     * The services outside the allowance as an operator would name them, for
+     * a notification and for the log line beside it.
      */
-    public function withheldSummary(): string
+    public function notAllowedSummary(): string
     {
-        return $this->withheld
+        return $this->notAllowed
             ->map(fn (RateResponse $rate): string => trim("{$rate->carrier} {$rate->serviceName}")
-                .($rate->observedService === null ? '' : ' (via '.self::approvalScope($rate->observedService).')'))
+                .($rate->observedService === null ? '' : " (via {$rate->sourceKind()->label()})"))
             ->unique()
             ->implode(', ');
     }
 
     /**
-     * Where the approval that is missing would be filed. An off-Amazon rate is
-     * said so, because an approval for Amazon orders does not cover it.
+     * @return array<int, array{source: string, carrier: string, service: string, carrier_service_id: int|null}>
      */
-    private static function approvalScope(ObservedServiceIdentity $identity): string
+    public function notAllowedForLog(): array
     {
-        return $identity->channelType === AmazonChannelType::External
-            ? "{$identity->source}, ".Str::lower($identity->channelType->label())
-            : $identity->source;
-    }
-
-    /**
-     * @return array<int, array{source: string, environment: string, channel_type: string, carrier: string, service: string}>
-     */
-    public function withheldForLog(): array
-    {
-        return $this->withheld
-            ->filter(fn (RateResponse $rate): bool => $rate->observedService !== null)
+        return $this->notAllowed
             ->map(fn (RateResponse $rate): array => [
-                'source' => $rate->observedService->source,
-                'environment' => $rate->observedService->environment->value,
-                'channel_type' => $rate->observedService->channelType->value,
-                'carrier' => $rate->observedService->externalCarrierId,
-                'service' => $rate->observedService->externalServiceId,
+                'source' => $rate->sourceKind()->value,
+                'carrier' => $rate->observedService->externalCarrierId ?? $rate->carrier,
+                'service' => $rate->observedService->externalServiceId ?? $rate->serviceCode,
+                'carrier_service_id' => $rate->carrierServiceId,
             ])
             ->values()
             ->all();

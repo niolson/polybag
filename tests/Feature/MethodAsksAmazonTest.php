@@ -3,6 +3,7 @@
 use App\Enums\PostageSourceKind;
 use App\Enums\UnlistedServices;
 use App\Filament\Resources\ShippingMethodResource\Pages\EditShippingMethod;
+use App\Filament\Resources\ShippingMethodResource\RelationManagers\CarrierServicesRelationManager;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\PostageSourcesRelationManager;
 use App\Models\Carrier;
 use App\Models\CarrierService;
@@ -80,7 +81,7 @@ describe('the amazon row', function (): void {
         ])
             ->mountAction(TestAction::make(CreateAction::class)->table())
             ->fillForm(['source_kind' => PostageSourceKind::Amazon->value])
-            ->assertFormFieldHidden('unlisted_services')
+            ->assertFormFieldVisible('unlisted_services')
             ->callMountedAction()
             ->assertHasNoFormErrors();
 
@@ -88,24 +89,47 @@ describe('the amazon row', function (): void {
             ->and($method->fresh()->allowsUnlistedServices(PostageSourceKind::Amazon))->toBeFalse();
     });
 
-    it('takes only none until 13', function (): void {
-        expect(fn () => ShippingMethodPostageSource::factory()->amazon()->any()->create())
-            ->toThrow(DomainException::class);
-
+    it('defaults to services on this method, and takes any service (carrier-catalog-reset/13)', function (): void {
         $row = ShippingMethodPostageSource::factory()->amazon()->create();
+        $any = ShippingMethodPostageSource::factory()->amazon()->any()->create();
 
-        expect($row->unlisted_services)->toBe(UnlistedServices::None);
+        expect($row->unlisted_services)->toBe(UnlistedServices::None)
+            ->and($any->allowsUnlistedServices())->toBeTrue();
     });
 
-    it('is described as every Amazon service, not the listed ones', function (): void {
+    it('lets an Admin allow Amazon any service on the method page', function (): void {
         $method = ShippingMethod::factory()->create();
-        ShippingMethodPostageSource::factory()->amazon()->for($method)->create();
 
         Livewire::test(PostageSourcesRelationManager::class, [
             'ownerRecord' => $method,
             'pageClass' => EditShippingMethod::class,
         ])
-            ->assertSee('All Amazon services (approvals gate automation)');
+            ->mountAction(TestAction::make(CreateAction::class)->table())
+            ->fillForm(['source_kind' => PostageSourceKind::Amazon->value, 'unlisted_services' => true])
+            ->callMountedAction()
+            ->assertHasNoFormErrors();
+
+        expect($method->fresh()->allowsUnlistedServices(PostageSourceKind::Amazon))->toBeTrue();
+    });
+
+    it('is described as listed services only, or any service', function (): void {
+        $listed = ShippingMethod::factory()->create();
+        ShippingMethodPostageSource::factory()->amazon()->for($listed)->create();
+        $any = ShippingMethod::factory()->create();
+        ShippingMethodPostageSource::factory()->amazon()->any()->for($any)->create();
+
+        Livewire::test(PostageSourcesRelationManager::class, [
+            'ownerRecord' => $listed,
+            'pageClass' => EditShippingMethod::class,
+        ])
+            ->assertSee('Listed services only')
+            ->assertDontSee('approvals');
+
+        Livewire::test(PostageSourcesRelationManager::class, [
+            'ownerRecord' => $any,
+            'pageClass' => EditShippingMethod::class,
+        ])
+            ->assertSee('Any service');
     });
 
     it('cannot be added, changed or removed by a Manager', function (): void {
@@ -163,5 +187,24 @@ describe('the migration', function (): void {
         runRemoveAmazonCarrierMigration();
 
         expect(DB::table('carriers')->count())->toBe($carriers);
+    });
+});
+
+describe('the method\'s carrier services', function (): void {
+    it('shows a service as active only while it and its carrier are', function (): void {
+        $method = ShippingMethod::factory()->create();
+        $active = CarrierService::factory()->uspsGroundAdvantage()->create();
+        $inactive = CarrierService::factory()->create(['active' => false]);
+        $inactiveCarrier = CarrierService::factory()->create();
+        $inactiveCarrier->carrier->update(['active' => false]);
+        $method->carrierServices()->attach([$active->id, $inactive->id, $inactiveCarrier->id]);
+
+        Livewire::test(CarrierServicesRelationManager::class, [
+            'ownerRecord' => $method,
+            'pageClass' => EditShippingMethod::class,
+        ])
+            ->assertTableColumnStateSet('active', true, $active)
+            ->assertTableColumnStateSet('active', false, $inactive)
+            ->assertTableColumnStateSet('active', false, $inactiveCarrier);
     });
 });

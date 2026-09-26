@@ -8,16 +8,15 @@ use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
-use App\Enums\AmazonChannelType;
 use App\Enums\PackageStatus;
+use App\Enums\PostageSourceKind;
 use App\Enums\ShippingRuleSource;
-use App\Enums\SourceEnvironment;
+use App\Enums\UnlistedServices;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\Package;
 use App\Models\Product;
-use App\Models\ServiceApproval;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
@@ -118,8 +117,6 @@ function sourceRuleAmazonRate(CarrierService $service, float $price): RateRespon
         price: $price,
         observedService: new ObservedServiceIdentity(
             source: 'amazon',
-            environment: SourceEnvironment::Production,
-            channelType: AmazonChannelType::Amazon,
             externalCarrierId: 'MOCK',
             externalServiceId: $service->service_code,
         ),
@@ -153,17 +150,6 @@ function sourceRuleAdapter(array $rates, ?RateResponse $preSelected = null): voi
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
 }
 
-function approveAmazonFor(Package $package, CarrierService $service): void
-{
-    ServiceApproval::factory()->create([
-        'source' => 'amazon',
-        'environment' => SourceEnvironment::Production,
-        'external_carrier_id' => 'MOCK',
-        'external_service_id' => $service->service_code,
-        'client_id' => $package->shipment->client_id,
-    ]);
-}
-
 function autoShipUnderRule(Package $package): Package
 {
     $result = app(PackageShippingWorkflow::class)->autoShip(
@@ -177,7 +163,6 @@ function autoShipUnderRule(Package $package): Package
 }
 
 it('highlights and buys the direct rate for Direct, a service, though Amazon\'s is cheaper', function (): void {
-    approveAmazonFor($this->package, $this->ground);
     $direct = sourceRuleDirectRate($this->ground, 9.00);
     sourceRuleAdapter([sourceRuleAmazonRate($this->ground, 4.00), $direct], preSelected: $direct);
 
@@ -195,7 +180,6 @@ it('highlights and buys the direct rate for Direct, a service, though Amazon\'s 
 });
 
 it('buys the cheaper of direct and Amazon for Any priced source, a service', function (): void {
-    approveAmazonFor($this->package, $this->ground);
     sourceRuleAdapter([
         sourceRuleDirectRate($this->ground, 9.00),
         sourceRuleAmazonRate($this->ground, 4.00),
@@ -252,7 +236,9 @@ it('removes a service from every source for Exclude, any source', function (): v
         ->and(autoShipUnderRule($this->package)->cost)->toEqual(12.00);
 });
 
-it('removes every Amazon offer a carrier carries, mapped or not', function (): void {
+it('removes every Amazon offer a carrier carries, mapped or not, even under any service', function (): void {
+    // *Any service* would otherwise let automation buy the unmapped one.
+    $this->method->postageSourceFor(PostageSourceKind::Amazon)->update(['unlisted_services' => UnlistedServices::Any]);
     $onTrac = Carrier::factory()->create(['name' => 'OnTrac']);
     $onTracGround = CarrierService::factory()->create(['carrier_id' => $onTrac->id, 'service_code' => 'ONTRAC_GROUND']);
     $unmapped = new RateResponse(
@@ -262,8 +248,6 @@ it('removes every Amazon offer a carrier carries, mapped or not', function (): v
         price: 3.00,
         observedService: new ObservedServiceIdentity(
             source: 'amazon',
-            environment: SourceEnvironment::Production,
-            channelType: AmazonChannelType::Amazon,
             externalCarrierId: 'ONTRAC',
             externalServiceId: 'ONTRAC_NEXT_DAY',
         ),
@@ -278,5 +262,6 @@ it('removes every Amazon offer a carrier carries, mapped or not', function (): v
 
     $options = app(PackageShippingWorkflow::class)->prepareRates($this->package);
 
-    expect(collect($options->rateOptions)->pluck('serviceCode')->all())->toBe(['GROUND']);
+    expect(collect($options->rateOptions)->pluck('serviceCode')->all())->toBe(['GROUND'])
+        ->and(autoShipUnderRule($this->package)->cost)->toEqual(9.00);
 });

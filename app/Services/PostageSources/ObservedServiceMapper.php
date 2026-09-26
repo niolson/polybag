@@ -88,10 +88,9 @@ class ObservedServiceMapper
      * Return an identity to the unmapped state, which is a valid place for it
      * to stay.
      *
-     * Approvals are left alone. What a service is called is not whether
-     * automation may buy it (`amazon-buy-shipping/18`): an approval names the
-     * source's own identifiers, which unmapping does not change, so withdrawing
-     * it here would switch automation off as a side effect of a naming fix.
+     * Unmapping narrows automation: a shipping method that allows Amazon only
+     * its listed services no longer matches this service, while one that
+     * allows any service still buys it (`carrier-catalog-reset/13`).
      *
      * @return int observations returned to unmapped
      */

@@ -1,34 +1,22 @@
 <?php
 
 use App\DataTransferObjects\PostageSources\ServiceObservation;
-use App\Enums\AmazonChannelType;
 use App\Enums\PostageSourceKind;
 use App\Enums\Role;
 use App\Enums\SourceEnvironment;
 use App\Filament\Pages\UnmappedObservedServices;
 use App\Models\Carrier;
 use App\Models\CarrierService;
-use App\Models\Client;
 use App\Models\ObservedService;
-use App\Models\ServiceApproval;
 use App\Models\SourceServiceMapping;
 use App\Models\User;
 use App\Services\PostageSources\ObservedServiceRecorder;
-use App\Services\PostageSources\ServiceApprovalGate;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
-
-/**
- * An approval, granted the way the gate insists on it: by somebody.
- */
-function approveService(ObservedService $observation, Client $client): void
-{
-    app(ServiceApprovalGate::class)->grant($observation, AmazonChannelType::Amazon, $client, User::factory()->create());
-}
 
 beforeEach(function (): void {
     $this->actingAs(User::factory()->create(['role' => Role::Admin]));
@@ -291,32 +279,19 @@ it('returns a mapped observation to the unmapped state without deleting catalog 
         ->and(CarrierService::whereKey($carrierService->id)->exists())->toBeTrue();
 });
 
-it('leaves approvals in place when a service is unmapped', function (): void {
-    // amazon-buy-shipping/18: what a service is called is not whether
-    // automation may buy it.
+it('unmaps a service, which narrows what automation buys', function (): void {
+    // carrier-catalog-reset/13: a method allowing Amazon only its listed
+    // services buys a service only while it is mapped.
     $observation = ObservedService::factory()->mapped()->create();
-
-    approveService($observation, Client::factory()->create());
 
     Livewire::test(UnmappedObservedServices::class)
         ->filterTable('mapped', true)
         ->callAction(TestAction::make('unmap')->table($observation))
         ->assertNotified();
 
-    expect(ServiceApproval::count())->toBe(1)
-        ->and($observation->isMapped())->toBeFalse();
+    expect($observation->isMapped())->toBeFalse();
 });
-it('offers to unmap an approved service, since that withdraws nothing', function (): void {
-    $approved = ObservedService::factory()->mapped()->create([
-        'external_service_id' => 'USPS_GROUND_ADVANTAGE',
-    ]);
 
-    approveService($approved, Client::factory()->create());
-
-    Livewire::test(UnmappedObservedServices::class)
-        ->filterTable('mapped', true)
-        ->assertActionVisible(TestAction::make('unmap')->table($approved));
-});
 it('leaves an unmapped observation alone — no badge, no queue, no error', function (): void {
     ObservedService::factory()
         ->count(3)

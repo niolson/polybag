@@ -45,8 +45,8 @@ class ShippingMethodPostageSourceFactory extends Factory
     }
 
     /**
-     * May sell beyond the method's services: Shopify's `auto`. Amazon Buy
-     * Shipping takes it from `carrier-catalog-reset/13`.
+     * May sell beyond the method's services: Shopify's `auto`, or Amazon Buy
+     * Shipping's *any service* (`carrier-catalog-reset/13`).
      */
     public function any(): static
     {

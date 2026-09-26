@@ -1,6 +1,6 @@
 # The method's allowance replaces automation approval
 
-Status: needs-triage
+Status: done
 
 Repo: `polybag`
 
@@ -25,8 +25,15 @@ postage setting and by rules. The approvals table, page and gate go.
     unmapped ones included. The attended-only content identifier (`USPS_PTP_BPM`, `04`)
     is still withheld.
   - A method may list no services when its `amazon` row allows any service.
+  - `PostageSourceKind::Amazon::acceptedUnlistedServices()` takes `none` and `any`, so the
+    relation manager shows the toggle. `listedServicesLabel()` stops saying "approvals
+    gate automation" for the `amazon` row.
 - **Selection.** `RateSelector` replaces `partitionByApproval()` with a check against the
-  method's postage-source rows, loaded once with the method. A rate passes when:
+  method's postage-source rows, loaded once with the method. `selectForAutomation()`
+  takes the shipment's `ShippingMethod` (null while `16` is open), beside
+  `$channelSource`; its three callers in `EloquentPackageShippingWorkflow` pass it.
+  `$clientId` goes, since it existed only because approvals were per client, and so does
+  the unused `selectBest()` wrapper if nothing calls it. A rate passes when:
   - the method has a row for its source kind;
   - for Shopify and Amazon Buy Shipping, its connection allows automation (`10`);
   - its service is on the method, or that row's `unlisted_services` is `any`.
@@ -39,23 +46,36 @@ postage setting and by rules. The approvals table, page and gate go.
   channels is a direct rate (`15`). This is enforced at selection and drops nothing, so
   the Ship page still lists every offer. A refusal names the shipping method, where it
   used to point at *Amazon Approvals*.
-- **No shipping method.** The allowance is every direct service. Automation never buys
+- **No shipping method.** If `16` has landed, this case no longer exists and this bullet
+  and its criterion are dropped. Otherwise: the allowance is every direct service. Automation never buys
   through Amazon Buy Shipping and never blind. Direct rates are bought as before, and a
   *Use* rule picks within that (`07`).
 - **Neither environment nor channel type is a dimension.** Sandbox and production behave
   alike. Channels are separated by source: Amazon's own orders buy through Buy Shipping,
   and other orders buy Amazon Shipping directly.
-- **Switching to production.** *Any service* and `auto` have no fixed list, and the
-  sandbox setting flips every carrier and source at once. The confirmation for switching
-  to production lists the methods with a postage-source row whose `unlisted_services` is
-  `any`, so nothing starts spending unnoticed.
+- **No production-switch guard.** The PRD and ADR-0006 asked for one, but only a
+  development install ever switches: a deployment is either a demo locked to sandbox APIs
+  or a live install locked to production, and the setting cannot be switched on either.
+  Dev Settings, the only switch, is already limited to `local` and `testing`.
 - **Removed:**
   - the `service_approvals` table;
   - `ServiceApproval` with its policy and factory;
   - the `ServiceApprovals` page;
-  - `ServiceApprovalGate` and `ServiceApprovalRules`;
-  - the environment and channel-type fields of `ObservedServiceIdentity`, if nothing
-    else uses them.
+  - `ServiceApprovalGate`, `ServiceApprovalRules`, `ApprovalRule` and `ApprovalEffect`;
+  - `ServiceApproval`'s registration in `AppServiceProvider`;
+  - `UnattendedRateSelection::$withheld` and its summary and log helpers. The refusal
+    they reported becomes one that names the shipping method;
+  - the *Amazon Approvals* sentence in `UnmappedObservedServices`' description;
+  - the channel-type field of `ObservedServiceIdentity`. Its one other reader,
+    `RateSelector::partitionByPostageSetting()`, checks the source kind instead: since
+    `15`, only Buy Shipping for an Amazon order carries an observed service. The
+    environment field goes too if nothing but approvals reads it; `observed_services`
+    keeps its own `environment` column.
+- **Tests.** `ServiceApprovalsTest` and `ServiceApprovalGateTest` are deleted with what
+  they test. `UnapprovedServiceAutomationTest` is rewritten against the allowance, which
+  covers most of the acceptance criteria below. Approval fixtures in `RateSelectorTest`,
+  `RuleEvaluatorTest`, `ShippingMethodOfferRequirementsTest`, `ShippingRuleSourceTest`
+  and `RateResponseTest` are replaced with method rows.
 
   `ServiceApprovals::US_BUY_SHIPPING_CARRIERS` moves beside the seed in `11`.
 - **Docs.**
@@ -67,6 +87,8 @@ postage setting and by rules. The approvals table, page and gate go.
       it something to buy.
     - *Amazon Buy Shipping / Amazon Shipping*: Amazon Shipping for other channels is a
       direct sale.
+  - ADR-0006, *Environment is not a dimension*, and the PRD's *Unattended selection*
+    and *Gaps closed* bullets: remove the production-switch guard and say why.
   - `AGENTS.md`: update the Domain Model entries for `ObservedService` and
     `ServiceApproval`, Batch Ship, the Amazon Buy Shipping paragraph under *API and
     Postage Integrations*, the service layer and Key Files.
@@ -82,10 +104,10 @@ postage setting and by rules. The approvals table, page and gate go.
       OnTrac offer is bought, mapped or not
 - [ ] A connection set to *packer only* is never bought unattended
 - [ ] The same configuration buys the same thing in sandbox and in production
-- [ ] Switching to production lists the methods with *any service* or `auto` before it
-      takes effect
-- [ ] With no shipping method, automation never buys through Amazon Buy Shipping
-- [ ] No approvals table, model, page or gate remains
+- [ ] With no shipping method, automation never buys through Amazon Buy Shipping (unless
+      `16` has landed and removed the case)
+- [ ] No approvals table, model, page, gate, rule DTO or enum remains, and no text
+      points at *Amazon Approvals*
 - [ ] `CONTEXT.md` and `AGENTS.md` describe the allowance, not approval
 
 ## Blocked by
@@ -101,3 +123,42 @@ postage setting and by rules. The approvals table, page and gate go.
   service. The production-switch guard and the extra doc entries were added.
 - **2026-09-24** — The allowance check reads `09`'s source-policy table, one row per
   source kind, instead of per-kind columns on the method.
+- **2026-09-26** — Reviewed against the code after `10`, `12` and `15`. Settled:
+  - The production-switch guard is dropped. The maintainer confirmed that only a
+    development install switches between sandbox and production.
+  - The removal list gained `ApprovalRule`, `ApprovalEffect`, the provider registration,
+    `UnattendedRateSelection::$withheld` and the leftover *Amazon Approvals* text.
+  - The channel-type field has one other reader, which moves to the source kind.
+  - `selectForAutomation()` takes the method and drops `$clientId`.
+  - Which approval tests are deleted and which are rewritten.
+  - Either order with `16` works; the no-method bullet falls away if `16` lands first.
+- **2026-09-26** — Implemented.
+  - `RateSelector::selectForAutomation()` takes the shipment's `ShippingMethod` in place of
+    the client, and `partitionByAllowance()` replaces `partitionByApproval()`: one check
+    against the method's postage-source rows and listed service ids, read once. A rate's
+    source kind comes from its observed service, and its service from `carrierServiceId`.
+  - `PostageSourceKind::Amazon` takes `any`. The relation manager shows the toggle with its
+    own helper text, and both kinds' `none` read *Listed services only*.
+  - `UnattendedRateSelection::$withheld` became `$notAllowed` with `$shippingMethodName`. The
+    refusal is *Not Allowed by Shipping Method* and names the method; the requirements
+    refusal says *No Allowed On-Time Rates*.
+  - `ObservedServiceIdentity` lost both environment and channel type; nothing else read
+    them. `fromArray()` ignores them on a rate serialized before.
+  - `drop_service_approvals_table` drops the table, with nothing carried over.
+    `US_BUY_SHIPPING_CARRIERS` moved to `AmazonServiceMappingSeeder`.
+  - Unmapping an observed service now narrows automation, so the *Map Carrier Services*
+    copy says so instead of pointing at *Amazon Approvals*.
+  - Tests: `UnapprovedServiceAutomationTest` became `MethodAllowanceAutomationTest`, and
+    `RateSelectorTest`'s approval section was rewritten against method rows, including
+    sandbox against production. `ShippingRuleSourceTest` covers the OnTrac exclusion under
+    *any service*. Direct mock rates in the workflow and requirements tests now carry their
+    `carrierServiceId`, as the real adapters' rates do.
+- **2026-09-26** — From review: a deactivated service or carrier means "do not buy this".
+  `RateSelector` refuses a rate naming either before the allowance, *any service* included,
+  and a listed service counts only while it and its carrier are active. The refusal is its
+  own, *Inactive Services Only*, telling the operator to reactivate rather than change the
+  method. The method's carrier services list gained an *Active* column that reads both.
+- **2026-09-26** — Extended to packers. `InactiveCatalog` names what a set of rates names that
+  is inactive, and why. The Ship page lists such an offer greyed out, with an *Inactive*
+  badge and the reason, and neither highlights nor accepts it; the purchase refuses it
+  (*Service Inactive*), which covers a page quoted before the service was deactivated.

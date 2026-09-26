@@ -593,9 +593,9 @@ source kind that may sell for the method:
     service.
 - `USPS_PTP_BPM` is withheld from automation whatever the allowance says (see
   [Media Mail](#media-mail)).
-- *Any service* and `auto` have no fixed list, and the sandbox setting switches every
-  source to production at once. The confirmation for that switch lists the methods that
-  allow either.
+- No guard sits on switching to production. Only a development install switches between
+  sandbox and production; a demo stays on sandbox APIs and a live install on production
+  (`13`).
 - This is enforced at selection, where `06` said exclusions belong, not by dropping
   offers. The allowance removes nothing from the Ship page, so it leaves no Offer behind
   and needs no filter in the adapter. The `15` stash is not reused, except
@@ -857,7 +857,8 @@ everything below, and the maintainer agreed each change.
   - `07` keeps direct *Use* rules working on shipments with no method, and makes the
     Ship page default honour the rule's source.
   - `12` checks references before deleting the `Amazon` row.
-  - `13` adds the production-switch guard.
+  - `13` adds the production-switch guard. Later dropped: only a development install
+    switches.
   - *No shipping method* was corrected: Amazon connections have a default method.
 - **Seeding OnTrac and DHL.** The maintainer asked whether to seed every service Shopify
   and Amazon are known to sell. That is one service each: DHL Express Worldwide (`P`),

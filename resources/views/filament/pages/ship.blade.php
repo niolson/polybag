@@ -180,6 +180,9 @@
                         <div class="space-y-2" x-data="{ get selected() { return $wire.selectedRateIndex === null ? null : Number($wire.selectedRateIndex) } }">
                             @foreach($rateOptions as $index => $rate)
                                 @php
+                                    // Shown so the packer sees why, never selectable: nothing
+                                    // buys a deactivated service or carrier.
+                                    $inactiveReason = $rate['inactive'] ?? null;
                                     $logoFile = match(strtolower($rate['carrier'] ?? '')) {
                                         'usps' => 'usps-logo.svg',
                                         'fedex' => 'fedex-logo.svg',
@@ -187,6 +190,19 @@
                                         default => null,
                                     };
                                 @endphp
+                                @if($inactiveReason)
+                                <label
+                                    wire:key="rate-{{ $index }}"
+                                    title="{{ $inactiveReason }}"
+                                    class="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 opacity-60 cursor-not-allowed"
+                                >
+                                    <input
+                                        type="radio"
+                                        value="{{ $index }}"
+                                        disabled
+                                        class="text-gray-400"
+                                    >
+                                @else
                                 <label
                                     wire:key="rate-{{ $index }}"
                                     x-bind:class="selected === {{ $index }}
@@ -200,6 +216,7 @@
                                         value="{{ $index }}"
                                         class="text-primary-600 focus:ring-primary-500"
                                     >
+                                @endif
                                     <div class="flex-1 min-w-0">
                                         <div class="flex items-center gap-2 font-medium text-sm text-gray-900 dark:text-white">
                                             @if($logoFile)
@@ -220,6 +237,9 @@
                                                      postage is bought from the channel, not on our account. --}}
                                                 <x-filament::badge color="gray" size="sm">{{ $resoldVia }}</x-filament::badge>
                                             @endif
+                                            @if($inactiveReason)
+                                                <x-filament::badge color="gray" size="sm">Inactive</x-filament::badge>
+                                            @endif
                                             @isset($rate['otdrProtection'])
                                                 @if($rate['otdrProtection']['protected'])
                                                     <x-filament::badge color="success" size="sm">OTDR protected</x-filament::badge>
@@ -228,6 +248,11 @@
                                                 @endif
                                             @endisset
                                         </div>
+                                        @if($inactiveReason)
+                                            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                                {{ $inactiveReason }} It cannot be bought until it is reactivated.
+                                            </div>
+                                        @endif
                                         @if(!empty($rate['otdrProtection']['reasons']))
                                             <div class="text-xs text-warning-700 dark:text-warning-400 mt-0.5">
                                                 Not protected: {{ implode('; ', $rate['otdrProtection']['reasons']) }}

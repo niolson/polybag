@@ -18,8 +18,8 @@ use Illuminate\Support\Collection;
  * row is also outward, because a purchase sends exactly one code, so the
  * database refuses a second Shopify row for a service.
  *
- * Environment and marketplace are deliberately not part of the key. A name is
- * not an approval: if Amazon's sandbox and production both report
+ * Environment and marketplace are deliberately not part of the key: if
+ * Amazon's sandbox and production both report
  * `USPS/USPS_GROUND_ADVANTAGE`, that is one service under one name.
  *
  * @property PostageSourceKind $source_kind

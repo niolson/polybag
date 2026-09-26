@@ -88,7 +88,7 @@ class DataSource extends Model
 
     /**
      * Whether any Amazon connection is active — what Amazon-only settings,
-     * such as OTDR protection and automation approvals, wait on before they
+     * such as OTDR protection, wait on before they
      * are offered. Nothing Amazon sells can be bought without one.
      */
     public static function hasActiveAmazonConnection(): bool

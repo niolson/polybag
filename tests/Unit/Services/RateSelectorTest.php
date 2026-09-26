@@ -4,13 +4,17 @@ use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
 use App\DataTransferObjects\Shipping\ClassifiedRate;
 use App\DataTransferObjects\Shipping\OfferRequirements;
 use App\DataTransferObjects\Shipping\RateResponse;
-use App\Enums\AmazonChannelType;
 use App\Enums\PostageSetting;
-use App\Enums\SourceEnvironment;
-use App\Models\Client;
+use App\Enums\PostageSourceKind;
+use App\Enums\UnlistedServices;
+use App\Models\Carrier;
+use App\Models\CarrierService;
 use App\Models\DataSource;
-use App\Models\ServiceApproval;
+use App\Models\Setting;
+use App\Models\ShippingMethod;
+use App\Models\ShippingMethodPostageSource;
 use App\Services\RateSelector;
+use App\Services\SettingsService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -99,7 +103,7 @@ it('selectBest returns cheapest on-time rate when deadline exists', function ():
         makeRate(3.00, Carbon::parse('+10 days')->toDateString()),
     ]);
 
-    $best = app(RateSelector::class)->selectBest($rates, $deadline, clientId: null);
+    $best = app(RateSelector::class)->selectBest($rates, $deadline, method: null);
 
     expect($best->price)->toBe(5.00);
 });
@@ -111,7 +115,7 @@ it('selectBest falls back to cheapest overall when all rates are late', function
         makeRate(7.00, Carbon::today()->toDateString()),
     ]);
 
-    $best = app(RateSelector::class)->selectBest($rates, $deadline, clientId: null);
+    $best = app(RateSelector::class)->selectBest($rates, $deadline, method: null);
 
     expect($best->price)->toBe(7.00);
 });
@@ -119,7 +123,7 @@ it('selectBest falls back to cheapest overall when all rates are late', function
 it('selectBest returns cheapest when no deadline', function (): void {
     $rates = collect([makeRate(10.00), makeRate(5.00), makeRate(8.00)]);
 
-    $best = app(RateSelector::class)->selectBest($rates, null, clientId: null);
+    $best = app(RateSelector::class)->selectBest($rates, null, method: null);
 
     expect($best->price)->toBe(5.00);
 });
@@ -141,8 +145,8 @@ it('selectBest never buys a rate whose price nobody has seen', function (): void
     // Attended, an unpriced rate sorts last and a packer may still take it.
     // Unattended there is nobody to take responsibility, so "it was the only
     // thing offered" is a reason to buy nothing at all — ADR-0003 decision 5.
-    expect(app(RateSelector::class)->selectBest(collect([makeUnpricedRate()]), null, clientId: null))->toBeNull()
-        ->and(app(RateSelector::class)->selectBest(collect([makeUnpricedRate(), makeRate(9.00)]), null, clientId: null)->price)->toBe(9.00);
+    expect(app(RateSelector::class)->selectBest(collect([makeUnpricedRate()]), null, method: null))->toBeNull()
+        ->and(app(RateSelector::class)->selectBest(collect([makeUnpricedRate(), makeRate(9.00)]), null, method: null)->price)->toBe(9.00);
 });
 
 function makeUnpricedRate(): RateResponse
@@ -158,12 +162,13 @@ function makeUnpricedRate(): RateResponse
 
 /*
 |--------------------------------------------------------------------------
-| Approval — ADR-0003 decision 4
+| The shipping method's allowance — carrier-catalog-reset/13
 |--------------------------------------------------------------------------
 |
 | The split is on who is choosing. `classify()` is the attended list and keeps
-| everything; `selectBest()` is the unattended one and keeps only what somebody
-| approved for this client, in this world.
+| everything; `selectForAutomation()` keeps only what the shipment's method
+| allows: a row for the rate's source kind, and a service the method lists or
+| a row that allows any service.
 |
 */
 
@@ -171,7 +176,8 @@ function makeDiscoveredRate(
     float $price,
     string $externalServiceId = 'USPS_GROUND_ADVANTAGE',
     string $externalCarrierId = 'USPS',
-    SourceEnvironment $environment = SourceEnvironment::Production,
+    ?int $carrierServiceId = null,
+    bool $contentRestricted = false,
 ): RateResponse {
     return new RateResponse(
         carrier: $externalCarrierId,
@@ -180,158 +186,279 @@ function makeDiscoveredRate(
         price: $price,
         observedService: new ObservedServiceIdentity(
             source: 'amazon',
-            environment: $environment,
-            channelType: AmazonChannelType::Amazon,
             externalCarrierId: $externalCarrierId,
             externalServiceId: $externalServiceId,
         ),
+        carrierServiceId: $carrierServiceId,
+        contentRestricted: $contentRestricted,
     );
 }
 
-function approveDiscoveredService(
-    Client $client,
-    string $externalServiceId = 'USPS_GROUND_ADVANTAGE',
-    string $externalCarrierId = 'USPS',
-    SourceEnvironment $environment = SourceEnvironment::Production,
-): ServiceApproval {
-    return ServiceApproval::factory()->create([
-        'source' => 'amazon',
-        'environment' => $environment,
-        'external_carrier_id' => $externalCarrierId,
-        'external_service_id' => $externalServiceId,
-        'client_id' => $client->id,
-    ]);
+function makeDirectRate(float $price, CarrierService $service): RateResponse
+{
+    return new RateResponse(
+        carrier: 'USPS',
+        serviceCode: $service->service_code,
+        serviceName: $service->name,
+        price: $price,
+        carrierServiceId: $service->id,
+    );
 }
 
-it('selectBest never returns a discovered service nobody has approved', function (): void {
-    $client = Client::where('is_default', true)->firstOrFail();
+/**
+ * A method listing these services, with its `direct` row and, when given, an
+ * `amazon` row saying this about unlisted services.
+ *
+ * @param  list<CarrierService>  $services
+ */
+function methodAllowing(array $services, ?UnlistedServices $amazon = null): ShippingMethod
+{
+    $method = ShippingMethod::factory()->create(['name' => 'Ground']);
+    $method->carrierServices()->attach(collect($services)->pluck('id'));
+
+    if ($amazon !== null) {
+        ShippingMethodPostageSource::factory()->amazon()->create([
+            'shipping_method_id' => $method->id,
+            'unlisted_services' => $amazon,
+        ]);
+    }
+
+    return $method->fresh();
+}
+
+it('buys an Amazon offer mapped to a listed service under services on this method', function (): void {
+    $ground = CarrierService::factory()->uspsGroundAdvantage()->create();
+    $method = methodAllowing([$ground], UnlistedServices::None);
 
     $best = app(RateSelector::class)->selectBest(
-        collect([makeDiscoveredRate(4.00), makeRate(9.00)]),
+        collect([makeDiscoveredRate(4.00, carrierServiceId: $ground->id), makeDirectRate(9.00, $ground)]),
         null,
-        $client->id,
-    );
-
-    expect($best->price)->toBe(9.00)
-        ->and($best->observedService)->toBeNull();
-});
-
-it('selectBest returns nothing at all when every rate is an unapproved discovered service', function (): void {
-    $client = Client::where('is_default', true)->firstOrFail();
-
-    expect(app(RateSelector::class)->selectBest(collect([makeDiscoveredRate(4.00)]), null, $client->id))
-        ->toBeNull();
-});
-
-it('selectBest returns a discovered service once it is approved, with no other change', function (): void {
-    $client = Client::where('is_default', true)->firstOrFail();
-    approveDiscoveredService($client);
-
-    $best = app(RateSelector::class)->selectBest(
-        collect([makeDiscoveredRate(4.00), makeRate(9.00)]),
-        null,
-        $client->id,
+        $method,
     );
 
     expect($best->price)->toBe(4.00)
         ->and($best->observedService?->externalServiceId)->toBe('USPS_GROUND_ADVANTAGE');
 });
 
-it('keeps an unapproved discovered service in the attended list', function (): void {
-    // The whole point of the split: a packer sees the price and takes
-    // responsibility, so classify() is not filtered at all.
-    $classified = app(RateSelector::class)->classify(
-        collect([makeDiscoveredRate(4.00), makeRate(9.00)]),
-        null,
-    );
+it('never buys an offer for a deactivated service or carrier, whatever the method allows', function (string $deactivate, UnlistedServices $amazon): void {
+    $ground = CarrierService::factory()->uspsGroundAdvantage()->create();
+    $method = methodAllowing([$ground], $amazon);
 
-    expect($classified)->toHaveCount(2)
-        ->and($classified->first()->rate->price)->toBe(4.00);
-});
-
-it('does not let one client spend another client\'s approval', function (): void {
-    $approved = Client::factory()->create();
-    $other = Client::factory()->create();
-    approveDiscoveredService($approved);
-
-    $selector = app(RateSelector::class);
-    $rates = collect([makeDiscoveredRate(4.00)]);
-
-    expect($selector->selectBest($rates, null, $approved->id)?->price)->toBe(4.00)
-        ->and($selector->selectBest($rates, null, $other->id))->toBeNull();
-});
-
-it('denies every discovered service when the package names no client', function (): void {
-    approveDiscoveredService(Client::factory()->create());
-
-    expect(app(RateSelector::class)->selectBest(collect([makeDiscoveredRate(4.00)]), null, null))
-        ->toBeNull();
-});
-
-it('does not let a sandbox approval authorize a production purchase', function (): void {
-    $client = Client::where('is_default', true)->firstOrFail();
-    approveDiscoveredService($client, environment: SourceEnvironment::Sandbox);
-
-    $selector = app(RateSelector::class);
-
-    expect($selector->selectBest(collect([makeDiscoveredRate(4.00)]), null, $client->id))->toBeNull()
-        ->and($selector->selectBest(
-            collect([makeDiscoveredRate(4.00, environment: SourceEnvironment::Sandbox)]),
-            null,
-            $client->id,
-        )?->price)->toBe(4.00);
-});
-
-it('reports the services it withheld rather than just declining to choose', function (): void {
-    $client = Client::where('is_default', true)->firstOrFail();
+    if ($deactivate === 'service') {
+        $ground->update(['active' => false]);
+    } else {
+        $ground->carrier->update(['active' => false]);
+    }
 
     $selection = app(RateSelector::class)->selectForAutomation(
-        collect([makeDiscoveredRate(4.00), makeDiscoveredRate(6.00, 'ONTRAC_GROUND', 'ONTRAC')]),
+        collect([makeDiscoveredRate(4.00, carrierServiceId: $ground->id), makeDirectRate(9.00, $ground)]),
         null,
-        $client->id,
+        $method,
     );
 
     expect($selection->rate)->toBeNull()
-        ->and($selection->withheld)->toHaveCount(2)
-        ->and($selection->withheldSummary())->toContain('via amazon')
-        ->and($selection->withheldForLog())->toContain([
-            'source' => 'amazon',
-            'environment' => 'production',
-            'channel_type' => 'amazon',
-            'carrier' => 'ONTRAC',
-            'service' => 'ONTRAC_GROUND',
-        ]);
+        ->and($selection->deactivated)->toHaveCount(2)
+        ->and($selection->notAllowed)->toBeEmpty()
+        // The Ship page will not sell it either, so it is no attended alternative.
+        ->and($selection->attendedAlternativeAvailable)->toBeFalse();
+})->with([
+    'service, listed services only' => ['service', UnlistedServices::None],
+    'carrier, listed services only' => ['carrier', UnlistedServices::None],
+    'service, any service' => ['service', UnlistedServices::Any],
+    'carrier, any service' => ['carrier', UnlistedServices::Any],
+]);
+
+it('never buys an unmapped offer from a deactivated carrier under any service', function (): void {
+    $onTrac = Carrier::factory()->create(['name' => 'OnTrac', 'active' => false]);
+    $method = methodAllowing([], UnlistedServices::Any);
+
+    $unmapped = new RateResponse(
+        carrier: 'OnTrac',
+        serviceCode: 'ONTRAC_MFN_GROUND',
+        serviceName: 'Ground',
+        price: 3.00,
+        observedService: new ObservedServiceIdentity('amazon', 'ONTRAC', 'ONTRAC_MFN_GROUND'),
+        carrierId: $onTrac->id,
+    );
+
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([$unmapped, makeDiscoveredRate(5.00, 'UPS_PTP_GND', 'UPS')]),
+        null,
+        $method,
+    );
+
+    expect($selection->rate->observedService->externalServiceId)->toBe('UPS_PTP_GND')
+        ->and($selection->deactivatedSummary())->toBe('OnTrac Ground');
 });
 
-it('holds a packer-only connection\'s Amazon order offers before asking about approvals', function (): void {
-    $client = Client::where('is_default', true)->firstOrFail();
-    ServiceApproval::factory()->everything()->create(['client_id' => $client->id]);
+it('refuses an unmapped or unlisted Amazon offer under services on this method, and names the method', function (): void {
+    $ground = CarrierService::factory()->uspsGroundAdvantage()->create();
+    $priority = CarrierService::factory()->uspsPriority()->create();
+    $method = methodAllowing([$ground], UnlistedServices::None);
+    $rates = collect([
+        makeDiscoveredRate(3.00, 'ONTRAC_MFN_GROUND', 'ONTRAC'),
+        makeDiscoveredRate(4.00, 'USPS_PTP_PRI', carrierServiceId: $priority->id),
+        makeDirectRate(9.00, $ground),
+    ]);
+
+    $selection = app(RateSelector::class)->selectForAutomation($rates, null, $method);
+
+    expect($selection->rate->price)->toBe(9.00)
+        ->and($selection->notAllowed)->toHaveCount(2)
+        ->and($selection->shippingMethodName)->toBe('Ground')
+        ->and($selection->notAllowedSummary())->toContain('via Amazon Buy Shipping')
+        ->and($selection->notAllowedForLog())->toContain([
+            'source' => 'amazon',
+            'carrier' => 'ONTRAC',
+            'service' => 'ONTRAC_MFN_GROUND',
+            'carrier_service_id' => null,
+        ])
+        // The Ship page lists every offer: classify() filters nothing.
+        ->and(app(RateSelector::class)->classify($rates, null))->toHaveCount(3);
+});
+
+it('buys the cheapest Amazon offer under any service, unmapped ones included', function (): void {
+    $ground = CarrierService::factory()->uspsGroundAdvantage()->create();
+    $method = methodAllowing([], UnlistedServices::Any);
+
+    $best = app(RateSelector::class)->selectBest(
+        collect([
+            makeDiscoveredRate(4.00, carrierServiceId: $ground->id),
+            makeDiscoveredRate(3.00, 'DHL_PARCEL_GROUND', 'DHL_ECOMMERCE'),
+        ]),
+        null,
+        $method,
+    );
+
+    expect($best->observedService?->externalServiceId)->toBe('DHL_PARCEL_GROUND');
+});
+
+it('never buys a content-restricted offer, even under any service', function (): void {
+    $method = methodAllowing([], UnlistedServices::Any);
+
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([
+            makeDiscoveredRate(2.00, 'USPS_PTP_BPM', contentRestricted: true),
+            makeDiscoveredRate(5.00, 'UPS_PTP_GND', 'UPS'),
+        ]),
+        null,
+        $method,
+    );
+
+    expect($selection->rate->observedService->externalServiceId)->toBe('UPS_PTP_GND')
+        ->and($selection->contentRestricted)->toHaveCount(1)
+        ->and($selection->notAllowed)->toBeEmpty();
+});
+
+it('refuses every Amazon offer for a method with no amazon row', function (): void {
+    $ground = CarrierService::factory()->uspsGroundAdvantage()->create();
+    $method = methodAllowing([$ground]);
+
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([makeDiscoveredRate(4.00, carrierServiceId: $ground->id)]),
+        null,
+        $method,
+    );
+
+    expect($selection->rate)->toBeNull()
+        ->and($selection->notAllowed)->toHaveCount(1)
+        ->and($selection->attendedAlternativeAvailable)->toBeTrue();
+});
+
+it('refuses a direct rate for a service the method does not list', function (): void {
+    $ground = CarrierService::factory()->uspsGroundAdvantage()->create();
+    $priority = CarrierService::factory()->uspsPriority()->create();
+    $method = methodAllowing([$ground], UnlistedServices::Any);
+
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([makeDirectRate(3.00, $priority), makeDirectRate(9.00, $ground)]),
+        null,
+        $method,
+    );
+
+    // The `amazon` row's *any service* covers Amazon only.
+    expect($selection->rate->price)->toBe(9.00)
+        ->and($selection->notAllowed->pluck('carrierServiceId')->all())->toBe([$priority->id]);
+});
+
+it('refuses a direct rate when the method has no direct row', function (): void {
+    $ground = CarrierService::factory()->uspsGroundAdvantage()->create();
+    $method = methodAllowing([$ground], UnlistedServices::None);
+    $method->postageSources()->where('source_kind', PostageSourceKind::Direct)->delete();
+
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([makeDirectRate(3.00, $ground), makeDiscoveredRate(5.00, carrierServiceId: $ground->id)]),
+        null,
+        $method->fresh(),
+    );
+
+    expect($selection->rate->price)->toBe(5.00)
+        ->and($selection->notAllowed)->toHaveCount(1);
+});
+
+it('buys any direct rate and never Amazon Buy Shipping for a shipment with no method', function (): void {
+    $ground = CarrierService::factory()->uspsGroundAdvantage()->create();
+
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([makeDiscoveredRate(3.00, carrierServiceId: $ground->id), makeRate(9.00)]),
+        null,
+        null,
+    );
+
+    expect($selection->rate->price)->toBe(9.00)
+        ->and($selection->notAllowed)->toHaveCount(1)
+        ->and($selection->shippingMethodName)->toBeNull();
+});
+
+it('buys the same thing in sandbox and in production', function (bool $sandbox): void {
+    Setting::updateOrCreate(['key' => 'sandbox_mode'], ['value' => $sandbox ? '1' : '0', 'type' => 'boolean', 'group' => 'testing']);
+    app(SettingsService::class)->clearCache();
+
+    $ground = CarrierService::factory()->uspsGroundAdvantage()->create();
+    $method = methodAllowing([$ground], UnlistedServices::None);
+
+    $selection = app(RateSelector::class)->selectForAutomation(
+        collect([
+            makeDiscoveredRate(3.00, 'ONTRAC_MFN_GROUND', 'ONTRAC'),
+            makeDiscoveredRate(4.00, carrierServiceId: $ground->id),
+        ]),
+        null,
+        $method,
+    );
+
+    expect($selection->rate->price)->toBe(4.00)
+        ->and($selection->notAllowed)->toHaveCount(1);
+})->with(['sandbox' => [true], 'production' => [false]]);
+
+it('holds a packer-only connection\'s Amazon order offers, even under any service', function (): void {
+    $ground = CarrierService::factory()->uspsGroundAdvantage()->create();
+    $method = methodAllowing([$ground], UnlistedServices::Any);
     $connection = DataSource::factory()->amazon()->sellingPostage(PostageSetting::PackerOnly)->create(['name' => 'Amazon US']);
 
     $selection = app(RateSelector::class)->selectForAutomation(
-        collect([makeDiscoveredRate(4.00), makeRate(9.00)]),
+        collect([makeDiscoveredRate(4.00, carrierServiceId: $ground->id), makeDirectRate(9.00, $ground)]),
         null,
-        $client->id,
+        $method,
         channelSource: $connection,
     );
 
     expect($selection->rate?->price)->toBe(9.00)
-        ->and($selection->withheld)->toBeEmpty()
+        ->and($selection->notAllowed)->toBeEmpty()
         ->and($selection->heldByPostageSetting)->toHaveCount(1)
         ->and($selection->heldByPostageSettingSummary())->toBe('USPS Ground Advantage')
         ->and($selection->postageSettingConnection)->toBe('Amazon US')
         ->and($selection->attendedAlternativeAvailable)->toBeTrue();
 });
 
-it('leaves a packer-and-automation connection\'s offers to the approvals', function (): void {
-    $client = Client::where('is_default', true)->firstOrFail();
-    ServiceApproval::factory()->everything()->create(['client_id' => $client->id]);
+it('leaves a packer-and-automation connection\'s offers to the method', function (): void {
+    $ground = CarrierService::factory()->uspsGroundAdvantage()->create();
+    $method = methodAllowing([$ground], UnlistedServices::None);
     $connection = DataSource::factory()->amazon()->sellingPostage(PostageSetting::PackerAndAutomation)->create();
 
     $selection = app(RateSelector::class)->selectForAutomation(
-        collect([makeDiscoveredRate(4.00), makeRate(9.00)]),
+        collect([makeDiscoveredRate(4.00, carrierServiceId: $ground->id), makeDirectRate(9.00, $ground)]),
         null,
-        $client->id,
+        $method,
         channelSource: $connection,
     );
 
@@ -340,31 +467,23 @@ it('leaves a packer-and-automation connection\'s offers to the approvals', funct
 });
 
 it('never holds Amazon Shipping sold to an order from another channel', function (): void {
-    $client = Client::where('is_default', true)->firstOrFail();
-    ServiceApproval::factory()->everything()->create([
-        'client_id' => $client->id,
-        'channel_type' => AmazonChannelType::External,
-    ]);
+    $amazonGround = CarrierService::factory()->create(['service_code' => 'std-us-swa-mfn', 'name' => 'Amazon Shipping Ground']);
+    $method = methodAllowing([$amazonGround]);
     $connection = DataSource::factory()->amazon()->sellingPostage(PostageSetting::PackerOnly)->create();
 
+    // A direct rate (`carrier-catalog-reset/15`): no observed service.
     $external = new RateResponse(
         carrier: 'Amazon Shipping',
-        serviceCode: 'SWA-US-GROUND',
+        serviceCode: 'std-us-swa-mfn',
         serviceName: 'Ground',
         price: 4.00,
-        observedService: new ObservedServiceIdentity(
-            source: 'amazon',
-            environment: SourceEnvironment::Production,
-            channelType: AmazonChannelType::External,
-            externalCarrierId: 'AMZN_US',
-            externalServiceId: 'SWA-US-GROUND',
-        ),
+        carrierServiceId: $amazonGround->id,
     );
 
     $selection = app(RateSelector::class)->selectForAutomation(
         collect([$external]),
         null,
-        $client->id,
+        $method,
         channelSource: $connection,
     );
 
@@ -372,85 +491,34 @@ it('never holds Amazon Shipping sold to an order from another channel', function
         ->and($selection->heldByPostageSettingAnything())->toBeFalse();
 });
 
-it('asks the database nothing when no rate names a discovered service', function (): void {
+it('asks the database nothing when there is no method', function (): void {
     DB::enableQueryLog();
 
-    app(RateSelector::class)->selectBest(collect([makeRate(9.00), makeRate(5.00)]), null, 1);
+    app(RateSelector::class)->selectBest(collect([makeRate(9.00), makeDiscoveredRate(5.00)]), null, null);
 
     expect(DB::getQueryLog())->toBeEmpty();
 
     DB::disableQueryLog();
 });
 
-it('buys a service nobody has seen before once everything is approved', function (): void {
-    $client = Client::where('is_default', true)->firstOrFail();
-    ServiceApproval::factory()->everything()->create(['client_id' => $client->id]);
-
-    $best = app(RateSelector::class)->selectBest(
-        collect([makeDiscoveredRate(3.00, 'DHL_PARCEL_GROUND', 'DHL_ECOMMERCE'), makeRate(9.00)]),
-        null,
-        $client->id,
-    );
-
-    expect($best->observedService?->externalServiceId)->toBe('DHL_PARCEL_GROUND');
-});
-
-it('buys UPS and never OnTrac with everything approved except OnTrac', function (): void {
-    $client = Client::where('is_default', true)->firstOrFail();
-    ServiceApproval::factory()->everything()->create(['client_id' => $client->id]);
-    ServiceApproval::factory()->wholeCarrier('ONTRAC')->exception()->create(['client_id' => $client->id]);
-
-    $selection = app(RateSelector::class)->selectForAutomation(
-        collect([
-            makeDiscoveredRate(3.00, 'ONTRAC_MFN_GROUND', 'ONTRAC'),
-            makeDiscoveredRate(3.50, 'ONTRAC_MFN_SUNRISE', 'ONTRAC'),
-            makeDiscoveredRate(5.00, 'UPS_PTP_GND', 'UPS'),
-        ]),
-        null,
-        $client->id,
-    );
-
-    expect($selection->rate->observedService->externalServiceId)->toBe('UPS_PTP_GND')
-        ->and($selection->withheld->map(fn (RateResponse $rate): string => $rate->observedService->externalCarrierId)->unique()->all())
-        ->toBe(['ONTRAC']);
-});
-
-it('buys every OnTrac service and no UPS one with OnTrac approved', function (): void {
-    $client = Client::where('is_default', true)->firstOrFail();
-    ServiceApproval::factory()->wholeCarrier('ONTRAC')->create(['client_id' => $client->id]);
-
-    $selector = app(RateSelector::class);
-
-    expect($selector->selectBest(collect([makeDiscoveredRate(6.00, 'ONTRAC_MFN_GROUND', 'ONTRAC')]), null, $client->id))->not->toBeNull()
-        ->and($selector->selectBest(collect([makeDiscoveredRate(6.00, 'ONTRAC_MFN_SUNRISE', 'ONTRAC')]), null, $client->id))->not->toBeNull()
-        ->and($selector->selectBest(collect([makeDiscoveredRate(3.00, 'UPS_PTP_GND', 'UPS')]), null, $client->id))->toBeNull();
-});
-
-it('does not let a sandbox approval of everything buy anything in production', function (): void {
-    $client = Client::where('is_default', true)->firstOrFail();
-    ServiceApproval::factory()->everything()->sandbox()->create(['client_id' => $client->id]);
-
-    expect(app(RateSelector::class)->selectBest(collect([makeDiscoveredRate(4.00)]), null, $client->id))->toBeNull();
-});
-
-it('asks for approvals once per quote, not once per rate', function (): void {
-    $client = Client::where('is_default', true)->firstOrFail();
-    ServiceApproval::factory()->everything()->create(['client_id' => $client->id]);
-    ServiceApproval::factory()->wholeCarrier('ONTRAC')->exception()->create(['client_id' => $client->id]);
+it('reads the method\'s rows once, not once per rate', function (): void {
+    $ground = CarrierService::factory()->uspsGroundAdvantage()->create();
+    $method = methodAllowing([$ground], UnlistedServices::None);
 
     $rates = collect([
         makeDiscoveredRate(3.00, 'ONTRAC_MFN_GROUND', 'ONTRAC'),
-        makeDiscoveredRate(4.00, 'USPS_GROUND_ADVANTAGE', 'USPS'),
+        makeDiscoveredRate(4.00, carrierServiceId: $ground->id),
         makeDiscoveredRate(5.00, 'UPS_PTP_GND', 'UPS'),
-        makeDiscoveredRate(6.00, 'UPS_PTP_2ND_DAY_AIR', 'UPS'),
-        makeRate(9.00),
+        makeDirectRate(9.00, $ground),
     ]);
 
     DB::enableQueryLog();
 
-    app(RateSelector::class)->selectForAutomation($rates, null, $client->id);
+    app(RateSelector::class)->selectForAutomation($rates, null, $method);
 
-    expect(DB::getQueryLog())->toHaveCount(1);
+    // The inactive services the rates name, the postage-source rows and the
+    // listed services.
+    expect(DB::getQueryLog())->toHaveCount(3);
 
     DB::disableQueryLog();
 });

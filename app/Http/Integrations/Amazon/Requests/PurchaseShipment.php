@@ -18,7 +18,7 @@ use Saloon\Traits\Body\HasJsonBody;
  * operation takes no `rateId`: its request body is addresses, packages and a
  * channel, and Amazon picks the carrier and the service itself. It is therefore
  * a blind purchase in this codebase's terms — it cannot buy the offer a packer
- * looked at, and cannot buy the one an approved-service gate cleared. `01`
+ * looked at, and cannot buy the one the shipping method's allowance cleared. `01`
  * returned three carriers priced independently for one parcel, which is exactly
  * the choice `directPurchase` throws away.
  *

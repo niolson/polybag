@@ -3,9 +3,8 @@
 use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
-use App\Enums\AmazonChannelType;
 use App\Enums\CarrierPackaging;
-use App\Enums\SourceEnvironment;
+use App\Enums\PostageSourceKind;
 
 it('round-trips the offer identifier through Livewire serialization', function (): void {
     $rate = new RateResponse(
@@ -117,14 +116,12 @@ it('names no catalog service when told it has none', function (): void {
 });
 
 it('round-trips the observed service identity, which names a service rather than authorizing one', function (): void {
-    // ADR-0003 decision 4. The identity is what `RateSelector` asks the approval
-    // gate about, so a round trip that quietly dropped it would turn a
-    // discovered service back into an authored one — fail-open, in the one place
-    // that must not be. It is safe in browser state for the same reason it is
-    // not purchase authority: it says which service Amazon named, which the page
-    // already shows as a carrier and a service name, and nothing reads it back
-    // off the browser to decide anything. Automation only ever sees rates that
-    // came straight from the quote.
+    // The identity is how `RateSelector` tells Buy Shipping's rates from
+    // direct ones, so a round trip that quietly dropped it would judge an
+    // Amazon offer by the method's `direct` row. It is safe in browser state
+    // for the same reason it is not purchase authority: it says which service
+    // Amazon named, which the page already shows, and automation only ever sees
+    // rates that came straight from the quote.
     $rate = new RateResponse(
         carrier: 'OnTrac',
         serviceCode: 'ONTRAC_MFN_GROUND',
@@ -132,8 +129,6 @@ it('round-trips the observed service identity, which names a service rather than
         price: 5.79,
         observedService: new ObservedServiceIdentity(
             source: 'amazon',
-            environment: SourceEnvironment::Production,
-            channelType: AmazonChannelType::External,
             externalCarrierId: 'ONTRAC',
             externalServiceId: 'ONTRAC_MFN_GROUND',
         ),
@@ -141,12 +136,11 @@ it('round-trips the observed service identity, which names a service rather than
 
     $restored = RateResponse::fromArray($rate->toArray());
 
-    expect($restored->observedService?->approvalKey())->toBe($rate->observedService->approvalKey())
-        ->and($restored->observedService?->environment)->toBe(SourceEnvironment::Production)
-        ->and($restored->observedService?->channelType)->toBe(AmazonChannelType::External);
+    expect($restored->observedService)->toEqual($rate->observedService)
+        ->and($restored->sourceKind())->toBe(PostageSourceKind::Amazon);
 });
 
-it('reads a rate serialized before channel types existed as an Amazon order\'s', function (): void {
+it('ignores the environment and channel type a rate serialized before carrier-catalog-reset/13 carries', function (): void {
     $data = (new RateResponse(
         carrier: 'OnTrac',
         serviceCode: 'ONTRAC_MFN_GROUND',
@@ -154,15 +148,13 @@ it('reads a rate serialized before channel types existed as an Amazon order\'s',
         price: 5.79,
         observedService: new ObservedServiceIdentity(
             source: 'amazon',
-            environment: SourceEnvironment::Production,
-            channelType: AmazonChannelType::Amazon,
             externalCarrierId: 'ONTRAC',
             externalServiceId: 'ONTRAC_MFN_GROUND',
         ),
     ))->toArray();
-    unset($data['observedService']['channelType']);
+    $data['observedService'] += ['environment' => 'production', 'channelType' => 'AMAZON'];
 
-    expect(RateResponse::fromArray($data)->observedService?->channelType)->toBe(AmazonChannelType::Amazon);
+    expect(RateResponse::fromArray($data)->observedService?->externalServiceId)->toBe('ONTRAC_MFN_GROUND');
 });
 
 it('defaults to no observed service, so an authored carrier service is not treated as discovered', function (): void {
