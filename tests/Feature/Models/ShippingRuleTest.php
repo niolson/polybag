@@ -4,6 +4,7 @@ use App\Enums\ShippingRuleAction;
 use App\Enums\ShippingRuleSource;
 use App\Models\Carrier;
 use App\Models\CarrierService;
+use App\Models\Client;
 use App\Models\ShippingMethod;
 use App\Models\ShippingRule;
 use Illuminate\Database\QueryException;
@@ -117,6 +118,21 @@ it('refuses to delete a service or carrier a rule names', function (): void {
 
     expect(fn () => $service->delete())->toThrow(QueryException::class)
         ->and(fn () => $excluded->delete())->toThrow(QueryException::class);
+});
+
+it('deletes a rule with its shipping method or client rather than widening it', function (): void {
+    $method = ShippingMethod::factory()->create();
+    $client = Client::factory()->create();
+    $methodRule = ShippingRule::factory()->create(['shipping_method_id' => $method->id]);
+    $clientRule = ShippingRule::factory()->create(['client_id' => $client->id]);
+    $globalRule = ShippingRule::factory()->create();
+
+    $method->delete();
+    $client->delete();
+
+    expect(ShippingRule::find($methodRule->id))->toBeNull()
+        ->and(ShippingRule::find($clientRule->id))->toBeNull()
+        ->and(ShippingRule::find($globalRule->id))->not->toBeNull();
 });
 
 it('refuses an Exclude rule naming a carrier and another carrier\'s service', function (): void {

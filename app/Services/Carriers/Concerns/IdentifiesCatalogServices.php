@@ -18,8 +18,8 @@ use Illuminate\Support\Collection;
  * test all see the same ids.
  *
  * The carrier row is found the way {@see ResolvesCarrierAccount} finds it, by
- * the adapter's declared name, until `carriers.adapter` replaces the name
- * (`05`). A code the catalog does not hold, such as a variant a carrier quotes
+ * the adapter's declared name, which a system carrier's fixed name makes a
+ * stable key (`05`). A code the catalog does not hold, such as a variant a carrier quotes
  * unasked, keeps the carrier and names no service. Where two rows
  * share a code, the older one wins, which is the seeded one.
  */
