@@ -3,11 +3,9 @@
 use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\RateResponse;
-use App\Enums\AmazonChannelType;
 use App\Enums\PostageSourceKind;
 use App\Enums\ShippingRuleAction;
 use App\Enums\ShippingRuleSource;
-use App\Enums\SourceEnvironment;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\Channel;
@@ -777,8 +775,6 @@ function ruleAmazonOffer(?CarrierService $service, float $price = 4.0, ?int $car
         price: $price,
         observedService: new ObservedServiceIdentity(
             source: 'amazon',
-            environment: SourceEnvironment::Production,
-            channelType: AmazonChannelType::Amazon,
             externalCarrierId: 'EXTERNAL',
             externalServiceId: $externalServiceId,
         ),

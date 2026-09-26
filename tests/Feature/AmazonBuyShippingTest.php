@@ -12,7 +12,6 @@ use App\Enums\PackageStatus;
 use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
-use App\Enums\SourceEnvironment;
 use App\Http\Integrations\Amazon\Requests\CancelAmazonShipment;
 use App\Http\Integrations\Amazon\Requests\ConfirmShipment;
 use App\Http\Integrations\Amazon\Requests\GetAdditionalInputsSchema;
@@ -381,7 +380,6 @@ it('tags every rate with the discovered service it is an offer of', function ():
 
     expect($identity)->not->toBeNull()
         ->and($identity->source)->toBe('amazon')
-        ->and($identity->environment)->toBe(SourceEnvironment::Production)
         ->and($identity->externalCarrierId)->toBe('ONTRAC')
         ->and($identity->externalServiceId)->toBe('ONTRAC_MFN_GROUND')
         ->and($rates->every(fn (RateResponse $rate): bool => $rate->observedService !== null))->toBeTrue();

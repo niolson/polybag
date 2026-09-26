@@ -7,10 +7,8 @@ use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipResponse;
-use App\Enums\AmazonChannelType;
 use App\Enums\OtdrProtectedOrders;
 use App\Enums\PackageStatus;
-use App\Enums\SourceEnvironment;
 use App\Filament\Resources\DataSources\Pages\EditDataSource;
 use App\Filament\Resources\ShippingMethodResource\Pages\EditShippingMethod;
 use App\Models\BoxSize;
@@ -60,6 +58,21 @@ function requirementsRate(float $price, ?string $deliveryDate, ?bool $otdrProtec
             'includedBenefits' => $otdrProtected ? ['OTDR_PROTECTED'] : [],
             'excludedBenefits' => $otdrProtected ? [] : [['benefit' => 'OTDR_PROTECTED', 'reasonCodes' => $reasonCodes]],
         ]],
+        // The method's listed service, so the allowance passes it.
+        carrierServiceId: requirementsService()->id,
+    );
+}
+
+/**
+ * The one service every method here lists.
+ */
+function requirementsService(): CarrierService
+{
+    $carrier = Carrier::firstOrCreate(['name' => 'MockCarrier'], Carrier::factory()->raw(['name' => 'MockCarrier', 'active' => true]));
+
+    return CarrierService::firstOrCreate(
+        ['carrier_id' => $carrier->id, 'service_code' => 'GROUND'],
+        CarrierService::factory()->raw(['carrier_id' => $carrier->id, 'name' => 'Ground', 'service_code' => 'GROUND', 'active' => true]),
     );
 }
 
@@ -94,11 +107,7 @@ function packageForOrderFrom(
     array $method = [],
     ?array $programs = null,
 ): Package {
-    $carrier = Carrier::firstOrCreate(['name' => 'MockCarrier'], Carrier::factory()->raw(['name' => 'MockCarrier', 'active' => true]));
-    $carrierService = CarrierService::firstOrCreate(
-        ['carrier_id' => $carrier->id, 'service_code' => 'GROUND'],
-        CarrierService::factory()->raw(['carrier_id' => $carrier->id, 'name' => 'Ground', 'service_code' => 'GROUND', 'active' => true]),
-    );
+    $carrierService = requirementsService();
     $shippingMethod = ShippingMethod::factory()->create(['name' => 'Standard', 'commitment_days' => null, ...$method]);
     $shippingMethod->carrierServices()->attach($carrierService->id);
 
@@ -331,7 +340,7 @@ it('no longer keeps the requirements on the Amazon connection', function (): voi
         ->and(Schema::hasColumn('data_sources', 'requires_otdr_protected_offers'))->toBeFalse();
 });
 
-it('claims only approved rates fail when an unapproved service was withheld', function (): void {
+it('claims only allowed rates fail when the method does not allow a service', function (): void {
     $package = packageForOrderFrom(DataSource::factory()->amazon()->sellingPostage()->create());
     registerRequirementsAdapter([
         requirementsRate(6.00, Carbon::parse('+5 days')->toDateString()),
@@ -343,8 +352,6 @@ it('claims only approved rates fail when an unapproved service was withheld', fu
             deliveryDate: Carbon::today()->toDateString(),
             observedService: new ObservedServiceIdentity(
                 source: 'amazon',
-                environment: SourceEnvironment::Production,
-                channelType: AmazonChannelType::Amazon,
                 externalCarrierId: 'UPS',
                 externalServiceId: 'UPS_PTP_GND',
             ),
@@ -353,9 +360,9 @@ it('claims only approved rates fail when an unapproved service was withheld', fu
 
     $result = autoShipForRequirements($package);
 
-    expect($result->title)->toBe('No Approved On-Time Rates')
-        ->and($result->message)->toContain('none of the rates approved for automated purchase does')
-        ->and($result->message)->toContain('Not approved: MockCarrier Ground (via amazon)')
+    expect($result->title)->toBe('No Allowed On-Time Rates')
+        ->and($result->message)->toContain('none of the rates it allows automation to buy does')
+        ->and($result->message)->toContain('Not allowed: MockCarrier Ground (via Amazon Buy Shipping)')
         ->and($result->message)->not->toContain("none of this package's rates");
 });
 

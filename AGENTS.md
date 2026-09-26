@@ -96,8 +96,11 @@ Server-operations tooling for our own hosted deployment lives in a separate priv
   `is_system`: its `name` is the key the registry, seeders and alias matching use, so it
   can never be renamed or deleted. The UI shows `Carrier::label()` (`display_name`, an
   operator-owned relabel, else `name`); use the `Carrier::USPS`/`UPS`/`FEDEX` constants
-- **ObservedService** / **ServiceApproval** — Amazon-reported service identity and the
-  separate, client/environment-scoped permission for unattended purchasing
+- **ObservedService** — Amazon-reported service identity; a `SourceServiceMapping` names the
+  `CarrierService` it is
+- **ShippingMethodPostageSource** — One postage-source kind a `ShippingMethod` allows (direct,
+  Shopify, Amazon Buy Shipping), and whether it may sell unlisted services. With the method's
+  services, it is the **allowance**: what automation may buy
 - **CarrierAccount** — Per-carrier API credentials; supports multiple accounts per carrier with OAuth
 - **CarrierAccountScope** — Routes a `CarrierAccount` to a specific `Location` and/or `Client` combination with priority-based resolution
 - **BoxSize** — Scannable dimensions plus physical form and optional carrier-supplied
@@ -117,8 +120,8 @@ Preserve these domain terms in code and prose — see `CONTEXT.md`. In particula
   Label was bought (`CarrierAccount` or sales-channel `DataSource`). They are independent.
 - A Shopify purchase is a **blind purchase**, not a rate or Offer: price and service are
   unknown and it is excluded from unattended flows.
-- **Observed service**, `CarrierService` normalization, and automation approval are three
-  separate concepts.
+- **Observed service**, `CarrierService` normalization, and the shipping method's
+  **allowance** are three separate concepts.
 - **Shipment**, **Package**, **Package Draft**, and **Label** are distinct things.
 
 ## Key Workflows
@@ -130,9 +133,9 @@ Preserve these domain terms in code and prose — see `CONTEXT.md`. In particula
    purchase, buy a Label, and print it. Offers are bound to the Package version, quote inputs,
    source instance, environment, and billing identity
 4. **Manual Ship** (`/manual-ship`) — Ship without a pre-existing shipment
-5. **Batch Ship** — Buy Labels for multiple Packages using approved, automatable services;
-   blind Shopify purchases require an explicit rule or sole eligible ShippingMethod selection,
-   while unapproved observed services are excluded
+5. **Batch Ship** — Buy Labels for multiple Packages within each shipping method's allowance,
+   narrowed by the connection's postage setting; blind Shopify purchases require an explicit
+   rule or sole eligible ShippingMethod selection
 6. **Label Reprint / Void** — Reprint the active Label or void it through the postage source;
    a void retains Label history and returns the Package to unshipped
 7. **End of Day** (`/end-of-day`) — Create USPS SCAN forms / manifests only for eligible
@@ -169,12 +172,13 @@ Preserve these domain terms in code and prose — see `CONTEXT.md`. In particula
 - **Amazon Buy Shipping** — SP-API offers and Label purchase for Amazon-originating
   Shipments (`channelType: AMAZON`), with tracking and cancellation dispatched back through
   Amazon. Those offers may name Amazon Shipping, USPS, UPS, FedEx, or another carrier. Amazon
-  dynamically discovers services; human selection may use an unmapped/unapproved service,
-  while automation requires normalization and explicit approval
+  dynamically discovers services; human selection may use any of them, while automation buys
+  one only when the method's `amazon` row allows it: mapped to a listed service, or any
+  service
 - **Amazon Shipping** — A carrier sold directly to orders from other channels, on a
   connection's account. A method lists Amazon Shipping Ground; `AmazonShippingAdapter` quotes
   `channelType: EXTERNAL` on the Amazon connection a scope chooses, and its rates are direct
-  rates that automation buys without approval. The Offer and Label record the connection as
+  rates that automation buys under the method's `direct` row. The Offer and Label record the connection as
   the postage source, so purchase, tracking and voids go through it. Verified against the
   sandbox only: no production Amazon Shipping account has run it
 - **Shopify Shipping** — Attended blind Label purchase tied to the Shipment's originating
@@ -258,7 +262,8 @@ php artisan demo:reset                        # Reset demo data (APP_ENV demo/lo
 - `app/Services/ShippingRateService.php` — Resolves sources, quotes concurrently, filters
   packaging, logs quotes, and issues server-side Offers; keeps blind purchases separate
 - `app/Services/PostageSources/` — Source resolution/dispatch, Offer persistence and
-  redemption, observed-service recording/mapping, and automation approval gates
+  redemption, and observed-service recording/mapping. The allowance is enforced in
+  `RateSelector::selectForAutomation()`
 - `app/Services/PackageDrafts/` — Package preparation workflow behind `PackageDraftWorkflow`
 - `app/Services/PackageShipping/` — Offer redemption, purchase/recovery, and the atomic
   Package-to-shipped transition behind `PackageShippingWorkflow`
@@ -303,7 +308,8 @@ factory and seeder too — the test suite leans on factories heavily.
 - `app/Services/PackageLabels/EloquentPackageLabelWorkflow.php` — Active Label reprint and void workflow
 - `app/Models/PackageLabel.php` — Durable Label history and active-label projection data
 - `app/Models/ShippingOffer.php` — Server-side quoted-purchase authority
-- `app/Models/ObservedService.php` / `ServiceApproval.php` — Amazon discovery, mapping, and automation permission
+- `app/Models/ObservedService.php` / `SourceServiceMapping.php` — Amazon discovery and mapping
+- `app/Models/ShippingMethodPostageSource.php` — The sources a method allows; with the method's services, what automation may buy
 - `app/Services/CacheService.php` — Box size and carrier service caching
 - `app/Models/CarrierAccount.php` — Per-carrier credentials with `resolveForShipment()` priority logic
 - `app/Filament/Resources/Clients/ClientResource.php` — 3PL client management (Admin nav group)

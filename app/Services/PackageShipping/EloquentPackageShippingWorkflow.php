@@ -33,6 +33,7 @@ use App\Models\Package;
 use App\Models\ShippingOffer;
 use App\Models\SpecialService;
 use App\Services\Carriers\CarrierRegistry;
+use App\Services\InactiveCatalog;
 use App\Services\PostageSources\OfferStore;
 use App\Services\PostageSources\PostageSourceDispatcher;
 use App\Services\PostageSources\PostageSourceResolver;
@@ -77,6 +78,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
         $deadline = $package->shipment->getDeliverByDate();
         $classified = $this->rateSelector->classify($rates, $deadline);
+        $inactive = InactiveCatalog::among($rates);
 
         // Per-rate special service visibility: which requested services will
         // actually be purchased with each rate, and which get stripped by
@@ -121,6 +123,12 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 ];
             }
 
+            // Shown, so the packer sees why an offer cannot be chosen, and
+            // unselectable: nothing buys a deactivated service or carrier.
+            if (($reason = $inactive->reasonFor($classifiedRate->rate)) !== null) {
+                $rateArray['inactive'] = $reason;
+            }
+
             $options[$key] = $rateArray;
         }
 
@@ -131,7 +139,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             deliverByDate: $deadline?->format('D, M j'),
             allRatesLate: $deadline !== null && $classified->isNotEmpty() && $classified->every(fn (ClassifiedRate $cr): bool => ! $cr->isOnTime),
             exclusions: $exclusions,
-            selectedRateIndex: $this->selectedRateIndex($classified, $ruleResult),
+            selectedRateIndex: $this->selectedRateIndex($classified, $ruleResult, $inactive),
             // Alongside the rates, never among them, and never pre-selected on
             // the attended page: a person must choose and confirm it here.
             blindPurchaseOffers: $this->shippingRateService->getBlindPurchaseOffers($ruleResult->excludesBlindOffer(...))
@@ -347,6 +355,23 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         // this is the only check `04` cannot ship without (ADR-0005 decision 4).
         if ($selectedRate !== null && ($refused = $this->packagingRefused($package, $offer, $selectedRate)) !== null) {
             return $refused;
+        }
+
+        // Nothing buys a deactivated service or carrier, a packer included.
+        // The Ship page shows such an offer unselectable; this is the check a
+        // stale page, or one deactivated since it was quoted, cannot pass.
+        if ($selectedRate !== null && ($reason = InactiveCatalog::among(collect([$selectedRate]))->reasonFor($selectedRate)) !== null) {
+            logger()->info('Refused a purchase for a deactivated service or carrier', [
+                'package_id' => $package->id,
+                'offer' => $offer?->public_id,
+                'carrier_service_id' => $selectedRate->carrierServiceId,
+                'carrier_id' => $selectedRate->carrierId,
+            ]);
+
+            return PackageShippingResult::failed(
+                'Service Inactive',
+                "{$reason} Choose another rate, or reactivate it under Carriers or Carrier Services.",
+            );
         }
 
         // Marked through the offer, which points at the row the quote log
@@ -1138,19 +1163,23 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * and code, so *Direct, UPS Ground* would otherwise highlight Amazon's.
      * The keys of the rate options are those of the classified list, so its
      * first match is the one the packer sees offered first. Without a rule's
-     * choice, the first rate.
+     * choice, the first rate. Never a rate for a deactivated service or
+     * carrier, which the page shows but cannot select; with nothing else,
+     * nothing is highlighted.
      *
      * @param  Collection<int, ClassifiedRate>  $classified
      */
-    private function selectedRateIndex(Collection $classified, RuleEvaluationResult $ruleResult): ?int
+    private function selectedRateIndex(Collection $classified, RuleEvaluationResult $ruleResult, InactiveCatalog $inactive): ?int
     {
-        $key = $classified->search(fn (ClassifiedRate $cr): bool => $ruleResult->isPreSelected($cr->rate));
+        $selectable = $classified->reject(fn (ClassifiedRate $cr): bool => $inactive->includes($cr->rate));
+
+        $key = $selectable->search(fn (ClassifiedRate $cr): bool => $ruleResult->isPreSelected($cr->rate));
 
         if ($key !== false) {
             return $key;
         }
 
-        return $classified->isEmpty() ? null : $classified->keys()->first();
+        return $selectable->isEmpty() ? null : $selectable->keys()->first();
     }
 
     /**
@@ -1188,7 +1217,8 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * Every unattended path arrives here — auto-ship from Pack and Manual Ship,
      * and batch ship through `GenerateLabelJob` — and every one of them leaves
      * through {@see RateSelector::selectForAutomation()}, which is the single
-     * place ADR-0003 decision 4 is enforced for quoted services. A blind
+     * place the shipping method's allowance is enforced for quoted services
+     * (`carrier-catalog-reset/13`). A blind
      * purchase follows a separate explicit-choice policy: a matching rule may
      * name it, or it may be inferred only when it is the ShippingMethod's sole
      * configured, package-eligible choice.
@@ -1198,7 +1228,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * holds back is kept in the result, so the refusal can name the setting.
      *
      * Deliberately not routed through {@see prepareRates()}. That builds the
-     * attended view — where an unapproved service is *supposed* to appear, with
+     * attended view — where a service outside the allowance is *supposed* to appear, with
      * its price, for a packer to take responsibility for — and its
      * `selectedRateIndex` is a default highlight, not a decision. Reading a
      * choice off the attended list is how the two would come to mean the same
@@ -1209,7 +1239,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         $package->loadMissing(['packageItems.product', 'packageItems.shipmentItem', 'shipment.shippingMethod']);
 
         $ruleResult = $this->ruleEvaluator->evaluate($package->shipment, $package);
-        $clientId = $package->shipment?->client_id;
+        $method = $package->shipment?->shippingMethod;
         $channel = $this->postageSourceResolver->channelSourceFor($package);
         $blindAllowed = $channel?->postageSetting()->allowsAutomation() ?? false;
 
@@ -1228,7 +1258,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             if ($blindOffer && $blindAllowed) {
                 return new UnattendedRateSelection(
                     rate: null,
-                    withheld: collect(),
+                    notAllowed: collect(),
                     blindOffer: $blindOffer,
                 );
             }
@@ -1244,7 +1274,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         $requirements = $this->offerRequirementsFor($package);
 
         // A rule naming a scope of quoted rates selects among them like any
-        // rate-shopped offer, so an unapproved service is withheld and named.
+        // rate-shopped offer, so a service outside the allowance is refused and named.
         // Never a blind purchase. A rule naming Amazon buys from Amazon or not
         // at all (`amazon-buy-shipping/19`); *any priced source* with nothing
         // quoted in scope falls through to rate shopping, as a pre-selected
@@ -1267,7 +1297,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                     ]);
                 }
 
-                return $finish($this->rateSelector->selectForAutomation($rates, $deadline, $clientId, $requirements, $channel));
+                return $finish($this->rateSelector->selectForAutomation($rates, $deadline, $method, $requirements, $channel));
             }
 
             logger()->info('A shipping rule names a service no source quoted for this package; rate shopping instead', [
@@ -1298,7 +1328,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             return $finish($this->rateSelector->selectForAutomation(
                 collect([$preSelected]),
                 $deadline,
-                $clientId,
+                $method,
                 $requirements,
                 $channel,
             ));
@@ -1330,7 +1360,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             $rates = $rates->reject(fn (RateResponse $rate): bool => $ruleResult->excludes($rate));
         }
 
-        $selection = $this->rateSelector->selectForAutomation($rates, $deadline, $clientId, $requirements, $channel);
+        $selection = $this->rateSelector->selectForAutomation($rates, $deadline, $method, $requirements, $channel);
 
         if ($selection->rate === null) {
             $blindOffer = $this->shippingRateService->soleBlindPurchaseOfferForAutomation(
@@ -1341,7 +1371,8 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             if ($blindOffer && $blindAllowed) {
                 return new UnattendedRateSelection(
                     rate: null,
-                    withheld: $selection->withheld,
+                    notAllowed: $selection->notAllowed,
+                    shippingMethodName: $selection->shippingMethodName,
                     blindOffer: $blindOffer,
                 );
             }
@@ -1353,7 +1384,8 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
         return $finish(new UnattendedRateSelection(
             rate: $selection->rate,
-            withheld: $selection->withheld,
+            notAllowed: $selection->notAllowed,
+            shippingMethodName: $selection->shippingMethodName,
             attendedAlternativeAvailable: $selection->attendedAlternativeAvailable
                 || $this->shippingRateService->getBlindPurchaseOffers($ruleResult->excludesBlindOffer(...))->isNotEmpty(),
             late: $selection->late,
@@ -1361,6 +1393,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             requirements: $selection->requirements,
             deadlineMissing: $selection->deadlineMissing,
             contentRestricted: $selection->contentRestricted,
+            deactivated: $selection->deactivated,
             heldByPostageSetting: $selection->heldByPostageSetting,
             blindOffersHeldByPostageSetting: $selection->blindOffersHeldByPostageSetting,
             postageSettingConnection: $selection->postageSettingConnection,
@@ -1383,21 +1416,30 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * Why nothing was bought, in words an operator can act on.
      *
      * "No shipping rates available" is true of an empty rate list and false of
-     * a package that was quoted three services none of which an administrator
-     * has approved — and it sends whoever reads it to the carrier rather than
-     * to the approval page. A batch of several hundred is exactly where that
+     * a package that was quoted three services none of which its shipping
+     * method allows — and it sends whoever reads it to the carrier rather than
+     * to the shipping method. A batch of several hundred is exactly where that
      * misdirection costs the most, so the refusal names itself.
      */
     private function nothingToBuyUnattended(Package $package, UnattendedRateSelection $selection): PackageShippingResult
     {
         if (! $selection->attendedAlternativeAvailable) {
-            return PackageShippingResult::failed('Shipping Error', 'No shipping rates available for this package.');
+            return $selection->deactivatedAnything()
+                ? $this->onlyInactiveServices($package, $selection)
+                : PackageShippingResult::failed('Shipping Error', 'No shipping rates available for this package.');
         }
 
         if ($selection->contentRestrictedAnything()) {
             logger()->info('Withheld a content-restricted rate from automated purchase', [
                 'package_id' => $package->id,
                 'content_restricted' => $selection->contentRestrictedSummary(),
+            ]);
+        }
+
+        if ($selection->deactivatedAnything()) {
+            logger()->info('Refused a rate for a deactivated service or carrier', [
+                'package_id' => $package->id,
+                'deactivated' => $selection->deactivatedSummary(),
             ]);
         }
 
@@ -1413,51 +1455,64 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             return $this->refusedForMethodRequirements($package, $selection);
         }
 
-        if (! $selection->withheldAnything() && $selection->heldByPostageSettingAnything()) {
+        if (! $selection->notAllowedAnything() && $selection->heldByPostageSettingAnything()) {
             return PackageShippingResult::attendedSelectionRequired(
                 'Connection Sells to Packers Only',
                 "This package was offered {$selection->heldByPostageSettingSummary()}, but the connection \"{$selection->postageSettingConnection}\" sells postage to a packer only, so automation does not buy it. "
                 .$this->contentRestrictionNote($selection)
+                .$this->deactivatedNote($selection)
                 .'Ship this package from the Ship page, or set the connection\'s postage setting to Packer and automation.',
             );
         }
 
-        if (! $selection->withheldAnything() && $selection->contentRestrictedAnything()) {
+        if (! $selection->notAllowedAnything() && $selection->contentRestrictedAnything()) {
             return PackageShippingResult::attendedSelectionRequired(
                 'Content-Restricted Rates Only',
                 'This package was quoted, but automation never buys '.$selection->contentRestrictedSummary()
                 .': the service is valid only for restricted contents, and nothing in PolyBag vouches for what this package holds. '
+                .$this->deactivatedNote($selection)
                 .'Ship it from the Ship page, where a person checks the contents and chooses the rate.',
             );
         }
 
-        if (! $selection->withheldAnything()) {
+        if (! $selection->notAllowedAnything()) {
             return PackageShippingResult::attendedSelectionRequired(
                 'Attended Shipping Required',
                 'Auto Ship cannot purchase the available attended-only postage. Continue on the Ship page to review and confirm it.',
             );
         }
 
-        logger()->warning('Withheld a rate from automated purchase because nobody has approved the service', [
+        logger()->warning('Refused a rate for automated purchase because the shipping method does not allow it', [
             'package_id' => $package->id,
-            'client_id' => $package->shipment?->client_id,
-            'withheld' => $selection->withheldForLog(),
+            'shipping_method' => $selection->shippingMethodName,
+            'not_allowed' => $selection->notAllowedForLog(),
         ]);
 
         return PackageShippingResult::attendedSelectionRequired(
-            'No Approved Rates',
-            'This package was quoted, but no service it was offered is approved for automated purchase: '
-            .$selection->withheldSummary().'. '
+            'Not Allowed by Shipping Method',
+            'This package was quoted, but '.$this->methodPhrase($selection).' does not allow automation to buy any service it was offered: '
+            .$selection->notAllowedSummary().'. '
             .$this->contentRestrictionNote($selection)
+            .$this->deactivatedNote($selection)
             .$this->postageSettingNote($selection)
-            .'Approve it on Amazon Approvals, or ship this package from the Ship page, where a person chooses the rate.',
+            .'Add the service to the shipping method or allow its source any service, or ship this package from the Ship page, where a person chooses the rate.',
         );
     }
 
     /**
+     * The shipping method, named, or what stands in for one.
+     */
+    private function methodPhrase(UnattendedRateSelection $selection): string
+    {
+        return $selection->shippingMethodName !== null
+            ? "the shipping method \"{$selection->shippingMethodName}\""
+            : 'a shipment with no shipping method';
+    }
+
+    /**
      * A sentence naming the content-restricted rates beside another refusal,
-     * so an operator approving services does not go looking for an approval
-     * that would release them. None would.
+     * so an operator changing the shipping method does not expect that to
+     * release them. Nothing would.
      */
     private function contentRestrictionNote(UnattendedRateSelection $selection): string
     {
@@ -1468,9 +1523,45 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
     }
 
     /**
+     * A sentence naming the deactivated services beside another refusal, so an
+     * operator changing the shipping method does not expect that to release
+     * them. Only reactivating them would.
+     */
+    private function deactivatedNote(UnattendedRateSelection $selection): string
+    {
+        return $selection->deactivatedAnything()
+            ? 'Nothing buys '.$selection->deactivatedSummary()
+                .', because the service or its carrier is inactive. '
+            : '';
+    }
+
+    /**
+     * Every rate quoted names a deactivated service or carrier.
+     *
+     * Not an attended selection: the Ship page shows those rates greyed out
+     * and the purchase refuses them, so sending the operator there would
+     * leave them with nothing to choose. What helps is reactivating the
+     * service or carrier, or a shipping method that lists an active one.
+     */
+    private function onlyInactiveServices(Package $package, UnattendedRateSelection $selection): PackageShippingResult
+    {
+        logger()->info('Every rate quoted names a deactivated service or carrier', [
+            'package_id' => $package->id,
+            'deactivated' => $selection->deactivatedSummary(),
+        ]);
+
+        return PackageShippingResult::failed(
+            'Inactive Services Only',
+            'This package was quoted only '.$selection->deactivatedSummary()
+            .', and the service or its carrier is inactive, so nothing can buy it. '
+            .'Reactivate it under Carriers or Carrier Services, or give the shipment a shipping method that lists an active service.',
+        );
+    }
+
+    /**
      * A sentence naming what the connection's postage setting held back beside
-     * another refusal, so an operator approving services does not expect an
-     * approval to release it. None would.
+     * another refusal, so an operator changing the shipping method does not
+     * expect that to release it. Only the connection's setting would.
      */
     private function postageSettingNote(UnattendedRateSelection $selection): string
     {
@@ -1520,23 +1611,24 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             'unprotected' => $selection->unprotected?->count() ?? 0,
         ]);
 
-        // The requirements are checked only against approved rates, so with a
-        // service withheld the honest claim is about approved rates alone: the
-        // withheld one may well have met them.
-        $approved = $selection->withheldAnything() ? 'Approved ' : '';
-        $scope = $selection->withheldAnything()
-            ? 'none of the rates approved for automated purchase does. Not approved: '
-                .$selection->withheldSummary().', which Amazon Approvals can approve.'
+        // The requirements are checked only against allowed rates, so with a
+        // service outside the allowance the honest claim is about allowed
+        // rates alone: the other one may well have met them.
+        $allowed = $selection->notAllowedAnything() ? 'Allowed ' : '';
+        $scope = $selection->notAllowedAnything()
+            ? 'none of the rates it allows automation to buy does. Not allowed: '
+                .$selection->notAllowedSummary().'.'
             : "none of this package's rates does.";
 
         return PackageShippingResult::attendedSelectionRequired(
             match (true) {
-                $refusedLate && $refusedUnprotected => "No {$approved}On-Time, Protected Rates",
-                $refusedLate => "No {$approved}On-Time Rates",
-                default => "No {$approved}OTDR-Protected Rates",
+                $refusedLate && $refusedUnprotected => "No {$allowed}On-Time, Protected Rates",
+                $refusedLate => "No {$allowed}On-Time Rates",
+                default => "No {$allowed}OTDR-Protected Rates",
             },
             "{$method} requires a rate that {$missing}, and {$scope} "
             .$this->contentRestrictionNote($selection)
+            .$this->deactivatedNote($selection)
             .$this->postageSettingNote($selection)
             .'Ship it from the Ship page, where a person chooses the rate, or change the requirement on the shipping method.',
         );

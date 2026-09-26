@@ -11,9 +11,10 @@ namespace App\Enums;
  * Shipping by the connection scoped to it (ADR-0002, 2026-09-22), with its own
  * prices and none of those protections.
  *
- * An approval to spend is scoped to one of the two (ADR-0003 decision 3,
- * amended by `amazon-shipping-external-orders/07`). The service identities are
- * the same on both, and so is what we call them: observations and mappings are
+ * The two are separated by source, not by a setting: an Amazon order buys
+ * through Buy Shipping, and another channel's order buys Amazon Shipping as a
+ * direct rate (`carrier-catalog-reset/15`). The service identities are the
+ * same on both, and so is what we call them: observations and mappings are
  * not split by channel.
  */
 enum AmazonChannelType: string

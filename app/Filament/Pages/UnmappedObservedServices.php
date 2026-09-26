@@ -55,8 +55,9 @@ class UnmappedObservedServices extends Page implements HasTable
 
     public static function canAccess(): bool
     {
-        // Admin, not Manager: from `carrier-catalog-reset/13` a mapping
-        // authorizes spend, and the page should not change hands that day.
+        // Admin, not Manager: a mapping authorizes spend. Automation buys a
+        // mapped Amazon offer whenever the method lists the service
+        // (`carrier-catalog-reset/13`).
         return auth()->user()->role->isAtLeast(Role::Admin);
     }
 
@@ -156,7 +157,7 @@ class UnmappedObservedServices extends Page implements HasTable
                         ->all()),
             ])
             ->emptyStateHeading('Nothing observed yet')
-            ->emptyStateDescription('Services a postage source reports appear here after a rate quote. Leaving one unmapped is fine — nothing depends on it being mapped, including approval for automated shipping.')
+            ->emptyStateDescription('Services a postage source reports appear here after a rate quote. Leaving one unmapped is fine: a packer can still choose it. Automation buys an unmapped service only for a shipping method that allows Amazon any service.')
             ->recordActions([
                 Actions\Action::make('assign')
                     ->label('Assign')
@@ -252,7 +253,7 @@ class UnmappedObservedServices extends Page implements HasTable
                     ->icon('heroicon-o-link-slash')
                     ->color('danger')
                     ->requiresConfirmation()
-                    ->modalDescription('The observation stays on file and stays selectable by a person. Only the mapping is removed; no catalog rows are deleted, and approvals for automated shipping are unchanged.')
+                    ->modalDescription('The observation stays on file and stays selectable by a person. Only the mapping is removed; no catalog rows are deleted. Automation stops buying this service for shipping methods that allow Amazon only their listed services.')
                     ->visible(fn (ObservedService $record): bool => $record->mapped_carrier_service_id !== null)
                     ->action(function (ObservedService $record): void {
                         $observations = app(ObservedServiceMapper::class)->unmap($record);
@@ -311,6 +312,6 @@ class UnmappedObservedServices extends Page implements HasTable
 
     public function getSubheading(): ?string
     {
-        return 'Services a postage source has reported. Mapping one gives it a name we already use; leaving it unmapped is a valid end state. Whether automated shipping may buy a service is set separately, under Amazon Approvals.';
+        return 'Services a postage source has reported. Mapping one gives it a name we already use; leaving it unmapped is a valid end state. Automation buys a mapped service for a shipping method that lists it, and any service for a method whose Amazon source allows any service.';
     }
 }

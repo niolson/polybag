@@ -299,6 +299,15 @@ class Ship extends Page
      */
     public function updatedSelectedRateIndex(): void
     {
+        // The page renders an inactive rate unselectable; this is only the
+        // guard for a selection that arrives anyway. The purchase refuses it
+        // regardless.
+        if ($this->selectedRateIndex !== null && isset($this->rateOptions[$this->selectedRateIndex]['inactive'])) {
+            $this->selectedRateIndex = null;
+
+            return;
+        }
+
         if ($this->selectedRateIndex !== null) {
             $this->selectedBlindOfferId = null;
         }

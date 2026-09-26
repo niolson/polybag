@@ -92,7 +92,7 @@ it('prepares sorted rate options for a package', function (): void {
     $adapter->shouldReceive('prepareRateRequest')->once()->andReturnNull();
     $adapter->shouldReceive('getRates')->once()->andReturn(collect([
         new RateResponse('MockCarrier', 'EXPRESS', 'Express', 15.00, '1 day'),
-        new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'),
+        new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days', carrierServiceId: CarrierService::where('service_code', 'GROUND')->value('id')),
     ]));
 
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
@@ -423,7 +423,7 @@ it('rate shops when the pre-selected service has no variant for the packaging', 
     $adapter->shouldReceive('isConfigured')->once()->andReturnTrue();
     $adapter->shouldReceive('prepareRateRequest')->once()->andReturnNull();
     $adapter->shouldReceive('getRates')->once()->andReturn(collect([
-        new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'),
+        new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days', carrierServiceId: CarrierService::where('service_code', 'GROUND')->value('id')),
     ]));
     $adapter->shouldReceive('createShipment')
         ->once()

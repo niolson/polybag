@@ -38,13 +38,16 @@ Amazon Buy Shipping is the Shipping v2 API used to quote and buy postage. Amazon
 one physical carrier that API can return. For an on-Amazon order (`channelType: AMAZON`), the
 API may return Amazon Shipping, USPS, UPS, FedEx, or another eligible carrier. For an
 off-Amazon order (`channelType: EXTERNAL`), the purchasable carrier is Amazon Shipping.
-PolyBag quotes both. Off-Amazon Amazon Shipping is sold by the Amazon connection scoped to the
-Package, never by the Shipment's import source.
+PolyBag quotes both. Off-Amazon Amazon Shipping is a direct sale: a shipping method lists
+Amazon Shipping Ground like any direct service, and the Amazon connection scoped to the
+Package sells it, never the Shipment's import source.
 _Avoid_: Using "Amazon" without saying whether it means the API/postage source or the carrier
 
 **Service class**:
 What a `ShippingMethod` is — a speed/price tier that several concrete carrier services can
 satisfy. "Ground" is a service class; `USPS_GROUND_ADVANTAGE` is one service that satisfies it.
+A method may list no services when a postage source may sell it any service, such as Amazon
+Buy Shipping allowed *any service*.
 _Avoid_: Service, shipping service
 
 **Offer**:
@@ -58,14 +61,21 @@ A durable service identity seen in a postage source's response, not part of the 
 becomes a `CarrierService` only when a human authors one; discovery never creates one.
 _Avoid_: Discovered service, carrier service
 
-**Automation approval**:
-One Client's permission for observed services to be bought by an unattended workflow in
-one postage-source environment. It covers one service, every service of one carrier, or
-everything the source offers, and an **exception** of the same shape carves services back
-out; an exception always wins. It does not require normalization and never crosses between
-sandbox and production, nor between Amazon orders and orders from other channels sold
-Amazon Shipping. Human selection does not require it.
-_Avoid_: Service enabled, service active
+**Allowance**:
+What a shipping method lets automation buy: a postage source the method has a row for, and a
+service the method lists, or any service where that source's row allows it. Amazon Buy
+Shipping's row says *services on this method* (the default: an Amazon offer mapped to a listed
+service) or *any service* (every Amazon offer, unmapped ones included). The connection's
+**postage setting** and shipping rules narrow it, and a deactivated service or carrier is
+never in it, whatever the row says; nothing widens it. It is the same in sandbox
+and production. With no shipping method, it is every direct service. Human selection does not
+require it.
+_Avoid_: Approval, service enabled, service active
+
+**Postage setting**:
+A connection's consent to sell channel postage: *does not sell*, *packer only*, or *packer and
+automation*. *Packer only* keeps its postage off every unattended path, whatever the
+shipping method allows.
 
 **Label**:
 One purchased instance of *outbound* postage for a Package: its tracking number, cost, and
@@ -119,9 +129,9 @@ _Avoid_: Report printer (in anything a user reads)
 - A void marks the **Label** voided and returns the **Package** to unshipped; re-shipping buys a new **Label** for the same Package.
 - A **service class** is satisfied by one or more concrete carrier services; a **blind purchase** satisfies none, because no service is offered.
 - An **observed service** is normalized onto an existing `CarrierService`, or promoted by authoring one. Nothing promotes itself.
-- An **observed service** may be selected by a human without an **automation approval**;
-  shipping rules, auto-ship and batch shipping require approval for that Client, environment
-  and kind of order (Amazon's own, or another channel's).
+- Any **Offer** may be selected by a human; shipping rules, auto-ship and batch shipping buy
+  only within the shipping method's **allowance**, narrowed by the connection's **postage
+  setting**.
 - A **blind purchase** is not an **Offer** — with no price it can never win a comparison, so it never enters one.
 - An **Offer** is claimed atomically before purchase. If the source's answer is ambiguous,
   it remains awaiting confirmation and must be recovered or resolved before another purchase
@@ -154,7 +164,7 @@ _Avoid_: Report printer (in anything a user reads)
 > **Domain expert:** "Not automatically. It is an observed service, and a packer can still pick it. A carrier row only appears when someone decides to author one."
 >
 > **Dev:** "Once we map that service, can batch shipping buy it?"
-> **Domain expert:** "Only after an administrator approves it for that Client and environment. Naming a service and authorizing unattended spend are separate decisions."
+> **Domain expert:** "If the shipment's shipping method lists the service it is mapped to, yes — the method is what allows unattended spend. A method whose Amazon Buy Shipping row allows *any service* would have bought it unmapped too, unless the connection sells postage to a packer only."
 
 ## Flagged ambiguities
 

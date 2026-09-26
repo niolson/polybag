@@ -3,7 +3,6 @@
 namespace Database\Seeders;
 
 use App\Enums\PostageSourceKind;
-use App\Filament\Pages\ServiceApprovals;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\SourceServiceMapping;
@@ -14,7 +13,7 @@ use App\Models\SourceServiceMapping;
  * Each row maps one `carrierId:serviceId` pair Amazon has returned to the
  * catalog service it sells, as signed off on 2026-09-26. Drawn from captured
  * `getRates` responses, and covering the carriers
- * {@see ServiceApprovals::US_BUY_SHIPPING_CARRIERS} names.
+ * {@see self::US_BUY_SHIPPING_CARRIERS} names.
  *
  * Inward only, so several identifiers may name one service. Most of those
  * differ only by packaging — flat-rate boxes, One Rate, cubic — and packaging
@@ -33,6 +32,27 @@ use App\Models\SourceServiceMapping;
  */
 class AmazonServiceMappingSeeder extends OnceOnlySeeder
 {
+    /**
+     * Amazon carrier identifiers for the carriers Buy Shipping sells to a US
+     * seller.
+     *
+     * From Seller Central's "US shipping services available on Amazon Buy
+     * Shipping" (help page GJC5VMZUMVF2YE4P, read 2026-09-24). That page also
+     * lists DHL Express for export, but no DHL identifier we have observed is
+     * known to be it, so none is mapped. Amazon's `ineligibleRates` also names
+     * cross-border carriers shipping *into* the US and Self Delivery, which a
+     * US seller cannot buy.
+     *
+     * @var list<string>
+     */
+    public const US_BUY_SHIPPING_CARRIERS = [
+        'AMZN_US',
+        'FEDEX',
+        'ONTRAC',
+        'UPS',
+        'USPS',
+    ];
+
     /**
      * `carrierId:serviceId` => [carrier name, catalog service code].
      *

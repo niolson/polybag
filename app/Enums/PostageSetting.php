@@ -15,8 +15,8 @@ use Filament\Support\Contracts\HasLabel;
  * which `offers_off_amazon_shipping` and the scope decide.
  *
  * It only narrows. A value that sells still needs the shipping method to allow
- * the source, and, until `13`, an approval before automation buys an Amazon
- * service.
+ * the source, and automation buys only what the method's allowance covers
+ * (`13`).
  */
 enum PostageSetting: string implements HasLabel
 {
@@ -29,8 +29,8 @@ enum PostageSetting: string implements HasLabel
      * that sells no postage.
      *
      * Shopify starts off, as the client opt-in it replaces did. Amazon starts
-     * at *packer only*, which is what an Amazon connection with nothing
-     * approved has always done.
+     * at *packer only*, so nothing it sells is bought unattended until
+     * somebody decides it should be.
      */
     public static function defaultFor(?string $sourceType): ?self
     {
