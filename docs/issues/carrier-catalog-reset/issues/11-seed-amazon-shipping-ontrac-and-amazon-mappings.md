@@ -61,9 +61,12 @@ signs off the table below before it is seeded.
   - These carriers and services go in `CarrierSeeder`, found by name and marked
     `is_system` (`05`), so their names are fixed. Deactivate rather than delete one that is not wanted: the
     reference-data sync on every start would recreate a deleted row.
-- **Mappings are seeded once, by migration.** A mapping authorizes from `13` on, and the
-  reference-data sync would restore one an Admin had removed on the next start. The
-  migration writes the signed-off rows and never runs again.
+- **Mappings are seeded once, behind a marker.** A mapping authorizes from `13` on, and the
+  reference-data sync would restore one an Admin had removed on the next start. The sync
+  writes the signed-off rows as a named batch, using the marker `09` builds, and never
+  writes that batch again. Not by migration: migrations run before the sync, so on a
+  fresh install there would be no service rows to map (ADR-0006 decision 2, 2026-09-25
+  amendment).
 - **Remove `04`'s fallback** that gated `USPS_PTP_MM` by identifier. The seeded mapping
   covers it.
 - **Take `UPS_PTP_SUREPOST_MEDIA` off the adapter's drop list.** Its mapping to UPS Ground

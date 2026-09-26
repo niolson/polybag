@@ -18,6 +18,9 @@ System carriers' names are locked instead, and an operator-owned `display_name` 
 what an operator would have renamed. See decision 1 and option F. Decision 4 is clarified
 to match (`carrier-catalog-reset/06`).
 
+Amended 2026-09-25 (`carrier-catalog-reset/09`): seeded mappings are written once by the
+reference-data sync behind a marker, not by migration (decision 2).
+
 Supersedes in part:
 
 - **ADR-0002.** The 2026-09-22 amendment's choice of the `Amazon` postage-source row as the
@@ -130,6 +133,12 @@ direction each source needs.**
 - **Seeded mappings are written once, by migration**, never by the reference-data sync.
   A mapping authorizes (see the trade-off), and the sync would restore one an Admin had
   removed.
+
+  *Amended 2026-09-25* (`carrier-catalog-reset/09`). Not by migration after all: the
+  entrypoint runs `migrate` before `app:sync-reference-data`, so on a fresh install a
+  mapping migration finds no service rows and never runs again. The sync writes each
+  seeded set as a named batch, only while that batch's marker is absent, and records the
+  marker when it does. Removing a mapping still sticks.
 - Mapping never makes a blind purchase's service `confirmed`. What Shopify was asked for
   stays the requested preference (ADR-0003 decision 7).
 
@@ -427,7 +436,7 @@ identifier onto a service the method lists is what lets automation buy it. So:
 
 - A wrong mapping is a spending error, not just a naming one.
 - The mapping page moves from Manager to Admin, and so does the method's source policy.
-- Seeded mappings are written once, by migration, so removing one sticks.
+- Seeded mappings are written once, behind a marker, so removing one sticks.
 - `amazon-buy-shipping/06` avoided keying on `carrier_service_id` for exactly this
   reason: aliasing two identifiers onto one service vouches for both. That now holds on
   purpose, because the method's service is what the seller chose to allow.
