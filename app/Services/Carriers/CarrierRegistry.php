@@ -25,9 +25,10 @@ class CarrierRegistry
 
     /**
      * Adapters by carrier name. A system carrier's name is fixed, so it is a
-     * stable key (ADR-0006 decision 1, as amended 2026-09-25). The `Shopify`
-     * and `Amazon` entries are sources posing as carriers, and are
-     * transitional until `carrier-catalog-reset/09` and `12` remove the rows.
+     * stable key (ADR-0006 decision 1, as amended 2026-09-25). `Shopify` is a
+     * source's registry name, which no carrier row carries
+     * (`carrier-catalog-reset/09`). `Amazon` is a source posing as a carrier,
+     * transitional until `carrier-catalog-reset/12` removes its row.
      *
      * @var array<string, class-string<PostageOfferSource>>
      */

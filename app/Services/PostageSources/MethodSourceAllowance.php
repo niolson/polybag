@@ -8,21 +8,22 @@ use App\Enums\ShippingRuleSource;
 use App\Models\CarrierService;
 use App\Models\ShippingMethod;
 use App\Models\ShippingRule;
+use App\Models\SourceServiceMapping;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
-use App\Services\Carriers\ShopifyAdapter;
 use Illuminate\Support\Collection;
 
 /**
  * What a shipping method allows a *Use* rule to pick from — ADR-0006 decision
  * 12, `carrier-catalog-reset/07`.
  *
- * A rule picks within this and grants nothing. Until `09` and `12` give the
- * method a source policy of its own, the sources are read off today's catalog
- * rows, here and nowhere else:
+ * A rule picks within this and grants nothing. The sources are the method's
+ * source policy rows (`carrier-catalog-reset/09`):
  *
- * - Direct is always allowed.
- * - Amazon Buy Shipping is allowed when the method lists the `Amazon` hook row.
- * - Shopify is allowed when the method lists a row under the `Shopify` carrier.
+ * - Direct is allowed by the method's `direct` row.
+ * - Shopify is allowed by its `shopify` row. It sells the method's services it
+ *   has a mapping for, and `auto` when the row allows Shopify's own choice.
+ * - Amazon Buy Shipping is still allowed when the method lists the `Amazon`
+ *   hook row, until `carrier-catalog-reset/12` moves it to the policy.
  *
  * A shipment with no method is allowed every direct service, and nothing else.
  */
@@ -39,13 +40,13 @@ class MethodSourceAllowance
             return [PostageSourceKind::Direct];
         }
 
-        $listed = $this->listedServices($method)
-            ->map(fn (CarrierService $service): PostageSourceKind => $this->rowKind($service))
-            ->unique();
+        $listsAmazon = $this->listedServices($method)->contains(fn (CarrierService $service): bool => $this->isAmazonHookRow($service));
 
         return array_values(array_filter(
             PostageSourceKind::cases(),
-            fn (PostageSourceKind $kind): bool => $kind === PostageSourceKind::Direct || $listed->contains($kind),
+            fn (PostageSourceKind $kind): bool => $kind === PostageSourceKind::Amazon
+                ? $listsAmazon
+                : $method->allowsSource($kind),
         ));
     }
 
@@ -83,6 +84,20 @@ class MethodSourceAllowance
     }
 
     /**
+     * Whether a *Use* rule on this method may leave the service to the source:
+     * Amazon Buy Shipping, whose services are discovered per quote, or Shopify
+     * when the method allows its own choice (`auto`).
+     */
+    public function allowsAnyServiceFor(?ShippingMethod $method, ?ShippingRuleSource $source): bool
+    {
+        return match ($source) {
+            ShippingRuleSource::Amazon => true,
+            ShippingRuleSource::Shopify => $method?->allowsUnlistedServices(PostageSourceKind::Shopify) ?? false,
+            default => false,
+        };
+    }
+
+    /**
      * Whether a *Use* rule may pick this for a shipment on this method.
      *
      * Evaluated against the shipment's method, not the rule's: a rule with no
@@ -102,22 +117,16 @@ class MethodSourceAllowance
         }
 
         if ($rule->any_service) {
-            return $source === ShippingRuleSource::Amazon;
+            return $this->allowsAnyServiceFor($method, $source);
         }
 
         $service = $rule->carrierService;
 
-        if ($service === null) {
+        if ($service === null || $this->isAmazonHookRow($service)) {
             return false;
         }
 
-        // Shopify's rows name its own selections until `09`; every other
-        // source sells a catalog service a direct account could.
-        $expectedRowKind = $source === ShippingRuleSource::Shopify
-            ? PostageSourceKind::Shopify
-            : PostageSourceKind::Direct;
-
-        if ($this->rowKind($service) !== $expectedRowKind) {
+        if ($source === ShippingRuleSource::Shopify && ! $this->shopifySells($service)) {
             return false;
         }
 
@@ -131,30 +140,33 @@ class MethodSourceAllowance
      */
     public function serviceOptionsFor(?ShippingMethod $method, ?ShippingRuleSource $source): Collection
     {
-        $services = $method !== null
+        $services = ($method !== null
             ? $this->listedServices($method)
-            : CarrierService::query()->with('carrier')->get();
+            : CarrierService::query()->with('carrier')->get())
+            ->reject(fn (CarrierService $service): bool => $this->isAmazonHookRow($service));
 
-        return $services
-            ->filter(fn (CarrierService $service): bool => match ($source) {
-                ShippingRuleSource::Shopify => $this->rowKind($service) === PostageSourceKind::Shopify,
-                ShippingRuleSource::Any, null => $this->rowKind($service) !== PostageSourceKind::Amazon,
-                default => $this->rowKind($service) === PostageSourceKind::Direct,
-            })
-            ->values();
+        if ($source === ShippingRuleSource::Shopify) {
+            $mapped = SourceServiceMapping::forServices(PostageSourceKind::Shopify, $services->pluck('id'));
+            $services = $services->filter(fn (CarrierService $service): bool => $mapped->has($service->id));
+        }
+
+        return $services->values();
     }
 
     /**
-     * Which kind of source a catalog row stands for. The `Amazon` hook row and
-     * the `Shopify` rows pose as carriers until `09` and `12` remove them.
+     * Whether Shopify has a mapping for this service, so can be asked for it.
      */
-    public function rowKind(CarrierService $service): PostageSourceKind
+    private function shopifySells(CarrierService $service): bool
     {
-        return match ($service->carrier?->name) {
-            AmazonBuyShippingAdapter::SOURCE_NAME => PostageSourceKind::Amazon,
-            ShopifyAdapter::CARRIER_NAME => PostageSourceKind::Shopify,
-            default => PostageSourceKind::Direct,
-        };
+        return SourceServiceMapping::forServices(PostageSourceKind::Shopify, [$service->id])->isNotEmpty();
+    }
+
+    /**
+     * The `Amazon` hook row poses as a carrier's service until `12` removes it.
+     */
+    private function isAmazonHookRow(CarrierService $service): bool
+    {
+        return $service->carrier?->name === AmazonBuyShippingAdapter::SOURCE_NAME;
     }
 
     /**

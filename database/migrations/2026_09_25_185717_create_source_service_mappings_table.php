@@ -12,9 +12,9 @@ return new class extends Migration
      *
      * One row per mapping, where `observed_services.carrier_service_id` copied a
      * mapping onto every sighting and needed a lock to keep the copies agreeing.
-     * Seeded rows (Shopify in `09`, Amazon in `11`) are written once by their own
-     * migrations, never by the reference-data sync, which would restore a mapping
-     * an Admin had removed.
+     * Seeded rows (Shopify in `09`, Amazon in `11`) are written once, by a batch
+     * of the reference-data sync that never runs twice (`OnceOnlySeeder`), so a
+     * mapping an Admin removed stays removed.
      */
     public function up(): void
     {

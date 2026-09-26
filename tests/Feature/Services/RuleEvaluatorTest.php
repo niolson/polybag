@@ -17,7 +17,9 @@ use App\Models\Product;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
+use App\Models\ShippingMethodPostageSource;
 use App\Models\ShippingRule;
+use App\Models\SourceServiceMapping;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\Carriers\ShopifyAdapter;
 use App\Services\RuleEvaluator;
@@ -773,15 +775,33 @@ function ruleAmazonHookRow(): CarrierService
     ], ['name' => 'Amazon Buy Shipping']);
 }
 
-function ruleShopifyRow(string $serviceCode = 'usps:usps_ground_advantage'): CarrierService
+/**
+ * A catalog service Shopify sells, under the Shopify mapping `$shopifyCode`.
+ */
+function ruleShopifyRow(string $shopifyCode = 'usps:GroundAdvantage'): CarrierService
 {
-    $shopify = Carrier::firstOrCreate(['name' => ShopifyAdapter::CARRIER_NAME]);
-
-    return CarrierService::factory()->create([
-        'carrier_id' => $shopify->id,
-        'service_code' => $serviceCode,
-        'name' => 'Shopify Ground Advantage',
+    [$externalCarrierId, $externalServiceId] = explode(':', $shopifyCode, 2);
+    $service = CarrierService::factory()->create([
+        'carrier_id' => Carrier::firstOrCreate(['name' => $externalCarrierId === 'usps' ? Carrier::USPS : Carrier::UPS])->id,
+        'service_code' => strtoupper($externalServiceId),
+        'name' => $externalServiceId,
     ]);
+
+    SourceServiceMapping::map(PostageSourceKind::Shopify, $externalCarrierId, $externalServiceId, $service->id);
+
+    return $service;
+}
+
+/**
+ * Let Shopify sell for the method, and choose for itself when `$auto`.
+ */
+function ruleAllowShopify(ShippingMethod $method, bool $auto = false): ShippingMethod
+{
+    $row = ShippingMethodPostageSource::factory()->shopify()->for($method);
+
+    ($auto ? $row->any() : $row)->create();
+
+    return $method->fresh();
 }
 
 function ruleUpsGround(): CarrierService
@@ -872,9 +892,9 @@ it('selects strictly among Amazon offers for Amazon Buy Shipping, any', function
         ->and($result->isPreSelected(ruleDirectRate(ruleUpsGround())))->toBeFalse();
 });
 
-it('pre-selects the Shopify blind purchase a Shopify rule names', function (): void {
+it('pre-selects the Shopify blind purchase a Shopify rule names, by the service\'s mapped code', function (): void {
     $row = ruleShopifyRow();
-    $method = ruleMethodListing([$row]);
+    $method = ruleAllowShopify(ruleMethodListing([$row]));
     $shipment = Shipment::factory()->create(['shipping_method_id' => $method->id]);
 
     ShippingRule::factory()->source(ShippingRuleSource::Shopify)->create([
@@ -884,7 +904,36 @@ it('pre-selects the Shopify blind purchase a Shopify rule names', function (): v
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->preSelectedBlindPurchaseId)->toBe(BlindPurchaseOffer::identifier(ShopifyAdapter::CARRIER_NAME, 'usps:usps_ground_advantage'));
+    expect($result->preSelectedBlindPurchaseId)->toBe(BlindPurchaseOffer::identifier(ShopifyAdapter::CARRIER_NAME, 'usps:GroundAdvantage'));
+});
+
+it('pre-selects Shopify\'s own choice when a Shopify rule leaves the service open and the method allows auto', function (bool $auto): void {
+    $method = ruleAllowShopify(ruleMethodListing([ruleUpsGround()]), auto: $auto);
+    $shipment = Shipment::factory()->create(['shipping_method_id' => $method->id]);
+
+    ShippingRule::factory()->source(ShippingRuleSource::Shopify)->anyService()->create([
+        'shipping_method_id' => $method->id,
+    ]);
+
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
+
+    expect($result->preSelectedBlindPurchaseId)->toBe($auto ? 'Shopify:auto' : null);
+})->with([
+    'auto allowed' => [true],
+    'auto not allowed' => [false],
+]);
+
+it('skips a Shopify rule naming a service Shopify has no mapping for', function (): void {
+    $ground = ruleUpsGround();
+    $method = ruleAllowShopify(ruleMethodListing([$ground]));
+    $shipment = Shipment::factory()->create(['shipping_method_id' => $method->id]);
+
+    ShippingRule::factory()->source(ShippingRuleSource::Shopify)->create([
+        'shipping_method_id' => $method->id,
+        'carrier_service_id' => $ground->id,
+    ]);
+
+    expect(app(RuleEvaluator::class)->evaluate($shipment)->hasPreSelectedBlindPurchase())->toBeFalse();
 });
 
 it('skips a Use rule naming a source the method does not allow', function (ShippingRuleSource $source, bool $anyService): void {
@@ -908,6 +957,7 @@ it('skips a Use rule naming a source the method does not allow', function (Shipp
     'Amazon, any' => [ShippingRuleSource::Amazon, true],
     'Amazon, a service' => [ShippingRuleSource::Amazon, false],
     'Shopify, a service' => [ShippingRuleSource::Shopify, false],
+    'Shopify, auto' => [ShippingRuleSource::Shopify, true],
 ]);
 
 it('skips a global Use rule naming a service the shipment\'s method does not list, and applies the next', function (): void {
@@ -990,27 +1040,44 @@ it('excludes every offer a carrier carries, mapped or not, for Exclude, Amazon B
         ->and($result->excludes(ruleDirectRate($onTracGround)))->toBeFalse();
 });
 
-it('excludes Shopify blind purchases by source or by the row a rule names', function (): void {
+it('excludes Shopify blind purchases by source, by carrier or by the service a rule names', function (): void {
     $row = ruleShopifyRow();
-    $other = ruleShopifyRow('ups:ground');
+    $other = ruleShopifyRow('ups_shipping:03');
     $shipment = Shipment::factory()->withoutShippingMethod()->create();
     $offer = fn (CarrierService $service): BlindPurchaseOffer => new BlindPurchaseOffer(
         source: ShopifyAdapter::CARRIER_NAME,
         sourceLabel: ShopifyAdapter::SOURCE_LABEL,
-        serviceCode: $service->service_code,
+        serviceCode: (string) ShopifyAdapter::serviceCodeFor($service->id),
         selectionLabel: $service->name,
+        carrierServiceId: $service->id,
+        carrierId: $service->carrier_id,
+    );
+    $auto = new BlindPurchaseOffer(
+        source: ShopifyAdapter::CARRIER_NAME,
+        sourceLabel: ShopifyAdapter::SOURCE_LABEL,
+        serviceCode: ShopifyAdapter::AUTO_SERVICE_CODE,
+        selectionLabel: ShopifyAdapter::AUTO_SELECTION_LABEL,
     );
 
     ShippingRule::factory()->excludeService()->create(['carrier_service_id' => $row->id]);
+    $byService = app(RuleEvaluator::class)->evaluate($shipment);
 
-    $byRow = app(RuleEvaluator::class)->evaluate($shipment);
+    ShippingRule::query()->delete();
+    ShippingRule::factory()->excludeService()->anyService()->create(['carrier_id' => $other->carrier_id]);
+    $byCarrier = app(RuleEvaluator::class)->evaluate($shipment);
 
+    ShippingRule::query()->delete();
     ShippingRule::factory()->excludeService()->source(ShippingRuleSource::Shopify)->anyService()->create();
-
     $bySource = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($byRow->excludesBlindOffer($offer($row)))->toBeTrue()
-        ->and($byRow->excludesBlindOffer($offer($other)))->toBeFalse()
+    expect($byService->excludesBlindOffer($offer($row)))->toBeTrue()
+        ->and($byService->excludesBlindOffer($offer($other)))->toBeFalse()
+        // Shopify's own choice has no carrier or service before it is bought.
+        ->and($byService->excludesBlindOffer($auto))->toBeFalse()
+        ->and($byCarrier->excludesBlindOffer($offer($other)))->toBeTrue()
+        ->and($byCarrier->excludesBlindOffer($offer($row)))->toBeFalse()
+        ->and($byCarrier->excludesBlindOffer($auto))->toBeFalse()
         ->and($bySource->excludesBlindOffer($offer($other)))->toBeTrue()
+        ->and($bySource->excludesBlindOffer($auto))->toBeTrue()
         ->and($bySource->excludes(ruleDirectRate(ruleUpsGround())))->toBeFalse();
 });

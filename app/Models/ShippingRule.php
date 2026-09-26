@@ -135,7 +135,7 @@ class ShippingRule extends Model
         }
 
         $parts[] = $this->any_service
-            ? 'Any service'
+            ? ($this->source === ShippingRuleSource::Shopify && $this->action === ShippingRuleAction::UseService ? "Shopify's choice" : 'Any service')
             : ($this->carrierService ? "{$this->carrierService->carrier->label()} {$this->carrierService->name}" : 'Unknown service');
 
         return implode(' · ', $parts);
@@ -168,10 +168,12 @@ class ShippingRule extends Model
                 throw new DomainException('Only an Exclude rule can name a carrier.');
             }
 
-            // Only Amazon Buy Shipping discovers its services per quote, so it
-            // is the only source a *Use* rule can leave to choose.
-            if ($this->any_service && $source !== ShippingRuleSource::Amazon) {
-                throw new DomainException('A Use rule must name a service, except for Amazon Buy Shipping.');
+            // Amazon Buy Shipping discovers its services per quote, and Shopify
+            // may choose for itself (`auto`), so they are the only sources a
+            // *Use* rule can leave to choose. Whether the method allows
+            // Shopify's choice is the evaluator's question, not this one's.
+            if ($this->any_service && ! in_array($source, [ShippingRuleSource::Amazon, ShippingRuleSource::Shopify], true)) {
+                throw new DomainException("A Use rule must name a service, except for Amazon Buy Shipping or Shopify's choice.");
             }
 
             return;

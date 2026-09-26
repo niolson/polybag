@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Enums\PostageSourceKind;
 use App\Models\CarrierService;
 use App\Models\Client;
 use App\Models\ShippingMethod;
@@ -82,5 +83,22 @@ class ShippingMethodSeeder extends Seeder
                 'STANDARD_OVERNIGHT',
             ])->pluck('id')
         );
+
+        foreach ([$standardGround, $twoDay, $internationalEconomy, $overnight] as $method) {
+            $this->allowDirectIfNew($method);
+        }
+    }
+
+    /**
+     * Direct on, as for any new method. Written here as well as by the model's
+     * `created` hook because `DatabaseSeeder` runs without model events. Only
+     * for a method this run created: a row an Admin deleted from an existing
+     * method stays deleted.
+     */
+    private function allowDirectIfNew(ShippingMethod $method): void
+    {
+        if ($method->wasRecentlyCreated) {
+            $method->postageSources()->firstOrCreate(['source_kind' => PostageSourceKind::Direct]);
+        }
     }
 }

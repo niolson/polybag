@@ -17,15 +17,11 @@ readonly class RuleExclusion
      * @param  PostageSourceKind|null  $kind  The kind of source that sells it, or null for any source
      * @param  int|null  $carrierId  The carrier expected to carry the parcel
      * @param  int|null  $carrierServiceId  The catalog service
-     * @param  string|null  $carrierName  The carrier's registry name, for a blind purchase, which names no carrier row
-     * @param  string|null  $blindPurchaseId  The blind purchase the service stands for, until Shopify sells real catalog services (`09`)
      */
     public function __construct(
         public ?PostageSourceKind $kind = null,
         public ?int $carrierId = null,
         public ?int $carrierServiceId = null,
-        public ?string $carrierName = null,
-        public ?string $blindPurchaseId = null,
     ) {}
 
     public function matchesRate(RateResponse $rate): bool
@@ -35,10 +31,15 @@ readonly class RuleExclusion
             && ($this->carrierServiceId === null || $rate->carrierServiceId === $this->carrierServiceId);
     }
 
+    /**
+     * A blind offer requesting a service matches as a rate for it would.
+     * Shopify's own choice names no carrier or service before it is bought, so
+     * only a rule naming neither matches it.
+     */
     public function matchesBlindOffer(BlindPurchaseOffer $offer): bool
     {
         return ($this->kind === null || $this->kind === PostageSourceKind::Shopify)
-            && ($this->carrierName === null || $offer->source === $this->carrierName)
-            && ($this->blindPurchaseId === null || $offer->id() === $this->blindPurchaseId);
+            && ($this->carrierId === null || $offer->carrierId === $this->carrierId)
+            && ($this->carrierServiceId === null || $offer->carrierServiceId === $this->carrierServiceId);
     }
 }

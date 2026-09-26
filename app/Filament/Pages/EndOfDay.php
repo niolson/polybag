@@ -11,7 +11,6 @@ use App\Models\Manifest;
 use App\Models\Package;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\Carriers\CarrierRegistry;
-use App\Services\Carriers\ShopifyAdapter;
 use App\Services\ManifestService;
 use App\Services\SettingsService;
 use App\Services\ShipDateService;
@@ -81,10 +80,9 @@ class EndOfDay extends Page
         $multiLocation = (bool) app(SettingsService::class)->get('multi_location_enabled', false);
 
         $this->carrierSummary = Carrier::active()
-            // Transitional: the fake `Shopify` and `Amazon` rows date nothing
-            // any more, and leave with them in `carrier-catalog-reset/09`
-            // and `12`.
-            ->whereNotIn('name', [ShopifyAdapter::CARRIER_NAME, AmazonBuyShippingAdapter::SOURCE_NAME])
+            // Transitional: the fake `Amazon` row dates nothing any more, and
+            // leaves in `carrier-catalog-reset/12`.
+            ->where('name', '!=', AmazonBuyShippingAdapter::SOURCE_NAME)
             ->orderBy('name')
             ->get()
             ->map(function (Carrier $carrier) use ($shipDateService, $registry, $multiLocation): array {

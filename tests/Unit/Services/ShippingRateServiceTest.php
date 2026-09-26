@@ -13,6 +13,7 @@ use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CarrierPackaging;
 use App\Enums\CustomsDocumentDelivery;
+use App\Enums\PostageSourceKind;
 use App\Enums\ServiceCapability;
 use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Exceptions\InvalidPackageDimensionsException;
@@ -33,6 +34,8 @@ use App\Models\RateQuote;
 use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
+use App\Models\ShippingMethodPostageSource;
+use App\Models\SourceServiceMapping;
 use App\Models\SpecialService;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\Carriers\CarrierRegistry;
@@ -1631,12 +1634,7 @@ it('excludes a Shopify offer, visibly, when the shipment hard-requires a special
     $shippingMethod = ShippingMethod::factory()->create();
     $shippingMethod->specialServices()->attach($signature->id, ['mode' => 'required']);
 
-    $shopifyCarrier = Carrier::factory()->shopify()->create();
-    $shopifyService = CarrierService::factory()->for($shopifyCarrier)->create([
-        'name' => 'USPS Ground Advantage',
-        'service_code' => 'usps:usps_ground_advantage',
-    ]);
-    $shippingMethod->carrierServices()->attach($shopifyService->id);
+    shopifyOnlyMethodSelling($shippingMethod);
 
     $shipment = Shipment::factory()->for($shippingMethod)->create([
         'postal_code' => '90210',
@@ -1652,7 +1650,7 @@ it('excludes a Shopify offer, visibly, when the shipment hard-requires a special
     // change. The reason has to say that nobody has picked a carrier yet.
     expect($rates)->toBeEmpty()
         ->and($service->getExclusions())->toHaveCount(1)
-        ->and($service->getExclusions()[0]['carrier'])->toBe('Shopify')
+        ->and($service->getExclusions()[0]['carrier'])->toBe('Shopify Shipping')
         ->and($service->getExclusions()[0]['reason'])->toContain('cannot guarantee Signature Required')
         ->and($service->getExclusions()[0]['reason'])->toContain('after the label is bought');
 });
@@ -1666,12 +1664,7 @@ it('keeps a Shopify offer when the special service is only a default', function 
     $shippingMethod = ShippingMethod::factory()->create();
     $shippingMethod->specialServices()->attach($signature->id, ['mode' => 'default']);
 
-    $shopifyCarrier = Carrier::factory()->shopify()->create();
-    $shopifyService = CarrierService::factory()->for($shopifyCarrier)->create([
-        'name' => 'USPS Ground Advantage',
-        'service_code' => 'usps:usps_ground_advantage',
-    ]);
-    $shippingMethod->carrierServices()->attach($shopifyService->id);
+    shopifyOnlyMethodSelling($shippingMethod);
 
     // Shopify only offers on a shipment it can buy against: its own data source
     // plus the fulfillment order the purchase is keyed to.
@@ -1691,7 +1684,7 @@ it('keeps a Shopify offer when the special service is only a default', function 
     expect($rates)->toBeEmpty()
         ->and($service->getBlindPurchaseOffers())->toHaveCount(1)
         ->and($service->getBlindPurchaseOffers()[0]->source)->toBe('Shopify')
-        ->and($service->getBlindPurchaseOffers()[0]->serviceCode)->toBe('usps:usps_ground_advantage')
+        ->and($service->getBlindPurchaseOffers()[0]->serviceCode)->toBe('usps:GroundAdvantage')
         ->and($service->getExclusions())->toBeEmpty();
 });
 
@@ -1871,3 +1864,19 @@ it('parses concurrent rate responses from an async source that is not a carrier'
         ->and($rates->pluck('carrier')->sort()->values()->all())->toBe(['Amazon', 'USPS'])
         ->and($rates[0]->price)->toBe(12.75);
 });
+
+/**
+ * List USPS Ground Advantage on the method and let only Shopify sell it, under
+ * its Shopify mapping (`carrier-catalog-reset/09`).
+ */
+function shopifyOnlyMethodSelling(ShippingMethod $shippingMethod): void
+{
+    $groundAdvantage = CarrierService::factory()->uspsGroundAdvantage()->create([
+        'carrier_id' => Carrier::firstOrCreate(['name' => Carrier::USPS])->id,
+    ]);
+    SourceServiceMapping::map(PostageSourceKind::Shopify, 'usps', 'GroundAdvantage', $groundAdvantage->id);
+
+    $shippingMethod->carrierServices()->attach($groundAdvantage->id);
+    $shippingMethod->postageSources()->delete();
+    ShippingMethodPostageSource::factory()->shopify()->for($shippingMethod)->create();
+}

@@ -6,6 +6,7 @@ use App\Enums\OtdrProtectedOrders;
 use App\Filament\Resources\ShippingMethodResource\Pages;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\AliasesRelationManager;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\CarrierServicesRelationManager;
+use App\Filament\Resources\ShippingMethodResource\RelationManagers\PostageSourcesRelationManager;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\ShippingRulesRelationManager;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\SpecialServicesRelationManager;
 use App\Models\DataSource;
@@ -94,6 +95,7 @@ class ShippingMethodResource extends Resource
             CarrierServicesRelationManager::class,
             SpecialServicesRelationManager::class,
             AliasesRelationManager::class,
+            PostageSourcesRelationManager::class,
             ShippingRulesRelationManager::class,
         ];
     }

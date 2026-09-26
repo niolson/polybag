@@ -17,6 +17,7 @@ use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\PostageSource;
+use App\Enums\PostageSourceKind;
 use App\Enums\ServiceCapability;
 use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Exceptions\Carriers\CarrierUnavailableException;
@@ -31,6 +32,7 @@ use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\ShippingOffer;
+use App\Models\SourceServiceMapping;
 use App\Models\SpecialService;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\Carriers\CarrierRegistry;
@@ -50,6 +52,7 @@ use Saloon\Http\Senders\GuzzleSender;
 
 /**
  * @phpstan-type RatingTask array{key: string, source: string, label: string, candidate: PostageSourceCandidate, carrierAccount: CarrierAccount|null, serviceCodes: array<int, string>, specialServiceCodes: array<int, string>}
+ * @phpstan-type ServiceAssignment array{candidate: PostageSourceCandidate, source: string, services: Collection<int, CarrierService>, serviceCodes: array<int, string>|null}
  */
 class ShippingRateService
 {
@@ -141,7 +144,7 @@ class ShippingRateService
         $this->ratedPackageId = null;
         $this->ratedShippingMethodId = null;
 
-        $package = Package::with(['packageItems', 'shipment.shippingMethod'])
+        $package = Package::with(['packageItems', 'shipment.shippingMethod.postageSources'])
             ->findOrFail($packageId);
 
         $destination = AddressData::fromShipment($package->shipment);
@@ -430,6 +433,7 @@ class ShippingRateService
         RateRequest $rateRequest,
         AddressData $destination,
     ): array {
+        $package->loadMissing('shipment.shippingMethod.postageSources');
         $shipment = $package->shipment;
         $shippingMethod = $shipment->shippingMethod;
 
@@ -456,7 +460,8 @@ class ShippingRateService
         if ($shippingMethod) {
             $methodServices = $this->getActiveCarrierServices($shippingMethod, $destination);
 
-            if ($methodServices->isEmpty()) {
+            // A method may list nothing when Shopify may choose for itself.
+            if ($methodServices->isEmpty() && ! $shippingMethod->allowsUnlistedServices(PostageSourceKind::Shopify)) {
                 throw new NoActiveCarrierServicesException($shippingMethod->name);
             }
 
@@ -475,11 +480,12 @@ class ShippingRateService
         $sources = app(PostageSourceResolver::class)->resolve($package, $shippingMethod);
         $tasks = [];
 
-        foreach ($this->assignServices($sources, $methodServices, $destination) as $assignment) {
+        foreach ($this->assignServices($sources, $shippingMethod, $methodServices, $destination) as $assignment) {
             $task = $this->buildTask(
                 $assignment['candidate'],
                 $assignment['source'],
                 $assignment['services'],
+                $assignment['serviceCodes'],
                 $requiredCodes,
                 $defaultCodes,
                 $scopeMap,
@@ -499,9 +505,10 @@ class ShippingRateService
      * The services each resolved source can sell (ADR-0006 decision 3).
      *
      * - A direct account sells its carrier's services that its integration
-     *   supports ({@see DeclaresSellableServices}).
-     * - Shopify sells what its catalog rows name, until
-     *   `carrier-catalog-reset/09`.
+     *   supports ({@see DeclaresSellableServices}), when the method's policy
+     *   allows direct at all ({@see PostageSourceResolver}).
+     * - Shopify sells the method's services it has a mapping for, and `auto`
+     *   when the method allows its own choice ({@see assignShopify()}).
      * - Amazon, for its own orders or off-Amazon, is asked when the method
      *   lists its row, until `carrier-catalog-reset/12`.
      *
@@ -512,9 +519,9 @@ class ShippingRateService
      * 400s on a military "AE" state).
      *
      * @param  Collection<int, CarrierService>|null  $methodServices  null when there is no shipping method
-     * @return array<int, array{candidate: PostageSourceCandidate, source: string, services: Collection<int, CarrierService>}>
+     * @return array<int, ServiceAssignment>
      */
-    private function assignServices(PostageSourceResolution $sources, ?Collection $methodServices, AddressData $destination): array
+    private function assignServices(PostageSourceResolution $sources, ?ShippingMethod $shippingMethod, ?Collection $methodServices, AddressData $destination): array
     {
         $registry = app(CarrierRegistry::class);
         $restrictedDestination = $destination->isPoBox() || $destination->isMilitary();
@@ -524,6 +531,16 @@ class ShippingRateService
             $sourceName = $this->registryNameFor($candidate);
 
             if ($sourceName === null || ! $registry->has($sourceName)) {
+                continue;
+            }
+
+            if ($candidate->isChannel() && $candidate->dataSourceType === ShopifySource::class) {
+                $assignment = $this->assignShopify($candidate, $sourceName, $shippingMethod, $methodServices);
+
+                if ($assignment !== null) {
+                    $assignments[] = $assignment;
+                }
+
                 continue;
             }
 
@@ -549,6 +566,7 @@ class ShippingRateService
                 'candidate' => $candidate,
                 'source' => $sourceName,
                 'services' => $services->values(),
+                'serviceCodes' => null,
             ];
         }
 
@@ -556,12 +574,55 @@ class ShippingRateService
     }
 
     /**
+     * What Shopify is asked for on this method, or null when it is asked
+     * nothing (`carrier-catalog-reset/09`).
+     *
+     * Only with the method's `shopify` policy row. Each listed service with a
+     * Shopify mapping is asked for by that mapping's outward code, and `auto`
+     * is added when the row allows Shopify's own choice. With no method there
+     * is no policy to allow Shopify, so it is not asked.
+     *
+     * @param  Collection<int, CarrierService>|null  $methodServices
+     * @return ServiceAssignment|null
+     */
+    private function assignShopify(PostageSourceCandidate $candidate, string $sourceName, ?ShippingMethod $shippingMethod, ?Collection $methodServices): ?array
+    {
+        if ($shippingMethod === null || $methodServices === null || ! $shippingMethod->allowsSource(PostageSourceKind::Shopify)) {
+            return null;
+        }
+
+        $mappings = SourceServiceMapping::forServices(PostageSourceKind::Shopify, $methodServices->pluck('id'));
+        $services = $methodServices
+            ->filter(fn (CarrierService $service): bool => $mappings->has($service->id))
+            ->values();
+
+        $serviceCodes = $services
+            ->map(fn (CarrierService $service): string => ShopifyAdapter::serviceCodeFromMapping($mappings->get($service->id)))
+            ->all();
+
+        if ($shippingMethod->allowsUnlistedServices(PostageSourceKind::Shopify)) {
+            $serviceCodes[] = ShopifyAdapter::AUTO_SERVICE_CODE;
+        }
+
+        if ($serviceCodes === []) {
+            return null;
+        }
+
+        return [
+            'candidate' => $candidate,
+            'source' => $sourceName,
+            'services' => $services,
+            'serviceCodes' => $serviceCodes,
+        ];
+    }
+
+    /**
      * The name a resolved source's adapter is registered under.
      *
      * A direct carrier's fixed name is the registry's key (ADR-0006 decision
-     * 1, as amended). The channel sources are still registered as the
-     * `Shopify` and `Amazon` rows they pose as, until
-     * `carrier-catalog-reset/09` and `12` remove them.
+     * 1, as amended). Shopify is registered under a name no carrier row
+     * carries (`carrier-catalog-reset/09`). Amazon is still registered as the
+     * `Amazon` row it poses as, until `carrier-catalog-reset/12` removes it.
      */
     private function registryNameFor(PostageSourceCandidate $candidate): ?string
     {
@@ -842,6 +903,7 @@ class ShippingRateService
      * is excluded.
      *
      * @param  Collection<int, CarrierService>  $services  Empty when no shipping method is assigned
+     * @param  array<int, string>|null  $serviceCodes  What to ask the source for, when that is not the services' own codes
      * @param  array<int, string>  $requiredCodes
      * @param  array<int, string>  $defaultCodes
      * @param  array<string, array<int, array<int, array<int, string>|null>>>  $scopeMap
@@ -852,6 +914,7 @@ class ShippingRateService
         PostageSourceCandidate $candidate,
         string $sourceName,
         Collection $services,
+        ?array $serviceCodes,
         array $requiredCodes,
         array $defaultCodes,
         array $scopeMap,
@@ -862,7 +925,9 @@ class ShippingRateService
         $registry = app(CarrierRegistry::class);
         $specialServiceCodes = [];
         $scoped = $candidate->isDirect();
-        $label = Carrier::labelForName($sourceName);
+        $label = $sourceName === ShopifyAdapter::CARRIER_NAME
+            ? ShopifyAdapter::SOURCE_LABEL
+            : Carrier::labelForName($sourceName);
         $task = ['key' => $candidate->key(), 'source' => $sourceName, 'label' => $label];
 
         $adapter = $registry->has($sourceName) ? $registry->get($sourceName) : null;
@@ -948,7 +1013,9 @@ class ShippingRateService
             ...$task,
             'candidate' => $candidate,
             'carrierAccount' => $candidate->carrierAccount,
-            'serviceCodes' => $services->pluck('service_code')->values()->all(),
+            // Scoping narrows only a direct source's services, and only a
+            // direct source is asked by its services' own codes.
+            'serviceCodes' => $serviceCodes ?? $services->pluck('service_code')->values()->all(),
             'specialServiceCodes' => $specialServiceCodes,
         ];
     }
@@ -1103,11 +1170,7 @@ class ShippingRateService
         $sources = app(PostageSourceResolver::class)->resolve($package, $shippingMethod);
         $methodServices = $shippingMethod ? $this->getActiveCarrierServices($shippingMethod, $destination) : null;
 
-        if ($methodServices?->isEmpty()) {
-            return collect();
-        }
-
-        return collect($this->assignServices($sources, $methodServices, $destination))
+        return collect($this->assignServices($sources, $shippingMethod, $methodServices, $destination))
             ->pluck('source')
             ->unique()
             ->map(fn (string $name): PostageOfferSource => $registry->get($name))

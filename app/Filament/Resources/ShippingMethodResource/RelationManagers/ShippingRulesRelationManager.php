@@ -73,9 +73,11 @@ class ShippingRulesRelationManager extends RelationManager
                     // any service, the carrier is all that is left.
                     ->required(fn (Get $get): bool => self::sourceFrom($get) === ShippingRuleSource::Any && (bool) $get('any_service')),
                 Forms\Components\Toggle::make('any_service')
-                    ->label('Any service')
+                    ->label(fn (Get $get): string => self::actionFrom($get) === ShippingRuleAction::UseService && self::sourceFrom($get) === ShippingRuleSource::Shopify
+                        ? "Shopify's choice (auto)"
+                        : 'Any service')
                     ->live()
-                    ->visible(fn (Get $get): bool => self::allowsAnyService(self::actionFrom($get), self::sourceFrom($get))),
+                    ->visible(fn (Get $get): bool => $this->allowsAnyService(self::actionFrom($get), self::sourceFrom($get))),
                 Forms\Components\Select::make('carrier_service_id')
                     ->label('Service')
                     ->options(fn (Get $get): array => $this->serviceOptions(self::sourceFrom($get), self::carrierIdFrom($get)))
@@ -123,12 +125,12 @@ class ShippingRulesRelationManager extends RelationManager
             ])
             ->headerActions([
                 Actions\CreateAction::make()
-                    ->mutateDataUsing(fn (array $data): array => self::normalizeTarget($data))
+                    ->mutateDataUsing(fn (array $data): array => $this->normalizeTarget($data))
                     ->slideOver(),
             ])
             ->recordActions([
                 Actions\EditAction::make()
-                    ->mutateDataUsing(fn (array $data): array => self::normalizeTarget($data))
+                    ->mutateDataUsing(fn (array $data): array => $this->normalizeTarget($data))
                     ->slideOver(),
                 Actions\DeleteAction::make(),
             ])
@@ -144,12 +146,12 @@ class ShippingRulesRelationManager extends RelationManager
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
-    public static function normalizeTarget(array $data): array
+    public function normalizeTarget(array $data): array
     {
         $action = self::asAction($data['action'] ?? null);
         $source = self::asSource($data['source'] ?? null);
 
-        $data['any_service'] = self::allowsAnyService($action, $source) && ($data['any_service'] ?? false);
+        $data['any_service'] = $this->allowsAnyService($action, $source) && ($data['any_service'] ?? false);
 
         if ($data['any_service']) {
             $data['carrier_service_id'] = null;
@@ -198,12 +200,13 @@ class ShippingRulesRelationManager extends RelationManager
 
     /**
      * An *Exclude* rule may leave the service open. A *Use* rule may only for
-     * Amazon Buy Shipping, whose services are discovered per quote.
+     * Amazon Buy Shipping, whose services are discovered per quote, or for
+     * Shopify when this method allows its own choice (`auto`).
      */
-    private static function allowsAnyService(?ShippingRuleAction $action, ?ShippingRuleSource $source): bool
+    private function allowsAnyService(?ShippingRuleAction $action, ?ShippingRuleSource $source): bool
     {
         return $action === ShippingRuleAction::ExcludeService
-            || ($action === ShippingRuleAction::UseService && $source === ShippingRuleSource::Amazon);
+            || ($action === ShippingRuleAction::UseService && app(MethodSourceAllowance::class)->allowsAnyServiceFor($this->method(), $source));
     }
 
     private static function actionFrom(Get $get): ?ShippingRuleAction

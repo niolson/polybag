@@ -1,6 +1,6 @@
 # Shopify sells real catalog services
 
-Status: needs-triage
+Status: done
 
 Repo: `polybag`
 
@@ -20,9 +20,21 @@ itself. A Shopify blind offer is an offer of a real service through Shopify.
 - **The Shopify mappings.** `14` created the source mapping table. This issue writes the
   Shopify rows: the 21 established `carrier:service` pairs from `CarrierSeeder`, outward,
   one code per service.
-  - They are written once, by migration, not by `CarrierSeeder`. The reference-data sync
-    runs on every start and would restore a row someone had removed. A Shopify mapping
-    decides what Shopify is offered for, so removing one must stick.
+  - A row splits the pair at the colon: `usps:GroundAdvantage` is external carrier id
+    `usps`, external service id `GroundAdvantage`. Purchase joins them back.
+  - They are written once, by the reference-data sync behind a marker, not on every
+    start. The sync runs on every start and would otherwise restore a row someone had
+    removed. A Shopify mapping decides what Shopify is offered for, so removing one must
+    stick.
+    - Not by migration. The entrypoint runs `migrate` before `app:sync-reference-data`,
+      so on a fresh install a migration finds no service rows to map and never runs
+      again (ADR-0006 decision 2, 2026-09-25 amendment).
+    - `ReferenceDataSeeder` runs the mapping seed after `CarrierSeeder`. It writes a
+      named batch (`shopify-mappings-v1`) only when that batch's marker is absent, and
+      records the marker in `settings` in the same transaction. Once the marker is
+      there, the batch never writes again, even if every row has been removed.
+    - `11` seeds Amazon's mappings the same way, as its own batch, so build the marker
+      for more than one batch.
 - **The catalog.**
   - Author USPS First-Class Package International Service
     (`FIRST-CLASS_PACKAGE_INTERNATIONAL_SERVICE`) and USPS Priority Mail Express
@@ -41,6 +53,15 @@ itself. A Shopify blind offer is an offer of a real service through Shopify.
   - Remove the `Shopify` carrier, its rows, `ShopifyAdapter::CARRIER_NAME` as a catalog
     name, `AUTO_SERVICE_CODE` as a catalog row, and `05`'s transitional name lookup for
     Shopify.
+    - `CARRIER_NAME` can stay as the `CarrierRegistry` key that
+      `ShippingRateService::registryNameFor()` rates the Shopify candidate through. It
+      just stops naming a carrier row. The name exclusions in `EndOfDay` and
+      `DataSourceForm` lose their Shopify entry.
+  - **No data is carried over.** There are no production tenants. The migration deletes
+    the `Shopify` carrier and its rows. The method pivot cascades, so a method that listed
+    them loses them, and existing methods get no `direct` row. The maintainer rebuilds
+    local methods by hand. If a shipping rule still names a `Shopify` row, the migration
+    fails on the restricting key. That is correct: delete the rule and run it again.
 - **The method's source policy is its own table.** This issue creates it, because
   *Shopify may sell* is the first source setting. `12` and `13` add to it rather than to
   `shipping_methods` (ADR-0006 decision 5, option O).
@@ -97,28 +118,35 @@ itself. A Shopify blind offer is an offer of a real service through Shopify.
   carrier. `auto` is dated by the connection's *Date Shopify's choice as* from `08`.
 - **Rules.** *Shopify, a service* from `07` names a real service, and *Shopify, auto*
   names `auto`.
+  - *Shopify, auto* is stored as `any_service = true` with source `shopify`.
+    `ShippingRule`'s check that only Amazon may leave the service open widens to Shopify,
+    and the form offers it only when the method's `shopify` row allows `any`.
+  - `MethodSourceAllowance::kindsFor()` reads the policy rows, as `07` planned. `rowKind()`
+    and its `Shopify`-carrier branches go.
 
 ## Acceptance criteria
 
-- [ ] On a method listing USPS Ground Advantage and UPS Ground, with Shopify allowed, a
+- [x] On a method listing USPS Ground Advantage and UPS Ground, with Shopify allowed, a
       Shopify order whose client has opted in shows a blind offer for each beside the
       direct rates
-- [ ] `auto` appears only when the method allows it. A method with Shopify, `auto` and
+- [x] `auto` appears only when the method allows it. A method with Shopify, `auto` and
       no services is valid and quotes
-- [ ] Batch ship buys `auto` unattended on that method. With `auto` and one service it
+- [x] Batch ship buys `auto` unattended on that method. With `auto` and one service it
       buys nothing unless a rule names one
-- [ ] A purchase sends the mapped code (for example `usps:GroundAdvantage`) and records
+- [x] A purchase sends the mapped code (for example `usps:GroundAdvantage`) and records
       no confirmed service
-- [ ] A Shopify label requesting UPS Ground is dated by UPS's policy, and an `auto` label
+- [x] A Shopify label requesting UPS Ground is dated by UPS's policy, and an `auto` label
       by the carrier its connection names
-- [ ] No `Shopify` carrier or "Shopify's …" service exists, and the mapping table holds
+- [x] No `Shopify` carrier or "Shopify's …" service exists, and the mapping table holds
       the 21 pairs
-- [ ] A Shopify mapping removed by hand stays removed after `app:sync-reference-data`
-- [ ] A new method has a `direct` row. Without one, the method gets no direct rates
-- [ ] A Manager can see a method's postage-source rows but not create, change or delete
+- [x] A Shopify mapping removed by hand stays removed after `app:sync-reference-data`
+- [x] On a fresh database, `migrate` then `app:sync-reference-data` leaves the 21 Shopify
+      mappings in place, and a second sync writes none
+- [x] A new method has a `direct` row. Without one, the method gets no direct rates
+- [x] A Manager can see a method's postage-source rows but not create, change or delete
       them
-- [ ] A `direct` row with `unlisted_services = any` is refused
-- [ ] No carrier account can be created for DHL Express
+- [x] A `direct` row with `unlisted_services = any` is refused
+- [x] No carrier account can be created for DHL Express
 
 ## Blocked by
 
@@ -136,3 +164,51 @@ itself. A Shopify blind offer is an offer of a real service through Shopify.
 - **2026-09-24** — The source policy became a child table, one row per source kind,
   rather than columns on `shipping_methods` (ADR-0006 option O). It gives new channel
   sources, the Admin-only policy and later per-client overrides one place to live.
+- **2026-09-25** — Triage: ready for an agent. Checked against the code after `06`, `07`,
+  `08` and `14`:
+  - The mappings moved from a one-shot migration to a once-only batch in the
+    reference-data sync, behind a marker. Migrations run before the sync, so a migration
+    would have written nothing on a fresh install. ADR-0006 decision 2 is amended to
+    match, and `11` follows it.
+  - No existing methods or rules are carried over, and existing methods get no `direct`
+    row. There are no production tenants, and the maintainer will rebuild the local
+    methods.
+  - Settled: a mapping row splits the pair at the colon, *Shopify, auto* is
+    `any_service`, and `CARRIER_NAME` stays only as the registry key.
+- **2026-09-26** — Done on `feature/shopify-sells-real-catalog-services`.
+  - The `Shopify` carrier and its 22 rows are deleted by migration
+    `2026_09_25_235731`. `CarrierSeeder` authors USPS First-Class Package International
+    Service and Priority Mail Express International, and a `DHL Express` carrier with
+    Express Worldwide (`P`).
+  - `ShopifyServiceMappingSeeder` writes the 21 pairs as batch `shopify-mappings-v1`.
+    It extends `OnceOnlySeeder`, which records the batch's marker in `settings` under
+    `reference_data.seeded.<batch>` in the same transaction. `11` can extend it too.
+  - `shipping_method_postage_sources` is `ShippingMethodPostageSource`, with
+    `UnlistedServices` for the column. `PostageSourceKind` declares what each kind
+    accepts and what allowing it is called. A method gets its `direct` row in a
+    `created` hook. `ShippingMethodSeeder` also writes it, because `DatabaseSeeder`
+    runs without model events, but only for a method that run created, so a later
+    seed never re-enables direct postage an Admin turned off.
+  - The *Postage sources* relation manager sits beside the rules. It offers direct and
+    Shopify only: an Amazon row would change nothing while the hook row still decides,
+    so it appears once `12` makes the row govern Amazon.
+    `ShippingMethodPostageSourcePolicy` lets a Manager view and an Admin write. Direct
+    rows have no edit action, since there is nothing to edit.
+  - Rating: `PostageSourceResolver` gives no direct candidates without the `direct`
+    row. `ShippingRateService::assignShopify()` asks Shopify for the listed services
+    it has a mapping for, by outward code, plus `auto` when the row allows it.
+    `ShopifyAdapter` turns codes back into catalog services through the mapping table.
+    A blind offer now carries `carrierServiceId` and `carrierId`. Both are null for
+    `auto`.
+  - Exclusions match a blind offer by carrier and service, as a rate. Shopify's `auto`
+    is matched only by a rule that names neither. `RuleExclusion` loses `carrierName`
+    and `blindPurchaseId`.
+  - The Shopify task is labelled *Shopify Shipping* in exclusion reasons, where it was
+    the old row's name *Shopify*.
+  - Listed services are offered before `auto`, where the old rows put `auto` first.
+  - Amazon is still gated by its hook row. `MethodSourceAllowance::kindsFor()` reads
+    the policy rows for direct and Shopify only, until `12`.
+  - Covered by `tests/Feature/ShopifySellsCatalogServicesTest.php`, with the seeding
+    criteria in `DatabaseSeederTest` and the DHL Express account refusal in
+    `SystemCarrierTest`. Existing Shopify tests moved from the fake rows to real
+    services with mappings.

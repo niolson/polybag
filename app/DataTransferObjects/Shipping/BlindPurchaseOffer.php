@@ -19,8 +19,12 @@ use App\Services\RateSelector;
  *
  * What it does carry is enough to buy: the source that sells it and the
  * selection to ask that source for. `serviceCode` is a *preference*, not a
- * service — Shopify may honour `usps:usps_ground_advantage` or ignore it, and
- * the response is the only record of what actually happened.
+ * service — Shopify may honour `usps:GroundAdvantage` or ignore it, and the
+ * response is the only record of what actually happened.
+ *
+ * Its identity is the source and the catalog service it requests, or `auto`,
+ * where the source chooses (`carrier-catalog-reset/09`). The code is the
+ * service's one outward mapping, so the identifier below names exactly one.
  */
 readonly class BlindPurchaseOffer
 {
@@ -30,6 +34,8 @@ readonly class BlindPurchaseOffer
      * @param  string  $serviceCode  The preference to ask the source for, never a confirmed service
      * @param  string  $selectionLabel  What that preference is called on screen
      * @param  int|null  $postageDataSourceId  The data source whose account the label is bought on
+     * @param  int|null  $carrierServiceId  The catalog service requested, or null for the source's own choice
+     * @param  int|null  $carrierId  That service's carrier, which the purchase is dated by
      */
     public function __construct(
         public string $source,
@@ -37,7 +43,17 @@ readonly class BlindPurchaseOffer
         public string $serviceCode,
         public string $selectionLabel,
         public ?int $postageDataSourceId = null,
+        public ?int $carrierServiceId = null,
+        public ?int $carrierId = null,
     ) {}
+
+    /**
+     * Whether the source chooses the service itself — Shopify's `auto`.
+     */
+    public function isSourceChoice(): bool
+    {
+        return $this->carrierServiceId === null;
+    }
 
     /**
      * The identifier the browser holds and hands back.
@@ -61,7 +77,7 @@ readonly class BlindPurchaseOffer
     }
 
     /**
-     * @return array{source: string, sourceLabel: string, serviceCode: string, selectionLabel: string, postageDataSourceId: ?int, id: string}
+     * @return array{source: string, sourceLabel: string, serviceCode: string, selectionLabel: string, postageDataSourceId: ?int, carrierServiceId: ?int, carrierId: ?int, id: string}
      */
     public function toArray(): array
     {
@@ -71,12 +87,14 @@ readonly class BlindPurchaseOffer
             'serviceCode' => $this->serviceCode,
             'selectionLabel' => $this->selectionLabel,
             'postageDataSourceId' => $this->postageDataSourceId,
+            'carrierServiceId' => $this->carrierServiceId,
+            'carrierId' => $this->carrierId,
             'id' => $this->id(),
         ];
     }
 
     /**
-     * @param  array{source: string, sourceLabel: string, serviceCode: string, selectionLabel: string, postageDataSourceId?: ?int}  $data
+     * @param  array{source: string, sourceLabel: string, serviceCode: string, selectionLabel: string, postageDataSourceId?: ?int, carrierServiceId?: ?int, carrierId?: ?int}  $data
      */
     public static function fromArray(array $data): self
     {
@@ -86,6 +104,8 @@ readonly class BlindPurchaseOffer
             serviceCode: $data['serviceCode'],
             selectionLabel: $data['selectionLabel'],
             postageDataSourceId: $data['postageDataSourceId'] ?? null,
+            carrierServiceId: $data['carrierServiceId'] ?? null,
+            carrierId: $data['carrierId'] ?? null,
         );
     }
 }

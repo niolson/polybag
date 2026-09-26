@@ -21,6 +21,7 @@ use App\Models\Location;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
+use App\Models\ShippingMethodPostageSource;
 use App\Models\ShippingOffer;
 use App\Models\User;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
@@ -149,13 +150,25 @@ describe('Shopify', function (): void {
         expect(shopifyChoiceShipDate($package, $offer))->toBe('2026-04-02');
     });
 
-    it('does not read the Shopify row cutoff', function (): void {
-        Carrier::factory()->shopify()->create(['pickup_cutoff_hour' => 10]);
-        [$package, $offer] = shopifyChoiceToDate();
+    it('dates a Shopify purchase requesting UPS Ground by UPS policy, whatever the connection names', function (): void {
+        $this->ups->update(['pickup_cutoff_hour' => 17]);
+        $ground = CarrierService::factory()->upsGround()->for($this->ups)->create();
+        [$package, $auto] = shopifyChoiceToDate();
+        $upsGround = new BlindPurchaseOffer(
+            source: ShopifyAdapter::CARRIER_NAME,
+            sourceLabel: 'Shopify Shipping',
+            serviceCode: 'ups_shipping:03',
+            selectionLabel: 'UPS Ground',
+            postageDataSourceId: $auto->postageDataSourceId,
+            carrierServiceId: $ground->id,
+            carrierId: $this->ups->id,
+        );
 
-        onWednesdayAt('15:00');
+        // After UPS's 5 PM, before USPS's 8 PM, which the connection names.
+        onWednesdayAt('18:00');
 
-        expect(shopifyChoiceShipDate($package, $offer))->toBe('2026-04-01');
+        expect(shopifyChoiceShipDate($package, $upsGround))->toBe('2026-04-02')
+            ->and(shopifyChoiceShipDate($package, $auto))->toBe('2026-04-01');
     });
 
     it('dates by USPS when the chosen carrier has been deleted or deactivated', function (): void {
@@ -250,10 +263,9 @@ describe('End of Day', function (): void {
         $this->actingAs(User::factory()->admin()->create());
     });
 
-    it('lists OnTrac and Amazon Shipping, and neither fake row', function (): void {
+    it('lists OnTrac and Amazon Shipping, and not the Amazon row', function (): void {
         Carrier::factory()->create(['name' => 'OnTrac']);
         Carrier::factory()->create(['name' => 'Amazon Shipping']);
-        Carrier::factory()->shopify()->create();
         Carrier::factory()->create(['name' => AmazonBuyShippingAdapter::SOURCE_NAME]);
 
         $listed = collect(Livewire::test(EndOfDay::class)->get('carrierSummary'))->pluck('carrier')->sort()->values()->all();
@@ -404,11 +416,10 @@ describe('End of Day', function (): void {
 });
 
 describe('quoting', function (): void {
-    it('dates a Shopify quote by the connection carrier, never by the Shopify row', function (): void {
-        $shopifyRow = Carrier::factory()->shopify()->create(['pickup_cutoff_hour' => 10]);
-        $auto = CarrierService::factory()->for($shopifyRow)->create(['name' => "Shopify's choice", 'service_code' => ShopifyAdapter::AUTO_SERVICE_CODE]);
+    it('dates a Shopify quote by the connection carrier', function (): void {
+        // Shopify may choose for itself, and the method lists nothing.
         $method = ShippingMethod::factory()->create();
-        $method->carrierServices()->attach($auto->id);
+        ShippingMethodPostageSource::factory()->shopify()->any()->for($method)->create();
 
         $source = createShopifyDataSource(
             [DataSource::SHIP_DATE_CARRIER_SETTING => $this->ups->id],
@@ -431,10 +442,6 @@ describe('quoting', function (): void {
         expect($offers)->not->toBeEmpty();
         $shipDates->shouldHaveReceived('getShipDate', [
             Mockery::on(fn (?Carrier $carrier): bool => $carrier?->is($this->ups) ?? false),
-            Mockery::any(),
-        ]);
-        $shipDates->shouldNotHaveReceived('getShipDate', [
-            Mockery::on(fn (?Carrier $carrier): bool => $carrier?->is($shopifyRow) ?? false),
             Mockery::any(),
         ]);
     });
