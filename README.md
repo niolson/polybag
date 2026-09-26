@@ -206,21 +206,28 @@ of the merchant's direct carrier accounts.
 An **Offer** is a package-specific quoted rate backed by short-lived purchase authority
 held on the server. Shopify Shipping is different: it is an attended **blind purchase**
 whose final carrier is learned after purchase and whose price and service Shopify does
-not report. It is therefore excluded from shipping rules, batch shipping, and auto-ship.
-Shopify Shipping labels must be voided in the Shopify admin; the scheduled fulfillment
-sync detects the void and returns the Package to an unshipped state.
+not report. A packer buys one only after confirming it. Automation buys one only when a
+shipping rule names it, or when Shopify is the shipping method's sole eligible source and
+offers exactly one purchase. Shopify Shipping labels must be voided in the Shopify admin;
+the scheduled fulfillment sync detects the void and returns the Package to an unshipped
+state.
 
-Amazon can return carrier services that PolyBag has never seen before. An operator may
-select one manually after seeing its price and promise. Automated shipping can use it
-only after an administrator maps it to the carrier-service catalog and explicitly
-approves it for the Client and environment.
+A packer may buy any Offer shown on the Ship page. Auto-ship, batch shipping, and shipping
+rules buy only within the shipping method's **allowance**: the postage sources the method
+permits, and the services it lists. For Amazon Buy Shipping, an administrator can widen
+this to any service Amazon offers. A Connection's **postage setting** (*does not sell
+postage*, *packer only*, or *packer and automation*) can narrow the allowance further. A
+Shipment needs a shipping method before any Label is bought.
 
-Amazon's Shipping v2 API distinguishes on-Amazon orders (`channelType: AMAZON`) from
-off-Amazon orders (`channelType: EXTERNAL`). PolyBag currently implements only the first
-path. An Amazon order can therefore receive Amazon Shipping, USPS, UPS, FedEx, or another
-carrier that Amazon returns. PolyBag does not yet offer Amazon Shipping for Shipments
-originating on Shopify, a database source, or another non-Amazon channel, even when an
-Amazon Connection is set up and the seller has completed Amazon Shipping onboarding.
+Amazon's Shipping v2 API distinguishes Amazon orders (`channelType: AMAZON`) from orders
+from other channels (`channelType: EXTERNAL`). An Amazon order is quoted through Amazon Buy
+Shipping and can receive Amazon Shipping, USPS, UPS, FedEx, OnTrac, or another carrier that
+Amazon returns. Amazon may offer services PolyBag has never seen. An administrator maps
+these to the carrier-service catalog on *Map Carrier Services*; until then, only a packer,
+or a method allowing any service, can buy them. A Shipment from Shopify, a database
+source, or Manual Ship can be sold Amazon Shipping directly, like any other carrier. The
+seller's Amazon Connection is the account, and a Carrier Account Scope chooses which
+Connection sells for each Location and Client.
 
 The main scopes are **Location** for a warehouse and **Client** for a 3PL brand or
 retailer. **Carrier Account Scopes** select credentials from the Location and Client.
