@@ -9,6 +9,7 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CustomsDocumentDelivery;
+use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
 use App\Models\Carrier;
@@ -182,6 +183,7 @@ describe('channel binding', function (): void {
 
     it('offers the bound channel source as a candidate with no carrier of its own', function (): void {
         $source = createShopifyDataSource();
+        $source->update(['postage_setting' => PostageSetting::PackerOnly]);
 
         $resolution = app(PostageSourceResolver::class)->resolve(packageFrom($source));
         $channel = $resolution->channel();
@@ -369,6 +371,7 @@ describe('accounts on carriers we do not sell directly', function (): void {
         }
 
         $source = createShopifyDataSource();
+        $source->update(['postage_setting' => PostageSetting::PackerOnly]);
         $resolution = app(PostageSourceResolver::class)->resolve(packageFrom($source));
 
         expect($resolution->forCarrier(ShopifyAdapter::CARRIER_NAME))->toBeEmpty()

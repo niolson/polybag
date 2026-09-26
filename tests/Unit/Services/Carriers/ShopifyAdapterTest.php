@@ -8,6 +8,7 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ServiceInference;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\PackageStatus;
+use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Enums\PostageSourceKind;
 use App\Enums\ServiceEvidence;
@@ -91,11 +92,19 @@ it('advertises catalogued selections as priceless offers for a Shopify-sourced p
         ->and($offers->last()->selectionLabel)->toBe('USPS Ground Advantage');
 });
 
-it('advertises nothing for a client that has not opted into blind purchase', function (): void {
+it('advertises nothing from a connection that does not sell postage', function (): void {
     seedShopifyCarrierServices();
     $package = shopifyPackage();
 
     expect($this->adapter->blindPurchaseOffers(RateRequest::fromPackage($package), ['auto']))->toBeEmpty();
+});
+
+it('advertises from a packer-only connection', function (): void {
+    seedShopifyCarrierServices();
+    $package = shopifyPackage();
+    setPostageSetting($package, PostageSetting::PackerOnly);
+
+    expect($this->adapter->blindPurchaseOffers(RateRequest::fromPackage($package), ['auto']))->toHaveCount(1);
 });
 
 it('advertises nothing for a package that has no Shopify fulfillment order', function (): void {

@@ -21,7 +21,6 @@ class Client extends Model
         'return_instructions',
         'is_default',
         'active',
-        'blind_purchase_enabled',
         'return_company',
         'return_name',
         'return_address1',
@@ -45,7 +44,6 @@ class Client extends Model
     protected $casts = [
         'is_default' => 'boolean',
         'active' => 'boolean',
-        'blind_purchase_enabled' => 'boolean',
         'pick_fee_first_item' => 'decimal:2',
         'pick_fee_additional_item' => 'decimal:2',
         'label_fee_per_package' => 'decimal:2',

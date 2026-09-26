@@ -47,9 +47,10 @@ use Illuminate\Support\Str;
  *   and the cost recorded on the package is left null;
  * - no purchased service is reported either, so the package records the service
  *   as `unknown` and keeps what was asked for as a requested preference;
- * - the offer is advertised only for a client that has opted into blind
- *   purchase, and automation can select it only through an explicit shipping
- *   rule or as the ShippingMethod's sole eligible configured choice;
+ * - the offer is advertised only by a connection whose postage setting sells,
+ *   and automation can select it only when that setting allows automation,
+ *   through an explicit shipping rule or as the ShippingMethod's sole eligible
+ *   configured choice;
  * - only shipments imported from an active Shopify data source are eligible,
  *   since a purchase is keyed to a Shopify fulfillment order.
  *
@@ -168,9 +169,9 @@ class ShopifyAdapter implements BlindPurchaseSource
      * What Shopify will sell for this package, priceless.
      *
      * Five gates, and none of them is an error worth telling a packer about:
-     * the client has to have opted into blind purchase (ADR-0003 decision 5),
-     * the shipment has to have come from a live Shopify data source with a
-     * fulfillment order to buy against, no label can have been bought against
+     * the shipment has to have come from a live Shopify data source whose
+     * postage setting sells (ADR-0006 decision 6), with a fulfillment order to
+     * buy against, no label can have been bought against
      * that fulfillment order already, the selection has to be `auto` or a
      * pair the source mapping table maps to a catalog service, and the Package
      * has to qualify for any contents that service requires.
@@ -181,10 +182,11 @@ class ShopifyAdapter implements BlindPurchaseSource
      * catalog service the offer names. The purchase re-derives these offers, so
      * a stale Media Mail selection, or a rule's, is refused there too.
      *
-     * The opt-in is checked here rather than in `ShippingRateService` because
-     * it is a fact about this kind of purchase, not about rate shopping: there
-     * is no price and no service to consent to after the fact, so consent has
-     * to be on file before the offer is shown at all.
+     * `PostageSourceResolver` already leaves a connection that does not sell
+     * out of rating. The setting is checked again here because it is a fact
+     * about this kind of purchase, not about rate shopping: there is no price
+     * and no service to consent to after the fact, so consent has to be on
+     * file before the offer is shown at all.
      *
      * @param  array<string>  $serviceCodes
      * @return Collection<int, BlindPurchaseOffer>
@@ -195,15 +197,16 @@ class ShopifyAdapter implements BlindPurchaseSource
             return collect();
         }
 
-        $package = Package::with(['shipment.dataSource', 'shipment.client'])->find($request->packageId);
+        $package = Package::with('shipment.dataSource')->find($request->packageId);
 
-        if (! $package || ! $package->shipment?->client?->blind_purchase_enabled) {
+        if (! $package) {
             return collect();
         }
 
         $labelService = app(ShopifyShippingLabelService::class);
+        $connection = $labelService->dataSourceFor($package);
 
-        if (! $labelService->canPurchaseFor($package)) {
+        if (! $connection || ! $connection->postageSetting()->sells() || ! $labelService->canPurchaseFor($package)) {
             return collect();
         }
 
@@ -219,7 +222,7 @@ class ShopifyAdapter implements BlindPurchaseSource
                 ->all(),
         );
 
-        $dataSourceId = $labelService->dataSourceFor($package)?->id;
+        $dataSourceId = $connection->id;
         $offers = collect();
 
         foreach ($serviceCodes as $code) {

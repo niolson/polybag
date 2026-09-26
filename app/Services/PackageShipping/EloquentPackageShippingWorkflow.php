@@ -596,27 +596,29 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * offer, and nothing more.
      *
      * Consent is checked first and separately because it deserves its own
-     * message — the offer will also be absent for a client that has not opted
-     * in, and "no longer available" would send an operator looking for the
-     * wrong thing.
+     * message — the offer will also be absent for a connection that does not
+     * sell postage, and "no longer available" would send an operator looking
+     * for the wrong thing.
      *
      * @return BlindPurchaseOffer|PackageShippingResult the offer to buy, or the reason not to
      */
     private function resolveBlindOffer(Package $package, BlindPurchaseOffer $requested): BlindPurchaseOffer|PackageShippingResult
     {
-        $package->loadMissing(['shipment.client', 'shipment.shippingMethod']);
+        $package->loadMissing(['shipment.shippingMethod']);
 
-        if (! $package->shipment?->client?->blind_purchase_enabled) {
-            logger()->warning('Refused a blind purchase for a client that has not opted in', [
+        $connection = $this->postageSourceResolver->channelSourceFor($package);
+
+        if ($connection && ! $connection->postageSetting()->sells()) {
+            logger()->warning('Refused a blind purchase from a connection that does not sell postage', [
                 'package_id' => $package->id,
                 'source' => $requested->source,
-                'client_id' => $package->shipment?->client_id,
+                'data_source_id' => $connection->id,
             ]);
 
             return PackageShippingResult::offerUnavailable(
-                'Blind Purchase Not Enabled',
-                "{$requested->sourceLabel} buys postage without reporting a price or a service, so it is only available to clients that have opted in. "
-                .'Enable it on the client, or choose a rate from a carrier account.',
+                'Connection Does Not Sell Postage',
+                "{$requested->sourceLabel} buys postage without reporting a price or a service, and the connection \"{$connection->name}\" is set not to sell postage. "
+                .'Change its postage setting under Integrations → Connections, or choose a rate from a carrier account.',
             );
         }
 
@@ -1191,6 +1193,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * name it, or it may be inferred only when it is the ShippingMethod's sole
      * configured, package-eligible choice.
      *
+     * Either way, channel postage is bought only when its connection's postage
+     * setting allows automation (ADR-0006 decision 6). An offer the setting
+     * holds back is kept in the result, so the refusal can name the setting.
+     *
      * Deliberately not routed through {@see prepareRates()}. That builds the
      * attended view — where an unapproved service is *supposed* to appear, with
      * its price, for a packer to take responsibility for — and its
@@ -1204,6 +1210,14 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
         $ruleResult = $this->ruleEvaluator->evaluate($package->shipment, $package);
         $clientId = $package->shipment?->client_id;
+        $channel = $this->postageSourceResolver->channelSourceFor($package);
+        $blindAllowed = $channel?->postageSetting()->allowsAutomation() ?? false;
+
+        /** @var Collection<int, BlindPurchaseOffer> $heldBlind */
+        $heldBlind = collect();
+        $finish = fn (UnattendedRateSelection $selection): UnattendedRateSelection => $channel === null
+            ? $selection
+            : $selection->holdingBlindOffers($heldBlind, $channel->name);
 
         if ($ruleResult->hasPreSelectedBlindPurchase()) {
             $blindOffer = $this->shippingRateService
@@ -1211,12 +1225,18 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 ->reject($ruleResult->excludesBlindOffer(...))
                 ->first(fn (BlindPurchaseOffer $offer): bool => $offer->id() === $ruleResult->preSelectedBlindPurchaseId);
 
-            if ($blindOffer) {
+            if ($blindOffer && $blindAllowed) {
                 return new UnattendedRateSelection(
                     rate: null,
                     withheld: collect(),
                     blindOffer: $blindOffer,
                 );
+            }
+
+            // A rule cannot reach what the connection sells to a packer only.
+            // Rate shopping goes on, as it does when the offer is gone.
+            if ($blindOffer) {
+                $heldBlind->push($blindOffer);
             }
         }
 
@@ -1247,7 +1267,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                     ]);
                 }
 
-                return $this->rateSelector->selectForAutomation($rates, $deadline, $clientId, $requirements);
+                return $finish($this->rateSelector->selectForAutomation($rates, $deadline, $clientId, $requirements, $channel));
             }
 
             logger()->info('A shipping rule names a service no source quoted for this package; rate shopping instead', [
@@ -1275,12 +1295,13 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         // A rule's choice is still unattended: the shipping method's on-time
         // and protection requirements hold against it too.
         if ($preSelected instanceof RateResponse) {
-            return $this->rateSelector->selectForAutomation(
+            return $finish($this->rateSelector->selectForAutomation(
                 collect([$preSelected]),
                 $deadline,
                 $clientId,
                 $requirements,
-            );
+                $channel,
+            ));
         }
 
         // The adapter found no variant of the pre-selected service this
@@ -1309,7 +1330,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             $rates = $rates->reject(fn (RateResponse $rate): bool => $ruleResult->excludes($rate));
         }
 
-        $selection = $this->rateSelector->selectForAutomation($rates, $deadline, $clientId, $requirements);
+        $selection = $this->rateSelector->selectForAutomation($rates, $deadline, $clientId, $requirements, $channel);
 
         if ($selection->rate === null) {
             $blindOffer = $this->shippingRateService->soleBlindPurchaseOfferForAutomation(
@@ -1317,16 +1338,20 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 $ruleResult->excludesBlindOffer(...),
             );
 
-            if ($blindOffer) {
+            if ($blindOffer && $blindAllowed) {
                 return new UnattendedRateSelection(
                     rate: null,
                     withheld: $selection->withheld,
                     blindOffer: $blindOffer,
                 );
             }
+
+            if ($blindOffer && ! $heldBlind->contains(fn (BlindPurchaseOffer $held): bool => $held->id() === $blindOffer->id())) {
+                $heldBlind->push($blindOffer);
+            }
         }
 
-        return new UnattendedRateSelection(
+        return $finish(new UnattendedRateSelection(
             rate: $selection->rate,
             withheld: $selection->withheld,
             attendedAlternativeAvailable: $selection->attendedAlternativeAvailable
@@ -1336,7 +1361,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             requirements: $selection->requirements,
             deadlineMissing: $selection->deadlineMissing,
             contentRestricted: $selection->contentRestricted,
-        );
+            heldByPostageSetting: $selection->heldByPostageSetting,
+            blindOffersHeldByPostageSetting: $selection->blindOffersHeldByPostageSetting,
+            postageSettingConnection: $selection->postageSettingConnection,
+        ));
     }
 
     /**
@@ -1373,8 +1401,25 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             ]);
         }
 
+        if ($selection->heldByPostageSettingAnything()) {
+            logger()->info('Held channel postage from automated purchase under the connection\'s postage setting', [
+                'package_id' => $package->id,
+                'connection' => $selection->postageSettingConnection,
+                'held' => $selection->heldByPostageSettingSummary(),
+            ]);
+        }
+
         if ($selection->refusedForRequirements()) {
             return $this->refusedForMethodRequirements($package, $selection);
+        }
+
+        if (! $selection->withheldAnything() && $selection->heldByPostageSettingAnything()) {
+            return PackageShippingResult::attendedSelectionRequired(
+                'Connection Sells to Packers Only',
+                "This package was offered {$selection->heldByPostageSettingSummary()}, but the connection \"{$selection->postageSettingConnection}\" sells postage to a packer only, so automation does not buy it. "
+                .$this->contentRestrictionNote($selection)
+                .'Ship this package from the Ship page, or set the connection\'s postage setting to Packer and automation.',
+            );
         }
 
         if (! $selection->withheldAnything() && $selection->contentRestrictedAnything()) {
@@ -1404,6 +1449,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             'This package was quoted, but no service it was offered is approved for automated purchase: '
             .$selection->withheldSummary().'. '
             .$this->contentRestrictionNote($selection)
+            .$this->postageSettingNote($selection)
             .'Approve it on Amazon Approvals, or ship this package from the Ship page, where a person chooses the rate.',
         );
     }
@@ -1418,6 +1464,19 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         return $selection->contentRestrictedAnything()
             ? 'Automation also never buys '.$selection->contentRestrictedSummary()
                 .', which is valid only for restricted contents nothing in PolyBag vouches for. '
+            : '';
+    }
+
+    /**
+     * A sentence naming what the connection's postage setting held back beside
+     * another refusal, so an operator approving services does not expect an
+     * approval to release it. None would.
+     */
+    private function postageSettingNote(UnattendedRateSelection $selection): string
+    {
+        return $selection->heldByPostageSettingAnything()
+            ? 'Automation also never buys '.$selection->heldByPostageSettingSummary()
+                .", because the connection \"{$selection->postageSettingConnection}\" sells postage to a packer only. "
             : '';
     }
 
@@ -1478,6 +1537,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             },
             "{$method} requires a rate that {$missing}, and {$scope} "
             .$this->contentRestrictionNote($selection)
+            .$this->postageSettingNote($selection)
             .'Ship it from the Ship page, where a person chooses the rate, or change the requirement on the shipping method.',
         );
     }

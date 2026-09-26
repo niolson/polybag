@@ -9,6 +9,7 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\BoxSizeType;
 use App\Enums\CarrierPackaging;
 use App\Enums\PackageStatus;
+use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
 use App\Enums\SourceEnvironment;
@@ -1371,6 +1372,25 @@ it('refuses rather than buying when the account that quoted the offer is gone', 
         // Amazon answered nothing because it was never asked, so the offer
         // resolves as declined and the package is free to be quoted again.
         ->and(ShippingOffer::where('public_id', $rate->offerId)->value('purchase_failed_at'))->not->toBeNull();
+});
+
+it('refuses an offer quoted before its connection was set not to sell postage', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->first();
+
+    $this->source->update(['postage_setting' => PostageSetting::DoesNotSell]);
+
+    $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package->fresh(), new PackageShippingRequest(
+        selectedRate: $rate,
+    ));
+
+    expect($result->success)->toBeFalse()
+        ->and($result->message)->toContain('is set not to sell postage')
+        ->and($this->package->fresh()->status)->toBe(PackageStatus::Unshipped)
+        ->and(ShippingOffer::where('public_id', $rate->offerId)->value('purchase_failed_at'))->not->toBeNull();
+
+    Saloon::assertNotSent(PurchaseShipment::class);
 });
 
 it('skips a settled confirmation even when the credentials to send one are gone', function (): void {

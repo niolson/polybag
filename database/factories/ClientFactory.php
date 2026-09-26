@@ -24,15 +24,6 @@ class ClientFactory extends Factory
         ];
     }
 
-    /**
-     * A client that has consented to postage bought with no price and no
-     * service reported back. See ADR-0003 decision 5.
-     */
-    public function withBlindPurchase(): static
-    {
-        return $this->state(fn () => ['blind_purchase_enabled' => true]);
-    }
-
     public function default(): static
     {
         return $this->state(fn () => [

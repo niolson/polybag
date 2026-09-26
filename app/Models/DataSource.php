@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\OffAmazonShippingStatus;
+use App\Enums\PostageSetting;
 use App\Enums\ScheduleInterval;
 use App\Models\Concerns\HasDefaultClient;
 use App\Services\ShipmentImport\Sources\AmazonSource;
@@ -33,6 +34,7 @@ class DataSource extends Model
         'active',
         'import_enabled',
         'offers_off_amazon_shipping',
+        'postage_setting',
         'off_amazon_shipping_status',
         'off_amazon_shipping_checked_at',
         'global_export',
@@ -49,6 +51,7 @@ class DataSource extends Model
         'active' => 'boolean',
         'import_enabled' => 'boolean',
         'offers_off_amazon_shipping' => 'boolean',
+        'postage_setting' => PostageSetting::class,
         'off_amazon_shipping_status' => OffAmazonShippingStatus::class,
         'off_amazon_shipping_checked_at' => 'datetime',
         'global_export' => 'boolean',
@@ -59,6 +62,10 @@ class DataSource extends Model
 
     protected static function booted(): void
     {
+        static::creating(function (DataSource $source): void {
+            $source->postage_setting ??= PostageSetting::defaultFor($source->source_type);
+        });
+
         static::saved(function (DataSource $source): void {
             if ($source->wasChanged('client_id') && $source->client_id !== null) {
                 $source->dropScopesOutsideClient();
@@ -117,6 +124,17 @@ class DataSource extends Model
             : null;
 
         return $carrier ?? Carrier::query()->where('name', Carrier::USPS)->first();
+    }
+
+    /**
+     * This connection's consent to sell channel postage — ADR-0006 decision 6.
+     *
+     * Read here rather than off the column, so a driver that sells no postage
+     * and a row that somehow has no value both answer *does not sell*.
+     */
+    public function postageSetting(): PostageSetting
+    {
+        return $this->postage_setting ?? PostageSetting::DoesNotSell;
     }
 
     public function secret(string $key): mixed

@@ -125,7 +125,8 @@ class PostageSourceResolver
 
     /**
      * Every source that could sell this package a label: the bound channel
-     * source, the connection scoped to sell off-Amazon Amazon Shipping, then
+     * source when its postage setting sells, the connection scoped to sell
+     * off-Amazon Amazon Shipping, then
      * one per direct carrier (ADR-0006 decision 4).
      *
      * The direct carriers are those the shipping method's active services
@@ -154,7 +155,11 @@ class PostageSourceResolver
         /** @var Collection<int, PostageSourceCandidate> $candidates */
         $candidates = new Collection;
 
-        if ($channel = $this->channelSourceFor($package)) {
+        // A connection that does not sell postage is not asked (ADR-0006
+        // decision 6). It stays the channel source for everything else.
+        $channel = $this->channelSourceFor($package);
+
+        if ($channel && $channel->postageSetting()->sells()) {
             $candidates->push(PostageSourceCandidate::fromDataSource($channel));
         }
 

@@ -34,6 +34,9 @@ readonly class UnattendedRateSelection
      * @param  OfferRequirements|null  $requirements  What the order's shipping method required, if anything
      * @param  bool  $deadlineMissing  Whether on-time delivery was required of an Amazon order with no due-by date, so no rate could meet it
      * @param  Collection<int, RateResponse>|null  $contentRestricted  Rates refused because they are valid only for contents nothing in PolyBag vouches for. Not `withheld`: no approval can release them
+     * @param  Collection<int, RateResponse>|null  $heldByPostageSetting  Rates refused because the connection sells postage to a packer only (ADR-0006 decision 6). Decided before approvals, so not `withheld`: no approval can release them
+     * @param  Collection<int, BlindPurchaseOffer>|null  $blindOffersHeldByPostageSetting  Blind offers a rule or the sole-choice rule would have bought, refused for the same reason
+     * @param  string|null  $postageSettingConnection  The name of the connection whose postage setting held them
      */
     public function __construct(
         public ?RateResponse $rate,
@@ -45,6 +48,9 @@ readonly class UnattendedRateSelection
         public ?OfferRequirements $requirements = null,
         public bool $deadlineMissing = false,
         public ?Collection $contentRestricted = null,
+        public ?Collection $heldByPostageSetting = null,
+        public ?Collection $blindOffersHeldByPostageSetting = null,
+        public ?string $postageSettingConnection = null,
     ) {
         if ($rate !== null && $blindOffer !== null) {
             throw new \InvalidArgumentException('Unattended shipping may select either a rate or a blind purchase, never both.');
@@ -74,6 +80,54 @@ readonly class UnattendedRateSelection
             ->map(fn (RateResponse $rate): string => trim("{$rate->carrier} {$rate->serviceName}"))
             ->unique()
             ->implode(', ');
+    }
+
+    public function heldByPostageSettingAnything(): bool
+    {
+        return ($this->heldByPostageSetting?->isNotEmpty() ?? false)
+            || ($this->blindOffersHeldByPostageSetting?->isNotEmpty() ?? false);
+    }
+
+    /**
+     * The channel postage the connection's setting held back, as an operator
+     * would name it.
+     */
+    public function heldByPostageSettingSummary(): string
+    {
+        return ($this->heldByPostageSetting ?? collect())
+            ->map(fn (RateResponse $rate): string => trim("{$rate->carrier} {$rate->serviceName}"))
+            ->merge(($this->blindOffersHeldByPostageSetting ?? collect())
+                ->map(fn (BlindPurchaseOffer $offer): string => "{$offer->sourceLabel} {$offer->selectionLabel}"))
+            ->unique()
+            ->implode(', ');
+    }
+
+    /**
+     * The same selection, also holding back these blind offers, which a rule
+     * or the sole-choice rule would have bought.
+     *
+     * @param  Collection<int, BlindPurchaseOffer>  $offers
+     */
+    public function holdingBlindOffers(Collection $offers, string $connection): self
+    {
+        if ($offers->isEmpty()) {
+            return $this;
+        }
+
+        return new self(
+            rate: $this->rate,
+            withheld: $this->withheld,
+            blindOffer: $this->blindOffer,
+            attendedAlternativeAvailable: true,
+            late: $this->late,
+            unprotected: $this->unprotected,
+            requirements: $this->requirements,
+            deadlineMissing: $this->deadlineMissing,
+            contentRestricted: $this->contentRestricted,
+            heldByPostageSetting: $this->heldByPostageSetting,
+            blindOffersHeldByPostageSetting: ($this->blindOffersHeldByPostageSetting ?? collect())->merge($offers)->values(),
+            postageSettingConnection: $connection,
+        );
     }
 
     public function withheldAnything(): bool

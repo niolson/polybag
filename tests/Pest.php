@@ -4,6 +4,7 @@ use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\PackageStatus;
+use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
@@ -227,16 +228,32 @@ function createShopifyDataSource(array $settings = [], array $secrets = []): Dat
 }
 
 /**
- * Put a client's consent to blind purchase on file — ADR-0003 decision 5, and
- * the gate every Shopify offer is advertised behind. Defaults to the default
- * client, which is the one every factory-made shipment belongs to.
+ * Let a Shopify connection sell blind purchases to a packer and to automation
+ * — ADR-0006 decision 6, and the gate every Shopify offer is advertised
+ * behind. The package's own connection, or every Shopify connection when none
+ * is given.
  */
 function allowBlindPurchase(?Package $package = null): void
 {
-    $client = $package?->shipment?->client;
-    $client ??= Client::where('is_default', true)->first();
+    if ($package !== null) {
+        setPostageSetting($package, PostageSetting::PackerAndAutomation);
 
-    $client?->update(['blind_purchase_enabled' => true]);
+        return;
+    }
+
+    DataSource::where('source_type', ShopifySource::class)
+        ->get()
+        ->each(fn (DataSource $source) => $source->update(['postage_setting' => PostageSetting::PackerAndAutomation]));
+}
+
+/**
+ * Set the postage setting on the connection a package's shipment came from.
+ */
+function setPostageSetting(Package $package, PostageSetting $setting): void
+{
+    $package->loadMissing('shipment.dataSource');
+
+    $package->shipment?->dataSource?->update(['postage_setting' => $setting]);
 }
 
 /**

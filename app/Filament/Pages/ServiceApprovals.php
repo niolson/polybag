@@ -40,8 +40,8 @@ use UnitEnum;
  *
  * Amazon-only for now, because Amazon is the only postage source that reports
  * services rather than quoting ones we authored: direct carrier accounts buy
- * from the seeded catalog without approval, and Shopify's blind purchase has
- * its own per-client opt-in. The page is hidden while no Amazon connection is
+ * from the seeded catalog without approval, and Shopify's blind purchase is
+ * governed by its connection's postage setting alone. The page is hidden while no Amazon connection is
  * active; approvals already on file are kept, and apply again when one is.
  * Amazon orders and orders from other channels, sold Amazon Shipping off
  * Amazon, are approved separately: the prices and terms differ, so consent to
