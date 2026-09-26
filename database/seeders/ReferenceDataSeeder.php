@@ -15,6 +15,7 @@ class ReferenceDataSeeder extends Seeder
             CarrierSeeder::class,
             // After the catalog it maps, and once only: removing one sticks.
             ShopifyServiceMappingSeeder::class,
+            AmazonServiceMappingSeeder::class,
             CarrierAliasSeeder::class,
             SpecialServiceSeeder::class,
             CarrierServiceSpecialServiceSeeder::class,

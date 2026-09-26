@@ -396,7 +396,7 @@ describe('the Shopify mappings', function (): void {
         $this->artisan('app:sync-reference-data')->assertSuccessful();
 
         expect($first)->toHaveCount(21)
-            ->and(SourceServiceMapping::query()->orderBy('id')->get(['id', 'updated_at'])->toArray())->toBe($first->toArray())
+            ->and(SourceServiceMapping::query()->where('source_kind', PostageSourceKind::Shopify)->orderBy('id')->get(['id', 'updated_at'])->toArray())->toBe($first->toArray())
             ->and(OnceOnlySeeder::markerFor(ShopifyServiceMappingSeeder::BATCH))->toBe('reference_data.seeded.shopify-mappings-v1');
     });
 

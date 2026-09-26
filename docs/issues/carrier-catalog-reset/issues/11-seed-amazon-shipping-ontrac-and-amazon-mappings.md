@@ -1,6 +1,6 @@
 # Seed Amazon Shipping and OnTrac, and Amazon's known service mappings
 
-Status: needs-triage
+Status: done
 
 Repo: `polybag`
 
@@ -22,9 +22,11 @@ signs off the table below before it is seeded.
   - Seed `Amazon Shipping` with *Amazon Shipping Ground*, `service_code`
     `std-us-swa-mfn`, the code Amazon returns for it in the sandbox. `15` registers
     its direct adapter under this name.
-  - Seed `OnTrac` (no adapter) with *OnTrac Ground*. Take its `service_code` from OnTrac's
-    own API documentation when seeding, not from Amazon's identifier and not from memory,
-    so a later direct integration needs no remapping.
+  - Seed `OnTrac` (no adapter) with *OnTrac Ground*, `service_code` `ONTRAC_MFN_GROUND`.
+    OnTrac publishes no API documentation, so the code is the one Amazon's Buy Shipping
+    tutorial gives. Say so in the seeder. A later direct integration that finds OnTrac's own
+    code changes only `service_code`: mappings point at the `CarrierService` row, not at
+    its code.
   - Nothing else is known for either. Across every capture, OnTrac has one identity
     (`ONTRAC_MFN_GROUND`, eligible in production). Amazon Shipping has one
     (`std-us-swa-mfn`, seen only in the sandbox; production has never quoted it for us).
@@ -45,7 +47,8 @@ signs off the table below before it is seeded.
     Ground Saver*. `CarrierSeeder` names both *UPS Ground Saver*, so the method form shows
     two identical entries. Rename them *UPS Ground Saver (under 1 lb)* and *UPS Ground
     Saver (1 lb and over)*: in a one-off migration for existing rows, and in the seeder
-    for new installs. The seeder must not rename on every start, because it would undo
+    for new installs. The migration renames only rows still named exactly *UPS Ground
+    Saver*, so it leaves alone a row an Admin has already renamed. The seeder must not rename on every start, because it would undo
     an Admin's rename. A method may list one band without the other.
   - **Author UPS Ground Saver Media**: UPS code `95`, 1 lb and over, with
     `required_contents = media` (`02`). It reaches PO Boxes and military addresses,
@@ -63,8 +66,11 @@ signs off the table below before it is seeded.
     reference-data sync on every start would recreate a deleted row.
 - **Mappings are seeded once, behind a marker.** A mapping authorizes from `13` on, and the
   reference-data sync would restore one an Admin had removed on the next start. The sync
-  writes the signed-off rows as a named batch, using the marker `09` builds, and never
-  writes that batch again. Not by migration: migrations run before the sync, so on a
+  writes the signed-off rows as a named batch, extending `OnceOnlySeeder` from `09`, and
+  never writes that batch again.
+  - The batch skips an identifier that already has a mapping. The mapping page has been
+    live since `14`, so an Admin may have mapped one first, and
+    `SourceServiceMapping::map()` would silently overwrite their choice. Not by migration: migrations run before the sync, so on a
   fresh install there would be no service rows to map (ADR-0006 decision 2, 2026-09-25
   amendment).
 - **Remove `04`'s fallback** that gated `USPS_PTP_MM` by identifier. The seeded mapping
@@ -73,6 +79,15 @@ signs off the table below before it is seeded.
   Saver Media carries the media requirement, so a Package that does not qualify never
   sees it. The list is left with `UPS_PTP_SUREPOST_BPM` (dropped) and `USPS_PTP_BPM`
   (attended-only).
+- **An offered service with no mapping is logged.** `ObservedServiceRecorder` already
+  records every identity Amazon returns, with `last_eligible_at`, and the Map Carrier
+  Services page lists them. Two additions:
+  - When an unmapped identity is first offered as eligible (`last_eligible_at` goes from
+    empty to set), write one application log line naming the source, carrier and service
+    identifiers and names, and the environment. Do this once per identity, not on every
+    quote: the recorder is on the Ship page's hot path.
+  - Add an *Offered* filter to the page, so *offered and unmapped* is one filtered view.
+  - No badge or notification. ADR-0003 decision 8 keeps the page quiet.
 - **Approvals are unchanged.** They are still keyed on Amazon's identifiers until `13`.
 
 ### Proposed seed mappings, for sign-off
@@ -132,28 +147,35 @@ Left unmapped:
 The carriers outside the US list (4PX, China Post, Yanwen and others) are left for the
 page.
 
-Questions for the sign-off:
+Questions for the sign-off, answered 2026-09-26:
 
 - **Saturday variants.** Mapping them to the base service means a method that lists
   UPS Next Day Air lets automation buy the Saturday variant, which usually costs more.
-  The due-by date already decides whether the extra day matters.
-- **`USPS_PTP_FC`.** First-Class Package became Ground Advantage in 2023.
+  The due-by date already decides whether the extra day matters. *Answer: map them to the
+  base service, as the table shows.*
+- **`USPS_PTP_FC`.** First-Class Package became Ground Advantage in 2023. *Answer: map it
+  to USPS Ground Advantage.*
 
 ## Acceptance criteria
 
-- [ ] The maintainer has signed off the seed table, and the questions above are answered
+- [x] The maintainer has signed off the seed table, and the questions above are answered
       in this file
-- [ ] An Amazon offer for a seeded identifier arrives named as its `CarrierService`, for
+- [x] An Amazon offer for a seeded identifier arrives named as its `CarrierService`, for
       example OnTrac Ground under the `OnTrac` carrier
-- [ ] A seeded mapping removed on the mapping page stays removed after
+- [x] A seeded mapping removed on the mapping page stays removed after
       `app:sync-reference-data`
-- [ ] OnTrac Ground's `service_code` is OnTrac's own, with its source noted in the seeder
-- [ ] The two Ground Saver services are named by weight band on the method form, and an
-      Admin's rename of either survives `app:sync-reference-data`
-- [ ] An Amazon `UPS_PTP_SUREPOST_MEDIA` offer is shown as UPS Ground Saver Media for a
+- [x] An identifier an Admin mapped before the batch runs keeps the Admin's mapping
+- [x] OnTrac Ground's `service_code` is `ONTRAC_MFN_GROUND`, with its source noted in the
+      seeder
+- [x] The two Ground Saver services are named by weight band on the method form, and an
+      Admin's rename of either survives both the migration and `app:sync-reference-data`
+- [x] An Amazon `UPS_PTP_SUREPOST_MEDIA` offer is shown as UPS Ground Saver Media for a
       qualifying Package and dropped, with no `ShippingOffer`, for one that does not
       qualify
-- [ ] Approvals behave as before
+- [x] An unmapped identity first offered as eligible writes one log line, and a later
+      quote that offers it again writes none
+- [x] The Map Carrier Services page filters to services that have been offered
+- [x] Approvals behave as before
 
 ## Blocked by
 
@@ -174,3 +196,25 @@ Questions for the sign-off:
   (`95`) is authored with the media requirement, so `UPS_PTP_SUREPOST_MEDIA` maps and
   leaves the drop list. `UPS_PTP_GROUNDSAVER` stays unmapped because it is not tied to a
   weight band.
+- **2026-09-26** — Signed off. The maintainer approved the seed table as written:
+  Saturday variants map to the base service, and `USPS_PTP_FC` maps to Ground Advantage.
+  OnTrac publishes no API documentation, so OnTrac Ground uses the code from Amazon's Buy
+  Shipping tutorial, `ONTRAC_MFN_GROUND`. Added a log line for the first time an unmapped
+  service is offered as buyable, and an *Offered* filter on the mapping page. The seed
+  batch now skips an identifier an Admin has already mapped, and the Ground Saver rename
+  migration leaves an Admin's rename alone. The first 2026-09-24 comment's "one-shot
+  migration" is superseded: the seed is a once-only batch run by the reference-data sync,
+  as the body says. Triaged ready.
+- **2026-09-26** — Done. `AmazonServiceMappingSeeder` writes the 63 signed-off pairs as
+  batch `amazon-mappings-v1`, after the Shopify batch in `ReferenceDataSeeder`. The
+  captures key every pair under `USPS`, `UPS`, `FEDEX`, `ONTRAC` or `AMZN_US`, and the
+  SurePost fixtures in `AmazonBuyShippingTest` now use `UPS`, as Amazon does. Some notes:
+  - With the identifier fallback gone, an Admin who removes the `USPS_PTP_MM` mapping
+    makes Amazon's Media Mail unmapped again. That means no requirement, so it is shown
+    for any Package. The same holds for `UPS_PTP_SUREPOST_MEDIA`. Mapping it to anything
+    other than a media service is the Admin's call, like any other mapping.
+  - The first-offer log line claims `last_eligible_at` in one bulk update and reads it
+    back, so a new production reply costs two queries, not one per service. Two quotes
+    in the same second can both log it.
+  - The migration renames only UPS rows still named `UPS Ground Saver`. It ran against
+    MySQL 8.4 locally, as did the sync and the first-offer log.

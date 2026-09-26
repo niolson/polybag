@@ -64,6 +64,26 @@ it('can show mapped observations so a mapping can be corrected', function (): vo
         ->assertCanSeeTableRecords([$mapped]);
 });
 
+it('filters to the unmapped services a source has offered as buyable', function (): void {
+    $offered = ObservedService::factory()->create([
+        'external_carrier_id' => 'ONTRAC',
+        'external_service_id' => 'ONTRAC_MFN_SUNRISE',
+    ]);
+
+    $neverOffered = ObservedService::factory()->neverEligible()->create([
+        'external_carrier_id' => 'DHLMX',
+        'external_service_id' => 'DHLMX_PTP_PACKAGE_EXPRESS',
+    ]);
+
+    Livewire::test(UnmappedObservedServices::class)
+        ->filterTable('offered', true)
+        ->assertCanSeeTableRecords([$offered])
+        ->assertCanNotSeeTableRecords([$neverOffered])
+        ->filterTable('offered', false)
+        ->assertCanSeeTableRecords([$neverOffered])
+        ->assertCanNotSeeTableRecords([$offered]);
+});
+
 it('aliases an observed service onto an existing carrier service', function (): void {
     $carrierService = CarrierService::factory()->create(['name' => 'Ground Advantage']);
 

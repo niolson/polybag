@@ -28,6 +28,8 @@ class CarrierSeeder extends Seeder
             // seller marked as media (ADR-0006 decision 11). Library Mail and
             // Bound Printed Matter are not authored.
             ['name' => 'Media Mail', 'service_code' => 'MEDIA_MAIL', 'required_contents' => ContentClass::Media],
+            // USPS's `SP` mail class. Amazon sells it as `USPS_PTP_PSBN`.
+            ['name' => 'Parcel Select', 'service_code' => 'PARCEL_SELECT'],
         ] as $service) {
             $requiredContents = $service['required_contents'] ?? null;
 
@@ -100,8 +102,16 @@ class CarrierSeeder extends Seeder
             ['name' => 'UPS Worldwide Expedited', 'service_code' => '08'],
             ['name' => 'UPS Worldwide Saver', 'service_code' => '65'],
             ['name' => 'UPS Standard', 'service_code' => '11'],
-            ['name' => 'UPS Ground Saver', 'service_code' => '92'],
-            ['name' => 'UPS Ground Saver', 'service_code' => '93'],
+            // Named for their weight band, because every source sells them
+            // apart: a method may list one without the other. Only written
+            // when the row is created, so an Admin's rename stands; rows
+            // seeded before the bands were named are renamed by migration.
+            ['name' => 'UPS Ground Saver (under 1 lb)', 'service_code' => '92'],
+            ['name' => 'UPS Ground Saver (1 lb and over)', 'service_code' => '93'],
+            // 1 lb and over, with a USPS Media Mail last mile, so it is held
+            // to Media Mail's rule. Ground Saver BPM (94) is not authored, as
+            // no Bound Printed Matter is (ADR-0006 decision 11).
+            ['name' => 'UPS Ground Saver Media', 'service_code' => '95', 'required_contents' => ContentClass::Media],
         ] as $service) {
             // UPS Ground Saver (what UPS's API still calls SurePost) is UPS's
             // only USPS-last-mile service -- like FedEx Ground Economy above,
@@ -110,16 +120,23 @@ class CarrierSeeder extends Seeder
             // under 1lb, 93 at 1lb or greater -- and its Shop-rating response
             // returns whichever applies to the request, so both must be
             // seeded or one weight tier's rates get silently filtered out.
-            $isGroundSaver = in_array($service['service_code'], ['92', '93'], true);
+            $isGroundSaver = in_array($service['service_code'], ['92', '93', '95'], true);
+            $requiredContents = $service['required_contents'] ?? null;
 
-            $ups->carrierServices()->firstOrCreate(
+            $row = $ups->carrierServices()->firstOrCreate(
                 ['service_code' => $service['service_code']],
                 [
                     'name' => $service['name'],
                     'can_ship_to_po_boxes' => $isGroundSaver,
                     'can_ship_to_military_addresses' => $isGroundSaver,
+                    'required_contents' => $requiredContents,
                 ],
             );
+
+            // Restored on every sync, for the reason given for USPS above.
+            if ($requiredContents !== null && $row->required_contents !== $requiredContents) {
+                $row->update(['required_contents' => $requiredContents]);
+            }
         }
 
         // DHL Express, with no integration of ours: Shopify sells its Express
@@ -134,6 +151,37 @@ class CarrierSeeder extends Seeder
             ['service_code' => 'P'],
             [
                 'name' => 'DHL Express Worldwide',
+                'can_ship_to_po_boxes' => false,
+                'can_ship_to_military_addresses' => false,
+            ],
+        );
+
+        // The two carriers of record Amazon Buy Shipping sells that we hold no
+        // other row for (`carrier-catalog-reset/11`). Each has one service,
+        // because across every capture each has one identity. Neither reaches
+        // a PO Box or a military address.
+        //
+        // `std-us-swa-mfn` is the code Amazon returns for Amazon Shipping
+        // Ground; `15` registers a direct adapter under this carrier's name.
+        $amazonShipping = Carrier::seedSystem(Carrier::AMAZON_SHIPPING);
+        $amazonShipping->carrierServices()->firstOrCreate(
+            ['service_code' => 'std-us-swa-mfn'],
+            [
+                'name' => 'Amazon Shipping Ground',
+                'can_ship_to_po_boxes' => false,
+                'can_ship_to_military_addresses' => false,
+            ],
+        );
+
+        // OnTrac publishes no API documentation, so the code is the one
+        // Amazon's Buy Shipping tutorial gives. A direct integration that
+        // finds OnTrac's own code changes only this column: mappings point at
+        // the row, not at its code.
+        $onTrac = Carrier::seedSystem(Carrier::ONTRAC);
+        $onTrac->carrierServices()->firstOrCreate(
+            ['service_code' => 'ONTRAC_MFN_GROUND'],
+            [
+                'name' => 'OnTrac Ground',
                 'can_ship_to_po_boxes' => false,
                 'can_ship_to_military_addresses' => false,
             ],
