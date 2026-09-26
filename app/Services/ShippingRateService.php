@@ -190,10 +190,11 @@ class ShippingRateService
      * The ship date each task will be quoted for, by task key.
      *
      * Dated by the carrier expected to carry the parcel (ADR-0006, guideline
-     * 12). A direct task is its carrier. Shopify is the carrier its
-     * connection's *Date Shopify's choice as* names. An Amazon task gets no
-     * date: `getRates` sends none, each offer carries Amazon's own window, and
-     * the purchase is dated by the carrier the offer names.
+     * 12). A direct task is its carrier, and so is Amazon Shipping sold on a
+     * connection (`carrier-catalog-reset/15`). Shopify is the carrier its
+     * connection's *Date Shopify's choice as* names. A Buy Shipping task gets
+     * no date: `getRates` sends none, each offer carries Amazon's own window,
+     * and the purchase is dated by the carrier the offer names.
      *
      * @param  array<int, RatingTask>  $tasks
      * @return array<string, CarbonImmutable|null>
@@ -209,6 +210,10 @@ class ShippingRateService
             $shipDates[$task['key']] = match (true) {
                 $candidate->isDirect() => $shipDateService->getShipDate(
                     Carrier::query()->where('name', $candidate->carrier)->first(),
+                    $locationId,
+                ),
+                $candidate->offAmazon => $shipDateService->getShipDate(
+                    Carrier::query()->where('name', Carrier::AMAZON_SHIPPING)->first(),
                     $locationId,
                 ),
                 $candidate->isChannel() && $candidate->dataSourceType === ShopifySource::class => $shipDateService->getShipDate(
@@ -509,8 +514,11 @@ class ShippingRateService
      *   allows direct at all ({@see PostageSourceResolver}).
      * - Shopify sells the method's services it has a mapping for, and `auto`
      *   when the method allows its own choice ({@see assignShopify()}).
-     * - Amazon, for its own orders or off-Amazon, is asked when the method
+     * - Amazon Buy Shipping, for Amazon's own orders, is asked when the method
      *   lists its row, until `carrier-catalog-reset/12`.
+     * - Amazon Shipping sold to other channels sells the method's Amazon
+     *   Shipping services, like a direct carrier, through the scoped
+     *   connection (`carrier-catalog-reset/15`).
      *
      * With a method, a source that sells none of its services is left out.
      * With none, every source is asked with no service list, except that a PO
@@ -544,9 +552,14 @@ class ShippingRateService
                 continue;
             }
 
-            $services = $methodServices !== null
-                ? $methodServices->filter(fn (CarrierService $service): bool => $service->carrier?->name === $sourceName)
-                : $this->getActiveCarrierServicesForCarrierName($sourceName, $destination);
+            $services = match (true) {
+                $methodServices !== null => $methodServices->filter(fn (CarrierService $service): bool => $service->carrier?->name === $sourceName),
+                // Amazon Shipping keeps only the codes it is handed, so with no
+                // method it is handed every active one it may sell here, where
+                // a direct carrier is handed none and quotes everything.
+                $candidate->offAmazon => $this->getActiveCarrierServicesForCarrierName($sourceName, $destination, allDestinations: true),
+                default => $this->getActiveCarrierServicesForCarrierName($sourceName, $destination),
+            };
 
             $adapter = $candidate->isDirect() ? $registry->directAdapterFor($sourceName) : null;
 
@@ -554,7 +567,7 @@ class ShippingRateService
                 $services = $services->filter(fn (CarrierService $service): bool => $adapter->sellsService($service->service_code));
             }
 
-            if ($services->isEmpty() && ($methodServices !== null || $restrictedDestination)) {
+            if ($services->isEmpty() && ($methodServices !== null || $restrictedDestination || $candidate->offAmazon)) {
                 if ($methodServices === null) {
                     logger()->debug("ShippingRateService: {$sourceName} has no cataloged service for this destination, skipping");
                 }
@@ -621,13 +634,20 @@ class ShippingRateService
      *
      * A direct carrier's fixed name is the registry's key (ADR-0006 decision
      * 1, as amended). Shopify is registered under a name no carrier row
-     * carries (`carrier-catalog-reset/09`). Amazon is still registered as the
-     * `Amazon` row it poses as, until `carrier-catalog-reset/12` removes it.
+     * carries (`carrier-catalog-reset/09`). Amazon Buy Shipping is still
+     * registered as the `Amazon` row it poses as, until
+     * `carrier-catalog-reset/12` removes it. An Amazon connection scoped to
+     * sell Amazon Shipping to other channels is that carrier's adapter
+     * (`carrier-catalog-reset/15`).
      */
     private function registryNameFor(PostageSourceCandidate $candidate): ?string
     {
         if ($candidate->isDirect()) {
             return $candidate->carrier;
+        }
+
+        if ($candidate->offAmazon) {
+            return Carrier::AMAZON_SHIPPING;
         }
 
         return match ($candidate->dataSourceType) {
@@ -1211,11 +1231,15 @@ class ShippingRateService
      * reaching it -- which may be empty if the carrier has no such service (or
      * no catalog rows at all), in which case the caller must not query it.
      *
+     * `$allDestinations` lists the active services for an ordinary destination
+     * too, for a source that keeps only the codes it is handed, such as Amazon
+     * Shipping on a connection. The PO Box and military restrictions still apply.
+     *
      * @return Collection<int, CarrierService>
      */
-    private function getActiveCarrierServicesForCarrierName(string $carrierName, AddressData $destination): Collection
+    private function getActiveCarrierServicesForCarrierName(string $carrierName, AddressData $destination, bool $allDestinations = false): Collection
     {
-        if (! $destination->isPoBox() && ! $destination->isMilitary()) {
+        if (! $allDestinations && ! $destination->isPoBox() && ! $destination->isMilitary()) {
             return collect();
         }
 

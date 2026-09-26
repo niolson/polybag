@@ -35,6 +35,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
+use Mockery\MockInterface;
 
 /**
  * `carrier-catalog-reset/08`: a purchase is dated by the carrier expected to
@@ -63,6 +64,27 @@ afterEach(function (): void {
 /**
  * Wednesday 2026-04-01 at the given local time.
  */
+/**
+ * An Amazon adapter that answers nothing and keeps each request it was asked.
+ *
+ * @param  list<RateRequest>  $requests
+ */
+function recordingAmazonAdapter(array &$requests): MockInterface
+{
+    $amazon = Mockery::mock(CarrierAdapterInterface::class.', '.AsyncRateQuoting::class);
+    $amazon->shouldReceive('isConfigured')->andReturnTrue();
+    $amazon->shouldReceive('offerCapability')->andReturn(ServiceCapability::Supported);
+    $amazon->shouldReceive('offerDeclaredValueCap')->andReturnNull();
+    $amazon->shouldReceive('prepareRateRequest')->andReturnNull();
+    $amazon->shouldReceive('getRates')->andReturnUsing(function (RateRequest $request) use (&$requests): Collection {
+        $requests[] = $request;
+
+        return collect();
+    });
+
+    return $amazon;
+}
+
 function onWednesdayAt(string $time): void
 {
     $now = CarbonImmutable::parse("2026-04-01 {$time}", 'America/New_York');
@@ -446,34 +468,22 @@ describe('quoting', function (): void {
         ]);
     });
 
-    it('quotes Amazon with no date, while a direct carrier is quoted for its own', function (): void {
+    it('quotes Amazon Shipping sold directly for its own carrier row\'s date', function (): void {
+        $amazonShipping = Carrier::seedSystem(Carrier::AMAZON_SHIPPING);
+        $amazonShipping->update(['pickup_cutoff_hour' => 10]);
         $method = ShippingMethod::factory()->create();
         $method->carrierServices()->attach([
             CarrierService::factory()->uspsGroundAdvantage()->for($this->usps)->create()->id,
-            CarrierService::factory()
-                ->for(Carrier::factory()->create(['name' => AmazonBuyShippingAdapter::SOURCE_NAME, 'pickup_cutoff_hour' => 10]))
-                ->create(['service_code' => 'AMAZON_BUY_SHIPPING', 'name' => 'Amazon Buy Shipping'])
-                ->id,
+            amazonShippingGround()->id,
         ]);
         $connection = DataSource::factory()->unassigned()->offeringOffAmazonShipping()->create();
         CarrierAccountScope::create(['data_source_id' => $connection->id]);
 
         app(CarrierRegistry::class)->registerInstance(Carrier::USPS, new FakeCarrierAdapter(Carrier::USPS));
+        $requests = [];
+        app(CarrierRegistry::class)->registerInstance(Carrier::AMAZON_SHIPPING, recordingAmazonAdapter($requests));
 
-        $amazonRequests = [];
-        $amazon = Mockery::mock(CarrierAdapterInterface::class.', '.AsyncRateQuoting::class);
-        $amazon->shouldReceive('isConfigured')->andReturnTrue();
-        $amazon->shouldReceive('offerCapability')->andReturn(ServiceCapability::Supported);
-        $amazon->shouldReceive('offerDeclaredValueCap')->andReturnNull();
-        $amazon->shouldReceive('prepareRateRequest')->andReturnNull();
-        $amazon->shouldReceive('getRates')->andReturnUsing(function (RateRequest $request) use (&$amazonRequests): Collection {
-            $amazonRequests[] = $request;
-
-            return collect();
-        });
-        app(CarrierRegistry::class)->registerInstance(AmazonBuyShippingAdapter::SOURCE_NAME, $amazon);
-
-        // After the fake Amazon row's 10 AM, which nothing may read.
+        // After Amazon Shipping's 10 AM cutoff, before USPS's.
         onWednesdayAt('15:00');
 
         $package = Package::factory()
@@ -490,9 +500,39 @@ describe('quoting', function (): void {
         $rates = app(ShippingRateService::class)->getShippingRates($package->id);
         $offer = ShippingOffer::where('public_id', $rates->firstWhere('carrier', Carrier::USPS)->offerId)->firstOrFail();
 
-        expect($amazonRequests)->toHaveCount(1)
-            ->and($amazonRequests[0]->shipDate)->toBeNull()
+        expect($requests)->toHaveCount(1)
+            ->and($requests[0]->shipDate?->toDateString())->toBe('2026-04-02')
             ->and($offer->expires_at->timestamp)
             ->toBe(CarbonImmutable::parse('2026-04-01', 'America/New_York')->endOfDay()->timestamp);
+    });
+
+    it('quotes Amazon Buy Shipping with no date', function (): void {
+        $method = ShippingMethod::factory()->create();
+        $method->carrierServices()->attach(
+            CarrierService::factory()
+                ->for(Carrier::factory()->create(['name' => AmazonBuyShippingAdapter::SOURCE_NAME, 'pickup_cutoff_hour' => 10]))
+                ->create(['service_code' => 'AMAZON_BUY_SHIPPING', 'name' => 'Amazon Buy Shipping'])
+                ->id,
+        );
+        $origin = DataSource::factory()->amazon()->create(['active' => true]);
+
+        $requests = [];
+        app(CarrierRegistry::class)->registerInstance(AmazonBuyShippingAdapter::SOURCE_NAME, recordingAmazonAdapter($requests));
+
+        // After the fake Amazon row's 10 AM, which nothing may read.
+        onWednesdayAt('15:00');
+
+        $package = Package::factory()
+            ->for(Shipment::factory()->for($method)->create([
+                'postal_code' => '90210',
+                'data_source_id' => $origin->id,
+                'metadata' => ['amazon_order_id' => '111-2222222-3333333'],
+            ]))
+            ->create(['box_size_id' => BoxSize::factory()->create()->id, 'weight' => 2.0, 'status' => PackageStatus::Unshipped]);
+
+        app(ShippingRateService::class)->getShippingRates($package->id);
+
+        expect($requests)->toHaveCount(1)
+            ->and($requests[0]->shipDate)->toBeNull();
     });
 });

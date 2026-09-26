@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\CarrierAccounts\Schemas;
 
+use App\Filament\Resources\DataSources\DataSourceResource;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Client;
@@ -11,6 +12,7 @@ use App\Services\Carriers\UspsAdapter;
 use App\Services\OAuthService;
 use App\Services\SettingsService;
 use Carbon\Carbon;
+use Closure;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -24,6 +26,17 @@ use Illuminate\Support\HtmlString;
 
 class CarrierAccountForm
 {
+    /**
+     * Whether the chosen carrier's account is a connection, so has no
+     * carrier account to save.
+     */
+    private static function takesConnection(mixed $carrierId): bool
+    {
+        $name = filled($carrierId) ? Carrier::whereKey($carrierId)->value('name') : null;
+
+        return is_string($name) && CarrierRegistry::takesConnection($name);
+    }
+
     public static function configure(Schema $schema): Schema
     {
         return $schema
@@ -32,15 +45,25 @@ class CarrierAccountForm
                     ->schema([
                         Select::make('carrier_id')
                             ->label('Carrier')
-                            // Only carriers whose integration keeps its account here. Shopify
-                            // and Amazon postage is bought through a connection (ADR-0002,
-                            // 2026-09-22 amendment). An existing record still shows its own
-                            // carrier.
+                            // Only carriers whose integration keeps its account here, plus
+                            // those whose account is a connection, which point to
+                            // Connections instead of saving (`carrier-catalog-reset/15`).
+                            // Shopify and Amazon Buy Shipping postage is bought through a
+                            // connection too (ADR-0002, 2026-09-22 amendment). An existing
+                            // record still shows its own carrier.
                             ->options(fn (string $operation) => Carrier::active()
-                                ->when($operation !== 'edit', fn ($query) => $query->whereIn('name', CarrierRegistry::carrierAccountCarrierNames()))
+                                ->when($operation !== 'edit', fn ($query) => $query->whereIn('name', [
+                                    ...CarrierRegistry::carrierAccountCarrierNames(),
+                                    ...CarrierRegistry::connectionCarrierNames(),
+                                ]))
                                 ->get()
                                 ->mapWithKeys(fn (Carrier $carrier): array => [$carrier->id => $carrier->label()]))
                             ->required()
+                            ->rule(fn (): Closure => function (string $attribute, mixed $value, Closure $fail): void {
+                                if (self::takesConnection($value)) {
+                                    $fail(Carrier::find($value)?->label().'\'s account is an Amazon connection. Set it up under Integrations → Connections.');
+                                }
+                            })
                             // Fixed once saved. The credentials below are issued
                             // by this carrier and mean nothing to another one, so
                             // moving an account across carriers leaves it unable
@@ -71,6 +94,19 @@ class CarrierAccountForm
                         Toggle::make('active')
                             ->default(true),
                     ]),
+
+                Section::make('Account on a Connection')
+                    ->schema([
+                        TextEntry::make('connection_account_notice')
+                            ->hiddenLabel()
+                            ->state(fn (Get $get): HtmlString => new HtmlString(
+                                e(Carrier::find($get('carrier_id'))?->label() ?? 'This carrier')
+                                .' is bought through an Amazon connection, not a carrier account. Opt a connection into selling it under '
+                                .'<a href="'.e(DataSourceResource::getUrl('index')).'" class="text-primary-600 underline">Integrations → Connections</a>.'
+                            ))
+                            ->columnSpanFull(),
+                    ])
+                    ->visible(fn (Get $get): bool => self::takesConnection($get('carrier_id'))),
 
                 // ── USPS ────────────────────────────────────────────────────────────
 

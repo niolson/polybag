@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use DomainException;
 use Illuminate\Database\Eloquent\Builder;
@@ -16,7 +15,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * A row targets exactly one of two things: a direct `CarrierAccount`, or an
  * Amazon connection (`DataSource`) that sells Amazon Shipping for orders from
  * other channels (ADR-0002, 2026-09-22 amendment). Both kinds share the table so
- * they share one unique index and one precedence walk.
+ * they share one unique index and one precedence walk. A connection row sits
+ * on the Amazon Shipping carrier, whose account the connection is
+ * (`carrier-catalog-reset/15`).
  */
 class CarrierAccountScope extends Model
 {
@@ -49,7 +50,7 @@ class CarrierAccountScope extends Model
                 $account = CarrierAccount::find($scope->carrier_account_id);
 
                 if ($account && $account->carrier_id === self::amazonCarrierId()) {
-                    throw new DomainException('A carrier account cannot be scoped to the Amazon postage source. Amazon postage is bought through an Amazon connection.');
+                    throw new DomainException('A carrier account cannot be scoped to Amazon Shipping. Its account is an Amazon connection.');
                 }
 
                 $scope->carrier_id = $account?->carrier_id;
@@ -64,14 +65,15 @@ class CarrierAccountScope extends Model
     }
 
     /**
-     * The seeded `Amazon` carrier row, which every connection scope sits on.
+     * The Amazon Shipping carrier row, which every connection scope sits on.
      *
-     * It is the postage-source row, not a carrier of record: the scope says
-     * where postage is bought, and who carries the parcel is decided per offer.
+     * Amazon Shipping sold to an order from another channel is a direct sale,
+     * and the scoped connection is its account, so the scope sits on the
+     * carrier it sells, as a `CarrierAccount`'s does (`carrier-catalog-reset/15`).
      */
     public static function amazonCarrierId(bool $create = false): ?int
     {
-        $attributes = ['name' => AmazonBuyShippingAdapter::SOURCE_NAME];
+        $attributes = ['name' => Carrier::AMAZON_SHIPPING];
 
         return $create
             ? Carrier::firstOrCreate($attributes)->id

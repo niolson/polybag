@@ -9,6 +9,7 @@ use App\Enums\PostageSource;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierAccountScope;
+use App\Models\CarrierService;
 use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Location;
@@ -329,20 +330,36 @@ function externalRatesResponse(?array $rates = null): MockResponse
 }
 
 /**
+ * Amazon Shipping Ground, the one Amazon Shipping service authored, as the
+ * reference-data sync seeds it (`carrier-catalog-reset/11`).
+ */
+function amazonShippingGround(): CarrierService
+{
+    return Carrier::seedSystem(Carrier::AMAZON_SHIPPING)->carrierServices()->firstOrCreate(
+        ['service_code' => 'std-us-swa-mfn'],
+        ['name' => 'Amazon Shipping Ground', 'active' => true],
+    );
+}
+
+/**
  * A packed parcel on an order from another channel, on a shipping method that
- * asks Amazon. Each item is `[product weight, quantity]`.
+ * lists Amazon Shipping Ground (`carrier-catalog-reset/15`), and the Amazon
+ * hook row when `$asksBuyShipping`. Each item is `[product weight, quantity]`.
  *
  * @param  array<int, array{0: float|null, 1: int}>  $items
  */
-function externalPackage(?DataSource $origin, float $weight = 1.52, array $items = [[0.5, 1]]): Package
+function externalPackage(?DataSource $origin, float $weight = 1.52, array $items = [[0.5, 1]], bool $asksBuyShipping = false): Package
 {
-    $amazon = Carrier::firstOrCreate(['name' => AmazonBuyShippingAdapter::SOURCE_NAME], ['active' => true]);
-    $catalog = $amazon->carrierServices()->firstOrCreate(
-        ['service_code' => AmazonBuyShippingAdapter::CATALOG_SERVICE_CODE],
-        ['name' => 'Amazon Buy Shipping rates', 'active' => true],
-    );
     $method = ShippingMethod::factory()->create();
-    $method->carrierServices()->attach($catalog->id);
+    $method->carrierServices()->attach(amazonShippingGround()->id);
+
+    if ($asksBuyShipping) {
+        $amazon = Carrier::firstOrCreate(['name' => AmazonBuyShippingAdapter::SOURCE_NAME], ['active' => true]);
+        $method->carrierServices()->attach($amazon->carrierServices()->firstOrCreate(
+            ['service_code' => AmazonBuyShippingAdapter::CATALOG_SERVICE_CODE],
+            ['name' => 'Amazon Buy Shipping rates', 'active' => true],
+        )->id);
+    }
 
     $shipment = Shipment::factory()->create([
         'data_source_id' => $origin?->id,

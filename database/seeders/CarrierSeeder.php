@@ -162,7 +162,9 @@ class CarrierSeeder extends Seeder
         // a PO Box or a military address.
         //
         // `std-us-swa-mfn` is the code Amazon returns for Amazon Shipping
-        // Ground; `15` registers a direct adapter under this carrier's name.
+        // Ground. `AmazonShippingAdapter` sells it directly to orders from
+        // other channels, on a scoped Amazon connection, and reads the code
+        // from here (`carrier-catalog-reset/15`).
         $amazonShipping = Carrier::seedSystem(Carrier::AMAZON_SHIPPING);
         $amazonShipping->carrierServices()->firstOrCreate(
             ['service_code' => 'std-us-swa-mfn'],
@@ -188,8 +190,8 @@ class CarrierSeeder extends Seeder
         );
 
         // This hook asks Amazon for Buy Shipping against the seller's own Amazon
-        // order (`channelType: AMAZON`), and for Amazon Shipping on an order from
-        // another channel (`EXTERNAL`) where a connection is scoped to sell it.
+        // order (`channelType: AMAZON`). Amazon Shipping on an order from
+        // another channel is the Amazon Shipping carrier above, sold directly.
         // Unlike every carrier above, this catalog is *discovered*: one
         // `getRates` came back naming 108 services across fifteen carriers, and
         // nothing may create a `CarrierService` from that (ADR-0003 decision

@@ -60,6 +60,12 @@ class CarrierAccount extends Model
 
             $carrierName = Carrier::query()->whereKey($account->carrier_id)->value('name');
 
+            if (is_string($carrierName) && CarrierRegistry::takesConnection($carrierName)) {
+                throw new InvalidArgumentException(
+                    Carrier::labelForName($carrierName).'\'s account is a connection. Set it up under Integrations → Connections.',
+                );
+            }
+
             if (! is_string($carrierName) || ! CarrierRegistry::takesCarrierAccount($carrierName)) {
                 throw new InvalidArgumentException(
                     ($carrierName ?? 'This carrier').' has no direct integration that uses a carrier account.',

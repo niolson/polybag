@@ -5,6 +5,7 @@ use App\DataTransferObjects\PostageSources\PostageSourceResolution;
 use App\Enums\OffAmazonShippingStatus;
 use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
+use App\Enums\PostageSourceKind;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierAccountScope;
@@ -13,7 +14,7 @@ use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\Shipment;
-use App\Services\Carriers\AmazonBuyShippingAdapter;
+use App\Models\ShippingMethod;
 use App\Services\PostageSources\PostageSourceResolver;
 use Illuminate\Support\Collection;
 
@@ -202,7 +203,7 @@ describe('resolution', function (): void {
 });
 
 describe('the off-Amazon candidate', function (): void {
-    it('is marked off-Amazon, carries the check result, and is neither channel postage nor a carrier', function (): void {
+    it('is marked off-Amazon, carries the check result, names Amazon Shipping, and is not channel postage', function (): void {
         $connection = DataSource::factory()->unassigned()->offeringOffAmazonShipping(OffAmazonShippingStatus::NotSetUp)->create();
         scopeConnectionTo($connection);
 
@@ -216,8 +217,9 @@ describe('the off-Amazon candidate', function (): void {
         expect($candidate->kind)->toBe(PostageSource::PostageDataSource)
             ->and($candidate->postageDataSourceId)->toBe($connection->id)
             ->and($candidate->offAmazonShippingStatus)->toBe(OffAmazonShippingStatus::NotSetUp)
-            ->and($candidate->carrier)->toBeNull()
+            ->and($candidate->carrier)->toBe(Carrier::AMAZON_SHIPPING)
             ->and($candidate->isChannel())->toBeFalse()
+            ->and($candidate->isDirect())->toBeFalse()
             ->and($resolution->channel()?->postageDataSourceId)->toBe($shopify->id)
             ->and($resolution->forCarrier('Amazon'))->toBeEmpty();
     });
@@ -230,6 +232,45 @@ describe('the off-Amazon candidate', function (): void {
 
         expect(connectionCandidates($resolution))->toHaveCount(1)
             ->and($resolution->channel())->toBeNull();
+    });
+});
+
+describe('the shipping method', function (): void {
+    beforeEach(function (): void {
+        scopeConnectionTo(DataSource::factory()->unassigned()->offeringOffAmazonShipping()->create());
+        $this->method = ShippingMethod::factory()->create();
+    });
+
+    it('asks the connection when the method lists an Amazon Shipping service', function (): void {
+        $this->method->carrierServices()->attach(amazonShippingGround()->id);
+
+        $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage(), $this->method);
+
+        expect(connectionCandidates($resolution))->toHaveCount(1)
+            ->and($resolution->candidates->filter(fn (PostageSourceCandidate $candidate): bool => $candidate->isDirect()))->toBeEmpty();
+    });
+
+    it('does not ask the connection when the method lists no Amazon Shipping service', function (): void {
+        $this->method->carrierServices()->attach(
+            Carrier::firstOrCreate(['name' => Carrier::UPS])->carrierServices()->create(['service_code' => '03', 'name' => 'UPS Ground', 'active' => true])->id
+        );
+
+        expect(connectionCandidates(app(PostageSourceResolver::class)->resolve(offAmazonPackage(), $this->method)))->toBeEmpty();
+    });
+
+    it('does not ask the connection when the method has no direct row', function (): void {
+        $this->method->carrierServices()->attach(amazonShippingGround()->id);
+        $this->method->postageSources()->where('source_kind', PostageSourceKind::Direct)->delete();
+
+        expect(connectionCandidates(app(PostageSourceResolver::class)->resolve(offAmazonPackage(), $this->method->refresh())))->toBeEmpty();
+    });
+
+    it('does not ask the connection when its Amazon Shipping service is inactive', function (): void {
+        $service = amazonShippingGround();
+        $service->update(['active' => false]);
+        $this->method->carrierServices()->attach($service->id);
+
+        expect(connectionCandidates(app(PostageSourceResolver::class)->resolve(offAmazonPackage(), $this->method)))->toBeEmpty();
     });
 });
 
@@ -265,7 +306,7 @@ describe('scope rules', function (): void {
             ]))->toThrow(DomainException::class);
     });
 
-    it('derives the Amazon carrier row for a connection and ignores a caller-supplied one', function (): void {
+    it('derives the Amazon Shipping carrier row for a connection and ignores a caller-supplied one', function (): void {
         $usps = Carrier::firstOrCreate(['name' => 'USPS']);
         $connection = DataSource::factory()->unassigned()->amazon()->create();
 
@@ -273,7 +314,7 @@ describe('scope rules', function (): void {
         $scope->carrier_id = $usps->id;
         $scope->save();
 
-        expect($scope->carrier->name)->toBe(AmazonBuyShippingAdapter::SOURCE_NAME);
+        expect($scope->carrier->name)->toBe(Carrier::AMAZON_SHIPPING);
     });
 
     it('never lets a connection rate shop', function (): void {
@@ -285,10 +326,10 @@ describe('scope rules', function (): void {
         expect($scope->refresh()->rate_shop)->toBeFalse();
     });
 
-    it('refuses a carrier account scope on the Amazon row', function (): void {
-        $amazon = Carrier::firstOrCreate(['name' => AmazonBuyShippingAdapter::SOURCE_NAME]);
-        // A legacy row: the model now refuses an account on the Amazon carrier.
-        $account = CarrierAccount::withoutEvents(fn () => CarrierAccount::factory()->create(['carrier_id' => $amazon->id]));
+    it('refuses a carrier account scope on the Amazon Shipping row', function (): void {
+        $amazonShipping = Carrier::seedSystem(Carrier::AMAZON_SHIPPING);
+        // A row the model refuses: Amazon Shipping's account is a connection.
+        $account = CarrierAccount::withoutEvents(fn () => CarrierAccount::factory()->create(['carrier_id' => $amazonShipping->id]));
 
         expect(fn () => CarrierAccountScope::create(['carrier_account_id' => $account->id]))
             ->toThrow(DomainException::class);
