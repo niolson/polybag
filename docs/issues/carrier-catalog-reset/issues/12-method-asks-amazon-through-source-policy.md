@@ -1,6 +1,6 @@
 # A shipping method allows Amazon Buy Shipping for Amazon orders; the `Amazon` carrier row goes
 
-Status: needs-triage
+Status: ready-for-agent
 
 Repo: `polybag`
 
@@ -22,24 +22,62 @@ Shipping for other channels a direct sale. The `Amazon` carrier and its
   postage-source table from `09`, with `unlisted_services = none`. It is off by default,
   because a new method gets only a `direct` row, and it is Admin-only by that table's
   policy.
-  - `amazon` accepts only `unlisted_services = none` here. `13` allows `any`, as *Any
-    service*, in the same change that makes automation read it.
   - When the row exists, an Amazon order's origin connection is asked.
   - It does nothing for an order from another channel. That order is sold Amazon
     Shipping directly when the method lists the service and a connection is scoped
     (`15`).
-  - Listing the hook row no longer means anything, because the row is gone.
   - The OTDR checkboxes from `amazon-buy-shipping/17` show only while an Amazon
     connection is active, as today.
+- **`none` means what it does today, until `13`.** An `amazon` row with `none` still
+  quotes every service Amazon returns on the Ship page, and approvals still decide
+  automation. It does not mean "listed services only" for Amazon yet.
+  - `PostageSourceKind::Amazon::acceptedUnlistedServices()` narrows to `[None]`, so the
+    model refuses `any` and the form hides the toggle. `13` allows `any`, as *Any
+    service*, in the same change that makes automation read it.
+  - The relation manager's *Beyond listed services* column shows "All Amazon services
+    (approvals gate automation)" for an `amazon` row, not "Listed services only".
+  - `PostageSourcesRelationManager::kindOptions()` stops excluding Amazon.
+- **No shipping method: Amazon is not asked.** Today, with no method, rating asks every
+  active service for the `Amazon` carrier, which is the hook row, so an Amazon order
+  still gets Buy Shipping quotes. With the row gone there is no policy to allow it, so it
+  is not asked, the same as Shopify (`09`). This is the direction
+  [`16`](16-require-a-shipping-method-to-buy.md) takes further, where a shipment with no
+  method cannot be bought at all. Until `16` lands, an Amazon order with no method loses
+  Buy Shipping quotes on the Ship page. That is rare, because an Amazon connection's
+  default method catches service levels with no alias, and there are no production
+  tenants.
+- **Existing methods carry over.** Today a method asks Amazon by listing the hook row in
+  `carrier_service_shipping_method`. The migration gives each such method an `amazon`
+  policy row with `none`, then removes the pivot rows. It does not refuse on them.
 - **The catalog.** Remove the `Amazon` carrier, its row,
-  `AmazonBuyShippingAdapter::CATALOG_SERVICE_CODE`, `SOURCE_NAME` as a catalog name, and
-  `05`'s transitional name lookup for Amazon. `PostageSourceDispatcher` finds the Amazon
-  source by kind.
-- **Nothing hangs off the row any more.** `15` moved the off-Amazon scope to Amazon
-  Shipping. Check anyway before deleting: `carrier_account_scopes`,
-  `carrier_service_shipping_method` and `shipping_rules` all cascade or restrict on the
-  carrier or its service, and `package_labels.normalized_carrier_id` restricts. The
-  migration refuses, naming the rows, if anything still points at it.
+  `AmazonBuyShippingAdapter::CATALOG_SERVICE_CODE`, and `SOURCE_NAME` as a catalog name:
+  - the `CarrierSeeder` block that seeds them;
+  - the two transitional `name != SOURCE_NAME` filters `05` left, in `EndOfDay` and
+    `DataSourceForm`;
+  - `MethodSourceAllowance::isAmazonHookRow()` and its callers, with `kindsFor()` reading
+    the `amazon` policy row like the other kinds;
+  - the comments pointing at `12` in `ShippingRateService`, `CarrierRegistry`,
+    `MethodSourceAllowance` and `PostageSourcesRelationManager`.
+
+  `SOURCE_NAME` stays as the adapter's registry name, as `ShopifyAdapter::CARRIER_NAME`
+  did in `09`: `CarrierRegistry`, `ShippingRateService::registryNameFor()`,
+  `getCarrierName()` and `PostageSourceDispatcher::sellerFor()` keep using it. The
+  dispatcher already picks the Amazon adapter by the connection's driver, not by a
+  carrier row.
+- **Check what still points at the row before deleting.** `15` moved the off-Amazon
+  scopes. Delete through `DB::table`, as `remove_shopify_carrier` did: `Carrier`'s
+  `deleting` hook refuses a system carrier. The migration refuses, naming the rows, if any
+  of these still point at the carrier or its service, since each restricts the delete or
+  would lose history:
+  - `shipping_rules.carrier_id` and `carrier_service_id`
+  - `package_labels.normalized_carrier_id` and `carrier_service_id`
+  - `packages.normalized_carrier_id`
+  - `source_service_mappings.carrier_service_id`
+  - `carrier_account_scopes`, which would cascade
+
+  These clear or cascade on their own and need no check: `shipping_offers.carrier_id`
+  and `carrier_service_id` clear to null, and `carrier_accounts`, `carrier_aliases` and
+  `carrier_service_special_service` cascade.
 - **Rules.** `07`'s *Amazon Buy Shipping* source kind covers what the hook row meant in a
   rule.
 - **Approvals are unchanged.** They still decide automation until `13`.
@@ -48,8 +86,14 @@ Shipping for other channels a direct sale. The `Amazon` carrier and its
 
 - [ ] With an `amazon` row on the method, an Amazon order is quoted through its origin
       connection. Without one, it is not
+- [ ] An Amazon order with no shipping method is not quoted through Buy Shipping
 - [ ] The row does not change what a Shopify order is quoted
+- [ ] A method that listed the hook row has an `amazon` row after the migration
+- [ ] The migration refuses, naming the rows, when a rule, label, package, mapping or
+      scope still points at the `Amazon` carrier or its service
 - [ ] A Manager cannot add, change or remove the `amazon` row
+- [ ] An `amazon` row cannot be saved with `any`, and the table does not describe it as
+      listed services only
 - [ ] No `Amazon` carrier row or `AMAZON_BUY_SHIPPING` service exists
 - [ ] *Amazon Buy Shipping, any* rules behave as `amazon-buy-shipping/19` does
 - [ ] Approvals still gate automation
@@ -61,6 +105,8 @@ Shipping for other channels a direct sale. The `Amazon` carrier and its
 - [`15`](15-sell-amazon-shipping-directly.md), which moves the off-Amazon scope off the
   row this issue deletes
 
+All three are done.
+
 ## Comments
 
 - **2026-09-24** — Second review: narrowed to Buy Shipping for Amazon's own orders. The
@@ -68,3 +114,11 @@ Shipping for other channels a direct sale. The `Amazon` carrier and its
   to `15`. The toggle became Admin-only.
 - **2026-09-24** — The toggle became an `amazon` row in `09`'s source-policy table,
   rather than a column on `shipping_methods`.
+- **2026-09-26** — Reviewed against the code after `15`, and readied. Settled:
+  - No method means Amazon is not asked. The maintainer went further: a shipment with no
+    method should not be buyable at all, which became `16`.
+  - Methods listing the hook row are converted to `amazon` rows, rather than making the
+    migration refuse on them, which would have blocked every install using Buy Shipping.
+  - The reference check covers every table that holds the carrier or its service.
+  - `SOURCE_NAME` stays as the registry name, following `09`'s Shopify precedent.
+  - The `amazon` row's `none` is described as what it does until `13`.
