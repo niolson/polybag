@@ -1,6 +1,6 @@
 # A shipping method allows Amazon Buy Shipping for Amazon orders; the `Amazon` carrier row goes
 
-Status: ready-for-agent
+Status: done
 
 Repo: `polybag`
 
@@ -122,3 +122,19 @@ All three are done.
   - The reference check covers every table that holds the carrier or its service.
   - `SOURCE_NAME` stays as the registry name, following `09`'s Shopify precedent.
   - The `amazon` row's `none` is described as what it does until `13`.
+- **2026-09-26** — Implemented.
+  - `ShippingRateService::assignAmazonBuyShipping()` asks Buy Shipping only with the
+    method's `amazon` row, handed no services. A method that lists nothing but has that
+    row no longer throws `NoActiveCarrierServicesException`.
+  - `MethodSourceAllowance` reads the row like the other kinds, and the hook-row checks
+    are gone. `PostageSourceKind::Amazon` takes only `none`, and the relation manager
+    offers the row and describes it with `listedServicesLabel()`.
+  - The migration (`remove_amazon_carrier`) gives each method listing the hook row an
+    `amazon` row, then deletes the pivot rows, the service and the carrier. It refuses,
+    naming the rows, while a rule, label, package, mapping or scope still points at them.
+  - Tests: `MethodAsksAmazonTest` covers the row and the migration. `SourceFirstRatingTest`
+    covers asking with and without the row, with no method, on a method listing nothing,
+    and for a Shopify order. The rule, ship-date and Buy Shipping suites now use the row.
+    *Never lets a direct Use rule name a channel's catalog row* had nothing left to test,
+    because no channel catalog row exists. It became *never lets a direct Use rule reach
+    a service a method only asks Amazon for*.

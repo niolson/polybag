@@ -21,9 +21,9 @@ use App\Models\ServiceApproval;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
+use App\Models\ShippingMethodPostageSource;
 use App\Models\ShippingRule;
 use App\Models\User;
-use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\Carriers\CarrierRegistry;
 
 /*
@@ -55,15 +55,9 @@ beforeEach(function (): void {
         'active' => true,
     ]);
 
-    // The hook row is what allows Amazon Buy Shipping on a method until `12`.
-    $amazon = Carrier::firstOrCreate(['name' => AmazonBuyShippingAdapter::SOURCE_NAME]);
-    $hookRow = CarrierService::firstOrCreate(
-        ['carrier_id' => $amazon->id, 'service_code' => AmazonBuyShippingAdapter::CATALOG_SERVICE_CODE],
-        ['name' => 'Amazon Buy Shipping'],
-    );
-
     $this->method = ShippingMethod::factory()->create();
-    $this->method->carrierServices()->attach([$this->ground->id, $this->express->id, $hookRow->id]);
+    $this->method->carrierServices()->attach([$this->ground->id, $this->express->id]);
+    ShippingMethodPostageSource::factory()->amazon()->for($this->method)->create();
     $this->package = sourceRulePackage($this->method);
 });
 

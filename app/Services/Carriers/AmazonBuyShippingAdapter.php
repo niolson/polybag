@@ -88,7 +88,11 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
 {
     use ReadsShippingV2Rates;
 
-    /** The name this source is registered and displayed under. */
+    /**
+     * The name this source is registered and displayed under. No carrier row
+     * carries it: a shipping method asks Amazon through its `amazon` policy
+     * row (`carrier-catalog-reset/12`).
+     */
     public const SOURCE_NAME = 'Amazon';
 
     /**
@@ -101,17 +105,6 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
      * mapping.
      */
     public const OBSERVATION_SOURCE = PostageSourceKind::Amazon->value;
-
-    /**
-     * The one seeded `CarrierService` under the `Amazon` carrier.
-     *
-     * Not a service. It is how a shipping method says "ask Amazon", in a
-     * catalog whose rows are otherwise authored per service — Amazon's own
-     * catalog is discovered per order and nothing here may mint rows from it.
-     * The adapter never reads it back: `getRates` takes no service filter, so
-     * the code's only job is to exist.
-     */
-    public const CATALOG_SERVICE_CODE = 'AMAZON_BUY_SHIPPING';
 
     /** Where a Buy Shipping purchase records what Amazon called it. */
     public const SHIPMENT_ID_KEY = 'amazon_shipment_id';

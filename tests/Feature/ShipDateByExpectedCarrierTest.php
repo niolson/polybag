@@ -285,10 +285,9 @@ describe('End of Day', function (): void {
         $this->actingAs(User::factory()->admin()->create());
     });
 
-    it('lists OnTrac and Amazon Shipping, and not the Amazon row', function (): void {
+    it('lists OnTrac and Amazon Shipping', function (): void {
         Carrier::factory()->create(['name' => 'OnTrac']);
         Carrier::factory()->create(['name' => 'Amazon Shipping']);
-        Carrier::factory()->create(['name' => AmazonBuyShippingAdapter::SOURCE_NAME]);
 
         $listed = collect(Livewire::test(EndOfDay::class)->get('carrierSummary'))->pluck('carrier')->sort()->values()->all();
 
@@ -508,19 +507,11 @@ describe('quoting', function (): void {
 
     it('quotes Amazon Buy Shipping with no date', function (): void {
         $method = ShippingMethod::factory()->create();
-        $method->carrierServices()->attach(
-            CarrierService::factory()
-                ->for(Carrier::factory()->create(['name' => AmazonBuyShippingAdapter::SOURCE_NAME, 'pickup_cutoff_hour' => 10]))
-                ->create(['service_code' => 'AMAZON_BUY_SHIPPING', 'name' => 'Amazon Buy Shipping'])
-                ->id,
-        );
+        ShippingMethodPostageSource::factory()->amazon()->for($method)->create();
         $origin = DataSource::factory()->amazon()->create(['active' => true]);
 
         $requests = [];
         app(CarrierRegistry::class)->registerInstance(AmazonBuyShippingAdapter::SOURCE_NAME, recordingAmazonAdapter($requests));
-
-        // After the fake Amazon row's 10 AM, which nothing may read.
-        onWednesdayAt('15:00');
 
         $package = Package::factory()
             ->for(Shipment::factory()->for($method)->create([

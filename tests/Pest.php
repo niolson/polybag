@@ -19,8 +19,8 @@ use App\Models\Product;
 use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
+use App\Models\ShippingMethodPostageSource;
 use App\Models\ShippingOffer;
-use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\ShopifyFulfillmentOrderActivationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -343,8 +343,8 @@ function amazonShippingGround(): CarrierService
 
 /**
  * A packed parcel on an order from another channel, on a shipping method that
- * lists Amazon Shipping Ground (`carrier-catalog-reset/15`), and the Amazon
- * hook row when `$asksBuyShipping`. Each item is `[product weight, quantity]`.
+ * lists Amazon Shipping Ground (`carrier-catalog-reset/15`), and that allows
+ * Amazon Buy Shipping when `$asksBuyShipping` (`carrier-catalog-reset/12`). Each item is `[product weight, quantity]`.
  *
  * @param  array<int, array{0: float|null, 1: int}>  $items
  */
@@ -354,11 +354,7 @@ function externalPackage(?DataSource $origin, float $weight = 1.52, array $items
     $method->carrierServices()->attach(amazonShippingGround()->id);
 
     if ($asksBuyShipping) {
-        $amazon = Carrier::firstOrCreate(['name' => AmazonBuyShippingAdapter::SOURCE_NAME], ['active' => true]);
-        $method->carrierServices()->attach($amazon->carrierServices()->firstOrCreate(
-            ['service_code' => AmazonBuyShippingAdapter::CATALOG_SERVICE_CODE],
-            ['name' => 'Amazon Buy Shipping rates', 'active' => true],
-        )->id);
+        ShippingMethodPostageSource::factory()->amazon()->for($method)->create();
     }
 
     $shipment = Shipment::factory()->create([

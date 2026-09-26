@@ -21,6 +21,7 @@ use App\Models\Location;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
+use App\Models\ShippingMethodPostageSource;
 use App\Models\ShippingOffer;
 use App\Models\SpecialService;
 use App\Models\User;
@@ -29,6 +30,7 @@ use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\FakeCarrierAdapter;
 use App\Services\PostageSources\PostageSourceResolver;
 use App\Services\ShipmentImport\AmazonOrderItems;
+use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\ShippingRateService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -129,11 +131,13 @@ function silentAmazonSource(string $registryName = AmazonBuyShippingAdapter::SOU
     return $amazon;
 }
 
-function amazonHookService(): CarrierService
+/**
+ * Let the method ask Amazon Buy Shipping, through its `amazon` policy row
+ * (`carrier-catalog-reset/12`).
+ */
+function askAmazonBuyShipping(ShippingMethod $method): void
 {
-    return CarrierService::factory()
-        ->for(Carrier::firstOrCreate(['name' => AmazonBuyShippingAdapter::SOURCE_NAME]))
-        ->create(['service_code' => 'AMAZON_BUY_SHIPPING', 'name' => 'Amazon Buy Shipping']);
+    ShippingMethodPostageSource::factory()->amazon()->for($method)->create();
 }
 
 it('resolves the package sources once per quote', function (): void {
@@ -225,7 +229,8 @@ it('does not ask Amazon Shipping when the method does not list it', function ():
 it('asks Amazon Shipping through the scoped connection when the method lists it, and not Buy Shipping', function (): void {
     $connection = DataSource::factory()->unassigned()->offeringOffAmazonShipping()->create();
     CarrierAccountScope::create(['data_source_id' => $connection->id]);
-    $this->method->carrierServices()->attach([amazonShippingGround()->id, amazonHookService()->id]);
+    $this->method->carrierServices()->attach(amazonShippingGround()->id);
+    askAmazonBuyShipping($this->method);
 
     app(CarrierRegistry::class)->registerInstance('USPS', new FakeCarrierAdapter('USPS'));
     $buyShipping = silentAmazonSource();
@@ -239,6 +244,71 @@ it('asks Amazon Shipping through the scoped connection when the method lists it,
     app(ShippingRateService::class)->getShippingRates(sourceFirstPackage($this->method)->id);
 });
 
+/**
+ * An Amazon order's package, imported from an active Amazon connection.
+ */
+function amazonOrderPackage(?ShippingMethod $method): Package
+{
+    $origin = DataSource::factory()->amazon()->create(['active' => true]);
+
+    return Package::factory()
+        ->for(Shipment::factory()->create([
+            'shipping_method_id' => $method?->id,
+            'postal_code' => '90210',
+            'data_source_id' => $origin->id,
+            'metadata' => ['amazon_order_id' => '111-2222222-3333333'],
+        ]))
+        ->create(['box_size_id' => BoxSize::factory()->create()->id, 'weight' => 2.0, 'status' => PackageStatus::Unshipped]);
+}
+
+it('asks Amazon Buy Shipping for an Amazon order when the method has its amazon row', function (): void {
+    askAmazonBuyShipping($this->method);
+    app(CarrierRegistry::class)->registerInstance('USPS', new FakeCarrierAdapter('USPS'));
+    silentAmazonSource()->shouldReceive('getRates')
+        ->once()
+        ->withArgs(fn (RateRequest $request, array $serviceCodes): bool => $serviceCodes === [])
+        ->andReturn(collect());
+
+    app(ShippingRateService::class)->getShippingRates(amazonOrderPackage($this->method)->id);
+});
+
+it('does not ask Amazon Buy Shipping without the amazon row', function (): void {
+    app(CarrierRegistry::class)->registerInstance('USPS', new FakeCarrierAdapter('USPS'));
+    silentAmazonSource()->shouldNotReceive('getRates');
+
+    $rates = app(ShippingRateService::class)->getShippingRates(amazonOrderPackage($this->method)->id);
+
+    expect($rates->pluck('carrier')->unique()->all())->toBe(['USPS']);
+});
+
+it('does not ask Amazon Buy Shipping for an Amazon order with no shipping method', function (): void {
+    app(CarrierRegistry::class)->registerInstance('USPS', new FakeCarrierAdapter('USPS'));
+    silentAmazonSource()->shouldNotReceive('getRates');
+
+    app(ShippingRateService::class)->getShippingRates(amazonOrderPackage(null)->id);
+});
+
+it('asks Amazon Buy Shipping on a method that lists no services of its own', function (): void {
+    $method = ShippingMethod::factory()->create();
+    askAmazonBuyShipping($method);
+    silentAmazonSource()->shouldReceive('getRates')->once()->andReturn(collect());
+
+    app(ShippingRateService::class)->getShippingRates(amazonOrderPackage($method)->id);
+});
+
+it('does not change what a Shopify order is quoted', function (): void {
+    askAmazonBuyShipping($this->method);
+    createShopifyDataSource();
+    app(CarrierRegistry::class)->registerInstance('USPS', new FakeCarrierAdapter('USPS'));
+    silentAmazonSource()->shouldNotReceive('getRates');
+
+    $rates = app(ShippingRateService::class)->getShippingRates(sourceFirstPackage($this->method, [
+        'data_source_id' => DataSource::where('source_type', ShopifySource::class)->sole()->id,
+    ])->id);
+
+    expect($rates->pluck('carrier')->unique()->all())->toBe(['USPS']);
+});
+
 it('applies special-service scoping to direct sources and never to Amazon', function (): void {
     $signature = SpecialService::create([
         'code' => 'signature_required',
@@ -250,19 +320,13 @@ it('applies special-service scoping to direct sources and never to Amazon', func
     ]);
     $this->method->specialServices()->attach($signature->id, ['mode' => 'required']);
 
-    // Signature is scoped to a service of each carrier that the method does
-    // not list, so neither carrier's listed service is scoped for it.
-    $hook = amazonHookService();
-    $this->method->carrierServices()->attach($hook->id);
-    foreach ([
-        CarrierService::factory()->uspsPriority()->for($this->usps)->create(),
-        CarrierService::factory()->for($hook->carrier)->create(['service_code' => 'AMAZON_OTHER']),
-    ] as $scopedService) {
-        CarrierServiceSpecialService::create([
-            'carrier_service_id' => $scopedService->id,
-            'special_service_id' => $signature->id,
-        ]);
-    }
+    // Signature is scoped to a USPS service the method does not list, so its
+    // listed USPS service is not scoped for it. Amazon is handed no services.
+    askAmazonBuyShipping($this->method);
+    CarrierServiceSpecialService::create([
+        'carrier_service_id' => CarrierService::factory()->uspsPriority()->for($this->usps)->create()->id,
+        'special_service_id' => $signature->id,
+    ]);
 
     $requests = [];
     uspsQuotingOnHandedAccount($requests);

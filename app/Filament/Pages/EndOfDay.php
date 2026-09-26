@@ -9,7 +9,6 @@ use App\Models\Carrier;
 use App\Models\Location;
 use App\Models\Manifest;
 use App\Models\Package;
-use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\ManifestService;
 use App\Services\SettingsService;
@@ -80,9 +79,6 @@ class EndOfDay extends Page
         $multiLocation = (bool) app(SettingsService::class)->get('multi_location_enabled', false);
 
         $this->carrierSummary = Carrier::active()
-            // Transitional: the fake `Amazon` row dates nothing any more, and
-            // leaves in `carrier-catalog-reset/12`.
-            ->where('name', '!=', AmazonBuyShippingAdapter::SOURCE_NAME)
             ->orderBy('name')
             ->get()
             ->map(function (Carrier $carrier) use ($shipDateService, $registry, $multiLocation): array {
