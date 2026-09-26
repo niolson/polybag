@@ -11,6 +11,7 @@ use App\Models\SourceServiceMapping;
 use App\Services\PostageSources\ObservedServiceRecorder;
 use App\Services\SettingsService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 function observation(
     string $carrierId = 'ONTRAC',
@@ -269,4 +270,43 @@ it('does not touch or return a service nobody observed', function (): void {
             'UPS:GROUND' => 1,
             'ONTRAC:NEXT_DAY' => 1,
         ]);
+});
+
+describe('the first offer of an unmapped service', function (): void {
+    beforeEach(function (): void {
+        $this->log = Log::spy();
+    });
+
+    it('is logged once, and a later quote offering it again logs nothing', function (): void {
+        $recorder = app(ObservedServiceRecorder::class);
+
+        $recorder->record([observation()]);
+        $recorder->record([observation()]);
+
+        $this->log->shouldHaveReceived('info')
+            ->with('Unmapped postage service offered for the first time', Mockery::on(fn (array $context): bool => $context['external_carrier_id'] === 'ONTRAC'
+                && $context['external_service_id'] === 'ONTRAC_MFN_GROUND'
+                && $context['external_service_name'] === 'OnTrac Ground'
+                && $context['environment'] === SourceEnvironment::Production->value))
+            ->once();
+    });
+
+    it('is logged when a service long listed as ineligible is first offered', function (): void {
+        $recorder = app(ObservedServiceRecorder::class);
+
+        $recorder->record([observation(eligible: false)]);
+        $this->log->shouldNotHaveReceived('info');
+
+        $recorder->record([observation()]);
+        $this->log->shouldHaveReceived('info')->once();
+    });
+
+    it('is not logged for a mapped service', function (): void {
+        $service = CarrierService::factory()->for(Carrier::factory()->create(['name' => 'OnTrac']))->create();
+        SourceServiceMapping::map(PostageSourceKind::Amazon, 'ONTRAC', 'ONTRAC_MFN_GROUND', $service->id);
+
+        app(ObservedServiceRecorder::class)->record([observation()]);
+
+        $this->log->shouldNotHaveReceived('info');
+    });
 });

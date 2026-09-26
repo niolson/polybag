@@ -42,6 +42,7 @@ use App\Services\ShipmentImport\PackageExportService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShippingRateService;
 use App\Services\TrackingService;
+use Database\Seeders\ReferenceDataSeeder;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\Request;
@@ -576,17 +577,20 @@ it('offers nothing for a Package in UPS packaging, which Amazon never quotes for
  * The four content-restricted services Amazon has been seen to name, for
  * `carrier-catalog-reset/04`. No capture has ever returned one as eligible —
  * Amazon refused all of them for the products in the order — so these are
- * fixtures shaped like the eligible USPS offers beside them.
+ * fixtures shaped like the eligible USPS offers beside them, under the carrier
+ * Amazon names for each.
  *
  * @return array<int, array<string, mixed>>
  */
 function amazonContentRestrictedRates(): array
 {
+    $ups = ['carrierId' => 'UPS', 'carrierName' => 'UPS'];
+
     return [
         amazonUspsRateFor('USPS_PTP_MM', 'USPS Media Mail'),
         amazonUspsRateFor('USPS_PTP_BPM', 'USPS Bound Printed Matter'),
-        amazonUspsRateFor('UPS_PTP_SUREPOST_MEDIA', 'UPS SurePost Media Mail'),
-        amazonUspsRateFor('UPS_PTP_SUREPOST_BPM', 'UPS SurePost Bound Printed Matter'),
+        [...amazonUspsRateFor('UPS_PTP_SUREPOST_MEDIA', 'UPS Ground Saver Media (Tender to UPS only)'), ...$ups],
+        [...amazonUspsRateFor('UPS_PTP_SUREPOST_BPM', 'UPS Ground Saver BPM (Tender to UPS only)'), ...$ups],
     ];
 }
 
@@ -600,7 +604,8 @@ function amazonMediaPackage(Package $package): Package
     return $package->fresh();
 }
 
-it('drops Media Mail for a package that does not qualify, and keeps Bound Printed Matter as attended-only', function (): void {
+it('drops both Media Mail services for a package that does not qualify, and keeps Bound Printed Matter as attended-only', function (): void {
+    $this->seed(ReferenceDataSeeder::class);
     Saloon::fake([GetShippingRates::class => amazonRatesResponse(amazonContentRestrictedRates())]);
 
     $package = amazonPackageIn($this->package, BoxSizeType::BOX);
@@ -617,20 +622,41 @@ it('drops Media Mail for a package that does not qualify, and keeps Bound Printe
         ])->count())->toBe(4);
 });
 
-it('offers unmapped Media Mail to a package whose items are all media, and still drops both SurePost services', function (): void {
+it('offers both Media Mail services as the seeded catalog services to a package whose items are all media, and still drops Ground Saver BPM', function (): void {
+    $this->seed(ReferenceDataSeeder::class);
     Saloon::fake([GetShippingRates::class => amazonRatesResponse(amazonContentRestrictedRates())]);
 
     $package = amazonMediaPackage(amazonPackageIn($this->package, BoxSizeType::BOX));
 
     $rates = amazonAdapter()->getRates(RateRequest::fromPackage($package), [])->keyBy('serviceCode');
+    $groundSaverMedia = CarrierService::query()->where('service_code', '95')->sole();
 
-    expect($rates->keys()->all())->toBe(['USPS_PTP_MM', 'USPS_PTP_BPM'])
-        ->and($rates['USPS_PTP_MM']->contentRestricted)->toBeFalse()
-        // Unmapped: it names no catalog service until `11` maps it.
-        ->and($rates['USPS_PTP_MM']->carrierServiceId)->toBeNull()
+    expect($rates->pluck('serviceCode')->all())->toBe(['MEDIA_MAIL', 'USPS_PTP_BPM', '95'])
+        ->and($rates['MEDIA_MAIL']->contentRestricted)->toBeFalse()
+        ->and($rates['95']->carrier)->toBe(Carrier::UPS)
+        ->and($rates['95']->serviceName)->toBe('UPS Ground Saver Media')
+        ->and($rates['95']->carrierServiceId)->toBe($groundSaverMedia->id)
+        ->and($rates['95']->contentRestricted)->toBeFalse()
         // Bound Printed Matter stays attended-only, qualifying or not: nothing
         // vouches for bound printed matter.
         ->and($rates['USPS_PTP_BPM']->contentRestricted)->toBeTrue();
+});
+
+it('names an offer for a seeded identifier as its catalog service, under its carrier of record', function (): void {
+    $this->seed(ReferenceDataSeeder::class);
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    $rates = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->keyBy('carrier');
+    $onTracGround = CarrierService::query()->where('service_code', 'ONTRAC_MFN_GROUND')->sole();
+    $offer = ShippingOffer::where('public_id', $rates['OnTrac']->offerId)->sole();
+
+    expect($rates->keys()->all())->toBe([Carrier::ONTRAC, Carrier::UPS])
+        ->and($rates['OnTrac']->serviceName)->toBe('OnTrac Ground')
+        ->and($rates['OnTrac']->carrierServiceId)->toBe($onTracGround->id)
+        ->and($rates['OnTrac']->carrierId)->toBe($onTracGround->carrier_id)
+        ->and($offer->carrier_service_id)->toBe($onTracGround->id)
+        ->and($rates['UPS']->serviceCode)->toBe('13')
+        ->and($rates['UPS']->serviceName)->toBe('UPS Next Day Air Saver');
 });
 
 it('holds mapped Media Mail to the requirement of the service it is mapped to', function (): void {

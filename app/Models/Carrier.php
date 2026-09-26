@@ -27,6 +27,12 @@ class Carrier extends Model
     /** A carrier Shopify sells, with no integration of ours. */
     public const DHL_EXPRESS = 'DHL Express';
 
+    /** Amazon's own network, sold today through Amazon Buy Shipping. */
+    public const AMAZON_SHIPPING = 'Amazon Shipping';
+
+    /** A carrier Amazon Buy Shipping sells, with no integration of ours. */
+    public const ONTRAC = 'OnTrac';
+
     protected static function booted(): void
     {
         static::updating(function (Carrier $carrier): void {

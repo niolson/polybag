@@ -20,7 +20,6 @@ use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\AmazonChannelType;
 use App\Enums\CarrierPackaging;
-use App\Enums\ContentClass;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\OffAmazonShippingStatus;
 use App\Enums\PostageSource;
@@ -170,32 +169,17 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
      *   PolyBag vouches for the contents. So only a person may choose it.
      * - `UPS_PTP_SUREPOST_BPM` is dropped for good. Ground Saver BPM is not
      *   authored, and nothing shows that Amazon checks products for it.
-     * - `UPS_PTP_SUREPOST_MEDIA` is dropped until `11` maps it to UPS Ground
-     *   Saver Media, whose media requirement guards it from then on.
      *
      * @var array<string, string>
      */
     private const CONTENT_RESTRICTED_SERVICES = [
         'USPS_PTP_BPM' => self::ATTENDED_ONLY_FOR_CONTENTS,
         'UPS_PTP_SUREPOST_BPM' => self::DROP_FOR_CONTENTS,
-        'UPS_PTP_SUREPOST_MEDIA' => self::DROP_FOR_CONTENTS,
     ];
 
     private const DROP_FOR_CONTENTS = 'drop';
 
     private const ATTENDED_ONLY_FOR_CONTENTS = 'attended-only';
-
-    /**
-     * What an unmapped Amazon service requires, by identifier, until `11`
-     * seeds Amazon's known mappings and removes this fallback. Without it an
-     * unmapped Media Mail offer would name no catalog service, carry no
-     * requirement, and be shown for any Package.
-     *
-     * @var array<string, ContentClass>
-     */
-    private const UNMAPPED_REQUIRED_CONTENTS = [
-        'USPS_PTP_MM' => ContentClass::Media,
-    ];
 
     public function getCarrierName(): string
     {
@@ -1148,15 +1132,15 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
      *
      * The requirement is the mapped `CarrierService`'s, the same one
      * {@see ContentsFilter} reads for a direct rate, so Media Mail bought
-     * through Amazon is held to the rule our own USPS account is. Until `11`
-     * maps Amazon's Media Mail, {@see UNMAPPED_REQUIRED_CONTENTS} gates it by
-     * identifier, so an unmapped offer is never shown for a Package that does
-     * not qualify. Amazon's own product check has already run, so an offer
-     * kept here has passed both.
+     * through Amazon is held to the rule our own USPS account is, and so is UPS
+     * Ground Saver Media. The reference-data sync seeds both mappings
+     * (`carrier-catalog-reset/11`). Amazon's own product check has already
+     * run, so an offer kept here has passed both.
      *
      * The identifiers with a restriction and no catalog service are the
-     * exception on {@see CONTENT_RESTRICTED_SERVICES}: two are dropped here,
-     * and Bound Printed Matter is kept and marked attended-only instead.
+     * exception on {@see CONTENT_RESTRICTED_SERVICES}: Ground Saver BPM is
+     * dropped here, and Bound Printed Matter is kept and marked attended-only
+     * instead.
      *
      * It runs here, beside {@see fitsThePackaging()}, rather than being left
      * to `ShippingRateService`, for the reason on {@see isBuyable()}: no
@@ -1172,7 +1156,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
             return false;
         }
 
-        $required = $mapped->required_contents ?? self::UNMAPPED_REQUIRED_CONTENTS[$serviceId] ?? null;
+        $required = $mapped?->required_contents;
 
         return $required === null
             || in_array($required, $request->packages[0]->qualifyingContents ?? [], true);

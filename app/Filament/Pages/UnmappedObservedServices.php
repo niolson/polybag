@@ -140,6 +140,15 @@ class UnmappedObservedServices extends Page implements HasTable
                         blank: fn ($query) => $query,
                     )
                     ->default(false),
+                // With the Mapping filter's default, "offered and unmapped":
+                // the services a packer can already buy under Amazon's name.
+                Tables\Filters\TernaryFilter::make('offered')
+                    ->label('Offered')
+                    ->placeholder('All')
+                    ->trueLabel('Offered as buyable')
+                    ->falseLabel('Only listed as ineligible')
+                    ->attribute('last_eligible_at')
+                    ->nullable(),
                 Tables\Filters\SelectFilter::make('environment')
                     ->label('Environment')
                     ->options(fn (): array => collect(SourceEnvironment::cases())

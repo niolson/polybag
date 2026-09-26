@@ -165,6 +165,8 @@ class ObservedServiceRecorder
             ->all();
 
         if (($ids = $idsFor($eligible)) !== []) {
+            $this->reportFirstOffered($rows->whereIn('id', $ids)->whereNull('last_eligible_at'), $now);
+
             ObservedService::query()->whereIn('id', $ids)->increment('observation_count', 1, [
                 'last_seen_at' => $now,
                 'last_eligible_at' => $now,
@@ -180,6 +182,52 @@ class ObservedServiceRecorder
                 'updated_at' => $now,
             ]);
         }
+    }
+
+    /**
+     * Log an unmapped service the first time a source offers it as buyable —
+     * `carrier-catalog-reset/11`.
+     *
+     * The Map Carrier Services page lists it either way, and deliberately
+     * raises nothing (ADR-0003 decision 8). This is the one line that says a
+     * new service became real, for whoever is watching the log.
+     *
+     * Two writes, not one per row: a first sighting of a production reply
+     * offers several services at once. The rows still empty are claimed in one
+     * update, then read back by the value it wrote, so a second packer quoting
+     * the same parcel later finds nothing left to claim. Two quotes landing in
+     * the same second can both log it; that costs a repeated line, not a
+     * missed one. The increment that follows writes the same value again.
+     *
+     * @param  Collection<string, ObservedService>  $firstOffered  rows as read before this sighting
+     */
+    private function reportFirstOffered(Collection $firstOffered, CarbonInterface $now): void
+    {
+        if ($firstOffered->isEmpty()) {
+            return;
+        }
+
+        $ids = $firstOffered->pluck('id')->all();
+
+        ObservedService::query()
+            ->whereIn('id', $ids)
+            ->whereNull('last_eligible_at')
+            ->update(['last_eligible_at' => $now]);
+
+        ObservedService::query()
+            ->whereIn('id', $ids)
+            ->where('last_eligible_at', $now)
+            ->unmapped()
+            ->get()
+            ->each(fn (ObservedService $service) => logger()->info('Unmapped postage service offered for the first time', [
+                'source' => $service->source,
+                'environment' => $service->environment->value,
+                'marketplace' => $service->marketplace,
+                'external_carrier_id' => $service->external_carrier_id,
+                'external_carrier_name' => $service->external_carrier_name,
+                'external_service_id' => $service->external_service_id,
+                'external_service_name' => $service->external_service_name,
+            ]));
     }
 
     /**
