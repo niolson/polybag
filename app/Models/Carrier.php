@@ -24,6 +24,9 @@ class Carrier extends Model
 
     public const FEDEX = 'FedEx';
 
+    /** A carrier Shopify sells, with no integration of ours. */
+    public const DHL_EXPRESS = 'DHL Express';
+
     protected static function booted(): void
     {
         static::updating(function (Carrier $carrier): void {

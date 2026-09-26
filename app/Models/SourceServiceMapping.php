@@ -122,6 +122,30 @@ class SourceServiceMapping extends Model
             ->toBase();
     }
 
+    /**
+     * One source's rows for these catalog services, in one query, keyed by
+     * service id — the outward direction, what a purchase sends for a service.
+     * Only Shopify's rows are outward, so a service has at most one of them.
+     *
+     * @param  iterable<int>  $carrierServiceIds
+     * @return Collection<int, self> keyed by carrier service id
+     */
+    public static function forServices(PostageSourceKind $kind, iterable $carrierServiceIds): Collection
+    {
+        $ids = collect($carrierServiceIds)->unique()->values();
+
+        if ($ids->isEmpty()) {
+            return collect();
+        }
+
+        return self::query()
+            ->where('source_kind', $kind)
+            ->whereIn('carrier_service_id', $ids->all())
+            ->get()
+            ->keyBy('carrier_service_id')
+            ->toBase();
+    }
+
     public static function key(string $externalCarrierId, string $externalServiceId): string
     {
         return $externalCarrierId.'|'.$externalServiceId;

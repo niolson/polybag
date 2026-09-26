@@ -13,12 +13,14 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
+use App\Enums\PostageSourceKind;
 use App\Enums\ServiceCapability;
 use App\Enums\ServiceEvidence;
 use App\Exceptions\Carriers\ShopifyLabelPurchaseException;
 use App\Models\CarrierService;
 use App\Models\DataSource;
 use App\Models\Package;
+use App\Models\SourceServiceMapping;
 use App\Services\ServiceInference\ServiceInferrer;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\Shipping\ContentsFilter;
@@ -52,16 +54,28 @@ use Illuminate\Support\Str;
  *   since a purchase is keyed to a Shopify fulfillment order.
  *
  * Service codes are `carrier:service` pairs for Shopify's
- * `preferredRateSelection` (`usps:usps_ground_advantage`), or the bare code
- * `auto` to let Shopify pick the rate the way its admin would. Either way they
- * are a preference we asked for, never a service we were sold.
+ * `preferredRateSelection` (`usps:GroundAdvantage`), or the bare code `auto` to
+ * let Shopify pick the rate the way its admin would. Either way they are a
+ * preference we asked for, never a service we were sold.
+ *
+ * Shopify sells real catalog services (`carrier-catalog-reset/09`): a pair is
+ * a Shopify row in the source mapping table, and the offer names the catalog
+ * service it maps to. `auto` is no catalog row at all, but the shipping
+ * method's source policy allowing Shopify's own choice.
  */
 class ShopifyAdapter implements BlindPurchaseSource
 {
+    /**
+     * The name this source is registered under in `CarrierRegistry`. Not a
+     * carrier: no catalog row carries it (`carrier-catalog-reset/09`).
+     */
     public const CARRIER_NAME = 'Shopify';
 
     /** Service code that leaves rate selection to Shopify. */
     public const AUTO_SERVICE_CODE = 'auto';
+
+    /** What Shopify's own choice is called on screen. */
+    public const AUTO_SELECTION_LABEL = "Shopify's choice";
 
     /** How the seller is named to a packer choosing an offer. */
     public const SOURCE_LABEL = 'Shopify Shipping';
@@ -157,14 +171,14 @@ class ShopifyAdapter implements BlindPurchaseSource
      * the client has to have opted into blind purchase (ADR-0003 decision 5),
      * the shipment has to have come from a live Shopify data source with a
      * fulfillment order to buy against, no label can have been bought against
-     * that fulfillment order already, the selection has to be one we
-     * actually catalogue, and the Package has to qualify for any contents
-     * that catalogue row requires.
+     * that fulfillment order already, the selection has to be `auto` or a
+     * pair the source mapping table maps to a catalog service, and the Package
+     * has to qualify for any contents that service requires.
      *
      * The last is Media Mail's rule, which binds Shopify as it binds our own
      * USPS account (ADR-0006 decision 10). A blind offer has no rate for
      * {@see ContentsFilter} to read, so the requirement is read here, off the
-     * same row that names the offer. The purchase re-derives these offers, so
+     * catalog service the offer names. The purchase re-derives these offers, so
      * a stale Media Mail selection, or a rule's, is refused there too.
      *
      * The opt-in is checked here rather than in `ShippingRateService` because
@@ -197,26 +211,87 @@ class ShopifyAdapter implements BlindPurchaseSource
             return collect();
         }
 
-        $services = CarrierService::query()
-            ->whereHas('carrier', fn ($query) => $query->where('name', self::CARRIER_NAME))
-            ->whereIn('service_code', $serviceCodes)
-            ->get(['service_code', 'name', 'required_contents'])
-            ->keyBy('service_code');
+        $mappings = SourceServiceMapping::forIdentities(
+            PostageSourceKind::Shopify,
+            collect($serviceCodes)
+                ->map(fn (string $code): array => $this->splitServiceCode($code))
+                ->filter(fn (array $pair): bool => $pair[0] !== null)
+                ->all(),
+        );
 
         $dataSourceId = $labelService->dataSourceFor($package)?->id;
+        $offers = collect();
 
-        return collect($serviceCodes)
-            ->filter(fn (string $code): bool => $services->has($code))
-            ->filter(fn (string $code): bool => $this->weightAllows($code, (float) $package->weight))
-            ->filter(fn (string $code): bool => $this->contentsAllow($services->get($code), $package))
-            ->map(fn (string $code): BlindPurchaseOffer => new BlindPurchaseOffer(
+        foreach ($serviceCodes as $code) {
+            if (! $this->weightAllows($code, (float) $package->weight)) {
+                continue;
+            }
+
+            if ($code === self::AUTO_SERVICE_CODE) {
+                $offers->push(new BlindPurchaseOffer(
+                    source: self::CARRIER_NAME,
+                    sourceLabel: self::SOURCE_LABEL,
+                    serviceCode: $code,
+                    selectionLabel: self::AUTO_SELECTION_LABEL,
+                    postageDataSourceId: $dataSourceId,
+                ));
+
+                continue;
+            }
+
+            [$carrierCode, $serviceCode] = $this->splitServiceCode($code);
+            $service = $carrierCode === null
+                ? null
+                : $mappings->get(SourceServiceMapping::key($carrierCode, $serviceCode))?->carrierService;
+
+            if ($service === null || ! $this->contentsAllow($service, $package)) {
+                continue;
+            }
+
+            $offers->push(new BlindPurchaseOffer(
                 source: self::CARRIER_NAME,
                 sourceLabel: self::SOURCE_LABEL,
                 serviceCode: $code,
-                selectionLabel: (string) $services->get($code)->name,
+                selectionLabel: self::selectionLabelFor($service),
                 postageDataSourceId: $dataSourceId,
-            ))
-            ->values();
+                carrierServiceId: $service->id,
+                carrierId: $service->carrier_id,
+            ));
+        }
+
+        return $offers;
+    }
+
+    /**
+     * The code a purchase sends for this catalog service, or null when Shopify
+     * has no mapping for it: its one outward Shopify row, joined back into the
+     * `carrier:service` pair `preferredRateSelection` takes.
+     */
+    public static function serviceCodeFor(int $carrierServiceId): ?string
+    {
+        $mapping = SourceServiceMapping::forServices(PostageSourceKind::Shopify, [$carrierServiceId])->first();
+
+        return $mapping === null ? null : self::serviceCodeFromMapping($mapping);
+    }
+
+    public static function serviceCodeFromMapping(SourceServiceMapping $mapping): string
+    {
+        return $mapping->external_carrier_id.':'.$mapping->external_service_id;
+    }
+
+    /**
+     * What a packer reads for a requested service: "USPS Ground Advantage",
+     * "UPS Ground" — the carrier's label, unless the service already says it.
+     */
+    private static function selectionLabelFor(CarrierService $service): string
+    {
+        $carrierLabel = $service->carrier?->label();
+
+        if ($carrierLabel === null || str_starts_with($service->name, $carrierLabel)) {
+            return $service->name;
+        }
+
+        return "{$carrierLabel} {$service->name}";
     }
 
     /**

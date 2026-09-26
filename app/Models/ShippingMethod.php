@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\OtdrProtectedOrders;
+use App\Enums\PostageSourceKind;
 use Illuminate\Database\Eloquent\Casts\AsEnumCollection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -28,6 +29,42 @@ class ShippingMethod extends Model
         'excludes_late_rates' => 'boolean',
         'otdr_protection_orders' => AsEnumCollection::class.':'.OtdrProtectedOrders::class,
     ];
+
+    /**
+     * Every method starts with its `direct` row: direct is on by default, and
+     * deleting the row turns it off (`carrier-catalog-reset/09`).
+     */
+    protected static function booted(): void
+    {
+        static::created(function (ShippingMethod $method): void {
+            $method->postageSources()->firstOrCreate(['source_kind' => PostageSourceKind::Direct]);
+        });
+    }
+
+    /**
+     * The row that lets this kind of source sell for the method, or null when
+     * it may not. Reads the loaded rows, so rating loads them once.
+     */
+    public function postageSourceFor(PostageSourceKind $kind): ?ShippingMethodPostageSource
+    {
+        return $this->postageSources->first(
+            fn (ShippingMethodPostageSource $row): bool => $row->source_kind === $kind,
+        );
+    }
+
+    public function allowsSource(PostageSourceKind $kind): bool
+    {
+        return $this->postageSourceFor($kind) !== null;
+    }
+
+    /**
+     * Whether this kind may sell beyond the method's listed services —
+     * Shopify's `auto`, say.
+     */
+    public function allowsUnlistedServices(PostageSourceKind $kind): bool
+    {
+        return $this->postageSourceFor($kind)?->allowsUnlistedServices() ?? false;
+    }
 
     /**
      * Whether automation must buy an OTDR-protected offer for this Amazon
@@ -64,6 +101,16 @@ class ShippingMethod extends Model
     public function shippingRules(): HasMany
     {
         return $this->hasMany(ShippingRule::class);
+    }
+
+    /**
+     * The source policy: one row per kind of source that may sell.
+     *
+     * @return HasMany<ShippingMethodPostageSource, $this>
+     */
+    public function postageSources(): HasMany
+    {
+        return $this->hasMany(ShippingMethodPostageSource::class);
     }
 
     /**

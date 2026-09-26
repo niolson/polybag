@@ -353,11 +353,18 @@ readonly class ShipRequest
     }
 
     /**
-     * The carrier a blind purchase is dated by: its connection's setting, or
-     * USPS's policy when the offer names no connection.
+     * The carrier a blind purchase is dated by (ADR-0006, guideline 12): the
+     * carrier of the service it requests, as a rate is. Only Shopify's own
+     * choice has no carrier before it is bought, and is dated by its
+     * connection's *Date Shopify's choice as*, or USPS's policy when the offer
+     * names no connection.
      */
     private static function shipDateCarrierForBlindOffer(BlindPurchaseOffer $offer): ?Carrier
     {
+        if ($offer->carrierId !== null) {
+            return Carrier::find($offer->carrierId);
+        }
+
         $dataSource = $offer->postageDataSourceId !== null
             ? DataSource::find($offer->postageDataSourceId)
             : null;

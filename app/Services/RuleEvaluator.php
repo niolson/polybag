@@ -18,6 +18,7 @@ use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\ShippingRule;
+use App\Services\Carriers\ShopifyAdapter;
 use App\Services\PostageSources\MethodSourceAllowance;
 
 /**
@@ -49,7 +50,7 @@ class RuleEvaluator
             ->with(['carrierService.carrier', 'carrier'])
             ->get();
 
-        $shipment->loadMissing('shippingMethod');
+        $shipment->loadMissing('shippingMethod.postageSources');
         $method = $shipment->shippingMethod;
         $exclusions = [];
 
@@ -89,9 +90,12 @@ class RuleEvaluator
 
         return match ($rule->source) {
             // A blind purchase has no rate to pre-select, and nothing invents
-            // one (ADR-0003 decision 5).
+            // one (ADR-0003 decision 5). *Any service* is Shopify's own choice.
             ShippingRuleSource::Shopify => new RuleEvaluationResult(
-                preSelectedBlindPurchaseId: BlindPurchaseOffer::identifier($service->carrier->name, $service->service_code),
+                preSelectedBlindPurchaseId: BlindPurchaseOffer::identifier(
+                    ShopifyAdapter::CARRIER_NAME,
+                    $rule->any_service ? ShopifyAdapter::AUTO_SERVICE_CODE : (string) ShopifyAdapter::serviceCodeFor($service->id),
+                ),
                 exclusions: $exclusions,
             ),
 
@@ -144,10 +148,6 @@ class RuleEvaluator
             kind: $rule->source->kind(),
             carrierId: $rule->carrier_id,
             carrierServiceId: $service?->id,
-            carrierName: $rule->carrier?->name,
-            blindPurchaseId: $service !== null
-                ? BlindPurchaseOffer::identifier($service->carrier->name, $service->service_code)
-                : null,
         );
     }
 

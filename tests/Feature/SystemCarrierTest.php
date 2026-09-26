@@ -16,7 +16,6 @@ use App\Models\Setting;
 use App\Models\User;
 use App\Services\CarrierNormalizer;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
-use App\Services\Carriers\ShopifyAdapter;
 use App\Services\SettingsService;
 use Filament\Actions\DeleteAction;
 use Filament\Forms\Components\Select;
@@ -135,9 +134,11 @@ describe('the reference-data sync', function (): void {
                 Carrier::USPS,
                 Carrier::FEDEX,
                 Carrier::UPS,
-                ShopifyAdapter::CARRIER_NAME,
+                Carrier::DHL_EXPRESS,
                 AmazonBuyShippingAdapter::SOURCE_NAME,
-            );
+            )
+            // Shopify is a source, not a carrier (`carrier-catalog-reset/09`).
+            ->and(Carrier::query()->pluck('name')->all())->not->toContain('Shopify');
     });
 
     it('adopts a custom carrier an operator made under a seeded name', function (): void {
@@ -237,7 +238,7 @@ describe('carrier accounts', function (): void {
             Carrier::factory()->ups()->system()->create(),
             Carrier::factory()->fedex()->system()->create(),
         ]);
-        Carrier::factory()->shopify()->system()->create();
+        Carrier::factory()->system()->create(['name' => Carrier::DHL_EXPRESS]);
         Carrier::factory()->system()->create(['name' => AmazonBuyShippingAdapter::SOURCE_NAME]);
         Carrier::factory()->create(['name' => 'Regional Courier']);
 
@@ -254,16 +255,17 @@ describe('carrier accounts', function (): void {
 
         expect(CarrierAccount::query()->exists())->toBeFalse();
     })->with([
-        'Shopify' => [ShopifyAdapter::CARRIER_NAME],
+        // A carrier Shopify sells, with no integration of ours.
+        'DHL Express' => [Carrier::DHL_EXPRESS],
         'Amazon' => [AmazonBuyShippingAdapter::SOURCE_NAME],
         'a custom carrier' => ['Regional Courier'],
     ]);
 
     it('are refused when moved to another carrier', function (): void {
         $account = CarrierAccount::factory()->usps()->create();
-        $shopify = Carrier::factory()->shopify()->create();
+        $dhlExpress = Carrier::factory()->create(['name' => Carrier::DHL_EXPRESS]);
 
-        expect(fn () => $account->update(['carrier_id' => $shopify->id]))
+        expect(fn () => $account->update(['carrier_id' => $dhlExpress->id]))
             ->toThrow(InvalidArgumentException::class);
     });
 });

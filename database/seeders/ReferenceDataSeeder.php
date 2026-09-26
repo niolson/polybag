@@ -13,6 +13,8 @@ class ReferenceDataSeeder extends Seeder
     {
         $this->call([
             CarrierSeeder::class,
+            // After the catalog it maps, and once only: removing one sticks.
+            ShopifyServiceMappingSeeder::class,
             CarrierAliasSeeder::class,
             SpecialServiceSeeder::class,
             CarrierServiceSpecialServiceSeeder::class,

@@ -8,7 +8,9 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\ContentClass;
 use App\Enums\OfferRejection;
 use App\Enums\PackageStatus;
+use App\Enums\PostageSourceKind;
 use App\Enums\ShippingRuleAction;
+use App\Enums\ShippingRuleSource;
 use App\Filament\Resources\ProductResource\Pages\CreateProduct;
 use App\Filament\Resources\ProductResource\Pages\ListProducts;
 use App\Http\Integrations\USPS\Requests\ShippingOptions;
@@ -22,8 +24,10 @@ use App\Models\Product;
 use App\Models\RateQuote;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
+use App\Models\ShippingMethodPostageSource;
 use App\Models\ShippingOffer;
 use App\Models\ShippingRule;
+use App\Models\SourceServiceMapping;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\FakeCarrierAdapter;
@@ -362,23 +366,24 @@ it('filters the product table by the media flag', function (): void {
 */
 
 /**
- * A package on a Shopify order whose shipping method lists Shopify's Media
- * Mail and Shopify's choice, with the real adapter registered.
+ * A package on a Shopify order whose shipping method lists USPS Media Mail and
+ * lets only Shopify sell, with its own choice allowed, and the real adapter
+ * registered.
  */
 function shopifyMediaMailPackage(array $products): Package
 {
     $source = createShopifyDataSource([], ['oauth_access_token' => 'shpat_test_token']);
 
-    $shopify = Carrier::factory()->shopify()->create();
-    $auto = CarrierService::factory()->for($shopify)->create(['name' => "Shopify's choice", 'service_code' => 'auto']);
-    $mediaMail = CarrierService::factory()->for($shopify)->create([
-        'name' => "Shopify's USPS Media Mail",
-        'service_code' => 'usps:MediaMail',
-        'required_contents' => ContentClass::Media,
-    ]);
+    $mediaMail = Carrier::seedSystem(Carrier::USPS)->carrierServices()->firstOrCreate(
+        ['service_code' => 'MEDIA_MAIL'],
+        ['name' => 'Media Mail', 'required_contents' => ContentClass::Media],
+    );
+    SourceServiceMapping::map(PostageSourceKind::Shopify, 'usps', 'MediaMail', $mediaMail->id);
 
     $method = ShippingMethod::factory()->create();
-    $method->carrierServices()->attach([$auto->id, $mediaMail->id]);
+    $method->carrierServices()->attach($mediaMail->id);
+    $method->postageSources()->delete();
+    ShippingMethodPostageSource::factory()->shopify()->any()->for($method)->create();
 
     $shipment = Shipment::factory()->for($method)->create([
         'data_source_id' => $source->id,
@@ -406,8 +411,9 @@ function shopifyMediaMailOffer(Package $package): BlindPurchaseOffer
         source: 'Shopify',
         sourceLabel: 'Shopify Shipping',
         serviceCode: 'usps:MediaMail',
-        selectionLabel: "Shopify's USPS Media Mail",
+        selectionLabel: 'USPS Media Mail',
         postageDataSourceId: $package->shipment->data_source_id,
+        carrierServiceId: CarrierService::where('service_code', 'MEDIA_MAIL')->value('id'),
     );
 }
 
@@ -416,7 +422,7 @@ it('advertises Shopify Media Mail to a package whose items are all media', funct
 
     $offers = app(ShippingRateService::class)->blindPurchaseOffersFor($package);
 
-    expect($offers->pluck('serviceCode')->all())->toBe(['auto', 'usps:MediaMail']);
+    expect($offers->pluck('serviceCode')->all())->toBe(['usps:MediaMail', 'auto']);
 });
 
 it('does not advertise Shopify Media Mail to a package that does not qualify', function (): void {
@@ -450,12 +456,12 @@ it('does not let a rule pre-selecting Shopify Media Mail buy it for a package th
     $this->actingAs($user = User::factory()->create());
     $package = shopifyMediaMailPackage([Product::factory()->create()]);
     $method = $package->shipment->shippingMethod;
-    $mediaMail = CarrierService::where('service_code', 'usps:MediaMail')->sole();
+    $mediaMail = CarrierService::where('service_code', 'MEDIA_MAIL')->sole();
 
     // Media Mail alone, so nothing else could be bought in its place.
-    $method->carrierServices()->sync([$mediaMail->id]);
+    $method->postageSources()->update(['unlisted_services' => 'none']);
 
-    ShippingRule::factory()->create([
+    ShippingRule::factory()->source(ShippingRuleSource::Shopify)->create([
         'shipping_method_id' => $method->id,
         'action' => ShippingRuleAction::UseService,
         'carrier_service_id' => $mediaMail->id,
@@ -477,18 +483,15 @@ it('does not let a rule pre-selecting Shopify Media Mail buy it for a package th
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 
-it('seeds Shopify Media Mail requiring media contents, and restores the requirement on every sync', function (): void {
-    $this->seed(CarrierSeeder::class);
+it('maps Shopify Media Mail onto USPS Media Mail, which carries the media requirement', function (): void {
+    $this->artisan('app:sync-reference-data')->assertSuccessful();
 
-    $shopifyMediaMail = CarrierService::query()
-        ->whereHas('carrier', fn ($query) => $query->where('name', ShopifyAdapter::CARRIER_NAME))
-        ->where('service_code', 'usps:MediaMail')
-        ->sole();
+    $mediaMail = SourceServiceMapping::query()
+        ->forIdentity(PostageSourceKind::Shopify, 'usps', 'MediaMail')
+        ->sole()
+        ->carrierService;
 
-    expect($shopifyMediaMail->required_contents)->toBe(ContentClass::Media);
-
-    $shopifyMediaMail->update(['required_contents' => null]);
-    $this->seed(CarrierSeeder::class);
-
-    expect($shopifyMediaMail->fresh()->required_contents)->toBe(ContentClass::Media);
+    expect($mediaMail->carrier->name)->toBe(Carrier::USPS)
+        ->and($mediaMail->service_code)->toBe('MEDIA_MAIL')
+        ->and($mediaMail->required_contents)->toBe(ContentClass::Media);
 });

@@ -30,7 +30,9 @@ use App\Models\Product;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
+use App\Models\ShippingMethodPostageSource;
 use App\Models\ShippingRule;
+use App\Models\SourceServiceMapping;
 use App\Models\SpecialService;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
@@ -185,11 +187,10 @@ it('refuses a blind purchase when the shipment hard-requires a special service',
     $source->shouldNotHaveReceived('createShipment');
 });
 
-it('gives the refusal its reason when the Shopify row carries a display name', function (): void {
+it('gives the refusal its reason, naming the source as the packer knows it', function (): void {
     $package = blindPurchasePackage();
     allowBlindPurchase($package);
     registerBlindSource();
-    Carrier::where('name', ShopifyAdapter::CARRIER_NAME)->update(['display_name' => 'Shopify Shipping']);
 
     $signature = SpecialService::create([
         'code' => 'signature_required',
@@ -206,8 +207,8 @@ it('gives the refusal its reason when the Shopify row carries a display name', f
         new PackageShippingRequest(blindOffer: shopifyBlindOffer()),
     );
 
-    // Matched by the source's registry name, while the text names it as the
-    // operator labelled it.
+    // Matched by the source's registry name, which no carrier row carries,
+    // while the text names it as the Ship page does.
     expect($result->success)->toBeFalse()
         ->and($result->message)->toBe('Shopify Shipping cannot guarantee Signature Required — it picks the carrier and service after the label is bought.');
 });
@@ -384,7 +385,7 @@ it('excludes the blind purchase entirely when a special service is hard-required
     // the choice not having been made yet rather than a carrier refusing.
     expect($options->blindPurchaseOffers)->toBeEmpty()
         ->and($options->exclusions)->toHaveCount(1)
-        ->and($options->exclusions[0]['carrier'])->toBe('Shopify')
+        ->and($options->exclusions[0]['carrier'])->toBe('Shopify Shipping')
         ->and($options->exclusions[0]['reason'])->toContain('cannot guarantee Signature Required');
 });
 
@@ -492,11 +493,11 @@ it('excludes a blind purchase selected by an exclude service rule', function ():
     allowBlindPurchase($package);
     $source = registerBlindSource();
 
-    $shopifyService = CarrierService::whereHas('carrier', fn ($query) => $query->where('name', 'Shopify'))->firstOrFail();
     ShippingRule::factory()->source(ShippingRuleSource::Shopify)->create([
         'shipping_method_id' => $package->shipment->shipping_method_id,
         'action' => ShippingRuleAction::ExcludeService,
-        'carrier_service_id' => $shopifyService->id,
+        'carrier_service_id' => null,
+        'any_service' => true,
     ]);
 
     $options = app(PackageShippingWorkflow::class)->prepareRates($package);
@@ -519,11 +520,11 @@ it('applies package weight conditions when excluding an attended blind purchase'
     allowBlindPurchase($package);
     registerBlindSource();
 
-    $shopifyService = CarrierService::whereHas('carrier', fn ($query) => $query->where('name', 'Shopify'))->firstOrFail();
     ShippingRule::factory()->source(ShippingRuleSource::Shopify)->create([
         'shipping_method_id' => $package->shipment->shipping_method_id,
         'action' => ShippingRuleAction::ExcludeService,
-        'carrier_service_id' => $shopifyService->id,
+        'carrier_service_id' => null,
+        'any_service' => true,
         'conditions' => [
             ['type' => 'weight', 'data' => ['operator' => '>=', 'value' => 16]],
         ],
@@ -539,11 +540,11 @@ it('refuses a forged purchase request for a rule-excluded blind offer', function
     allowBlindPurchase($package);
     $source = registerBlindSource();
 
-    $shopifyService = CarrierService::whereHas('carrier', fn ($query) => $query->where('name', 'Shopify'))->firstOrFail();
     ShippingRule::factory()->source(ShippingRuleSource::Shopify)->create([
         'shipping_method_id' => $package->shipment->shipping_method_id,
         'action' => ShippingRuleAction::ExcludeService,
-        'carrier_service_id' => $shopifyService->id,
+        'carrier_service_id' => null,
+        'any_service' => true,
     ]);
 
     $result = app(PackageShippingWorkflow::class)->ship(
@@ -630,12 +631,18 @@ it('requires attended selection when a shipping method has multiple blind choice
     $package = blindPurchasePackage();
     allowBlindPurchase($package);
 
-    $shopifyCarrier = Carrier::where('name', 'Shopify')->sole();
-    $priority = CarrierService::factory()->for($shopifyCarrier)->create([
-        'name' => "Shopify's USPS Priority Mail",
-        'service_code' => 'usps:Priority',
+    $priority = CarrierService::factory()->for(Carrier::factory()->usps())->create([
+        'name' => 'Priority Mail',
+        'service_code' => 'PRIORITY_MAIL',
     ]);
+    SourceServiceMapping::factory()->shopify()->create([
+        'external_carrier_id' => 'usps',
+        'external_service_id' => 'Priority',
+        'carrier_service_id' => $priority->id,
+    ]);
+    // Shopify may sell the method's Priority Mail, but not directly.
     $package->shipment->shippingMethod->carrierServices()->attach($priority);
+    $package->shipment->shippingMethod->postageSources()->where('source_kind', 'direct')->delete();
 
     $source = registerBlindSource(collect([
         shopifyBlindOffer(),
@@ -643,7 +650,9 @@ it('requires attended selection when a shipping method has multiple blind choice
             source: 'Shopify',
             sourceLabel: 'Shopify Shipping',
             serviceCode: 'usps:Priority',
-            selectionLabel: "Shopify's USPS Priority Mail",
+            selectionLabel: 'USPS Priority Mail',
+            carrierServiceId: $priority->id,
+            carrierId: $priority->carrier_id,
         ),
     ]));
 
@@ -660,12 +669,11 @@ it('requires attended selection when a shipping method has multiple blind choice
 
 it('represents a shipping rule that pre-selects a blind purchase', function (): void {
     $package = blindPurchasePackage();
-    $shopifyService = CarrierService::whereHas('carrier', fn ($query) => $query->where('name', 'Shopify'))->firstOrFail();
-
     ShippingRule::factory()->source(ShippingRuleSource::Shopify)->create([
         'shipping_method_id' => $package->shipment->shipping_method_id,
         'action' => ShippingRuleAction::UseService,
-        'carrier_service_id' => $shopifyService->id,
+        'carrier_service_id' => null,
+        'any_service' => true,
     ]);
 
     $result = app(RuleEvaluator::class)->evaluate($package->shipment->fresh(), $package);
@@ -681,11 +689,11 @@ it('auto-ships a blind purchase selected by a rule on a mixed shipping method', 
     $source = registerBlindSource();
     $source->shouldReceive('createShipment')->once()->andReturn(blindShipResponse());
 
-    $shopifyService = CarrierService::whereHas('carrier', fn ($query) => $query->where('name', 'Shopify'))->firstOrFail();
     ShippingRule::factory()->source(ShippingRuleSource::Shopify)->create([
         'shipping_method_id' => $package->shipment->shipping_method_id,
         'action' => ShippingRuleAction::UseService,
-        'carrier_service_id' => $shopifyService->id,
+        'carrier_service_id' => null,
+        'any_service' => true,
     ]);
 
     $result = app(PackageShippingWorkflow::class)->autoShip(
@@ -817,14 +825,10 @@ function blindPurchasePackage(bool $withUspsRate = false): Package
 {
     $source = createShopifyDataSource([], ['oauth_access_token' => 'shpat_test_token']);
 
-    $shopifyCarrier = Carrier::factory()->shopify()->create();
-    $shopifyService = CarrierService::factory()->for($shopifyCarrier)->create([
-        'name' => "Shopify's choice",
-        'service_code' => 'auto',
-    ]);
-
+    // Shopify may sell for the method and choose for itself (`auto`). The
+    // method lists no service Shopify has a mapping for.
     $shippingMethod = ShippingMethod::factory()->create();
-    $shippingMethod->carrierServices()->attach($shopifyService->id);
+    ShippingMethodPostageSource::factory()->shopify()->any()->for($shippingMethod)->create();
 
     if ($withUspsRate) {
         $uspsService = CarrierService::factory()->uspsGroundAdvantage()->create([

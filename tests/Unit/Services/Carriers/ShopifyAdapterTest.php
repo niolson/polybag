@@ -9,16 +9,18 @@ use App\DataTransferObjects\Shipping\ServiceInference;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
+use App\Enums\PostageSourceKind;
 use App\Enums\ServiceEvidence;
 use App\Enums\VoidReason;
 use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Models\Carrier;
+use App\Models\CarrierService;
 use App\Models\Package;
 use App\Models\Shipment;
+use App\Models\SourceServiceMapping;
 use App\Services\Carriers\ShopifyAdapter;
 use App\Services\ServiceInference\ServiceInferrer;
-use Database\Seeders\CarrierSeeder;
 use Illuminate\Support\Facades\Http;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
@@ -72,14 +74,21 @@ it('advertises catalogued selections as priceless offers for a Shopify-sourced p
     $package = shopifyPackage();
     allowBlindPurchase($package);
 
-    $offers = $this->adapter->blindPurchaseOffers(RateRequest::fromPackage($package), ['auto', 'usps:usps_ground_advantage']);
+    $offers = $this->adapter->blindPurchaseOffers(RateRequest::fromPackage($package), ['auto', 'usps:GroundAdvantage', 'usps:NotMapped']);
+    $groundAdvantage = CarrierService::where('service_code', 'USPS_GROUND_ADVANTAGE')->sole();
 
+    // A code with no mapping is no offer: Shopify sells catalog services.
     expect($offers)->toHaveCount(2)
-        ->and($offers->pluck('serviceCode')->all())->toBe(['auto', 'usps:usps_ground_advantage'])
+        ->and($offers->pluck('serviceCode')->all())->toBe(['auto', 'usps:GroundAdvantage'])
         ->and($offers->every(fn (BlindPurchaseOffer $offer): bool => $offer->source === 'Shopify'))->toBeTrue()
         ->and($offers->first()->sourceLabel)->toBe('Shopify Shipping')
         ->and($offers->first()->selectionLabel)->toBe("Shopify's choice")
-        ->and($offers->first()->postageDataSourceId)->toBe($package->shipment->data_source_id);
+        ->and($offers->first()->isSourceChoice())->toBeTrue()
+        ->and($offers->first()->postageDataSourceId)->toBe($package->shipment->data_source_id)
+        // The requested service is the catalog's, with its carrier.
+        ->and($offers->last()->carrierServiceId)->toBe($groundAdvantage->id)
+        ->and($offers->last()->carrierId)->toBe($groundAdvantage->carrier_id)
+        ->and($offers->last()->selectionLabel)->toBe('USPS Ground Advantage');
 });
 
 it('advertises nothing for a client that has not opted into blind purchase', function (): void {
@@ -244,19 +253,18 @@ it('withdraws both Ground Saver tiers when the package has no weight', function 
     expect($offers->pluck('serviceCode')->all())->toBe(['usps:GroundAdvantage']);
 });
 
-it('gives the two Ground Saver tiers labels a packer can tell apart', function (): void {
-    $this->seed(CarrierSeeder::class);
+it('names a requested service by its carrier without saying the carrier twice', function (): void {
+    seedShopifyCarrierServices();
+    $package = shopifyPackage();
+    $package->update(['weight' => 0.5]);
+    allowBlindPurchase($package);
 
-    $names = Carrier::query()
-        ->where('name', ShopifyAdapter::CARRIER_NAME)
-        ->firstOrFail()
-        ->carrierServices()
-        ->whereIn('service_code', ['ups_shipping:92', 'ups_shipping:93'])
-        ->pluck('name', 'service_code');
+    $offers = $this->adapter->blindPurchaseOffers(
+        RateRequest::fromPackage($package->fresh()),
+        ['usps:GroundAdvantage', 'ups_shipping:92'],
+    );
 
-    expect($names->get('ups_shipping:92'))->not->toBe($names->get('ups_shipping:93'))
-        ->and($names->get('ups_shipping:92'))->toContain('under 1 lb')
-        ->and($names->get('ups_shipping:93'))->toContain('1 lb and over');
+    expect($offers->pluck('selectionLabel')->all())->toBe(['USPS Ground Advantage', 'UPS Ground Saver']);
 });
 
 it('splits a service code into the parts Shopify selects a rate with', function (): void {
@@ -525,7 +533,7 @@ it('records the carrier Shopify actually picked, not the one that was asked for'
 
 it('translates the carrier code Shopify reports into a carrier name', function (): void {
     seedShopifyCarrierServices();
-    $ups = Carrier::factory()->ups()->create();
+    $ups = Carrier::where('name', Carrier::UPS)->sole();
     $package = shopifyPackage();
 
     Saloon::fake([
@@ -1235,18 +1243,24 @@ it('counts a variant with no measured weight as declaring nothing', function ():
     expect($this->adapter->createShipment(shopifyShipRequest($package))->success)->toBeTrue();
 });
 
+/**
+ * The catalog services these tests ask Shopify for, and the Shopify mapping
+ * each is sold under (`carrier-catalog-reset/09`). `auto` needs neither.
+ */
 function seedShopifyCarrierServices(): void
 {
-    $carrier = Carrier::firstOrCreate(['name' => 'Shopify']);
+    $usps = Carrier::seedSystem(Carrier::USPS);
+    $ups = Carrier::seedSystem(Carrier::UPS);
 
     foreach ([
-        'auto' => "Shopify's choice",
-        'usps:usps_ground_advantage' => 'USPS Ground Advantage',
-        'usps:GroundAdvantage' => "Shopify's USPS Ground Advantage",
-        'ups_shipping:92' => "Shopify's UPS Ground Saver (under 1 lb)",
-        'ups_shipping:93' => "Shopify's UPS Ground Saver (1 lb and over)",
-    ] as $code => $name) {
-        $carrier->carrierServices()->firstOrCreate(['service_code' => $code], ['name' => $name]);
+        'usps:GroundAdvantage' => [$usps, 'USPS_GROUND_ADVANTAGE', 'Ground Advantage'],
+        'ups_shipping:92' => [$ups, '92', 'UPS Ground Saver'],
+        'ups_shipping:93' => [$ups, '93', 'UPS Ground Saver'],
+    ] as $code => [$carrier, $serviceCode, $name]) {
+        $service = $carrier->carrierServices()->firstOrCreate(['service_code' => $serviceCode], ['name' => $name]);
+        [$externalCarrierId, $externalServiceId] = explode(':', $code, 2);
+
+        SourceServiceMapping::map(PostageSourceKind::Shopify, $externalCarrierId, $externalServiceId, $service->id);
     }
 }
 

@@ -1,7 +1,10 @@
 <?php
 
+use App\Enums\PostageSourceKind;
 use App\Models\Carrier;
+use App\Models\CarrierService;
 use App\Models\Setting;
+use App\Models\SourceServiceMapping;
 use App\Services\Carriers\ShopifyAdapter;
 use Database\Seeders\DatabaseSeeder;
 
@@ -57,55 +60,47 @@ it('marks every USPS service and only FedEx Ground Economy as PO Box / military 
         ->and($fedex->carrierServices()->where('service_code', 'FEDEX_GROUND')->value('can_ship_to_military_addresses'))->toBeFalse();
 });
 
-it('seeds every catalogued Shopify service as a code the adapter can select a rate with', function (): void {
+it('maps every Shopify code to a real catalog service, as a pair the adapter can select a rate with', function (): void {
     $this->seed(DatabaseSeeder::class);
 
     $adapter = new ShopifyAdapter;
-    $codes = Carrier::query()
-        ->where('name', ShopifyAdapter::CARRIER_NAME)
-        ->firstOrFail()
-        ->carrierServices()
-        ->pluck('service_code')
-        ->reject(fn (string $code): bool => $code === ShopifyAdapter::AUTO_SERVICE_CODE);
+    $mappings = SourceServiceMapping::query()
+        ->where('source_kind', PostageSourceKind::Shopify)
+        ->with('carrierService.carrier')
+        ->get();
 
-    expect($codes)->not->toBeEmpty();
+    expect($mappings)->toHaveCount(21)
+        ->and(Carrier::where('name', 'Shopify')->exists())->toBeFalse()
+        ->and(CarrierService::where('name', 'like', "Shopify's%")->exists())->toBeFalse();
 
     // A pair that does not split is not a preference Shopify can read -- it
     // silently degrades to letting Shopify choose, which is the one failure
-    // mode a catalogued explicit service must not have.
-    foreach ($codes as $code) {
-        expect($adapter->splitServiceCode($code))->not->toBe([null, null], "service code {$code}");
+    // mode an explicit service must not have.
+    foreach ($mappings as $mapping) {
+        $code = ShopifyAdapter::serviceCodeFromMapping($mapping);
+
+        expect($adapter->splitServiceCode($code))->not->toBe([null, null], "service code {$code}")
+            ->and($mapping->carrierService->carrier->name)->not->toBe('Shopify');
     }
 });
 
-it('marks Shopify USPS services and only Ground Saver on its UPS side as PO Box / military capable', function (): void {
+it('maps the Shopify USPS international and DHL codes the oracle confirmed onto authored services', function (): void {
     $this->seed(DatabaseSeeder::class);
 
-    $shopify = Carrier::query()->where('name', ShopifyAdapter::CARRIER_NAME)->firstOrFail();
-
-    // Each carrier keeps its own vocabulary and Shopify passes it through, so
-    // this catalog is deliberately in three alphabets: a PascalCase of
-    // Shopify's own for USPS, UPS's numeric codes, and DHL's letter codes.
-    expect($shopify->carrierServices()->where('service_code', 'usps:GroundAdvantage')->value('can_ship_to_po_boxes'))->toBeTrue()
-        ->and($shopify->carrierServices()->where('service_code', 'usps:PriorityExpress')->value('can_ship_to_military_addresses'))->toBeTrue()
-        ->and($shopify->carrierServices()->where('service_code', 'ups_shipping:92')->value('can_ship_to_po_boxes'))->toBeTrue()
-        ->and($shopify->carrierServices()->where('service_code', 'ups_shipping:93')->value('can_ship_to_po_boxes'))->toBeTrue()
-        ->and($shopify->carrierServices()->where('service_code', 'ups_shipping:03')->value('can_ship_to_po_boxes'))->toBeFalse()
-        ->and($shopify->carrierServices()->where('service_code', 'ups_shipping:01')->value('can_ship_to_military_addresses'))->toBeFalse()
-        ->and($shopify->carrierServices()->where('service_code', 'dhl_express:P')->value('can_ship_to_po_boxes'))->toBeFalse()
-        ->and($shopify->carrierServices()->where('service_code', 'ups_shipping:07')->value('can_ship_to_po_boxes'))->toBeFalse();
-});
-
-it('seeds the Shopify USPS international services under the names the oracle confirmed', function (): void {
-    $this->seed(DatabaseSeeder::class);
-
-    $shopify = Carrier::query()->where('name', ShopifyAdapter::CARRIER_NAME)->firstOrFail();
+    $serviceFor = fn (string $carrierId, string $serviceId): ?CarrierService => SourceServiceMapping::query()
+        ->forIdentity(PostageSourceKind::Shopify, $carrierId, $serviceId)
+        ->first()
+        ?->carrierService;
 
     // The full USPS product name in PascalCase, "Service" suffix included --
     // `FirstClassPackageInternational` and the international API's own
     // `PRIORITY_MAIL_INTERNATIONAL` both find no rate.
-    expect($shopify->carrierServices()->where('service_code', 'usps:FirstClassPackageInternationalService')->value('can_ship_to_po_boxes'))->toBeTrue()
-        ->and($shopify->carrierServices()->where('service_code', 'usps:PriorityMailInternational')->exists())->toBeTrue()
-        ->and($shopify->carrierServices()->where('service_code', 'usps:PriorityMailExpressInternational')->exists())->toBeTrue()
-        ->and($shopify->carrierServices()->where('service_code', 'ups_shipping:14')->value('can_ship_to_po_boxes'))->toBeFalse();
+    expect($serviceFor('usps', 'FirstClassPackageInternationalService')?->service_code)->toBe('FIRST-CLASS_PACKAGE_INTERNATIONAL_SERVICE')
+        ->and($serviceFor('usps', 'PriorityMailInternational')?->service_code)->toBe('PRIORITY_MAIL_INTERNATIONAL')
+        ->and($serviceFor('usps', 'PriorityMailExpressInternational')?->service_code)->toBe('PRIORITY_MAIL_EXPRESS_INTERNATIONAL')
+        ->and($serviceFor('ups_shipping', '92')?->carrier->name)->toBe(Carrier::UPS)
+        // DHL's own product code, so a direct integration later needs no remapping.
+        ->and($serviceFor('dhl_express', 'P')?->carrier->name)->toBe(Carrier::DHL_EXPRESS)
+        ->and($serviceFor('dhl_express', 'P')?->service_code)->toBe('P')
+        ->and($serviceFor('dhl_express', 'P')?->can_ship_to_po_boxes)->toBeFalse();
 });

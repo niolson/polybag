@@ -32,4 +32,34 @@ enum PostageSourceKind: string
             self::Amazon => 'Amazon Buy Shipping',
         };
     }
+
+    /**
+     * What a shipping method's policy row for this kind may say about selling
+     * beyond the method's listed services — `carrier-catalog-reset/09`.
+     *
+     * A direct account sells only what the method lists. Shopify may be left
+     * to choose (`auto`), and Amazon Buy Shipping to sell any service (`13`).
+     *
+     * @return list<UnlistedServices>
+     */
+    public function acceptedUnlistedServices(): array
+    {
+        return match ($this) {
+            self::Direct => [UnlistedServices::None],
+            self::Shopify, self::Amazon => [UnlistedServices::None, UnlistedServices::Any],
+        };
+    }
+
+    /**
+     * What allowing unlisted services is called for this kind, or null where
+     * there is nothing to allow.
+     */
+    public function unlistedServicesLabel(): ?string
+    {
+        return match ($this) {
+            self::Direct => null,
+            self::Shopify => "Allow Shopify's choice (auto)",
+            self::Amazon => 'Any service',
+        };
+    }
 }

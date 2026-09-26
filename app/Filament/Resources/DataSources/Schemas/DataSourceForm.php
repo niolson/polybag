@@ -15,7 +15,6 @@ use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\ShippingMethod;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
-use App\Services\Carriers\ShopifyAdapter;
 use App\Services\OAuthService;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\DataSourceFactory;
@@ -188,7 +187,7 @@ class DataSourceForm
                         ->label("Date Shopify's choice as")
                         ->options(fn (): array => Carrier::query()
                             ->active()
-                            ->whereNotIn('name', [ShopifyAdapter::CARRIER_NAME, AmazonBuyShippingAdapter::SOURCE_NAME])
+                            ->where('name', '!=', AmazonBuyShippingAdapter::SOURCE_NAME)
                             ->orderBy('name')
                             ->get()
                             ->mapWithKeys(fn (Carrier $carrier): array => [$carrier->id => $carrier->label()])

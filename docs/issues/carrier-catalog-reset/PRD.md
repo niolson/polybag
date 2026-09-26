@@ -349,8 +349,10 @@ explicitly.
 - **Amazon Shipping's direct adapter needs no mapping rows.** It reads its codes from the
   catalog, as the UPS adapter does. Buy Shipping's `AMZN_US` / `std-us-swa-mfn` maps to
   the same service, so one listing on a method covers both routes.
-- **Seeded mappings are written once, by migration.** A mapping authorizes, and the
-  reference-data sync that runs on every start would restore one an Admin had removed.
+- **Seeded mappings are written once**, as a named batch the reference-data sync writes
+  only while its marker is absent. A mapping authorizes, and a sync that wrote them on
+  every start would restore one an Admin had removed. (Not by migration: migrations run
+  before the sync, so a fresh install has no service rows to map yet.)
 - **The table comes first, on its own** (`14`), so the Shopify rows (`09`) and the Amazon
   seed (`11`) do not wait on each other.
 - **The mapping page moves to Admin**, because mapping now authorizes (see

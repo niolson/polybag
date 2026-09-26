@@ -5,7 +5,6 @@ namespace Database\Seeders;
 use App\Enums\ContentClass;
 use App\Models\Carrier;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
-use App\Services\Carriers\ShopifyAdapter;
 use Illuminate\Database\Seeder;
 
 class CarrierSeeder extends Seeder
@@ -22,7 +21,9 @@ class CarrierSeeder extends Seeder
             ['name' => 'Ground Advantage', 'service_code' => 'USPS_GROUND_ADVANTAGE'],
             ['name' => 'Priority Mail', 'service_code' => 'PRIORITY_MAIL'],
             ['name' => 'Priority Mail Express', 'service_code' => 'PRIORITY_MAIL_EXPRESS'],
+            ['name' => 'First-Class Package International Service', 'service_code' => 'FIRST-CLASS_PACKAGE_INTERNATIONAL_SERVICE'],
             ['name' => 'Priority Mail International', 'service_code' => 'PRIORITY_MAIL_INTERNATIONAL'],
+            ['name' => 'Priority Mail Express International', 'service_code' => 'PRIORITY_MAIL_EXPRESS_INTERNATIONAL'],
             // Offered only to a Package whose every item is a product the
             // seller marked as media (ADR-0006 decision 11). Library Mail and
             // Bound Printed Matter are not authored.
@@ -121,103 +122,22 @@ class CarrierSeeder extends Seeder
             );
         }
 
-        // Shopify Shipping buys postage on the merchant's Shopify account
-        // instead of a carrier account of ours, which is how a shop without an
-        // NSA reaches USPS Connect eCommerce rates. Its service codes are the
-        // `carrier:service` pairs Shopify's preferredRateSelection takes, or
-        // `auto` to let Shopify choose the rate the way its admin would.
-        //
-        // Shopify publishes no list of service codes and has no API to
-        // enumerate them, so the pairs below were established by probe rather
-        // than from documentation -- see the issue file for the method and the
-        // caveats. There is no single vocabulary here: each carrier keeps its
-        // own, and Shopify passes it through.
-        //
-        //   USPS  the product name in PascalCase -- `GroundAdvantage`, not the
-        //         `USPS_GROUND_ADVANTAGE` the USPS block above uses, and not
-        //         the `PRIORITY_MAIL_INTERNATIONAL` of USPS's international
-        //         API either. Domestic Priority drops the "Mail"
-        //         (`Priority`); international keeps it and the trailing
-        //         "Service" (`FirstClassPackageInternationalService`)
-        //   UPS   UPS's own numeric codes, the same alphabet as the UPS block
-        //   DHL   DHL's own single-letter product codes, where `P` is Express
-        //         Worldwide
-        //
-        // All are matched case-sensitively: `priority` finds no rate where
-        // `Priority` does.
-        //
-        // No cutoff: nothing is dated by this row. A Shopify label is dated by the
-        // carrier its connection's *Date Shopify's choice as* names, USPS unless
-        // changed (`carrier-catalog-reset/08`), and the row itself leaves in `09`.
-        $shopify = Carrier::seedSystem(ShopifyAdapter::CARRIER_NAME);
-        $shopify->carrierServices()->firstOrCreate(
-            ['service_code' => ShopifyAdapter::AUTO_SERVICE_CODE],
+        // DHL Express, with no integration of ours: Shopify sells its Express
+        // Worldwide, and the service needs a row to be sold as. Named DHL
+        // Express rather than DHL, because DHL eCommerce is a different network
+        // with different pickups and would need its own row. `P` is DHL's own
+        // product code, so a direct integration later needs no remapping.
+        // Shopify's *Preferred services* lists nothing else for DHL
+        // (`shopify-shipping-carrier/02`), so nothing else is seeded.
+        $dhlExpress = Carrier::seedSystem(Carrier::DHL_EXPRESS);
+        $dhlExpress->carrierServices()->firstOrCreate(
+            ['service_code' => 'P'],
             [
-                'name' => "Shopify's choice",
-                // Shopify picks the carrier itself, and only USPS reaches a PO
-                // Box or an APO/FPO, so its choice for those destinations is
-                // constrained the same way ours would be.
-                'can_ship_to_po_boxes' => true,
-                'can_ship_to_military_addresses' => true,
+                'name' => 'DHL Express Worldwide',
+                'can_ship_to_po_boxes' => false,
+                'can_ship_to_military_addresses' => false,
             ],
         );
-
-        foreach ([
-            ['name' => "Shopify's USPS Ground Advantage", 'service_code' => 'usps:GroundAdvantage'],
-            ['name' => "Shopify's USPS Priority Mail", 'service_code' => 'usps:Priority'],
-            ['name' => "Shopify's USPS Priority Mail Express", 'service_code' => 'usps:PriorityExpress'],
-            // The media requirement binds every source that sells Media Mail,
-            // not only our own USPS account (ADR-0006 decision 10).
-            ['name' => "Shopify's USPS Media Mail", 'service_code' => 'usps:MediaMail', 'required_contents' => ContentClass::Media],
-            ['name' => "Shopify's USPS First Class Package International", 'service_code' => 'usps:FirstClassPackageInternationalService'],
-            ['name' => "Shopify's USPS Priority Mail International", 'service_code' => 'usps:PriorityMailInternational'],
-            ['name' => "Shopify's USPS Priority Mail Express International", 'service_code' => 'usps:PriorityMailExpressInternational'],
-            ['name' => "Shopify's UPS Ground", 'service_code' => 'ups_shipping:03'],
-            ['name' => "Shopify's UPS 3 Day Select", 'service_code' => 'ups_shipping:12'],
-            ['name' => "Shopify's UPS 2nd Day Air", 'service_code' => 'ups_shipping:02'],
-            ['name' => "Shopify's UPS 2nd Day Air A.M.", 'service_code' => 'ups_shipping:59'],
-            ['name' => "Shopify's UPS Next Day Air Saver", 'service_code' => 'ups_shipping:13'],
-            ['name' => "Shopify's UPS Next Day Air", 'service_code' => 'ups_shipping:01'],
-            ['name' => "Shopify's UPS Next Day Air Early", 'service_code' => 'ups_shipping:14'],
-            // Named apart, unlike the UPS block's pair. There the two rows only
-            // ever filter a rate response that already returned exactly one of
-            // them, so a packer never sees both; here they are advertised from
-            // the catalog and would otherwise be two identical lines on screen.
-            // The admin's own wording is the model.
-            ['name' => "Shopify's UPS Ground Saver (under 1 lb)", 'service_code' => 'ups_shipping:92'],
-            ['name' => "Shopify's UPS Ground Saver (1 lb and over)", 'service_code' => 'ups_shipping:93'],
-            ['name' => "Shopify's UPS Worldwide Express", 'service_code' => 'ups_shipping:07'],
-            ['name' => "Shopify's UPS Worldwide Expedited", 'service_code' => 'ups_shipping:08'],
-            ['name' => "Shopify's UPS Worldwide Saver", 'service_code' => 'ups_shipping:65'],
-            ['name' => "Shopify's UPS Standard", 'service_code' => 'ups_shipping:11'],
-            ['name' => "Shopify's DHL Express Worldwide", 'service_code' => 'dhl_express:P'],
-        ] as $service) {
-            // Same USPS-last-mile rule as the UPS block above, and the same
-            // 92/93 split by weight -- which Shopify reproduces exactly: a
-            // 0.3lb parcel finds a rate for 92 and none for 93, a 5lb parcel
-            // the reverse. That is worth stating because it is also the reason
-            // "no rate" cannot be read as "no such service": availability is
-            // per shipment, and a code is only ever disproved for the parcel it
-            // was probed with.
-            $isGroundSaver = in_array($service['service_code'], ['ups_shipping:92', 'ups_shipping:93'], true);
-            $isUsps = str_starts_with($service['service_code'], 'usps:');
-
-            $requiredContents = $service['required_contents'] ?? null;
-
-            $row = $shopify->carrierServices()->firstOrCreate(
-                ['service_code' => $service['service_code']],
-                [
-                    'name' => $service['name'],
-                    'can_ship_to_po_boxes' => $isUsps || $isGroundSaver,
-                    'can_ship_to_military_addresses' => $isUsps || $isGroundSaver,
-                    'required_contents' => $requiredContents,
-                ],
-            );
-
-            if ($requiredContents !== null && $row->required_contents !== $requiredContents) {
-                $row->update(['required_contents' => $requiredContents]);
-            }
-        }
 
         // This hook asks Amazon for Buy Shipping against the seller's own Amazon
         // order (`channelType: AMAZON`), and for Amazon Shipping on an order from

@@ -4,6 +4,7 @@ namespace App\Services\PostageSources;
 
 use App\DataTransferObjects\PostageSources\PostageSourceCandidate;
 use App\DataTransferObjects\PostageSources\PostageSourceResolution;
+use App\Enums\PostageSourceKind;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\DataSource;
@@ -129,8 +130,10 @@ class PostageSourceResolver
      *
      * The direct carriers are those the shipping method's active services
      * name, or every carrier with a direct integration when there is no
-     * method. Which of a method's services each source then sells is rating's
-     * question, not this one's.
+     * method. A method without its `direct` policy row gets none: direct is on
+     * by default, and deleting the row turns it off
+     * (`carrier-catalog-reset/09`). Which of a method's services each source
+     * then sells is rating's question, not this one's.
      *
      * Each direct carrier gets the first account its scopes resolve, and null
      * when none does. A `rate_shop` scope still yields one account: the
@@ -190,6 +193,10 @@ class PostageSourceResolver
      */
     private function directCarriers(?ShippingMethod $shippingMethod): array
     {
+        if ($shippingMethod !== null && ! $shippingMethod->allowsSource(PostageSourceKind::Direct)) {
+            return [];
+        }
+
         if ($shippingMethod !== null) {
             return $shippingMethod->carrierServices()
                 ->active()
