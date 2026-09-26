@@ -12,6 +12,7 @@ use App\Models\Channel;
 use App\Models\ShippingMethod;
 use App\Models\ShippingRule;
 use App\Services\PostageSources\MethodSourceAllowance;
+use App\Services\SettingsService;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Forms\Components\Builder;
@@ -80,10 +81,18 @@ class ShippingRulesRelationManager extends RelationManager
                     ->visible(fn (Get $get): bool => $this->allowsAnyService(self::actionFrom($get), self::sourceFrom($get))),
                 Forms\Components\Select::make('carrier_service_id')
                     ->label('Service')
-                    ->options(fn (Get $get): array => $this->serviceOptions(self::sourceFrom($get), self::carrierIdFrom($get)))
+                    ->options(fn (Get $get): array => $this->serviceOptions(self::actionFrom($get), self::sourceFrom($get), self::carrierIdFrom($get)))
                     ->searchable()
                     ->hidden(fn (Get $get): bool => (bool) $get('any_service'))
                     ->required(fn (Get $get): bool => ! $get('any_service')),
+                Forms\Components\Select::make('client_id')
+                    ->label('Client')
+                    ->helperText('A rule for one client applies only to its shipments.')
+                    ->relationship('client', 'name', fn ($query) => $query->orderBy('name'))
+                    ->placeholder('All clients')
+                    ->searchable()
+                    ->preload()
+                    ->visible(fn (): bool => self::multiClientEnabled()),
                 Forms\Components\Toggle::make('enabled')
                     ->default(true),
                 Builder::make('conditions')
@@ -117,6 +126,10 @@ class ShippingRulesRelationManager extends RelationManager
                 Tables\Columns\TextColumn::make('target')
                     ->label('Source and service')
                     ->state(fn (ShippingRule $record): string => $record->describeTarget()),
+                Tables\Columns\TextColumn::make('client.name')
+                    ->label('Client')
+                    ->placeholder('All clients')
+                    ->visible(fn (): bool => self::multiClientEnabled()),
                 Tables\Columns\ToggleColumn::make('enabled'),
                 Tables\Columns\TextColumn::make('conditions_summary')
                     ->label('Conditions')
@@ -179,14 +192,20 @@ class ShippingRulesRelationManager extends RelationManager
     }
 
     /**
-     * Only the method's services: a rule picks within what the method allows.
+     * A *Use* rule picks within what the method allows, so it is offered only
+     * the method's services. An *Exclude* rule narrows rather than grants, so
+     * it is offered the whole catalog: under *any service*, it is how a method
+     * refuses a service it never listed.
      *
      * @return array<int, string>
      */
-    private function serviceOptions(?ShippingRuleSource $source, ?int $carrierId): array
+    private function serviceOptions(?ShippingRuleAction $action, ?ShippingRuleSource $source, ?int $carrierId): array
     {
-        return app(MethodSourceAllowance::class)
-            ->serviceOptionsFor($this->method(), $source)
+        $services = $action === ShippingRuleAction::ExcludeService
+            ? CarrierService::query()->with('carrier')->get()->sortBy(fn (CarrierService $service): string => "{$service->carrier->label()} {$service->name}")
+            : app(MethodSourceAllowance::class)->serviceOptionsFor($this->method(), $source);
+
+        return $services
             ->when($carrierId !== null, fn (Collection $services): Collection => $services->where('carrier_id', $carrierId))
             ->mapWithKeys(fn (CarrierService $service): array => [$service->id => "{$service->carrier->label()} — {$service->name}"])
             ->all();
@@ -207,6 +226,11 @@ class ShippingRulesRelationManager extends RelationManager
     {
         return $action === ShippingRuleAction::ExcludeService
             || ($action === ShippingRuleAction::UseService && app(MethodSourceAllowance::class)->allowsAnyServiceFor($this->method(), $source));
+    }
+
+    private static function multiClientEnabled(): bool
+    {
+        return (bool) app(SettingsService::class)->get('multi_client_enabled', false);
     }
 
     private static function actionFrom(Get $get): ?ShippingRuleAction
