@@ -35,9 +35,11 @@ beforeEach(function (): void {
     $this->actingAs(User::factory()->admin()->create());
 });
 
-function removeAmazonCarrierMigration(): object
+function runRemoveAmazonCarrierMigration(): void
 {
-    return require database_path('migrations/2026_09_26_145829_remove_amazon_carrier.php');
+    $migration = require database_path('migrations/2026_09_26_145829_remove_amazon_carrier.php');
+
+    $migration->up();
 }
 
 /**
@@ -134,7 +136,7 @@ describe('the migration', function (): void {
         $other = ShippingMethod::factory()->create();
         $other->carrierServices()->attach($ground->id);
 
-        removeAmazonCarrierMigration()->up();
+        runRemoveAmazonCarrierMigration();
 
         expect($asking->fresh()->allowsSource(PostageSourceKind::Amazon))->toBeTrue()
             ->and($asking->fresh()->carrierServices->pluck('id')->all())->toBe([$ground->id])
@@ -149,7 +151,7 @@ describe('the migration', function (): void {
         $rule = ShippingRule::factory()->create(['carrier_service_id' => $serviceId]);
         $label = PackageLabel::factory()->for(Package::factory())->create(['normalized_carrier_id' => $carrierId]);
 
-        expect(fn () => removeAmazonCarrierMigration()->up())
+        expect(fn () => runRemoveAmazonCarrierMigration())
             ->toThrow(RuntimeException::class, "shipping_rules #{$rule->id}; package_labels #{$label->id}");
 
         expect(DB::table('carriers')->where('id', $carrierId)->exists())->toBeTrue();
@@ -158,7 +160,7 @@ describe('the migration', function (): void {
     it('does nothing on an install without the carrier', function (): void {
         $carriers = DB::table('carriers')->count();
 
-        removeAmazonCarrierMigration()->up();
+        runRemoveAmazonCarrierMigration();
 
         expect(DB::table('carriers')->count())->toBe($carriers);
     });
