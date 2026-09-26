@@ -115,7 +115,7 @@ function uspsQuotingOnHandedAccount(array &$requests, ServiceCapability $capabil
 /**
  * An Amazon source that answers nothing, so a test can see whether it was asked.
  */
-function silentAmazonSource(): MockInterface
+function silentAmazonSource(string $registryName = AmazonBuyShippingAdapter::SOURCE_NAME): MockInterface
 {
     $amazon = Mockery::mock(CarrierAdapterInterface::class.', '.AsyncRateQuoting::class);
     $amazon->shouldReceive('isConfigured')->andReturnTrue();
@@ -124,7 +124,7 @@ function silentAmazonSource(): MockInterface
     $amazon->shouldReceive('prepareRateRequest')->andReturnUsing(fn (): mixed => null)->byDefault();
     $amazon->shouldReceive('getRates')->andReturnUsing(fn (): Collection => collect())->byDefault();
 
-    app(CarrierRegistry::class)->registerInstance(AmazonBuyShippingAdapter::SOURCE_NAME, $amazon);
+    app(CarrierRegistry::class)->registerInstance($registryName, $amazon);
 
     return $amazon;
 }
@@ -208,12 +208,12 @@ it('quotes one account under a rate-shopping scope, and buys its offer', functio
         ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
 });
 
-it('does not ask Amazon for off-Amazon Shipping when the method does not list it', function (): void {
+it('does not ask Amazon Shipping when the method does not list it', function (): void {
     $connection = DataSource::factory()->unassigned()->offeringOffAmazonShipping()->create();
     CarrierAccountScope::create(['data_source_id' => $connection->id]);
 
     app(CarrierRegistry::class)->registerInstance('USPS', new FakeCarrierAdapter('USPS'));
-    $amazon = silentAmazonSource();
+    $amazon = silentAmazonSource(Carrier::AMAZON_SHIPPING);
     $amazon->shouldNotReceive('prepareRateRequest');
     $amazon->shouldNotReceive('getRates');
 
@@ -222,14 +222,19 @@ it('does not ask Amazon for off-Amazon Shipping when the method does not list it
     expect($rates->pluck('carrier')->unique()->all())->toBe(['USPS']);
 });
 
-it('asks Amazon for off-Amazon Shipping when the method lists it', function (): void {
+it('asks Amazon Shipping through the scoped connection when the method lists it, and not Buy Shipping', function (): void {
     $connection = DataSource::factory()->unassigned()->offeringOffAmazonShipping()->create();
     CarrierAccountScope::create(['data_source_id' => $connection->id]);
-    $this->method->carrierServices()->attach(amazonHookService()->id);
+    $this->method->carrierServices()->attach([amazonShippingGround()->id, amazonHookService()->id]);
 
     app(CarrierRegistry::class)->registerInstance('USPS', new FakeCarrierAdapter('USPS'));
-    $amazon = silentAmazonSource();
-    $amazon->shouldReceive('getRates')->once()->andReturn(collect());
+    $buyShipping = silentAmazonSource();
+    $buyShipping->shouldNotReceive('getRates');
+    $amazon = silentAmazonSource(Carrier::AMAZON_SHIPPING);
+    $amazon->shouldReceive('getRates')
+        ->once()
+        ->withArgs(fn (RateRequest $request, array $serviceCodes): bool => $serviceCodes === ['std-us-swa-mfn'])
+        ->andReturn(collect());
 
     app(ShippingRateService::class)->getShippingRates(sourceFirstPackage($this->method)->id);
 });

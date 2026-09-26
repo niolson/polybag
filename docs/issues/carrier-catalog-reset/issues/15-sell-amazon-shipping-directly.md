@@ -1,6 +1,6 @@
 # Sell Amazon Shipping directly for orders from other channels
 
-Status: needs-triage
+Status: done
 
 Repo: `polybag`
 
@@ -32,6 +32,36 @@ service. Buy Shipping keeps Amazon's own orders.
   - The adapter declares that its account is a connection (`05`). The Carrier Account form
     lists Amazon Shipping with a link to Connections rather than a form, and
     `CarrierAccount` refuses to save against it.
+- **A direct sale on a connection's account.** Today `isDirect()` answers two questions
+  at once, because it means "quoted on a `CarrierAccount`". Here they get different
+  answers: the sale is direct, and the account is a connection (ADR-0006 options M and
+  N). The candidate stays the one `PostageSourceResolver` already builds with
+  `forOffAmazonShipping()`, of kind `PostageDataSource`. Each place that reads it asks one
+  of the two questions:
+  - *The sale is direct:*
+    - **When it is asked.** The connection is asked only when the method has a `direct`
+      row and lists an Amazon Shipping service, or when there is no method, which allows
+      every direct service (`13`). The resolver's comment that it is "always resolved"
+      goes.
+    - **Which adapter.** `ShippingRateService::registryNameFor()` sends the candidate to
+      the Amazon Shipping adapter, registered under `Carrier::AMAZON_SHIPPING`. The Buy
+      Shipping adapter is never asked for it.
+    - **Which services.** Rating narrows the method's services to Amazon Shipping's, as
+      it does for a direct carrier.
+    - **Source kind.** Kept rates carry no `observedService`, so
+      `RateResponse::sourceKind()` is `Direct`. That is what lets a *Direct* rule match
+      them and keeps approvals from reading them. Only a dropped rate is recorded as an
+      observation.
+    - **Ship date.** `shipDatesFor()` dates the quote by the Amazon Shipping carrier row,
+      instead of returning `null` as it does for a connection today.
+  - *The account is a connection:*
+    - **No direct candidate.** `directCarriers()` leaves out a carrier whose adapter does
+      not take a `CarrierAccount`. Otherwise a method listing Amazon Shipping Ground would
+      also get a direct candidate with no account.
+    - **Resolution.** The account comes from the connection's scope, not from
+      `CarrierAccount::resolveForShipment()`.
+    - **Postage source.** The Offer and the Label record the connection. Void, tracking
+      and recovery dispatch through it, as today.
 - **Quoting.** The adapter sends `channelType: EXTERNAL` on the scoped connection. It
   reuses the request `amazon-shipping-external-orders/05` built: items from what was
   packed, their weights scaled to fit, and `403 A-101` reported as the connection not
@@ -60,27 +90,39 @@ service. Buy Shipping keeps Amazon's own orders.
 - **Dates and End of Day.** Its Labels are dated by the Amazon Shipping carrier row (`08`).
   They now carry a `normalized_carrier_id`, which `amazon-shipping-external-orders/06`
   found null because no row matched. End of Day lists Amazon Shipping with no manifest.
-- **Configuration.** A method that asked Amazon for other channels through the hook row
-  lists Amazon Shipping Ground instead. A rule that wants it names *Direct, Amazon
-  Shipping Ground* (`07`).
+- **Configuration.** No migration changes methods or rules; the maintainer sets them up
+  by hand. A method that wants Amazon Shipping for other channels lists Amazon Shipping
+  Ground. A method that lists only the hook row gets no Amazon Shipping for other channels
+  after this ships, and keeps the hook row for Amazon orders until `12`. A rule that wants
+  it names *Direct, Amazon Shipping Ground* (`07`). A rule on the *Amazon Buy Shipping*
+  source stops matching orders from other channels. Note both in the PR.
+- **Docs.** `AGENTS.md` describes orders from other channels as quoted `EXTERNAL` through
+  Buy Shipping, and says not to confuse that with the direct-account arm. Rewrite it as a
+  direct sale on a connection's account. `13` covers the rest.
 
 ## Acceptance criteria
 
-- [ ] A Shopify order on a method listing Amazon Shipping Ground, with a connection
+- [x] A Shopify order on a method listing Amazon Shipping Ground, with a connection
       scoped, is quoted Amazon Shipping Ground beside the other direct rates
-- [ ] The same method gives an Amazon order no `EXTERNAL` quote. Its Amazon Shipping comes
+- [x] The same method gives an Amazon order no `EXTERNAL` quote. Its Amazon Shipping comes
       only through Buy Shipping, when the method allows Buy Shipping
-- [ ] Batch ship buys Amazon Shipping Ground for that Shopify order unattended, with no
+- [x] Batch ship buys Amazon Shipping Ground for that Shopify order unattended, with no
       approval
-- [ ] A `403 A-101` still reports the connection as not set up and marks it so
-- [ ] Buying, tracking, voiding and recovery behave as `amazon-shipping-external-orders/06`
+- [x] A `403 A-101` still reports the connection as not set up and marks it so
+- [x] Buying, tracking, voiding and recovery behave as `amazon-shipping-external-orders/06`
       proves
-- [ ] Off-Amazon scopes sit on Amazon Shipping, and
+- [x] Off-Amazon scopes sit on Amazon Shipping, and
       `DataSource::resolveOffAmazonShipping()` resolves as before
-- [ ] The Carrier Account form sends Amazon Shipping to Connections, and a
+- [x] The Carrier Account form sends Amazon Shipping to Connections, and a
       `CarrierAccount` for it is refused
-- [ ] An Amazon Shipping Label is dated by Amazon Shipping's carrier row and carries its
+- [x] An Amazon Shipping Label is dated by Amazon Shipping's carrier row and carries its
       `normalized_carrier_id`
+- [x] A method whose services include no Amazon Shipping service, or which has no `direct`
+      row, does not ask the scoped connection. With no method, it is asked
+- [x] A method listing Amazon Shipping Ground gets one Amazon Shipping candidate, the
+      connection, and no direct candidate without an account
+- [x] An Amazon Shipping rate reports `sourceKind()` as `Direct`, and a *Direct, Amazon
+      Shipping Ground* rule matches it
 
 ## Blocked by
 
@@ -94,3 +136,15 @@ service. Buy Shipping keeps Amazon's own orders.
   `CarrierAccount` with its own Amazon authorization was deferred (option N) until
   `amazon-shipping-external-orders/08` says how an account with no Seller Central
   authorizes.
+- **2026-09-26** — Readiness review. Added *A direct sale on a connection's account*,
+  because the adapter wiring is split between two ideas: the sale is direct and the
+  account is a connection. No migration for existing methods or rules: the maintainer
+  reconfigures them by hand. Moving the off-Amazon scopes to Amazon Shipping is still a
+  migration, because the `Amazon` row's cascade would otherwise delete them.
+- **2026-09-26** — Implemented. `AmazonShippingAdapter` is registered under Amazon
+  Shipping, declares `UsesConnectionAccount`, and shares the Shipping v2 rate filters with
+  the Buy Shipping adapter through `ReadsShippingV2Rates`. A *Use, Direct* rule naming a
+  service sold on a connection selects among quoted direct rates (a non-strict scope),
+  because there is no Offer to pre-select before a quote. Purchase still dispatches
+  through the Buy Shipping adapter by the Offer's postage source. The one migration
+  moves connection scopes and creates the Amazon Shipping row if the sync has not yet.

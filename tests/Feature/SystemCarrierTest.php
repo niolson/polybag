@@ -261,6 +261,26 @@ describe('carrier accounts', function (): void {
         'a custom carrier' => ['Regional Courier'],
     ]);
 
+    it('send Amazon Shipping to Connections instead of saving one', function (): void {
+        $amazonShipping = Carrier::seedSystem(Carrier::AMAZON_SHIPPING);
+
+        Livewire::test(CreateCarrierAccount::class)
+            ->assertFormFieldExists('carrier_id', fn (Select $field): bool => array_key_exists($amazonShipping->id, $field->getOptions()))
+            ->fillForm(['carrier_id' => $amazonShipping->id, 'name' => 'Amazon Shipping Default'])
+            ->assertSee('Integrations → Connections')
+            ->call('create')
+            ->assertHasFormErrors(['carrier_id']);
+
+        expect(CarrierAccount::query()->exists())->toBeFalse();
+    });
+
+    it('are refused for Amazon Shipping, whose account is a connection', function (): void {
+        $amazonShipping = Carrier::seedSystem(Carrier::AMAZON_SHIPPING);
+
+        expect(fn () => CarrierAccount::create(['carrier_id' => $amazonShipping->id, 'name' => 'Account', 'active' => true]))
+            ->toThrow(InvalidArgumentException::class, 'Integrations → Connections');
+    });
+
     it('are refused when moved to another carrier', function (): void {
         $account = CarrierAccount::factory()->usps()->create();
         $dhlExpress = Carrier::factory()->create(['name' => Carrier::DHL_EXPRESS]);

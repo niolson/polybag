@@ -14,10 +14,12 @@ use App\Enums\DestinationZone;
 use App\Enums\PostageSourceKind;
 use App\Enums\ShippingRuleAction;
 use App\Enums\ShippingRuleSource;
+use App\Models\CarrierService;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\ShippingRule;
+use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\ShopifyAdapter;
 use App\Services\PostageSources\MethodSourceAllowance;
 
@@ -99,21 +101,7 @@ class RuleEvaluator
                 exclusions: $exclusions,
             ),
 
-            // A rule names a service, never a packaging (ADR-0005 decision 4).
-            // It does name the catalog service, so the contents drop can judge
-            // a rate an adapter hands back unquoted.
-            ShippingRuleSource::Direct => new RuleEvaluationResult(
-                preSelectedRate: new RateResponse(
-                    carrier: $service->carrier->name,
-                    serviceCode: $service->service_code,
-                    serviceName: $service->name,
-                    price: 0.0,
-                    packagingRequirement: PackagingRequirement::shipperPackaging(),
-                    carrierServiceId: $service->id,
-                    carrierId: $service->carrier_id,
-                ),
-                exclusions: $exclusions,
-            ),
+            ShippingRuleSource::Direct => $this->directResult($service, $exclusions),
 
             // Amazon's services are discovered per quote, so there is no rate
             // to pre-select: the caller chooses among what it quotes. An
@@ -138,6 +126,48 @@ class RuleEvaluator
 
             ShippingRuleSource::Any => throw new \LogicException('A Use rule cannot name any source.'),
         };
+    }
+
+    /**
+     * A *Use* rule naming a service sold directly.
+     *
+     * A rule names a service, never a packaging (ADR-0005 decision 4). It
+     * does name the catalog service, so the contents drop can judge a rate an
+     * adapter hands back unquoted.
+     *
+     * A service sold on a connection's account, like Amazon Shipping, is
+     * bought against the Offer a quote issues, so there is no rate to
+     * pre-select: the rule selects among quoted direct rates of that service.
+     * An empty scope falls through to rate shopping, as a pre-selected direct
+     * service with no variant does (`carrier-catalog-reset/15`).
+     *
+     * @param  list<RuleExclusion>  $exclusions
+     */
+    private function directResult(CarrierService $service, array $exclusions): RuleEvaluationResult
+    {
+        if (CarrierRegistry::takesConnection($service->carrier->name)) {
+            return new RuleEvaluationResult(
+                preSelectedScope: new RuleRateScope(
+                    kinds: [PostageSourceKind::Direct],
+                    carrierServiceId: $service->id,
+                    strict: false,
+                ),
+                exclusions: $exclusions,
+            );
+        }
+
+        return new RuleEvaluationResult(
+            preSelectedRate: new RateResponse(
+                carrier: $service->carrier->name,
+                serviceCode: $service->service_code,
+                serviceName: $service->name,
+                price: 0.0,
+                packagingRequirement: PackagingRequirement::shipperPackaging(),
+                carrierServiceId: $service->id,
+                carrierId: $service->carrier_id,
+            ),
+            exclusions: $exclusions,
+        );
     }
 
     private function exclusionFor(ShippingRule $rule): RuleExclusion

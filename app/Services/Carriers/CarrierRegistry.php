@@ -8,6 +8,7 @@ use App\Contracts\CarrierPolicy;
 use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\PostageOfferSource;
 use App\Contracts\UsesCarrierAccount;
+use App\Contracts\UsesConnectionAccount;
 use App\Models\Carrier;
 use InvalidArgumentException;
 
@@ -28,7 +29,9 @@ class CarrierRegistry
      * stable key (ADR-0006 decision 1, as amended 2026-09-25). `Shopify` is a
      * source's registry name, which no carrier row carries
      * (`carrier-catalog-reset/09`). `Amazon` is a source posing as a carrier,
-     * transitional until `carrier-catalog-reset/12` removes its row.
+     * transitional until `carrier-catalog-reset/12` removes its row. Amazon
+     * Shipping is a carrier sold directly on a connection's account
+     * (`carrier-catalog-reset/15`).
      *
      * @var array<string, class-string<PostageOfferSource>>
      */
@@ -36,6 +39,7 @@ class CarrierRegistry
         Carrier::USPS => UspsAdapter::class,
         Carrier::FEDEX => FedexAdapter::class,
         Carrier::UPS => UpsAdapter::class,
+        Carrier::AMAZON_SHIPPING => AmazonShippingAdapter::class,
         ShopifyAdapter::CARRIER_NAME => ShopifyAdapter::class,
         AmazonBuyShippingAdapter::SOURCE_NAME => AmazonBuyShippingAdapter::class,
     ];
@@ -172,6 +176,30 @@ class CarrierRegistry
         $adapterClass = self::DEFAULT_ADAPTERS[$carrierName] ?? null;
 
         return $adapterClass !== null && is_subclass_of($adapterClass, UsesCarrierAccount::class);
+    }
+
+    /**
+     * Whether a carrier's integration keeps its account as a connection, like
+     * Amazon Shipping's. Asked of the shipped integration, as above.
+     */
+    public static function takesConnection(string $carrierName): bool
+    {
+        $adapterClass = self::DEFAULT_ADAPTERS[$carrierName] ?? null;
+
+        return $adapterClass !== null && is_subclass_of($adapterClass, UsesConnectionAccount::class);
+    }
+
+    /**
+     * Carrier names whose integration keeps its account as a connection.
+     *
+     * @return list<string>
+     */
+    public static function connectionCarrierNames(): array
+    {
+        return array_values(array_filter(
+            array_keys(self::DEFAULT_ADAPTERS),
+            self::takesConnection(...),
+        ));
     }
 
     /**

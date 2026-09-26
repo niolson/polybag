@@ -170,10 +170,13 @@ Preserve these domain terms in code and prose — see `CONTEXT.md`. In particula
   Shipments (`channelType: AMAZON`), with tracking and cancellation dispatched back through
   Amazon. Those offers may name Amazon Shipping, USPS, UPS, FedEx, or another carrier. Amazon
   dynamically discovers services; human selection may use an unmapped/unapproved service,
-  while automation requires normalization and explicit approval. Orders from other channels
-  are quoted `channelType: EXTERNAL` on the Amazon connection scoped to sell them Amazon
-  Shipping, bought, tracked and voided through that connection. Verified against the sandbox
-  only: no production Amazon Shipping account has run it
+  while automation requires normalization and explicit approval
+- **Amazon Shipping** — A carrier sold directly to orders from other channels, on a
+  connection's account. A method lists Amazon Shipping Ground; `AmazonShippingAdapter` quotes
+  `channelType: EXTERNAL` on the Amazon connection a scope chooses, and its rates are direct
+  rates that automation buys without approval. The Offer and Label record the connection as
+  the postage source, so purchase, tracking and voids go through it. Verified against the
+  sandbox only: no production Amazon Shipping account has run it
 - **Shopify Shipping** — Attended blind Label purchase tied to the Shipment's originating
   Shopify `DataSource`; Shopify may choose the carrier and does not confirm price or service.
   Tracking comes through Shopify; Labels must be voided in the Shopify admin and are then
@@ -184,9 +187,12 @@ Carrier and source adapters live in `app/Services/Carriers/`. Direct accounts re
 `client_id`; Shopify and Amazon marketplace postage bind to the Shipment's originating
 `DataSource`. `CarrierRegistry` remains carrier-policy/direct-adapter lookup, while
 `PostageSourceResolver` and `PostageSourceDispatcher` own source selection and post-purchase
-dispatch. Off-Amazon Amazon Shipping resolves by scope to a connected Amazon `DataSource`
-(`PostageSourceResolver::offAmazonShippingSourceFor()`); it must not be confused with the
-direct-carrier-account arm, nor with the origin-bound Amazon postage of an Amazon order.
+dispatch. Amazon Shipping for other channels is a direct sale whose account is a connection:
+the scope resolves a connected Amazon `DataSource`
+(`PostageSourceResolver::offAmazonShippingSourceFor()`), not a `CarrierAccount`
+(`UsesConnectionAccount`). Rules and automation treat its rates as direct; the postage
+source is the connection. Do not confuse it with the origin-bound Buy Shipping postage of
+an Amazon order.
 
 ## Data Import / Export
 

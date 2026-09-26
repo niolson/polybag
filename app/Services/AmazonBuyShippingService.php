@@ -35,12 +35,13 @@ use Saloon\Http\Response;
  * request-building testable against Amazon's own schema without a package, an
  * offer store or a carrier registry in the way.
  *
- * Two Shipping v2 channels, chosen per package by {@see quotingSourceFor()}.
- * An Amazon order is rated `channelType: AMAZON` on the connection it was
- * imported from, against its Amazon order ID. Any other order is rated
- * `channelType: EXTERNAL` on the Amazon connection scoped to sell it Amazon
- * Shipping (ADR-0002's 2026-09-22 amendment), with no order ID and items
- * described from what was packed.
+ * Two Shipping v2 channels. An Amazon order is rated `channelType: AMAZON` on
+ * the connection it was imported from, against its Amazon order ID, by
+ * `AmazonBuyShippingAdapter` ({@see quotingSourceFor()}). Any other order is
+ * rated `channelType: EXTERNAL` on the Amazon connection scoped to sell it
+ * Amazon Shipping (ADR-0002's 2026-09-22 amendment), with no order ID and items
+ * described from what was packed, by `AmazonShippingAdapter`
+ * (`carrier-catalog-reset/15`). Both buy through {@see purchase()}.
  */
 class AmazonBuyShippingService
 {
@@ -140,22 +141,19 @@ class AmazonBuyShippingService
     }
 
     /**
-     * The connection that would rate this package, or null.
+     * The connection Buy Shipping would rate this package on, or null.
      *
-     * An Amazon order is rated on the connection it came from and nowhere
-     * else, and only once its order ID is known: an Amazon order sold as
-     * `EXTERNAL` would lose its link to the order. Any other order is rated on
-     * the connection scoped to sell it off-Amazon Amazon Shipping, if there is
-     * one. Neither absence is an error worth telling a packer about: a shipment
-     * with no Amazon connection simply has no Amazon offer.
+     * Only an Amazon order, on the connection it came from, and only once its
+     * order ID is known. Any other order is not Buy Shipping's: Amazon
+     * Shipping sold to it is a direct sale (`carrier-catalog-reset/15`). Not an
+     * error worth telling a packer about: a shipment with no Amazon connection
+     * simply has no Buy Shipping offer.
      */
     public function quotingSourceFor(Package $package): ?DataSource
     {
-        if ($origin = $this->dataSourceFor($package)) {
-            return $this->orderItems->orderIdFor($package) !== null ? $origin : null;
-        }
+        $origin = $this->dataSourceFor($package);
 
-        return $this->postageSourceResolver->offAmazonShippingSourceFor($package);
+        return $origin !== null && $this->orderItems->orderIdFor($package) !== null ? $origin : null;
     }
 
     public function marketplaceIdFor(DataSource $source): ?string
@@ -166,7 +164,7 @@ class AmazonBuyShippingService
     }
 
     /**
-     * The `getRates` body for this package, on whichever channel it is rated.
+     * The Buy Shipping `getRates` body for this Amazon order's package.
      *
      * Call it only once {@see quotingSourceFor()} has named a connection.
      *
@@ -176,11 +174,7 @@ class AmazonBuyShippingService
      */
     public function ratePayloadFor(Package $package, RateRequest $request): array
     {
-        $orderId = $this->orderItems->orderIdFor($package);
-
-        return $this->dataSourceFor($package) !== null && $orderId !== null
-            ? $this->buildRatePayload($package, $request, $orderId)
-            : $this->buildOffAmazonRatePayload($package, $request);
+        return $this->buildRatePayload($package, $request, (string) $this->orderItems->orderIdFor($package));
     }
 
     /**

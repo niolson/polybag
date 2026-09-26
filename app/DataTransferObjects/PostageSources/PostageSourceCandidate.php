@@ -4,6 +4,7 @@ namespace App\DataTransferObjects\PostageSources;
 
 use App\Enums\OffAmazonShippingStatus;
 use App\Enums\PostageSource;
+use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\DataSource;
 
@@ -25,9 +26,11 @@ use App\Models\DataSource;
  * then quotes nothing, as it always has, while fake carriers quote without one.
  *
  * An off-Amazon candidate is an Amazon connection selling Amazon Shipping for
- * an order from another channel (`channelType: EXTERNAL`). It is bought through
- * a connection, so its kind is still `PostageDataSource`, but it is not channel
- * postage: it is bound to no order, and its price and service are quoted.
+ * an order from another channel (`channelType: EXTERNAL`). The sale is direct
+ * and the account is a connection (`carrier-catalog-reset/15`): it is bought
+ * through the connection, so its kind is still `PostageDataSource`, but it is
+ * not channel postage. It is bound to no order, its carrier is Amazon
+ * Shipping, and its price and service are quoted.
  */
 readonly class PostageSourceCandidate
 {
@@ -73,14 +76,14 @@ readonly class PostageSourceCandidate
      * come from Amazon, chosen by scope rather than by the order's origin.
      *
      * It carries the connection's check result so an account Amazon refused
-     * stays visible instead of silently dropping out. No carrier is named: each
-     * rate is named after the carrier Amazon quotes, as on-Amazon rates are.
+     * stays visible instead of silently dropping out.
      */
     public static function forOffAmazonShipping(DataSource $source): self
     {
         return new self(
             kind: PostageSource::PostageDataSource,
             name: (string) $source->name,
+            carrier: Carrier::AMAZON_SHIPPING,
             postageDataSourceId: $source->id,
             offAmazon: true,
             offAmazonShippingStatus: $source->off_amazon_shipping_status,

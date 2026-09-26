@@ -3,17 +3,21 @@
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\Enums\OffAmazonShippingStatus;
 use App\Enums\PostageSource;
+use App\Enums\PostageSourceKind;
+use App\Enums\ServiceCapability;
 use App\Exceptions\Carriers\CarrierUnavailableException;
 use App\Filament\Pages\Ship;
 use App\Http\Integrations\Amazon\Requests\GetShippingRates;
+use App\Models\Carrier;
 use App\Models\CarrierAccountScope;
 use App\Models\DataSource;
 use App\Models\ObservedService;
 use App\Models\Package;
 use App\Models\Product;
 use App\Models\ShippingOffer;
+use App\Models\SpecialService;
 use App\Models\User;
-use App\Services\Carriers\AmazonBuyShippingAdapter;
+use App\Services\Carriers\AmazonShippingAdapter;
 use App\Services\SettingsService;
 use App\Services\ShippingRateService;
 use GuzzleHttp\Handler\MockHandler;
@@ -27,9 +31,10 @@ use Saloon\Http\Senders\GuzzleSender;
 use Saloon\Laravel\Facades\Saloon;
 
 /**
- * `amazon-shipping-external-orders/05`: a Package whose order did not come from
- * Amazon is rated `channelType: EXTERNAL` on the Amazon connection scoped to
- * sell it Amazon Shipping, and its rates are Offers beside everyone else's.
+ * `amazon-shipping-external-orders/05`, as `carrier-catalog-reset/15` made it: a
+ * Package whose order did not come from Amazon, on a method listing Amazon
+ * Shipping Ground, is rated `channelType: EXTERNAL` on the Amazon connection
+ * scoped to sell it, and its rates are direct Offers beside everyone else's.
  */
 beforeEach(function (): void {
     Cache::put('amazon_sp_api_access_token_'.md5('external-refresh-token'), 'external-access-token', 3600);
@@ -174,18 +179,99 @@ it('binds the offer to the scoped connection, never the shipment\'s import sourc
         ->and($offer->quote_fingerprint)->not->toBeNull();
 });
 
-it('records the observed services an EXTERNAL reply names, so mapping and approval apply', function (): void {
+it('quotes a direct rate for the authored service, with no observed identity', function (): void {
     Saloon::fake([GetShippingRates::class => externalRatesResponse()]);
 
-    $rate = app(ShippingRateService::class)->getShippingRates(externalPackage($this->shopify)->id)->first();
+    $rate = app(ShippingRateService::class)->getShippingRates(externalPackage($this->shopify)->id)->sole();
+    $offer = ShippingOffer::where('public_id', $rate->offerId)->sole();
 
-    $observed = ObservedService::sole();
+    expect($rate->observedService)->toBeNull()
+        ->and($rate->sourceKind())->toBe(PostageSourceKind::Direct)
+        ->and($rate->carrierServiceId)->toBe(amazonShippingGround()->id)
+        ->and($rate->carrierId)->toBe(amazonShippingGround()->carrier_id)
+        ->and($offer->carrier_id)->toBe(amazonShippingGround()->carrier_id)
+        ->and($offer->carrier_service_id)->toBe(amazonShippingGround()->id)
+        ->and($offer->service_code)->toBe('std-us-swa-mfn')
+        ->and(ObservedService::count())->toBe(0);
+});
 
-    expect($observed->source)->toBe(AmazonBuyShippingAdapter::OBSERVATION_SOURCE)
-        ->and($observed->external_carrier_id)->toBe('AMZN_US')
-        ->and($observed->external_service_id)->toBe('std-us-swa-mfn')
-        ->and($observed->carrier_service_id)->toBeNull()
-        ->and($rate->observedService?->externalServiceId)->toBe('std-us-swa-mfn');
+it('records an Amazon Shipping service nobody has authored, and drops it', function (): void {
+    $unauthored = [...amazonShippingGroundRate(), 'rateId' => 'rate-2', 'serviceId' => 'exp-us-swa-mfn', 'serviceName' => 'Amazon Shipping Two-Day'];
+    Saloon::fake([GetShippingRates::class => externalRatesResponse([amazonShippingGroundRate(), $unauthored])]);
+
+    $rates = app(ShippingRateService::class)->getShippingRates(externalPackage($this->shopify)->id);
+
+    expect($rates->pluck('serviceCode')->all())->toBe(['std-us-swa-mfn'])
+        ->and(ShippingOffer::count())->toBe(1)
+        ->and(ObservedService::sole()->external_service_id)->toBe('exp-us-swa-mfn');
+});
+
+describe('a shipment with no shipping method', function (): void {
+    it('quotes the active authored Amazon Shipping services', function (): void {
+        $package = externalPackage($this->shopify);
+        $package->shipment->update(['shipping_method_id' => null]);
+        Saloon::fake([GetShippingRates::class => externalRatesResponse()]);
+
+        $rates = app(ShippingRateService::class)->getShippingRates($package->id);
+
+        expect($rates->pluck('serviceCode')->all())->toBe(['std-us-swa-mfn'])
+            ->and($rates->sole()->sourceKind())->toBe(PostageSourceKind::Direct);
+    });
+
+    it('keeps nothing for an inactive service', function (): void {
+        $package = externalPackage($this->shopify);
+        $package->shipment->update(['shipping_method_id' => null]);
+        amazonShippingGround()->update(['active' => false]);
+        Saloon::fake([GetShippingRates::class => externalRatesResponse()]);
+
+        expect(app(ShippingRateService::class)->getShippingRates($package->id))->toBeEmpty();
+        Saloon::assertNothingSent();
+    });
+
+    it('does not ask Amazon Shipping for a PO Box it cannot reach', function (): void {
+        $package = externalPackage($this->shopify);
+        $package->shipment->update(['shipping_method_id' => null, 'address1' => 'PO Box 123']);
+        amazonShippingGround()->update(['can_ship_to_po_boxes' => false]);
+        Saloon::fake([GetShippingRates::class => externalRatesResponse()]);
+
+        expect(app(ShippingRateService::class)->getShippingRates($package->id))->toBeEmpty();
+        Saloon::assertNothingSent();
+    });
+});
+
+it('drops an authored service the method does not list', function (): void {
+    $package = externalPackage($this->shopify);
+    $package->shipment->shippingMethod->carrierServices()->detach();
+    $package->shipment->shippingMethod->carrierServices()->attach(
+        Carrier::seedSystem(Carrier::AMAZON_SHIPPING)->carrierServices()->create(['service_code' => 'exp-us-swa-mfn', 'name' => 'Amazon Shipping Two-Day', 'active' => true])->id
+    );
+    Saloon::fake([GetShippingRates::class => externalRatesResponse()]);
+
+    expect(app(ShippingRateService::class)->getShippingRates($package->id))->toBeEmpty()
+        ->and(ShippingOffer::count())->toBe(0);
+});
+
+it('offers nothing to a shipment that requires a special service, and asks nothing', function (): void {
+    $package = externalPackage($this->shopify);
+    $package->shipment->shippingMethod->specialServices()->attach(
+        SpecialService::create([
+            'code' => 'signature_required',
+            'name' => 'Signature Required',
+            'scope' => 'package',
+            'category' => 'delivery',
+            'requires_value' => false,
+            'active' => true,
+        ])->id,
+        ['mode' => 'required'],
+    );
+    Saloon::fake([GetShippingRates::class => externalRatesResponse()]);
+
+    $service = app(ShippingRateService::class);
+
+    expect($service->getShippingRates($package->id))->toBeEmpty()
+        ->and($service->getExclusions()[0]['carrier'])->toBe('Amazon Shipping')
+        ->and((new AmazonShippingAdapter)->offerCapability('declared_value'))->toBe(ServiceCapability::NotImplemented);
+    Saloon::assertNothingSent();
 });
 
 it('treats an empty rate list as no offers, not an error', function (): void {
@@ -206,7 +292,7 @@ it('answers a 403 A-101 with no offers and a not-set-up message, and marks the c
     expect($rates)->toBeEmpty()
         ->and(ShippingOffer::count())->toBe(0)
         ->and($service->getExclusions())->toHaveCount(1)
-        ->and($service->getExclusions()[0]['carrier'])->toBe('Amazon')
+        ->and($service->getExclusions()[0]['carrier'])->toBe('Amazon Shipping')
         ->and($service->getExclusions()[0]['reason'])
         ->toContain('Amazon Shipping (3PL)')
         ->toContain('A-101')
@@ -248,7 +334,7 @@ function a101Body(): array
 }
 
 it('hears A-101 on the concurrent path as a response, not as a rejected promise', function (): void {
-    $adapter = new AmazonBuyShippingAdapter;
+    $adapter = new AmazonShippingAdapter;
     $request = RateRequest::fromPackage(externalPackage($this->shopify));
     $response = guzzleSenderAnswering(403, a101Body())
         ->sendAsync($adapter->prepareRateRequest($request, [])->pendingRequest)
@@ -261,7 +347,7 @@ it('hears A-101 on the concurrent path as a response, not as a rejected promise'
 
 describe('a scope changed while the request is in flight', function (): void {
     beforeEach(function (): void {
-        $this->adapter = new AmazonBuyShippingAdapter;
+        $this->adapter = new AmazonShippingAdapter;
         $this->request = RateRequest::fromPackage(externalPackage($this->shopify));
         $this->pending = $this->adapter->prepareRateRequest($this->request, [])->pendingRequest;
 
@@ -280,7 +366,7 @@ describe('a scope changed while the request is in flight', function (): void {
             'ineligibleRates' => [],
         ]])->sendAsync($this->pending)->wait();
 
-        $rate = $this->adapter->parseRateResponse($response, $this->request, [])->sole();
+        $rate = $this->adapter->parseRateResponse($response, $this->request, ['std-us-swa-mfn'])->sole();
 
         expect(ShippingOffer::where('public_id', $rate->offerId)->sole()->postage_data_source_id)
             ->toBe($this->connection->id);
@@ -338,7 +424,7 @@ it('still rates an Amazon order on its own connection as AMAZON, whatever is sco
     $origin = DataSource::factory()->unassigned()->amazon()->create([
         'secret_settings' => ['refresh_token' => 'external-refresh-token'],
     ]);
-    $package = externalPackage($origin);
+    $package = externalPackage($origin, asksBuyShipping: true);
     $package->shipment->update(['metadata' => ['amazon_order_id' => '111-2222222-3333333']]);
     $package->shipment->shipmentItems()->update(['source_item_id' => 'AMAZON-ITEM-123']);
 
@@ -351,6 +437,19 @@ it('still rates an Amazon order on its own connection as AMAZON, whatever is sco
         'amazonOrderDetails' => ['orderId' => '111-2222222-3333333'],
     ])
         ->and(ShippingOffer::where('public_id', $rate->offerId)->sole()->postage_data_source_id)->toBe($origin->id);
+    Saloon::assertSentCount(1);
+});
+
+it('gives an Amazon order no EXTERNAL quote on a method listing Amazon Shipping Ground without Buy Shipping', function (): void {
+    $origin = DataSource::factory()->unassigned()->amazon()->create([
+        'secret_settings' => ['refresh_token' => 'external-refresh-token'],
+    ]);
+    $package = externalPackage($origin);
+    $package->shipment->update(['metadata' => ['amazon_order_id' => '111-2222222-3333333']]);
+    Saloon::fake([GetShippingRates::class => externalRatesResponse()]);
+
+    expect(app(ShippingRateService::class)->getShippingRates($package->id))->toBeEmpty();
+    Saloon::assertNothingSent();
 });
 
 it('asks nothing of Amazon for an order from another channel with no connection scoped to it', function (): void {
@@ -359,7 +458,7 @@ it('asks nothing of Amazon for an order from another channel with no connection 
 
     $package = externalPackage($this->shopify);
 
-    expect((new AmazonBuyShippingAdapter)->getRates(RateRequest::fromPackage($package), []))->toBeEmpty();
+    expect((new AmazonShippingAdapter)->getRates(RateRequest::fromPackage($package), ['std-us-swa-mfn']))->toBeEmpty();
     Saloon::assertNothingSent();
 });
 
@@ -381,7 +480,7 @@ describe('Ship page', function (): void {
 
         $component = Livewire::test(Ship::class, ['package_id' => externalPackage($this->shopify)->id]);
 
-        $component->assertNotified('Amazon excluded');
+        $component->assertNotified('Amazon Shipping excluded');
         expect($component->get('rateOptions'))->toBe([]);
     });
 });

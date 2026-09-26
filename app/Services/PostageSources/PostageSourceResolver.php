@@ -126,8 +126,15 @@ class PostageSourceResolver
     /**
      * Every source that could sell this package a label: the bound channel
      * source when its postage setting sells, the connection scoped to sell
-     * off-Amazon Amazon Shipping, then
-     * one per direct carrier (ADR-0006 decision 4).
+     * Amazon Shipping directly, then one per direct carrier with a
+     * `CarrierAccount` (ADR-0006 decision 4).
+     *
+     * Amazon Shipping sold to an order from another channel is a direct sale
+     * on a connection's account (`carrier-catalog-reset/15`). Its candidate is
+     * the connection, because that is what an Offer and a Label record as the
+     * postage source, but it is asked only where a direct carrier would be:
+     * when the method has its `direct` row and lists an Amazon Shipping
+     * service, or when there is no method.
      *
      * The direct carriers are those the shipping method's active services
      * name, or every carrier with a direct integration when there is no
@@ -163,9 +170,8 @@ class PostageSourceResolver
             $candidates->push(PostageSourceCandidate::fromDataSource($channel));
         }
 
-        // Always resolved, like the channel arm: no carrier on the method
-        // selects it, since each offer names whichever carrier Amazon quotes.
-        if ($offAmazon = $this->offAmazonShippingSourceFor($package)) {
+        if ($this->sellsAmazonShippingDirectly($shippingMethod)
+            && $offAmazon = $this->offAmazonShippingSourceFor($package)) {
             $candidates->push(PostageSourceCandidate::forOffAmazonShipping($offAmazon));
         }
 
@@ -185,6 +191,25 @@ class PostageSourceResolver
     }
 
     /**
+     * Whether this method would buy Amazon Shipping directly: with no method,
+     * which allows every direct service, or with its `direct` row and an
+     * active Amazon Shipping service listed.
+     */
+    private function sellsAmazonShippingDirectly(?ShippingMethod $shippingMethod): bool
+    {
+        if ($shippingMethod === null) {
+            return true;
+        }
+
+        return $shippingMethod->allowsSource(PostageSourceKind::Direct)
+            && $shippingMethod->carrierServices()
+                ->active()
+                ->withActiveCarrier()
+                ->whereHas('carrier', fn ($query) => $query->where('name', Carrier::AMAZON_SHIPPING))
+                ->exists();
+    }
+
+    /**
      * The carriers sold directly that this method needs, by their fixed name,
      * with each one's carrier row id, or null for a registered integration
      * with no row.
@@ -192,7 +217,9 @@ class PostageSourceResolver
      * Asked as `directAdapterFor()` and not `policyFor()`, because a candidate
      * is a claim that we can *buy* here, and the pairing that has to hold is
      * with `CarrierAccountPostageSource`, which voids and tracks through
-     * `directAdapterOrFail()`.
+     * `directAdapterOrFail()`. Amazon Shipping is not one: its adapter takes a
+     * connection, not a `CarrierAccount`, and is asked through the connection
+     * candidate above.
      *
      * @return array<string, int|null>
      */

@@ -14,6 +14,7 @@ use App\Http\Integrations\Amazon\Requests\GetShipmentTracking;
 use App\Http\Integrations\Amazon\Requests\GetShippingRates;
 use App\Http\Integrations\Amazon\Requests\PurchaseShipment;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
+use App\Models\Carrier;
 use App\Models\CarrierAccountScope;
 use App\Models\DataSource;
 use App\Models\Package;
@@ -25,6 +26,8 @@ use App\Services\PackageShipping\EloquentPackageShippingWorkflow;
 use App\Services\PostageSources\PostageSourceDispatcher;
 use App\Services\ShippingRateService;
 use App\Services\TrackingService;
+use Carbon\Carbon;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\PendingRequest;
@@ -130,6 +133,32 @@ it('buys a Shopify order\'s Amazon Shipping label on the scoped connection and r
     Saloon::assertSent(fn (PurchaseShipment $request, $response): bool => sentByConnection($response->getPendingRequest(), $this->connection)
         && $request->body()->all()['rateId'] === 'b1a4a1f0-0c4f-4a47-9d2e-5c6f0a1e7a11'
         && $request->body()->all()['requestToken'] === 'amzn1.rq.external-request-token');
+});
+
+it('dates the label by the Amazon Shipping carrier row and records it as the carrier of record', function (): void {
+    $amazonShipping = Carrier::seedSystem(Carrier::AMAZON_SHIPPING);
+    $amazonShipping->update(['pickup_cutoff_hour' => 10]);
+    $now = CarbonImmutable::parse('2026-04-01 15:00', 'America/New_York');
+    Carbon::setTestNow($now);
+    CarbonImmutable::setTestNow($now);
+
+    Saloon::fake([
+        GetShippingRates::class => externalRatesResponse(),
+        PurchaseShipment::class => externalPurchaseResponse(),
+    ]);
+
+    $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(
+        selectedRate: quoteExternalRate($this->package),
+        labelFormat: 'pdf',
+    ));
+
+    $package = $this->package->fresh();
+
+    // After Amazon Shipping's 10 AM cutoff on a Wednesday: Thursday.
+    expect($result->success)->toBeTrue()
+        ->and($package->normalized_carrier_id)->toBe($amazonShipping->id)
+        ->and($package->activeLabel->normalized_carrier_id)->toBe($amazonShipping->id)
+        ->and($package->ship_date->toDateString())->toBe('2026-04-02');
 });
 
 it('buys Amazon Shipping for an order from another channel whatever the connection\'s postage setting', function (): void {

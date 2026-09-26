@@ -55,6 +55,29 @@ it('returns pre-selected rate for UseService rule', function (): void {
         ->and($result->preSelectedRate->price)->toBe(0.0);
 });
 
+it('scopes a Direct rule naming a service sold on a connection to its quoted direct rates', function (): void {
+    $service = amazonShippingGround();
+    $method = ShippingMethod::factory()->create();
+    $method->carrierServices()->attach($service);
+    $shipment = Shipment::factory()->create(['shipping_method_id' => $method->id]);
+
+    ShippingRule::factory()->create([
+        'shipping_method_id' => $method->id,
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => $service->id,
+    ]);
+
+    $result = app(RuleEvaluator::class)->evaluate($shipment);
+    $direct = new RateResponse(carrier: Carrier::AMAZON_SHIPPING, serviceCode: 'std-us-swa-mfn', serviceName: 'Amazon Shipping Ground', price: 7.9, carrierServiceId: $service->id);
+
+    expect($result->hasPreSelectedRate())->toBeFalse()
+        ->and($result->hasPreSelectedScope())->toBeTrue()
+        ->and($result->preSelectedScope->kinds)->toBe([PostageSourceKind::Direct])
+        ->and($result->preSelectedScope->carrierServiceId)->toBe($service->id)
+        ->and($result->preSelectedScope->strict)->toBeFalse()
+        ->and($result->isPreSelected($direct))->toBeTrue();
+});
+
 it('returns excluded service codes for ExcludeService rule', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'FedEx']);
     $service = CarrierService::factory()->fedexGround()->create(['carrier_id' => $carrier->id]);
