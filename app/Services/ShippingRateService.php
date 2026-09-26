@@ -46,7 +46,6 @@ use App\Services\Shipping\PackagingFilter;
 use Carbon\CarbonImmutable;
 use Closure;
 use GuzzleHttp\Promise\Utils as PromiseUtils;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Saloon\Http\Senders\GuzzleSender;
 
@@ -429,6 +428,10 @@ class ShippingRateService
      * Resets the exclusions and offers recorded from any earlier call, so a
      * caller reads the reasons belonging to the tasks it just built.
      *
+     * A shipment with no shipping method gets no tasks, so no rates and no
+     * Offers: nothing is bought for it until one is chosen
+     * (`carrier-catalog-reset/16`).
+     *
      * @return array<int, RatingTask>
      *
      * @throws NoActiveCarrierServicesException
@@ -456,40 +459,41 @@ class ShippingRateService
 
         $this->exclusions = [];
         $this->blindPurchaseOffers = collect();
+
+        if ($shippingMethod === null) {
+            logger()->debug('ShippingRateService: No shipping method assigned, nothing is rated', [
+                'package_id' => $package->id,
+            ]);
+
+            return [];
+        }
+
         $scopeMap = $this->loadServiceScopes([...$requiredCodes, ...$defaultCodes]);
         $serviceNames = SpecialService::whereIn('code', [...$requiredCodes, ...$defaultCodes])
             ->pluck('name', 'code');
 
-        $methodServices = null;
+        $methodServices = $this->getActiveCarrierServices($shippingMethod, $destination);
 
-        if ($shippingMethod) {
-            $methodServices = $this->getActiveCarrierServices($shippingMethod, $destination);
-
-            // A method may list nothing when Shopify may choose for itself, or
-            // when it asks Amazon Buy Shipping, whose services are discovered
-            // per quote.
-            if ($methodServices->isEmpty()
-                && ! $shippingMethod->allowsUnlistedServices(PostageSourceKind::Shopify)
-                && ! $shippingMethod->allowsSource(PostageSourceKind::Amazon)) {
-                throw new NoActiveCarrierServicesException($shippingMethod->name);
-            }
-
-            logger()->debug('ShippingRateService: Getting rates', [
-                'package_id' => $package->id,
-                'shipping_method' => $shippingMethod->name,
-                'active_carrier_services_count' => $methodServices->count(),
-                'carrier_services' => $methodServices->pluck('service_code', 'name')->toArray(),
-            ]);
-        } else {
-            logger()->debug('ShippingRateService: No shipping method assigned, asking every source', [
-                'package_id' => $package->id,
-            ]);
+        // A method may list nothing when Shopify may choose for itself, or
+        // when it asks Amazon Buy Shipping, whose services are discovered
+        // per quote.
+        if ($methodServices->isEmpty()
+            && ! $shippingMethod->allowsUnlistedServices(PostageSourceKind::Shopify)
+            && ! $shippingMethod->allowsSource(PostageSourceKind::Amazon)) {
+            throw new NoActiveCarrierServicesException($shippingMethod->name);
         }
+
+        logger()->debug('ShippingRateService: Getting rates', [
+            'package_id' => $package->id,
+            'shipping_method' => $shippingMethod->name,
+            'active_carrier_services_count' => $methodServices->count(),
+            'carrier_services' => $methodServices->pluck('service_code', 'name')->toArray(),
+        ]);
 
         $sources = app(PostageSourceResolver::class)->resolve($package, $shippingMethod);
         $tasks = [];
 
-        foreach ($this->assignServices($sources, $shippingMethod, $methodServices, $destination) as $assignment) {
+        foreach ($this->assignServices($sources, $shippingMethod, $methodServices) as $assignment) {
             $task = $this->buildTask(
                 $assignment['candidate'],
                 $assignment['source'],
@@ -524,19 +528,16 @@ class ShippingRateService
      *   Shipping services, like a direct carrier, through the scoped
      *   connection (`carrier-catalog-reset/15`).
      *
-     * With a method, a source that sells none of its services is left out.
-     * With none, every source is asked with no service list, except that a PO
-     * Box or military destination asks only a source with a cataloged service
-     * known to reach it: querying one blind risks a carrier-side reject (UPS
-     * 400s on a military "AE" state).
+     * A source that sells none of the method's services is left out. The
+     * method's services are already narrowed to those that reach the
+     * destination ({@see getActiveCarrierServices()}).
      *
-     * @param  Collection<int, CarrierService>|null  $methodServices  null when there is no shipping method
+     * @param  Collection<int, CarrierService>  $methodServices
      * @return array<int, ServiceAssignment>
      */
-    private function assignServices(PostageSourceResolution $sources, ?ShippingMethod $shippingMethod, ?Collection $methodServices, AddressData $destination): array
+    private function assignServices(PostageSourceResolution $sources, ShippingMethod $shippingMethod, Collection $methodServices): array
     {
         $registry = app(CarrierRegistry::class);
-        $restrictedDestination = $destination->isPoBox() || $destination->isMilitary();
         $assignments = [];
 
         foreach ($sources->candidates as $candidate) {
@@ -566,14 +567,7 @@ class ShippingRateService
                 continue;
             }
 
-            $services = match (true) {
-                $methodServices !== null => $methodServices->filter(fn (CarrierService $service): bool => $service->carrier?->name === $sourceName),
-                // Amazon Shipping keeps only the codes it is handed, so with no
-                // method it is handed every active one it may sell here, where
-                // a direct carrier is handed none and quotes everything.
-                $candidate->offAmazon => $this->getActiveCarrierServicesForCarrierName($sourceName, $destination, allDestinations: true),
-                default => $this->getActiveCarrierServicesForCarrierName($sourceName, $destination),
-            };
+            $services = $methodServices->filter(fn (CarrierService $service): bool => $service->carrier?->name === $sourceName);
 
             $adapter = $candidate->isDirect() ? $registry->directAdapterFor($sourceName) : null;
 
@@ -581,11 +575,7 @@ class ShippingRateService
                 $services = $services->filter(fn (CarrierService $service): bool => $adapter->sellsService($service->service_code));
             }
 
-            if ($services->isEmpty() && ($methodServices !== null || $restrictedDestination || $candidate->offAmazon)) {
-                if ($methodServices === null) {
-                    logger()->debug("ShippingRateService: {$sourceName} has no cataloged service for this destination, skipping");
-                }
-
+            if ($services->isEmpty()) {
                 continue;
             }
 
@@ -606,15 +596,14 @@ class ShippingRateService
      *
      * Only with the method's `shopify` policy row. Each listed service with a
      * Shopify mapping is asked for by that mapping's outward code, and `auto`
-     * is added when the row allows Shopify's own choice. With no method there
-     * is no policy to allow Shopify, so it is not asked.
+     * is added when the row allows Shopify's own choice.
      *
-     * @param  Collection<int, CarrierService>|null  $methodServices
+     * @param  Collection<int, CarrierService>  $methodServices
      * @return ServiceAssignment|null
      */
-    private function assignShopify(PostageSourceCandidate $candidate, string $sourceName, ?ShippingMethod $shippingMethod, ?Collection $methodServices): ?array
+    private function assignShopify(PostageSourceCandidate $candidate, string $sourceName, ShippingMethod $shippingMethod, Collection $methodServices): ?array
     {
-        if ($shippingMethod === null || $methodServices === null || ! $shippingMethod->allowsSource(PostageSourceKind::Shopify)) {
+        if (! $shippingMethod->allowsSource(PostageSourceKind::Shopify)) {
             return null;
         }
 
@@ -649,14 +638,13 @@ class ShippingRateService
      *
      * Only with the method's `amazon` policy row. It is handed no services:
      * `getRates` takes no service filter, and what Amazon offers is discovered
-     * per quote. With no method there is no policy to allow it, so it is not
-     * asked, as Shopify is not.
+     * per quote.
      *
      * @return ServiceAssignment|null
      */
-    private function assignAmazonBuyShipping(PostageSourceCandidate $candidate, string $sourceName, ?ShippingMethod $shippingMethod): ?array
+    private function assignAmazonBuyShipping(PostageSourceCandidate $candidate, string $sourceName, ShippingMethod $shippingMethod): ?array
     {
-        if ($shippingMethod === null || ! $shippingMethod->allowsSource(PostageSourceKind::Amazon)) {
+        if (! $shippingMethod->allowsSource(PostageSourceKind::Amazon)) {
             return null;
         }
 
@@ -960,7 +948,7 @@ class ShippingRateService
      * Returns null (recording the reason in $this->exclusions) when the source
      * is excluded.
      *
-     * @param  Collection<int, CarrierService>  $services  Empty when no shipping method is assigned
+     * @param  Collection<int, CarrierService>  $services  The method's services this source sells; empty for Amazon Buy Shipping, whose services are discovered per quote
      * @param  array<int, string>|null  $serviceCodes  What to ask the source for, when that is not the services' own codes
      * @param  array<int, string>  $requiredCodes
      * @param  array<int, string>  $defaultCodes
@@ -1127,8 +1115,7 @@ class ShippingRateService
      * Carrier-service scope rows for one code, limited to this carrier.
      * Returns null when the code has no rows for any of this carrier's services —
      * the code is unscoped for this carrier and only the carrier-wide capability
-     * check applies. Also null when there is no carrier-service list to filter
-     * (no shipping method assigned).
+     * check applies. Also null when there is no carrier-service list to filter.
      *
      * @param  array<string, array<int, array<int, array<int, string>|null>>>  $scopeMap
      * @param  Collection<int, CarrierService>  $services
@@ -1225,10 +1212,15 @@ class ShippingRateService
         $package->location_id = $locationId;
         $package->setRelation('shipment', $shipment);
 
-        $sources = app(PostageSourceResolver::class)->resolve($package, $shippingMethod);
-        $methodServices = $shippingMethod ? $this->getActiveCarrierServices($shippingMethod, $destination) : null;
+        // Nothing is bought without a method, so there is no seller either.
+        if ($shippingMethod === null) {
+            return collect();
+        }
 
-        return collect($this->assignServices($sources, $shippingMethod, $methodServices, $destination))
+        $sources = app(PostageSourceResolver::class)->resolve($package, $shippingMethod);
+        $methodServices = $this->getActiveCarrierServices($shippingMethod, $destination);
+
+        return collect($this->assignServices($sources, $shippingMethod, $methodServices))
             ->pluck('source')
             ->unique()
             ->map(fn (string $name): PostageOfferSource => $registry->get($name))
@@ -1258,35 +1250,5 @@ class ShippingRateService
         }
 
         return $query->get();
-    }
-
-    /**
-     * Active CarrierService rows for a carrier name, used by the no-shipping-method
-     * fallback. For an ordinary destination this returns an empty collection,
-     * preserving that fallback's existing "ask the adapter for everything, no
-     * service-code restriction" behavior. For a PO Box / military destination
-     * it returns only the carrier's cataloged services flagged capable of
-     * reaching it -- which may be empty if the carrier has no such service (or
-     * no catalog rows at all), in which case the caller must not query it.
-     *
-     * `$allDestinations` lists the active services for an ordinary destination
-     * too, for a source that keeps only the codes it is handed, such as Amazon
-     * Shipping on a connection. The PO Box and military restrictions still apply.
-     *
-     * @return Collection<int, CarrierService>
-     */
-    private function getActiveCarrierServicesForCarrierName(string $carrierName, AddressData $destination, bool $allDestinations = false): Collection
-    {
-        if (! $allDestinations && ! $destination->isPoBox() && ! $destination->isMilitary()) {
-            return collect();
-        }
-
-        return CarrierService::query()
-            ->active()
-            ->withActiveCarrier()
-            ->whereHas('carrier', fn (Builder $query) => $query->where('name', $carrierName))
-            ->when($destination->isPoBox(), fn (Builder $query) => $query->where('can_ship_to_po_boxes', true))
-            ->when($destination->isMilitary(), fn (Builder $query) => $query->where('can_ship_to_military_addresses', true))
-            ->get();
     }
 }

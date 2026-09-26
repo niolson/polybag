@@ -255,7 +255,7 @@ it('refuses every Amazon offer for a method with no amazon row', function (): vo
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 
-it('never auto ships through Amazon Buy Shipping for a shipment with no method', function (): void {
+it('never auto ships a shipment with no method, and sends the packer to choose one', function (): void {
     $this->actingAs($user = User::factory()->create());
     $package = packageForDiscoveredQuote();
     $package->shipment->update(['shipping_method_id' => null]);
@@ -263,8 +263,10 @@ it('never auto ships through Amazon Buy Shipping for a shipment with no method',
 
     $result = autoShipAs($user, $package->fresh());
 
-    expect($result->title)->toBe('Not Allowed by Shipping Method')
-        ->and($result->message)->toContain('a shipment with no shipping method')
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Shipping Method Required')
+        ->and($result->requiresAttendedSelection)->toBeTrue()
+        ->and($result->leavePackageIntact)->toBeTrue()
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 

@@ -66,7 +66,7 @@ class BatchLabelService
             return 'Not picked';
         }
 
-        if (! $shipment->shipping_method_id) {
+        if ($shipment->needsShippingMethod()) {
             return 'No shipping method assigned';
         }
 

@@ -648,6 +648,26 @@ it('refuses a forged purchase request for a rule-excluded blind offer', function
     $source->shouldNotHaveReceived('createShipment');
 });
 
+it('refuses a blind purchase for a shipment with no shipping method', function (): void {
+    $package = blindPurchasePackage();
+    allowBlindPurchase($package);
+    $source = registerBlindSource();
+    $package->shipment->update(['shipping_method_id' => null]);
+
+    expect(app(PackageShippingWorkflow::class)->prepareRates($package->fresh())->blindPurchaseOffers)->toBeEmpty();
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package->fresh(),
+        new PackageShippingRequest(blindOffer: shopifyBlindOffer()),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Shipping Method Required')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+
+    $source->shouldNotHaveReceived('createShipment');
+});
+
 it('reuses the advertised blind offer snapshot when checking sole-choice automation', function (): void {
     $package = blindPurchasePackage();
     allowBlindPurchase($package);

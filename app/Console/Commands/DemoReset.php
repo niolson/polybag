@@ -10,17 +10,17 @@ use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\Channel;
 use App\Models\ChannelAlias;
+use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\Manifest;
 use App\Models\Package;
 use App\Models\PackageLabel;
 use App\Models\Shipment;
-use App\Models\ShippingMethod;
-use App\Models\ShippingMethodAlias;
 use App\Models\User;
 use App\Services\ClientContext;
 use App\Services\ShipmentImport\DataSourceFactory;
+use App\Services\ShipmentImport\ImportReferenceResolver;
 use App\Services\ShipmentImport\PackageExportService;
 use App\Services\ShipmentImport\ShipmentImportService;
 use App\Services\ShipmentImport\Sources\DatabaseSource;
@@ -130,9 +130,20 @@ class DemoReset extends Command
             return self::FAILURE;
         }
 
+        // Checked before anything is wiped: a shipment imported with no
+        // shipping method cannot have a label bought (`carrier-catalog-reset/16`),
+        // so a demo reset must not leave one behind.
+        $unmapped = $this->unmappedShippingMethods($record, $from, $mapping);
+
+        if ($unmapped !== []) {
+            $this->error('Shipping method references with no match: '.implode(', ', $unmapped).'. '
+                .'Every demo shipment needs a shipping method. Map them with a Shipping Method alias, or fix the import data, then run this again.');
+
+            return self::FAILURE;
+        }
+
         $this->truncateTransactionalTables();
         $this->ensureChannelAliases($record, $from, $mapping);
-        $this->warnAboutUnmappedShippingMethods($record, $from, $mapping);
 
         $result = ShipmentImportService::forSource($source, $record)->import();
         $this->components->twoColumnDetail('Shipments imported', (string) $result->shipmentsCreated);
@@ -270,31 +281,54 @@ class DemoReset extends Command
     }
 
     /**
+     * The shipping method references in the window that will import with no
+     * method, with `(none)` for rows that name none at all.
+     *
+     * Resolved as the import resolves each row: against the client its
+     * `client_column` names, else the source's client, else the default, and
+     * through {@see ImportReferenceResolver}, so an alias counts only for the
+     * client it belongs to.
+     *
      * @param  array<string, string>  $mapping
+     * @return list<string>
      */
-    private function warnAboutUnmappedShippingMethods(DataSource $record, Carbon $from, array $mapping): void
+    private function unmappedShippingMethods(DataSource $record, Carbon $from, array $mapping): array
     {
         $column = array_search('shipping_method_id', $mapping, true) ?: 'shipping_method';
-        $table = ($record->settings ?? [])['shipments_table'] ?? 'shipments';
-        $client = $record->client ?? app(ClientContext::class)->default();
+        $settings = $record->settings ?? [];
+        $table = $settings['shipments_table'] ?? 'shipments';
+        $clientColumn = $settings['client_column'] ?? null;
 
-        $values = DB::connection($this->importConnection($record))
+        $pairs = DB::connection($this->importConnection($record))
             ->table($table)
             ->where('created_at', '>=', $from)
-            ->whereNotNull($column)
+            ->select($clientColumn ? ["{$column} as reference", "{$clientColumn} as client_name"] : ["{$column} as reference"])
             ->distinct()
-            ->pluck($column)
-            ->map(fn ($value): string => (string) $value);
+            ->get();
 
-        $known = ShippingMethod::pluck('id')
-            ->map(fn (int $id): string => (string) $id)
-            ->merge(ShippingMethodAlias::where('client_id', $client->id)->pluck('reference'));
+        $references = new ImportReferenceResolver;
+        $unmapped = [];
 
-        $unmapped = $values->diff($known);
+        foreach ($pairs->sortBy('client_name') as $pair) {
+            $reference = (string) ($pair->reference ?? '');
 
-        if ($unmapped->isNotEmpty()) {
-            $this->warn('Shipping method references with no match (will land in Unmapped Shipping References): '.$unmapped->implode(', '));
+            if ($reference === '') {
+                $unmapped['(none)'] = '(none)';
+
+                continue;
+            }
+
+            $clientName = $pair->client_name ?? null;
+            $client = ($clientName !== null ? Client::findByImportName((string) $clientName) : null)
+                ?? $record->client;
+
+            if ($references->shippingMethodIdFor(['shipping_method_id' => $reference], $client) === null) {
+                $label = $clientColumn && $clientName !== null ? "{$reference} ({$clientName})" : $reference;
+                $unmapped[$label] = $label;
+            }
         }
+
+        return array_values($unmapped);
     }
 
     /**

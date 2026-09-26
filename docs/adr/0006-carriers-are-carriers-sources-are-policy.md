@@ -21,6 +21,9 @@ to match (`carrier-catalog-reset/06`).
 Amended 2026-09-25 (`carrier-catalog-reset/09`): seeded mappings are written once by the
 reference-data sync behind a marker, not by migration (decision 2).
 
+Amended 2026-09-26 (`carrier-catalog-reset/16`): a shipment with no shipping method is not
+rated and cannot have a Label bought (decision 12). Its allowance is nothing.
+
 Supersedes in part:
 
 - **ADR-0002.** The 2026-09-22 amendment's choice of the `Amazon` postage-source row as the
@@ -226,8 +229,8 @@ Shipping account can only be scoped to that client (ADR-0002).
   source*. The service is one service or *any*. *Any* is stored explicitly, never as a
   null service.
 - A blind purchase never enters *any priced source*.
-- *Use* can pick only what the allowance allows, including the allowance of a shipment
-  with no method (decision 12).
+- *Use* can pick only what the allowance allows. A shipment with no method allows
+  nothing, so no *Use* rule picks for it (decision 12).
 - *Exclude* matches a source kind, a carrier, a service, or any combination of them. A
   carrier matches every offer it carries, mapped or not, so excluding OnTrac excludes
   every OnTrac service Amazon offers, including ones first offered later.
@@ -308,17 +311,25 @@ source sold it, including Shopify `auto` labels dated as USPS.
 - `UPS_PTP_SUREPOST_BPM` stays dropped. Bound Printed Matter is not authored, directly
   or as Ground Saver BPM (UPS `94`), and neither is Library Mail.
 
-**12. With no shipping method,** every eligible priced source is asked, unfiltered. The
-allowance is every direct service: automation buys direct rates as before, and never
-buys through Amazon Buy Shipping or blind. A *Use* rule on such a shipment picks within
-that. Most Amazon orders never reach this case, because an Amazon connection's default
-method catches service levels that have no alias.
+**12. With no shipping method, nothing is bought.** *Amended 2026-09-26*
+(`carrier-catalog-reset/16`). A shipment with no method can be packed, but it is not
+rated, no Offer is issued for it, and the purchase path refuses it, blind purchases
+included. The Ship page shows a method picker instead of rates, and Batch Ship skips it.
+The check is worked out from `shipping_method_id` (`Shipment::needsShippingMethod()`), not
+stored as a status. A *rule* with no method still applies to every method.
+
+As first accepted, every eligible priced source was asked, unfiltered, and the allowance
+was every direct service. That was a development convenience: nobody had decided what
+such a shipment may buy. A missing method is almost always an unmapped import reference,
+and the remedy is to map it or pick a method. Most Amazon orders never reach this case,
+because an Amazon connection's default method catches service levels that have no
+alias.
 
 ### Terminology
 
 | Term | Means |
 |---|---|
-| **Allowance** | What a shipping method lets automation buy: its services, the sources that may sell them, Shopify `auto`, and Amazon Buy Shipping *any service*. With no method, every direct service |
+| **Allowance** | What a shipping method lets automation buy: its services, the sources that may sell them, Shopify `auto`, and Amazon Buy Shipping *any service*. With no method, nothing (decision 12) |
 | **Direct sale** | Postage bought from the carrier's own integration: a carrier account for USPS, UPS and FedEx, a scoped Amazon connection for Amazon Shipping |
 | **Postage setting** | A connection's consent to sell channel postage: none, to a packer, or to automation as well. Covers Shopify and Amazon Buy Shipping, not Amazon Shipping |
 | **Source mapping** | One row naming a `CarrierService` for a source's own code. Inward for Amazon Buy Shipping, outward for Shopify |

@@ -148,6 +148,43 @@
                             </div>
                         </div>
                     </x-filament::section>
+                @elseif($this->needsShippingMethod())
+                    {{-- Nothing is rated or bought without a method
+                         (`carrier-catalog-reset/16`). --}}
+                    <x-filament::section>
+                        <x-slot name="heading">Shipping Method Required</x-slot>
+                        <div class="flex items-start gap-3">
+                            <x-filament::icon icon="heroicon-o-exclamation-triangle" class="w-6 h-6 text-warning-500 flex-shrink-0" />
+                            <div class="text-sm text-gray-700 dark:text-gray-300 space-y-3 flex-1">
+                                <p>
+                                    This shipment has no shipping method, so no rates can be shown and no label can be bought.
+                                    @if(filled($package->shipment->shipping_method_reference))
+                                        It was imported as <span class="font-mono">{{ $package->shipment->shipping_method_reference }}</span>, which is not mapped to a method.
+                                    @endif
+                                </p>
+                                @if($this->canAssignShippingMethod())
+                                    <form wire:submit="assignShippingMethod" class="flex flex-wrap items-start gap-2">
+                                        <div class="flex-1 min-w-48">
+                                            <x-filament::input.wrapper :valid="! $errors->has('shippingMethodId')">
+                                                <x-filament::input.select wire:model="shippingMethodId" aria-label="Shipping method">
+                                                    <option value="">Choose a shipping method…</option>
+                                                    @foreach($this->getShippingMethodOptions() as $id => $name)
+                                                        <option value="{{ $id }}">{{ $name }}</option>
+                                                    @endforeach
+                                                </x-filament::input.select>
+                                            </x-filament::input.wrapper>
+                                            @error('shippingMethodId')
+                                                <p class="mt-1 text-sm text-danger-600 dark:text-danger-400">{{ $message }}</p>
+                                            @enderror
+                                        </div>
+                                        <x-filament::button type="submit">Use this method</x-filament::button>
+                                    </form>
+                                @else
+                                    <p class="text-gray-500 dark:text-gray-400">Ask a manager to choose a shipping method for this shipment.</p>
+                                @endif
+                            </div>
+                        </div>
+                    </x-filament::section>
                 @else
                 <x-filament::section>
                     <x-slot name="heading">Select Shipping Rate</x-slot>

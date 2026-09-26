@@ -486,6 +486,9 @@
             @if($scanToAddMode)
                 <x-filament::badge color="warning" class="mr-2">Scan-to-Add</x-filament::badge>
             @endif
+            @if($shipment->needsShippingMethod())
+                <x-filament::badge color="danger" icon="heroicon-m-exclamation-triangle" class="mr-2">No shipping method</x-filament::badge>
+            @endif
             {{ $shipment->first_name }} {{ $shipment->last_name }} - {{ $shipment->city }}, {{ $shipment->state_or_province }}
         </x-slot>
 

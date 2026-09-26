@@ -187,7 +187,9 @@ class ManualShip extends Page implements HasForms
                                             ->options(fn (): array => $this->getShippingMethodOptions())
                                             ->searchable()
                                             ->native(false)
-                                            ->placeholder('— None —'),
+                                            // Nothing is bought without one (`carrier-catalog-reset/16`).
+                                            ->required()
+                                            ->rules(['exists:shipping_methods,id']),
                                     ])
                                     ->columns(2),
                             ]),

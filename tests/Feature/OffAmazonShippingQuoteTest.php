@@ -207,15 +207,15 @@ it('records an Amazon Shipping service nobody has authored, and drops it', funct
 });
 
 describe('a shipment with no shipping method', function (): void {
-    it('quotes the active authored Amazon Shipping services', function (): void {
+    it('asks Amazon Shipping nothing, active services or not', function (): void {
         $package = externalPackage($this->shopify);
         $package->shipment->update(['shipping_method_id' => null]);
         Saloon::fake([GetShippingRates::class => externalRatesResponse()]);
 
-        $rates = app(ShippingRateService::class)->getShippingRates($package->id);
-
-        expect($rates->pluck('serviceCode')->all())->toBe(['std-us-swa-mfn'])
-            ->and($rates->sole()->sourceKind())->toBe(PostageSourceKind::Direct);
+        // Nothing is bought for a shipment with no method (`carrier-catalog-reset/16`).
+        expect(app(ShippingRateService::class)->getShippingRates($package->id))->toBeEmpty()
+            ->and(ShippingOffer::count())->toBe(0);
+        Saloon::assertNothingSent();
     });
 
     it('keeps nothing for an inactive service', function (): void {

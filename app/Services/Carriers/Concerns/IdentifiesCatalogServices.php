@@ -19,8 +19,8 @@ use Illuminate\Support\Collection;
  *
  * The carrier row is found the way {@see ResolvesCarrierAccount} finds it, by
  * the adapter's declared name, until `carriers.adapter` replaces the name
- * (`05`). A code the catalog does not hold, such as a mail class quoted with
- * no shipping method, keeps the carrier and names no service. Where two rows
+ * (`05`). A code the catalog does not hold, such as a variant a carrier quotes
+ * unasked, keeps the carrier and names no service. Where two rows
  * share a code, the older one wins, which is the seeded one.
  */
 trait IdentifiesCatalogServices

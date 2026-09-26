@@ -116,6 +116,31 @@ it('spends the offer and ties it to the purchase', function (): void {
         ->and($offer->fresh()->isAwaitingPurchaseConfirmation())->toBeFalse();
 });
 
+it('refuses to buy against an offer once the shipment has no shipping method', function (): void {
+    $package = Package::factory()->create(['status' => PackageStatus::Unshipped]);
+    $offer = ShippingOffer::factory()->for($package)->create(['carrier' => 'MockCarrier', 'postage_source' => PostageSource::CarrierAccount]);
+
+    // Quoted while it had one; a stale page must not buy after it is removed
+    // (`carrier-catalog-reset/16`).
+    $package->shipment->update(['shipping_method_id' => null]);
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldNotReceive('createShipment');
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: rateForOffer($offer)),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Shipping Method Required')
+        ->and($result->leavePackageIntact)->toBeTrue()
+        ->and($offer->fresh()->consumed_at)->toBeNull()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});
+
 it('refuses to buy against an expired offer and never reaches the carrier', function (): void {
     $package = Package::factory()->create(['status' => PackageStatus::Unshipped]);
     $offer = ShippingOffer::factory()->expired()->for($package)->create(['carrier' => 'MockCarrier', 'postage_source' => PostageSource::CarrierAccount]);

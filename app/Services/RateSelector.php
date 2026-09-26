@@ -64,9 +64,9 @@ class RateSelector
      * this method with the refusals kept rather than dropped.
      *
      * @param  Collection<int, RateResponse>  $rates
-     * @param  ShippingMethod|null  $method  The shipment's shipping method, whose postage-source rows are the allowance
+     * @param  ShippingMethod  $method  The shipment's shipping method, whose postage-source rows are the allowance
      */
-    public function selectBest(Collection $rates, ?Carbon $deadline, ?ShippingMethod $method): ?RateResponse
+    public function selectBest(Collection $rates, ?Carbon $deadline, ShippingMethod $method): ?RateResponse
     {
         return $this->selectForAutomation($rates, $deadline, $method)->rate;
     }
@@ -109,13 +109,13 @@ class RateSelector
      * automation.
      *
      * @param  Collection<int, RateResponse>  $rates
-     * @param  ShippingMethod|null  $method  The shipment's shipping method, whose postage-source rows are the allowance
+     * @param  ShippingMethod  $method  The shipment's shipping method, whose postage-source rows are the allowance. A shipment with none is never rated (`carrier-catalog-reset/16`)
      * @param  DataSource|null  $channelSource  The package's channel connection, whose postage setting governs the Amazon Buy Shipping it sells for its own orders
      */
     public function selectForAutomation(
         Collection $rates,
         ?Carbon $deadline,
-        ?ShippingMethod $method,
+        ShippingMethod $method,
         ?OfferRequirements $requirements = null,
         ?DataSource $channelSource = null,
     ): UnattendedRateSelection {
@@ -152,7 +152,7 @@ class RateSelector
         return new UnattendedRateSelection(
             rate: $acceptable?->rate,
             notAllowed: $notAllowed,
-            shippingMethodName: $method?->name,
+            shippingMethodName: $method->name,
             // Not a deactivated rate: the Ship page will not sell it either.
             attendedAlternativeAvailable: $notAllowed->isNotEmpty()
                 || $contentRestricted->isNotEmpty()
@@ -204,9 +204,6 @@ class RateSelector
      * purchase is not a rate and never arrives here: the explicit-choice rule
      * governs it (`carrier-catalog-reset/09`).
      *
-     * A shipment with no method is allowed every direct service and nothing
-     * else, so automation never buys through Amazon Buy Shipping for it.
-     *
      * An inactive listed service does not count as listed. A rate naming one
      * never gets here: {@see InactiveCatalog} refused it first.
      *
@@ -216,14 +213,8 @@ class RateSelector
      * @param  Collection<int, RateResponse>  $rates
      * @return array{0: Collection<int, RateResponse>, 1: Collection<int, RateResponse>} allowed, then not
      */
-    private function partitionByAllowance(Collection $rates, ?ShippingMethod $method): array
+    private function partitionByAllowance(Collection $rates, ShippingMethod $method): array
     {
-        if ($method === null) {
-            [$allowed, $notAllowed] = $rates->partition(fn (RateResponse $rate): bool => $rate->sourceKind() === PostageSourceKind::Direct);
-
-            return [$allowed->values(), $notAllowed->values()];
-        }
-
         $method->loadMissing('postageSources');
         $listed = $method->carrierServices()
             ->active()

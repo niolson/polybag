@@ -11,6 +11,7 @@ use App\Models\Package;
 use App\Models\PackageLabel;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
+use App\Models\ShippingMethodAlias;
 use App\Models\User;
 use App\Services\ShipmentImport\ExportResult;
 use App\Services\ShipmentImport\PackageExportService;
@@ -193,6 +194,52 @@ it('resets demo data end to end', function (): void {
 
     // Dashboard stats were rebuilt
     expect(DB::table('daily_shipping_stats')->count())->toBeGreaterThan(0);
+});
+
+it('refuses before wiping anything when a demo shipment would have no shipping method', function (?string $reference, string $named): void {
+    $leftover = Package::factory()->shipped()->create();
+
+    insertImportShipment($this->dataSource, 'D00NEW0001', now('UTC')->subMinutes(30)->format('Y-m-d H:i:s'));
+    DB::connection(importConnectionFor($this->dataSource))->table('shipments')->update(['shipping_method' => $reference]);
+
+    // Nothing is bought for a shipment with no method (`carrier-catalog-reset/16`),
+    // so a reset must not leave one open.
+    $this->artisan('demo:reset', ['--days' => 30, '--open-hours' => 8])
+        ->expectsOutputToContain($named)
+        ->assertFailed();
+
+    expect(Package::whereKey($leftover->id)->exists())->toBeTrue()
+        ->and(Shipment::where('shipment_reference', 'D00NEW0001')->exists())->toBeFalse();
+})->with([
+    'an unmapped reference' => ['EXPRESS-99', 'EXPRESS-99'],
+    'no reference at all' => [null, '(none)'],
+]);
+
+it('checks each row\'s shipping method against the client its client column names', function (): void {
+    $acme = Client::factory()->create(['name' => 'Acme']);
+    Client::factory()->create(['name' => 'Bolt']);
+    $express = ShippingMethod::factory()->create();
+    ShippingMethodAlias::create(['client_id' => $acme->id, 'reference' => 'EXPRESS', 'shipping_method_id' => $express->id]);
+
+    $this->dataSource->update(['settings' => [...$this->dataSource->settings, 'client_column' => 'client']]);
+    $connection = importConnectionFor($this->dataSource);
+    Schema::connection($connection)->table('shipments', fn ($table) => $table->string('client')->nullable());
+
+    insertImportShipment($this->dataSource, 'D00ACME001', now('UTC')->subMinutes(30)->format('Y-m-d H:i:s'));
+    DB::connection($connection)->table('shipments')->update(['shipping_method' => 'EXPRESS', 'client' => ' acme ']);
+
+    // Acme's alias resolves Acme's row, though the source itself has no client.
+    $this->artisan('demo:reset', ['--days' => 30, '--open-hours' => 8])->assertSuccessful();
+
+    expect(Shipment::where('shipment_reference', 'D00ACME001')->sole()->shipping_method_id)->toBe($express->id);
+
+    // The same reference on Bolt's row resolves to nothing: the alias is Acme's.
+    insertImportShipment($this->dataSource, 'D00BOLT001', now('UTC')->subMinutes(20)->format('Y-m-d H:i:s'));
+    DB::connection($connection)->table('shipments')->where('id', 'D00BOLT001')->update(['shipping_method' => 'EXPRESS', 'client' => 'Bolt']);
+
+    $this->artisan('demo:reset', ['--days' => 30, '--open-hours' => 8])
+        ->expectsOutputToContain('EXPRESS (Bolt)')
+        ->assertFailed();
 });
 
 it('clears package export claims before package IDs are reused', function (): void {

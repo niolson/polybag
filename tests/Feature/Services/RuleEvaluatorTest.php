@@ -20,6 +20,7 @@ use App\Models\ShippingRule;
 use App\Models\SourceServiceMapping;
 use App\Services\Carriers\ShopifyAdapter;
 use App\Services\RuleEvaluator;
+use Database\Factories\ShipmentFactory;
 
 it('returns empty result when no rules exist', function (): void {
     $shipment = Shipment::factory()->withoutShippingMethod()->create();
@@ -97,7 +98,7 @@ it('evaluates rules in priority order', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'UPS']);
     $groundService = CarrierService::factory()->upsGround()->create(['carrier_id' => $carrier->id]);
     $nextDayService = CarrierService::factory()->upsNextDay()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->create();
 
     // Lower priority (evaluated first) — UseService
     ShippingRule::factory()->create([
@@ -122,7 +123,7 @@ it('evaluates rules in priority order', function (): void {
 it('skips disabled rules', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->create();
 
     ShippingRule::factory()->disabled()->create([
         'action' => ShippingRuleAction::UseService,
@@ -156,7 +157,7 @@ it('scopes rules to specific shipping method', function (): void {
 it('matches global rules with null shipping_method_id', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->create();
 
     ShippingRule::factory()->create([
         'shipping_method_id' => null,
@@ -174,7 +175,7 @@ it('collects exclude codes before UseService stops evaluation', function (): voi
     $carrier = Carrier::factory()->create(['name' => 'FedEx']);
     $excludeService = CarrierService::factory()->fedexGround()->create(['carrier_id' => $carrier->id]);
     $useService = CarrierService::factory()->fedexExpress()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->create();
 
     // Exclude first (lower priority)
     ShippingRule::factory()->excludeService()->create([
@@ -201,7 +202,7 @@ it('collects exclude codes before UseService stops evaluation', function (): voi
 it('matches rule with weight condition when package weight satisfies operator', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->create();
     $package = Package::factory()->create(['shipment_id' => $shipment->id, 'weight' => 20]);
 
     ShippingRule::factory()->create([
@@ -220,7 +221,7 @@ it('matches rule with weight condition when package weight satisfies operator', 
 it('skips rule with weight condition when weight does not match', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->create();
     $package = Package::factory()->create(['shipment_id' => $shipment->id, 'weight' => 10]);
 
     ShippingRule::factory()->create([
@@ -239,7 +240,7 @@ it('skips rule with weight condition when weight does not match', function (): v
 it('matches weight between condition', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->create();
     $package = Package::factory()->create(['shipment_id' => $shipment->id, 'weight' => 12]);
 
     ShippingRule::factory()->create([
@@ -258,7 +259,7 @@ it('matches weight between condition', function (): void {
 it('matches destination_zone condition for continental US', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create([
+    $shipment = ruleShipment()->create([
         'state_or_province' => 'NY',
         'country' => 'US',
     ]);
@@ -279,7 +280,7 @@ it('matches destination_zone condition for continental US', function (): void {
 it('skips destination_zone condition for non-continental shipment when rule requires continental', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create([
+    $shipment = ruleShipment()->create([
         'state_or_province' => 'HI',
         'country' => 'US',
     ]);
@@ -300,7 +301,7 @@ it('skips destination_zone condition for non-continental shipment when rule requ
 it('matches destination_zone condition for non-continental US (AK)', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create([
+    $shipment = ruleShipment()->create([
         'state_or_province' => 'AK',
         'country' => 'US',
     ]);
@@ -321,7 +322,7 @@ it('matches destination_zone condition for non-continental US (AK)', function ()
 it('matches destination_zone condition for international', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->international()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->international()->create();
 
     ShippingRule::factory()->create([
         'action' => ShippingRuleAction::UseService,
@@ -339,7 +340,7 @@ it('matches destination_zone condition for international', function (): void {
 it('matches destination_state in condition', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create([
+    $shipment = ruleShipment()->create([
         'state_or_province' => 'CA',
         'country' => 'US',
     ]);
@@ -360,7 +361,7 @@ it('matches destination_state in condition', function (): void {
 it('skips destination_state not_in condition when state is excluded', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create([
+    $shipment = ruleShipment()->create([
         'state_or_province' => 'CA',
         'country' => 'US',
     ]);
@@ -381,7 +382,7 @@ it('skips destination_state not_in condition when state is excluded', function (
 it('matches order_value condition', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create(['value' => 150.00]);
+    $shipment = ruleShipment()->create(['value' => 150.00]);
 
     ShippingRule::factory()->create([
         'action' => ShippingRuleAction::UseService,
@@ -399,7 +400,7 @@ it('matches order_value condition', function (): void {
 it('matches item_count condition', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->create();
     ShipmentItem::factory()->count(3)->create([
         'shipment_id' => $shipment->id,
         'quantity' => 2,
@@ -423,7 +424,7 @@ it('matches channel condition', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
     $channel = Channel::factory()->create();
-    $shipment = Shipment::factory()->withoutShippingMethod()->create(['channel_id' => $channel->id]);
+    $shipment = ruleShipment()->create(['channel_id' => $channel->id]);
 
     ShippingRule::factory()->create([
         'action' => ShippingRuleAction::UseService,
@@ -442,7 +443,7 @@ it('skips channel is_not condition when channel matches', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
     $channel = Channel::factory()->create();
-    $shipment = Shipment::factory()->withoutShippingMethod()->create(['channel_id' => $channel->id]);
+    $shipment = ruleShipment()->create(['channel_id' => $channel->id]);
 
     ShippingRule::factory()->create([
         'action' => ShippingRuleAction::UseService,
@@ -460,7 +461,7 @@ it('skips channel is_not condition when channel matches', function (): void {
 it('matches residential condition', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->residential()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->residential()->create();
 
     ShippingRule::factory()->create([
         'action' => ShippingRuleAction::UseService,
@@ -478,7 +479,7 @@ it('matches residential condition', function (): void {
 it('uses the conservative residential fallback when classification is unknown', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create([
+    $shipment = ruleShipment()->create([
         'residential' => null,
         'validated_residential' => null,
     ]);
@@ -499,7 +500,7 @@ it('uses the conservative residential fallback when classification is unknown', 
 it('skips residential condition when shipment is commercial', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->commercial()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->commercial()->create();
 
     ShippingRule::factory()->create([
         'action' => ShippingRuleAction::UseService,
@@ -517,7 +518,7 @@ it('skips residential condition when shipment is commercial', function (): void 
 it('requires all conditions to match (AND logic)', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create([
+    $shipment = ruleShipment()->create([
         'state_or_province' => 'NY',
         'country' => 'US',
         'value' => 200.00,
@@ -542,7 +543,7 @@ it('requires all conditions to match (AND logic)', function (): void {
 it('skips rule when one of multiple conditions fails', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create([
+    $shipment = ruleShipment()->create([
         'state_or_province' => 'HI', // Non-continental
         'country' => 'US',
         'value' => 200.00,
@@ -567,7 +568,7 @@ it('skips rule when one of multiple conditions fails', function (): void {
 it('matches rule with null conditions (backward compatible)', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->create();
 
     ShippingRule::factory()->create([
         'action' => ShippingRuleAction::UseService,
@@ -583,7 +584,7 @@ it('matches rule with null conditions (backward compatible)', function (): void 
 it('matches rule with empty conditions array (backward compatible)', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->create();
 
     ShippingRule::factory()->create([
         'action' => ShippingRuleAction::UseService,
@@ -599,7 +600,7 @@ it('matches rule with empty conditions array (backward compatible)', function ()
 it('uses calculated weight from items when no package provided', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->create();
 
     $product = Product::factory()->create(['weight' => 5.0]);
     ShipmentItem::factory()->create([
@@ -625,7 +626,7 @@ it('uses calculated weight from items when no package provided', function (): vo
 it('uses validated address fields when available for destination conditions', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create([
+    $shipment = ruleShipment()->create([
         'state_or_province' => 'XX', // Invalid original
         'country' => 'US',
         'validated_state_or_province' => 'NY', // Corrected by validation
@@ -647,7 +648,7 @@ it('uses validated address fields when available for destination conditions', fu
 it('passes unknown condition types (forward compatibility)', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->create();
 
     ShippingRule::factory()->create([
         'action' => ShippingRuleAction::UseService,
@@ -669,7 +670,7 @@ it('does not apply a client-specific rule to a shipment belonging to a different
     $clientA = Client::factory()->create();
     $clientB = Client::factory()->create();
 
-    $shipment = Shipment::factory()->withoutShippingMethod()->create(['client_id' => $clientB->id]);
+    $shipment = ruleShipment()->create(['client_id' => $clientB->id]);
 
     ShippingRule::factory()->create([
         'client_id' => $clientA->id,
@@ -687,7 +688,7 @@ it('applies a global rule (null client_id) to shipments from any client', functi
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
 
     $client = Client::factory()->create();
-    $shipment = Shipment::factory()->withoutShippingMethod()->create(['client_id' => $client->id]);
+    $shipment = ruleShipment()->create(['client_id' => $client->id]);
 
     ShippingRule::factory()->create([
         'client_id' => null,
@@ -705,7 +706,7 @@ it('applies a client-specific rule only to shipments for that client', function 
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
 
     $client = Client::factory()->create();
-    $shipment = Shipment::factory()->withoutShippingMethod()->create(['client_id' => $client->id]);
+    $shipment = ruleShipment()->create(['client_id' => $client->id]);
 
     ShippingRule::factory()->create([
         'client_id' => $client->id,
@@ -721,7 +722,7 @@ it('applies a client-specific rule only to shipments for that client', function 
 it('matches an Amazon program condition only on an order enrolled in that program', function (string $program, ?array $metadata, bool $matches): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create(['metadata' => $metadata]);
+    $shipment = ruleShipment()->create(['metadata' => $metadata]);
 
     ShippingRule::factory()->create([
         'action' => ShippingRuleAction::UseService,
@@ -747,6 +748,18 @@ it('matches an Amazon program condition only on an order enrolled in that progra
 ]);
 
 // --- A rule names a source and a service (`carrier-catalog-reset/07`) ---
+
+/**
+ * A shipment whose method lists every catalog service that exists when it is
+ * created, so a global *Use* rule naming one of them may pick it. A shipment
+ * with no method allows nothing (`carrier-catalog-reset/16`).
+ */
+function ruleShipment(): ShipmentFactory
+{
+    return Shipment::factory()->state(fn (): array => [
+        'shipping_method_id' => ruleMethodListing(CarrierService::all()->all())->id,
+    ]);
+}
 
 /**
  * A rate quoted on a carrier account for a catalog service.
@@ -996,18 +1009,21 @@ it('skips a global Use rule naming a service the shipment\'s method does not lis
     expect($result->preSelectedRate->carrierServiceId)->toBe($ground->id);
 });
 
-it('allows a shipment with no method every direct service and nothing else', function (): void {
+it('picks nothing for a shipment with no method, and keeps its exclusions', function (): void {
     $ground = ruleUpsGround();
+    $excluded = CarrierService::factory()->fedexGround()->create();
     $shipment = Shipment::factory()->withoutShippingMethod()->create();
 
-    ShippingRule::factory()->source(ShippingRuleSource::Amazon)->anyService()->create(['priority' => 0]);
-    ShippingRule::factory()->source(ShippingRuleSource::Shopify)->create(['carrier_service_id' => ruleShopifyRow()->id, 'priority' => 1]);
-    ShippingRule::factory()->create(['carrier_service_id' => $ground->id, 'priority' => 2]);
+    ShippingRule::factory()->excludeService()->create(['carrier_service_id' => $excluded->id, 'priority' => 0]);
+    ShippingRule::factory()->source(ShippingRuleSource::Amazon)->anyService()->create(['priority' => 1]);
+    ShippingRule::factory()->source(ShippingRuleSource::Shopify)->create(['carrier_service_id' => ruleShopifyRow()->id, 'priority' => 2]);
+    ShippingRule::factory()->create(['carrier_service_id' => $ground->id, 'priority' => 3]);
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue()
-        ->and($result->preSelectedRate->carrierServiceId)->toBe($ground->id);
+    expect($result->hasPreSelectedRate())->toBeFalse()
+        ->and($result->hasPreSelectedBlindPurchase())->toBeFalse()
+        ->and($result->excludes(ruleDirectRate($excluded)))->toBeTrue();
 });
 
 it('never lets a direct Use rule reach a service a method only asks Amazon for', function (): void {
@@ -1024,7 +1040,7 @@ it('never lets a direct Use rule reach a service a method only asks Amazon for',
 
 it('excludes a service from every source for Exclude, any source', function (): void {
     $ground = ruleUpsGround();
-    $shipment = Shipment::factory()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->create();
 
     ShippingRule::factory()->excludeService()->create(['carrier_service_id' => $ground->id]);
 
@@ -1037,7 +1053,7 @@ it('excludes a service from every source for Exclude, any source', function (): 
 
 it('excludes only the named source\'s offers of a service', function (): void {
     $ground = ruleUpsGround();
-    $shipment = Shipment::factory()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->create();
 
     ShippingRule::factory()->excludeService()->source(ShippingRuleSource::Amazon)->create(['carrier_service_id' => $ground->id]);
 
@@ -1050,7 +1066,7 @@ it('excludes only the named source\'s offers of a service', function (): void {
 it('excludes every offer a carrier carries, mapped or not, for Exclude, Amazon Buy Shipping, OnTrac', function (): void {
     $onTrac = Carrier::factory()->create(['name' => 'OnTrac']);
     $onTracGround = CarrierService::factory()->create(['carrier_id' => $onTrac->id, 'service_code' => 'ONTRAC_GROUND']);
-    $shipment = Shipment::factory()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->create();
 
     ShippingRule::factory()->excludeCarrier($onTrac, ShippingRuleSource::Amazon)->create();
 
@@ -1065,7 +1081,7 @@ it('excludes every offer a carrier carries, mapped or not, for Exclude, Amazon B
 it('excludes Shopify blind purchases by source, by carrier or by the service a rule names', function (): void {
     $row = ruleShopifyRow();
     $other = ruleShopifyRow('ups_shipping:03');
-    $shipment = Shipment::factory()->withoutShippingMethod()->create();
+    $shipment = ruleShipment()->create();
     $offer = fn (CarrierService $service): BlindPurchaseOffer => new BlindPurchaseOffer(
         source: ShopifyAdapter::CARRIER_NAME,
         sourceLabel: ShopifyAdapter::SOURCE_LABEL,

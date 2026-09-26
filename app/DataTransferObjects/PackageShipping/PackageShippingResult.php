@@ -56,6 +56,24 @@ readonly class PackageShippingResult
         );
     }
 
+    /**
+     * The shipment has no shipping method, so nothing may be bought for it
+     * (`carrier-catalog-reset/16`).
+     *
+     * Leaves the package intact: it is packed, and the remedy is a method,
+     * chosen on the Ship page. Unattended callers send the packer there.
+     */
+    public static function shippingMethodRequired(): self
+    {
+        return new self(
+            success: false,
+            title: 'Shipping Method Required',
+            message: 'This shipment has no shipping method. Choose one before buying a label.',
+            leavePackageIntact: true,
+            requiresAttendedSelection: true,
+        );
+    }
+
     public static function customsWeightOverrideRequired(): self
     {
         return new self(

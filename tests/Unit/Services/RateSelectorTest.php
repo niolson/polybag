@@ -4,6 +4,7 @@ use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
 use App\DataTransferObjects\Shipping\ClassifiedRate;
 use App\DataTransferObjects\Shipping\OfferRequirements;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\DataTransferObjects\Shipping\UnattendedRateSelection;
 use App\Enums\PostageSetting;
 use App\Enums\PostageSourceKind;
 use App\Enums\UnlistedServices;
@@ -16,6 +17,7 @@ use App\Models\ShippingMethodPostageSource;
 use App\Services\RateSelector;
 use App\Services\SettingsService;
 use Carbon\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 function makeRate(float $price, ?string $deliveryDate = null, string $carrier = 'USPS', string $serviceCode = 'GA'): RateResponse
@@ -27,6 +29,46 @@ function makeRate(float $price, ?string $deliveryDate = null, string $carrier = 
         price: $price,
         deliveryDate: $deliveryDate,
     );
+}
+
+/**
+ * The rates as quotes for one service a method lists, with that method, so a
+ * test about ranking or requirements has an allowance every rate is inside.
+ * Nothing is selected for a shipment with no method (`carrier-catalog-reset/16`).
+ *
+ * @param  Collection<int, RateResponse>  $rates
+ * @return array{0: Collection<int, RateResponse>, 1: ShippingMethod}
+ */
+function listedOnAMethod(Collection $rates): array
+{
+    $service = CarrierService::factory()->uspsGroundAdvantage()->create();
+    $method = ShippingMethod::factory()->create();
+    $method->carrierServices()->attach($service);
+
+    return [
+        $rates->map(fn (RateResponse $rate): RateResponse => $rate->withCatalogIdentity($service->carrier_id, $service->id)),
+        $method->fresh(),
+    ];
+}
+
+/**
+ * @param  Collection<int, RateResponse>  $rates
+ */
+function selectBestListed(Collection $rates, ?Carbon $deadline): ?RateResponse
+{
+    [$rates, $method] = listedOnAMethod($rates);
+
+    return app(RateSelector::class)->selectBest($rates, $deadline, $method);
+}
+
+/**
+ * @param  Collection<int, RateResponse>  $rates
+ */
+function selectListed(Collection $rates, ?Carbon $deadline, OfferRequirements $requirements): UnattendedRateSelection
+{
+    [$rates, $method] = listedOnAMethod($rates);
+
+    return app(RateSelector::class)->selectForAutomation($rates, $deadline, $method, $requirements);
 }
 
 it('classifies all rates as on-time when there is no deadline', function (): void {
@@ -103,7 +145,7 @@ it('selectBest returns cheapest on-time rate when deadline exists', function ():
         makeRate(3.00, Carbon::parse('+10 days')->toDateString()),
     ]);
 
-    $best = app(RateSelector::class)->selectBest($rates, $deadline, method: null);
+    $best = selectBestListed($rates, $deadline);
 
     expect($best->price)->toBe(5.00);
 });
@@ -115,7 +157,7 @@ it('selectBest falls back to cheapest overall when all rates are late', function
         makeRate(7.00, Carbon::today()->toDateString()),
     ]);
 
-    $best = app(RateSelector::class)->selectBest($rates, $deadline, method: null);
+    $best = selectBestListed($rates, $deadline);
 
     expect($best->price)->toBe(7.00);
 });
@@ -123,7 +165,7 @@ it('selectBest falls back to cheapest overall when all rates are late', function
 it('selectBest returns cheapest when no deadline', function (): void {
     $rates = collect([makeRate(10.00), makeRate(5.00), makeRate(8.00)]);
 
-    $best = app(RateSelector::class)->selectBest($rates, null, method: null);
+    $best = selectBestListed($rates, null);
 
     expect($best->price)->toBe(5.00);
 });
@@ -145,8 +187,8 @@ it('selectBest never buys a rate whose price nobody has seen', function (): void
     // Attended, an unpriced rate sorts last and a packer may still take it.
     // Unattended there is nobody to take responsibility, so "it was the only
     // thing offered" is a reason to buy nothing at all — ADR-0003 decision 5.
-    expect(app(RateSelector::class)->selectBest(collect([makeUnpricedRate()]), null, method: null))->toBeNull()
-        ->and(app(RateSelector::class)->selectBest(collect([makeUnpricedRate(), makeRate(9.00)]), null, method: null)->price)->toBe(9.00);
+    expect(selectBestListed(collect([makeUnpricedRate()]), null))->toBeNull()
+        ->and(selectBestListed(collect([makeUnpricedRate(), makeRate(9.00)]), null)->price)->toBe(9.00);
 });
 
 function makeUnpricedRate(): RateResponse
@@ -396,20 +438,6 @@ it('refuses a direct rate when the method has no direct row', function (): void 
         ->and($selection->notAllowed)->toHaveCount(1);
 });
 
-it('buys any direct rate and never Amazon Buy Shipping for a shipment with no method', function (): void {
-    $ground = CarrierService::factory()->uspsGroundAdvantage()->create();
-
-    $selection = app(RateSelector::class)->selectForAutomation(
-        collect([makeDiscoveredRate(3.00, carrierServiceId: $ground->id), makeRate(9.00)]),
-        null,
-        null,
-    );
-
-    expect($selection->rate->price)->toBe(9.00)
-        ->and($selection->notAllowed)->toHaveCount(1)
-        ->and($selection->shippingMethodName)->toBeNull();
-});
-
 it('buys the same thing in sandbox and in production', function (bool $sandbox): void {
     Setting::updateOrCreate(['key' => 'sandbox_mode'], ['value' => $sandbox ? '1' : '0', 'type' => 'boolean', 'group' => 'testing']);
     app(SettingsService::class)->clearCache();
@@ -491,16 +519,6 @@ it('never holds Amazon Shipping sold to an order from another channel', function
         ->and($selection->heldByPostageSettingAnything())->toBeFalse();
 });
 
-it('asks the database nothing when there is no method', function (): void {
-    DB::enableQueryLog();
-
-    app(RateSelector::class)->selectBest(collect([makeRate(9.00), makeDiscoveredRate(5.00)]), null, null);
-
-    expect(DB::getQueryLog())->toBeEmpty();
-
-    DB::disableQueryLog();
-});
-
 it('reads the method\'s rows once, not once per rate', function (): void {
     $ground = CarrierService::factory()->uspsGroundAdvantage()->create();
     $method = methodAllowing([$ground], UnlistedServices::None);
@@ -552,10 +570,9 @@ function rateWithBenefits(float $price, ?string $deliveryDate, bool $otdrProtect
 it('falls back to the cheapest late rate when the method requires nothing', function (): void {
     $deadline = Carbon::tomorrow();
 
-    $selection = app(RateSelector::class)->selectForAutomation(
+    $selection = selectListed(
         collect([makeRate(9.00, Carbon::parse('+5 days')->toDateString()), makeRate(7.00, Carbon::parse('+6 days')->toDateString())]),
         $deadline,
-        null,
         new OfferRequirements,
     );
 
@@ -564,10 +581,9 @@ it('falls back to the cheapest late rate when the method requires nothing', func
 });
 
 it('refuses every late rate when the method excludes late rates', function (): void {
-    $selection = app(RateSelector::class)->selectForAutomation(
+    $selection = selectListed(
         collect([makeRate(9.00, Carbon::parse('+5 days')->toDateString()), makeRate(7.00, null)]),
         Carbon::tomorrow(),
-        null,
         new OfferRequirements(onTime: true),
     );
 
@@ -578,13 +594,12 @@ it('refuses every late rate when the method excludes late rates', function (): v
 });
 
 it('buys the on-time rate over a cheaper late one under every requirement the rate meets', function (bool $onTime, bool $otdrProtection): void {
-    $selection = app(RateSelector::class)->selectForAutomation(
+    $selection = selectListed(
         collect([
             rateWithBenefits(4.00, Carbon::parse('+5 days')->toDateString(), otdrProtected: true),
             rateWithBenefits(8.00, Carbon::today()->toDateString(), otdrProtected: true),
         ]),
         Carbon::tomorrow(),
-        null,
         new OfferRequirements(onTime: $onTime, otdrProtection: $otdrProtection),
     );
 
@@ -597,10 +612,9 @@ it('buys the on-time rate over a cheaper late one under every requirement the ra
 ]);
 
 it('buys an on-time rate that carries LATE_DELIVERY_RISK when only on-time is required', function (): void {
-    $selection = app(RateSelector::class)->selectForAutomation(
+    $selection = selectListed(
         collect([rateWithBenefits(6.00, Carbon::today()->toDateString(), otdrProtected: false, reasonCodes: ['LATE_DELIVERY_RISK'])]),
         Carbon::tomorrow(),
-        null,
         new OfferRequirements(onTime: true),
     );
 
@@ -608,13 +622,12 @@ it('buys an on-time rate that carries LATE_DELIVERY_RISK when only on-time is re
 });
 
 it('buys a protected late rate when only protection is required', function (): void {
-    $selection = app(RateSelector::class)->selectForAutomation(
+    $selection = selectListed(
         collect([
             rateWithBenefits(5.00, Carbon::today()->toDateString(), otdrProtected: false, reasonCodes: ['NON_SSA_ORDER']),
             rateWithBenefits(7.00, Carbon::parse('+5 days')->toDateString(), otdrProtected: true),
         ]),
         Carbon::tomorrow(),
-        null,
         new OfferRequirements(otdrProtection: true),
     );
 
@@ -622,13 +635,12 @@ it('buys a protected late rate when only protection is required', function (): v
 });
 
 it('refuses an unprotected rate, direct carriers included, when protection is required', function (): void {
-    $selection = app(RateSelector::class)->selectForAutomation(
+    $selection = selectListed(
         collect([
             makeRate(3.00, Carbon::today()->toDateString()),
             rateWithBenefits(5.00, Carbon::today()->toDateString(), otdrProtected: false, reasonCodes: ['NON_SSA_ORDER']),
         ]),
         Carbon::tomorrow(),
-        null,
         new OfferRequirements(otdrProtection: true),
     );
 
@@ -638,14 +650,13 @@ it('refuses an unprotected rate, direct carriers included, when protection is re
 });
 
 it('buys only a rate that is both on time and protected when both are required', function (): void {
-    $selection = app(RateSelector::class)->selectForAutomation(
+    $selection = selectListed(
         collect([
             rateWithBenefits(4.00, Carbon::parse('+5 days')->toDateString(), otdrProtected: true),
             rateWithBenefits(5.00, Carbon::today()->toDateString(), otdrProtected: false, reasonCodes: ['NON_AHT_ORDER']),
             rateWithBenefits(9.00, Carbon::today()->toDateString(), otdrProtected: true),
         ]),
         Carbon::tomorrow(),
-        null,
         new OfferRequirements(onTime: true, otdrProtection: true),
     );
 
@@ -653,9 +664,8 @@ it('buys only a rate that is both on time and protected when both are required',
 });
 
 it('refuses every rate for an order that must have a deadline and has none', function (): void {
-    $selection = app(RateSelector::class)->selectForAutomation(
+    $selection = selectListed(
         collect([makeRate(5.00, Carbon::today()->toDateString()), makeRate(3.00, null)]),
-        null,
         null,
         new OfferRequirements(onTime: true, deadlineRequired: true),
     );
@@ -667,9 +677,8 @@ it('refuses every rate for an order that must have a deadline and has none', fun
 });
 
 it('refuses nothing as late when there is no deadline and the order need not have one', function (): void {
-    $selection = app(RateSelector::class)->selectForAutomation(
+    $selection = selectListed(
         collect([makeRate(5.00, Carbon::today()->toDateString()), makeRate(3.00, null)]),
-        null,
         null,
         new OfferRequirements(onTime: true),
     );

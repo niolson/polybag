@@ -58,6 +58,33 @@ it('creates a shipment and redirects to ship page', function (): void {
     expect(Package::where('shipment_id', $shipment->id)->exists())->toBeTrue();
 });
 
+it('cannot create a shipment with no shipping method', function (): void {
+    Channel::factory()->create(['name' => 'Manual']);
+    $box = BoxSize::factory()->create();
+
+    Livewire::test(ManualShip::class)
+        ->fillForm([
+            'shipment_reference' => 'MAN-NOMETHOD',
+            'first_name' => 'Taylor',
+            'last_name' => 'Jones',
+            'address1' => '123 Main St',
+            'city' => 'Seattle',
+            'country' => 'US',
+            'state_or_province' => 'WA',
+            'postal_code' => '98101',
+            'shipping_method_id' => null,
+            'box_size_id' => $box->id,
+            'weight' => 2.5,
+            'height' => 10,
+            'width' => 8,
+            'length' => 6,
+        ])
+        ->call('ship')
+        ->assertHasFormErrors(['shipping_method_id' => 'required']);
+
+    expect(Shipment::count())->toBe(0);
+});
+
 it('uses the account auto-ship setting and redirects attended-only options to the ship page', function (): void {
     auth()->user()->update(['auto_ship_enabled' => true]);
 
@@ -84,6 +111,7 @@ it('uses the account auto-ship setting and redirects attended-only options to th
             'country' => 'US',
             'state_or_province' => 'WA',
             'postal_code' => '98101',
+            'shipping_method_id' => ShippingMethod::factory()->create()->id,
             'box_size_id' => $box->id,
             'weight' => 2.5,
             'height' => 10,
@@ -115,6 +143,7 @@ it('rejects shipping when no name or company is provided', function (): void {
             'country' => 'US',
             'state_or_province' => 'WA',
             'postal_code' => '98101',
+            'shipping_method_id' => ShippingMethod::factory()->create()->id,
             'box_size_id' => $box->id,
             'weight' => 2.5,
             'height' => 10,
@@ -144,6 +173,7 @@ it('redirects to pack page without overriding the account auto-ship policy when 
             'country' => 'US',
             'state_or_province' => 'OR',
             'postal_code' => '97201',
+            'shipping_method_id' => ShippingMethod::factory()->create()->id,
             'box_size_id' => $box->id,
             'weight' => 1.5,
             'height' => 8,
