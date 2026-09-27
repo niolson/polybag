@@ -52,6 +52,42 @@ fi
 
 npm ci --no-audit --no-fund
 
+# Pest's browser tests run headless through the Playwright pinned in
+# package-lock.json, which needs its own Chromium headless shell build. The
+# image ships an older one, and the web sandbox blocks Playwright's CDN, so
+# fall back to the same Chrome for Testing zip from Google's bucket.
+# Browser tests are optional here: a failed download warns instead of
+# stopping the rest of the setup.
+install_playwright_shell() {
+  local browsers_dir revision version shell_dir zip
+  browsers_dir="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
+  read -r revision version < <(node -e '
+    const b = JSON.parse(require("fs").readFileSync("node_modules/playwright-core/browsers.json"))
+      .browsers.find(b => b.name === "chromium-headless-shell");
+    console.log(b.revision, b.browserVersion);')
+  [ -n "$revision" ] && [ -n "$version" ] || return 1
+  shell_dir="${browsers_dir}/chromium_headless_shell-${revision}"
+  [ -f "${shell_dir}/INSTALLATION_COMPLETE" ] && return 0
+
+  npx playwright install --only-shell chromium && return 0
+
+  # Called through `||`, so set -e is off in here: every step checks itself.
+  zip=$(mktemp --suffix=.zip) || return 1
+  rm -rf "${shell_dir}.tmp"
+  curl -fsSL -o "$zip" \
+    "https://storage.googleapis.com/chrome-for-testing-public/${version}/linux64/chrome-headless-shell-linux64.zip" \
+    && mkdir -p "${shell_dir}.tmp" \
+    && unzip -q "$zip" -d "${shell_dir}.tmp" \
+    && touch "${shell_dir}.tmp/INSTALLATION_COMPLETE" \
+    && rm -rf "$shell_dir" \
+    && mv "${shell_dir}.tmp" "$shell_dir"
+  local status=$?
+  rm -rf "$zip" "${shell_dir}.tmp"
+  return $status
+}
+
+install_playwright_shell || echo 'warning: Chromium headless shell not installed; tests/Browser will not run' >&2
+
 if [ ! -f .env ]; then
   cp .env.local.example .env
   php artisan key:generate --no-interaction
