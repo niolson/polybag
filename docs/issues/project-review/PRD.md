@@ -23,7 +23,7 @@ a directory:
 | B | Label lifecycle — reprint, void, tracking and manifest dispatch, Shopify fulfillment sync | Reviewed 2026-09-28; issues `06`–`10` |
 | C | Postage sources and carrier adapters | Reviewed 2026-09-28; issues `11`–`15` |
 | D | Client and location scoping, authorization | Partly reviewed 2026-09-28 (see below); issue `16` |
-| E | Automation — rules, allowance, batch selection | Not started |
+| E | Automation — rules, allowance, batch selection | Reviewed 2026-09-28; issues `17`–`20` |
 
 Each area is checked against the invariants its ADRs and `CONTEXT.md` state, not
 against a general checklist. Area A's:
@@ -241,3 +241,62 @@ client-scoped aliases and default-client assignment through `HasDefaultClient` a
 `ClientContext`, per-client export destination overrides, and a table-action sweep: this
 pass checked resources and pages, not every action inside a table (`08` was one).
 
+## Area E: invariants
+
+From ADR-0006 decisions 5–8 and 11–12, `amazon-buy-shipping/17` and `CONTEXT.md`:
+
+1. Automation buys only within the allowance: a source the method has a row for, a
+   service the method lists or the row's *any service*, never a deactivated service or
+   carrier, and nothing for a shipment with no method.
+2. The connection's postage setting only narrows; *packer only* keeps channel postage
+   off every unattended path.
+3. A *Use* rule picks only within the allowance and grants nothing. An *Exclude* rule
+   applies to the Ship page and to automation alike.
+4. A blind purchase never enters a price comparison. Automation buys one only when a rule
+   names it or it is the method's sole eligible choice.
+5. A content-restricted offer (Media Mail for a Package that doesn't qualify,
+   `USPS_PTP_BPM`) is never bought unattended.
+6. The method's on-time and OTDR requirements hold against everything automation buys,
+   a rule's choice included.
+7. Batch ship selects only shipments it can finish, and buys one label for what is left
+   to ship.
+
+## Area E: what held
+
+Invariants 1, 2, 3 (for *Use*) and 5 hold. `RateSelector::selectForAutomation()` is the
+single gate every unattended rate passes, a rule's pre-selected rate included. It holds
+back, in order: content-restricted rates, Buy Shipping held by a *packer only*
+connection, rates naming an inactive service or carrier (`InactiveCatalog`), and anything
+outside the method's rows and active listed services. Unpriced rates never win.
+`MethodSourceAllowance::permits()` skips a *Use* rule naming a source or service the
+shipment's method does not allow, and nothing is picked for a shipment with no method.
+A rule-selected blind purchase is refused when the connection's setting stops short of
+automation, and falls through to rate shopping. The sole-choice inference counts
+configured sources, not the ones that answered, so an outage doesn't make Shopify the
+fallback. A pre-selected Media Mail rate still goes through `ContentsFilter`. Rules match
+only their own client or none. Batch ship refuses shipments with no method,
+unpicked shipments where picking is required, FBA orders and shipments with an unshipped
+Package. `GenerateLabelJob` keeps a Package with an unresolved Offer.
+
+Invariant 3 fails for *Exclude* against a rule's pre-selected direct rate (`17`).
+Invariant 6 fails twice: a UPS or FedEx *Use* rule is judged on a placeholder with no
+delivery date and refused as late on any order with a due-by date (`18`), and a blind
+purchase skips the requirement entirely (`20`, which needs a decision). Invariant 7 fails
+for a partly shipped order (`19`).
+
+## Area E: candidates dropped
+
+- *The Ship page can buy an excluded offer by naming it.* `getShippingRates()` issues an
+  Offer for every quoted rate before `prepareRates()` drops the excluded ones, and
+  `ship()` doesn't re-check exclusions, whereas `resolveBlindOffer()` does for blind
+  offers. But an excluded offer's opaque ID never reaches the browser, so nobody can name it.
+- *Rules with equal priority are evaluated in no defined order.* `scopeActive()` sorts on
+  `priority` only, and every new rule is created at `0` until someone drags the table,
+  so ties are the normal case. In practice MySQL returns ties in id order, the same
+  order the table shows, so what an Admin sees is what runs. Adding `orderBy('id')`
+  to `scopeActive()` and the table's sort would guarantee it. Not filed.
+- *Exclude rules ranked after the matching Use rule are ignored.* By design: priority is
+  first-match, and `RuleEvaluatorTest` pins it.
+- *Batch validation and draft creation race a packer.* Both run in one request. A packer
+  who opens the Shipment afterwards resumes the batch's draft rather than creating a
+  second, and `buyPostage()` re-reads the Package status before buying.
