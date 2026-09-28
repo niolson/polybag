@@ -22,7 +22,7 @@ a directory:
 | A | Label purchase — Ship page, `ShippingRateService` offer issuance, `OfferStore`, `EloquentPackageShippingWorkflow`, `BatchLabelService` / `GenerateLabelJob` | Reviewed 2026-09-28; issues `01`–`05` |
 | B | Label lifecycle — reprint, void, tracking and manifest dispatch, Shopify fulfillment sync | Reviewed 2026-09-28; issues `06`–`10` |
 | C | Postage sources and carrier adapters | Reviewed 2026-09-28; issues `11`–`15` |
-| D | Client and location scoping, authorization | Not started |
+| D | Client and location scoping, authorization | Partly reviewed 2026-09-28 (see below); issue `12` |
 | E | Automation — rules, allowance, batch selection | Not started |
 
 Each area is checked against the invariants its ADRs and `CONTEXT.md` state, not
@@ -206,3 +206,38 @@ past tense.
   two agree in practice.
 - *`CarrierNormalizer::resolve()` loads every carrier per call.* Correct, and small; the
   Amazon adapter already memoizes it per quote.
+
+## Area D: invariants
+
+Users have a role and a home location but no client, so every user sees every client by
+design. Client scoping here is about correctness, not visibility. From `AGENTS.md` and
+ADR-0006 decisions 5–6:
+
+1. Each resource, page and action is gated by role. Operational credentials (carrier
+   accounts, connections, settings) and the source policy and service mappings are
+   Admin-only.
+2. A carrier account resolves from the Shipment's client and the Package's location.
+3. Products, aliases, shipping rules and pick batches match only within their own client.
+4. End of Day and pick batches respect location when multi-location is on.
+
+## Area D: what held
+
+Every custom page carries a role gate matching `AuthorizationTest`. Connections, clients,
+label batches and pick batches gate their resources with `canAccess()`, and the source
+policy has its own Admin-only policy. The OAuth callback refuses anyone below Admin.
+Scan-to-add looks up a product within the Shipment's client, and
+`EloquentPackageDraftWorkflow` re-checks every packed item from the browser: the shipment
+item must belong to the Shipment, the product must match it, and a scan-to-add product
+must belong to the Shipment's client. `RuleEvaluator` applies a rule only to its own
+client or to rules with no client.
+
+Invariant 1 fails for carrier accounts (`12`). Area B's `08` (voids) is the same kind of
+gap on an action rather than a resource.
+
+## Area D: not yet covered
+
+Location scoping (invariant 4: End of Day, manifests and pick batches under multi-location),
+client-scoped aliases and default-client assignment through `HasDefaultClient` and
+`ClientContext`, per-client export destination overrides, and a table-action sweep: this
+pass checked resources and pages, not every action inside a table (`08` was one).
+
