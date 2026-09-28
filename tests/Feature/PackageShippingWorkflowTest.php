@@ -3,6 +3,7 @@
 use App\Contracts\CarrierAdapterInterface;
 use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\PackageShippingWorkflow;
+use App\Contracts\RecoversUnresolvedPurchase;
 use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
@@ -11,6 +12,7 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CarrierPackaging;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PackageStatus;
+use App\Enums\PostageSource;
 use App\Enums\ShippingRuleAction;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\NoActiveCarrierServicesException;
@@ -400,13 +402,46 @@ it('auto ships through a rule preselected rate', function (): void {
         new PackageAutoShippingRequest(userId: $user->id, cleanupOnFailure: false),
     );
 
-    // A rule's pre-selected rate never rate-shopped, so it carries no offer —
-    // and the unattended path is the trusted side of the boundary ship()
-    // enforces, so it buys anyway.
+    // A rule's pre-selected rate never rate-shopped, so the workflow issues
+    // its offer: the recovery record every purchase needs.
+    $offer = ShippingOffer::sole();
+
     expect($result->success)->toBeTrue()
         ->and($result->summaryMessage())->toContain('AUTO123')
         ->and($package->fresh()->status)->toBe(PackageStatus::Shipped)
-        ->and(ShippingOffer::count())->toBe(0);
+        ->and($offer->postage_source)->toBe(PostageSource::CarrierAccount)
+        ->and($offer->purchase_reference)->toBe('AUTO123')
+        ->and($offer->quote_fingerprint)->not->toBeNull()
+        ->and($offer->expires_at)->not->toBeNull();
+});
+
+it('does not buy again after a rule-selected purchase went unanswered', function (): void {
+    // project-review/02: with no offer, a timeout left nothing unresolved and
+    // the next unattended attempt bought a second label. A carrier that can be
+    // asked (USPS, UPS) and has no answer yet keeps the package blocked.
+    $package = createWorkflowPackage();
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class, RecoversUnresolvedPurchase::class);
+    $adapter->shouldReceive('recoverPurchase')->once()->andReturnNull();
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('resolvePreSelectedRate')->andReturnUsing(fn (RateResponse $rate): RateResponse => $rate);
+    $calls = 0;
+    $adapter->shouldReceive('createShipment')->andReturnUsing(function () use (&$calls): never {
+        $calls++;
+
+        throw new RequestTimeOutException(Mockery::mock(Response::class), 'timed out');
+    });
+
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $workflow = app(PackageShippingWorkflow::class);
+    $first = $workflow->autoShip($package, new PackageAutoShippingRequest(cleanupOnFailure: false));
+    $second = $workflow->autoShip($package->fresh(), new PackageAutoShippingRequest(cleanupOnFailure: false));
+
+    expect($first->title)->toBe('Carrier Timeout')
+        ->and(ShippingOffer::whereNotNull('consumed_at')->sole()->isAwaitingPurchaseConfirmation())->toBeTrue()
+        ->and($second->title)->toBe('Earlier Purchase Unresolved')
+        ->and($calls)->toBe(1);
 });
 
 it('rate shops when the pre-selected service has no variant for the packaging', function (): void {
@@ -525,6 +560,31 @@ it('cleans up an unshipped package when auto ship fails by default', function ()
 
     expect($result->success)->toBeFalse()
         ->and(Package::find($package->id))->toBeNull();
+});
+
+it('keeps a package whose purchase went unanswered, even when cleanup was asked for', function (): void {
+    // project-review/01: a timeout came back as a plain failure, the default
+    // cleanup deleted the package, and the cascade took the unresolved offer —
+    // the only record that a label may exist.
+    $package = createWorkflowPackage();
+    ShippingRule::query()->delete();
+
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('isConfigured')->andReturnTrue();
+    $adapter->shouldReceive('prepareRateRequest')->andReturnNull();
+    $adapter->shouldReceive('getRates')->andReturn(collect([
+        new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days', carrierServiceId: CarrierService::where('service_code', 'GROUND')->value('id')),
+    ]));
+    $adapter->shouldReceive('createShipment')->once()->andThrow(new RequestTimeOutException(Mockery::mock(Response::class), 'timed out'));
+
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->autoShip($package, new PackageAutoShippingRequest);
+
+    expect($result->title)->toBe('Carrier Timeout')
+        ->and(Package::find($package->id))->not->toBeNull()
+        ->and(ShippingOffer::whereNotNull('consumed_at')->sole()->isAwaitingPurchaseConfirmation())->toBeTrue();
 });
 
 it('prompts for a customs weight override when a military destination is overweight', function (): void {

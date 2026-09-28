@@ -1,6 +1,6 @@
 # Failure cleanup deletes the record of an unresolved purchase
 
-Status: needs-triage
+Status: done — 2026-09-28
 
 Repo: `polybag`
 
@@ -98,3 +98,20 @@ operator's next Ship attempt asks the carrier through `recoverPurchase()` before
 That is the existing, tested recovery path.
 
 ## Comments
+
+- 2026-09-28 — Fixed with `02`. Every cleanup path asks one question before deleting an
+  unshipped Package: `OfferStore::hasUnresolvedPurchase()`, meaning any consumed Offer
+  still awaiting confirmation. `cleanupPackage()` and `GenerateLabelJob::handleFailure()`
+  keep the Package when it's true. The batch item is still marked failed, with a note
+  sending the operator to the Ship page, and the shipment stays out of the next batch
+  because it has an unshipped Package. Manual Ship redirects to that Package's Ship page
+  instead of returning to the form. Changed from the proposal: the timeout result keeps
+  `leavePackageIntact: false`, because the Offer check is more precise (a timeout before
+  the claim leaves nothing to recover, and cleaning up after it is still right), and the
+  batch job still deletes after an ordinary decline or an attended-selection refusal, as
+  before. `restrictOnDelete()` on `shipping_offers.package_id` was not done: it changes
+  every delete action, which is a decision of its own. An existing job test whose adapter
+  throws after the claim now expects the Package kept. Regression tests are in
+  `PackageShippingWorkflowTest`, `GenerateLabelJobTest` and `ManualShipTest`; each fails
+  without the fix.
+

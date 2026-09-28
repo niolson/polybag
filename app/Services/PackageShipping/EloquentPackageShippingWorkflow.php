@@ -384,8 +384,9 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
         // Marked through the offer, which points at the row the quote log
         // wrote for exactly this rate. Nothing to mark for a blind purchase,
-        // which logged no quote, or for a rule's pre-selected rate, which
-        // never rate-shopped (`postage-source-split/17`).
+        // which logged no quote, or for a rule's pre-selected rate, whose
+        // offer points at no quote row because it never rate-shopped
+        // (`postage-source-split/17`).
         if ($offer !== null) {
             $this->rateQuoteLogger->markSelected($offer);
         }
@@ -561,10 +562,19 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 return $result;
             }
 
-            // Through purchase() rather than ship(): a rule's pre-selected
-            // rate is resolved server-side and carries no offer, and this is
-            // the trusted side of the boundary ship() enforces. A rate from
-            // rate shopping does carry one, and is restored from it as usual.
+            // A rule's pre-selected rate is resolved server-side and never
+            // rate-shopped, so it arrives with no offer. It gets one here: not
+            // because it needs protecting from a browser it never reached, but
+            // because the offer is the recovery record — the claim, the
+            // unresolved state after a timeout, and the handle the carrier is
+            // asked about all live on it (`project-review/02`). A rate from
+            // rate shopping already carries one and is left as it is.
+            if ($selectedRate !== null) {
+                $selectedRate = $this->shippingRateService->offerForUnquotedRate($package, $selectedRate);
+            }
+
+            // Through purchase() rather than ship(): this is the trusted side
+            // of the boundary ship() enforces.
             $result = $this->purchase(
                 $package,
                 new PackageShippingRequest(
@@ -711,9 +721,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * what the packer reads and what the package will record — would find a
      * direct adapter we do not have and hold no account with.
      *
-     * A rate with no offer behind it is a rule's pre-selected rate, resolved
-     * server-side on the unattended path and never rate-shopped, and
-     * dispatches by carrier name exactly as it always did.
+     * Every rate reaching a purchase carries an offer now — ship() refuses one
+     * that does not, and autoShip() issues one for a rule's pre-selected rate.
+     * The carrier-name fallback is for a caller that bypasses both, and
+     * dispatches exactly as a direct offer would.
      */
     private function sellerFor(?ShippingOffer $offer, ?RateResponse $selectedRate): ?PostageOfferSource
     {
@@ -1652,6 +1663,12 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
     private function cleanupPackage(Package $package, PackageAutoShippingRequest $request, PackageShippingResult $result): void
     {
         if (! $request->cleanupOnFailure || $result->success || $result->leavePackageIntact) {
+            return;
+        }
+
+        // A timeout reads as a plain failure, but the offer it spent is the
+        // only record that a label may exist, and it would go with the package.
+        if ($this->offerStore->hasUnresolvedPurchase($package)) {
             return;
         }
 

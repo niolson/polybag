@@ -301,27 +301,96 @@ class ShippingRateService
                 return $rate;
             }
 
-            $offer = $offerStore->issue($package, new OfferDraft(
-                carrier: $rate->carrier,
-                postageSource: PostageSource::CarrierAccount,
-                carrierAccountId: $rate->carrierAccountId,
-                carrierId: $rate->carrierId,
-                carrierServiceId: $rate->carrierServiceId,
-                serviceCode: $rate->serviceCode,
-                serviceName: $rate->serviceName,
-                price: $rate->priceUnknown ? null : $rate->price,
-                currency: 'USD',
-                // The packaging requirement travels with the metadata so the
-                // purchase-time check classifies what the server quoted.
-                rateMetadata: $rate->packagingRequirement->intoRateMetadata($rate->metadata),
-                expiresAt: $shipDates[$rateTaskKeys[$index]]?->endOfDay(),
-                rateQuoteId: $quoteId,
-                quoteFingerprint: $quoteFingerprint,
-                carrierAccountFingerprint: $accountFingerprints->get($rate->carrierAccountId),
-            ));
-
-            return $rate->withOfferId($offer->public_id);
+            return $this->issueDirectOffer(
+                $offerStore,
+                $package,
+                $rate,
+                $shipDates[$rateTaskKeys[$index]],
+                $quoteFingerprint,
+                $accountFingerprints->get($rate->carrierAccountId),
+                $quoteId,
+            );
         });
+    }
+
+    /**
+     * An offer for a rate that was never rate-shopped: a shipping rule's
+     * pre-selected rate, resolved server-side on the unattended path.
+     *
+     * Not for tamper protection — the rate never reached a browser — but for
+     * recovery. The offer is the only record that a purchase was attempted:
+     * the claim, the unresolved state after a timeout, and the handle a
+     * carrier is asked about (USPS's `X-Idempotency-Key`) all live on it, so a
+     * purchase without one can be repeated after an unanswered reply
+     * (`project-review/02`). Issued exactly as rate shopping issues a direct
+     * offer, so both are bound, windowed and re-checked the same way.
+     *
+     * A rate that already names an offer is returned as it is.
+     */
+    public function offerForUnquotedRate(Package $package, RateResponse $rate): RateResponse
+    {
+        if ($rate->offerId !== null) {
+            return $rate;
+        }
+
+        // Fingerprinted from the database, as ShippingOffer::quoteInputsChangedSince()
+        // re-checks it at purchase, not from relations the caller may have
+        // loaded earlier: the two must digest the same package.
+        $stored = Package::query()
+            ->with(['packageItems.product', 'packageItems.shipmentItem', 'shipment.shippingMethod', 'shipment.packages', 'boxSize', 'location'])
+            ->findOrFail($package->id);
+        $rateRequest = RateRequest::fromPackage($stored);
+
+        $account = $rate->carrierAccountId === null ? null : CarrierAccount::find($rate->carrierAccountId);
+
+        return $this->issueDirectOffer(
+            app(OfferStore::class),
+            $package,
+            $rate,
+            app(ShipDateService::class)->getShipDate(
+                Carrier::query()->where('name', $rate->carrier)->first(),
+                $rateRequest->locationId,
+            ),
+            $rateRequest->fingerprint(),
+            $account?->fingerprint(),
+        );
+    }
+
+    /**
+     * Issue the direct-carrier offer for one rate and return the rate naming it.
+     *
+     * `postage_source = CarrierAccount`, the account the adapter quoted on, and
+     * no purchase context. Its window ends with the ship day it was quoted for.
+     */
+    private function issueDirectOffer(
+        OfferStore $offerStore,
+        Package $package,
+        RateResponse $rate,
+        ?CarbonImmutable $shipDate,
+        string $quoteFingerprint,
+        ?string $carrierAccountFingerprint,
+        ?int $quoteId = null,
+    ): RateResponse {
+        $offer = $offerStore->issue($package, new OfferDraft(
+            carrier: $rate->carrier,
+            postageSource: PostageSource::CarrierAccount,
+            carrierAccountId: $rate->carrierAccountId,
+            carrierId: $rate->carrierId,
+            carrierServiceId: $rate->carrierServiceId,
+            serviceCode: $rate->serviceCode,
+            serviceName: $rate->serviceName,
+            price: $rate->priceUnknown ? null : $rate->price,
+            currency: 'USD',
+            // The packaging requirement travels with the metadata so the
+            // purchase-time check classifies what the server quoted.
+            rateMetadata: $rate->packagingRequirement->intoRateMetadata($rate->metadata),
+            expiresAt: $shipDate?->endOfDay(),
+            rateQuoteId: $quoteId,
+            quoteFingerprint: $quoteFingerprint,
+            carrierAccountFingerprint: $carrierAccountFingerprint,
+        ));
+
+        return $rate->withOfferId($offer->public_id);
     }
 
     /**

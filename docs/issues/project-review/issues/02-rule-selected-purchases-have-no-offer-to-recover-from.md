@@ -1,6 +1,6 @@
 # Rule-selected purchases have no Offer, so a timeout can buy twice
 
-Status: needs-triage
+Status: done — 2026-09-28
 
 Repo: `polybag`
 
@@ -79,3 +79,18 @@ The existing test *auto ships through a rule preselected rate* asserts
 `ShippingOffer::count()` is `0` and changes with the fix.
 
 ## Comments
+
+- 2026-09-28 — Fixed as proposed. `autoShip()` passes the selected rate through
+  `ShippingRateService::offerForUnquotedRate()`, which issues a direct Offer the same way
+  rate shopping does (shared `issueDirectOffer()`): quote fingerprint from the Package as
+  stored, carrier-account fingerprint, and an expiry at the end of the carrier's ship
+  day. A rate that already names an Offer is left alone. The purchase then goes through
+  `inspect()`, `redeem()` and recovery like any other. The Evidence test above used a
+  carrier that cannot be asked about an earlier purchase. For that kind of carrier, which
+  is FedEx today, the next attempt settles the Offer and buys again, by the existing
+  design in `recoverPurchase()`. So the regression test uses a carrier that can be asked
+  (`RecoversUnresolvedPurchase`, answering "can't say") and asserts the second attempt is
+  refused with `Earlier Purchase Unresolved`. It fails without the fix. The old test
+  asserting a pre-selected purchase issues no Offer now asserts it issues one and records
+  the purchase on it.
+
