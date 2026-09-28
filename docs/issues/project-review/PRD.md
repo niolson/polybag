@@ -22,7 +22,7 @@ a directory:
 | A | Label purchase — Ship page, `ShippingRateService` offer issuance, `OfferStore`, `EloquentPackageShippingWorkflow`, `BatchLabelService` / `GenerateLabelJob` | Reviewed 2026-09-28; issues `01`–`05` |
 | B | Label lifecycle — reprint, void, tracking and manifest dispatch, Shopify fulfillment sync | Reviewed 2026-09-28; issues `06`–`10` |
 | C | Postage sources and carrier adapters | Reviewed 2026-09-28; issues `11`–`15` |
-| D | Client and location scoping, authorization | Partly reviewed 2026-09-28 (see below); issue `12` |
+| D | Client and location scoping, authorization | Partly reviewed 2026-09-28 (see below); issue `16` |
 | E | Automation — rules, allowance, batch selection | Not started |
 
 Each area is checked against the invariants its ADRs and `CONTEXT.md` state, not
@@ -231,7 +231,7 @@ item must belong to the Shipment, the product must match it, and a scan-to-add p
 must belong to the Shipment's client. `RuleEvaluator` applies a rule only to its own
 client or to rules with no client.
 
-Invariant 1 fails for carrier accounts (`12`). Area B's `08` (voids) is the same kind of
+Invariant 1 fails for carrier accounts (`16`). Area B's `08` (voids) is the same kind of
 gap on an action rather than a resource.
 
 ## Area D: not yet covered
