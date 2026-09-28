@@ -22,7 +22,7 @@ a directory:
 | A | Label purchase — Ship page, `ShippingRateService` offer issuance, `OfferStore`, `EloquentPackageShippingWorkflow`, `BatchLabelService` / `GenerateLabelJob` | Reviewed 2026-09-28; issues `01`–`05` |
 | B | Label lifecycle — reprint, void, tracking and manifest dispatch, Shopify fulfillment sync | Reviewed 2026-09-28; issues `06`–`10` |
 | C | Postage sources and carrier adapters | Reviewed 2026-09-28; issues `11`–`15` |
-| D | Client and location scoping, authorization | Partly reviewed 2026-09-28 (see below); issue `16` |
+| D | Client and location scoping, authorization | Reviewed 2026-09-28; issues `16`, `21` |
 | E | Automation — rules, allowance, batch selection | Reviewed 2026-09-28; issues `17`–`20` |
 
 Each area is checked against the invariants its ADRs and `CONTEXT.md` state, not
@@ -218,7 +218,8 @@ ADR-0006 decisions 5–6:
    Admin-only.
 2. A carrier account resolves from the Shipment's client and the Package's location.
 3. Products, aliases, shipping rules and pick batches match only within their own client.
-4. End of Day and pick batches respect location when multi-location is on.
+4. End of Day respects location when multi-location is on (`AGENTS.md` asks this of End
+   of Day only; pick batches are scoped by client).
 
 ## Area D: what held
 
@@ -234,12 +235,24 @@ client or to rules with no client.
 Invariant 1 fails for carrier accounts (`16`). Area B's `08` (voids) is the same kind of
 gap on an action rather than a resource.
 
-## Area D: not yet covered
+## Area D: second pass
 
-Location scoping (invariant 4: End of Day, manifests and pick batches under multi-location),
-client-scoped aliases and default-client assignment through `HasDefaultClient` and
-`ClientContext`, per-client export destination overrides, and a table-action sweep: this
-pass checked resources and pages, not every action inside a table (`08` was one).
+Invariant 4 holds. End of Day and `ManifestService` filter by location when multi-location
+is on; the page's location is a deliberate picker, not a hidden value. Pick batches keep to
+one client (`PickBatchService` filters and resolves a single `client_id`). Channel and
+shipping-method aliases are read per importing client (`ImportReferenceResolver`).
+
+Every action on the Shipment and Package screens was checked. Create, edit and delete go
+through `ShipmentPolicy` / `PackagePolicy`, and the item relation managers are editable
+only on Edit pages, which the policies guard. The custom actions are the
+Ship/Pack/Edit links, reprint (active Label only, area B), track and address validation.
+Void is `08`.
+
+Per-client export overrides were removed on purpose (`4e5d75d`), but the export docblock and
+`AGENTS.md` still describe them (`21`).
+
+Dropped: *A User can run address validation*, which may cost a billed lookup. Packers
+need it, and it changes only the validation fields.
 
 ## Area E: invariants
 
