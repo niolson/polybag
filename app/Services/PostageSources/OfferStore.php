@@ -257,6 +257,20 @@ class OfferStore
     }
 
     /**
+     * Whether a label may already exist for this package that nothing records.
+     *
+     * The question every cleanup path asks before deleting an unshipped
+     * package. The offer rows it looks at cascade with the package, so a
+     * delete would destroy the only evidence the purchase was ever attempted,
+     * and the next attempt would buy again with nothing to ask the source
+     * about (`project-review/01`).
+     */
+    public function hasUnresolvedPurchase(Package $package): bool
+    {
+        return $this->awaitingPurchaseConfirmation($package)->isNotEmpty();
+    }
+
+    /**
      * Offers spent against this package whose outcome nobody knows.
      *
      * What a purchase path consults before spending anything else on a package:

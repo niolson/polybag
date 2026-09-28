@@ -7,6 +7,7 @@ use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
 use App\Models\LabelBatchItem;
+use App\Services\PostageSources\OfferStore;
 use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -77,8 +78,14 @@ class GenerateLabelJob implements ShouldQueue
 
     private function handleFailure(LabelBatchItem $item, string $errorMessage): void
     {
-        // Clean up the unshipped package
-        if ($item->package && $item->package->status !== PackageStatus::Shipped) {
+        // A purchase that never reported back may have bought a label, and the
+        // offer recording it cascades with the package. Keep both, so the
+        // shipment stays out of the next batch and the Ship page asks the
+        // carrier before anything is bought again (`project-review/01`).
+        if ($item->package && app(OfferStore::class)->hasUnresolvedPurchase($item->package)) {
+            $errorMessage .= ' A label may already exist for this package: open it on the Ship page, which checks with the carrier before buying again.';
+        } elseif ($item->package && $item->package->status !== PackageStatus::Shipped) {
+            // Clean up the unshipped package
             $item->package->packageItems()->delete();
             $item->package->delete();
             $item->update(['package_id' => null]);
