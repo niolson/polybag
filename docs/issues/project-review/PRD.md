@@ -21,7 +21,7 @@ a directory:
 |---|---|---|
 | A | Label purchase — Ship page, `ShippingRateService` offer issuance, `OfferStore`, `EloquentPackageShippingWorkflow`, `BatchLabelService` / `GenerateLabelJob` | Reviewed 2026-09-28; issues `01`–`05` |
 | B | Label lifecycle — reprint, void, tracking and manifest dispatch, Shopify fulfillment sync | Reviewed 2026-09-28; issues `06`–`10` |
-| C | Postage sources and carrier adapters | Partly reviewed 2026-09-28 (see below); issue `11` |
+| C | Postage sources and carrier adapters | Reviewed 2026-09-28; issues `11`–`15` |
 | D | Client and location scoping, authorization | Not started |
 | E | Automation — rules, allowance, batch selection | Not started |
 
@@ -141,6 +141,16 @@ From ADR-0002 decisions 4–9, ADR-0003 and ADR-0006 decisions 1–4 and 10:
 4. An adapter's answer to a purchase is either a decline (the source sold nothing) or an
    unknown outcome that stays unresolved for recovery. A source that can be asked about a
    purchase never turns an unknown into a decline.
+5. The carrier of record is the physical carrier, normalized for behaviour and snapshotted
+   when the Label is bought; normalization runs before any carrier-policy lookup
+   (ADR-0002 decisions 1 and 5).
+6. Observation, normalization and the allowance stay separate; discovery never creates
+   catalog rows, and a mapping names the same service (ADR-0003 decision 2, ADR-0006
+   decision 2).
+7. A hard-required special service excludes an offer that can't honour it, judged per
+   offer for Amazon; a default is a preference and never excludes (ADR-0002 decision 8).
+8. A void or tracking answer is read from what the source said, not only from its HTTP
+   status.
 
 ## Area C: what held
 
@@ -152,22 +162,47 @@ quoting, Shopify's specific services come from the same filtered list, and Amazo
 are filtered on their mapped service. For invariant 4, all three recoverable adapters
 let transport errors and 5xx through as intended.
 
+Invariant 5 holds for everything but a mapped Amazon offer (`15`). `markShipped()`
+normalizes `ShipResponse::$carrier` inside its transaction and writes
+`normalized_carrier_id` to the Package and the Label together; the export reads the
+snapshot through `carrierOfRecordName()`; End of Day reads `normalized_carrier_id`; ship
+dates come from the `carrier_id` stored on the Offer when it was issued, so a rename
+between quote and purchase changes nothing.
+
+Invariant 6 holds apart from `15`. The recorder only inserts `observed_services` rows, with
+`insertOrIgnore` settling the concurrent-quote race, never touching `Carrier` or
+`CarrierService`; the mapper is reached only from the page, and a mapping is one
+`source_service_mappings` row.
+
+Invariant 7 holds for direct, Shopify and off-Amazon Amazon Shipping: direct consults
+carrier policy and catalog scoping, Shopify is `Unguaranteed` and so excluded, and the
+off-Amazon adapter reports `NotImplemented` for every code, so a required service excludes
+it and a default is dropped. Buy Shipping judges each offer on its own value-added service
+groups, as the ADR asks, but counts defaults as required (`14`).
+
 Invariant 4 fails after a 2xx: USPS and UPS turn a response they cannot read into a
-decline (`11`). Amazon stamps its shipment ID first and avoids that half.
+decline (`11`). Amazon stamps its shipment ID first and avoids that half. FedEx declines
+deliberately, since it bills only on tender and has no lookup to recover by.
 
-## Area C: not yet covered
-
-This pass covered source resolution, the purchase-error contract and destination
-properties. Still to read against the invariants: carrier normalization and its snapshot
-(ADR-0002 decision 5), the observed-service recorder and mapper (ADR-0003), hard-required
-special services at the offer seam (ADR-0002 decision 8) including Amazon's per-offer
-value-added services, the FedEx adapter end to end, the off-Amazon Amazon Shipping
-adapter, and each adapter's void and tracking response parsing (the same
-unreadable-response question as `11`, on the void side).
+Invariant 8 fails for FedEx twice: a cancel reply saying nothing was cancelled is
+recorded as a void (`13`, with UPS and USPS reading status only), and "out for delivery" and
+"delivery exception" read as the terminal Delivered (`12`). Amazon's tracking reads only
+its summary vocabulary and reports an unknown status as no answer; USPS and UPS match the
+past tense.
 
 ## Area C: candidates dropped
 
 - *Shopify `auto` is offered for a PO Box destination.* Shopify picks the carrier and is
   responsible for reaching the address; nothing on our side can check it, and a specific
   Shopify service is already filtered.
-
+- *FedEx retries without Saturday delivery, even when it is required.* Both rating and
+  purchase drop Saturday when FedEx rejects it. Saturday is opportunistic by design across
+  every adapter (`HasSaturdayDelivery` strips it on ineligible days), so it is not a
+  guaranteed service in the ADR's sense.
+- *A FedEx 2xx with a tracking number but no label is a decline.* The shipment exists, but
+  FedEx bills only on tender, so the retry costs nothing, unlike `11`.
+- *USPS void reads `shipments.country` where purchase reads `validated_country ?? country`.*
+  They could pick different endpoints, but no validator writes `validated_country`, so the
+  two agree in practice.
+- *`CarrierNormalizer::resolve()` loads every carrier per call.* Correct, and small; the
+  Amazon adapter already memoizes it per quote.
