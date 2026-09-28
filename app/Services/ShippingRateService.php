@@ -22,6 +22,7 @@ use App\Enums\ServiceCapability;
 use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Exceptions\Carriers\CarrierUnavailableException;
 use App\Exceptions\InvalidPackageDimensionsException;
+use App\Exceptions\MissingDeclaredValueException;
 use App\Exceptions\NoActiveCarrierServicesException;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
@@ -339,20 +340,40 @@ class ShippingRateService
         $stored = Package::query()
             ->with(['packageItems.product', 'packageItems.shipmentItem', 'shipment.shippingMethod', 'shipment.packages', 'boxSize', 'location'])
             ->findOrFail($package->id);
-        $rateRequest = RateRequest::fromPackage($stored);
 
-        $account = $rate->carrierAccountId === null ? null : CarrierAccount::find($rate->carrierAccountId);
+        // The package-level request applies every declared-value code on the
+        // method, unscoped, so it can refuse a package the purchase would
+        // accept for this service. The offer is then issued without a
+        // fingerprint, as older offers were, and whether a declared value is
+        // needed stays the purchase's question — answered, as before, with
+        // "Declared Value Required" rather than a generic failure.
+        try {
+            $quoteFingerprint = RateRequest::fromPackage($stored)->fingerprint();
+        } catch (MissingDeclaredValueException) {
+            $quoteFingerprint = null;
+        }
+
+        $carrier = Carrier::query()->where('name', $rate->carrier)->first();
+
+        // A rule names a service, not an account, so its rate usually carries
+        // none. Record the one the adapter will buy on, resolved as the
+        // purchase re-checks it: without it the account check is skipped, and
+        // UPS recovery would ask whichever account scopes prefer by then
+        // rather than the one the label was bought on.
+        $account = match (true) {
+            $rate->carrierAccountId !== null => CarrierAccount::find($rate->carrierAccountId),
+            $carrier !== null => CarrierAccount::resolveForShipment($carrier->id, $stored->location_id, $stored->shipment?->client_id)->first(),
+            default => null,
+        };
 
         return $this->issueDirectOffer(
             app(OfferStore::class),
             $package,
             $rate,
-            app(ShipDateService::class)->getShipDate(
-                Carrier::query()->where('name', $rate->carrier)->first(),
-                $rateRequest->locationId,
-            ),
-            $rateRequest->fingerprint(),
+            app(ShipDateService::class)->getShipDate($carrier, $stored->location_id),
+            $quoteFingerprint,
             $account?->fingerprint(),
+            carrierAccountId: $account?->id,
         );
     }
 
@@ -367,14 +388,15 @@ class ShippingRateService
         Package $package,
         RateResponse $rate,
         ?CarbonImmutable $shipDate,
-        string $quoteFingerprint,
+        ?string $quoteFingerprint,
         ?string $carrierAccountFingerprint,
         ?int $quoteId = null,
+        ?int $carrierAccountId = null,
     ): RateResponse {
         $offer = $offerStore->issue($package, new OfferDraft(
             carrier: $rate->carrier,
             postageSource: PostageSource::CarrierAccount,
-            carrierAccountId: $rate->carrierAccountId,
+            carrierAccountId: $carrierAccountId ?? $rate->carrierAccountId,
             carrierId: $rate->carrierId,
             carrierServiceId: $rate->carrierServiceId,
             serviceCode: $rate->serviceCode,

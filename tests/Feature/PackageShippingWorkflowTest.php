@@ -26,6 +26,7 @@ use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
 use App\Models\ShippingOffer;
 use App\Models\ShippingRule;
+use App\Models\SpecialService;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
 use Illuminate\Support\Facades\Log;
@@ -413,6 +414,72 @@ it('auto ships through a rule preselected rate', function (): void {
         ->and($offer->purchase_reference)->toBe('AUTO123')
         ->and($offer->quote_fingerprint)->not->toBeNull()
         ->and($offer->expires_at)->not->toBeNull();
+});
+
+it('records the account a rule-selected purchase will be bought on', function (): void {
+    // A rule names a service, not an account, so its rate carries none. The
+    // offer records the one the adapter will buy on, so the account check at
+    // purchase runs and recovery asks the account the label was bought on.
+    $this->actingAs($user = User::factory()->create());
+    $package = createWorkflowPackage();
+    $account = createUpsAccount();
+    $upsGround = CarrierService::factory()->create([
+        'carrier_id' => $account->carrier_id,
+        'name' => 'UPS Ground',
+        'service_code' => '03',
+        'active' => true,
+    ]);
+    $package->shipment->shippingMethod->carrierServices()->attach($upsGround->id);
+    ShippingRule::query()->update(['carrier_service_id' => $upsGround->id]);
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn (RateResponse $rate): RateResponse => $rate);
+    $adapter->shouldReceive('createShipment')->once()->andReturn(
+        ShipResponse::success(trackingNumber: 'AUTO456', cost: 7.25, carrier: 'UPS', service: 'UPS Ground', labelData: base64_encode('label'), carrierAccountId: $account->id)
+    );
+
+    app(CarrierRegistry::class)->registerInstance('UPS', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package,
+        new PackageAutoShippingRequest(userId: $user->id, cleanupOnFailure: false),
+    );
+
+    $offer = ShippingOffer::sole();
+
+    expect($result->success)->toBeTrue()
+        ->and($offer->carrier_account_id)->toBe($account->id)
+        ->and($offer->carrier_account_fingerprint)->toBe($account->fingerprint());
+});
+
+it('still asks for a declared value, rather than failing, on a rule-selected rate that needs one', function (): void {
+    // Fingerprinting the package applies every declared-value code on the
+    // method and can throw before the purchase is reached; the offer is then
+    // issued without one, and the purchase answers as it always has.
+    $package = createWorkflowPackage();
+    $declaredValue = SpecialService::create([
+        'code' => 'declared_value',
+        'name' => 'Declared Value',
+        'scope' => 'package',
+        'category' => 'insurance',
+        'requires_value' => true,
+        'active' => true,
+    ]);
+    $package->shipment->shippingMethod->specialServices()->attach($declaredValue->id, ['mode' => 'required']);
+    $package->shipment->update(['value' => null]);
+    $package->shipment->shipmentItems()->update(['value' => null]);
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn (RateResponse $rate): RateResponse => $rate);
+    $adapter->shouldNotReceive('createShipment');
+
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->autoShip($package->fresh(), new PackageAutoShippingRequest(cleanupOnFailure: false));
+
+    expect($result->title)->toBe('Declared Value Required');
 });
 
 it('does not buy again after a rule-selected purchase went unanswered', function (): void {

@@ -94,3 +94,13 @@ The existing test *auto ships through a rule preselected rate* asserts
   asserting a pre-selected purchase issues no Offer now asserts it issues one and records
   the purchase on it.
 
+- 2026-09-28 — Two gaps in the first fix, found by an independent review before merge.
+  First, the package-level fingerprint applies every declared-value code on the method,
+  unscoped, and can throw `MissingDeclaredValueException` before the purchase. That turned
+  "Declared Value Required", and a purchase that previously succeeded because the code
+  was scoped to another service, into a generic "Auto Ship Error". The Offer is now
+  issued without a fingerprint in that case. Second, a rule's rate names no account, so
+  the Offer recorded none: the account check was skipped, and UPS recovery would have
+  asked whichever account scopes preferred at retry. The Offer now records the account
+  `CarrierAccount::resolveForShipment()` gives, the same resolution the purchase re-checks.
+  Both have regression tests that fail without the change.
