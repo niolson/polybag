@@ -1,6 +1,6 @@
 # Any user can create, edit and delete carrier accounts
 
-Status: needs-triage
+Status: done — 2026-09-29
 
 Repo: `polybag`
 
@@ -71,3 +71,22 @@ it('does not let a User change the billing account', function (): void {
   gate.
 
 ## Comments
+
+- 2026-09-29 — Fixed with a `CarrierAccountPolicy` rather than `canAccess()`: every
+  ability (`viewAny`, `view`, `create`, `update`, `delete`, `deleteAny`) requires Admin,
+  like `CarrierPolicy`. Filament gates the resource, the list, create and edit pages, the
+  navigation item, and the table and page actions from it, so the edit page's OAuth,
+  FedEx registration and delete actions are covered without a check each. `deleteAny` is
+  explicit rather than load-bearing: Filament allows an ability the policy doesn't define,
+  so the Admin bulk-delete assertion only guards against it being denied later.
+  Changed from the proposal: "nothing else needs a gate" was wrong. The Location form's
+  Carrier Accounts section (shown with multi-location on) writes location scopes, and
+  `LocationPolicy::update` lets Managers save it, so a Manager could still reroute a
+  location's billing. That section is now visible only to a user the carrier account
+  policy lets see accounts. Filament neither shows nor saves a hidden relationship
+  repeater, so a Manager's save leaves existing assignments alone. Regression tests are in
+  `AuthorizationTest`: `carrier accounts are Admin-only` (User and Manager are refused every
+  page and cannot change `account_number`; Admin can list, create, edit and bulk delete)
+  and `assigning carrier accounts to a location` (a Manager doesn't see the section, can't
+  write a scope and keeps existing ones on save; an Admin can assign). The six refusal
+  cases fail without the fix.

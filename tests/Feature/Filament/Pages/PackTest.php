@@ -1,7 +1,9 @@
 <?php
 
+use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\PackageShipping\PackageShippingResult;
+use App\DataTransferObjects\Shipping\CancelResponse;
 use App\Enums\PackageStatus;
 use App\Enums\PickingStatus;
 use App\Enums\Role;
@@ -16,6 +18,7 @@ use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\User;
+use App\Services\Carriers\CarrierRegistry;
 use App\Services\SettingsService;
 use Illuminate\Support\Facades\Session;
 use Livewire\Livewire;
@@ -842,3 +845,42 @@ it('badges an Amazon order with the programs it is enrolled in', function (array
     'premium' => [['PREMIUM'], ['Premium'], ['Prime']],
     'ordinary' => [[], [], ['Prime', 'Premium']],
 ]);
+
+it('does not let a shipper cancel the last label when someone else shipped it', function (): void {
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('cancelShipment')->never()->andReturn(CancelResponse::success('voided'));
+    app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
+
+    $package = Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'shipped_by_user_id' => User::factory()->create(['role' => Role::User])->id,
+    ]);
+    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    Session::put('last_shipped_package_id', $package->id);
+
+    Livewire::test(Pack::class)
+        ->call('cancelLastLabel')
+        ->assertNotified('Access Denied');
+
+    expect($package->fresh()->status)->toBe(PackageStatus::Shipped);
+})->after(fn () => app(CarrierRegistry::class)->reset());
+
+it('lets the shipper cancel the last label they shipped', function (): void {
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('cancelShipment')->once()->andReturn(CancelResponse::success('voided'));
+    app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
+
+    $shipper = User::factory()->create(['role' => Role::User]);
+    $package = Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'shipped_by_user_id' => $shipper->id,
+    ]);
+    $this->actingAs($shipper);
+    Session::put('last_shipped_package_id', $package->id);
+
+    Livewire::test(Pack::class)
+        ->call('cancelLastLabel')
+        ->assertNotified('Label Cancelled');
+
+    expect($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+})->after(fn () => app(CarrierRegistry::class)->reset());
