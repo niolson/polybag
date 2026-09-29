@@ -21,8 +21,10 @@ use App\Enums\CarrierPackaging;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
+use App\Exceptions\Carriers\CarrierException;
 use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
+use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
 use App\Http\Integrations\Ups\Requests\CreateShipment;
 use App\Http\Integrations\Ups\Requests\LabelRecovery;
 use App\Http\Integrations\Ups\Requests\Rate;
@@ -307,9 +309,13 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
 
     public function trackShipment(Package $package): TrackShipmentResponse
     {
-        $connector = $this->resolveConnector(
-            $this->resolveAccount($package->location_id, $package->shipment?->client_id)
-        );
+        try {
+            $account = $this->labelAccount($package);
+        } catch (CarrierException $e) {
+            return TrackShipmentResponse::failure($e->getMessage());
+        }
+
+        $connector = $this->resolveConnector($account);
         $trackRequest = new TrackShipment($package->tracking_number);
         $requestUri = rtrim($connector->resolveBaseUrl(), '/').$trackRequest->resolveEndpoint();
 
@@ -575,6 +581,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
     public function createShipment(ShipRequest $request): ShipResponse
     {
         $account = $this->resolveAccount($request->locationId, $request->clientId);
+        $response = null;
 
         try {
             $connector = $this->resolveConnector($account);
@@ -666,28 +673,29 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
 
             // A UPS refusal never comes back as a failed response: the
             // connector retries and throws, so the RequestException catch
-            // below is the one place an error body is read.
-            $responseData = $this->sendCreateShipment($connector, $shipment, $request)->json();
+            // below is the one place an error body is read. Anything past
+            // this line is a 2xx — UPS created the shipment and charged for
+            // it — so nothing after it may come back as a decline.
+            $response = $this->sendCreateShipment($connector, $shipment, $request);
+            $responseData = json_decode($response->body(), associative: true);
+
+            if (! is_array($responseData)) {
+                $this->unreadablePurchase($response, $request, 'UPS response was not JSON');
+            }
 
             $shipmentResults = $responseData['ShipmentResponse']['ShipmentResults'] ?? null;
 
-            if (! $shipmentResults) {
-                Log::channel('ups-validation')->error('UPS createShipment missing ShipmentResults', [
-                    'body' => $responseData,
-                ]);
-
-                return ShipResponse::failure('UPS response missing shipment results');
+            if (! is_array($shipmentResults) || $shipmentResults === []) {
+                $this->unreadablePurchase($response, $request, 'UPS response missing shipment results');
             }
 
             $trackingNumber = $shipmentResults['ShipmentIdentificationNumber'] ?? null;
 
-            if (empty($trackingNumber)) {
-                Log::channel('ups-validation')->error('UPS createShipment missing tracking number', [
-                    'shipmentResults' => $shipmentResults,
-                ]);
-
-                return ShipResponse::failure('UPS response missing tracking number');
+            if (! is_scalar($trackingNumber) || (string) $trackingNumber === '') {
+                $this->unreadablePurchase($response, $request, 'UPS response missing tracking number');
             }
+
+            $trackingNumber = (string) $trackingNumber;
 
             // Package results may be a single object or array
             $packageResults = $shipmentResults['PackageResults'] ?? [];
@@ -698,11 +706,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
             $labelData = $packageResults[0]['ShippingLabel']['GraphicImage'] ?? null;
 
             if (empty($labelData)) {
-                Log::channel('ups-validation')->error('UPS createShipment missing label data', [
-                    'packageResults' => $packageResults,
-                ]);
-
-                return ShipResponse::failure('UPS response missing label data');
+                $this->unreadablePurchase($response, $request, 'UPS response missing label data', $trackingNumber);
             }
 
             // UPS ZPL is always 203 DPI; scale to 300 DPI if requested
@@ -753,6 +757,9 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
             ]);
 
             throw $e;
+        } catch (UnreadablePurchaseResponseException $e) {
+            // Accepted and charged — see unreadablePurchase().
+            throw $e;
         } catch (RequestException $e) {
             $rawResponse = $this->decodeJsonSafely($e->getResponse());
 
@@ -766,7 +773,18 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
                     ?? data_get($rawResponse, 'errors.0.message')
                     ?? $e->getMessage()
             );
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
+            if ($response !== null) {
+                // Anything that breaks after the 2xx is still an accepted
+                // purchase — a TypeError from a label image of the wrong
+                // shape included.
+                $this->unreadablePurchase($response, $request, $e->getMessage(), previous: $e);
+            }
+
+            if (! $e instanceof \Exception) {
+                throw $e;
+            }
+
             Log::channel('ups-validation')->error('UPS createShipment error', [
                 'exception' => $e::class,
                 'error' => $e->getMessage(),
@@ -777,12 +795,41 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
         }
     }
 
+    /**
+     * Refuse to call a 2xx purchase reply a decline.
+     *
+     * UPS answering 2xx means the shipment exists and is billed, so a reply
+     * with no shipment results, tracking number or label image is an unknown
+     * outcome. {@see UnreadablePurchaseResponseException} leaves the offer
+     * unresolved, and {@see recoverPurchase()} asks Label Recovery for the
+     * same shipment on the next attempt. The raw body is logged first because
+     * it is the only copy of what UPS said — `project-review/11`.
+     *
+     * @throws UnreadablePurchaseResponseException
+     */
+    private function unreadablePurchase(
+        Response $response,
+        ShipRequest $request,
+        string $reason,
+        ?string $trackingNumber = null,
+        ?\Throwable $previous = null,
+    ): never {
+        Log::channel('ups-validation')->error('UPS createShipment accepted the purchase but its reply could not be read; the offer stays unresolved', [
+            'reason' => $reason,
+            'status' => $response->status(),
+            'offer' => $request->offer?->public_id,
+            'tracking_number' => $trackingNumber,
+            'body' => $response->body(),
+        ]);
+
+        throw new UnreadablePurchaseResponseException(Carrier::UPS, $reason, $trackingNumber, $previous);
+    }
+
     public function cancelShipment(string $trackingNumber, Package $package): CancelResponse
     {
         try {
-            $connector = $this->resolveConnector(
-                $this->resolveAccount($package->location_id, $package->shipment?->client_id)
-            );
+            // The account that bought the label — see labelAccount().
+            $connector = $this->resolveConnector($this->labelAccount($package));
 
             $apiRequest = new VoidShipment($trackingNumber);
 
@@ -1010,9 +1057,11 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
 
         $response = $connector->send($apiRequest);
 
+        // Decoded safely: a body that is not JSON must reach throw() below,
+        // or the adapter's own classification, rather than fail in a log line.
         Log::channel('ups-validation')->debug('LABEL RESPONSE', [
             'status' => $response->status(),
-            'body' => $response->json(),
+            'body' => $this->decodeJsonSafely($response),
         ]);
 
         // The request is sent once (see CreateShipment::$tries), which also

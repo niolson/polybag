@@ -1,6 +1,6 @@
 # An unreadable 2xx from USPS or UPS is settled as a decline
 
-Status: needs-triage
+Status: done — 2026-09-29
 
 Repo: `polybag`
 
@@ -99,3 +99,27 @@ before the carrier has accepted. Whether that's enforceable is worth checking, s
 adapters build the failure in one place.
 
 ## Comments
+
+- 2026-09-29 — Fixed as proposed. `UspsAdapter` (domestic and international) and
+  `UpsAdapter` throw `UnreadablePurchaseResponseException` for every problem after a
+  2xx: `parseBody()` failing, a missing tracking number, an empty label part, missing
+  `ShipmentResults`, a missing label image, and a UPS body that is not JSON. Each logs
+  the raw body at error level first. The adapters rethrow it past their catch-all
+  `\Exception` handlers, and in UPS anything else that throws after the 2xx is converted
+  to it too. `buyPostage()` catches it before its `\RuntimeException` branch, leaves the
+  Offer unresolved and shows "the carrier accepted the purchase but its reply could not
+  be read". The next attempt then recovers the same label through the existing USPS
+  reprint and UPS Label Recovery. Where the reply carried a tracking number (UPS's
+  missing-label case), it is stored in the Offer's encrypted `purchase_context` under
+  `reported_tracking_number`, and the "Earlier Purchase Unresolved" refusal names it.
+  It is deliberately not written to `purchase_reference`, because that would make the
+  Offer read as resolved and let a new purchase through (`03`'s gap). The shared
+  `ShipResponse` rule was not attempted: FedEx still turns a timeout into a decline on
+  purpose. Also fixed along the way: the UPS label response debug log called
+  `json()`, which threw on a non-JSON body before `throw()`, so a 5xx with an HTML body
+  was settled as a decline. It now decodes safely. Two phpstan baseline entries for
+  `UspsAdapter` went away because the parsing now runs on a typed `LabelResponse`.
+  Regression tests are in `DirectCarrierPurchaseRecoveryTest`: the two Evidence tests,
+  each unreadable case per carrier, end-to-end recovery for both carriers, the reported
+  tracking number, and genuine 4xx declines still settling. All except the decline
+  cases fail without the fix.

@@ -24,6 +24,7 @@ use App\DataTransferObjects\Shipping\UnattendedRateSelection;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
+use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
 use App\Exceptions\MissingDeclaredValueException;
 use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Exceptions\ZeroValueCustomsItemException;
@@ -500,6 +501,30 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             // and may insist; only they can, since the remedy is a catalogue
             // PolyBag does not own.
             return PackageShippingResult::declaredWeightOverrideRequired($e->getMessage());
+        } catch (UnreadablePurchaseResponseException $e) {
+            // The carrier answered 2xx — the label exists and is paid for — but
+            // the adapter could not read the reply. Like a timeout, nothing
+            // settles the offer: the next attempt asks the carrier for the same
+            // label before buying another (`project-review/11`). The adapter
+            // has already logged the raw reply.
+            if ($offer !== null && $e->trackingNumber !== null) {
+                $this->offerStore->recordReportedTrackingNumber($offer, $e->trackingNumber);
+            }
+
+            logger()->error('Carrier accepted a purchase but its reply could not be read', [
+                'carrier' => $e->carrier,
+                'package_id' => $package->id,
+                'offer' => $offer?->public_id,
+                'tracking_number' => $e->trackingNumber,
+                'error' => $e->getMessage(),
+            ]);
+
+            return PackageShippingResult::failed(
+                'Carrier Reply Unreadable',
+                "{$e->carrier} accepted the purchase but its reply could not be read"
+                .($e->trackingNumber !== null ? " (tracking number {$e->trackingNumber})" : '')
+                .'. Try again to retrieve the same label; a second label will not be bought.',
+            );
         } catch (RequestTimeOutException|FatalRequestException|ServerException) {
             // No usable reply either way — a 5xx included, since the carrier
             // may have created the label before failing. Nothing here settles
@@ -804,9 +829,15 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             'offers' => $stillUnresolved->pluck('public_id')->all(),
         ]);
 
+        $reported = $stillUnresolved
+            ->map(fn (ShippingOffer $offer): mixed => $offer->purchase_context[OfferStore::REPORTED_TRACKING_NUMBER] ?? null)
+            ->filter(fn (mixed $trackingNumber): bool => is_string($trackingNumber))
+            ->implode(', ');
+
         return PackageShippingResult::offerUnavailable(
             'Earlier Purchase Unresolved',
             'A previous attempt to buy postage for this package did not report back, so a label may already exist. '
+            .($reported !== '' ? "The carrier reported tracking number {$reported}. " : '')
             .'Check the carrier or channel for a label on this package before buying again.',
         );
     }

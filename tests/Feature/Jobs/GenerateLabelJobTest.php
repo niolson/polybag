@@ -6,6 +6,7 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
 use App\Enums\ShippingRuleAction;
+use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
 use App\Jobs\GenerateLabelJob;
 use App\Models\Carrier;
 use App\Models\CarrierService;
@@ -154,6 +155,28 @@ it('keeps the package and its unresolved offer when the purchase goes unanswered
 
     expect($ctx['item']->status)->toBe(LabelBatchItemStatus::Failed)
         ->and($ctx['item']->error_message)->toContain('A label may already exist')
+        ->and($ctx['item']->package_id)->toBe($ctx['package']->id)
+        ->and(Package::find($ctx['package']->id))->not->toBeNull()
+        ->and(ShippingOffer::whereNotNull('consumed_at')->sole()->isAwaitingPurchaseConfirmation())->toBeTrue();
+});
+
+it('keeps the package and its unresolved offer when the carrier accepted but its reply could not be read', function (): void {
+    // project-review/11: a 2xx the adapter cannot read is a label that exists
+    // and is paid for, so the batch must not clean the package up either.
+    $ctx = createBatchContext();
+
+    $mockAdapter = Mockery::mock(CarrierAdapterInterface::class);
+    $mockAdapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
+    $mockAdapter->shouldReceive('createShipment')->once()
+        ->andThrow(new UnreadablePurchaseResponseException('MockCarrier', 'response missing label data'));
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $mockAdapter);
+
+    (new GenerateLabelJob($ctx['item']->id, 'pdf', null))->handle();
+
+    $ctx['item']->refresh();
+
+    expect($ctx['item']->status)->toBe(LabelBatchItemStatus::Failed)
         ->and($ctx['item']->package_id)->toBe($ctx['package']->id)
         ->and(Package::find($ctx['package']->id))->not->toBeNull()
         ->and(ShippingOffer::whereNotNull('consumed_at')->sole()->isAwaitingPurchaseConfirmation())->toBeTrue();

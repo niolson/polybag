@@ -3,9 +3,12 @@
 namespace App\Services\Carriers\Concerns;
 
 use App\DataTransferObjects\Shipping\RateRequest;
+use App\Exceptions\Carriers\CarrierException;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
+use App\Models\Package;
 use App\Models\ShippingOffer;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Resolves the carrier account for a shipment and reports configuration status.
@@ -78,6 +81,60 @@ trait ResolvesCarrierAccount
         return $offer->carrier_account_id === null
             ? $this->resolveAccount($locationId, $clientId)
             : CarrierAccount::query()->find($offer->carrier_account_id);
+    }
+
+    /**
+     * The account a Package's Label was bought on, for voiding or tracking it.
+     *
+     * The same rule as recovery and the manifest: the account recorded at
+     * purchase, never whichever account the scopes prefer now. A client
+     * account added after the purchase, or the buying account losing its
+     * scope, would otherwise send the void to an account that never bought
+     * the label and gets told "not found" (`project-review/06`). A
+     * deactivated account is still used: the label it bought exists either
+     * way. Only a Label that never recorded an account, bought before
+     * accounts were recorded, is resolved through the scopes.
+     *
+     * @throws CarrierException when the account that bought the Label has been deleted
+     */
+    private function labelAccount(Package $package): ?CarrierAccount
+    {
+        $fingerprint = $package->activeLabel()->value('carrier_account_fingerprint');
+
+        if ($package->carrier_account_id === null) {
+            // Deleting the account nulls the id (the FK is nullOnDelete) but
+            // leaves the fingerprint, so a fingerprint with no id is a gone
+            // account — see purchasingAccountChanged().
+            if ($fingerprint !== null) {
+                throw $this->labelAccountDeleted();
+            }
+
+            return $this->resolveAccount($package->location_id, $package->shipment?->client_id);
+        }
+
+        $account = CarrierAccount::query()->find($package->carrier_account_id)
+            ?? throw $this->labelAccountDeleted();
+
+        if ($fingerprint !== null && $fingerprint !== $account->fingerprint()) {
+            // Logged, not refused: the row is still the account the label was
+            // bought on, and refusing would leave a live label with no way to
+            // void it from here.
+            Log::warning('The carrier account a label was bought on bills as someone else now; using it anyway', [
+                'package_id' => $package->id,
+                'carrier_account_id' => $account->id,
+            ]);
+        }
+
+        return $account;
+    }
+
+    private function labelAccountDeleted(): CarrierException
+    {
+        return new CarrierException(
+            $this->getCarrierName(),
+            "The {$this->getCarrierName()} carrier account that bought this label has been deleted, so PolyBag cannot ask "
+            .'another account about it. Void or track it with the carrier directly.',
+        );
     }
 
     public function isConfigured(): bool
