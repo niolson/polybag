@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Contracts\PackageDraftWorkflow;
 use App\DataTransferObjects\PackageLabels\VoidedLabel;
 use App\DataTransferObjects\Shipping\ServiceInference;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\ContentClass;
+use App\Enums\PackageDraftState;
 use App\Enums\PackageStatus;
+use App\Enums\PickingStatus;
 use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
 use App\Enums\SpecialServiceSource;
@@ -15,6 +18,7 @@ use App\Enums\VoidReason;
 use App\Events\PackageCancelled;
 use App\Events\PackageShipped;
 use App\Services\CarrierNormalizer;
+use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\SpecialServiceResolver;
@@ -247,6 +251,74 @@ class Package extends Model
         return $query
             ->where('status', PackageStatus::Shipped)
             ->whereNotNull('label_data');
+    }
+
+    /**
+     * Each unshipped package's {@see PackageDraftState} as SQL, and null for
+     * any other status.
+     *
+     * Ready is the purchase's readiness rule, the one in
+     * {@see PackageDraftWorkflow::assertPackageReadyToShip()} plus the
+     * picking check the purchase makes before it, restated in SQL so the
+     * Packages list can show and filter it without loading every draft.
+     * PackageDraftStateTest holds the two versions together.
+     */
+    public static function draftStateSql(): string
+    {
+        $settings = app(SettingsService::class);
+        $unshipped = PackageStatus::Unshipped->value;
+
+        $shipmentMayShip = (bool) $settings->get('picking_enabled', false)
+            && (bool) $settings->get('require_picking_before_shipping', false)
+            ? "EXISTS (SELECT 1 FROM shipments WHERE shipments.id = packages.shipment_id AND shipments.picking_status = '".PickingStatus::Picked->value."')"
+            : 'EXISTS (SELECT 1 FROM shipments WHERE shipments.id = packages.shipment_id)';
+
+        // Scan-to-add and manual shipments have no shipment items, so they
+        // are complete by definition, as in the workflow.
+        $itemsComplete = (bool) $settings->get('packing_validation_enabled', true)
+            ? 'NOT EXISTS (SELECT 1 FROM shipment_items WHERE shipment_items.shipment_id = packages.shipment_id'
+                .' AND shipment_items.quantity <> (SELECT COALESCE(SUM(package_items.quantity), 0) FROM package_items'
+                .' WHERE package_items.package_id = packages.id AND package_items.shipment_item_id = shipment_items.id))'
+            : '1 = 1';
+
+        return "CASE
+            WHEN packages.status <> '{$unshipped}' THEN NULL
+            WHEN packages.box_size_id IS NULL
+                AND COALESCE(packages.weight, 0) <= 0 AND COALESCE(packages.height, 0) <= 0
+                AND COALESCE(packages.width, 0) <= 0 AND COALESCE(packages.length, 0) <= 0
+                AND NOT EXISTS (SELECT 1 FROM package_items WHERE package_items.package_id = packages.id AND package_items.quantity > 0)
+                THEN '".PackageDraftState::Empty->value."'
+            WHEN packages.weight > 0 AND packages.height > 0 AND packages.width > 0 AND packages.length > 0
+                AND {$shipmentMayShip} AND {$itemsComplete}
+                THEN '".PackageDraftState::Ready->value."'
+            ELSE '".PackageDraftState::Packing->value."'
+        END";
+    }
+
+    /**
+     * Adds `draft_state`, the {@see draftStateSql()} value, to each row.
+     *
+     * @param  Builder<Package>  $query
+     * @return Builder<Package>
+     */
+    public function scopeWithDraftState(Builder $query): Builder
+    {
+        if ($query->getQuery()->columns === null) {
+            $query->select($query->qualifyColumn('*'));
+        }
+
+        return $query->addSelect(DB::raw('('.self::draftStateSql().') AS draft_state'));
+    }
+
+    /**
+     * @param  Builder<Package>  $query
+     * @return Builder<Package>
+     */
+    public function scopeWhereDraftState(Builder $query, PackageDraftState $state): Builder
+    {
+        return $query
+            ->where('packages.status', PackageStatus::Unshipped)
+            ->whereRaw('('.self::draftStateSql().') = ?', [$state->value]);
     }
 
     /**
