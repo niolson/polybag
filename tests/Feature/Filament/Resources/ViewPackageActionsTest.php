@@ -13,6 +13,7 @@ use App\Models\Product;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\User;
+use Filament\Actions\Action;
 use Livewire\Livewire;
 
 function viewPackageReadyDraft(): Package
@@ -42,18 +43,18 @@ function viewPackageEmptyDraft(): Package
     ]);
 }
 
-it('sends an empty draft back to packing instead of offering to ship it', function (): void {
+it('offers only Pack for an empty draft', function (): void {
     $this->actingAs(User::factory()->create(['role' => Role::Manager]));
     $package = viewPackageEmptyDraft();
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
-        ->assertActionVisible('continuePacking')
-        ->assertActionHasUrl('continuePacking', '/pack/'.$package->shipment_id)
+        ->assertActionVisible('pack')
+        ->assertActionHasUrl('pack', '/pack/'.$package->shipment_id)
         ->assertActionHidden('buyAndPrintLabel')
         ->assertActionHidden('ship');
 });
 
-it('sends a measured draft with items still to pack back to packing', function (): void {
+it('offers only Pack for a measured draft with items still to pack', function (): void {
     $this->actingAs(User::factory()->create(['role' => Role::Manager]));
     $package = viewPackageReadyDraft();
     ShipmentItem::factory()->create([
@@ -63,38 +64,54 @@ it('sends a measured draft with items still to pack back to packing', function (
     ]);
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
-        ->assertActionVisible('continuePacking')
+        ->assertActionVisible('pack')
         ->assertActionHidden('buyAndPrintLabel')
         ->assertActionHidden('ship');
 });
 
-it('offers a shipper only the unattended purchase for a ready draft', function (): void {
+it('offers a shipper Pack and the unattended purchase for a ready draft', function (): void {
     $this->actingAs(User::factory()->create(['role' => Role::User]));
     $package = viewPackageReadyDraft();
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
-        ->assertActionHidden('continuePacking')
+        ->assertActionVisible('pack')
         ->assertActionVisible('buyAndPrintLabel')
         ->assertActionHidden('ship');
 });
 
-it('offers a manager both the unattended purchase and the Ship page for a ready draft', function (Role $role): void {
+it('offers a manager Pack, the Ship page and the unattended purchase for a ready draft', function (Role $role): void {
     $this->actingAs(User::factory()->create(['role' => $role]));
     $package = viewPackageReadyDraft();
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
-        ->assertActionHidden('continuePacking')
+        ->assertActionVisible('pack')
         ->assertActionVisible('buyAndPrintLabel')
         ->assertActionVisible('ship')
         ->assertActionHasUrl('ship', '/ship/'.$package->id);
 })->with([Role::Manager, Role::Admin]);
+
+it('orders a ready draft\'s actions Pack, Ship, Buy and print label, Edit', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Admin]));
+    $package = viewPackageReadyDraft();
+
+    $page = Livewire::test(ViewPackage::class, ['record' => $package->id])->instance();
+    expect($page)->toBeInstanceOf(ViewPackage::class);
+
+    $visible = collect($page instanceof ViewPackage ? $page->getCachedHeaderActions() : [])
+        ->filter(fn (Action $action): bool => $action->isVisible())
+        ->map(fn (Action $action): string => $action->getName())
+        ->values()
+        ->all();
+
+    expect($visible)->toBe(['pack', 'ship', 'buyAndPrintLabel', 'edit']);
+});
 
 it('offers none of the purchase actions for a shipped package', function (): void {
     $this->actingAs(User::factory()->create(['role' => Role::Admin]));
     $package = Package::factory()->shipped()->create();
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
-        ->assertActionHidden('continuePacking')
+        ->assertActionHidden('pack')
         ->assertActionHidden('buyAndPrintLabel')
         ->assertActionHidden('ship');
 });
@@ -106,16 +123,6 @@ it('shows the stored weight and when it was saved before buying', function (): v
     Livewire::test(ViewPackage::class, ['record' => $package->id])
         ->mountAction('buyAndPrintLabel')
         ->assertMountedActionModalSee(['2.50 lbs', '10 × 8 × 6 in', 'Last saved']);
-});
-
-it('offers to re-weigh on the Pack page instead of buying', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
-    $package = viewPackageReadyDraft();
-
-    Livewire::test(ViewPackage::class, ['record' => $package->id])
-        ->mountAction('buyAndPrintLabel')
-        ->assertMountedActionModalSee('Re-weigh on Pack page')
-        ->assertMountedActionModalSeeHtml('href="/pack/'.$package->shipment_id.'"');
 });
 
 it('buys unattended with the workstation printer settings and keeps the package on failure', function (): void {
@@ -206,5 +213,5 @@ it('does not let a shipper buy for a shipment that has already shipped', functio
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
         ->assertActionHidden('buyAndPrintLabel')
-        ->assertActionHidden('continuePacking');
+        ->assertActionHidden('pack');
 });
