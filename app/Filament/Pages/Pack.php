@@ -475,13 +475,13 @@ class Pack extends Page
             return;
         }
 
-        if (! $this->canAccessPackage($package)) {
+        if (auth()->user()->cannot('printLabel', $package)) {
             $this->notifyError('Access Denied', 'You can only cancel labels for packages you shipped.');
 
             return;
         }
 
-        $result = app(PackageLabelWorkflow::class)->voidLabel($package);
+        $result = app(PackageLabelWorkflow::class)->voidLabel($package, auth()->user());
 
         if ($result->success) {
             Session::forget('last_shipped_package_id');
@@ -491,22 +491,5 @@ class Pack extends Page
         }
 
         $this->notifyError($result->title, $result->message);
-    }
-
-    /**
-     * Check if the current user can access/modify a package.
-     * Users can only access packages they shipped, unless they are a manager or admin.
-     */
-    private function canAccessPackage(Package $package): bool
-    {
-        $user = auth()->user();
-
-        // Managers and admins can access any package
-        if ($user->role->isAtLeast(Role::Manager)) {
-            return true;
-        }
-
-        // Regular users can only access packages they shipped
-        return $package->shipped_by_user_id === $user->id;
     }
 }

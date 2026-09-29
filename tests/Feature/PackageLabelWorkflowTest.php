@@ -37,7 +37,7 @@ it('voids a shipped package label and clears shipping data', function (): void {
 
     app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 
-    $result = app(PackageLabelWorkflow::class)->voidLabel($package);
+    $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
 
     expect($result->success)->toBeTrue()
         ->and($result->message)->toBe('Label voided successfully.')
@@ -47,24 +47,41 @@ it('voids a shipped package label and clears shipping data', function (): void {
 });
 
 it('records the operator who voided the label on the label record', function (): void {
-    $operator = User::factory()->create();
-    $this->actingAs($operator);
+    $operator = User::factory()->create(['role' => Role::User]);
     $package = Package::factory()->shipped()->create([
         'carrier' => 'USPS',
         'tracking_number' => '9400111899223456789012',
+        'shipped_by_user_id' => $operator->id,
     ]);
 
     $adapter = Mockery::mock(DirectCarrierAdapter::class);
     $adapter->shouldReceive('cancelShipment')->once()->andReturn(CancelResponse::success('Label voided successfully.'));
     app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 
-    app(PackageLabelWorkflow::class)->voidLabel($package);
+    app(PackageLabelWorkflow::class)->voidLabel($package, $operator);
 
     $label = $package->labels()->sole();
 
     expect($label->void_reason)->toBe(VoidReason::Operator)
         ->and($label->voided_by_user_id)->toBe($operator->id)
         ->and($label->tracking_number)->toBe('9400111899223456789012');
+});
+
+it('refuses to void a label for a user who neither shipped the package nor is a manager', function (): void {
+    $package = Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'shipped_by_user_id' => User::factory()->create(['role' => Role::User])->id,
+    ]);
+
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldNotReceive('cancelShipment');
+    app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
+
+    $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->create(['role' => Role::User]));
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Access Denied')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
 });
 
 it('returns a failure result when carrier label voiding fails', function (): void {
@@ -80,7 +97,7 @@ it('returns a failure result when carrier label voiding fails', function (): voi
 
     app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 
-    $result = app(PackageLabelWorkflow::class)->voidLabel($package);
+    $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
 
     expect($result->success)->toBeFalse()
         ->and($result->title)->toBe('Void failed')
@@ -94,7 +111,7 @@ it('refuses to void a package that is not shipped', function (): void {
         'tracking_number' => '9400111899223456789012',
     ]);
 
-    $result = app(PackageLabelWorkflow::class)->voidLabel($package);
+    $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
 
     expect($result->success)->toBeFalse()
         ->and($result->title)->toBe('Package Not Found');
@@ -106,7 +123,7 @@ it('refuses to void a shipped package missing tracking information', function ()
         'tracking_number' => null,
     ]);
 
-    $result = app(PackageLabelWorkflow::class)->voidLabel($package);
+    $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
 
     expect($result->success)->toBeFalse()
         ->and($result->title)->toBe('Cannot Cancel');
@@ -125,7 +142,7 @@ it('reports a state change when voiding hits a runtime exception', function (): 
 
     app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 
-    $result = app(PackageLabelWorkflow::class)->voidLabel($package);
+    $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
 
     expect($result->success)->toBeFalse()
         ->and($result->title)->toBe('Package State Changed')
@@ -145,7 +162,7 @@ it('reports a carrier error when voiding hits a request exception', function ():
 
     app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 
-    $result = app(PackageLabelWorkflow::class)->voidLabel($package);
+    $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
 
     expect($result->success)->toBeFalse()
         ->and($result->title)->toBe('Carrier Error');
@@ -164,7 +181,7 @@ it('reports a generic error when voiding hits an unexpected exception', function
 
     app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 
-    $result = app(PackageLabelWorkflow::class)->voidLabel($package);
+    $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
 
     expect($result->success)->toBeFalse()
         ->and($result->title)->toBe('Cancel Error');
@@ -289,7 +306,7 @@ it('clears the printed timestamp when a label is voided', function (): void {
 
     app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 
-    app(PackageLabelWorkflow::class)->voidLabel($package);
+    app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
 
     expect($package->fresh()->label_printed_at)->toBeNull();
 });

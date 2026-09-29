@@ -1,5 +1,8 @@
 <?php
 
+use App\Contracts\DirectCarrierAdapter;
+use App\DataTransferObjects\Shipping\CancelResponse;
+use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Pages\EndOfDay;
 use App\Filament\Pages\Settings;
@@ -13,14 +16,17 @@ use App\Filament\Resources\Carriers\Pages\ListCarriers;
 use App\Filament\Resources\CarrierServiceResource\Pages\ListCarrierServices;
 use App\Filament\Resources\ChannelResource\Pages\ListChannels;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
+use App\Filament\Resources\PackageResource\Pages\ViewPackage;
 use App\Filament\Resources\ProductResource\Pages\ListProducts;
 use App\Filament\Resources\ShipmentResource\Pages\CreateShipment;
 use App\Filament\Resources\ShipmentResource\Pages\EditShipment;
 use App\Filament\Resources\ShipmentResource\Pages\ListShipments;
 use App\Filament\Resources\ShippingMethodResource\Pages\ListShippingMethods;
 use App\Filament\Resources\UserResource\Pages\ListUsers;
+use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\User;
+use App\Services\Carriers\CarrierRegistry;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\Testing\TestAction;
 use Livewire\Livewire;
@@ -267,4 +273,69 @@ describe('carrier accounts are Admin-only', function (): void {
 
         expect($this->account->fresh()->credentials['account_number'])->toBe('Z9Y8X7');
     });
+});
+
+describe('voiding a label', function (): void {
+    beforeEach(function (): void {
+        $adapter = Mockery::mock(DirectCarrierAdapter::class);
+        $adapter->shouldReceive('cancelShipment')->andReturn(CancelResponse::success('voided'));
+        app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
+
+        $this->shipper = User::factory()->create(['role' => Role::User]);
+        $this->package = Package::factory()->shipped()->for(Shipment::factory())->create([
+            'carrier' => 'USPS',
+            'shipped_by_user_id' => $this->shipper->id,
+        ]);
+    });
+
+    afterEach(function (): void {
+        app(CarrierRegistry::class)->reset();
+    });
+
+    it('does not let a user void a label someone else shipped from the packages table', function (): void {
+        $this->actingAs(User::factory()->create(['role' => Role::User]));
+
+        try {
+            Livewire::test(ListPackages::class)->callAction(TestAction::make('void')->table($this->package));
+        } catch (Throwable) {
+            // A refusal by exception is also a pass.
+        }
+
+        expect($this->package->fresh()->status)->toBe(PackageStatus::Shipped);
+    });
+
+    it('hides the void action from a user who did not ship the package', function (): void {
+        $this->actingAs(User::factory()->create(['role' => Role::User]));
+
+        Livewire::test(ListPackages::class)->assertActionHidden(TestAction::make('void')->table($this->package));
+        Livewire::test(ViewPackage::class, ['record' => $this->package->id])->assertActionHidden('void');
+    });
+
+    it('does not let a user void a label someone else shipped from View Package', function (): void {
+        $this->actingAs(User::factory()->create(['role' => Role::User]));
+
+        try {
+            Livewire::test(ViewPackage::class, ['record' => $this->package->id])->callAction('void');
+        } catch (Throwable) {
+            // A refusal by exception is also a pass.
+        }
+
+        expect($this->package->fresh()->status)->toBe(PackageStatus::Shipped);
+    });
+
+    it('lets the user who shipped the package void its label', function (): void {
+        $this->actingAs($this->shipper);
+
+        Livewire::test(ListPackages::class)->callAction(TestAction::make('void')->table($this->package));
+
+        expect($this->package->fresh()->status)->toBe(PackageStatus::Unshipped);
+    });
+
+    it('lets a :dataset void a label someone else shipped', function (Role $role): void {
+        $this->actingAs(User::factory()->create(['role' => $role]));
+
+        Livewire::test(ViewPackage::class, ['record' => $this->package->id])->callAction('void');
+
+        expect($this->package->fresh()->status)->toBe(PackageStatus::Unshipped);
+    })->with(['Manager' => Role::Manager, 'Admin' => Role::Admin]);
 });

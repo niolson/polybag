@@ -9,7 +9,11 @@ use App\Models\User;
 
 interface PackageLabelWorkflow
 {
-    public function voidLabel(Package $package): LabelVoidResult;
+    /**
+     * Void the active label through the postage source that sold it, if the user
+     * may handle that package's label.
+     */
+    public function voidLabel(Package $package, User $user): LabelVoidResult;
 
     public function labelForReprint(Package $package, User $user): LabelReprintResult;
 
