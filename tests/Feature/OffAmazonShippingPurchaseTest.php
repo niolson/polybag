@@ -295,7 +295,7 @@ it('voids through the connection that sold the label, keeps the Label as history
 
     Saloon::fake([CancelAmazonShipment::class => MockResponse::make(['payload' => []])]);
 
-    $result = app(PackageLabelWorkflow::class)->voidLabel($this->package->fresh());
+    $result = app(PackageLabelWorkflow::class)->voidLabel($this->package->fresh(), User::factory()->manager()->create());
 
     $package = $this->package->fresh();
     $label = $package->labels()->sole();

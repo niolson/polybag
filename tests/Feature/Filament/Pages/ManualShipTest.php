@@ -9,6 +9,7 @@ use App\Models\Package;
 use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
+use App\Models\ShippingOffer;
 use App\Models\User;
 use App\Services\SettingsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -122,6 +123,52 @@ it('uses the account auto-ship setting and redirects attended-only options to th
         ->assertNotified('Attended Shipping Required');
 
     $shipment = Shipment::where('shipment_reference', 'MAN-AUTO-1')->firstOrFail();
+    $package = Package::where('shipment_id', $shipment->id)->firstOrFail();
+
+    $component->assertRedirect('/ship/'.$package->id);
+
+    expect(session('ship_return_url'))->toBe('/manual-ship');
+});
+
+it('sends an unanswered purchase to its ship page rather than back to the form', function (): void {
+    // project-review/01: resubmitting the form would create a new package and
+    // buy again. The package's own Ship page asks the carrier first.
+    auth()->user()->update(['auto_ship_enabled' => true]);
+
+    Channel::factory()->create(['name' => 'Manual']);
+    $box = BoxSize::factory()->create();
+
+    $workflow = Mockery::mock(PackageShippingWorkflow::class);
+    $workflow->shouldReceive('autoShip')
+        ->once()
+        ->andReturnUsing(function (Package $package): PackageShippingResult {
+            ShippingOffer::factory()->awaitingConfirmation()->create(['package_id' => $package->id]);
+
+            return PackageShippingResult::failed('Carrier Timeout', 'The MockCarrier API is not responding.');
+        });
+    app()->instance(PackageShippingWorkflow::class, $workflow);
+
+    $component = Livewire::test(ManualShip::class)
+        ->fillForm([
+            'shipment_reference' => 'MAN-AUTO-2',
+            'first_name' => 'Sam',
+            'last_name' => 'Lee',
+            'address1' => '123 Main St',
+            'city' => 'Seattle',
+            'country' => 'US',
+            'state_or_province' => 'WA',
+            'postal_code' => '98101',
+            'shipping_method_id' => ShippingMethod::factory()->create()->id,
+            'box_size_id' => $box->id,
+            'weight' => 2.5,
+            'height' => 10,
+            'width' => 8,
+            'length' => 6,
+        ])
+        ->call('ship')
+        ->assertNotified('Carrier Timeout');
+
+    $shipment = Shipment::where('shipment_reference', 'MAN-AUTO-2')->firstOrFail();
     $package = Package::where('shipment_id', $shipment->id)->firstOrFail();
 
     $component->assertRedirect('/ship/'.$package->id);

@@ -60,6 +60,7 @@ class PackageLabel extends Model
         'tracking_number',
         'postage_source',
         'carrier_account_id',
+        'carrier_account_fingerprint',
         'postage_data_source_id',
         'carrier',
         'normalized_carrier_id',
@@ -136,7 +137,23 @@ class PackageLabel extends Model
             'package_id' => $package->id,
             'source_label_reference' => ShopifyAdapter::shippingLabelIdFor($package)
                 ?? AmazonBuyShippingAdapter::shipmentIdFor($package),
+            'carrier_account_fingerprint' => self::fingerprintOfAccount($package->carrier_account_id),
         ] + self::projectionFrom($package->getAttributes()));
+    }
+
+    /**
+     * The billing-identity digest of the account a Label is bought on.
+     *
+     * Stored beside `carrier_account_id`, which is null-on-delete, so a Label
+     * bought on an account since deleted can be told from one that never
+     * recorded an account — only the second may be voided or tracked on
+     * whichever account the scopes resolve now (`project-review/06`).
+     */
+    public static function fingerprintOfAccount(?int $carrierAccountId): ?string
+    {
+        return $carrierAccountId === null
+            ? null
+            : CarrierAccount::query()->find($carrierAccountId)?->fingerprint();
     }
 
     /**

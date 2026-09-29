@@ -16,6 +16,7 @@ use App\Models\ShippingOffer;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\FedexAdapter;
 use App\Services\Carriers\UspsAdapter;
+use App\Services\PostageSources\OfferStore;
 use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\PendingRequest;
@@ -280,3 +281,224 @@ it('settles a FedEx purchase that got no answer as a decline and says to try aga
         ->and($offer->purchase_failed_at)->not->toBeNull()
         ->and($offer->postage_source)->toBe(PostageSource::CarrierAccount);
 });
+
+// --- An unreadable 2xx (`project-review/11`) ---------------------------------
+
+/**
+ * A 2xx from the label endpoint means the label was created and charged, so a
+ * reply the adapter cannot read is an unknown outcome, never a decline: the
+ * offer stays unresolved and the next attempt recovers the same label.
+ */
+function uspsUnreadable(string $case): MockResponse
+{
+    return match ($case) {
+        'missing tracking number' => MockResponse::make(
+            body: "--b\r\nContent-Type: application/json\r\n\r\n{\"postage\":8.40}\r\n--b\r\nContent-Type: application/pdf\r\n\r\nJVBERi0xLjQ=\r\n--b--",
+            headers: ['Content-Type' => 'multipart/form-data; boundary=b'],
+        ),
+        'missing label part' => MockResponse::make(
+            body: "--b\r\nContent-Type: application/json\r\n\r\n{\"trackingNumber\":\"9200190414219000000011\",\"postage\":8.40}\r\n--b\r\nContent-Type: application/pdf\r\n\r\n\r\n--b--",
+            headers: ['Content-Type' => 'multipart/form-data; boundary=b'],
+        ),
+        'malformed multipart' => MockResponse::make(
+            body: 'not a multipart body',
+            headers: ['Content-Type' => 'multipart/form-data'],
+        ),
+        'metadata that is not an object' => MockResponse::make(
+            body: "--b\r\nContent-Type: application/json\r\n\r\n\"8.40\"\r\n--b\r\nContent-Type: application/pdf\r\n\r\nJVBERi0xLjQ=\r\n--b--",
+            headers: ['Content-Type' => 'multipart/form-data; boundary=b'],
+        ),
+        default => throw new InvalidArgumentException($case),
+    };
+}
+
+function upsUnreadable(string $case): MockResponse
+{
+    return match ($case) {
+        'missing shipment results' => MockResponse::make(['ShipmentResponse' => ['Response' => ['ResponseStatus' => ['Code' => '1']]]]),
+        'missing tracking number' => MockResponse::make(['ShipmentResponse' => ['ShipmentResults' => [
+            'PackageResults' => ['ShippingLabel' => ['GraphicImage' => 'R0lGODlhAQABAAAAACw=']],
+        ]]]),
+        'missing label image' => MockResponse::make(['ShipmentResponse' => ['ShipmentResults' => [
+            'ShipmentIdentificationNumber' => '1ZREVIEW',
+            'PackageResults' => [['TrackingNumber' => '1ZREVIEW', 'ShippingLabel' => []]],
+        ]]]),
+        'body that is not JSON' => MockResponse::make('<html>ok</html>', 200, ['Content-Type' => 'text/html']),
+        // A TypeError past the 2xx, not an Exception: it must still be unreadable.
+        'label image that is not a string' => MockResponse::make(['ShipmentResponse' => ['ShipmentResults' => [
+            'ShipmentIdentificationNumber' => '1ZREVIEW',
+            'PackageResults' => [['TrackingNumber' => '1ZREVIEW', 'ShippingLabel' => ['GraphicImage' => ['R0lGODlh']]]],
+        ]]]),
+        default => throw new InvalidArgumentException($case),
+    };
+}
+
+it('does not treat a USPS 200 it cannot read as a decline', function (): void {
+    $calls = 0;
+    Saloon::fake([
+        ...uspsAuthFakes(),
+        Label::class => function () use (&$calls): MockResponse {
+            $calls++;
+
+            return uspsUnreadable('missing tracking number');
+        },
+        LabelReprint::class => noAnswer(),
+    ]);
+
+    $workflow = app(PackageShippingWorkflow::class);
+    $workflow->ship($this->package, new PackageShippingRequest(selectedRate: uspsGroundAdvantage($this->package)));
+    $workflow->ship($this->package->fresh(), new PackageShippingRequest(selectedRate: uspsGroundAdvantage($this->package)));
+
+    expect($calls)->toBe(1);
+});
+
+it('does not treat a UPS 2xx it cannot read as a decline', function (): void {
+    $calls = 0;
+    Saloon::fake([
+        ...upsAuthFake(),
+        UpsCreateShipment::class => function () use (&$calls): MockResponse {
+            $calls++;
+
+            return upsUnreadable('missing label image');
+        },
+        LabelRecovery::class => noAnswer(),
+    ]);
+
+    $workflow = app(PackageShippingWorkflow::class);
+    $workflow->ship($this->package, new PackageShippingRequest(selectedRate: upsGround($this->package)));
+    $workflow->ship($this->package->fresh(), new PackageShippingRequest(selectedRate: upsGround($this->package)));
+
+    expect($calls)->toBe(1);
+});
+
+it('leaves a USPS purchase unresolved when its 2xx cannot be read', function (string $case): void {
+    Saloon::fake([...uspsAuthFakes(), Label::class => uspsUnreadable($case)]);
+    $rate = uspsGroundAdvantage($this->package);
+
+    $result = app(PackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: $rate));
+    $offer = ShippingOffer::where('public_id', $rate->offerId)->firstOrFail();
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Carrier Reply Unreadable')
+        ->and($result->message)->toContain('accepted the purchase but its reply could not be read')
+        ->and($offer->isAwaitingPurchaseConfirmation())->toBeTrue()
+        ->and($offer->purchase_failed_at)->toBeNull()
+        ->and($this->package->fresh()->status)->toBe(PackageStatus::Unshipped);
+})->with(['missing tracking number', 'missing label part', 'malformed multipart', 'metadata that is not an object']);
+
+it('leaves a UPS purchase unresolved when its 2xx cannot be read', function (string $case): void {
+    Saloon::fake([...upsAuthFake(), UpsCreateShipment::class => upsUnreadable($case)]);
+    $rate = upsGround($this->package);
+
+    $result = app(PackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: $rate));
+    $offer = ShippingOffer::where('public_id', $rate->offerId)->firstOrFail();
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Carrier Reply Unreadable')
+        ->and($offer->isAwaitingPurchaseConfirmation())->toBeTrue()
+        ->and($offer->purchase_failed_at)->toBeNull()
+        ->and($this->package->fresh()->status)->toBe(PackageStatus::Unshipped);
+})->with(['missing shipment results', 'missing tracking number', 'missing label image', 'body that is not JSON', 'label image that is not a string']);
+
+it('recovers the USPS label after an unreadable 2xx instead of buying another', function (): void {
+    Saloon::fake([...uspsAuthFakes(), Label::class => uspsUnreadable('missing tracking number')]);
+    $first = uspsGroundAdvantage($this->package);
+    app(PackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: $first));
+    $stalled = ShippingOffer::where('public_id', $first->offerId)->firstOrFail();
+    $key = $stalled->purchase_context[UspsAdapter::PURCHASE_CONTEXT_KEY];
+
+    // The first attempt's request stays in the fake's history, so a second
+    // purchase is counted rather than asserted absent.
+    $purchases = 0;
+    Saloon::fake([
+        ...uspsAuthFakes(),
+        LabelReprint::class => uspsMultipart('9200190414219000000011'),
+        Label::class => function () use (&$purchases): MockResponse {
+            $purchases++;
+
+            return uspsMultipart('9400111899223456789012');
+        },
+    ]);
+    $result = app(PackageShippingWorkflow::class)->ship($this->package->fresh(), new PackageShippingRequest(selectedRate: uspsGroundAdvantage($this->package)));
+
+    expect($result->success)->toBeTrue()
+        ->and($purchases)->toBe(0)
+        ->and($this->package->fresh()->tracking_number)->toBe('9200190414219000000011')
+        ->and($stalled->fresh()->purchase_reference)->toBe('9200190414219000000011');
+
+    Saloon::assertSent(fn ($request): bool => $request instanceof LabelReprint && $request->headers()->get('X-Idempotency-Key') === $key);
+});
+
+it('recovers the UPS label after an unreadable 2xx instead of buying another', function (): void {
+    Saloon::fake([...upsAuthFake(), UpsCreateShipment::class => upsUnreadable('missing label image')]);
+    $first = upsGround($this->package);
+    app(PackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: $first));
+    $stalled = ShippingOffer::where('public_id', $first->offerId)->firstOrFail();
+
+    // The tracking number UPS did report is kept on the offer, without
+    // resolving it, so a person can find the label if recovery cannot.
+    expect($stalled->purchase_context[OfferStore::REPORTED_TRACKING_NUMBER] ?? null)->toBe('1ZREVIEW')
+        ->and($stalled->isAwaitingPurchaseConfirmation())->toBeTrue();
+
+    $purchases = 0;
+    Saloon::fake([
+        ...upsAuthFake(),
+        LabelRecovery::class => upsRecovered('1ZREVIEW'),
+        UpsCreateShipment::class => function () use (&$purchases): MockResponse {
+            $purchases++;
+
+            return upsShipped('1Z9999999999999999');
+        },
+    ]);
+    $result = app(PackageShippingWorkflow::class)->ship($this->package->fresh(), new PackageShippingRequest(selectedRate: upsGround($this->package)));
+
+    expect($result->success)->toBeTrue()
+        ->and($purchases)->toBe(0)
+        ->and($this->package->fresh()->tracking_number)->toBe('1ZREVIEW')
+        ->and($stalled->fresh()->purchase_reference)->toBe('1ZREVIEW');
+
+    Saloon::assertSent(fn ($request): bool => $request instanceof LabelRecovery
+        && $request->body()->all()['LabelRecoveryRequest']['ReferenceValues']['ReferenceNumber']['Value'] === $stalled->public_id);
+});
+
+it('names the tracking number UPS reported when recovery cannot find the label either', function (): void {
+    Saloon::fake([...upsAuthFake(), UpsCreateShipment::class => upsUnreadable('missing label image'), LabelRecovery::class => noAnswer()]);
+    $workflow = app(PackageShippingWorkflow::class);
+
+    $first = $workflow->ship($this->package, new PackageShippingRequest(selectedRate: upsGround($this->package)));
+    $second = $workflow->ship($this->package->fresh(), new PackageShippingRequest(selectedRate: upsGround($this->package)));
+
+    expect($first->message)->toContain('1ZREVIEW')
+        ->and($second->title)->toBe('Earlier Purchase Unresolved')
+        ->and($second->message)->toContain('1ZREVIEW');
+});
+
+it('keeps the USPS idempotency key beside the tracking number a reply reported', function (): void {
+    // The label part is missing, but the metadata part names the label: both
+    // the key recovery asks by and the tracking number a person can look up
+    // must survive on the offer.
+    Saloon::fake([...uspsAuthFakes(), Label::class => uspsUnreadable('missing label part')]);
+    $rate = uspsGroundAdvantage($this->package);
+
+    $result = app(PackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: $rate));
+    $offer = ShippingOffer::where('public_id', $rate->offerId)->firstOrFail();
+
+    expect($result->message)->toContain('9200190414219000000011')
+        ->and($offer->purchase_context[UspsAdapter::PURCHASE_CONTEXT_KEY] ?? null)->toBeString()->toHaveLength(36)
+        ->and($offer->purchase_context[OfferStore::REPORTED_TRACKING_NUMBER] ?? null)->toBe('9200190414219000000011')
+        ->and($offer->isAwaitingPurchaseConfirmation())->toBeTrue();
+});
+
+it('still settles a genuine decline from USPS or UPS', function (string $carrier): void {
+    [$rate, $fakes] = $carrier === 'USPS'
+        ? [uspsGroundAdvantage($this->package), [...uspsAuthFakes(), Label::class => MockResponse::make(['error' => ['code' => '400', 'message' => 'Bad Request', 'errors' => [['code' => '020001', 'detail' => 'Invalid ZIP']]]], 400)]]
+        : [upsGround($this->package), [...upsAuthFake(), UpsCreateShipment::class => MockResponse::make(['response' => ['errors' => [['code' => '120100', 'message' => 'Missing or invalid shipper number']]]], 400)]];
+
+    $result = app(PackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: $rate));
+    $offer = ShippingOffer::where('public_id', $rate->offerId)->firstOrFail();
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Shipping Error')
+        ->and($offer->purchase_failed_at)->not->toBeNull()
+        ->and($offer->isAwaitingPurchaseConfirmation())->toBeFalse();
+})->with(['USPS', 'UPS']);

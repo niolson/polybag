@@ -24,6 +24,7 @@ use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Services\AddressValidationService;
 use App\Services\PackagingService;
+use App\Services\PostageSources\OfferStore;
 use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Forms;
@@ -259,6 +260,21 @@ class ManualShip extends Page implements HasForms
         );
 
         if (! $result->success) {
+            // The purchase never reported back, so a label may exist. Resubmitting
+            // this form would make a new package and buy again; the package's own
+            // Ship page asks the carrier first (`project-review/01`).
+            if (app(OfferStore::class)->hasUnresolvedPurchase($package)) {
+                Session::put('ship_return_url', '/manual-ship');
+                $this->notifyWarning(
+                    $result->title ?? 'Purchase Unconfirmed',
+                    ($result->message ?? 'The carrier did not confirm the purchase.')
+                    .' A label may already exist, so continue on this package\'s Ship page, which checks with the carrier before buying again.',
+                );
+                $this->redirect('/ship/'.$package->id);
+
+                return;
+            }
+
             if ($result->requiresAttendedSelection) {
                 Session::put('ship_return_url', '/manual-ship');
                 $this->notifyWarning($result->title ?? 'Attended Shipping Required', $result->message);

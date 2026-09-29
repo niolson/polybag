@@ -6,6 +6,7 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
 use App\Enums\ShippingRuleAction;
+use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
 use App\Jobs\GenerateLabelJob;
 use App\Models\Carrier;
 use App\Models\CarrierService;
@@ -16,9 +17,12 @@ use App\Models\PackageItem;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
+use App\Models\ShippingOffer;
 use App\Models\ShippingRule;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
+use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
+use Saloon\Http\Response;
 
 beforeEach(function (): void {
     app(CarrierRegistry::class)->reset();
@@ -132,6 +136,52 @@ it('handles label generation failure', function (): void {
     expect(Package::find($ctx['package']->id))->toBeNull();
 });
 
+it('keeps the package and its unresolved offer when the purchase goes unanswered', function (): void {
+    // project-review/01: the job deleted every unshipped package on failure,
+    // and the cascade took the offer recording that a label may exist — so
+    // the shipment was eligible for the next batch, which bought again.
+    $ctx = createBatchContext();
+
+    $mockAdapter = Mockery::mock(CarrierAdapterInterface::class);
+    $mockAdapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
+    $mockAdapter->shouldReceive('createShipment')->once()
+        ->andThrow(new RequestTimeOutException(Mockery::mock(Response::class), 'timed out'));
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $mockAdapter);
+
+    (new GenerateLabelJob($ctx['item']->id, 'pdf', null))->handle();
+
+    $ctx['item']->refresh();
+
+    expect($ctx['item']->status)->toBe(LabelBatchItemStatus::Failed)
+        ->and($ctx['item']->error_message)->toContain('A label may already exist')
+        ->and($ctx['item']->package_id)->toBe($ctx['package']->id)
+        ->and(Package::find($ctx['package']->id))->not->toBeNull()
+        ->and(ShippingOffer::whereNotNull('consumed_at')->sole()->isAwaitingPurchaseConfirmation())->toBeTrue();
+});
+
+it('keeps the package and its unresolved offer when the carrier accepted but its reply could not be read', function (): void {
+    // project-review/11: a 2xx the adapter cannot read is a label that exists
+    // and is paid for, so the batch must not clean the package up either.
+    $ctx = createBatchContext();
+
+    $mockAdapter = Mockery::mock(CarrierAdapterInterface::class);
+    $mockAdapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
+    $mockAdapter->shouldReceive('createShipment')->once()
+        ->andThrow(new UnreadablePurchaseResponseException('MockCarrier', 'response missing label data'));
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $mockAdapter);
+
+    (new GenerateLabelJob($ctx['item']->id, 'pdf', null))->handle();
+
+    $ctx['item']->refresh();
+
+    expect($ctx['item']->status)->toBe(LabelBatchItemStatus::Failed)
+        ->and($ctx['item']->package_id)->toBe($ctx['package']->id)
+        ->and(Package::find($ctx['package']->id))->not->toBeNull()
+        ->and(ShippingOffer::whereNotNull('consumed_at')->sole()->isAwaitingPurchaseConfirmation())->toBeTrue();
+});
+
 it('handles exceptions during label generation', function (): void {
     $ctx = createBatchContext();
 
@@ -147,11 +197,13 @@ it('handles exceptions during label generation', function (): void {
     $ctx['item']->refresh();
     $ctx['batch']->refresh();
 
+    // The exception came after the offer was claimed, so nobody knows whether
+    // a label was bought: the package is kept rather than cleaned up
+    // (project-review/01).
     expect($ctx['item']->status)->toBe(LabelBatchItemStatus::Failed)
-        ->and($ctx['item']->error_message)->toBe('Carrier API timeout')
-        ->and($ctx['batch']->failed_shipments)->toBe(1);
-
-    expect(Package::find($ctx['package']->id))->toBeNull();
+        ->and($ctx['item']->error_message)->toStartWith('Carrier API timeout')
+        ->and($ctx['batch']->failed_shipments)->toBe(1)
+        ->and(Package::find($ctx['package']->id))->not->toBeNull();
 });
 
 it('does nothing when batch item not found', function (): void {

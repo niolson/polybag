@@ -40,6 +40,12 @@ use Illuminate\Database\Eloquent\Collection;
  */
 class OfferStore
 {
+    /**
+     * The `purchase_context` key for a tracking number reported in an
+     * unreadable purchase reply.
+     */
+    public const REPORTED_TRACKING_NUMBER = 'reported_tracking_number';
+
     public function issue(Package $package, OfferDraft $draft): ShippingOffer
     {
         // The datetime cast formats the instant in whatever zone it arrives
@@ -237,6 +243,25 @@ class OfferStore
     }
 
     /**
+     * Keep a tracking number the source reported in a reply nobody could read.
+     *
+     * Not a resolution, and deliberately not `purchase_reference`: that would
+     * make the offer read as bought, and nothing would ask the source for the
+     * label. Merged into the encrypted `purchase_context` beside any key the
+     * adapter stored, so a person can find the label if recovery cannot —
+     * `project-review/11`.
+     */
+    public function recordReportedTrackingNumber(ShippingOffer $offer, string $trackingNumber): void
+    {
+        $offer->refresh();
+
+        $offer->update(['purchase_context' => [
+            ...($offer->purchase_context ?? []),
+            self::REPORTED_TRACKING_NUMBER => $trackingNumber,
+        ]]);
+    }
+
+    /**
      * Record that the source was asked about this offer and could not say.
      *
      * Not a resolution — the offer stays in
@@ -254,6 +279,20 @@ class OfferStore
             ->update(['recovery_unanswered_at' => now()]);
 
         $offer->refresh();
+    }
+
+    /**
+     * Whether a label may already exist for this package that nothing records.
+     *
+     * The question every cleanup path asks before deleting an unshipped
+     * package. The offer rows it looks at cascade with the package, so a
+     * delete would destroy the only evidence the purchase was ever attempted,
+     * and the next attempt would buy again with nothing to ask the source
+     * about (`project-review/01`).
+     */
+    public function hasUnresolvedPurchase(Package $package): bool
+    {
+        return $this->awaitingPurchaseConfirmation($package)->isNotEmpty();
     }
 
     /**

@@ -699,6 +699,7 @@ class Package extends Model
             // recorded on the package without its row.
             DB::table('package_labels')->insert(PackageLabel::projectionFrom($projected) + [
                 'package_id' => $this->id,
+                'carrier_account_fingerprint' => PackageLabel::fingerprintOfAccount($response->carrierAccountId),
                 'carrier_service_id' => $carrierServiceId,
                 'source_label_reference' => $response->sourceLabelReference,
                 'created_at' => $now,

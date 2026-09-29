@@ -24,6 +24,7 @@ use App\DataTransferObjects\Shipping\UnattendedRateSelection;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
+use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
 use App\Exceptions\MissingDeclaredValueException;
 use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Exceptions\ZeroValueCustomsItemException;
@@ -384,8 +385,9 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
         // Marked through the offer, which points at the row the quote log
         // wrote for exactly this rate. Nothing to mark for a blind purchase,
-        // which logged no quote, or for a rule's pre-selected rate, which
-        // never rate-shopped (`postage-source-split/17`).
+        // which logged no quote, or for a rule's pre-selected rate, whose
+        // offer points at no quote row because it never rate-shopped
+        // (`postage-source-split/17`).
         if ($offer !== null) {
             $this->rateQuoteLogger->markSelected($offer);
         }
@@ -499,6 +501,30 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             // and may insist; only they can, since the remedy is a catalogue
             // PolyBag does not own.
             return PackageShippingResult::declaredWeightOverrideRequired($e->getMessage());
+        } catch (UnreadablePurchaseResponseException $e) {
+            // The carrier answered 2xx — the label exists and is paid for — but
+            // the adapter could not read the reply. Like a timeout, nothing
+            // settles the offer: the next attempt asks the carrier for the same
+            // label before buying another (`project-review/11`). The adapter
+            // has already logged the raw reply.
+            if ($offer !== null && $e->trackingNumber !== null) {
+                $this->offerStore->recordReportedTrackingNumber($offer, $e->trackingNumber);
+            }
+
+            logger()->error('Carrier accepted a purchase but its reply could not be read', [
+                'carrier' => $e->carrier,
+                'package_id' => $package->id,
+                'offer' => $offer?->public_id,
+                'tracking_number' => $e->trackingNumber,
+                'error' => $e->getMessage(),
+            ]);
+
+            return PackageShippingResult::failed(
+                'Carrier Reply Unreadable',
+                "{$e->carrier} accepted the purchase but its reply could not be read"
+                .($e->trackingNumber !== null ? " (tracking number {$e->trackingNumber})" : '')
+                .'. Try again to retrieve the same label; a second label will not be bought.',
+            );
         } catch (RequestTimeOutException|FatalRequestException|ServerException) {
             // No usable reply either way — a 5xx included, since the carrier
             // may have created the label before failing. Nothing here settles
@@ -561,10 +587,19 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 return $result;
             }
 
-            // Through purchase() rather than ship(): a rule's pre-selected
-            // rate is resolved server-side and carries no offer, and this is
-            // the trusted side of the boundary ship() enforces. A rate from
-            // rate shopping does carry one, and is restored from it as usual.
+            // A rule's pre-selected rate is resolved server-side and never
+            // rate-shopped, so it arrives with no offer. It gets one here: not
+            // because it needs protecting from a browser it never reached, but
+            // because the offer is the recovery record — the claim, the
+            // unresolved state after a timeout, and the handle the carrier is
+            // asked about all live on it (`project-review/02`). A rate from
+            // rate shopping already carries one and is left as it is.
+            if ($selectedRate !== null) {
+                $selectedRate = $this->shippingRateService->offerForUnquotedRate($package, $selectedRate);
+            }
+
+            // Through purchase() rather than ship(): this is the trusted side
+            // of the boundary ship() enforces.
             $result = $this->purchase(
                 $package,
                 new PackageShippingRequest(
@@ -711,9 +746,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * what the packer reads and what the package will record — would find a
      * direct adapter we do not have and hold no account with.
      *
-     * A rate with no offer behind it is a rule's pre-selected rate, resolved
-     * server-side on the unattended path and never rate-shopped, and
-     * dispatches by carrier name exactly as it always did.
+     * Every rate reaching a purchase carries an offer now — ship() refuses one
+     * that does not, and autoShip() issues one for a rule's pre-selected rate.
+     * The carrier-name fallback is for a caller that bypasses both, and
+     * dispatches exactly as a direct offer would.
      */
     private function sellerFor(?ShippingOffer $offer, ?RateResponse $selectedRate): ?PostageOfferSource
     {
@@ -793,9 +829,15 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             'offers' => $stillUnresolved->pluck('public_id')->all(),
         ]);
 
+        $reported = $stillUnresolved
+            ->map(fn (ShippingOffer $offer): mixed => $offer->purchase_context[OfferStore::REPORTED_TRACKING_NUMBER] ?? null)
+            ->filter(fn (mixed $trackingNumber): bool => is_string($trackingNumber))
+            ->implode(', ');
+
         return PackageShippingResult::offerUnavailable(
             'Earlier Purchase Unresolved',
             'A previous attempt to buy postage for this package did not report back, so a label may already exist. '
+            .($reported !== '' ? "The carrier reported tracking number {$reported}. " : '')
             .'Check the carrier or channel for a label on this package before buying again.',
         );
     }
@@ -1652,6 +1694,12 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
     private function cleanupPackage(Package $package, PackageAutoShippingRequest $request, PackageShippingResult $result): void
     {
         if (! $request->cleanupOnFailure || $result->success || $result->leavePackageIntact) {
+            return;
+        }
+
+        // A timeout reads as a plain failure, but the offer it spent is the
+        // only record that a label may exist, and it would go with the package.
+        if ($this->offerStore->hasUnresolvedPurchase($package)) {
             return;
         }
 

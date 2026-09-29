@@ -518,6 +518,7 @@ class PackageResource extends Resource
                         ->icon('heroicon-o-x-circle')
                         ->color('danger')
                         ->requiresConfirmation()
+                        ->authorize('printLabel')
                         ->modalHeading('Void Label')
                         ->modalDescription('This will cancel the label with the carrier. The package will be kept with its dimensions so it can be re-shipped.')
                         ->visible(fn (Package $record): bool => $record->status === PackageStatus::Shipped
@@ -530,7 +531,7 @@ class PackageResource extends Resource
                             ? 'Bought through Shopify Shipping — void and refund it in the Shopify admin. PolyBag un-ships the package once Shopify reports the label voided.'
                             : null)
                         ->action(function (Package $record): void {
-                            $result = app(PackageLabelWorkflow::class)->voidLabel($record);
+                            $result = app(PackageLabelWorkflow::class)->voidLabel($record, auth()->user());
 
                             $notification = Notification::make()
                                 ->title($result->title)

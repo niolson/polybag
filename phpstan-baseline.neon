@@ -1249,18 +1249,6 @@ parameters:
 			path: app/Services/Carriers/UpsAdapter.php
 
 		-
-			message: '#^Access to an undefined property Saloon\\Http\\Response\:\:\$metadata\.$#'
-			identifier: property.notFound
-			count: 5
-			path: app/Services/Carriers/UspsAdapter.php
-
-		-
-			message: '#^Call to an undefined method Saloon\\Http\\Response\:\:parseBody\(\)\.$#'
-			identifier: method.notFound
-			count: 2
-			path: app/Services/Carriers/UspsAdapter.php
-
-		-
 			message: '#^Expression on left side of \?\? is not nullable\.$#'
 			identifier: nullCoalesce.expr
 			count: 1

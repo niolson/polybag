@@ -31,6 +31,7 @@ use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\ShippingMethodPostageSource;
 use App\Models\ShippingOffer;
+use App\Models\User;
 use App\Services\AmazonBuyShippingService;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\PackageShipping\EloquentPackageShippingWorkflow;
@@ -1563,7 +1564,7 @@ it('forgets the Amazon shipment once its label is voided, so a re-ship confirms 
 
     // The first live void left the shipment ID behind (`03`), and the
     // channel export reads it as "Amazon already confirmed this order".
-    $result = app(PackageLabelWorkflow::class)->voidLabel($package);
+    $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
 
     expect($result->success)->toBeTrue()
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped)
