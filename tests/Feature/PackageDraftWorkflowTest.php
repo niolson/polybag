@@ -314,6 +314,24 @@ it('rejects batch package drafts when an active package draft already exists', f
     );
 })->throws(PackageDraftInvalidException::class, 'already has an active package draft');
 
+it('rejects batch package drafts for a shipment another package has partly shipped', function (): void {
+    $shipment = Shipment::factory()->create();
+    $item = ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'quantity' => 1]);
+    ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'quantity' => 1]);
+    $shipped = Package::factory()->shipped()->create(['shipment_id' => $shipment->id]);
+    PackageItem::create(['package_id' => $shipped->id, 'shipment_item_id' => $item->id,
+        'product_id' => $item->product_id, 'quantity' => 1]);
+
+    try {
+        app(PackageDraftWorkflow::class)->createBatchReadyDraft(
+            $shipment,
+            new BatchPackageDraftInput(BoxSize::factory()->create()),
+        );
+    } finally {
+        expect(Package::where('shipment_id', $shipment->id)->where('status', PackageStatus::Unshipped)->exists())->toBeFalse();
+    }
+})->throws(PackageDraftInvalidException::class, 'partly shipped');
+
 it('saves scan-to-add items with null shipment_item_id when shipment has no items', function (): void {
     $shipment = Shipment::factory()->create();
     $product = Product::factory()->create();
