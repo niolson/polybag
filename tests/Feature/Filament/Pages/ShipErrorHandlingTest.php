@@ -6,6 +6,8 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PackageStatus;
+use App\Enums\Role;
+use App\Enums\ShipmentStatus;
 use App\Filament\Pages\Ship;
 use App\Models\BoxSize;
 use App\Models\Carrier;
@@ -32,7 +34,7 @@ beforeEach(function (): void {
 function createShippablePackageForErrorTest(): Package
 {
     $boxSize = BoxSize::factory()->create();
-    $product = Product::factory()->create();
+    $product = Product::factory()->create(['weight' => 1.0]);
 
     $carrier = Carrier::factory()->usps()->create();
     $carrierService = CarrierService::factory()->uspsGroundAdvantage()->create(['carrier_id' => $carrier->id]);
@@ -40,14 +42,14 @@ function createShippablePackageForErrorTest(): Package
     $shippingMethod->carrierServices()->attach($carrierService->id);
 
     $shipment = Shipment::factory()->create(['shipping_method_id' => $shippingMethod->id]);
-    ShipmentItem::factory()->create([
+    $shipmentItem = ShipmentItem::factory()->create([
         'shipment_id' => $shipment->id,
         'product_id' => $product->id,
         'quantity' => 1,
         'transparency' => false,
     ]);
 
-    return Package::create([
+    $package = Package::create([
         'shipment_id' => $shipment->id,
         'box_size_id' => $boxSize->id,
         'weight' => 2.0,
@@ -56,6 +58,14 @@ function createShippablePackageForErrorTest(): Package
         'length' => 6,
         'status' => PackageStatus::Unshipped,
     ]);
+
+    $package->packageItems()->create([
+        'shipment_item_id' => $shipmentItem->id,
+        'product_id' => $product->id,
+        'quantity' => 1,
+    ]);
+
+    return $package;
 }
 
 function registerMockAdapterForErrorTest(ShipResponse $response): void
@@ -177,6 +187,64 @@ it('ship warns and redirects when package is already shipped', function (): void
     Livewire::test(Ship::class, ['package_id' => $package->id])
         ->assertRedirect('/pack')
         ->assertNotified();
+});
+
+it('ship sends a package with no measurements back to the Pack page instead of quoting it', function (): void {
+    // A Package Draft is created when its shipment opens on the Pack page, so
+    // leaving before a box is scanned leaves one with nothing to rate.
+    $package = createShippablePackageForErrorTest();
+    $package->update(['weight' => 0, 'height' => null, 'width' => null, 'length' => null]);
+
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldNotReceive('getRates');
+    app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
+
+    Livewire::test(Ship::class, ['package_id' => $package->id])
+        ->assertRedirect('/pack/'.$package->shipment_id)
+        ->assertNotified('Not Ready');
+});
+
+it('ship sends a package with unpacked items back to the Pack page', function (): void {
+    $package = createShippablePackageForErrorTest();
+    $package->packageItems()->delete();
+
+    Livewire::test(Ship::class, ['package_id' => $package->id])
+        ->assertRedirect('/pack/'.$package->shipment_id)
+        ->assertNotified('Not Ready');
+});
+
+it('ship refuses a shipper another package for a shipment that has already shipped', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $package = createShippablePackageForErrorTest();
+    $package->shipment->update(['status' => ShipmentStatus::Shipped]);
+
+    Livewire::test(Ship::class, ['package_id' => $package->id])
+        ->assertForbidden();
+});
+
+it('ship refuses a shipper whose shipment shipped from another station after the page opened', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $package = createShippablePackageForErrorTest();
+    registerThrowingAdapterForErrorTest(new RuntimeException('must not be asked to buy'));
+
+    $component = setUpShipComponentWithRate($package);
+    $package->shipment->update(['status' => ShipmentStatus::Shipped]);
+
+    $component->call('ship')
+        ->assertNotified('Not Allowed')
+        ->assertNotDispatched('print-label');
+
+    expect($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});
+
+it('ship still tells a shipper a bought package has shipped, rather than forbidding it', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $shipment = Shipment::factory()->create(['status' => ShipmentStatus::Shipped]);
+    $package = Package::factory()->shipped()->for($shipment)->create();
+
+    Livewire::test(Ship::class, ['package_id' => $package->id])
+        ->assertRedirect('/pack')
+        ->assertNotified('Already Shipped');
 });
 
 it('ship disables ship action when no rates available', function (): void {

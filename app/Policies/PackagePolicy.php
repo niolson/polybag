@@ -2,9 +2,11 @@
 
 namespace App\Policies;
 
+use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Models\Package;
 use App\Models\User;
+use Illuminate\Auth\Access\Response;
 
 class PackagePolicy
 {
@@ -33,9 +35,19 @@ class PackagePolicy
         return $user->role->isAtLeast(Role::Admin);
     }
 
-    public function ship(User $user, Package $package): bool
+    public function ship(User $user, Package $package): Response|bool
     {
-        return $user->role->isAtLeast(Role::User);
+        if (! $user->role->isAtLeast(Role::User)) {
+            return false;
+        }
+
+        // A package already bought is refused by the Ship page itself, with a
+        // better message than this one.
+        if ($package->status === PackageStatus::Shipped || ! $package->shipment || $user->can('reship', $package->shipment)) {
+            return true;
+        }
+
+        return Response::deny('This shipment has already shipped. Only a manager can send another package for it.');
     }
 
     /**

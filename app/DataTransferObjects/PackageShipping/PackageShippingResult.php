@@ -74,6 +74,16 @@ readonly class PackageShippingResult
         );
     }
 
+    /**
+     * The package is not ready to buy for: unmeasured, not fully packed, or
+     * its shipment not yet picked. Leaves the package intact, since the
+     * remedy is finishing it on the Pack page.
+     */
+    public static function notReady(string $message): self
+    {
+        return new self(success: false, title: 'Not Ready', message: $message, leavePackageIntact: true);
+    }
+
     public static function customsWeightOverrideRequired(): self
     {
         return new self(

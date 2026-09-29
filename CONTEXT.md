@@ -120,6 +120,8 @@ _Avoid_: Report printer (in anything a user reads)
 - A **Package Draft** becomes a shipped **Package** when label purchase succeeds.
 - For now, a **Shipment** should have at most one active **Package Draft** in the packing workflow.
 - When a **Package Draft** exists, the packing workflow resumes from the draft as source of truth.
+- Opening a **Shipment** in the packing workflow does not create a **Package Draft**; the first saved packing progress (a box, a measurement, or a packed item) does, and progress is saved as it happens.
+- A **Package Draft** may only be bought for once it has positive weight and dimensions and, when packing validation is on, every item packed — whichever page the purchase starts from.
 - `PackageCreated` means the **Package Draft** was first persisted as a Package row, not that it is ready for label purchase.
 - A shipped **Package** has exactly one **postage source**, recorded explicitly rather than inferred from which pointer is set.
 - A **carrier of record** and a **postage source** are independent: postage bought from one can move on a parcel carried by any carrier.

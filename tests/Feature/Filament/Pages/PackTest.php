@@ -7,6 +7,7 @@ use App\DataTransferObjects\Shipping\CancelResponse;
 use App\Enums\PackageStatus;
 use App\Enums\PickingStatus;
 use App\Enums\Role;
+use App\Enums\ShipmentStatus;
 use App\Filament\Pages\Pack;
 use App\Models\BoxSize;
 use App\Models\Client;
@@ -926,3 +927,137 @@ it('lets the shipper cancel the last label they shipped', function (): void {
 
     expect($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 })->after(fn () => app(CarrierRegistry::class)->reset());
+
+it('creates no package draft just for opening a shipment', function (): void {
+    $shipment = Shipment::factory()->create();
+    ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'transparency' => false]);
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->assertSet('shipment.id', $shipment->id)
+        ->assertSet('boxSizeId', null)
+        ->assertSet('weight', '');
+
+    expect(Package::where('shipment_id', $shipment->id)->exists())->toBeFalse();
+});
+
+it('saves packing progress as a package draft that the next visit resumes, box and measurements included', function (): void {
+    $boxSize = BoxSize::factory()->create();
+    $product = Product::factory()->create(['barcode' => '1234567890123']);
+    $shipment = Shipment::factory()->create();
+    $shipmentItem = ShipmentItem::factory()->create([
+        'shipment_id' => $shipment->id,
+        'product_id' => $product->id,
+        'quantity' => 2,
+        'transparency' => false,
+    ]);
+
+    $packingItems = [[
+        'id' => $shipmentItem->id,
+        'product_id' => $product->id,
+        'quantity' => 2,
+        'packed' => 1,
+        'transparency_codes' => [],
+    ]];
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->call('saveDraft', $packingItems, $boxSize->id, '1.75', '10', '8', '6')
+        ->assertNotNotified();
+
+    $draft = Package::where('shipment_id', $shipment->id)->sole();
+
+    expect($draft->status)->toBe(PackageStatus::Unshipped)
+        ->and($draft->box_size_id)->toBe($boxSize->id)
+        ->and((float) $draft->weight)->toBe(1.75)
+        ->and($draft->packageItems->sole()->quantity)->toBe(1);
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->assertSet('boxSizeId', $boxSize->id)
+        ->assertSet('weight', '1.75')
+        ->assertSet('height', '10.00')
+        ->assertSet('packingItems.0.packed', 1);
+
+    expect(Package::where('shipment_id', $shipment->id)->count())->toBe(1);
+});
+
+it('warns that a shipped shipment has gone out, and still saves packing progress for it', function (): void {
+    // A replacement parcel is packed this way. The page says so rather than
+    // letting the packer think it is the first, and does not drop their work.
+    $shipment = Shipment::factory()->create(['status' => ShipmentStatus::Shipped]);
+    $item = ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'quantity' => 1, 'transparency' => false]);
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->assertNotified('Already Shipped')
+        ->call('saveDraft', [[
+            'id' => $item->id,
+            'product_id' => $item->product_id,
+            'quantity' => 1,
+            'packed' => 1,
+            'transparency_codes' => [],
+        ]], null, '0.00', '10', '8', '6');
+
+    expect(Package::where('shipment_id', $shipment->id)->sole()->packageItems)->toHaveCount(1);
+});
+
+it('warns rather than failing when packing progress cannot be saved', function (): void {
+    $shipment = Shipment::factory()->create();
+    $otherItem = ShipmentItem::factory()->create();
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->call('saveDraft', [[
+            'id' => $otherItem->id,
+            'product_id' => $otherItem->product_id,
+            'quantity' => 1,
+            'packed' => 1,
+            'transparency_codes' => [],
+        ]], null, '', '', '', '')
+        ->assertNotified('Progress Not Saved');
+
+    expect(Package::where('shipment_id', $shipment->id)->exists())->toBeFalse();
+});
+
+it('turns a shipper away from a shipment that has already shipped', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $shipment = Shipment::factory()->create(['status' => ShipmentStatus::Shipped]);
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->assertRedirect('/pack')
+        ->assertNotified('Already Shipped')
+        ->assertSet('shipment', null);
+});
+
+it('lets a manager pack a shipment that has already shipped, with a warning', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+    $shipment = Shipment::factory()->create(['status' => ShipmentStatus::Shipped]);
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->assertNoRedirect()
+        ->assertSet('shipment.id', $shipment->id)
+        ->assertNotified('Already Shipped');
+});
+
+it('stops a shipper saving or shipping once another station has shipped the shipment', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $boxSize = BoxSize::factory()->create();
+    $shipment = Shipment::factory()->create();
+    $item = ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'quantity' => 1, 'transparency' => false]);
+    $packingItems = [[
+        'id' => $item->id,
+        'product_id' => $item->product_id,
+        'quantity' => 1,
+        'packed' => 1,
+        'transparency_codes' => [],
+    ]];
+
+    $page = Livewire::test(Pack::class, ['shipment_id' => $shipment->id]);
+    $shipment->update(['status' => ShipmentStatus::Shipped]);
+
+    $page->call('saveDraft', $packingItems, $boxSize->id, '2.0', '10', '8', '6')
+        ->assertNotified('Progress Not Saved');
+
+    $page->call('ship', $packingItems, $boxSize->id, '2.0', '10', '8', '6', false)
+        ->assertNotified('Already Shipped')
+        ->assertDispatched('shipping-error')
+        ->assertNoRedirect();
+
+    expect(Package::where('shipment_id', $shipment->id)->exists())->toBeFalse();
+});

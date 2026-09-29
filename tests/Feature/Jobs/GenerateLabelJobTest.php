@@ -60,6 +60,7 @@ function createBatchContext(): array
         'package_id' => $package->id,
         'shipment_item_id' => $shipmentItem->id,
         'product_id' => $shipmentItem->product_id,
+        'quantity' => $shipmentItem->quantity,
     ]);
 
     $batch = LabelBatch::factory()->processing()->create([
