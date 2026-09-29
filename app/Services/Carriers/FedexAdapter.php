@@ -20,6 +20,7 @@ use App\Enums\CustomsDocumentDelivery;
 use App\Enums\FedexPackageType;
 use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
+use App\Exceptions\Carriers\CarrierException;
 use App\Http\Integrations\Fedex\FedexConnector;
 use App\Http\Integrations\Fedex\FedexRegistrationProxyConnector;
 use App\Http\Integrations\Fedex\Requests\CancelShipment as CancelShipmentRequest;
@@ -790,9 +791,9 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
 
     public function cancelShipment(string $trackingNumber, Package $package): CancelResponse
     {
-        $account = $this->resolveAccount($package->location_id, $package->shipment?->client_id);
-
         try {
+            // The account that bought the label — see labelAccount().
+            $account = $this->labelAccount($package);
             $connector = $this->resolveConnector($account);
 
             $apiRequest = new CancelShipmentRequest;
@@ -827,9 +828,8 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
             if (config('services.oauth.broker_url')) {
                 $connector = new FedexRegistrationProxyConnector;
             } else {
-                $connector = $this->resolveConnector(
-                    $this->resolveAccount($package->location_id, $package->shipment?->client_id)
-                );
+                // The account that bought the label — see labelAccount().
+                $connector = $this->resolveConnector($this->labelAccount($package));
             }
 
             $trackRequest = new TrackShipment($package->tracking_number);
@@ -885,6 +885,9 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
                     'raw' => $response->json(),
                 ],
             );
+        } catch (CarrierException $e) {
+            // The account that bought the label is gone — see labelAccount().
+            return TrackShipmentResponse::failure($e->getMessage());
         } catch (\Throwable $e) {
             Log::channel('fedex-validation')->error('FedEx trackShipment error', [
                 'tracking_number' => $package->tracking_number,

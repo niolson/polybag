@@ -21,6 +21,7 @@ use App\Enums\CarrierPackaging;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
+use App\Exceptions\Carriers\CarrierException;
 use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
@@ -308,9 +309,13 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
 
     public function trackShipment(Package $package): TrackShipmentResponse
     {
-        $connector = $this->resolveConnector(
-            $this->resolveAccount($package->location_id, $package->shipment?->client_id)
-        );
+        try {
+            $account = $this->labelAccount($package);
+        } catch (CarrierException $e) {
+            return TrackShipmentResponse::failure($e->getMessage());
+        }
+
+        $connector = $this->resolveConnector($account);
         $trackRequest = new TrackShipment($package->tracking_number);
         $requestUri = rtrim($connector->resolveBaseUrl(), '/').$trackRequest->resolveEndpoint();
 
@@ -817,9 +822,8 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
     public function cancelShipment(string $trackingNumber, Package $package): CancelResponse
     {
         try {
-            $connector = $this->resolveConnector(
-                $this->resolveAccount($package->location_id, $package->shipment?->client_id)
-            );
+            // The account that bought the label — see labelAccount().
+            $connector = $this->resolveConnector($this->labelAccount($package));
 
             $apiRequest = new VoidShipment($trackingNumber);
 

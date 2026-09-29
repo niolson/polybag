@@ -22,6 +22,7 @@ use App\Enums\CarrierPackaging;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
+use App\Exceptions\Carriers\CarrierException;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
 use App\Http\Integrations\USPS\Requests\CancelInternationalLabel;
@@ -671,9 +672,13 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
 
     public function trackShipment(Package $package): TrackShipmentResponse
     {
-        $connector = USPSConnector::getAuthenticatedConnector(
-            $this->resolveAccount($package->location_id, $package->shipment?->client_id)
-        );
+        try {
+            $account = $this->labelAccount($package);
+        } catch (CarrierException $e) {
+            return TrackShipmentResponse::failure($e->getMessage());
+        }
+
+        $connector = USPSConnector::getAuthenticatedConnector($account);
 
         try {
             $trackRequest = new TrackShipment($package->tracking_number);
@@ -1177,7 +1182,8 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
     public function cancelShipment(string $trackingNumber, Package $package): CancelResponse
     {
         try {
-            $account = $this->resolveAccount($package->location_id, $package->shipment->client_id);
+            // The account that bought the label — see labelAccount().
+            $account = $this->labelAccount($package);
             $connector = USPSConnector::getAuthenticatedConnector($account);
             $paymentAuthorizationToken = USPSConnector::getUspsPaymentAuthorizationToken($account?->id);
             $isInternational = $package->shipment->country !== 'US';
