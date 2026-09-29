@@ -1,6 +1,6 @@
 # Batch ship buys a label for items a partly shipped order has already sent
 
-Status: needs-triage
+Status: done — 2026-09-29
 
 Repo: `polybag`
 
@@ -70,3 +70,14 @@ validation and the draft run in one request today, but the lock is where the dec
 safe.
 
 ## Comments
+
+- 2026-09-29 — Built **Skip it**. `BatchLabelService::getIneligibilityReason()` returns
+  `Partly shipped` when any Package of the Shipment is shipped, checked right after the
+  existing *Has existing unshipped packages* skip. `createBatchReadyDraft()` re-checks
+  inside its shipment lock and throws `PackageDraftInvalidException` ("Shipment is partly
+  shipped; finish it on the Pack page.") before creating a draft. `batchDraftInput()` and
+  `hasCompletePackedItems()` are unchanged, since batch drafts are now only built for
+  orders with nothing shipped. Regression tests: the Evidence test and a
+  `Partly shipped` reason test in `BatchLabelServiceTest`, and the lock re-check in
+  `PackageDraftWorkflowTest`. All three fail without the fix. *Ship the remainder* is
+  still possible later if partly shipped orders should batch.
