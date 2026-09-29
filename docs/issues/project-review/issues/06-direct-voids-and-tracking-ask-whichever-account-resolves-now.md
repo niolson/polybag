@@ -1,6 +1,6 @@
 # Direct voids and tracking ask whichever account resolves now, not the one that bought the label
 
-Status: needs-triage
+Status: done — 2026-09-29
 
 Repo: `polybag`
 
@@ -112,3 +112,25 @@ manifest already do.
   account) and one tracking case.
 
 ## Comments
+
+- 2026-09-29 — Fixed as proposed for USPS, UPS and FedEx. `ResolvesCarrierAccount::labelAccount()`
+  returns the account in the Package's `carrier_account_id`, deactivated or not, and
+  falls back to scope resolution only for a Label that never recorded an account.
+  `cancelShipment()` and `trackShipment()` in all three adapters use it. To tell a
+  deleted account apart from one that was never recorded, a new
+  `package_labels.carrier_account_fingerprint` (the `CarrierAccount::fingerprint()`
+  digest) is written by `markShipped()` and `PackageLabel::createFromPackage()`, and a
+  migration backfills it from accounts that still exist. A fingerprint with no id means
+  the account was deleted. The void or tracking request is then refused with a message
+  saying the account that bought the label has been deleted, and nothing is sent.
+  Differs from the proposal in two ways. A fingerprint that no longer matches (the
+  account's billing identity was edited) is logged but not refused, because refusing
+  would leave a live label that can't be voided from PolyBag. And
+  `ManifestService::resolveUspsAccount()` is unchanged: it already prefers the recorded
+  account, and a refusal there would fail a whole SCAN form over one package, which is
+  a decision of its own. Labels whose account was deleted before this migration have
+  no fingerprint and still fall back to resolution. Regression tests are in
+  `DirectLabelAccountTest`: the FedEx void from Evidence, a USPS void (payment token
+  CRID), USPS and FedEx tracking, a deactivated account, a deleted account for void
+  and for tracking, the legacy fallback, the fingerprint written at purchase, and the
+  backfill. All except the legacy fallback fail without the fix.
