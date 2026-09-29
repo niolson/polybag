@@ -861,14 +861,9 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
      */
     private function readVoidReply(Response $response, string $trackingNumber): CancelResponse
     {
-        try {
-            $code = $response->json('VoidShipmentResponse.SummaryResult.Status.Code');
-            $description = $response->json('VoidShipmentResponse.SummaryResult.Status.Description');
-        } catch (\JsonException) {
-            $code = null;
-            $description = null;
-        }
-
+        $body = $this->decodeJsonSafely($response);
+        $code = data_get($body, 'VoidShipmentResponse.SummaryResult.Status.Code');
+        $description = data_get($body, 'VoidShipmentResponse.SummaryResult.Status.Description');
         $description = is_string($description) && $description !== '' ? $description : null;
 
         if ((is_string($code) || is_int($code)) && (string) $code === '1') {
@@ -879,7 +874,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
             return CancelResponse::failure('UPS did not void the shipment: '.($description ?? 'status code '.$code));
         }
 
-        logger()->error('UPS cancelShipment reply could not be read', [
+        Log::channel('ups-validation')->error('UPS cancelShipment reply could not be read', [
             'status' => $response->status(),
             'tracking_number' => $trackingNumber,
             'body' => $response->body(),

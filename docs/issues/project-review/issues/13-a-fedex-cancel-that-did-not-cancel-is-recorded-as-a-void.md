@@ -87,14 +87,20 @@ it('does not read a FedEx reply that cancelled nothing as a void', function (): 
   with the status description. USPS's v3 cancel reply does have a confirming field:
   production answered `{"trackingNumber": …, "status": "CANCELED"}`
   (`postage-source-split/18`), so `UspsAdapter` succeeds only on `status` `CANCELED`, for
-  domestic and international labels, and fails naming any other status. It is the only
+  domestic and international labels, and fails naming any other status. Only the domestic
+  reply has been seen; the international endpoint's shape is assumed to match. If it
+  differs, international voids fail as unreadable (the safe direction) until it is
+  checked in the sandbox. It is the only
   success value we have seen: if USPS answers a refund request for a used label with a
   different status, it now reads as a failure naming that status, not as a void. In all
-  three, a 2xx without the field, or with a body that is not JSON, logs the raw body and
+  three, a 2xx without the field, or with a body that is not a JSON object, logs the raw body and
   fails with the new `CancelResponse::unreadable()` message ("the label may still be
   live. Check the carrier's site before voiding again"). Amazon is unchanged. Regression
   tests: the Evidence test and three unreadable bodies in `FedexAdapterTest`; voided,
   not-voided and three unreadable bodies in `UpsAdapterTest`; another status and two
   unreadable bodies in `UspsAdapterTest`. All but the UPS voided case fail without the
-  fix. The USPS and UPS fixtures in `UspsAdapterTest` and `DirectLabelAccountTest` now
+  fix. The bodies are decoded with `DecodesJsonResponses::decodeJsonSafely()`: a review found
+  that Saloon's `json()` throws an uncaught `TypeError` on JSON that is not an object
+  (`true`, `null`), which gave the operator a 500. Each carrier's unreadable dataset now
+  includes that case, as does an international USPS test and a UPS integer status code. The USPS and UPS fixtures in `UspsAdapterTest` and `DirectLabelAccountTest` now
   carry the real success shapes.

@@ -33,6 +33,7 @@ use App\Models\Location;
 use App\Models\Package;
 use App\Services\Carriers\Concerns\BuildsCustomerReferences;
 use App\Services\Carriers\Concerns\ConsultsCarrierPolicyForOffers;
+use App\Services\Carriers\Concerns\DecodesJsonResponses;
 use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
 use App\Services\Carriers\Concerns\HasSaturdayDelivery;
 use App\Services\Carriers\Concerns\IdentifiesCatalogServices;
@@ -53,6 +54,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
 {
     use BuildsCustomerReferences;
     use ConsultsCarrierPolicyForOffers;
+    use DecodesJsonResponses;
     use HasDefaultServiceCapabilities;
     use HasSaturdayDelivery;
     use IdentifiesCatalogServices;
@@ -829,13 +831,9 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
      */
     private function readCancelReply(Response $response, string $trackingNumber): CancelResponse
     {
-        try {
-            $cancelled = $response->json('output.cancelledShipment');
-            $alert = $response->json('output.alerts.0.message');
-        } catch (\JsonException) {
-            $cancelled = null;
-            $alert = null;
-        }
+        $body = $this->decodeJsonSafely($response);
+        $cancelled = data_get($body, 'output.cancelledShipment');
+        $alert = data_get($body, 'output.alerts.0.message');
 
         if ($cancelled === true) {
             return CancelResponse::success('FedEx shipment cancelled.');
@@ -847,7 +845,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
                 : 'FedEx did not cancel the shipment.');
         }
 
-        logger()->error('FedEx cancelShipment reply could not be read', [
+        Log::channel('fedex-validation')->error('FedEx cancelShipment reply could not be read', [
             'status' => $response->status(),
             'tracking_number' => $trackingNumber,
             'body' => $response->body(),

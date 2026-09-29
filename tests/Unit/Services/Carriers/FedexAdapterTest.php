@@ -574,6 +574,7 @@ it('does not read a FedEx 2xx it cannot read as a void', function (MockResponse 
     'empty body' => fn (): MockResponse => MockResponse::make([], 200),
     'no cancelledShipment' => fn (): MockResponse => MockResponse::make(['output' => ['transactionId' => 'abc']], 200),
     'not JSON' => fn (): MockResponse => MockResponse::make('<html>gateway</html>', 200),
+    'JSON that is not an object' => fn (): MockResponse => MockResponse::make('true', 200),
 ]);
 
 it('returns failure when FedEx cancel errors', function (): void {

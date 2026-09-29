@@ -1251,11 +1251,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
      */
     private function readCancelReply(Response $response, string $trackingNumber): CancelResponse
     {
-        try {
-            $status = $response->json('status');
-        } catch (\JsonException) {
-            $status = null;
-        }
+        $status = data_get($this->decodeJsonSafely($response), 'status');
 
         if ($status === 'CANCELED') {
             return CancelResponse::success('Label voided successfully.');
