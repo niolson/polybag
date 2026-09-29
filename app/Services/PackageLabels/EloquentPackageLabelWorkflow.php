@@ -24,16 +24,16 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
 
     public function voidLabel(Package $package, User $user): LabelVoidResult
     {
+        if ($user->cannot('printLabel', $package)) {
+            return LabelVoidResult::failure('Access Denied', 'You can only void labels for packages you shipped.');
+        }
+
         if ($package->status !== PackageStatus::Shipped) {
             return LabelVoidResult::failure('Package Not Found', 'The package could not be found or is not shipped.');
         }
 
         if (! $package->tracking_number || ! $package->carrier) {
             return LabelVoidResult::failure('Cannot Cancel', 'Package is missing tracking information.');
-        }
-
-        if ($user->cannot('printLabel', $package)) {
-            return LabelVoidResult::failure('Access Denied', 'You can only void labels for packages you shipped.');
         }
 
         try {

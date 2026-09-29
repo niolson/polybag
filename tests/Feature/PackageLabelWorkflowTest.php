@@ -74,7 +74,7 @@ it('refuses to void a label for a user who neither shipped the package nor is a 
     ]);
 
     $adapter = Mockery::mock(DirectCarrierAdapter::class);
-    $adapter->shouldNotReceive('cancelShipment');
+    $adapter->shouldReceive('cancelShipment')->never()->andReturn(CancelResponse::success('voided'));
     app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 
     $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->create(['role' => Role::User]));

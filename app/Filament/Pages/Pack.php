@@ -475,12 +475,6 @@ class Pack extends Page
             return;
         }
 
-        if (auth()->user()->cannot('printLabel', $package)) {
-            $this->notifyError('Access Denied', 'You can only cancel labels for packages you shipped.');
-
-            return;
-        }
-
         $result = app(PackageLabelWorkflow::class)->voidLabel($package, auth()->user());
 
         if ($result->success) {

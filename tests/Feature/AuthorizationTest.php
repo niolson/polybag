@@ -35,6 +35,7 @@ use App\Services\SettingsService;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\Testing\TestAction;
 use Livewire\Livewire;
+use PHPUnit\Framework\ExpectationFailedException;
 
 describe('user role access', function (): void {
     beforeEach(function (): void {
@@ -253,12 +254,13 @@ describe('carrier accounts are Admin-only', function (): void {
     it('does not let a :dataset change the billing account', function (Role $role): void {
         $this->actingAs(User::factory()->create(['role' => $role]));
 
+        $component = Livewire::test(EditCarrierAccount::class, ['record' => $this->account->id]);
+        $component->assertForbidden();
+
         try {
-            Livewire::test(EditCarrierAccount::class, ['record' => $this->account->id])
-                ->fillForm(['ups_account_number' => 'Z9Y8X7'])
-                ->call('save');
-        } catch (Throwable) {
-            // A refusal by exception is also a pass.
+            $component->fillForm(['ups_account_number' => 'Z9Y8X7'])->call('save');
+        } catch (Error) {
+            // A forbidden page mounts no form to fill or save.
         }
 
         expect($this->account->fresh()->credentials['account_number'])->toBe('A1B2C3');
@@ -353,10 +355,12 @@ describe('voiding a label', function (): void {
     it('does not let a user void a label someone else shipped from the packages table', function (): void {
         $this->actingAs(User::factory()->create(['role' => Role::User]));
 
+        $component = Livewire::test(ListPackages::class)->assertActionExists(TestAction::make('void')->table($this->package));
+
         try {
-            Livewire::test(ListPackages::class)->callAction(TestAction::make('void')->table($this->package));
-        } catch (Throwable) {
-            // A refusal by exception is also a pass.
+            $component->callAction(TestAction::make('void')->table($this->package));
+        } catch (ExpectationFailedException) {
+            // Filament will not call an action it hides from this user.
         }
 
         expect($this->package->fresh()->status)->toBe(PackageStatus::Shipped);
@@ -372,10 +376,12 @@ describe('voiding a label', function (): void {
     it('does not let a user void a label someone else shipped from View Package', function (): void {
         $this->actingAs(User::factory()->create(['role' => Role::User]));
 
+        $component = Livewire::test(ViewPackage::class, ['record' => $this->package->id])->assertActionExists('void');
+
         try {
-            Livewire::test(ViewPackage::class, ['record' => $this->package->id])->callAction('void');
-        } catch (Throwable) {
-            // A refusal by exception is also a pass.
+            $component->callAction('void');
+        } catch (ExpectationFailedException) {
+            // Filament will not call an action it hides from this user.
         }
 
         expect($this->package->fresh()->status)->toBe(PackageStatus::Shipped);

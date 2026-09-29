@@ -76,13 +76,15 @@ the missing check belongs.
   and voiding a bought label; two abilities with one rule would drift apart. The rule
   itself is still the product choice the proposal flagged, and changing it later means
   splitting the ability. `PackageLabelWorkflow::voidLabel()` now takes the `User`, as
-  `labelForReprint()` does, and refuses with `Access Denied` before asking the postage
-  source; the user it is given is also the one recorded as `voided_by_user_id`, replacing
-  `auth()->id()`. The Packages table and View Package void actions have
+  `labelForReprint()` does, and refuses with `Access Denied` before any other check or
+  asking the postage source; the user it is given is also the one recorded as
+  `voided_by_user_id`, replacing `auth()->id()`. The Packages table and View Package void actions have
   `->authorize('printLabel')`, so the button is hidden from anyone refused, and Pack's
-  private `canAccessPackage()` is replaced by the policy. Callers in existing tests now
+  private `canAccessPackage()` is gone: Pack relies on the workflow's refusal. Callers in existing tests now
   pass a Manager. Regression tests are in `AuthorizationTest` (`voiding a label`: a User
   who didn't ship it cannot void from the table or View Package and doesn't see the
   button; the shipper, a Manager and an Admin can) and `PackageLabelWorkflowTest` (the
-  workflow refuses such a User without calling the carrier). The three refusal cases in
-  `AuthorizationTest` fail without the fix.
+  workflow refuses such a User without calling the carrier) and `PackTest` (Pack's cancel
+  refuses such a User and lets the shipper through). The three refusal cases in
+  `AuthorizationTest` and the workflow one fail without the fix; the Pack refusal fails if
+  the workflow check is removed.
