@@ -3,6 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Contracts\PackageLabelWorkflow;
+use App\Enums\PackageDraftState;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\TrackingStatus;
@@ -263,7 +264,7 @@ class PackageResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn (Builder $query) => $query->with(array_filter([
+            ->modifyQueryUsing(fn (Builder $query) => $query->scopes('withDraftState')->with(array_filter([
                 'shipment',
                 'postageDataSource',
                 app(SettingsService::class)->get('multi_client_enabled', false) ? 'shipment.client' : null,
@@ -331,8 +332,12 @@ class PackageResource extends Resource
                 Tables\Columns\TextColumn::make('cost')
                     ->money('USD')
                     ->sortable(),
+                // An unshipped package shows how far its draft has got,
+                // computed in the query rather than stored.
                 Tables\Columns\TextColumn::make('status')
-                    ->badge(),
+                    ->badge()
+                    ->state(fn (Package $record): PackageStatus|PackageDraftState => $record->draftState() ?? $record->status)
+                    ->tooltip(fn (Package $record): ?string => $record->status === PackageStatus::Unshipped ? 'Unshipped' : null),
                 Tables\Columns\TextColumn::make('tracking_status')
                     ->badge()
                     ->placeholder('—')
@@ -370,6 +375,13 @@ class PackageResource extends Resource
                     ->visible(fn () => app(SettingsService::class)->get('multi_location_enabled', false)),
                 Tables\Filters\SelectFilter::make('status')
                     ->options(PackageStatus::class),
+                Tables\Filters\SelectFilter::make('draft_state')
+                    ->label('Draft')
+                    ->options(PackageDraftState::class)
+                    ->query(fn (Builder $query, array $data): Builder => $query->when(
+                        PackageDraftState::tryFrom((string) ($data['value'] ?? '')),
+                        fn (Builder $query, PackageDraftState $state): Builder => $query->whereDraftState($state),
+                    )),
                 Tables\Filters\SelectFilter::make('tracking_status')
                     ->options(TrackingStatus::class)
                     ->label('Tracking Status'),

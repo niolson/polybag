@@ -235,6 +235,39 @@
                 }
             },
 
+            // Take one unit back out of the box. A Transparency code belongs to
+            // one unit, so the line gives up its last-scanned code with it.
+            unpackItem(idx) {
+                const item = this.packingItems[idx];
+                if (!item || item.packed <= 0) return;
+
+                item.packed--;
+                const codes = item.transparency_codes || [];
+                if (codes.length > item.packed) {
+                    item.transparency_codes = codes.slice(0, item.packed);
+                }
+                this.$refs.scanInput?.focus();
+            },
+
+            hasPackedItems() {
+                return this.packingItems.some(item => item.packed > 0);
+            },
+
+            // Start the box over: every item back out, with its Transparency
+            // codes. The box and measurements stay, since they describe the
+            // carton, not what is in it.
+            clearPacking() {
+                if (!this.hasPackedItems()) return;
+                if (!window.confirm('Take every item back out of this package? The box and measurements stay.')) return;
+
+                if (this.scanToAddMode) {
+                    this.packingItems = [];
+                } else {
+                    this.packingItems = this.packingItems.map(item => ({ ...item, packed: 0, transparency_codes: [] }));
+                }
+                this.$refs.scanInput?.focus();
+            },
+
             submitTransparency() {
                 if (this.pendingTransparencyKey === null) {
                     this.closeTransparencyModal();
@@ -516,6 +549,17 @@
         <x-slot name="heading">
             Shipment: {{ $shipment->shipment_reference }}
         </x-slot>
+        <x-slot name="afterHeader">
+            <x-filament::button
+                color="gray"
+                size="sm"
+                icon="heroicon-o-arrow-uturn-left"
+                x-on:click="clearPacking()"
+                x-bind:disabled="isShipping || !hasPackedItems()"
+            >
+                Clear packing
+            </x-filament::button>
+        </x-slot>
         <x-slot name="description">
             @if($multiClientEnabled && $clientName)
                 <x-filament::badge color="primary" class="mr-2">{{ $clientName }}</x-filament::badge>
@@ -606,7 +650,24 @@
                         <template x-for="(packingItem, index) in packingItems" :key="packingItem.id">
                             <tr>
                                 <td class="px-3 py-4 text-center text-sm text-gray-950 dark:text-white" x-text="packingItem.quantity"></td>
-                                <td class="px-3 py-4 text-center text-sm text-gray-950 dark:text-white" x-text="packingItem.packed"></td>
+                                <td class="px-3 py-4 text-center text-sm text-gray-950 dark:text-white">
+                                    <div class="flex items-center justify-center gap-2">
+                                        <button
+                                            type="button"
+                                            x-show="packingItem.packed > 0"
+                                            @click="unpackItem(index)"
+                                            x-bind:disabled="isShipping"
+                                            x-bind:title="packingItem.transparency && (packingItem.transparency_codes || []).length ? 'Unpack one (removes its last Transparency code)' : 'Unpack one'"
+                                            aria-label="Unpack one"
+                                            class="flex h-7 w-7 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/20 dark:bg-white/5 dark:text-gray-300 dark:hover:bg-white/10"
+                                        >
+                                            <svg class="h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14" />
+                                            </svg>
+                                        </button>
+                                        <span class="min-w-[1.5rem] text-center" x-text="packingItem.packed"></span>
+                                    </div>
+                                </td>
                                 <td class="px-3 py-4 text-sm text-gray-950 dark:text-white" x-text="packingItem.sku"></td>
                                 <td class="px-3 py-4 text-sm text-gray-950 dark:text-white" x-text="packingItem.barcode"></td>
                                 <td class="px-3 py-4 text-sm text-gray-950 dark:text-white max-w-xs truncate" x-text="packingItem.name" x-bind:title="packingItem.name"></td>

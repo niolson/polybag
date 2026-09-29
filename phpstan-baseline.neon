@@ -789,7 +789,7 @@ parameters:
 		-
 			message: '#^Cannot access property \$status on Illuminate\\Database\\Eloquent\\Model\|int\|string\.$#'
 			identifier: property.nonObject
-			count: 3
+			count: 2
 			path: app/Filament/Resources/PackageResource/Pages/ViewPackage.php
 
 		-

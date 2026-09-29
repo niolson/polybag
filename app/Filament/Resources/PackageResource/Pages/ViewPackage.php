@@ -2,8 +2,15 @@
 
 namespace App\Filament\Resources\PackageResource\Pages;
 
+use App\Contracts\PackageDraftWorkflow;
 use App\Contracts\PackageLabelWorkflow;
+use App\Contracts\PackageShippingWorkflow;
+use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
+use App\DataTransferObjects\PrintRequest;
+use App\Enums\PackageDraftState;
 use App\Enums\PackageStatus;
+use App\Enums\Role;
+use App\Exceptions\PackageDraftIncompleteException;
 use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Concerns\PrintsLabels;
 use App\Filament\Resources\PackageResource;
@@ -22,6 +29,8 @@ use Filament\Schemas\Components;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Illuminate\Contracts\View\View;
+use Illuminate\Support\Facades\Session;
+use LogicException;
 
 class ViewPackage extends ViewRecord
 {
@@ -31,15 +40,58 @@ class ViewPackage extends ViewRecord
 
     protected string $view = 'filament.resources.package-resource.pages.view-package';
 
+    /** Formats a workstation may ask carriers for; anything else buys PDF. */
+    private const LABEL_FORMATS = ['pdf', 'png', 'gif', 'zpl'];
+
+    private bool $notReadyReasonResolved = false;
+
+    private ?string $notReadyReason = null;
+
     protected function getHeaderActions(): array
     {
         return [
+            // Every draft can go back to the Pack page: to finish one that is
+            // not ready, or to re-weigh one that sat on a shelf.
+            Action::make('pack')
+                ->label('Pack')
+                ->icon('heroicon-o-archive-box')
+                ->color(fn (): string => $this->notReadyReason() === null ? 'gray' : 'primary')
+                ->authorize('ship')
+                ->visible(fn (): bool => $this->isDraft())
+                ->tooltip(fn (): ?string => $this->notReadyReason())
+                ->url(fn (): string => '/pack/'.$this->package()->shipment_id),
+            // Choosing the rate by hand is a manager's call from here; a shipper
+            // buys within the shipping rules, or picks a rate from the Pack page.
             Action::make('ship')
                 ->label('Ship')
                 ->icon('heroicon-o-paper-airplane')
+                ->color('gray')
+                ->authorize('ship')
+                ->visible(fn (): bool => $this->isDraft()
+                    && $this->notReadyReason() === null
+                    && auth()->user()->role->isAtLeast(Role::Manager))
+                ->url(fn (): string => '/ship/'.$this->record->id),
+            Action::make('buyAndPrintLabel')
+                ->label('Buy and print label')
+                ->icon('heroicon-o-printer')
                 ->color('primary')
-                ->url(fn (): string => '/ship/'.$this->record->id)
-                ->disabled(fn (): bool => $this->record->status === PackageStatus::Shipped),
+                ->authorize('ship')
+                ->visible(fn (): bool => $this->isDraft() && $this->notReadyReason() === null)
+                // The workstation's printers live in the browser, so the button
+                // reads them there and mounts the action with them, as the Pack
+                // page does when it ships.
+                ->alpineClickHandler(<<<'JS'
+                    $wire.mountAction('buyAndPrintLabel', {
+                        labelFormat: PrinterSettings.labelFormat(),
+                        labelDpi: PrinterSettings.labelDpi(),
+                        hasReportPrinter: PrinterSettings.hasDocumentPrinter(),
+                    })
+                    JS)
+                ->requiresConfirmation()
+                ->modalHeading('Buy and print label')
+                ->modalDescription(fn (): string => $this->buyConfirmationMessage())
+                ->modalSubmitActionLabel('Buy and print')
+                ->action(fn (array $arguments) => $this->buyAndPrintLabel($arguments)),
             Action::make('reprint')
                 ->label(fn (): string => $this->record->label_printed_at ? 'Reprint Label' : 'Print Label')
                 ->icon('heroicon-o-printer')
@@ -97,6 +149,113 @@ class ViewPackage extends ViewRecord
         }
 
         return view('components.legal-disclaimers', ['show' => ['fedex']]);
+    }
+
+    private function package(): Package
+    {
+        return $this->record instanceof Package
+            ? $this->record
+            : throw new LogicException('View Package was mounted without a Package.');
+    }
+
+    private function isDraft(): bool
+    {
+        return $this->package()->status === PackageStatus::Unshipped;
+    }
+
+    /**
+     * Why this Package Draft may not be bought for yet, or null when it may.
+     * The purchase's own rule, asked once per request; the header asks it for
+     * three actions.
+     */
+    private function notReadyReason(): ?string
+    {
+        if ($this->notReadyReasonResolved) {
+            return $this->notReadyReason;
+        }
+
+        $this->notReadyReasonResolved = true;
+
+        if ($this->package()->shipment?->isBlockedByPicking()) {
+            return $this->notReadyReason = 'This shipment must be picked before it can be shipped.';
+        }
+
+        try {
+            app(PackageDraftWorkflow::class)->assertPackageReadyToShip($this->package());
+        } catch (PackageDraftIncompleteException $e) {
+            return $this->notReadyReason = $e->getMessage();
+        }
+
+        return $this->notReadyReason = null;
+    }
+
+    /**
+     * The measurements the purchase will be bought at, and how old they are:
+     * a box set aside on a shelf may no longer weigh what it was saved at.
+     */
+    private function buyConfirmationMessage(): string
+    {
+        $package = $this->package();
+        $savedAt = $package->updated_at?->timezone(Location::timezone());
+
+        return sprintf(
+            'Buys a label within this shipment\'s shipping rules at %s lbs, %s × %s × %s in, then prints it. Last saved %s. If the box has changed since, re-weigh it on the Pack page first.',
+            number_format((float) $package->weight, 2),
+            (float) $package->length,
+            (float) $package->width,
+            (float) $package->height,
+            $savedAt ? $savedAt->format('M j, Y g:i A').' ('.$savedAt->diffForHumans().')' : 'at an unknown time',
+        );
+    }
+
+    /**
+     * @param  array{labelFormat?: mixed, labelDpi?: mixed, hasReportPrinter?: mixed}  $printer  Read from the workstation's browser settings
+     */
+    private function buyAndPrintLabel(array $printer): void
+    {
+        $package = $this->package();
+        $labelFormat = in_array($printer['labelFormat'] ?? null, self::LABEL_FORMATS, true) ? $printer['labelFormat'] : 'pdf';
+        $labelDpi = in_array((int) ($printer['labelDpi'] ?? 0), [203, 300], true) ? (int) $printer['labelDpi'] : null;
+
+        $result = app(PackageShippingWorkflow::class)->autoShip(
+            $package,
+            new PackageAutoShippingRequest(
+                labelFormat: $labelFormat,
+                labelDpi: $labelDpi,
+                userId: auth()->id(),
+                // A draft opened from the Packages list is someone's packed box:
+                // whatever goes wrong, it stays.
+                cleanupOnFailure: false,
+                hasReportPrinter: (bool) ($printer['hasReportPrinter'] ?? false),
+            ),
+        );
+
+        $this->notReadyReasonResolved = false;
+
+        if (! $result->success) {
+            if ($result->requiresAttendedSelection) {
+                $this->notifyWarning($result->title ?? 'Attended Shipping Required', $result->message);
+                $this->redirect('/ship/'.$package->id);
+
+                return;
+            }
+
+            $this->notifyError($result->title ?? 'Shipping Error', $result->message ?? 'Unable to ship package.');
+            // A label bought but not recorded is also sent to the bell; show it now, not at the next poll.
+            $this->dispatch('databaseNotificationsSent');
+            $package->refresh();
+
+            return;
+        }
+
+        Session::put('last_shipped_package_id', $package->id);
+        $package->refresh();
+
+        if ($result->response?->labelData) {
+            $this->dispatchPrint(PrintRequest::fromShipResponse($result->response, $package));
+        }
+
+        $this->notifySuccess('Label Bought', $result->summaryMessage());
     }
 
     private function shopifyShipped(): bool
@@ -161,8 +320,12 @@ class ViewPackage extends ViewRecord
                             TextEntry::make('weight')
                                 ->suffix(' lbs'),
                         ]),
+                        // The same badge as the Packages list: a draft shows
+                        // how far it has got.
                         TextEntry::make('status')
-                            ->badge(),
+                            ->badge()
+                            ->state(fn (Package $record): PackageStatus|PackageDraftState => $record->draftState() ?? $record->status)
+                            ->tooltip(fn (Package $record): ?string => $record->status === PackageStatus::Unshipped ? 'Unshipped' : null),
                         TextEntry::make('tracking_status')
                             ->badge()
                             ->placeholder('—'),

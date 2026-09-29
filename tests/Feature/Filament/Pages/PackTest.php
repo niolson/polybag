@@ -1015,6 +1015,56 @@ it('warns rather than failing when packing progress cannot be saved', function (
     expect(Package::where('shipment_id', $shipment->id)->exists())->toBeFalse();
 });
 
+it('offers to unpack a line and to clear packing outside scan-to-add mode', function (): void {
+    $shipment = Shipment::factory()->create();
+    ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'transparency' => false]);
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->assertSet('scanToAddMode', false)
+        ->assertSeeHtml('unpackItem(index)')
+        ->assertSeeHtml('clearPacking()')
+        ->assertSee('Clear packing');
+});
+
+it('saves an unpacked line, and the Transparency code it gave up, over the draft', function (): void {
+    // The browser drops the unpacked unit's code and autosave sends what is
+    // left; the draft must shrink to match, or the next visit restores it.
+    $product = Product::factory()->create();
+    $shipment = Shipment::factory()->create();
+    $item = ShipmentItem::factory()->create([
+        'shipment_id' => $shipment->id,
+        'product_id' => $product->id,
+        'quantity' => 2,
+        'transparency' => true,
+    ]);
+    $firstCode = str_repeat('A', 30);
+    $secondCode = str_repeat('B', 30);
+    $line = fn (int $packed, array $codes): array => [[
+        'id' => $item->id,
+        'product_id' => $product->id,
+        'quantity' => 2,
+        'packed' => $packed,
+        'transparency_codes' => $codes,
+    ]];
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->call('saveDraft', $line(2, [$firstCode, $secondCode]), null, '1.00', '10', '8', '6')
+        ->call('saveDraft', $line(1, [$firstCode]), null, '1.00', '10', '8', '6')
+        ->assertNotNotified();
+
+    $packed = Package::where('shipment_id', $shipment->id)->sole()->packageItems->sole();
+
+    expect($packed->quantity)->toBe(1)
+        ->and($packed->transparency_codes)->toBe([$firstCode]);
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->assertSet('packingItems.0.packed', 1)
+        ->assertSet('packingItems.0.transparency_codes', [$firstCode])
+        ->call('saveDraft', $line(0, []), null, '1.00', '10', '8', '6');
+
+    expect(Package::where('shipment_id', $shipment->id)->sole()->packageItems->sum('quantity'))->toBe(0);
+});
+
 it('turns a shipper away from a shipment that has already shipped', function (): void {
     $this->actingAs(User::factory()->create(['role' => Role::User]));
     $shipment = Shipment::factory()->create(['status' => ShipmentStatus::Shipped]);

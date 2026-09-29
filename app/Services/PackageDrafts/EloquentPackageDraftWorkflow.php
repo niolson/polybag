@@ -11,6 +11,7 @@ use App\DataTransferObjects\PackageDrafts\PackageDraftItemSnapshot;
 use App\DataTransferObjects\PackageDrafts\PackageDraftOptions;
 use App\DataTransferObjects\PackageDrafts\PackageDraftSnapshot;
 use App\DataTransferObjects\PackageDrafts\ReadyPackageDraft;
+use App\Enums\PackageDraftState;
 use App\Enums\PackageStatus;
 use App\Events\PackageCreated;
 use App\Exceptions\PackageDraftIncompleteException;
@@ -138,6 +139,8 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
                 'length' => $this->nullableDecimal($draftInput->measurements->length),
             ]);
 
+            // An empty draft may still hold lines packed at zero.
+            $package->packageItems()->delete();
             $package->packageItems()->createMany(
                 array_map(fn (PackageDraftItemInput $item): array => [
                     'shipment_item_id' => $item->shipmentItemId,
@@ -196,19 +199,14 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
         return $drafts->first();
     }
 
+    /**
+     * The Packages list's "Empty draft", so batch shipping fills exactly the
+     * drafts that list shows as empty. An item line left at zero packed is
+     * not packing.
+     */
     private function isEmptyDraft(Package $package): bool
     {
-        return $package->box_size_id === null
-            && ! $this->isPositive($package->weight)
-            && ! $this->isPositive($package->height)
-            && ! $this->isPositive($package->width)
-            && ! $this->isPositive($package->length)
-            && ! $package->packageItems()->exists();
-    }
-
-    private function isPositive(mixed $value): bool
-    {
-        return is_numeric($value) && (float) $value > 0;
+        return Package::whereKey($package->id)->whereDraftState(PackageDraftState::Empty)->exists();
     }
 
     private function lockShipment(Shipment $shipment): Shipment
