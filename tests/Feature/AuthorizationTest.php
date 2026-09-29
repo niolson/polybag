@@ -6,6 +6,9 @@ use App\Filament\Pages\Settings;
 use App\Filament\Pages\UnmappedObservedServices;
 use App\Filament\Pages\UnmappedShippingReferences;
 use App\Filament\Resources\BoxSizeResource\Pages\ListBoxSizes;
+use App\Filament\Resources\CarrierAccounts\Pages\CreateCarrierAccount;
+use App\Filament\Resources\CarrierAccounts\Pages\EditCarrierAccount;
+use App\Filament\Resources\CarrierAccounts\Pages\ListCarrierAccounts;
 use App\Filament\Resources\Carriers\Pages\ListCarriers;
 use App\Filament\Resources\CarrierServiceResource\Pages\ListCarrierServices;
 use App\Filament\Resources\ChannelResource\Pages\ListChannels;
@@ -18,6 +21,8 @@ use App\Filament\Resources\ShippingMethodResource\Pages\ListShippingMethods;
 use App\Filament\Resources\UserResource\Pages\ListUsers;
 use App\Models\Shipment;
 use App\Models\User;
+use Filament\Actions\DeleteBulkAction;
+use Filament\Actions\Testing\TestAction;
 use Livewire\Livewire;
 
 describe('user role access', function (): void {
@@ -218,5 +223,48 @@ describe('admin role access', function (): void {
 
     it('can access end of day page', function (): void {
         Livewire::test(EndOfDay::class)->assertSuccessful();
+    });
+});
+
+describe('carrier accounts are Admin-only', function (): void {
+    beforeEach(function (): void {
+        $this->account = createUpsAccount();
+    });
+
+    it('keeps a :dataset out of carrier accounts', function (Role $role): void {
+        $this->actingAs(User::factory()->create(['role' => $role]));
+
+        Livewire::test(ListCarrierAccounts::class)->assertForbidden();
+        Livewire::test(CreateCarrierAccount::class)->assertForbidden();
+        Livewire::test(EditCarrierAccount::class, ['record' => $this->account->id])->assertForbidden();
+    })->with(['User' => Role::User, 'Manager' => Role::Manager]);
+
+    it('does not let a :dataset change the billing account', function (Role $role): void {
+        $this->actingAs(User::factory()->create(['role' => $role]));
+
+        try {
+            Livewire::test(EditCarrierAccount::class, ['record' => $this->account->id])
+                ->fillForm(['ups_account_number' => 'Z9Y8X7'])
+                ->call('save');
+        } catch (Throwable) {
+            // A refusal by exception is also a pass.
+        }
+
+        expect($this->account->fresh()->credentials['account_number'])->toBe('A1B2C3');
+    })->with(['User' => Role::User, 'Manager' => Role::Manager]);
+
+    it('lets an Admin manage carrier accounts', function (): void {
+        $this->actingAs(User::factory()->admin()->create());
+
+        Livewire::test(ListCarrierAccounts::class)
+            ->assertActionVisible(TestAction::make(DeleteBulkAction::class)->table()->bulk())
+            ->assertSuccessful();
+        Livewire::test(CreateCarrierAccount::class)->assertSuccessful();
+        Livewire::test(EditCarrierAccount::class, ['record' => $this->account->id])
+            ->fillForm(['ups_account_number' => 'Z9Y8X7'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        expect($this->account->fresh()->credentials['account_number'])->toBe('Z9Y8X7');
     });
 });
