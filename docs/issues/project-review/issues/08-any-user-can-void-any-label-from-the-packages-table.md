@@ -1,6 +1,6 @@
 # Any user can void any label from the Packages table
 
-Status: needs-triage
+Status: done — 2026-09-29
 
 Repo: `polybag`
 
@@ -69,3 +69,20 @@ This is also area D (authorization). It is filed here because the void workflow 
 the missing check belongs.
 
 ## Comments
+
+- 2026-09-29 — Fixed with Pack's rule, Manager and above or the user who shipped the
+  Package. Changed from the proposal: no new `voidLabel` ability. `PackagePolicy::printLabel`
+  already is that rule, so voiding reuses it and its docblock now says it governs printing
+  and voiding a bought label; two abilities with one rule would drift apart. The rule
+  itself is still the product choice the proposal flagged, and changing it later means
+  splitting the ability. `PackageLabelWorkflow::voidLabel()` now takes the `User`, as
+  `labelForReprint()` does, and refuses with `Access Denied` before asking the postage
+  source; the user it is given is also the one recorded as `voided_by_user_id`, replacing
+  `auth()->id()`. The Packages table and View Package void actions have
+  `->authorize('printLabel')`, so the button is hidden from anyone refused, and Pack's
+  private `canAccessPackage()` is replaced by the policy. Callers in existing tests now
+  pass a Manager. Regression tests are in `AuthorizationTest` (`voiding a label`: a User
+  who didn't ship it cannot void from the table or View Package and doesn't see the
+  button; the shipper, a Manager and an Admin can) and `PackageLabelWorkflowTest` (the
+  workflow refuses such a User without calling the carrier). The three refusal cases in
+  `AuthorizationTest` fail without the fix.

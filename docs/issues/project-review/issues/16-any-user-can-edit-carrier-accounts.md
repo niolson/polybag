@@ -1,6 +1,6 @@
 # Any user can create, edit and delete carrier accounts
 
-Status: needs-triage
+Status: done — 2026-09-29
 
 Repo: `polybag`
 
@@ -71,3 +71,14 @@ it('does not let a User change the billing account', function (): void {
   gate.
 
 ## Comments
+
+- 2026-09-29 — Fixed with a `CarrierAccountPolicy` rather than `canAccess()`: every
+  ability (`viewAny`, `view`, `create`, `update`, `delete`, `deleteAny`) requires Admin,
+  like `CarrierPolicy`. Filament gates the resource, the list, create and edit pages, the
+  navigation item, and the table and page actions from it, so the edit page's OAuth,
+  FedEx registration and delete actions are covered without a check each. `deleteAny` is
+  explicit rather than load-bearing: Filament allows an ability the policy doesn't define.
+  Regression tests are in `AuthorizationTest` (`carrier accounts are Admin-only`): User and
+  Manager are refused every page and cannot change `account_number`, and Admin can list,
+  create, edit (the billing number saves) and see bulk delete. The four refusal cases fail
+  without the policy.
