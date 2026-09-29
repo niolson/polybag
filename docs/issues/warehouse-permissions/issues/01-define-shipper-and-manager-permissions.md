@@ -24,9 +24,10 @@ and access to commercial information may vary between companies.
   **shipper** means the existing `User` role; a code or UI rename is not yet decided.
 - Manual Ship should require Manager or Admin access. Prefer Label purchases in the
   context of an existing Shipment/order wherever possible.
-- Carrier Accounts and Special Services should not be exposed to shippers. A separate
-  working-tree change adds admin-only policies consistent with Carrier and Carrier
-  Service configuration; verify its delivery rather than assuming this issue implements it.
+- Carrier Accounts and Special Services should not be exposed to shippers. **Done**:
+  both are Admin-only, consistent with Carrier and Carrier Service configuration —
+  Carrier Accounts through `CarrierAccountPolicy` (#294), Special Services through
+  `SpecialServicePolicy` (#296).
 - Most current management-oriented dashboard widgets should be hidden from shippers.
   Candidate retained information includes unshipped Shipment counts and the signed-in
   account's Package counts for today and this week.
