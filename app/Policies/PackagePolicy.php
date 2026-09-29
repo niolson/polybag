@@ -39,12 +39,29 @@ class PackagePolicy
     }
 
     /**
-     * Handling a bought label — printing it, recording that it was printed, or
-     * voiding it — is limited to managers and the operator who shipped the
-     * package. Batch shipping is admin only, so batch operators always clear the
-     * manager bar.
+     * Printing a bought label, or recording that it was printed, is open to every
+     * shipper: a reprint costs nothing and a label jammed in one printer is often
+     * finished at another station.
      */
     public function printLabel(User $user, Package $package): bool
+    {
+        return $user->role->isAtLeast(Role::User);
+    }
+
+    /**
+     * Voiding an arbitrary package's label from the Packages pages is a manager's
+     * correction.
+     */
+    public function voidLabel(User $user, Package $package): bool
+    {
+        return $user->role->isAtLeast(Role::Manager);
+    }
+
+    /**
+     * The shipper who bought a label may void it — the "void last label" command
+     * barcode, for a box that fell off the scale — as may any manager.
+     */
+    public function voidOwnLabel(User $user, Package $package): bool
     {
         return $user->role->isAtLeast(Role::Manager)
             || $package->shipped_by_user_id === $user->id;

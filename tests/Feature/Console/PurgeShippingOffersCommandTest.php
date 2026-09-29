@@ -1,17 +1,61 @@
 <?php
 
 use App\Models\ObservedService;
+use App\Models\PackageLabel;
 use App\Models\Setting;
 use App\Models\ShippingOffer;
 
 it('purges spent and abandoned offers past the retention window', function (): void {
     ShippingOffer::factory()->create(['created_at' => now()->subDays(30)]);
-    ShippingOffer::factory()->consumed()->create(['created_at' => now()->subDays(30)]);
+    $spent = ShippingOffer::factory()->consumed()->create(['created_at' => now()->subDays(30)]);
+    PackageLabel::factory()->create(['package_id' => $spent->package_id]);
     ShippingOffer::factory()->create(['created_at' => now()->subDay()]);
 
     $this->artisan('data:purge')->assertSuccessful();
 
     expect(ShippingOffer::count())->toBe(1);
+});
+
+it('never purges an offer the source confirmed but PolyBag never recorded a Label for', function (): void {
+    // Amazon stamps the offer as soon as it confirms, and the stamp outlives a
+    // failed Label save. The row is what the next attempt asks Amazon about;
+    // purging it would let that attempt buy a second label.
+    $unrecorded = ShippingOffer::factory()->consumed()->create(['created_at' => now()->subYear()]);
+
+    $this->artisan('data:purge')
+        ->expectsOutputToContain('Kept 1 shipping offer(s) whose purchase the source confirmed but PolyBag never recorded.')
+        ->assertSuccessful();
+
+    expect(ShippingOffer::whereKey($unrecorded->id)->exists())->toBeTrue();
+});
+
+it('purges a confirmed offer once its Label is recorded, voided or not', function (): void {
+    // A voided Label stays as history, so a purchase recorded and later voided
+    // is still recorded and has nothing left to recover.
+    $recorded = ShippingOffer::factory()->consumed()->create(['created_at' => now()->subYear(), 'consumed_at' => now()->subYear()]);
+    PackageLabel::factory()->create([
+        'package_id' => $recorded->package_id,
+        'created_at' => now()->subYear()->addMinute(),
+        'voided_at' => now()->subMonths(6),
+    ]);
+
+    $this->artisan('data:purge')->assertSuccessful();
+
+    expect(ShippingOffer::count())->toBe(0);
+});
+
+it('does not count a Label older than the offer as recording it', function (): void {
+    // A Label voided before this offer was spent belongs to an earlier purchase.
+    $offer = ShippingOffer::factory()->consumed()->create(['created_at' => now()->subYear(), 'consumed_at' => now()->subMonths(6)]);
+    PackageLabel::factory()->create([
+        'package_id' => $offer->package_id,
+        'created_at' => now()->subMonths(7),
+        'voided_at' => now()->subMonths(7),
+    ]);
+
+    $this->artisan('data:purge')->assertSuccessful();
+
+    expect(ShippingOffer::whereKey($offer->id)->exists())->toBeTrue();
 });
 
 it('never purges an offer spent with no confirmed purchase', function (): void {

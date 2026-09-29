@@ -24,10 +24,24 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
 
     public function voidLabel(Package $package, User $user): LabelVoidResult
     {
-        if ($user->cannot('printLabel', $package)) {
+        if ($user->cannot('voidLabel', $package)) {
+            return LabelVoidResult::failure('Access Denied', 'Only a manager can void this label.');
+        }
+
+        return $this->void($package, $user);
+    }
+
+    public function voidOwnLabel(Package $package, User $user): LabelVoidResult
+    {
+        if ($user->cannot('voidOwnLabel', $package)) {
             return LabelVoidResult::failure('Access Denied', 'You can only void labels for packages you shipped.');
         }
 
+        return $this->void($package, $user);
+    }
+
+    private function void(Package $package, User $user): LabelVoidResult
+    {
         if ($package->status !== PackageStatus::Shipped) {
             return LabelVoidResult::failure('Package Not Found', 'The package could not be found or is not shipped.');
         }
@@ -66,7 +80,7 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
         }
 
         if ($user->cannot('printLabel', $package)) {
-            return LabelReprintResult::failure('Access Denied', 'You can only reprint labels for packages you shipped.');
+            return LabelReprintResult::failure('Access Denied', 'You cannot print this label.');
         }
 
         $isReprint = $package->label_printed_at !== null;

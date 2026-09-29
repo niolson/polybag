@@ -15,7 +15,6 @@ use App\Filament\Resources\ShipmentResource\Pages;
 use App\Filament\Resources\ShipmentResource\RelationManagers\PackagesRelationManager;
 use App\Filament\Resources\ShipmentResource\RelationManagers\ShipmentItemsRelationManager;
 use App\Filament\Support\AddressForm;
-use App\Jobs\ValidateAddressJob;
 use App\Models\BoxSize;
 use App\Models\Location;
 use App\Models\Shipment;
@@ -450,35 +449,6 @@ class ShipmentResource extends Resource
                         }
 
                         redirect(PickBatchResource::getUrl('view', ['record' => $batch]));
-                    })
-                    ->deselectRecordsAfterCompletion(),
-                Actions\BulkAction::make('validate-addresses')
-                    ->label('Validate Addresses')
-                    ->icon('heroicon-o-check-badge')
-                    ->requiresConfirmation()
-                    ->modalHeading('Validate Addresses')
-                    ->modalDescription('Queue address validation for all selected shipments. Already-validated shipments will be re-checked.')
-                    ->modalSubmitActionLabel('Validate')
-                    ->action(function (Collection $records): void {
-                        if ($records->count() > 1000) {
-                            Notification::make()
-                                ->title('Too many shipments selected')
-                                ->body('Validate Addresses is limited to 1,000 shipments at a time. You selected '.$records->count().'.')
-                                ->danger()
-                                ->send();
-
-                            return;
-                        }
-
-                        foreach ($records as $shipment) {
-                            ValidateAddressJob::dispatch($shipment->id);
-                        }
-
-                        $count = $records->count();
-                        Notification::make()
-                            ->success()
-                            ->title("Queued {$count} ".str('shipment')->plural($count).' for address validation')
-                            ->send();
                     })
                     ->deselectRecordsAfterCompletion(),
             ])

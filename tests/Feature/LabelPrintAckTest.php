@@ -62,7 +62,7 @@ it('requires authentication', function (): void {
     expect($package->fresh()->label_printed_at)->toBeNull();
 });
 
-it('refuses to record a print for a package another user shipped', function (): void {
+it('lets a shipper record a print for a package another user shipped, auditing the printer', function (): void {
     $shipper = User::factory()->create(['role' => Role::User]);
     $otherPacker = User::factory()->create(['role' => Role::User]);
     $package = Package::factory()->shipped()->create([
@@ -72,13 +72,14 @@ it('refuses to record a print for a package another user shipped', function (): 
 
     $this->actingAs($otherPacker)
         ->postJson(route('labels.printed', $package))
-        ->assertForbidden();
+        ->assertOk();
 
-    expect($package->fresh()->label_printed_at)->toBeNull();
+    expect($package->fresh()->label_printed_at)->not->toBeNull();
 
     expect(AuditLog::where('action', AuditAction::LabelPrinted)
         ->where('auditable_id', $package->id)
-        ->exists())->toBeFalse();
+        ->sole()
+        ->user_id)->toBe($otherPacker->id);
 });
 
 it('lets a manager record a print for a package someone else shipped', function (): void {

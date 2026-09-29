@@ -421,12 +421,20 @@ describe('voiding a label', function (): void {
         expect($this->package->fresh()->status)->toBe(PackageStatus::Shipped);
     });
 
-    it('lets the user who shipped the package void its label', function (): void {
+    it('does not let the shipper who bought the label void it from the packages pages', function (): void {
         $this->actingAs($this->shipper);
 
-        Livewire::test(ListPackages::class)->callAction(TestAction::make('void')->table($this->package));
+        Livewire::test(ViewPackage::class, ['record' => $this->package->id])->assertActionHidden('void');
+        $component = Livewire::test(ListPackages::class)->assertActionHidden(TestAction::make('void')->table($this->package));
 
-        expect($this->package->fresh()->status)->toBe(PackageStatus::Unshipped);
+        try {
+            $component->callAction(TestAction::make('void')->table($this->package));
+        } catch (ExpectationFailedException) {
+            // Filament will not call an action it hides from this user; the
+            // "void last label" command on the Pack page is the shipper's path.
+        }
+
+        expect($this->package->fresh()->status)->toBe(PackageStatus::Shipped);
     });
 
     it('lets a :dataset void a label someone else shipped', function (Role $role): void {

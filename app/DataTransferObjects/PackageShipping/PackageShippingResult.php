@@ -167,6 +167,41 @@ readonly class PackageShippingResult
         return new self(success: false, title: 'Package State Changed', message: $message, leavePackageIntact: true);
     }
 
+    /**
+     * An error nobody anticipated, before anything was bought. Its detail is
+     * in the log; the packer keeps the package and may try again.
+     */
+    public static function unexpectedError(): self
+    {
+        return new self(
+            success: false,
+            title: 'Shipping Error',
+            message: 'An unexpected error stopped the purchase. Try again, and tell a manager if it keeps happening.',
+            leavePackageIntact: true,
+        );
+    }
+
+    /**
+     * The source sold a label that PolyBag could not record. The package stays
+     * as it is. "Try again" is offered only when the next attempt can ask the
+     * source for this label; where it cannot, a retry could buy a second one.
+     */
+    public static function labelNotRecorded(string $seller, ?string $trackingNumber, bool $recoverable): self
+    {
+        $label = $trackingNumber !== null ? "label {$trackingNumber}" : 'a label';
+
+        return new self(
+            success: false,
+            title: 'Label Bought but Not Recorded',
+            message: $recoverable
+                ? "{$seller} sold {$label}, but PolyBag could not save it. Try again: PolyBag asks {$seller} for this label before buying another. "
+                    .'If it keeps failing, tell a manager and give them the tracking number.'
+                : "{$seller} sold {$label}, but PolyBag could not save it, and cannot ask {$seller} for it again. "
+                    ."Do not buy another label for this package: tell a manager, who can void this one with {$seller}.",
+            leavePackageIntact: true,
+        );
+    }
+
     public function summaryMessage(): string
     {
         if (! $this->success || ! $this->response) {

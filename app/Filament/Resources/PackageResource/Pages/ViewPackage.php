@@ -52,7 +52,7 @@ class ViewPackage extends ViewRecord
                 ->icon('heroicon-o-x-circle')
                 ->color('danger')
                 ->requiresConfirmation()
-                ->authorize('printLabel')
+                ->authorize('voidLabel')
                 ->modalHeading('Void Label')
                 ->modalDescription('This will cancel the label with the carrier. The package will be kept with its dimensions so it can be re-shipped.')
                 ->visible(fn (): bool => $this->record->status === PackageStatus::Shipped
@@ -85,6 +85,7 @@ class ViewPackage extends ViewRecord
                 ->visible(fn (): bool => $this->shopifyAdminOrderUrl() !== null)
                 ->url(fn (): ?string => $this->shopifyAdminOrderUrl(), shouldOpenInNewTab: true),
             Action::make('edit')
+                ->authorize('update')
                 ->url(fn (): string => PackageResource::getUrl('edit', ['record' => $this->record])),
         ];
     }

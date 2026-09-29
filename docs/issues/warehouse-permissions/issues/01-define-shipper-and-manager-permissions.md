@@ -28,6 +28,12 @@ and access to commercial information may vary between companies.
   both are Admin-only, consistent with Carrier and Carrier Service configuration —
   Carrier Accounts through `CarrierAccountPolicy` (#294), Special Services through
   `SpecialServicePolicy` (#296).
+- Shippers may reprint any Label and see Label costs. Voiding from the Packages pages is
+  Manager-only; the shipper who bought a Label may still void it with the Pack page's
+  "void last label" command, for a box that fell off the scale. **Done**: `printLabel`,
+  `voidLabel`, and `voidOwnLabel` on `PackagePolicy`.
+- Address validation is a billed API request per Shipment, so there is no bulk Validate
+  Addresses action for any role. **Done**: removed from the Shipments table.
 - Most current management-oriented dashboard widgets should be hidden from shippers.
   Candidate retained information includes unshipped Shipment counts and the signed-in
   account's Package counts for today and this week.

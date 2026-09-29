@@ -466,6 +466,48 @@ it('auto ships for a shipper whose account enables it even when the browser send
         ->assertNoRedirect();
 });
 
+it('keeps the shipment on screen when a bought label could not be recorded', function (): void {
+    $this->actingAs(User::factory()->create([
+        'role' => Role::User,
+        'auto_ship_enabled' => true,
+    ]));
+
+    $boxSize = BoxSize::factory()->create();
+    $product = Product::factory()->create(['barcode' => '1234567890123']);
+    $shipment = Shipment::factory()->create();
+    $shipmentItem = ShipmentItem::factory()->create([
+        'shipment_id' => $shipment->id,
+        'product_id' => $product->id,
+        'quantity' => 1,
+        'transparency' => false,
+    ]);
+
+    $mock = Mockery::mock(PackageShippingWorkflow::class);
+    $mock->shouldReceive('autoShip')
+        ->once()
+        ->andReturn(PackageShippingResult::labelNotRecorded('USPS', '9200190380793700250067', recoverable: true));
+    app()->instance(PackageShippingWorkflow::class, $mock);
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->call('ship', [[
+            'id' => $shipmentItem->id,
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'packed' => 1,
+            'barcode' => '1234567890123',
+            'description' => $product->description,
+            'transparency' => false,
+            'transparency_codes' => [],
+        ]], $boxSize->id, '1.5', '10', '8', '6', true)
+        ->assertNotified('Label Bought but Not Recorded')
+        ->assertDispatched('shipping-error')
+        ->assertDispatched('databaseNotificationsSent')
+        ->assertNoRedirect()
+        ->assertSet('shipment.id', $shipment->id)
+        ->assertSet('weight', '1.5')
+        ->assertSee($shipment->shipment_reference);
+});
+
 it('lets a manager toggle their own auto-ship setting from the pack page', function (Role $role): void {
     $user = User::factory()->create(['role' => $role, 'auto_ship_enabled' => true]);
     $this->actingAs($user);

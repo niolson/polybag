@@ -284,6 +284,8 @@ class ManualShip extends Page implements HasForms
             }
 
             $this->notifyError($result->title ?? 'Shipping Error', $result->message ?? 'Unable to ship package.');
+            // A label bought but not recorded is also sent to the bell; show it now, not at the next poll.
+            $this->dispatch('databaseNotificationsSent');
 
             return;
         }

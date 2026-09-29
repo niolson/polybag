@@ -337,6 +337,8 @@ class Pack extends Page
 
             $this->notifyError($result->title ?? 'Shipping Error', $result->message ?? 'Unable to ship package.');
             $this->dispatch('shipping-error');
+            // A label bought but not recorded is also sent to the bell; show it now, not at the next poll.
+            $this->dispatch('databaseNotificationsSent');
 
             return;
         }
@@ -475,7 +477,7 @@ class Pack extends Page
             return;
         }
 
-        $result = app(PackageLabelWorkflow::class)->voidLabel($package, auth()->user());
+        $result = app(PackageLabelWorkflow::class)->voidOwnLabel($package, auth()->user());
 
         if ($result->success) {
             Session::forget('last_shipped_package_id');

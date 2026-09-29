@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
@@ -250,5 +251,34 @@ class ShippingOffer extends Model
     public function scopeUnconsumed(Builder $query): void
     {
         $query->whereNull('consumed_at');
+    }
+
+    /**
+     * Offers whose package has a Label written since the offer was spent.
+     *
+     * A Label is saved in the same attempt that spends its offer, and voided
+     * Labels are kept, so this is what separates a purchase PolyBag recorded
+     * from one the source confirmed and PolyBag never saved.
+     *
+     * @param  Builder<$this>  $query
+     */
+    public function scopeWithRecordedLabel(Builder $query): void
+    {
+        $query->whereExists($this->labelSinceConsumed(...));
+    }
+
+    /**
+     * @param  Builder<$this>  $query
+     */
+    public function scopeWithoutRecordedLabel(Builder $query): void
+    {
+        $query->whereNotExists($this->labelSinceConsumed(...));
+    }
+
+    private function labelSinceConsumed(QueryBuilder $labels): void
+    {
+        $labels->from('package_labels')
+            ->whereColumn('package_labels.package_id', 'shipping_offers.package_id')
+            ->whereColumn('package_labels.created_at', '>=', 'shipping_offers.consumed_at');
     }
 }
