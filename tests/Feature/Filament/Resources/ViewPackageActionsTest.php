@@ -108,6 +108,16 @@ it('shows the stored weight and when it was saved before buying', function (): v
         ->assertMountedActionModalSee(['2.50 lbs', '10 × 8 × 6 in', 'Last saved']);
 });
 
+it('offers to re-weigh on the Pack page instead of buying', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $package = viewPackageReadyDraft();
+
+    Livewire::test(ViewPackage::class, ['record' => $package->id])
+        ->mountAction('buyAndPrintLabel')
+        ->assertMountedActionModalSee('Re-weigh on Pack page')
+        ->assertMountedActionModalSeeHtml('href="/pack/'.$package->shipment_id.'"');
+});
+
 it('buys unattended with the workstation printer settings and keeps the package on failure', function (): void {
     $this->actingAs(User::factory()->create(['role' => Role::User]));
     $package = viewPackageReadyDraft();

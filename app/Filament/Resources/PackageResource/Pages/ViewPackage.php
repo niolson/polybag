@@ -77,6 +77,13 @@ class ViewPackage extends ViewRecord
                 ->modalHeading('Buy and print label')
                 ->modalDescription(fn (): string => $this->buyConfirmationMessage())
                 ->modalSubmitActionLabel('Buy and print')
+                // Where the confirmation sends anyone whose box has changed.
+                ->extraModalFooterActions(fn (): array => [
+                    Action::make('reweighOnPackPage')
+                        ->label('Re-weigh on Pack page')
+                        ->color('gray')
+                        ->url('/pack/'.$this->package()->shipment_id),
+                ])
                 ->action(fn (array $arguments) => $this->buyAndPrintLabel($arguments)),
             // Choosing the rate by hand is a manager's call from here; a shipper
             // buys within the shipping rules, or picks a rate from the Pack page.
@@ -196,7 +203,7 @@ class ViewPackage extends ViewRecord
         $savedAt = $package->updated_at?->timezone(Location::timezone());
 
         return sprintf(
-            'Buys a label within this shipment\'s shipping rules at %s lbs, %s × %s × %s in, then prints it. Last saved %s. If the box has changed since, re-weigh it on the Pack page first.',
+            'Buys a label within this shipment\'s shipping rules at %s lbs, %s × %s × %s in, then prints it. Last saved %s. If the box has changed since, re-weigh it on the Pack page instead.',
             number_format((float) $package->weight, 2),
             (float) $package->length,
             (float) $package->width,
