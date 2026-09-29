@@ -508,6 +508,8 @@ class Ship extends Page
             }
 
             $this->notifyError($result->title ?? 'Shipping Error', $result->message ?? 'An unexpected error occurred. Please try again.');
+            // A label bought but not recorded is also sent to the bell; show it now, not at the next poll.
+            $this->dispatch('databaseNotificationsSent');
 
             return;
         }

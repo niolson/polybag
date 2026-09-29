@@ -337,6 +337,8 @@ class Pack extends Page
 
             $this->notifyError($result->title ?? 'Shipping Error', $result->message ?? 'Unable to ship package.');
             $this->dispatch('shipping-error');
+            // A label bought but not recorded is also sent to the bell; show it now, not at the next poll.
+            $this->dispatch('databaseNotificationsSent');
 
             return;
         }

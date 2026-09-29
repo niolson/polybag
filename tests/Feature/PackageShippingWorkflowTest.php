@@ -8,17 +8,20 @@ use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CarrierPackaging;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
+use App\Enums\Role;
 use App\Enums\ShippingRuleAction;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\NoActiveCarrierServicesException;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
+use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\Product;
 use App\Models\Shipment;
@@ -29,7 +32,11 @@ use App\Models\ShippingRule;
 use App\Models\SpecialService;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
+use App\Services\PostageSources\OfferStore;
+use Illuminate\Database\QueryException;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Saloon\Exceptions\Request\RequestException;
 use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
@@ -355,6 +362,174 @@ it('reports a state conflict when shipping raises a runtime exception', function
     expect($result->success)->toBeFalse()
         ->and($result->title)->toBe('Package State Changed')
         ->and($result->leavePackageIntact)->toBeTrue();
+});
+
+it('keeps a sold label recoverable when recording it fails, rather than buying another', function (): void {
+    // The column a pending migration adds: the carrier sells the label, then
+    // saving it fails. The offer must stay unresolved so the retry asks the
+    // carrier for this label — it used to read as settled, and the retry
+    // bought a second one.
+    Schema::table('package_labels', fn (Blueprint $table) => $table->dropColumn('carrier_account_fingerprint'));
+    $log = Log::spy();
+
+    $package = createWorkflowPackage();
+    $rate = new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days');
+    $sold = ShipResponse::success(
+        trackingNumber: 'TRACK123',
+        cost: 7.25,
+        carrier: 'MockCarrier',
+        service: 'Ground',
+        labelData: base64_encode('label'),
+    );
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class, RecoversUnresolvedPurchase::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('createShipment')->once()->andReturn($sold);
+    $adapter->shouldReceive('recoverPurchase')->once()->andReturn($sold);
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $buyer = User::factory()->create(['role' => Role::User]);
+    $manager = User::factory()->create(['role' => Role::Manager]);
+    $otherShipper = User::factory()->create(['role' => Role::User]);
+
+    $workflow = app(PackageShippingWorkflow::class);
+    $first = $workflow->ship($package, new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate), userId: $buyer->id));
+
+    $offer = ShippingOffer::whereNotNull('consumed_at')->sole();
+
+    // In the bell, not only a toast: the buyer and whoever can act on it.
+    expect($buyer->notifications()->sole()->data['title'])->toContain('Label bought but not recorded')
+        ->and($buyer->notifications()->sole()->data['body'])->toContain('MockCarrier sold label TRACK123')
+        ->and($manager->notifications()->count())->toBe(1)
+        ->and($otherShipper->notifications()->count())->toBe(0);
+
+    expect($first->success)->toBeFalse()
+        ->and($first->title)->toBe('Label Bought but Not Recorded')
+        ->and($first->message)->toContain('MockCarrier sold label TRACK123')
+        ->and($first->leavePackageIntact)->toBeTrue()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped)
+        ->and($package->labels()->count())->toBe(0)
+        ->and($offer->isAwaitingPurchaseConfirmation())->toBeTrue()
+        ->and($offer->purchase_context[OfferStore::REPORTED_TRACKING_NUMBER] ?? null)->toBe('TRACK123');
+
+    $log->shouldHaveReceived('error', [
+        'Bought a label but could not record it',
+        Mockery::on(fn (array $context): bool => $context['tracking_number'] === 'TRACK123'
+            && $context['seller'] === 'MockCarrier'
+            && $context['recoverable'] === true),
+    ]);
+
+    Schema::table('package_labels', fn (Blueprint $table) => $table->string('carrier_account_fingerprint', 64)->nullable());
+
+    $second = $workflow->ship($package->fresh(), new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate)));
+
+    expect($second->success)->toBeTrue()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped)
+        ->and($package->fresh()->tracking_number)->toBe('TRACK123')
+        ->and($offer->fresh()->purchase_reference)->toBe('TRACK123');
+});
+
+it('asks again for a label the source confirmed but PolyBag never recorded, rather than buying another', function (): void {
+    // Amazon stamps the offer the moment it confirms, outside the transaction
+    // that saves the Label. That stamp survives a failed save, so the offer
+    // reads as settled — and nothing would ask Amazon before buying again.
+    Schema::table('package_labels', fn (Blueprint $table) => $table->dropColumn('carrier_account_fingerprint'));
+
+    $package = createWorkflowPackage();
+    $rate = new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days');
+    $sold = ShipResponse::success(trackingNumber: 'TRACK123', cost: 7.25, carrier: 'MockCarrier', service: 'Ground', labelData: base64_encode('label'));
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class, RecoversUnresolvedPurchase::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('createShipment')->once()->andReturnUsing(function (ShipRequest $request) use ($sold): ShipResponse {
+        app(OfferStore::class)->recordPurchase($request->offer, 'SOURCE-SHIPMENT-1');
+
+        return $sold;
+    });
+    $adapter->shouldReceive('recoverPurchase')->once()->andReturn($sold);
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $workflow = app(PackageShippingWorkflow::class);
+    $first = $workflow->ship($package, new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate)));
+
+    $offer = ShippingOffer::whereNotNull('consumed_at')->sole();
+    $offers = app(OfferStore::class);
+
+    expect($first->title)->toBe('Label Bought but Not Recorded')
+        ->and($offer->purchase_reference)->toBe('SOURCE-SHIPMENT-1')
+        ->and($offers->awaitingPurchaseConfirmation($package))->toBeEmpty()
+        ->and($offers->boughtButUnrecorded($package)->modelKeys())->toBe([$offer->id])
+        ->and($offers->hasUnresolvedPurchase($package))->toBeTrue();
+
+    Schema::table('package_labels', fn (Blueprint $table) => $table->string('carrier_account_fingerprint', 64)->nullable());
+
+    $second = $workflow->ship($package->fresh(), new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate)));
+
+    expect($second->success)->toBeTrue()
+        ->and($package->fresh()->tracking_number)->toBe('TRACK123')
+        ->and($offers->boughtButUnrecorded($package))->toBeEmpty();
+});
+
+it('names channel postage by the connection that sold it, and gives no retry advice a source cannot honor', function (): void {
+    // USPS postage bought through Amazon is Amazon's to void, not USPS's; and a
+    // source that cannot be asked again must not be retried.
+    Schema::table('package_labels', fn (Blueprint $table) => $table->dropColumn('carrier_account_fingerprint'));
+
+    $connection = DataSource::factory()->amazon()->create(['name' => 'Acme Amazon']);
+    $package = createWorkflowPackage();
+    $rate = new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days');
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('createShipment')->once()->andReturn(new ShipResponse(
+        success: true,
+        trackingNumber: 'TRACK123',
+        cost: 7.25,
+        carrier: 'USPS',
+        service: 'Ground Advantage',
+        labelData: base64_encode('label'),
+        postageSource: PostageSource::PostageDataSource,
+        postageDataSourceId: $connection->id,
+    ));
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate)),
+    );
+
+    expect($result->title)->toBe('Label Bought but Not Recorded')
+        ->and($result->message)->toStartWith('Amazon (connection "Acme Amazon") sold label TRACK123')
+        ->and($result->message)->toContain('Do not buy another label')
+        ->and($result->message)->not->toContain('Try again');
+});
+
+it('logs a database error before the purchase instead of reporting it as a race', function (): void {
+    $log = Log::spy();
+    $package = createWorkflowPackage();
+    $rate = new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days');
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('createShipment')
+        ->once()
+        ->andThrow(new QueryException('sqlite', 'insert into rate_quotes', [], new PDOException('no such column')));
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate)),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Shipping Error')
+        ->and($result->message)->not->toContain('insert into')
+        ->and($result->leavePackageIntact)->toBeTrue();
+
+    $log->shouldHaveReceived('error', [
+        'Database error while buying postage',
+        Mockery::on(fn (array $context): bool => $context['package_id'] === $package->id),
+    ]);
 });
 
 it('reports a generic error when shipping raises an unexpected exception', function (): void {

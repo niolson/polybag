@@ -121,6 +121,17 @@ class PurgeData extends Command
             ->whereNull('recovery_unanswered_at')
             ->count();
 
+        // A purchase the source confirmed but PolyBag never saved a Label for
+        // is the same evidence by another route: some sources stamp the offer
+        // as soon as they confirm, and the stamp outlives a failed save. It is
+        // what the next attempt asks the source about, so it is kept too.
+        $unrecorded = ShippingOffer::query()
+            ->where('created_at', '<', $cutoff)
+            ->whereNotNull('consumed_at')
+            ->whereNotNull('purchase_reference')
+            ->withoutRecordedLabel()
+            ->count();
+
         $total = 0;
 
         do {
@@ -128,8 +139,10 @@ class PurgeData extends Command
                 ->where('created_at', '<', $cutoff)
                 ->where(fn ($query) => $query
                     ->whereNull('consumed_at')
-                    ->orWhereNotNull('purchase_reference')
-                    ->orWhereNotNull('purchase_failed_at'))
+                    ->orWhereNotNull('purchase_failed_at')
+                    ->orWhere(fn ($bought) => $bought
+                        ->whereNotNull('purchase_reference')
+                        ->withRecordedLabel()))
                 ->limit(1000)
                 ->delete();
             $total += $deleted;
@@ -143,6 +156,13 @@ class PurgeData extends Command
             $this->warn(
                 "Kept {$unresolved} consumed shipping offer(s) with no confirmed purchase. "
                 .'Each one may correspond to a label bought at the source and never recorded here.'
+            );
+        }
+
+        if ($unrecorded > 0) {
+            $this->warn(
+                "Kept {$unrecorded} shipping offer(s) whose purchase the source confirmed but PolyBag never recorded. "
+                .'Each one is a label paid for at the source; the next Ship attempt on its package asks for it.'
             );
         }
 

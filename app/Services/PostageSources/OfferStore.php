@@ -292,7 +292,37 @@ class OfferStore
      */
     public function hasUnresolvedPurchase(Package $package): bool
     {
-        return $this->awaitingPurchaseConfirmation($package)->isNotEmpty();
+        return $this->awaitingPurchaseConfirmation($package)->isNotEmpty()
+            || $this->boughtButUnrecorded($package)->isNotEmpty();
+    }
+
+    /**
+     * Offers the source confirmed selling, whose Label was never saved.
+     *
+     * Some adapters stamp `purchase_reference` the moment the source confirms
+     * — Amazon does, so a later failure can never read as "nothing bought" —
+     * and that stamp survives when saving the Label then fails. Such an offer
+     * is resolved but not recorded: without this, the next attempt would find
+     * nothing unresolved and buy a second label.
+     *
+     * Told apart from a recorded purchase by the Label itself, which is written
+     * in the same attempt that spends the offer: no Label row for the package
+     * from that moment on means nothing was recorded. Voided Labels are kept,
+     * so a purchase recorded and later voided still counts as recorded. Asks
+     * nothing to be written at failure time, when the database may be the
+     * thing failing.
+     *
+     * @return Collection<int, ShippingOffer>
+     */
+    public function boughtButUnrecorded(Package $package): Collection
+    {
+        return ShippingOffer::query()
+            ->where('package_id', $package->id)
+            ->whereNotNull('consumed_at')
+            ->whereNotNull('purchase_reference')
+            ->withoutRecordedLabel()
+            ->orderBy('consumed_at')
+            ->get();
     }
 
     /**

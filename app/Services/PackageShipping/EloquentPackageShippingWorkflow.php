@@ -20,9 +20,11 @@ use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\RuleEvaluationResult;
 use App\DataTransferObjects\Shipping\ShipRequest;
+use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Shipping\UnattendedRateSelection;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
+use App\Enums\Role;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
 use App\Exceptions\MissingDeclaredValueException;
@@ -30,10 +32,13 @@ use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Exceptions\ZeroValueCustomsItemException;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
+use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShippingOffer;
 use App\Models\SpecialService;
+use App\Models\User;
+use App\Notifications\LabelNotRecorded;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\InactiveCatalog;
 use App\Services\PostageSources\OfferStore;
@@ -45,8 +50,10 @@ use App\Services\RuleEvaluator;
 use App\Services\Shipping\ContentsFilter;
 use App\Services\ShippingRateService;
 use App\Services\SpecialServiceResolver;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Exceptions\Request\RequestException;
 use Saloon\Exceptions\Request\ServerException;
@@ -477,19 +484,18 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 return PackageShippingResult::failed('Shipping Error', $response->errorMessage ?? 'Failed to create shipment.');
             }
 
-            $this->recordPurchaseAgainstOffer($offer, $response->trackingNumber);
-
             // The catalog service comes off the server's copy of the rate:
             // the offer for a Ship-page purchase, the rate service or the
             // rule for automation. A blind purchase records none.
-            $package->markShipped(
+            $unrecorded = $this->recordBoughtLabel(
+                $package,
+                $offer,
                 $response,
-                $response->postageSource,
-                $request->userId,
+                $request,
                 $blindOffer === null ? $selectedRate?->carrierServiceId : null,
             );
 
-            return PackageShippingResult::shipped($response, $selectedRate, $package);
+            return $unrecorded ?? PackageShippingResult::shipped($response, $selectedRate, $package);
         } catch (MissingDeclaredValueException $e) {
             return PackageShippingResult::failed('Declared Value Required', $e->getMessage());
         } catch (ZeroValueCustomsItemException $e) {
@@ -555,6 +561,16 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 'Carrier Error',
                 "Unable to connect to {$seller}. Please check your connection and try again.",
             );
+        } catch (QueryException $e) {
+            // Before the carrier sold anything: everything after the sale is
+            // caught in recordBoughtLabel(). A database error is not a race,
+            // and its SQL is no message for a packer.
+            logger()->error('Database error while buying postage', [
+                'package_id' => $package->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return PackageShippingResult::unexpectedError();
         } catch (\RuntimeException $e) {
             return PackageShippingResult::stateConflict($e->getMessage());
         } catch (\Exception $e) {
@@ -628,6 +644,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             $this->cleanupPackage($package, $request, $result);
 
             return $result;
+        } catch (QueryException $e) {
+            logger()->error('AutoShip database error', ['package_id' => $package->id, 'error' => $e->getMessage()]);
+
+            return PackageShippingResult::unexpectedError();
         } catch (\RuntimeException $e) {
             logger()->warning('AutoShip race condition', ['package_id' => $package->id, 'error' => $e->getMessage()]);
 
@@ -638,6 +658,31 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             $this->cleanupPackage($package, $request, $result);
 
             return $result;
+        }
+    }
+
+    /**
+     * Tell the buyer and every active manager and admin, in the bell rather
+     * than only a toast, so an unrecorded label is not forgotten. Best effort:
+     * the database that refused the label may refuse this too, and the error
+     * log already carries the tracking number.
+     */
+    private function notifyLabelNotRecorded(Package $package, string $seller, ?string $trackingNumber, bool $recoverable, ?int $userId): void
+    {
+        try {
+            User::query()
+                ->where('active', true)
+                ->where(fn ($query) => $query
+                    ->whereIn('role', [Role::Manager->value, Role::Admin->value])
+                    ->when($userId !== null, fn ($query) => $query->orWhere('id', $userId)))
+                ->get()
+                ->each(fn (User $user) => $user->notify(new LabelNotRecorded($package, $seller, $trackingNumber, $recoverable)));
+        } catch (\Throwable $e) {
+            logger()->error('Could not send the label-not-recorded notification', [
+                'package_id' => $package->id,
+                'tracking_number' => $trackingNumber,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 
@@ -808,7 +853,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      */
     private function settleEarlierPurchases(Package $package, PackageShippingRequest $request): ?PackageShippingResult
     {
-        $unresolved = $this->offerStore->awaitingPurchaseConfirmation($package);
+        // Both kinds of earlier purchase: the unconfirmed, and the confirmed
+        // whose Label was never saved. The source is asked about either before
+        // anything new is bought.
+        $unresolved = $this->unaccountedPurchases($package);
 
         if ($unresolved->isEmpty()) {
             return null;
@@ -820,7 +868,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             }
         }
 
-        if (($stillUnresolved = $this->offerStore->awaitingPurchaseConfirmation($package))->isEmpty()) {
+        if (($stillUnresolved = $this->unaccountedPurchases($package))->isEmpty()) {
             return null;
         }
 
@@ -840,6 +888,17 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             .($reported !== '' ? "The carrier reported tracking number {$reported}. " : '')
             .'Check the carrier or channel for a label on this package before buying again.',
         );
+    }
+
+    /**
+     * @return Collection<int, ShippingOffer>
+     */
+    private function unaccountedPurchases(Package $package): Collection
+    {
+        return $this->offerStore->awaitingPurchaseConfirmation($package)
+            ->concat($this->offerStore->boughtButUnrecorded($package))
+            ->sortBy('consumed_at')
+            ->values();
     }
 
     /**
@@ -935,10 +994,112 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             'offer' => $offer->public_id,
         ]);
 
-        $this->recordPurchaseAgainstOffer($offer, $response->trackingNumber);
-        $package->markShipped($response, $response->postageSource, $request->userId, $offer->carrier_service_id);
+        return $this->recordBoughtLabel($package, $offer, $response, $request, $offer->carrier_service_id)
+            ?? PackageShippingResult::shipped($response, null, $package);
+    }
 
-        return PackageShippingResult::shipped($response, null, $package);
+    /**
+     * Record a label the source has already sold: stamp the offer and ship the
+     * package, together or not at all.
+     *
+     * Stamping the offer first and shipping second left a window in which the
+     * offer read as settled while the package had no label — so the next
+     * attempt found nothing unresolved and bought a second label. In one
+     * transaction a failure leaves the offer unresolved, and the next attempt
+     * asks the source for this label before buying another.
+     *
+     * Anything thrown here is thrown after the money was spent, so it is never
+     * reported as a race or a generic error: the packer is told a label exists
+     * and which one, and the tracking number is logged and kept on the offer
+     * for a person to find if recovery cannot.
+     */
+    private function recordBoughtLabel(
+        Package $package,
+        ?ShippingOffer $offer,
+        ShipResponse $response,
+        PackageShippingRequest $request,
+        ?int $carrierServiceId,
+    ): ?PackageShippingResult {
+        try {
+            DB::transaction(function () use ($package, $offer, $response, $request, $carrierServiceId): void {
+                $this->recordPurchaseAgainstOffer($offer, $response->trackingNumber);
+                $package->markShipped($response, $response->postageSource, $request->userId, $carrierServiceId);
+            });
+
+            return null;
+        } catch (\Throwable $e) {
+            if ($offer !== null && $response->trackingNumber !== null) {
+                try {
+                    $this->offerStore->recordReportedTrackingNumber($offer, $response->trackingNumber);
+                } catch (\Throwable) {
+                    // The log line below still carries the tracking number.
+                }
+            }
+
+            $seller = $this->sellerOfBoughtLabel($response, $request);
+            $recoverable = $this->sourceCanBeAskedAbout($offer);
+
+            logger()->error('Bought a label but could not record it', [
+                'seller' => $seller,
+                'carrier' => $response->carrier,
+                'package_id' => $package->id,
+                'offer' => $offer?->public_id,
+                'tracking_number' => $response->trackingNumber,
+                'recoverable' => $recoverable,
+                'exception' => $e::class,
+                'error' => $e->getMessage(),
+            ]);
+
+            $this->notifyLabelNotRecorded($package, $seller, $response->trackingNumber, $recoverable, $request->userId);
+
+            return PackageShippingResult::labelNotRecorded($seller, $response->trackingNumber, $recoverable);
+        }
+    }
+
+    /**
+     * Who sold a label, named by where its postage was bought rather than who
+     * carries it: USPS postage bought through Amazon was sold, and must be
+     * voided, by Amazon.
+     */
+    private function sellerOfBoughtLabel(ShipResponse $response, PackageShippingRequest $request): string
+    {
+        if ($request->blindOffer !== null) {
+            return $request->blindOffer->sourceLabel;
+        }
+
+        if ($response->postageSource === PostageSource::PostageDataSource) {
+            // Best effort: the database may be what just failed.
+            $connection = rescue(
+                fn (): ?DataSource => DataSource::query()->find($response->postageDataSourceId),
+                null,
+                report: false,
+            );
+
+            return match (true) {
+                $connection === null => 'The sales channel',
+                $connection->isAmazon() => "Amazon (connection \"{$connection->name}\")",
+                default => "The connection \"{$connection->name}\"",
+            };
+        }
+
+        return filled($response->carrier) ? $response->carrier : $this->sellerName($request);
+    }
+
+    /**
+     * Whether the next attempt can ask the source for this label rather than
+     * buy another — the only case in which "try again" is safe advice.
+     */
+    private function sourceCanBeAskedAbout(?ShippingOffer $offer): bool
+    {
+        if ($offer === null) {
+            return false;
+        }
+
+        return rescue(
+            fn (): bool => $this->postageSources->sellerFor($offer) instanceof RecoversUnresolvedPurchase,
+            false,
+            report: false,
+        );
     }
 
     /**
