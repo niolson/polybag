@@ -1,7 +1,7 @@
 <x-filament-panels::page>
     <x-qz-tray />
 
-    {{ $this->infolist }}
+    {{ $this->content }}
 
     <x-filament-actions::modals />
 </x-filament-panels::page>

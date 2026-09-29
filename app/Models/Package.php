@@ -296,6 +296,24 @@ class Package extends Model
     }
 
     /**
+     * This package's draft state, or null once it has a label. Read from
+     * `draft_state` when the query selected it ({@see scopeWithDraftState()}),
+     * so a list asks once per page rather than once per row.
+     */
+    public function draftState(): ?PackageDraftState
+    {
+        if ($this->status !== PackageStatus::Unshipped) {
+            return null;
+        }
+
+        $state = array_key_exists('draft_state', $this->attributes)
+            ? $this->attributes['draft_state']
+            : self::query()->withDraftState()->whereKey($this->getKey())->first()?->getAttribute('draft_state');
+
+        return PackageDraftState::tryFrom((string) $state);
+    }
+
+    /**
      * Adds `draft_state`, the {@see draftStateSql()} value, to each row.
      *
      * @param  Builder<Package>  $query

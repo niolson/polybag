@@ -7,6 +7,7 @@ use App\Contracts\PackageLabelWorkflow;
 use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PrintRequest;
+use App\Enums\PackageDraftState;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Exceptions\PackageDraftIncompleteException;
@@ -319,8 +320,12 @@ class ViewPackage extends ViewRecord
                             TextEntry::make('weight')
                                 ->suffix(' lbs'),
                         ]),
+                        // The same badge as the Packages list: a draft shows
+                        // how far it has got.
                         TextEntry::make('status')
-                            ->badge(),
+                            ->badge()
+                            ->state(fn (Package $record): PackageStatus|PackageDraftState => $record->draftState() ?? $record->status)
+                            ->tooltip(fn (Package $record): ?string => $record->status === PackageStatus::Unshipped ? 'Unshipped' : null),
                         TextEntry::make('tracking_status')
                             ->badge()
                             ->placeholder('—'),

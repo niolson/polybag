@@ -4,16 +4,20 @@ use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingResult;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\PackageDraftState;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Enums\ShipmentStatus;
 use App\Filament\Resources\PackageResource\Pages\ViewPackage;
+use App\Filament\Resources\PackageResource\RelationManagers\PackageItemsRelationManager;
 use App\Models\Package;
+use App\Models\PackageItem;
 use App\Models\Product;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\User;
 use Filament\Actions\Action;
+use Filament\Actions\Testing\TestAction;
 use Livewire\Livewire;
 
 function viewPackageReadyDraft(): Package
@@ -214,4 +218,34 @@ it('does not let a shipper buy for a shipment that has already shipped', functio
     Livewire::test(ViewPackage::class, ['record' => $package->id])
         ->assertActionHidden('buyAndPrintLabel')
         ->assertActionHidden('pack');
+});
+
+it('shows a draft the same status badge as the Packages list', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::User]));
+
+    Livewire::test(ViewPackage::class, ['record' => viewPackageEmptyDraft()->id])
+        ->assertSee(PackageDraftState::Empty->getLabel());
+
+    Livewire::test(ViewPackage::class, ['record' => viewPackageReadyDraft()->id])
+        ->assertSee(PackageDraftState::Ready->getLabel());
+});
+
+it('lists the package items on the view page, read-only', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Admin]));
+    $package = viewPackageReadyDraft();
+    $item = ShipmentItem::factory()->create(['shipment_id' => $package->shipment_id, 'quantity' => 1]);
+    $packed = PackageItem::create([
+        'package_id' => $package->id,
+        'shipment_item_id' => $item->id,
+        'product_id' => $item->product_id,
+        'quantity' => 1,
+    ]);
+
+    Livewire::test(ViewPackage::class, ['record' => $package->id])
+        ->assertSeeHtml('wire:name="'.e(PackageItemsRelationManager::class).'"');
+
+    Livewire::test(PackageItemsRelationManager::class, ['ownerRecord' => $package, 'pageClass' => ViewPackage::class])
+        ->assertCanSeeTableRecords([$packed])
+        ->assertActionHidden(TestAction::make('create')->table())
+        ->assertActionHidden(TestAction::make('edit')->table($packed));
 });

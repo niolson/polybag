@@ -336,9 +336,7 @@ class PackageResource extends Resource
                 // computed in the query rather than stored.
                 Tables\Columns\TextColumn::make('status')
                     ->badge()
-                    ->state(fn (Package $record): PackageStatus|PackageDraftState => $record->status === PackageStatus::Unshipped
-                        ? PackageDraftState::tryFrom((string) $record->getAttribute('draft_state')) ?? $record->status
-                        : $record->status)
+                    ->state(fn (Package $record): PackageStatus|PackageDraftState => $record->draftState() ?? $record->status)
                     ->tooltip(fn (Package $record): ?string => $record->status === PackageStatus::Unshipped ? 'Unshipped' : null),
                 Tables\Columns\TextColumn::make('tracking_status')
                     ->badge()
