@@ -23,6 +23,7 @@ use App\Enums\CustomsDocumentDelivery;
 use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
+use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
 use App\Http\Integrations\USPS\Requests\CancelInternationalLabel;
 use App\Http\Integrations\USPS\Requests\CancelLabel;
 use App\Http\Integrations\USPS\Requests\InternationalLabel;
@@ -504,6 +505,8 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
      * and let the next attempt buy a second one. The exception leaves the
      * offer unresolved, and {@see recoverPurchase()} asks USPS by the key
      * before anything else is bought — ADR-0002 decision 4's fifth property.
+     * A 2xx whose reply cannot be read is the same unknown, and is thrown as
+     * {@see UnreadablePurchaseResponseException} for the same reason.
      */
     public function createShipment(ShipRequest $request): ShipResponse
     {
@@ -853,31 +856,11 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
                 return ShipResponse::failure($errorMessage);
             }
 
-            $response->parseBody();
-
-            Log::channel('usps-validation')->debug('LABEL RESPONSE', [
-                'metadata' => $response->metadata,
-            ]);
-
-            // Validate required response fields
-            if (empty($response->metadata['trackingNumber'])) {
-                Log::channel('usps-validation')->error('USPS createDomesticShipment missing tracking number', [
-                    'metadata' => $response->metadata,
-                ]);
-
-                return ShipResponse::failure('USPS response missing tracking number');
-            }
-
-            if (empty($response->label)) {
-                Log::channel('usps-validation')->error('USPS createDomesticShipment missing label data', [
-                    'metadata' => $response->metadata,
-                ]);
-
-                return ShipResponse::failure('USPS response missing label data');
-            }
+            /** @var LabelResponse $response */
+            $trackingNumber = $this->readPurchasedLabel($response, 'createDomesticShipment', $idempotencyKey);
 
             return ShipResponse::success(
-                trackingNumber: $response->metadata['trackingNumber'],
+                trackingNumber: $trackingNumber,
                 cost: (float) ($response->metadata['postage'] ?? $request->selectedRate->price),
                 carrier: Carrier::USPS,
                 service: $request->selectedRate->serviceName,
@@ -899,6 +882,9 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
                 'idempotency_key' => $idempotencyKey,
             ]);
 
+            throw $e;
+        } catch (UnreadablePurchaseResponseException $e) {
+            // Accepted and charged — see readPurchasedLabel().
             throw $e;
         } catch (\Exception $e) {
             Log::channel('usps-validation')->error('USPS createDomesticShipment error', [
@@ -989,33 +975,8 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
                 return ShipResponse::failure($errorMessage);
             }
 
-            $response->parseBody();
-
-            Log::channel('usps-validation')->debug('LABEL RESPONSE', [
-                'metadata' => $response->metadata,
-            ]);
-
-            // International responses use 'internationalTrackingNumber' instead of 'trackingNumber'
-            $trackingNumber = $response->metadata['internationalTrackingNumber']
-                ?? $response->metadata['trackingNumber']
-                ?? null;
-
-            // Validate required response fields
-            if (empty($trackingNumber)) {
-                Log::channel('usps-validation')->error('USPS createInternationalShipment missing tracking number', [
-                    'metadata' => $response->metadata,
-                ]);
-
-                return ShipResponse::failure('USPS response missing tracking number');
-            }
-
-            if (empty($response->label)) {
-                Log::channel('usps-validation')->error('USPS createInternationalShipment missing label data', [
-                    'metadata' => $response->metadata,
-                ]);
-
-                return ShipResponse::failure('USPS response missing label data');
-            }
+            /** @var LabelResponse $response */
+            $trackingNumber = $this->readPurchasedLabel($response, 'createInternationalShipment', $idempotencyKey);
 
             return ShipResponse::success(
                 trackingNumber: $trackingNumber,
@@ -1042,6 +1003,9 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
             ]);
 
             throw $e;
+        } catch (UnreadablePurchaseResponseException $e) {
+            // Accepted and charged — see readPurchasedLabel().
+            throw $e;
         } catch (\Exception $e) {
             Log::channel('usps-validation')->error('USPS createInternationalShipment error', [
                 'exception' => $e::class,
@@ -1051,6 +1015,72 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
 
             return ShipResponse::failure($this->describeLabelException($e));
         }
+    }
+
+    /**
+     * Read the label out of a 2xx purchase reply, or throw.
+     *
+     * A 2xx from the label endpoint means USPS created the label and charged
+     * for it, so nothing past this point may come back as a decline: a
+     * malformed multipart body, a missing tracking number or an empty label
+     * part is an unknown outcome. {@see UnreadablePurchaseResponseException}
+     * leaves the offer unresolved, and {@see recoverPurchase()} reprints the
+     * same label by the idempotency key on the next attempt. The raw body is
+     * logged first because it is the only copy of what USPS said.
+     *
+     * @return string The tracking number; the label is on the response.
+     *
+     * @throws UnreadablePurchaseResponseException
+     */
+    private function readPurchasedLabel(LabelResponse $response, string $operation, string $idempotencyKey): string
+    {
+        try {
+            $response->parseBody();
+        } catch (\Exception $e) {
+            $this->unreadablePurchase($response, $operation, $idempotencyKey, $e->getMessage(), previous: $e);
+        }
+
+        Log::channel('usps-validation')->debug('LABEL RESPONSE', [
+            'metadata' => $response->metadata,
+        ]);
+
+        // International responses use 'internationalTrackingNumber' instead of 'trackingNumber'
+        $trackingNumber = $response->metadata['internationalTrackingNumber']
+            ?? $response->metadata['trackingNumber']
+            ?? null;
+
+        if (! is_scalar($trackingNumber) || (string) $trackingNumber === '') {
+            $this->unreadablePurchase($response, $operation, $idempotencyKey, 'USPS response missing tracking number');
+        }
+
+        if (empty($response->label)) {
+            $this->unreadablePurchase($response, $operation, $idempotencyKey, 'USPS response missing label data', (string) $trackingNumber);
+        }
+
+        return (string) $trackingNumber;
+    }
+
+    /**
+     * @throws UnreadablePurchaseResponseException
+     */
+    private function unreadablePurchase(
+        Response $response,
+        string $operation,
+        string $idempotencyKey,
+        string $reason,
+        ?string $trackingNumber = null,
+        ?\Throwable $previous = null,
+    ): never {
+        Log::channel('usps-validation')->error("USPS {$operation} accepted the purchase but its reply could not be read; the offer stays unresolved", [
+            'reason' => $reason,
+            'status' => $response->status(),
+            'idempotency_key' => $idempotencyKey,
+            'tracking_number' => $trackingNumber,
+            'content_type' => $response->headers()->get('Content-Type'),
+            'body' => $response->body(),
+        ]);
+
+        throw new UnreadablePurchaseResponseException(Carrier::USPS, $reason, $trackingNumber, $previous);
     }
 
     /**
