@@ -806,11 +806,11 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
 
             $response = $connector->send($apiRequest);
 
-            if ($response->successful()) {
-                return CancelResponse::success('FedEx shipment cancelled.');
+            if (! $response->successful()) {
+                return CancelResponse::failure('FedEx returned status '.$response->status());
             }
 
-            return CancelResponse::failure('FedEx returned status '.$response->status());
+            return $this->readCancelReply($response, $trackingNumber);
         } catch (\Exception $e) {
             logger()->error('FedEx cancelShipment error', [
                 'exception' => $e::class,
@@ -820,6 +820,40 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
 
             return CancelResponse::failure($e->getMessage());
         }
+    }
+
+    /**
+     * A 2xx is not FedEx's answer: `output.cancelledShipment` is. Only `true`
+     * voids the label; `false` is a refusal explained by the alerts, and any
+     * other body cannot be read.
+     */
+    private function readCancelReply(Response $response, string $trackingNumber): CancelResponse
+    {
+        try {
+            $cancelled = $response->json('output.cancelledShipment');
+            $alert = $response->json('output.alerts.0.message');
+        } catch (\JsonException) {
+            $cancelled = null;
+            $alert = null;
+        }
+
+        if ($cancelled === true) {
+            return CancelResponse::success('FedEx shipment cancelled.');
+        }
+
+        if ($cancelled === false) {
+            return CancelResponse::failure(is_string($alert) && $alert !== ''
+                ? 'FedEx did not cancel the shipment: '.$alert
+                : 'FedEx did not cancel the shipment.');
+        }
+
+        logger()->error('FedEx cancelShipment reply could not be read', [
+            'status' => $response->status(),
+            'tracking_number' => $trackingNumber,
+            'body' => $response->body(),
+        ]);
+
+        return CancelResponse::unreadable('FedEx');
     }
 
     public function trackShipment(Package $package): TrackShipmentResponse

@@ -532,6 +532,50 @@ it('cancels a FedEx shipment', function (): void {
     Saloon::assertSent(CancelShipment::class);
 });
 
+it('does not read a FedEx reply that cancelled nothing as a void', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CancelShipment::class => MockResponse::make([
+            'output' => [
+                'cancelledShipment' => false,
+                'cancelledHistory' => false,
+                'alerts' => [['code' => 'SHIPMENT.CANCEL.NOTALLOWED', 'message' => 'Shipment already tendered']],
+            ],
+        ], 200),
+    ]);
+
+    $package = Package::factory()->shipped()->for(Shipment::factory())->create([
+        'carrier' => 'FedEx', 'tracking_number' => '794644790138',
+    ]);
+    config(['services.fedex.account_number' => 'test_account']);
+
+    $response = $this->adapter->cancelShipment('794644790138', $package);
+
+    expect($response->success)->toBeFalse()
+        ->and($response->message)->toContain('Shipment already tendered');
+});
+
+it('does not read a FedEx 2xx it cannot read as a void', function (MockResponse $reply): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CancelShipment::class => $reply,
+    ]);
+
+    $package = Package::factory()->shipped()->for(Shipment::factory())->create([
+        'carrier' => 'FedEx', 'tracking_number' => '794644790138',
+    ]);
+    config(['services.fedex.account_number' => 'test_account']);
+
+    $response = $this->adapter->cancelShipment('794644790138', $package);
+
+    expect($response->success)->toBeFalse()
+        ->and($response->message)->toContain('could not be read');
+})->with([
+    'empty body' => fn (): MockResponse => MockResponse::make([], 200),
+    'no cancelledShipment' => fn (): MockResponse => MockResponse::make(['output' => ['transactionId' => 'abc']], 200),
+    'not JSON' => fn (): MockResponse => MockResponse::make('<html>gateway</html>', 200),
+]);
+
 it('returns failure when FedEx cancel errors', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),

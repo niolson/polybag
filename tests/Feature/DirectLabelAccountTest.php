@@ -124,7 +124,7 @@ it('voids a USPS label with the payment token of the account that bought it', fu
 
             return MockResponse::make(['paymentAuthorizationToken' => 'token']);
         },
-        CancelLabel::class => MockResponse::make([], 200),
+        CancelLabel::class => MockResponse::make(['trackingNumber' => '9400111899223456789012', 'status' => 'CANCELED'], 200),
     ]);
 
     $globalAccount = uspsAccount('global_crid', 'global_client');
@@ -204,7 +204,7 @@ it('voids and tracks a UPS label on the account that bought it', function (): vo
     $clientIds = [];
     Saloon::fake([
         '*oauth*' => recordingOauth($clientIds),
-        VoidShipment::class => MockResponse::make(['VoidShipmentResponse' => ['SummaryResult' => ['Status' => ['Description' => 'Voided']]]]),
+        VoidShipment::class => MockResponse::make(['VoidShipmentResponse' => ['SummaryResult' => ['Status' => ['Code' => '1', 'Description' => 'Voided']]]]),
         UpsTrackShipment::class => MockResponse::make(['trackResponse' => ['shipment' => [['package' => [[]]]]]]),
     ]);
 

@@ -15,12 +15,14 @@ use App\Http\Integrations\Ups\Requests\CreateShipment;
 use App\Http\Integrations\Ups\Requests\LabelRecovery;
 use App\Http\Integrations\Ups\Requests\Rate;
 use App\Http\Integrations\Ups\Requests\TrackShipment;
+use App\Http\Integrations\Ups\Requests\VoidShipment;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierAccountScope;
 use App\Models\Client;
 use App\Models\Package;
+use App\Models\Shipment;
 use App\Models\ShippingOffer;
 use App\Services\Carriers\UpsAdapter;
 use Carbon\CarbonImmutable;
@@ -2149,3 +2151,61 @@ it('leaves the question open when the account the offer was bought on is gone or
     expect($this->adapter->recoverPurchase(upsOfferShipRequest($offer->fresh())))->toBeNull();
     Saloon::assertNothingSent();
 })->with(['deleted', 'rebilled']);
+
+it('voids a UPS shipment only when the summary status code is 1', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        VoidShipment::class => MockResponse::make(['VoidShipmentResponse' => [
+            'Response' => ['ResponseStatus' => ['Code' => '1', 'Description' => 'Success']],
+            'SummaryResult' => ['Status' => ['Code' => '1', 'Description' => 'Voided']],
+        ]], 200),
+    ]);
+
+    $package = Package::factory()->shipped()->for(Shipment::factory())->create([
+        'carrier' => 'UPS', 'tracking_number' => '1Z999AA10123456784',
+    ]);
+
+    $response = $this->adapter->cancelShipment('1Z999AA10123456784', $package);
+
+    expect($response->success)->toBeTrue()
+        ->and($response->message)->toBe('Voided');
+});
+
+it('does not read a UPS reply whose summary status is not voided as a void', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        VoidShipment::class => MockResponse::make(['VoidShipmentResponse' => [
+            'Response' => ['ResponseStatus' => ['Code' => '1', 'Description' => 'Success']],
+            'SummaryResult' => ['Status' => ['Code' => '0', 'Description' => 'Not Voided']],
+        ]], 200),
+    ]);
+
+    $package = Package::factory()->shipped()->for(Shipment::factory())->create([
+        'carrier' => 'UPS', 'tracking_number' => '1Z999AA10123456784',
+    ]);
+
+    $response = $this->adapter->cancelShipment('1Z999AA10123456784', $package);
+
+    expect($response->success)->toBeFalse()
+        ->and($response->message)->toContain('Not Voided');
+});
+
+it('does not read a UPS 2xx it cannot read as a void', function (MockResponse $reply): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        VoidShipment::class => $reply,
+    ]);
+
+    $package = Package::factory()->shipped()->for(Shipment::factory())->create([
+        'carrier' => 'UPS', 'tracking_number' => '1Z999AA10123456784',
+    ]);
+
+    $response = $this->adapter->cancelShipment('1Z999AA10123456784', $package);
+
+    expect($response->success)->toBeFalse()
+        ->and($response->message)->toContain('could not be read');
+})->with([
+    'empty body' => fn (): MockResponse => MockResponse::make([], 200),
+    'no status code' => fn (): MockResponse => MockResponse::make(['VoidShipmentResponse' => ['SummaryResult' => ['Status' => ['Description' => 'Voided']]]], 200),
+    'not JSON' => fn (): MockResponse => MockResponse::make('<html>gateway</html>', 200),
+]);
