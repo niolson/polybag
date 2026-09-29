@@ -4,6 +4,7 @@ namespace App\Filament\Resources\ShipmentResource\Pages;
 
 use App\Enums\Deliverability;
 use App\Enums\ShipmentStatus;
+use App\Filament\Concerns\KeepsStatusTabInStepWithStatusFilter;
 use App\Filament\Resources\ShipmentResource;
 use Filament\Actions;
 use Filament\Resources\Pages\ListRecords;
@@ -18,6 +19,8 @@ use Livewire\Attributes\Url;
 
 class ListShipments extends ListRecords
 {
+    use KeepsStatusTabInStepWithStatusFilter;
+
     protected static string $resource = ShipmentResource::class;
 
     #[Url(as: 'status_tab')]
@@ -56,6 +59,7 @@ class ListShipments extends ListRecords
 
     public function updatedActiveStatusTab(): void
     {
+        $this->clearStatusFilterForStatusTab();
         $this->resetPage();
     }
 
@@ -98,6 +102,10 @@ class ListShipments extends ListRecords
 
     protected function modifyQueryWithStatusTab(Builder $query): Builder
     {
+        if ($this->hasStatusFilter()) {
+            return $query;
+        }
+
         return match ($this->activeStatusTab) {
             ShipmentStatus::Open->value => $query->where('status', ShipmentStatus::Open),
             ShipmentStatus::Shipped->value => $query->where('status', ShipmentStatus::Shipped),

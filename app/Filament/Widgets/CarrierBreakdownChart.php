@@ -2,6 +2,7 @@
 
 namespace App\Filament\Widgets;
 
+use App\Enums\Role;
 use App\Models\DailyShippingStat;
 use App\Models\Location;
 use Filament\Widgets\ChartWidget;
@@ -20,6 +21,11 @@ class CarrierBreakdownChart extends ChartWidget
     public ?string $filter = 'week';
 
     protected ?string $pollingInterval = '60s';
+
+    public static function canView(): bool
+    {
+        return auth()->user()?->role?->isAtLeast(Role::Manager) ?? false;
+    }
 
     protected function getFilters(): ?array
     {

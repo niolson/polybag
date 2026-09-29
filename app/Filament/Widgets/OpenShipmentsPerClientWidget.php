@@ -2,6 +2,7 @@
 
 namespace App\Filament\Widgets;
 
+use App\Enums\Role;
 use App\Enums\ShipmentStatus;
 use App\Filament\Resources\Clients\ClientResource;
 use App\Filament\Resources\ShipmentResource;
@@ -22,6 +23,10 @@ class OpenShipmentsPerClientWidget extends BaseWidget
 
     public static function canView(): bool
     {
+        if (! (auth()->user()?->role?->isAtLeast(Role::Manager) ?? false)) {
+            return false;
+        }
+
         /** @var SettingsService $settings */
         $settings = app(SettingsService::class);
 

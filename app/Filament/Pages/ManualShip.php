@@ -76,7 +76,7 @@ class ManualShip extends Page implements HasForms
 
     public static function canAccess(): bool
     {
-        return (auth()->user()?->role->isAtLeast(Role::User) ?? false)
+        return (auth()->user()?->role->isAtLeast(Role::Manager) ?? false)
             && app(SettingsService::class)->get('manual_shipping_enabled', true);
     }
 

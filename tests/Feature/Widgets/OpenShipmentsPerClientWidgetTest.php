@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\Role;
 use App\Enums\ShipmentStatus;
 use App\Filament\Widgets\OpenShipmentsPerClientWidget;
 use App\Models\Client;
@@ -28,9 +29,17 @@ it('is hidden when multi_client_enabled is false', function (): void {
 it('is visible when multi_client_enabled is true', function (): void {
     app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
 
-    $this->actingAs(User::factory()->create());
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
 
     expect(OpenShipmentsPerClientWidget::canView())->toBeTrue();
+});
+
+it('is hidden from shippers even when multi_client_enabled is true', function (): void {
+    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+
+    $this->actingAs(User::factory()->create(['role' => Role::User]));
+
+    expect(OpenShipmentsPerClientWidget::canView())->toBeFalse();
 });
 
 it('shows client names and open shipment counts', function (): void {

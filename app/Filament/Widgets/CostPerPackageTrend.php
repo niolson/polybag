@@ -2,6 +2,7 @@
 
 namespace App\Filament\Widgets;
 
+use App\Enums\Role;
 use App\Models\DailyShippingStat;
 use App\Models\Location;
 use Filament\Widgets\ChartWidget;
@@ -16,6 +17,11 @@ class CostPerPackageTrend extends ChartWidget
     protected int|string|array $columnSpan = 1;
 
     protected ?string $pollingInterval = '60s';
+
+    public static function canView(): bool
+    {
+        return auth()->user()?->role?->isAtLeast(Role::Manager) ?? false;
+    }
 
     /**
      * Packages that reported a cost. A null `costed_package_count` predates the

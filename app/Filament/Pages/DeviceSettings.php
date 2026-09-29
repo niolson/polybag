@@ -17,7 +17,7 @@ class DeviceSettings extends Page
 
     protected static ?string $navigationLabel = 'Device Settings';
 
-    protected static UnitEnum|string|null $navigationGroup = 'Admin';
+    protected static UnitEnum|string|null $navigationGroup = 'Devices';
 
     protected static ?int $navigationSort = 100;
 

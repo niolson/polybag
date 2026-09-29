@@ -31,7 +31,7 @@ class LabelBatchResource extends Resource
 
     protected static ?string $slug = 'batch-shipments';
 
-    protected static \UnitEnum|string|null $navigationGroup = 'Manage';
+    protected static \UnitEnum|string|null $navigationGroup = 'Operations';
 
     protected static ?int $navigationSort = 3;
 

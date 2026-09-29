@@ -56,6 +56,29 @@ it('allows logout through so the user can sign out', function (): void {
     expect($response->getStatusCode())->toBe(200);
 });
 
+it('allows required MFA enrollment including a replayed Livewire page request', function (): void {
+    $response = app(EnsurePasswordNotExpired::class)->handle(
+        requestWithExpiredFlag('/multi-factor-authentication/set-up'),
+        fn (): ResponseFactory|\Illuminate\Http\Response => response('ok'),
+    );
+
+    expect($response->getStatusCode())->toBe(200);
+});
+
+it('does not exempt other MFA paths from password expiry', function (string $path): void {
+    $response = app(EnsurePasswordNotExpired::class)->handle(
+        requestWithExpiredFlag($path),
+        fn (): ResponseFactory|\Illuminate\Http\Response => response('ok'),
+    );
+
+    expect($response->isRedirect())->toBeTrue()
+        ->and($response->headers->get('Location'))->toBe(ChangePassword::getUrl());
+})->with([
+    '/multi-factor-authentication/set-up-other',
+    '/multi-factor-authentication/set-up/other',
+    '/multi-factor-authentication',
+]);
+
 it('allows a livewire update replayed against the change-password page through', function (): void {
     // Registered as Livewire persistent middleware, this guard runs against the
     // reconstructed original page path (memo.path). For the change-password page
