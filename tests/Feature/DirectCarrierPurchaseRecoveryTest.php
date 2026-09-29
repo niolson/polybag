@@ -484,7 +484,7 @@ it('keeps the USPS idempotency key beside the tracking number a reply reported',
     $offer = ShippingOffer::where('public_id', $rate->offerId)->firstOrFail();
 
     expect($result->message)->toContain('9200190414219000000011')
-        ->and($offer->purchase_context[UspsAdapter::PURCHASE_CONTEXT_KEY] ?? null)->toBeString()->not->toBe('')
+        ->and($offer->purchase_context[UspsAdapter::PURCHASE_CONTEXT_KEY] ?? null)->toBeString()->toHaveLength(36)
         ->and($offer->purchase_context[OfferStore::REPORTED_TRACKING_NUMBER] ?? null)->toBe('9200190414219000000011')
         ->and($offer->isAwaitingPurchaseConfirmation())->toBeTrue();
 });

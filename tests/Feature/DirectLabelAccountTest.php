@@ -5,6 +5,8 @@ use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Http\Integrations\Fedex\Requests\CancelShipment;
 use App\Http\Integrations\Fedex\Requests\TrackShipment as FedexTrackShipment;
+use App\Http\Integrations\Ups\Requests\TrackShipment as UpsTrackShipment;
+use App\Http\Integrations\Ups\Requests\VoidShipment;
 use App\Http\Integrations\USPS\Requests\CancelLabel;
 use App\Http\Integrations\USPS\Requests\PaymentAuthorization;
 use App\Http\Integrations\USPS\Requests\TrackShipment as UspsTrackShipment;
@@ -17,7 +19,9 @@ use App\Models\PackageLabel;
 use App\Models\Shipment;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\PostageSources\PostageSourceDispatcher;
+use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Event;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\PendingRequest;
 use Saloon\Laravel\Facades\Saloon;
@@ -172,6 +176,69 @@ it('tracks a FedEx label on the account that bought it', function (): void {
     app(PostageSourceDispatcher::class)->trackShipment($package);
 
     expect($apiKeys)->toBe(['k1']);
+});
+
+function upsAccount(string $accountNumber, string $clientId, ?Client $client = null): CarrierAccount
+{
+    return scopedAccount(Carrier::UPS, ['account_number' => $accountNumber], ['client_id' => $clientId, 'client_secret' => 's'], $client);
+}
+
+/**
+ * The client id each OAuth token request authenticated as, from its body or
+ * its Basic credentials — which account a request was sent on.
+ *
+ * @param  array<int, string|null>  $clientIds
+ */
+function recordingOauth(array &$clientIds): Closure
+{
+    return function (PendingRequest $pending) use (&$clientIds): MockResponse {
+        $basic = (string) $pending->headers()->get('Authorization');
+        $clientIds[] = data_get($pending->body()?->all() ?? [], 'client_id')
+            ?? (str_starts_with($basic, 'Basic ') ? strtok((string) base64_decode(substr($basic, 6)), ':') : null);
+
+        return MockResponse::make(['access_token' => 't', 'token_type' => 'Bearer', 'expires_in' => 3600]);
+    };
+}
+
+it('voids and tracks a UPS label on the account that bought it', function (): void {
+    $clientIds = [];
+    Saloon::fake([
+        '*oauth*' => recordingOauth($clientIds),
+        VoidShipment::class => MockResponse::make(['VoidShipmentResponse' => ['SummaryResult' => ['Status' => ['Description' => 'Voided']]]]),
+        UpsTrackShipment::class => MockResponse::make(['trackResponse' => ['shipment' => [['package' => [[]]]]]]),
+    ]);
+
+    $globalAccount = upsAccount('GLOBAL', 'global_client');
+    $package = directLabel(Carrier::UPS, $this->client, $globalAccount, '1ZGLOBAL0000000001');
+    upsAccount('CLIENT', 'client_client', $this->client);
+
+    app(PostageSourceDispatcher::class)->trackShipment($package);
+    $void = app(PostageSourceDispatcher::class)->voidLabel($package);
+
+    expect($void->success)->toBeTrue()
+        ->and(array_unique($clientIds))->toBe(['global_client']);
+});
+
+it('voids on the recorded account after its billing identity is edited, and logs it', function (): void {
+    $sent = [];
+    Saloon::fake(fedexCancelFakes($sent));
+    $warnings = [];
+    Event::listen(MessageLogged::class, function (MessageLogged $logged) use (&$warnings): void {
+        if ($logged->level === 'warning') {
+            $warnings[] = $logged->message;
+        }
+    });
+
+    $globalAccount = fedexAccount('global_account', 'k1');
+    $package = directLabel(Carrier::FEDEX, $this->client, $globalAccount, '794600000001');
+    $globalAccount->update(['credentials' => ['account_number' => 'edited_account']]);
+
+    $response = app(PostageSourceDispatcher::class)->voidLabel($package);
+
+    // Logged, not refused: refusing would leave a live label nobody can void from here.
+    expect($response->success)->toBeTrue()
+        ->and($sent)->toBe(['edited_account'])
+        ->and(collect($warnings)->filter(fn (string $message): bool => str_contains($message, 'bills as someone else now')))->toHaveCount(1);
 });
 
 it('voids on the account that bought the label after that account is deactivated', function (): void {
