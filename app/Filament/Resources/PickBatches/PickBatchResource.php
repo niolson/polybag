@@ -26,7 +26,7 @@ class PickBatchResource extends Resource
 
     protected static ?string $pluralModelLabel = 'Pick Batches';
 
-    protected static UnitEnum|string|null $navigationGroup = 'Manage';
+    protected static UnitEnum|string|null $navigationGroup = 'Operations';
 
     protected static ?int $navigationSort = 4;
 

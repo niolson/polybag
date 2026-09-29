@@ -32,7 +32,7 @@ class GeneratePickBatch extends Page implements HasForms
 
     protected static ?string $navigationLabel = 'Generate Pick Batch';
 
-    protected static UnitEnum|string|null $navigationGroup = 'Manage';
+    protected static UnitEnum|string|null $navigationGroup = 'Operations';
 
     protected static ?int $navigationSort = 4;
 

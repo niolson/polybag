@@ -3,6 +3,7 @@
         x-data="{
             printer: null,
             scaleConfigured: false,
+            isShipper: @js(auth()->user()?->role === \App\Enums\Role::User),
 
             init() {
                 this.printer = PrinterSettings.labelPrinterFor(PrinterSettings.labelFormat())
@@ -31,7 +32,7 @@
                 return this.printerOk && this.scaleOk
             }
         }"
-        x-show="!allOk"
+        x-show="!allOk || isShipper"
         x-cloak
         class="fi-wi-stats-overview-stat relative rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10"
     >
@@ -62,13 +63,25 @@
                 </div>
             </div>
 
-            {{-- Link to Device Settings --}}
-            <a
-                href="{{ \App\Filament\Pages\DeviceSettings::getUrl() }}"
-                class="text-sm font-medium text-primary-600 hover:text-primary-500 dark:text-primary-400 dark:hover:text-primary-300"
-            >
-                Configure devices &rarr;
-            </a>
+            <div class="flex items-center gap-4">
+                @if(auth()->user()?->role === \App\Enums\Role::User)
+                    <a
+                        href="{{ \App\Filament\Pages\Pack::getUrl() }}"
+                        class="inline-flex items-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600"
+                    >
+                        Start packing
+                    </a>
+                @endif
+
+                <a
+                    x-show="!allOk"
+                    x-cloak
+                    href="{{ \App\Filament\Pages\DeviceSettings::getUrl() }}"
+                    class="text-sm font-medium text-primary-600 hover:text-primary-500 dark:text-primary-400 dark:hover:text-primary-300"
+                >
+                    Set up printer and scale &rarr;
+                </a>
+            </div>
         </div>
     </div>
 </x-filament-widgets::widget>

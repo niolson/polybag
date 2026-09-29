@@ -2,10 +2,15 @@
 
 use App\Enums\Role;
 use App\Filament\Pages\EndOfDay;
+use App\Filament\Pages\ManualShip;
 use App\Filament\Pages\Settings;
 use App\Filament\Pages\UnmappedObservedServices;
 use App\Filament\Pages\UnmappedShippingReferences;
 use App\Filament\Resources\BoxSizeResource\Pages\ListBoxSizes;
+use App\Filament\Resources\CarrierAccounts\CarrierAccountResource;
+use App\Filament\Resources\CarrierAccounts\Pages\CreateCarrierAccount;
+use App\Filament\Resources\CarrierAccounts\Pages\EditCarrierAccount;
+use App\Filament\Resources\CarrierAccounts\Pages\ListCarrierAccounts;
 use App\Filament\Resources\Carriers\Pages\ListCarriers;
 use App\Filament\Resources\CarrierServiceResource\Pages\ListCarrierServices;
 use App\Filament\Resources\ChannelResource\Pages\ListChannels;
@@ -15,10 +20,42 @@ use App\Filament\Resources\ShipmentResource\Pages\CreateShipment;
 use App\Filament\Resources\ShipmentResource\Pages\EditShipment;
 use App\Filament\Resources\ShipmentResource\Pages\ListShipments;
 use App\Filament\Resources\ShippingMethodResource\Pages\ListShippingMethods;
+use App\Filament\Resources\SpecialServices\Pages\ListSpecialServices;
+use App\Filament\Resources\SpecialServices\SpecialServiceResource;
 use App\Filament\Resources\UserResource\Pages\ListUsers;
+use App\Filament\Widgets\CarrierBreakdownChart;
+use App\Filament\Widgets\CostPerPackageTrend;
+use App\Filament\Widgets\ExceptionsWidget;
+use App\Filament\Widgets\ShippedShipmentsChart;
+use App\Models\CarrierAccount;
 use App\Models\Shipment;
 use App\Models\User;
 use Livewire\Livewire;
+
+it('restricts carrier configuration pages and navigation to admins', function (Role $role): void {
+    $this->actingAs(User::factory()->create(['role' => $role]));
+    $account = CarrierAccount::factory()->usps()->create();
+    $isAdmin = $role === Role::Admin;
+
+    expect(CarrierAccountResource::canViewAny())->toBe($isAdmin)
+        ->and(SpecialServiceResource::canViewAny())->toBe($isAdmin);
+
+    foreach ([ListCarrierAccounts::class, CreateCarrierAccount::class, ListSpecialServices::class] as $page) {
+        Livewire::test($page)->assertStatus($isAdmin ? 200 : 403);
+    }
+
+    Livewire::test(EditCarrierAccount::class, ['record' => $account->getRouteKey()])
+        ->assertStatus($isAdmin ? 200 : 403);
+})->with([Role::User, Role::Manager, Role::Admin]);
+
+it('shows reporting widgets to managers and admins but not shippers', function (Role $role): void {
+    $this->actingAs(User::factory()->create(['role' => $role]));
+    $isManager = $role->isAtLeast(Role::Manager);
+
+    foreach ([CarrierBreakdownChart::class, CostPerPackageTrend::class, ExceptionsWidget::class, ShippedShipmentsChart::class] as $widget) {
+        expect($widget::canView())->toBe($isManager);
+    }
+})->with([Role::User, Role::Manager, Role::Admin]);
 
 describe('user role access', function (): void {
     beforeEach(function (): void {
@@ -87,6 +124,10 @@ describe('user role access', function (): void {
     it('cannot access end of day page', function (): void {
         Livewire::test(EndOfDay::class)->assertForbidden();
     });
+
+    it('cannot access manual ship page', function (): void {
+        Livewire::test(ManualShip::class)->assertForbidden();
+    });
 });
 
 describe('manager role access', function (): void {
@@ -132,8 +173,12 @@ describe('manager role access', function (): void {
         Livewire::test(EndOfDay::class)->assertSuccessful();
     });
 
+    it('can access manual ship page', function (): void {
+        Livewire::test(ManualShip::class)->assertSuccessful();
+    });
+
     // Resources NOT accessible to manager
-    it('can create shipments', function (): void {
+    it('cannot create shipments', function (): void {
         Livewire::test(CreateShipment::class)->assertForbidden();
     });
 

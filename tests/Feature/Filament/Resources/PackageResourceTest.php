@@ -32,6 +32,38 @@ beforeEach(function (): void {
     $this->actingAs(User::factory()->create(['role' => Role::Admin]));
 });
 
+it('opens on every package, with no status tab applied', function (): void {
+    $shipped = Package::factory()->shipped()->create();
+    $unshipped = Package::factory()->create(['status' => PackageStatus::Unshipped]);
+
+    Livewire::test(ListPackages::class)
+        ->assertSet('activeStatusTab', 'all')
+        ->assertCanSeeTableRecords([$unshipped, $shipped]);
+});
+
+it('moves to the All tab when the status filter is used, so the two never stack', function (): void {
+    $shipped = Package::factory()->shipped()->create();
+    $unshipped = Package::factory()->create(['status' => PackageStatus::Unshipped]);
+
+    Livewire::test(ListPackages::class)
+        ->filterTable('status', PackageStatus::Shipped->value)
+        ->assertSet('activeStatusTab', 'all')
+        ->assertCanSeeTableRecords([$shipped])
+        ->assertCanNotSeeTableRecords([$unshipped]);
+});
+
+it('clears the status filter when a status tab is chosen', function (): void {
+    $shipped = Package::factory()->shipped()->create();
+    $unshipped = Package::factory()->create(['status' => PackageStatus::Unshipped]);
+
+    Livewire::test(ListPackages::class)
+        ->filterTable('status', PackageStatus::Unshipped->value)
+        ->set('activeStatusTab', PackageStatus::Shipped->value)
+        ->assertSet('tableFilters.status.value', null)
+        ->assertCanSeeTableRecords([$shipped])
+        ->assertCanNotSeeTableRecords([$unshipped]);
+});
+
 it('shows void action for shipped packages', function (): void {
     $shipment = Shipment::factory()->create();
     $package = Package::factory()->shipped()->for($shipment)->create();

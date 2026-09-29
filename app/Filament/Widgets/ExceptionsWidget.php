@@ -6,6 +6,7 @@ use App\Enums\Deliverability;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\LabelBatchStatus;
 use App\Enums\PackageStatus;
+use App\Enums\Role;
 use App\Enums\ShipmentStatus;
 use App\Enums\TrackingStatus;
 use App\Filament\Pages\UnmappedShippingReferences;
@@ -27,6 +28,11 @@ class ExceptionsWidget extends BaseWidget
 
     protected ?string $pollingInterval = '300s';
 
+    public static function canView(): bool
+    {
+        return auth()->user()?->role?->isAtLeast(Role::Manager) ?? false;
+    }
+
     protected function getStats(): array
     {
         // v2 added `needs_shipping_method`; an entry cached before it would lack the key.
@@ -37,7 +43,7 @@ class ExceptionsWidget extends BaseWidget
                 ->description('Last 90 days, deliverability "No"')
                 ->descriptionIcon('heroicon-m-x-circle')
                 ->color($counts['undeliverable'] > 0 ? 'danger' : 'success')
-                ->url(ShipmentResource::getUrl('index').'?deliverability_tab='.Deliverability::No->value),
+                ->url(ShipmentResource::getUrl('index').'?status_tab='.ShipmentStatus::Open->value.'&deliverability_tab='.Deliverability::No->value),
             Stat::make('Failed Batch Items', $counts['failed_batch_items'])
                 ->description('Last 7 days')
                 ->descriptionIcon('heroicon-m-exclamation-triangle')
@@ -47,12 +53,12 @@ class ExceptionsWidget extends BaseWidget
                 ->description('Shipped packages needing attention')
                 ->descriptionIcon('heroicon-m-truck')
                 ->color($counts['tracking_exceptions'] > 0 ? 'danger' : 'success')
-                ->url(PackageResource::getUrl('index').'?tracking_tab='.TrackingStatus::Exception->value),
+                ->url(PackageResource::getUrl('index').'?status_tab='.PackageStatus::Shipped->value.'&tracking_tab='.TrackingStatus::Exception->value),
             Stat::make('Stuck Pre-Transit', $counts['stuck_pre_transit'])
                 ->description('Pre-transit for more than 48 hours')
                 ->descriptionIcon('heroicon-m-clock')
                 ->color($counts['stuck_pre_transit'] > 0 ? 'warning' : 'success')
-                ->url(PackageResource::getUrl('index').'?tracking_tab='.TrackingStatus::PreTransit->value),
+                ->url(PackageResource::getUrl('index').'?status_tab='.PackageStatus::Shipped->value.'&tracking_tab='.TrackingStatus::PreTransit->value),
             Stat::make('Needs Shipping Method', $counts['needs_shipping_method'])
                 ->description('Open shipments no label can be bought for')
                 ->descriptionIcon('heroicon-m-exclamation-circle')

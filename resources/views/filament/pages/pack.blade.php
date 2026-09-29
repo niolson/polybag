@@ -387,7 +387,7 @@
                             x-ref="scanInput"
                             type="text"
                             x-model="input"
-                            x-bind:placeholder="hasShipment ? 'Scan product barcode or box code' : 'Scan Shipment ID'"
+                            x-bind:placeholder="hasShipment ? 'Scan product barcode or box code' : 'Scan shipment barcode or enter ID'"
                             x-bind:disabled="isShipping"
                             autofocus
                         />
@@ -628,9 +628,9 @@
                     class="h-8 w-8 text-primary-500"
                 />
             </div>
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-white">No Shipment Selected</h3>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Ready to pack?</h3>
             <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                Scan a shipment reference in the field above to begin packing.
+                Scan a shipment barcode or enter its ID above to get started.
             </p>
         </div>
     </div>

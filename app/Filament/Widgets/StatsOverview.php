@@ -2,6 +2,7 @@
 
 namespace App\Filament\Widgets;
 
+use App\Enums\Role;
 use App\Enums\ShipmentStatus;
 use App\Filament\Resources\ShipmentResource;
 use App\Models\DailyShippingStat;
@@ -25,6 +26,22 @@ class StatsOverview extends BaseWidget
 
     protected function getStats(): array
     {
+        if (auth()->user()?->role === Role::User) {
+            $pending = Cache::remember(
+                'widget:stats_overview:shipper:v1',
+                60,
+                fn (): int => Shipment::query()->where('status', ShipmentStatus::Open)->count(),
+            );
+
+            return [
+                Stat::make('Open Shipments', number_format($pending))
+                    ->description('Not shipped yet')
+                    ->descriptionIcon('heroicon-m-clock')
+                    ->color('warning')
+                    ->url(ShipmentResource::getUrl('index').'?status_tab='.ShipmentStatus::Open->value),
+            ];
+        }
+
         $data = Cache::remember('widget:stats_overview:v2', 60, function (): array {
             $tz = Location::timezone();
             $localToday = now($tz)->startOfDay();
