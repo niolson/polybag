@@ -15,6 +15,7 @@ use App\Filament\Resources\CarrierAccounts\Pages\ListCarrierAccounts;
 use App\Filament\Resources\Carriers\Pages\ListCarriers;
 use App\Filament\Resources\CarrierServiceResource\Pages\ListCarrierServices;
 use App\Filament\Resources\ChannelResource\Pages\ListChannels;
+use App\Filament\Resources\LocationResource\Pages\EditLocation;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
 use App\Filament\Resources\PackageResource\Pages\ViewPackage;
 use App\Filament\Resources\ProductResource\Pages\ListProducts;
@@ -23,10 +24,14 @@ use App\Filament\Resources\ShipmentResource\Pages\EditShipment;
 use App\Filament\Resources\ShipmentResource\Pages\ListShipments;
 use App\Filament\Resources\ShippingMethodResource\Pages\ListShippingMethods;
 use App\Filament\Resources\UserResource\Pages\ListUsers;
+use App\Models\CarrierAccountScope;
+use App\Models\Location;
 use App\Models\Package;
+use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
+use App\Services\SettingsService;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\Testing\TestAction;
 use Livewire\Livewire;
@@ -272,6 +277,59 @@ describe('carrier accounts are Admin-only', function (): void {
             ->assertHasNoFormErrors();
 
         expect($this->account->fresh()->credentials['account_number'])->toBe('Z9Y8X7');
+    });
+});
+
+describe('assigning carrier accounts to a location', function (): void {
+    beforeEach(function (): void {
+        Setting::create(['key' => 'multi_location_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+        app(SettingsService::class)->clearCache();
+
+        $this->account = createUpsAccount();
+        $this->location = Location::factory()->create();
+    });
+
+    it('hides the carrier accounts section from a Manager', function (): void {
+        $this->actingAs(User::factory()->manager()->create());
+
+        Livewire::test(EditLocation::class, ['record' => $this->location->id])
+            ->assertFormFieldHidden('carrierAccountScopes');
+    });
+
+    it('does not let a Manager route a location to a carrier account', function (): void {
+        $this->actingAs(User::factory()->manager()->create());
+
+        Livewire::test(EditLocation::class, ['record' => $this->location->id])
+            ->set('data.carrierAccountScopes', ['new' => ['carrier_account_id' => $this->account->id]])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        expect(CarrierAccountScope::where('location_id', $this->location->id)->exists())->toBeFalse();
+    });
+
+    it('keeps a location\'s carrier accounts when a Manager saves it', function (): void {
+        CarrierAccountScope::create(['carrier_account_id' => $this->account->id, 'location_id' => $this->location->id]);
+        $this->actingAs(User::factory()->manager()->create());
+
+        Livewire::test(EditLocation::class, ['record' => $this->location->id])
+            ->fillForm(['name' => 'Renamed'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        expect($this->location->fresh()->name)->toBe('Renamed')
+            ->and(CarrierAccountScope::where('location_id', $this->location->id)->count())->toBe(1);
+    });
+
+    it('lets an Admin route a location to a carrier account', function (): void {
+        $this->actingAs(User::factory()->admin()->create());
+
+        Livewire::test(EditLocation::class, ['record' => $this->location->id])
+            ->assertFormFieldVisible('carrierAccountScopes')
+            ->set('data.carrierAccountScopes', ['new' => ['carrier_account_id' => $this->account->id]])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        expect(CarrierAccountScope::where('location_id', $this->location->id)->value('carrier_account_id'))->toBe($this->account->id);
     });
 });
 

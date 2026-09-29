@@ -134,7 +134,11 @@ class LocationResource extends Resource
                             ->columnSpanFull(),
                     ])
                     ->description('Assign carrier accounts to this location. Client-specific overrides are configured per client.')
-                    ->visible(fn (): bool => (bool) app(SettingsService::class)->get('multi_location_enabled', false))
+                    // Routing a location to an account decides which account its
+                    // labels are billed to, so it follows the carrier account
+                    // policy rather than the location one, which lets Managers edit.
+                    ->visible(fn (): bool => (bool) app(SettingsService::class)->get('multi_location_enabled', false)
+                        && (auth()->user()?->can('viewAny', CarrierAccount::class) ?? false))
                     ->collapsible(),
             ]);
     }
