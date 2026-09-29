@@ -37,6 +37,11 @@ class LabelResponse extends Response
         $boundary = trim($matches[1], '"');
         $parts = $this->parseMultipart($this->body(), $boundary);
 
+        // First part: JSON metadata. Read before the parts are counted, so a
+        // reply missing its label part still says which label it was.
+        $metadata = isset($parts[0]) ? json_decode($parts[0]['body'], true) : null;
+        $this->metadata = is_array($metadata) ? $metadata : [];
+
         if (count($parts) < 2) {
             logger()->error('USPS Label Response: Expected at least 2 parts', [
                 'parts_count' => count($parts),
@@ -45,13 +50,11 @@ class LabelResponse extends Response
             throw new \Exception('Invalid USPS label response format: expected at least 2 parts');
         }
 
-        // First part: JSON metadata
-        $this->metadata = json_decode($parts[0]['body'], true) ?? [];
-
         // Second part: Base64 encoded label
         $this->label = $parts[1]['body'];
 
-        $this->reprintInfo = isset($parts[2]) ? (json_decode($parts[2]['body'], true) ?: []) : [];
+        $reprintInfo = isset($parts[2]) ? json_decode($parts[2]['body'], true) : null;
+        $this->reprintInfo = is_array($reprintInfo) ? $reprintInfo : [];
 
         logger()->debug('USPS Label Parsed', [
             'tracking_number' => $this->metadata['internationalTrackingNumber']

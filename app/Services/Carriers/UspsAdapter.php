@@ -776,6 +776,8 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
 
     private function createDomesticShipment(ShipRequest $request, string $idempotencyKey): ShipResponse
     {
+        $accepted = null;
+
         try {
             $account = $this->resolveAccount($request->locationId, $request->clientId);
             $connector = USPSConnector::getAuthenticatedConnector($account);
@@ -862,6 +864,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
             }
 
             /** @var LabelResponse $response */
+            $accepted = $response;
             $trackingNumber = $this->readPurchasedLabel($response, 'createDomesticShipment', $idempotencyKey);
 
             return ShipResponse::success(
@@ -891,7 +894,16 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         } catch (UnreadablePurchaseResponseException $e) {
             // Accepted and charged — see readPurchasedLabel().
             throw $e;
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
+            if ($accepted !== null) {
+                // Anything that breaks after the 2xx is still an accepted purchase.
+                $this->unreadablePurchase($accepted, 'createDomesticShipment', $idempotencyKey, $e->getMessage(), previous: $e);
+            }
+
+            if (! $e instanceof \Exception) {
+                throw $e;
+            }
+
             Log::channel('usps-validation')->error('USPS createDomesticShipment error', [
                 'exception' => $e::class,
                 'error' => $e->getMessage(),
@@ -904,6 +916,8 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
 
     private function createInternationalShipment(ShipRequest $request, string $idempotencyKey): ShipResponse
     {
+        $accepted = null;
+
         try {
             $account = $this->resolveAccount($request->locationId, $request->clientId);
             $connector = USPSConnector::getAuthenticatedConnector($account);
@@ -981,6 +995,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
             }
 
             /** @var LabelResponse $response */
+            $accepted = $response;
             $trackingNumber = $this->readPurchasedLabel($response, 'createInternationalShipment', $idempotencyKey);
 
             return ShipResponse::success(
@@ -1011,7 +1026,16 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         } catch (UnreadablePurchaseResponseException $e) {
             // Accepted and charged — see readPurchasedLabel().
             throw $e;
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
+            if ($accepted !== null) {
+                // Anything that breaks after the 2xx is still an accepted purchase.
+                $this->unreadablePurchase($accepted, 'createInternationalShipment', $idempotencyKey, $e->getMessage(), previous: $e);
+            }
+
+            if (! $e instanceof \Exception) {
+                throw $e;
+            }
+
             Log::channel('usps-validation')->error('USPS createInternationalShipment error', [
                 'exception' => $e::class,
                 'error' => $e->getMessage(),
@@ -1041,8 +1065,19 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
     {
         try {
             $response->parseBody();
-        } catch (\Exception $e) {
-            $this->unreadablePurchase($response, $operation, $idempotencyKey, $e->getMessage(), previous: $e);
+        } catch (\Throwable $e) {
+            // The metadata part is read before the parts are counted, so a
+            // reply missing its label can still name the tracking number.
+            $reported = $response->metadata['internationalTrackingNumber'] ?? $response->metadata['trackingNumber'] ?? null;
+
+            $this->unreadablePurchase(
+                $response,
+                $operation,
+                $idempotencyKey,
+                $e->getMessage(),
+                is_scalar($reported) && (string) $reported !== '' ? (string) $reported : null,
+                $e,
+            );
         }
 
         Log::channel('usps-validation')->debug('LABEL RESPONSE', [
@@ -1058,7 +1093,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
             $this->unreadablePurchase($response, $operation, $idempotencyKey, 'USPS response missing tracking number');
         }
 
-        if (empty($response->label)) {
+        if ($response->label === '') {
             $this->unreadablePurchase($response, $operation, $idempotencyKey, 'USPS response missing label data', (string) $trackingNumber);
         }
 

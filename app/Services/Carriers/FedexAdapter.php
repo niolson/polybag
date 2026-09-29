@@ -826,6 +826,8 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
     {
         try {
             if (config('services.oauth.broker_url')) {
+                // Tracking through the broker uses no carrier account, so the
+                // account that bought the label is neither needed nor checked.
                 $connector = new FedexRegistrationProxyConnector;
             } else {
                 // The account that bought the label — see labelAccount().
@@ -887,6 +889,11 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
             );
         } catch (CarrierException $e) {
             // The account that bought the label is gone — see labelAccount().
+            Log::channel('fedex-validation')->warning('FedEx trackShipment refused', [
+                'tracking_number' => $package->tracking_number,
+                'error' => $e->getMessage(),
+            ]);
+
             return TrackShipmentResponse::failure($e->getMessage());
         } catch (\Throwable $e) {
             Log::channel('fedex-validation')->error('FedEx trackShipment error', [

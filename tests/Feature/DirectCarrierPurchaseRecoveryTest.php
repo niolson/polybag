@@ -304,6 +304,10 @@ function uspsUnreadable(string $case): MockResponse
             body: 'not a multipart body',
             headers: ['Content-Type' => 'multipart/form-data'],
         ),
+        'metadata that is not an object' => MockResponse::make(
+            body: "--b\r\nContent-Type: application/json\r\n\r\n\"8.40\"\r\n--b\r\nContent-Type: application/pdf\r\n\r\nJVBERi0xLjQ=\r\n--b--",
+            headers: ['Content-Type' => 'multipart/form-data; boundary=b'],
+        ),
         default => throw new InvalidArgumentException($case),
     };
 }
@@ -320,6 +324,11 @@ function upsUnreadable(string $case): MockResponse
             'PackageResults' => [['TrackingNumber' => '1ZREVIEW', 'ShippingLabel' => []]],
         ]]]),
         'body that is not JSON' => MockResponse::make('<html>ok</html>', 200, ['Content-Type' => 'text/html']),
+        // A TypeError past the 2xx, not an Exception: it must still be unreadable.
+        'label image that is not a string' => MockResponse::make(['ShipmentResponse' => ['ShipmentResults' => [
+            'ShipmentIdentificationNumber' => '1ZREVIEW',
+            'PackageResults' => [['TrackingNumber' => '1ZREVIEW', 'ShippingLabel' => ['GraphicImage' => ['R0lGODlh']]]],
+        ]]]),
         default => throw new InvalidArgumentException($case),
     };
 }
@@ -375,7 +384,7 @@ it('leaves a USPS purchase unresolved when its 2xx cannot be read', function (st
         ->and($offer->isAwaitingPurchaseConfirmation())->toBeTrue()
         ->and($offer->purchase_failed_at)->toBeNull()
         ->and($this->package->fresh()->status)->toBe(PackageStatus::Unshipped);
-})->with(['missing tracking number', 'missing label part', 'malformed multipart']);
+})->with(['missing tracking number', 'missing label part', 'malformed multipart', 'metadata that is not an object']);
 
 it('leaves a UPS purchase unresolved when its 2xx cannot be read', function (string $case): void {
     Saloon::fake([...upsAuthFake(), UpsCreateShipment::class => upsUnreadable($case)]);
@@ -389,7 +398,7 @@ it('leaves a UPS purchase unresolved when its 2xx cannot be read', function (str
         ->and($offer->isAwaitingPurchaseConfirmation())->toBeTrue()
         ->and($offer->purchase_failed_at)->toBeNull()
         ->and($this->package->fresh()->status)->toBe(PackageStatus::Unshipped);
-})->with(['missing shipment results', 'missing tracking number', 'missing label image', 'body that is not JSON']);
+})->with(['missing shipment results', 'missing tracking number', 'missing label image', 'body that is not JSON', 'label image that is not a string']);
 
 it('recovers the USPS label after an unreadable 2xx instead of buying another', function (): void {
     Saloon::fake([...uspsAuthFakes(), Label::class => uspsUnreadable('missing tracking number')]);
@@ -462,6 +471,22 @@ it('names the tracking number UPS reported when recovery cannot find the label e
     expect($first->message)->toContain('1ZREVIEW')
         ->and($second->title)->toBe('Earlier Purchase Unresolved')
         ->and($second->message)->toContain('1ZREVIEW');
+});
+
+it('keeps the USPS idempotency key beside the tracking number a reply reported', function (): void {
+    // The label part is missing, but the metadata part names the label: both
+    // the key recovery asks by and the tracking number a person can look up
+    // must survive on the offer.
+    Saloon::fake([...uspsAuthFakes(), Label::class => uspsUnreadable('missing label part')]);
+    $rate = uspsGroundAdvantage($this->package);
+
+    $result = app(PackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: $rate));
+    $offer = ShippingOffer::where('public_id', $rate->offerId)->firstOrFail();
+
+    expect($result->message)->toContain('9200190414219000000011')
+        ->and($offer->purchase_context[UspsAdapter::PURCHASE_CONTEXT_KEY] ?? null)->toBeString()->not->toBe('')
+        ->and($offer->purchase_context[OfferStore::REPORTED_TRACKING_NUMBER] ?? null)->toBe('9200190414219000000011')
+        ->and($offer->isAwaitingPurchaseConfirmation())->toBeTrue();
 });
 
 it('still settles a genuine decline from USPS or UPS', function (string $carrier): void {

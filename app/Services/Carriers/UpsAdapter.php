@@ -773,10 +773,16 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
                     ?? data_get($rawResponse, 'errors.0.message')
                     ?? $e->getMessage()
             );
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             if ($response !== null) {
-                // Anything that breaks after the 2xx is still an accepted purchase.
+                // Anything that breaks after the 2xx is still an accepted
+                // purchase — a TypeError from a label image of the wrong
+                // shape included.
                 $this->unreadablePurchase($response, $request, $e->getMessage(), previous: $e);
+            }
+
+            if (! $e instanceof \Exception) {
+                throw $e;
             }
 
             Log::channel('ups-validation')->error('UPS createShipment error', [
