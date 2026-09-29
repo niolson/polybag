@@ -1233,14 +1233,41 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
 
             $response = $connector->send($apiRequest);
 
-            if ($response->successful()) {
-                return CancelResponse::success('Label voided successfully.');
+            if (! $response->successful()) {
+                return CancelResponse::failure('USPS returned status '.$response->status());
             }
 
-            return CancelResponse::failure('USPS returned status '.$response->status());
+            return $this->readCancelReply($response, $trackingNumber);
         } catch (\Exception $e) {
             return CancelResponse::failure($e->getMessage());
         }
+    }
+
+    /**
+     * A 2xx is not USPS's answer: the v3 cancel reply's `status` is, and only
+     * `CANCELED` means the label was cancelled or its refund requested
+     * (observed in production as `{"trackingNumber": …, "status": "CANCELED"}`).
+     * A reply without a status cannot be read.
+     */
+    private function readCancelReply(Response $response, string $trackingNumber): CancelResponse
+    {
+        $status = data_get($this->decodeJsonSafely($response), 'status');
+
+        if ($status === 'CANCELED') {
+            return CancelResponse::success('Label voided successfully.');
+        }
+
+        if (is_string($status) && $status !== '') {
+            return CancelResponse::failure("USPS did not cancel the label: it answered {$status}.");
+        }
+
+        Log::channel('usps-validation')->error('USPS cancelShipment reply could not be read', [
+            'status' => $response->status(),
+            'tracking_number' => $trackingNumber,
+            'body' => $response->body(),
+        ]);
+
+        return CancelResponse::unreadable('USPS');
     }
 
     public function supportsMultiPackage(): bool

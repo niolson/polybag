@@ -238,7 +238,7 @@ it('cancels a domestic label', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         PaymentAuthorization::class => MockResponse::make(['paymentAuthorizationToken' => 'test_payment_token']),
-        CancelLabel::class => MockResponse::make([], 200),
+        CancelLabel::class => MockResponse::make(['trackingNumber' => '9400111899223456789012', 'status' => 'CANCELED'], 200),
     ]);
 
     $shipment = Shipment::factory()->create(['country' => 'US']);
@@ -259,7 +259,7 @@ it('cancels an international label', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         PaymentAuthorization::class => MockResponse::make(['paymentAuthorizationToken' => 'test_payment_token']),
-        CancelInternationalLabel::class => MockResponse::make([], 200),
+        CancelInternationalLabel::class => MockResponse::make(['trackingNumber' => 'LZ999999999US', 'status' => 'CANCELED'], 200),
     ]);
 
     $shipment = Shipment::factory()->create(['country' => 'CA']);
@@ -274,6 +274,47 @@ it('cancels an international label', function (): void {
         ->and($response->message)->toBe('Label voided successfully.');
 
     Saloon::assertSent(CancelInternationalLabel::class);
+});
+
+it('does not read a USPS cancel reply without CANCELED as a void', function (MockResponse $reply, string $message): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        PaymentAuthorization::class => MockResponse::make(['paymentAuthorizationToken' => 'test_payment_token']),
+        CancelLabel::class => $reply,
+    ]);
+
+    $package = Package::factory()->shipped()->for(Shipment::factory()->create(['country' => 'US']))->create([
+        'carrier' => 'USPS',
+        'tracking_number' => '9400111899223456789012',
+    ]);
+
+    $response = $this->adapter->cancelShipment('9400111899223456789012', $package);
+
+    expect($response->success)->toBeFalse()
+        ->and($response->message)->toContain($message);
+})->with([
+    'another status' => [fn (): MockResponse => MockResponse::make(['trackingNumber' => '9400111899223456789012', 'status' => 'PENDING'], 200), 'PENDING'],
+    'empty body' => [fn (): MockResponse => MockResponse::make([], 200), 'could not be read'],
+    'not JSON' => [fn (): MockResponse => MockResponse::make('<html>gateway</html>', 200), 'could not be read'],
+    'JSON that is not an object' => [fn (): MockResponse => MockResponse::make('true', 200), 'could not be read'],
+]);
+
+it('does not read an international USPS cancel reply without CANCELED as a void', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        PaymentAuthorization::class => MockResponse::make(['paymentAuthorizationToken' => 'test_payment_token']),
+        CancelInternationalLabel::class => MockResponse::make([], 200),
+    ]);
+
+    $package = Package::factory()->shipped()->for(Shipment::factory()->create(['country' => 'CA']))->create([
+        'carrier' => 'USPS',
+        'tracking_number' => 'LZ999999999US',
+    ]);
+
+    $response = $this->adapter->cancelShipment('LZ999999999US', $package);
+
+    expect($response->success)->toBeFalse()
+        ->and($response->message)->toContain('could not be read');
 });
 
 it('returns failure when cancel API errors', function (): void {

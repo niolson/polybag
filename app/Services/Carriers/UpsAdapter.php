@@ -836,9 +836,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
             $response = $connector->send($apiRequest);
 
             if ($response->successful()) {
-                $status = $response->json('VoidShipmentResponse.SummaryResult.Status.Description');
-
-                return CancelResponse::success($status ?? 'UPS shipment voided.');
+                return $this->readVoidReply($response, $trackingNumber);
             }
 
             $errorMessage = $response->json('response.errors.0.message')
@@ -855,6 +853,34 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
 
             return CancelResponse::failure($e->getMessage());
         }
+    }
+
+    /**
+     * A 2xx is not UPS's answer: `SummaryResult.Status.Code` is, and only `1`
+     * means voided. A reply without a code cannot be read.
+     */
+    private function readVoidReply(Response $response, string $trackingNumber): CancelResponse
+    {
+        $body = $this->decodeJsonSafely($response);
+        $code = data_get($body, 'VoidShipmentResponse.SummaryResult.Status.Code');
+        $description = data_get($body, 'VoidShipmentResponse.SummaryResult.Status.Description');
+        $description = is_string($description) && $description !== '' ? $description : null;
+
+        if ((is_string($code) || is_int($code)) && (string) $code === '1') {
+            return CancelResponse::success($description ?? 'UPS shipment voided.');
+        }
+
+        if (is_string($code) || is_int($code)) {
+            return CancelResponse::failure('UPS did not void the shipment: '.($description ?? 'status code '.$code));
+        }
+
+        Log::channel('ups-validation')->error('UPS cancelShipment reply could not be read', [
+            'status' => $response->status(),
+            'tracking_number' => $trackingNumber,
+            'body' => $response->body(),
+        ]);
+
+        return CancelResponse::unreadable('UPS');
     }
 
     public function supportsMultiPackage(): bool

@@ -91,6 +91,45 @@ it('marks shipments with existing unshipped packages as ineligible', function ()
         ->and($result->ineligible->first()['reason'])->toBe('Has existing unshipped packages');
 });
 
+it('marks partly shipped shipments as ineligible', function (): void {
+    $shipment = Shipment::factory()->create();
+    $item = ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'quantity' => 1]);
+    ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'quantity' => 1]);
+    $shipped = Package::factory()->shipped()->create(['shipment_id' => $shipment->id]);
+    PackageItem::create(['package_id' => $shipped->id, 'shipment_item_id' => $item->id,
+        'product_id' => $item->product_id, 'quantity' => 1]);
+    $shipment->refresh()->updateShippedStatus();
+
+    $result = $this->service->validateShipmentsForBatch(collect([$shipment->fresh()]));
+
+    expect($result->eligible)->toBeEmpty()
+        ->and($result->ineligible)->toHaveCount(1)
+        ->and($result->ineligible->first()['reason'])->toBe('Partly shipped');
+});
+
+it('never batches a package holding items an earlier package already shipped', function (): void {
+    Bus::fake();
+    $user = User::factory()->admin()->create();
+    $shipment = Shipment::factory()->create();
+    $shipped = ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'quantity' => 1]);
+    ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'quantity' => 1]);
+
+    $first = Package::factory()->shipped()->create(['shipment_id' => $shipment->id]);
+    PackageItem::create(['package_id' => $first->id, 'shipment_item_id' => $shipped->id,
+        'product_id' => $shipped->product_id, 'quantity' => 1]);
+    $shipment->refresh()->updateShippedStatus();
+
+    $result = $this->service->validateShipmentsForBatch(collect([$shipment->fresh()]));
+
+    if ($result->eligible->isNotEmpty()) {
+        $this->service->createBatch($result->eligible, BoxSize::factory()->create(), $user, 'pdf', null);
+    }
+
+    $batched = Package::where('shipment_id', $shipment->id)->where('status', PackageStatus::Unshipped)->first();
+    expect($batched?->packageItems()->where('shipment_item_id', $shipped->id)->exists() ?? false)
+        ->toBeFalse();
+});
+
 it('marks shipments with zero-weight products as ineligible', function (): void {
     $product = Product::factory()->create(['weight' => 0]);
     $shipment = Shipment::factory()->create();

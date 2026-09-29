@@ -78,6 +78,12 @@ class BatchLabelService
             return 'Has existing unshipped packages';
         }
 
+        // Batch ship packs the whole order into one box, so an order another
+        // Package has partly sent is a person's to finish on the Pack page.
+        if ($shipment->packages->where('status', PackageStatus::Shipped)->isNotEmpty()) {
+            return 'Partly shipped';
+        }
+
         if ($shipment->shipmentItems->isEmpty()) {
             return 'No items';
         }
