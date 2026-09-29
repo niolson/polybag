@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Contracts\PackageDraftWorkflow;
 use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\PackageShipping\PackageShippingOptions;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
@@ -9,6 +10,7 @@ use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
+use App\Exceptions\PackageDraftIncompleteException;
 use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Concerns\PrintsLabels;
 use App\Models\Package;
@@ -19,6 +21,7 @@ use Filament\Actions\Action;
 use Filament\Pages\Page;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Validation\Rule;
@@ -143,6 +146,27 @@ class Ship extends Page
         if ($this->package->status === PackageStatus::Shipped) {
             $this->notifyWarning('Already Shipped', 'This package has already been shipped.');
             $this->redirect($this->returnUrl);
+
+            return;
+        }
+
+        // The purchase refuses these too. Turning them away here sends the
+        // packer to finish the package, instead of quoting rates for it.
+        if ($this->package->shipment->isBlockedByPicking()) {
+            $this->notifyError('Not Picked', 'This shipment must be picked before it can be shipped.');
+            $this->package = null;
+            $this->redirect($this->returnUrl);
+
+            return;
+        }
+
+        try {
+            app(PackageDraftWorkflow::class)->assertPackageReadyToShip($this->package);
+        } catch (PackageDraftIncompleteException $e) {
+            $this->notifyWarning('Not Ready', $e->getMessage().' Finish packing it first.');
+            $shipmentId = $this->package->shipment_id;
+            $this->package = null;
+            $this->redirect('/pack/'.$shipmentId);
 
             return;
         }
@@ -430,6 +454,16 @@ class Ship extends Page
         }
 
         $this->package->shipment->refresh()->load('location');
+
+        // Authorized on mount, but the shipment may have shipped from another
+        // station since, which makes this a reshipment.
+        $permission = Gate::inspect('ship', $this->package);
+        if ($permission->denied()) {
+            $this->notifyError('Not Allowed', $permission->message() ?? 'You may not ship this package.');
+
+            return;
+        }
+
         $locationError = app(ShipmentLocationGuard::class)->errorFor($this->package->shipment, auth()->user());
         if ($locationError !== null) {
             $this->notifyError('Location unavailable', $locationError);

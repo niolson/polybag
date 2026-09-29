@@ -20,33 +20,39 @@ use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use Illuminate\Support\Facades\Event;
 
-it('creates a package draft when resuming a shipment without one', function (): void {
+it('creates nothing when resuming a shipment that has no package draft', function (): void {
+    // Opening a shipment on the Pack page resumes it. A draft made then, before
+    // anything was scanned, kept the shipment out of batch shipping and could
+    // be taken to the Ship page with nothing in it.
     Event::fake([PackageCreated::class]);
 
     $shipment = Shipment::factory()->create();
-    $service = app(PackageDraftWorkflow::class);
 
-    $snapshot = $service->resumeForShipment($shipment);
+    expect(app(PackageDraftWorkflow::class)->resumeForShipment($shipment))->toBeNull()
+        ->and(Package::where('shipment_id', $shipment->id)->exists())->toBeFalse();
 
-    expect($snapshot->shipmentId)->toBe($shipment->id)
-        ->and($snapshot->packageDraftId)->toBeInt()
-        ->and($snapshot->readyToShip)->toBeFalse();
-
-    $package = Package::findOrFail($snapshot->packageDraftId);
-    expect($package->shipment_id)->toBe($shipment->id)
-        ->and($package->status)->toBe(PackageStatus::Unshipped)
-        ->and($package->packageItems)->toHaveCount(0);
-
-    Event::assertDispatched(PackageCreated::class, fn (PackageCreated $event): bool => $event->package->id === $package->id);
+    Event::assertNotDispatched(PackageCreated::class);
 });
 
-it('creates a package draft at the shipment assigned location', function (): void {
+it('creates the package draft on the first save, at the shipment assigned location', function (): void {
+    Event::fake([PackageCreated::class]);
+
     $location = Location::factory()->create();
     $shipment = Shipment::factory()->create(['location_id' => $location]);
 
-    $snapshot = app(PackageDraftWorkflow::class)->resumeForShipment($shipment);
+    $snapshot = app(PackageDraftWorkflow::class)->saveForShipment($shipment, new PackageDraftInput(
+        measurements: new Measurements(null, 10, 8, 6),
+        boxSizeId: null,
+    ));
 
-    expect(Package::findOrFail($snapshot->packageDraftId)->location_id)->toBe($location->id);
+    $package = Package::findOrFail($snapshot->packageDraftId);
+
+    expect($package->shipment_id)->toBe($shipment->id)
+        ->and($package->status)->toBe(PackageStatus::Unshipped)
+        ->and($package->location_id)->toBe($location->id)
+        ->and($snapshot->readyToShip)->toBeFalse();
+
+    Event::assertDispatched(PackageCreated::class, fn (PackageCreated $event): bool => $event->package->id === $package->id);
 });
 
 it('resumes an existing package draft as source of truth', function (): void {
@@ -306,13 +312,37 @@ it('creates a ready batch package draft from all shipment items and box dimensio
 
 it('rejects batch package drafts when an active package draft already exists', function (): void {
     $shipment = Shipment::factory()->create();
-    Package::factory()->for($shipment)->create(['status' => PackageStatus::Unshipped]);
+    Package::factory()->for($shipment)->create(['status' => PackageStatus::Unshipped, 'box_size_id' => null]);
 
     app(PackageDraftWorkflow::class)->createBatchReadyDraft(
         $shipment,
         new BatchPackageDraftInput(BoxSize::factory()->create()),
     );
 })->throws(PackageDraftInvalidException::class, 'already has an active package draft');
+
+it('fills an empty package draft rather than refusing the shipment for batch shipping', function (): void {
+    // Left by opening the shipment on the Pack page and scanning nothing.
+    $shipment = Shipment::factory()->create();
+    $product = Product::factory()->create(['weight' => 1.25]);
+    ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'product_id' => $product->id, 'quantity' => 2]);
+    $empty = Package::factory()->for($shipment)->create([
+        'status' => PackageStatus::Unshipped,
+        'box_size_id' => null,
+        'weight' => null,
+        'height' => null,
+        'width' => null,
+        'length' => null,
+    ]);
+
+    $ready = app(PackageDraftWorkflow::class)->createBatchReadyDraft(
+        $shipment,
+        new BatchPackageDraftInput(BoxSize::factory()->create()),
+    );
+
+    expect($ready->package->id)->toBe($empty->id)
+        ->and($ready->package->packageItems)->toHaveCount(1)
+        ->and(Package::where('shipment_id', $shipment->id)->count())->toBe(1);
+});
 
 it('rejects batch package drafts for a shipment another package has partly shipped', function (): void {
     $shipment = Shipment::factory()->create();

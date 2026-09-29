@@ -21,11 +21,13 @@
             scanToAddMode: @js($scanToAddMode),
             packingValidationEnabled: @js($packingValidationEnabled),
             boxSizes: @js($boxSizes),
-            boxSizeId: null,
-            weight: '',
-            height: '',
-            width: '',
-            length: '',
+            boxSizeId: @js($boxSizeId),
+            weight: @js($weight),
+            height: @js($height),
+            width: @js($width),
+            length: @js($length),
+            hasDraft: @js($hasDraft),
+            saveTimer: null,
             lastScaleWeight: null,
             input: '',
             hasShipment: {{ $shipment ? 'true' : 'false' }},
@@ -35,6 +37,13 @@
             isShipping: false,
 
             init() {
+                // Save packing progress as it changes, so a package can be set
+                // aside and resumed. Debounced: a scan changes several fields at
+                // once, and a scale settling changes the weight many times.
+                for (const field of ['packingItems', 'boxSizeId', 'weight', 'height', 'width', 'length']) {
+                    this.$watch(field, () => this.queueSave());
+                }
+
                 // Auto-connect scale: WebHID can connect immediately, QZ Tray must wait
                 if (ScaleUtils.backend === 'webhid') {
                     this.autoConnectScale();
@@ -261,7 +270,35 @@
                 });
             },
 
-            isReadyToShip() {
+            hasPackingProgress() {
+                return !!this.boxSizeId
+                    || !!(this.height && this.width && this.length)
+                    || this.packingItems.some(item => item.packed > 0);
+            },
+
+            // A weight alone is not progress: it is often the last box still on
+            // the scale, and would create a Package Draft for a shipment nobody
+            // has started packing. Once a draft exists, every change is saved,
+            // or removing the last item would come back on the next visit.
+            queueSave() {
+                clearTimeout(this.saveTimer);
+                if (!this.hasShipment || this.isShipping) return;
+                if (!this.hasDraft && !this.hasPackingProgress()) return;
+
+                this.saveTimer = setTimeout(() => {
+                    this.hasDraft = true;
+                    $wire.saveDraft(
+                        this.packingItems,
+                        this.boxSizeId,
+                        String(this.weight ?? ''),
+                        String(this.height ?? ''),
+                        String(this.width ?? ''),
+                        String(this.length ?? '')
+                    );
+                }, 500);
+            },
+
+                        isReadyToShip() {
                 if (!this.hasShipment) return false;
 
                 const w = parseFloat(this.weight);
@@ -284,6 +321,9 @@
 
             async shipPackage() {
                 if (this.isShipping || !this.isReadyToShip()) return;
+                // Ship saves the same state itself; a save landing after it could
+                // only reach a package that has since been bought.
+                clearTimeout(this.saveTimer);
                 const shouldKeepLoadingOnSuccess = !this.autoShipEnabled;
                 let completed = false;
                 this.isShipping = true;

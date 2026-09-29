@@ -2,6 +2,7 @@
 
 use App\Contracts\CarrierAdapterInterface;
 use App\Contracts\DirectCarrierAdapter;
+use App\Contracts\PackageDraftWorkflow;
 use App\Contracts\PackageShippingWorkflow;
 use App\Contracts\RecoversUnresolvedPurchase;
 use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
@@ -13,11 +14,13 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CarrierPackaging;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PackageStatus;
+use App\Enums\PickingStatus;
 use App\Enums\PostageSource;
 use App\Enums\Role;
 use App\Enums\ShippingRuleAction;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\NoActiveCarrierServicesException;
+use App\Exceptions\PackageDraftIncompleteException;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
@@ -33,6 +36,7 @@ use App\Models\SpecialService;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\PostageSources\OfferStore;
+use App\Services\SettingsService;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Log;
@@ -1110,4 +1114,84 @@ it('carries the report printer flag into an unattended purchase', function (): v
     );
 
     expect($result->success)->toBeTrue();
+});
+
+/**
+ * A carrier that must not be asked for anything: the package is refused first.
+ */
+function refusingAdapter(): void
+{
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldNotReceive('resolvePreSelectedRate');
+    $adapter->shouldNotReceive('createShipment');
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+}
+
+it('refuses to buy for a package with no measurements, as when the Pack page was left before a box was scanned', function (): void {
+    $this->actingAs($user = User::factory()->create());
+    $package = createWorkflowPackage();
+    $rate = quotedDirectly($package, new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'));
+    $package->update(['weight' => 0, 'height' => null, 'width' => null, 'length' => null]);
+    refusingAdapter();
+
+    $result = app(PackageShippingWorkflow::class)->ship($package, new PackageShippingRequest(selectedRate: $rate, userId: $user->id));
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Not Ready')
+        ->and($result->message)->toBe('Package draft is missing valid measurements.')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});
+
+it('refuses to buy for a package whose items are not all packed', function (): void {
+    $this->actingAs($user = User::factory()->create());
+    $package = createWorkflowPackage();
+    $rate = quotedDirectly($package, new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'));
+    $package->packageItems()->delete();
+    refusingAdapter();
+
+    $result = app(PackageShippingWorkflow::class)->ship($package, new PackageShippingRequest(selectedRate: $rate, userId: $user->id));
+
+    expect($result->title)->toBe('Not Ready')
+        ->and($result->message)->toBe('Not all shipment items are packed.');
+});
+
+it('buys for a partly packed package when packing validation is off, but still wants measurements', function (): void {
+    app(SettingsService::class)->set('packing_validation_enabled', false);
+    $package = createWorkflowPackage();
+    $package->packageItems()->delete();
+
+    expect(app(PackageDraftWorkflow::class)->assertPackageReadyToShip($package)->package->id)->toBe($package->id);
+
+    $package->update(['weight' => 0]);
+
+    expect(fn () => app(PackageDraftWorkflow::class)->assertPackageReadyToShip($package))
+        ->toThrow(PackageDraftIncompleteException::class, 'Package draft is missing valid measurements.');
+});
+
+it('refuses to buy for a shipment that must be picked first', function (): void {
+    $this->actingAs($user = User::factory()->create());
+    $package = createWorkflowPackage();
+    $rate = quotedDirectly($package, new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'));
+    app(SettingsService::class)->set('picking_enabled', true);
+    app(SettingsService::class)->set('require_picking_before_shipping', true);
+    $package->shipment->update(['picking_status' => PickingStatus::Pending]);
+    refusingAdapter();
+
+    $result = app(PackageShippingWorkflow::class)->ship($package, new PackageShippingRequest(selectedRate: $rate, userId: $user->id));
+
+    expect($result->title)->toBe('Not Ready')
+        ->and($result->message)->toContain('must be picked');
+});
+
+it('refuses an unready package on auto ship without quoting it, and keeps it for the packer to finish', function (): void {
+    $package = createWorkflowPackage();
+    $package->update(['weight' => 0]);
+    refusingAdapter();
+
+    $result = app(PackageShippingWorkflow::class)->autoShip($package, new PackageAutoShippingRequest);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Not Ready')
+        ->and(Package::find($package->id))->not->toBeNull();
 });

@@ -3,6 +3,7 @@
 namespace App\Services\PackageShipping;
 
 use App\Contracts\CarrierAdapterInterface;
+use App\Contracts\PackageDraftWorkflow;
 use App\Contracts\PackageShippingWorkflow;
 use App\Contracts\PostageOfferSource;
 use App\Contracts\RecoversUnresolvedPurchase;
@@ -28,6 +29,7 @@ use App\Enums\Role;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
 use App\Exceptions\MissingDeclaredValueException;
+use App\Exceptions\PackageDraftIncompleteException;
 use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Exceptions\ZeroValueCustomsItemException;
 use App\Models\Carrier;
@@ -70,6 +72,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         private readonly OfferStore $offerStore,
         private readonly PostageSourceDispatcher $postageSources,
         private readonly PostageSourceResolver $postageSourceResolver,
+        private readonly PackageDraftWorkflow $packageDrafts,
     ) {}
 
     public function prepareRates(Package $package): PackageShippingOptions
@@ -195,7 +198,40 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             );
         }
 
+        if ($refusal = $this->notReadyToShip($package)) {
+            return $refusal;
+        }
+
         return $this->purchase($package, $request);
+    }
+
+    /**
+     * Why this package may not be bought for yet, or null when it may.
+     *
+     * The Pack page checks this before sending anyone to buy, but the Ship
+     * page is reachable by URL for any unshipped package — one opened on the
+     * Pack page and left before a box or an item was scanned among them. So
+     * the purchase checks for itself, whoever sent it.
+     */
+    private function notReadyToShip(Package $package): ?PackageShippingResult
+    {
+        // Refused later, with its own message, where the purchase re-reads
+        // it. Read here too: a stale page's package can still say unshipped.
+        if (Package::whereKey($package->id)->where('status', PackageStatus::Shipped)->exists()) {
+            return null;
+        }
+
+        if ($package->shipment?->isBlockedByPicking()) {
+            return PackageShippingResult::notReady('This shipment must be picked before it can be shipped.');
+        }
+
+        try {
+            $this->packageDrafts->assertPackageReadyToShip($package);
+        } catch (PackageDraftIncompleteException $e) {
+            return PackageShippingResult::notReady($e->getMessage());
+        }
+
+        return null;
     }
 
     /**
@@ -585,6 +621,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
     public function autoShip(Package $package, PackageAutoShippingRequest $request): PackageShippingResult
     {
+        if ($refusal = $this->notReadyToShip($package)) {
+            return $refusal;
+        }
+
         // Before any quote: a shipment with no method is not rated, and the
         // remedy is a person choosing one on the Ship page.
         if ($package->shipment()->value('shipping_method_id') === null) {

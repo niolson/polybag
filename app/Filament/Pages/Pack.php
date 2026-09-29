@@ -13,6 +13,7 @@ use App\DataTransferObjects\PackageDrafts\ReadyPackageDraft;
 use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PrintRequest;
 use App\Enums\Role;
+use App\Enums\ShipmentStatus;
 use App\Exceptions\PackageDraftIncompleteException;
 use App\Exceptions\PackageDraftInvalidException;
 use App\Filament\Concerns\NotifiesUser;
@@ -26,6 +27,7 @@ use App\Services\ShipmentLocationGuard;
 use BackedEnum;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\Session;
+use Livewire\Attributes\Renderless;
 use UnitEnum;
 
 class Pack extends Page
@@ -63,6 +65,9 @@ class Pack extends Page
     public array $boxSizes = [];
 
     public ?int $boxSizeId = null;
+
+    /** Whether the shipment has a Package Draft, so every change must be saved to it — including one that empties it. */
+    public bool $hasDraft = false;
 
     public string $weight = '';
 
@@ -129,6 +134,23 @@ class Pack extends Page
                 return;
             }
 
+            if (! auth()->user()->can('reship', $this->shipment)) {
+                $this->notifyWarning('Already Shipped', $this->alreadyShippedMessage());
+                $this->shipment = null;
+                $this->redirect('/pack');
+
+                return;
+            }
+
+            // Packing it again sends a second parcel, which is sometimes the
+            // point — a replacement — but should never be a surprise.
+            if ($this->shipment->status === ShipmentStatus::Shipped) {
+                $this->notifyWarning(
+                    'Already Shipped',
+                    "Shipment {$this->shipment->shipment_reference} has already shipped. Packing it again will send another package.",
+                );
+            }
+
             // Packing is physical work and the method can be fixed after, so
             // this warns rather than refuses. The label cannot be bought until
             // one is chosen (`carrier-catalog-reset/16`).
@@ -155,10 +177,10 @@ class Pack extends Page
             $draft = app(PackageDraftWorkflow::class)->resumeForShipment($this->shipment);
 
             if ($this->scanToAddMode) {
-                $productIds = collect($draft->items)->pluck('productId')->unique()->filter();
+                $productIds = collect($draft->items ?? [])->pluck('productId')->unique()->filter();
                 $products = Product::whereIn('id', $productIds)->get()->keyBy('id');
 
-                foreach ($draft->items as $draftItem) {
+                foreach ($draft->items ?? [] as $draftItem) {
                     $product = $products->get($draftItem->productId);
                     if (! $product) {
                         continue;
@@ -174,7 +196,7 @@ class Pack extends Page
                     ];
                 }
             } else {
-                $packedItems = collect($draft->items)->keyBy('shipmentItemId');
+                $packedItems = collect($draft->items ?? [])->keyBy('shipmentItemId');
 
                 foreach ($this->shipment->shipmentItems as $shipmentItem) {
                     $packedItem = $packedItems->get($shipmentItem->id);
@@ -188,11 +210,12 @@ class Pack extends Page
                 }
             }
 
-            $this->boxSizeId = $draft->boxSizeId;
-            $this->weight = (string) ($draft->measurements->weight ?? '');
-            $this->height = (string) ($draft->measurements->height ?? '');
-            $this->width = (string) ($draft->measurements->width ?? '');
-            $this->length = (string) ($draft->measurements->length ?? '');
+            $this->hasDraft = $draft !== null;
+            $this->boxSizeId = $draft?->boxSizeId;
+            $this->weight = (string) ($draft?->measurements->weight ?? '');
+            $this->height = (string) ($draft?->measurements->height ?? '');
+            $this->width = (string) ($draft?->measurements->width ?? '');
+            $this->length = (string) ($draft?->measurements->length ?? '');
         }
     }
 
@@ -268,6 +291,15 @@ class Pack extends Page
             return;
         }
 
+        // Checked on mount too, but the shipment may have shipped from another
+        // station while this page was open.
+        if (! auth()->user()->can('reship', $this->shipment)) {
+            $this->notifyError('Already Shipped', $this->alreadyShippedMessage());
+            $this->dispatch('shipping-error');
+
+            return;
+        }
+
         try {
             $ready = $this->saveReadyPackageDraft();
         } catch (PackageDraftIncompleteException|PackageDraftInvalidException $e) {
@@ -282,6 +314,52 @@ class Pack extends Page
         } else {
             $this->manualShip($ready->package);
         }
+    }
+
+    /**
+     * Save packing progress as it happens, so a package can be set aside and
+     * resumed. Called from Alpine after a box or item scan and when the weight
+     * or dimensions settle; the first call creates the Package Draft.
+     */
+    #[Renderless]
+    public function saveDraft(array $packingItems, ?int $boxSizeId, string $weight, string $height, string $width, string $length): void
+    {
+        if (! $this->shipment) {
+            return;
+        }
+
+        // As in ship(): another station may have shipped it since mount.
+        $current = Shipment::find($this->shipment->id);
+        if (! $current || ! auth()->user()->can('reship', $current)) {
+            $this->notifyWarning('Progress Not Saved', $this->alreadyShippedMessage());
+
+            return;
+        }
+
+        $this->packingItems = $packingItems;
+        $this->boxSizeId = $boxSizeId;
+        $this->weight = $weight;
+        $this->height = $height;
+        $this->width = $width;
+        $this->length = $length;
+
+        try {
+            app(PackageDraftWorkflow::class)->saveForShipment(
+                shipment: $this->shipment,
+                input: new PackageDraftInput(
+                    measurements: new Measurements($this->weight, $this->height, $this->width, $this->length),
+                    boxSizeId: $this->boxSizeId,
+                    items: $this->mapPackingItems(),
+                ),
+            );
+        } catch (PackageDraftInvalidException $e) {
+            $this->notifyWarning('Progress Not Saved', $e->getMessage());
+        }
+    }
+
+    private function alreadyShippedMessage(): string
+    {
+        return "Shipment {$this->shipment?->shipment_reference} has already shipped. Ask a manager if it needs to be sent again.";
     }
 
     public function canToggleAutoShip(): bool

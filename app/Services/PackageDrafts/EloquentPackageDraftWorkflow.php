@@ -20,18 +20,16 @@ use App\Models\Location;
 use App\Models\Package;
 use App\Models\Product;
 use App\Models\Shipment;
+use App\Services\SettingsService;
 use Illuminate\Support\Facades\DB;
 
 class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
 {
-    public function resumeForShipment(Shipment $shipment): PackageDraftSnapshot
+    public function resumeForShipment(Shipment $shipment): ?PackageDraftSnapshot
     {
-        return DB::transaction(function () use ($shipment): PackageDraftSnapshot {
-            $lockedShipment = $this->lockShipment($shipment);
-            $package = $this->activeDraftFor($lockedShipment, lock: true) ?? $this->createDraft($lockedShipment);
+        $package = $this->activeDraftFor($shipment);
 
-            return $this->snapshot($lockedShipment, $package);
-        });
+        return $package ? $this->snapshot($shipment, $package) : null;
     }
 
     public function saveForShipment(
@@ -88,6 +86,21 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
         return $this->buildReadyDraft($shipment, $package, $options);
     }
 
+    public function assertPackageReadyToShip(Package $package): ReadyPackageDraft
+    {
+        $shipment = $package->shipment;
+
+        if (! $shipment) {
+            throw new PackageDraftIncompleteException('Package has no shipment.');
+        }
+
+        // Scan-to-add and manual shipments have no shipment items, so every
+        // item counts as packed for them and the setting alone decides.
+        return $this->assertReadyToShip($shipment, $package->id, new PackageDraftOptions(
+            requireCompletePackedItems: (bool) app(SettingsService::class)->get('packing_validation_enabled', true),
+        ));
+    }
+
     public function createBatchReadyDraft(
         Shipment $shipment,
         BatchPackageDraftInput $input,
@@ -100,7 +113,12 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
         return DB::transaction(function () use ($shipment, $draftInput, $options): ReadyPackageDraft {
             $lockedShipment = $this->lockShipment($shipment);
 
-            if ($this->activeDraftFor($lockedShipment, lock: true)) {
+            $existingDraft = $this->activeDraftFor($lockedShipment, lock: true);
+
+            // An empty draft records no packing, so there is nothing to lose by
+            // filling it. One with a box, a measurement or an item is someone's
+            // work in progress.
+            if ($existingDraft && ! $this->isEmptyDraft($existingDraft)) {
                 throw new PackageDraftInvalidException('Shipment already has an active package draft.');
             }
 
@@ -110,7 +128,7 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
                 throw new PackageDraftInvalidException('Shipment is partly shipped; finish it on the Pack page.');
             }
 
-            $package = $this->createDraft($lockedShipment);
+            $package = $existingDraft ?? $this->createDraft($lockedShipment);
 
             $package->update([
                 'box_size_id' => $draftInput->boxSizeId,
@@ -176,6 +194,21 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
         }
 
         return $drafts->first();
+    }
+
+    private function isEmptyDraft(Package $package): bool
+    {
+        return $package->box_size_id === null
+            && ! $this->isPositive($package->weight)
+            && ! $this->isPositive($package->height)
+            && ! $this->isPositive($package->width)
+            && ! $this->isPositive($package->length)
+            && ! $package->packageItems()->exists();
+    }
+
+    private function isPositive(mixed $value): bool
+    {
+        return is_numeric($value) && (float) $value > 0;
     }
 
     private function lockShipment(Shipment $shipment): Shipment

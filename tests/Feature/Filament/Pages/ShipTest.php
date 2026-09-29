@@ -33,7 +33,7 @@ beforeEach(function (): void {
 function createShippablePackage(): Package
 {
     $boxSize = BoxSize::factory()->create();
-    $product = Product::factory()->create(['barcode' => '1234567890123']);
+    $product = Product::factory()->create(['barcode' => '1234567890123', 'weight' => 1.0]);
 
     // Create a shipping method with active carrier services
     $carrier = Carrier::factory()->usps()->create();
@@ -42,14 +42,14 @@ function createShippablePackage(): Package
     $shippingMethod->carrierServices()->attach($carrierService->id);
 
     $shipment = Shipment::factory()->create(['shipping_method_id' => $shippingMethod->id]);
-    ShipmentItem::factory()->create([
+    $shipmentItem = ShipmentItem::factory()->create([
         'shipment_id' => $shipment->id,
         'product_id' => $product->id,
         'quantity' => 1,
         'transparency' => false,
     ]);
 
-    return Package::create([
+    $package = Package::create([
         'shipment_id' => $shipment->id,
         'box_size_id' => $boxSize->id,
         'weight' => 2.0,
@@ -58,6 +58,14 @@ function createShippablePackage(): Package
         'length' => 6,
         'status' => PackageStatus::Unshipped,
     ]);
+
+    $package->packageItems()->create([
+        'shipment_item_id' => $shipmentItem->id,
+        'product_id' => $product->id,
+        'quantity' => 1,
+    ]);
+
+    return $package;
 }
 
 function registerMockAdapter(ShipResponse $response): void
