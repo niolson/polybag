@@ -144,3 +144,8 @@ it('batch ship carries the workstation\'s report printer answer into the batch',
     Bus::assertBatched(fn ($batch): bool => $batch->jobs->count() === 1
         && $batch->jobs->every(fn (GenerateLabelJob $job): bool => $job->hasReportPrinter));
 });
+
+it('offers no bulk address validation, since every check is a billed API request', function (): void {
+    Livewire::test(ListShipments::class)
+        ->assertTableBulkActionDoesNotExist('validate-addresses');
+});

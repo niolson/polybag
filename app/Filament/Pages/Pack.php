@@ -475,7 +475,7 @@ class Pack extends Page
             return;
         }
 
-        $result = app(PackageLabelWorkflow::class)->voidLabel($package, auth()->user());
+        $result = app(PackageLabelWorkflow::class)->voidOwnLabel($package, auth()->user());
 
         if ($result->success) {
             Session::forget('last_shipped_package_id');

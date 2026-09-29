@@ -518,7 +518,7 @@ class PackageResource extends Resource
                         ->icon('heroicon-o-x-circle')
                         ->color('danger')
                         ->requiresConfirmation()
-                        ->authorize('printLabel')
+                        ->authorize('voidLabel')
                         ->modalHeading('Void Label')
                         ->modalDescription('This will cancel the label with the carrier. The package will be kept with its dimensions so it can be re-shipped.')
                         ->visible(fn (Package $record): bool => $record->status === PackageStatus::Shipped

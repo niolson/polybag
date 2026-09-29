@@ -11,9 +11,15 @@ interface PackageLabelWorkflow
 {
     /**
      * Void the active label through the postage source that sold it, if the user
-     * may handle that package's label.
+     * may void any package's label.
      */
     public function voidLabel(Package $package, User $user): LabelVoidResult;
+
+    /**
+     * Void a label the user bought themselves, or any label for a manager — the
+     * packing station's "void last label" command.
+     */
+    public function voidOwnLabel(Package $package, User $user): LabelVoidResult;
 
     public function labelForReprint(Package $package, User $user): LabelReprintResult;
 

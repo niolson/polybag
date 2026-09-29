@@ -58,7 +58,7 @@ it('records the operator who voided the label on the label record', function ():
     $adapter->shouldReceive('cancelShipment')->once()->andReturn(CancelResponse::success('Label voided successfully.'));
     app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 
-    app(PackageLabelWorkflow::class)->voidLabel($package, $operator);
+    app(PackageLabelWorkflow::class)->voidOwnLabel($package, $operator);
 
     $label = $package->labels()->sole();
 
@@ -77,11 +77,46 @@ it('refuses to void a label for a user who neither shipped the package nor is a 
     $adapter->shouldReceive('cancelShipment')->never()->andReturn(CancelResponse::success('voided'));
     app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 
-    $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->create(['role' => Role::User]));
+    $result = app(PackageLabelWorkflow::class)->voidOwnLabel($package, User::factory()->create(['role' => Role::User]));
 
     expect($result->success)->toBeFalse()
         ->and($result->title)->toBe('Access Denied')
         ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
+});
+
+it('limits voiding from the Packages pages to managers, even for the shipper who bought the label', function (): void {
+    $shipper = User::factory()->create(['role' => Role::User]);
+    $package = Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'shipped_by_user_id' => $shipper->id,
+    ]);
+
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('cancelShipment')->never()->andReturn(CancelResponse::success('voided'));
+    app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
+
+    $result = app(PackageLabelWorkflow::class)->voidLabel($package, $shipper);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Access Denied')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
+});
+
+it('lets a manager void a label another user bought through the own-label command', function (): void {
+    $package = Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'tracking_number' => '9400111899223456789012',
+        'shipped_by_user_id' => User::factory()->create(['role' => Role::User])->id,
+    ]);
+
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('cancelShipment')->once()->andReturn(CancelResponse::success('voided'));
+    app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
+
+    $result = app(PackageLabelWorkflow::class)->voidOwnLabel($package, User::factory()->manager()->create());
+
+    expect($result->success)->toBeTrue()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 
 it('returns a failure result when carrier label voiding fails', function (): void {
@@ -311,7 +346,7 @@ it('clears the printed timestamp when a label is voided', function (): void {
     expect($package->fresh()->label_printed_at)->toBeNull();
 });
 
-it('rejects label reprint for a different non-manager user', function (): void {
+it('lets a shipper reprint a label another shipper bought', function (): void {
     $shipper = User::factory()->create(['role' => Role::User]);
     $otherUser = User::factory()->create(['role' => Role::User]);
     $package = Package::factory()->shipped()->create([
@@ -321,6 +356,6 @@ it('rejects label reprint for a different non-manager user', function (): void {
 
     $result = app(PackageLabelWorkflow::class)->labelForReprint($package, $otherUser);
 
-    expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Access Denied');
+    expect($result->success)->toBeTrue()
+        ->and($result->printRequest)->not->toBeNull();
 });

@@ -215,7 +215,7 @@ it('interleaves each customs form with its own label in a batch print', function
         );
 });
 
-it('refuses to print a label the user is not allowed to reprint', function (): void {
+it('lets a shipper print a label another shipper bought', function (): void {
     $this->actingAs(User::factory()->create(['role' => Role::User]));
 
     $package = Package::factory()->shipped()->create([
@@ -225,7 +225,7 @@ it('refuses to print a label the user is not allowed to reprint', function (): v
 
     Livewire::test(ListPackages::class)
         ->call('printStoredPackageLabel', $package->id)
-        ->assertNotDispatched('print-label');
+        ->assertDispatched('print-label');
 });
 
 it('labels the package print action by whether it has been printed before', function (): void {

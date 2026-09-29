@@ -290,6 +290,32 @@ it('shows void action on view page for shipped packages', function (): void {
         ->assertActionVisible('void');
 });
 
+it('shows a shipper reprint but not void or edit, even on a package they shipped', function (): void {
+    $shipper = User::factory()->create(['role' => Role::User]);
+    $this->actingAs($shipper);
+    $package = Package::factory()->shipped()->for(Shipment::factory())->create([
+        'shipped_by_user_id' => $shipper->id,
+    ]);
+
+    Livewire::test(ViewPackage::class, ['record' => $package->id])
+        ->assertActionVisible('reprint')
+        ->assertActionHidden('void')
+        ->assertActionHidden('edit');
+
+    Livewire::test(ListPackages::class)
+        ->assertActionVisible(TestAction::make('reprint')->table($package))
+        ->assertActionHidden(TestAction::make('void')->table($package));
+});
+
+it('shows a manager the void and edit actions on the view page', function (): void {
+    $this->actingAs(User::factory()->manager()->create());
+    $package = Package::factory()->shipped()->for(Shipment::factory())->create();
+
+    Livewire::test(ViewPackage::class, ['record' => $package->id])
+        ->assertActionVisible('void')
+        ->assertActionVisible('edit');
+});
+
 it('hides void action on view page for unshipped packages', function (): void {
     $shipment = Shipment::factory()->create();
     $package = Package::factory()->for($shipment)->create([
