@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\Role;
 use App\Filament\Widgets\ShippedShipmentsChart;
 use App\Models\DailyShippingStat;
 use App\Models\User;
@@ -9,7 +10,7 @@ use Livewire\Livewire;
 uses(RefreshDatabase::class);
 
 it('renders the chart heading', function (): void {
-    $user = User::factory()->create();
+    $user = User::factory()->create(['role' => Role::Manager]);
 
     Livewire::actingAs($user)
         ->test(ShippedShipmentsChart::class)
@@ -17,7 +18,7 @@ it('renders the chart heading', function (): void {
 });
 
 it('supports week and month filters', function (): void {
-    $user = User::factory()->create();
+    $user = User::factory()->create(['role' => Role::Manager]);
 
     Livewire::actingAs($user)
         ->test(ShippedShipmentsChart::class)
@@ -32,7 +33,7 @@ it('renders with daily shipping stats', function (): void {
         'total_cost' => '60.00',
     ]);
 
-    $user = User::factory()->create();
+    $user = User::factory()->create(['role' => Role::Manager]);
 
     Livewire::actingAs($user)
         ->test(ShippedShipmentsChart::class)
@@ -40,7 +41,7 @@ it('renders with daily shipping stats', function (): void {
 });
 
 it('switches to month filter', function (): void {
-    $user = User::factory()->create();
+    $user = User::factory()->create(['role' => Role::Manager]);
 
     Livewire::actingAs($user)
         ->test(ShippedShipmentsChart::class)

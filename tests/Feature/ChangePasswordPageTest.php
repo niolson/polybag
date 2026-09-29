@@ -1,13 +1,41 @@
 <?php
 
+use App\Enums\Role;
 use App\Filament\Pages\Auth\ChangePassword;
 use App\Models\User;
+use App\Services\SettingsService;
+use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
+
+it('allows required MFA setup before changing an expired password without opening the panel', function (): void {
+    app(SettingsService::class)->set('setup_complete', true, 'boolean');
+    app(SettingsService::class)->set('require_mfa', true, 'boolean');
+
+    // MFA routes are conditional on settings when Filament registers its routes.
+    require base_path('vendor/filament/filament/routes/web.php');
+    app('router')->getRoutes()->refreshNameLookups();
+
+    $user = User::factory()->create(['role' => Role::User]);
+    $this->actingAs($user)->withSession(['password_expired' => true]);
+    $setupUrl = Filament::getSetUpRequiredMultiFactorAuthenticationUrl();
+
+    $this->get('/')->assertRedirect(ChangePassword::getUrl());
+    $this->get(ChangePassword::getUrl())->assertRedirect($setupUrl);
+    $this->get($setupUrl)->assertOk();
+    $this->get('/profile')->assertRedirect(ChangePassword::getUrl());
+
+    $user->app_authentication_secret = AppAuthentication::make()->generateSecret();
+    $user->save();
+
+    $this->get('/')->assertRedirect(ChangePassword::getUrl());
+    $this->get(ChangePassword::getUrl())->assertOk();
+    expect(session('password_expired'))->toBeTrue();
+});
 
 it('shows the live password policy checklist on the change-password page', function (): void {
     $user = User::factory()->create(['password' => Hash::make('CurrentPass123!456')]);

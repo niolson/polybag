@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\Role;
 use App\Filament\Widgets\ShippedShipmentsChart;
 use App\Models\DailyShippingStat;
 use App\Models\User;
@@ -8,7 +9,7 @@ use Livewire\Livewire;
 
 beforeEach(function (): void {
     Cache::flush();
-    $this->actingAs(User::factory()->create());
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
 });
 
 it('renders the chart widget', function (): void {

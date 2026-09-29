@@ -2,7 +2,11 @@
 
 use App\Enums\Deliverability;
 use App\Enums\LabelBatchItemStatus;
+use App\Enums\PackageStatus;
 use App\Enums\ShipmentStatus;
+use App\Enums\TrackingStatus;
+use App\Filament\Resources\PackageResource;
+use App\Filament\Resources\ShipmentResource;
 use App\Filament\Widgets\ExceptionsWidget;
 use App\Models\LabelBatchItem;
 use App\Models\Shipment;
@@ -78,4 +82,12 @@ it('renders when an entry cached before the shipping method count still exists',
     Livewire::actingAs(User::factory()->create())
         ->test(ExceptionsWidget::class)
         ->assertSee('Needs Shipping Method');
+});
+
+it('links each count to a list filtered to what it counts', function (): void {
+    Livewire::actingAs(User::factory()->manager()->create())
+        ->test(ExceptionsWidget::class)
+        ->assertSee(ShipmentResource::getUrl('index').'?status_tab='.ShipmentStatus::Open->value.'&deliverability_tab='.Deliverability::No->value)
+        ->assertSee(PackageResource::getUrl('index').'?status_tab='.PackageStatus::Shipped->value.'&tracking_tab='.TrackingStatus::Exception->value)
+        ->assertSee(PackageResource::getUrl('index').'?status_tab='.PackageStatus::Shipped->value.'&tracking_tab='.TrackingStatus::PreTransit->value);
 });

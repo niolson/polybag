@@ -11,9 +11,9 @@ use Symfony\Component\HttpFoundation\Response;
  * Keeps a user with an expired password pinned to the change-password page.
  *
  * The `password_expired` session flag is set at login (see Login::redirectToPasswordChange).
- * Until the user actually changes their password (which forgets the flag), every panel
- * request is redirected back to the change-password page so no other part of the app
- * can be reached by typing a URL or navigating via wire:navigate.
+ * Until the user actually changes their password (which forgets the flag), panel
+ * requests are redirected back to the change-password page. Required MFA enrollment
+ * remains reachable because Filament requires it before opening that page.
  */
 class EnsurePasswordNotExpired
 {
@@ -33,6 +33,12 @@ class EnsurePasswordNotExpired
     private function shouldBypass(Request $request): bool
     {
         $path = trim($request->path(), '/');
+
+        // Filament gates the password page on MFA enrollment. Blocking enrollment
+        // here would send the user back and forth between the two requirements.
+        if ($path === 'multi-factor-authentication/set-up') {
+            return true;
+        }
 
         // Allow only the change-password page itself and logout. This guard is
         // registered as Livewire persistent middleware, so on component updates

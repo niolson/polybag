@@ -27,6 +27,48 @@ it('displays status column in shipment table', function (): void {
         ->assertCanSeeTableRecords([$shipped, $notShipped]);
 });
 
+it('opens on every shipment, with no status tab applied', function (): void {
+    $shipped = Shipment::factory()->shipped()->create();
+    $open = Shipment::factory()->create(['status' => ShipmentStatus::Open]);
+
+    Livewire::test(ListShipments::class)
+        ->assertSet('activeStatusTab', 'all')
+        ->assertCanSeeTableRecords([$open, $shipped]);
+});
+
+it('moves to the All tab when the status filter is used, so the two never stack', function (): void {
+    $shipped = Shipment::factory()->shipped()->create();
+    $open = Shipment::factory()->create(['status' => ShipmentStatus::Open]);
+
+    Livewire::test(ListShipments::class)
+        ->filterTable('status', ShipmentStatus::Shipped->value)
+        ->assertSet('activeStatusTab', 'all')
+        ->assertCanSeeTableRecords([$shipped])
+        ->assertCanNotSeeTableRecords([$open]);
+});
+
+it('clears the status filter when a status tab is chosen', function (): void {
+    $shipped = Shipment::factory()->shipped()->create();
+    $open = Shipment::factory()->create(['status' => ShipmentStatus::Open]);
+
+    Livewire::test(ListShipments::class)
+        ->filterTable('status', ShipmentStatus::Open->value)
+        ->set('activeStatusTab', ShipmentStatus::Shipped->value)
+        ->assertSet('tableFilters.status.value', null)
+        ->assertCanSeeTableRecords([$shipped])
+        ->assertCanNotSeeTableRecords([$open]);
+});
+
+it('lets a status filter in the URL win over the status tab', function (): void {
+    $shipped = Shipment::factory()->shipped()->create();
+    $open = Shipment::factory()->create(['status' => ShipmentStatus::Open]);
+
+    Livewire::withQueryParams(['filters' => ['status' => ['value' => ShipmentStatus::Shipped->value]]])
+        ->test(ListShipments::class)
+        ->assertCanSeeTableRecords([$shipped])
+        ->assertCanNotSeeTableRecords([$open]);
+});
+
 it('filters shipments by status', function (): void {
     $shipped = Shipment::factory()->shipped()->create();
     $notShipped = Shipment::factory()->create(['status' => ShipmentStatus::Open]);

@@ -4,6 +4,7 @@ namespace App\Filament\Resources\PackageResource\Pages;
 
 use App\Enums\PackageStatus;
 use App\Enums\TrackingStatus;
+use App\Filament\Concerns\KeepsStatusTabInStepWithStatusFilter;
 use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Concerns\PrintsLabels;
 use App\Filament\Resources\PackageResource;
@@ -15,7 +16,7 @@ use Livewire\Attributes\Url;
 
 class ListPackages extends ListRecords
 {
-    use NotifiesUser, PrintsLabels;
+    use KeepsStatusTabInStepWithStatusFilter, NotifiesUser, PrintsLabels;
 
     protected static string $resource = PackageResource::class;
 
@@ -43,6 +44,7 @@ class ListPackages extends ListRecords
 
     public function updatedActiveStatusTab(): void
     {
+        $this->clearStatusFilterForStatusTab();
         $this->resetPage();
     }
 
@@ -89,7 +91,7 @@ class ListPackages extends ListRecords
     {
         $status = PackageStatus::tryFrom($this->activeStatusTab ?? '');
 
-        if ($status === null) {
+        if ($status === null || $this->hasStatusFilter()) {
             return $query;
         }
 

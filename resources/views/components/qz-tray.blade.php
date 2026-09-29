@@ -1,6 +1,11 @@
 <!-- QZ Tray Status Banner -->
-<div id="qz-status" class="mb-4 p-3 rounded-lg bg-gray-100 dark:bg-gray-800 text-sm hidden">
-    <span id="qz-status-text">Connecting to QZ Tray...</span>
+<div id="qz-status" class="mb-4 hidden items-center justify-between gap-4 rounded-lg border px-4 py-3 text-sm">
+    <span id="qz-status-text">Connecting to the label printer...</span>
+    <a
+        id="qz-status-action"
+        href="{{ \App\Filament\Pages\DeviceSettings::getUrl() }}"
+        class="hidden shrink-0 font-semibold underline underline-offset-4"
+    ></a>
 </div>
 
 <x-qz-tray-script />
@@ -9,26 +14,42 @@
     document.addEventListener('DOMContentLoaded', function() {
         const statusBanner = document.getElementById('qz-status');
         const statusText = document.getElementById('qz-status-text');
+        const statusAction = document.getElementById('qz-status-action');
 
         // Show status during initial connection
-        function showStatus(message, type = 'info') {
-            statusBanner.classList.remove('hidden', 'bg-green-100', 'bg-red-100', 'bg-yellow-100', 'bg-gray-100',
-                'dark:bg-green-900', 'dark:bg-red-900', 'dark:bg-yellow-900', 'dark:bg-gray-800');
+        function showStatus(message, type = 'info', actionLabel = null) {
+            statusBanner.classList.remove(
+                'hidden', 'border-green-200', 'border-red-200', 'border-amber-200', 'border-gray-200',
+                'bg-green-50', 'bg-red-50', 'bg-amber-50', 'bg-gray-50',
+                'text-green-800', 'text-red-800', 'text-amber-800', 'text-gray-700',
+                'dark:border-green-900', 'dark:border-red-900', 'dark:border-amber-900', 'dark:border-gray-700',
+                'dark:bg-green-950', 'dark:bg-red-950', 'dark:bg-amber-950', 'dark:bg-gray-800',
+                'dark:text-green-200', 'dark:text-red-200', 'dark:text-amber-200', 'dark:text-gray-200',
+            );
 
             const colors = {
-                'success': 'bg-green-100 dark:bg-green-900',
-                'error': 'bg-red-100 dark:bg-red-900',
-                'warning': 'bg-yellow-100 dark:bg-yellow-900',
-                'info': 'bg-gray-100 dark:bg-gray-800'
+                'success': 'border-green-200 bg-green-50 text-green-800 dark:border-green-900 dark:bg-green-950 dark:text-green-200',
+                'error': 'border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200',
+                'warning': 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200',
+                'info': 'border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200'
             };
 
-            statusBanner.classList.add(...colors[type].split(' '));
+            statusBanner.classList.add('flex', ...colors[type].split(' '));
             statusText.textContent = message;
+            statusAction.textContent = actionLabel || '';
+            statusAction.classList.toggle('hidden', !actionLabel);
 
             // Auto-hide success messages
             if (type === 'success') {
-                setTimeout(() => statusBanner.classList.add('hidden'), 3000);
+                setTimeout(hideStatus, 3000);
             }
+        }
+
+        // `flex` and `hidden` both set display, so swap one for the other rather
+        // than adding `hidden` on top.
+        function hideStatus() {
+            statusBanner.classList.remove('flex');
+            statusBanner.classList.add('hidden');
         }
 
         // Queue a message to appear on the *next* page. The ship flow redirects as
@@ -91,7 +112,7 @@
 
                 if (!PrinterSettings.hasLabelPrinter()) {
                     // Always warn if no printer configured
-                    showStatus('QZ Tray connected - No label printer configured. Go to Device Settings.', 'warning');
+                    showStatus('No label printer is selected for this computer.', 'warning', 'Choose printer');
                 } else if (showStatusOnSuccess) {
                     // Only show success message when explicitly requested (e.g., during print reconnect)
                     const printer = PrinterSettings.labelPrinterFor(PrinterSettings.labelFormat());
@@ -104,7 +125,7 @@
                 console.error('QZ Tray connection error:', error);
 
                 if (error.message && error.message.includes('Unable to connect')) {
-                    showStatus('QZ Tray not running. Please start QZ Tray.', 'error');
+                    showStatus('The label printing app is not running. Open QZ Tray on this computer, then try again.', 'error');
                 } else {
                     showStatus(`QZ Tray error: ${error.message || 'Connection failed'}`, 'error');
                 }
@@ -183,7 +204,7 @@
                     const config = qz.configs.create(printer);
                     const data = [atob(base64Data)];
                     await qz.print(config, data);
-                    statusBanner.classList.add('hidden');
+                    hideStatus();
                     return;
                 }
 
@@ -218,7 +239,7 @@
 
                 await qz.print(config, data);
                 // Success is shown via Filament notification, no need for banner
-                statusBanner.classList.add('hidden');
+                hideStatus();
             } catch (error) {
                 console.error('Print error:', error);
                 showStatus(`Print failed: ${error.message || 'Unknown error'}`, 'error');
@@ -263,7 +284,7 @@
                 }];
 
                 await qz.print(config, data);
-                statusBanner.classList.add('hidden');
+                hideStatus();
 
                 return true;
             } catch (error) {
