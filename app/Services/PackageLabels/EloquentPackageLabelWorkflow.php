@@ -22,8 +22,12 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
         private readonly PostageSourceDispatcher $dispatcher,
     ) {}
 
-    public function voidLabel(Package $package): LabelVoidResult
+    public function voidLabel(Package $package, User $user): LabelVoidResult
     {
+        if ($user->cannot('printLabel', $package)) {
+            return LabelVoidResult::failure('Access Denied', 'You can only void labels for packages you shipped.');
+        }
+
         if ($package->status !== PackageStatus::Shipped) {
             return LabelVoidResult::failure('Package Not Found', 'The package could not be found or is not shipped.');
         }
@@ -43,10 +47,7 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
                 return LabelVoidResult::failure('Void failed', $response->message ?? 'Failed to cancel the label.');
             }
 
-            // The operator asking for the void is whoever is signed in. Resolved
-            // here rather than passed by the caller because the contract's
-            // `voidLabel(Package)` takes no user and its callers are Filament pages.
-            $package->clearShipping(VoidReason::Operator, auth()->id());
+            $package->clearShipping(VoidReason::Operator, $user->id);
 
             return LabelVoidResult::success($response->message);
         } catch (\RuntimeException $e) {

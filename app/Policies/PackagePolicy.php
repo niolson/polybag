@@ -39,9 +39,10 @@ class PackagePolicy
     }
 
     /**
-     * Printing a bought label — and recording that it was printed — is limited to
-     * managers and the operator who shipped the package. Batch shipping is admin
-     * only, so batch operators always clear the manager bar.
+     * Handling a bought label — printing it, recording that it was printed, or
+     * voiding it — is limited to managers and the operator who shipped the
+     * package. Batch shipping is admin only, so batch operators always clear the
+     * manager bar.
      */
     public function printLabel(User $user, Package $package): bool
     {

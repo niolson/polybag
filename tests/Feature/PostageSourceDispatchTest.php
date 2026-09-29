@@ -6,6 +6,7 @@ use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\PackageStatus;
 use App\Enums\TrackingStatus;
 use App\Models\Package;
+use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\UspsAdapter;
 use App\Services\TrackingService;
@@ -52,7 +53,7 @@ it('voids a Shopify-bought label through Shopify, never through the carrier carr
     // would ask our own USPS account to void a label Shopify bought.
     $package = shippedShopifyPackage();
 
-    $result = app(PackageLabelWorkflow::class)->voidLabel($package);
+    $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
 
     expect($result->success)->toBeFalse()
         ->and($result->message)->toContain('Cancel this label in the Shopify admin')
@@ -77,7 +78,7 @@ it('still sends a directly-bought label to its carrier', function (): void {
     $package = Package::factory()->usps()->create();
 
     $tracking = app(TrackingService::class)->refreshPackage($package);
-    $void = app(PackageLabelWorkflow::class)->voidLabel($package->refresh());
+    $void = app(PackageLabelWorkflow::class)->voidLabel($package->refresh(), User::factory()->manager()->create());
 
     expect($tracking->status)->toBe(TrackingStatus::InTransit)
         ->and($void->success)->toBeTrue()
