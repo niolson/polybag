@@ -17,9 +17,8 @@ use Illuminate\Support\Collection;
  *
  * Runs wherever adapter rates are collected: `ShippingRateService::getShippingRates()`,
  * before the quote log, so a rate that was never offered is never logged as
- * one; and inside every `resolvePreSelectedRate()`, where a rule's chosen
- * service reaches automation without passing through rate shopping. An empty
- * result there is the contract's null — the caller rate-shops instead.
+ * one. A shipping rule's chosen service is selected among those same rates
+ * (`project-review/18`), so it passes through this filter too.
  */
 final class PackagingFilter
 {

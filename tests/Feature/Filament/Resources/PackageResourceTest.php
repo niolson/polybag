@@ -232,11 +232,6 @@ it('voids a label and clears shipping fields', function (): void {
             return true;
         }
 
-        public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
-        {
-            return $rate;
-        }
-
         public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
         {
             return PackagingRequirement::shipperPackaging();

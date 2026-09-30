@@ -111,11 +111,6 @@ class PolicyOnlyCarrierAdapter implements CarrierAdapterInterface, CarrierPolicy
         return ShipResponse::failure('We hold no account with this carrier.');
     }
 
-    public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
-    {
-        return $rate;
-    }
-
     public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
     {
         return PackagingRequirement::shipperPackaging();

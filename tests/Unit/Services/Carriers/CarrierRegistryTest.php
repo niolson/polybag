@@ -136,11 +136,6 @@ it('allows registering custom adapters', function (): void {
             return false;
         }
 
-        public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
-        {
-            return $rate;
-        }
-
         public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
         {
             return PackagingRequirement::shipperPackaging();
