@@ -1,6 +1,6 @@
 # A UPS or FedEx *Use* rule buys nothing when the order has a due-by date
 
-Status: needs-triage
+Status: done — 2026-09-30
 
 Repo: `polybag`
 
@@ -88,3 +88,23 @@ The second is smaller and fits `05`. Add the test above, and one against the rea
 `UpsAdapter` with a quoted delivery date.
 
 ## Comments
+
+- 2026-09-30 — Fixed by the second option. `RuleEvaluator::directResult()` returns a
+  `RuleRateScope` (`kinds: [Direct]`, the rule's service, not strict) for every direct
+  service, so the rule selects among the rates rate shopping quoted, with their prices and
+  delivery dates, and `RateSelector::selectForAutomation()` judges the on-time requirement
+  on them. That fixes `17` too. With nothing left on it, the pre-selected-rate path is
+  gone: `RuleEvaluationResult::$preSelectedRate`, the branch in `selectedRateForAutoShip()`,
+  `ShippingRateService::offerForUnquotedRate()` (see `02`) and
+  `CarrierAdapterInterface::resolvePreSelectedRate()` with its six implementations. Their
+  unit tests went with them (`PreSelectedRatePackagingTest`, one `UpsAdapterTest` case).
+  The packaging and Media Mail filters they duplicated already run on quoted rates.
+  `ADR-0005` gains a dated amendment for decision 4's second filter site.
+
+  Consequence: UPS, FedEx and USPS *Use* rules now rate-shop the method's services in
+  unattended runs, so batch ship makes more carrier API calls per package than before
+  (USPS already quoted one service; UPS and FedEx made none). Rate shopping also refuses
+  a package missing a required declared value before any Offer exists, so `autoShip()`
+  now reports that as "Declared Value Required", as the Ship page does, instead of a
+  generic error. Regression tests in `ShippingRuleSourceTest`: the Evidence test, and one
+  against the real `UpsAdapter` with a quoted delivery date. Both fail without the change.
