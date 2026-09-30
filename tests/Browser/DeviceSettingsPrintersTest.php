@@ -201,7 +201,11 @@ it('runs the hardware zero command when its barcode is scanned on the pack page'
 
             pack.scaleConnected = true;
             ScaleUtils.zero = () => Promise.resolve(window.scaleZeroed = true);
-            await pack.executeCommand('4');
+
+            // As a scanner sends it: the command sheet's code, lower-cased as with Caps Lock.
+            pack.input = 'pbczeroscale';
+            pack.handleScan();
+            await new Promise((resolve) => setTimeout(resolve, 0));
 
             return [window.scaleZeroed, pack.weight];
         })()
