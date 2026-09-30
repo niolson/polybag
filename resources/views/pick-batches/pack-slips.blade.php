@@ -52,6 +52,7 @@
         .order-cell { flex: 1; text-align: right; }
         .barcode-wrap svg { display: block; width: 100%; height: 30px; margin-left: auto; }
         .order-ref { font-family: monospace; font-size: 7pt; color: #555; margin-top: 2px; }
+        .order-ref .scan-code { color: #888; margin-left: 4px; }
 
         /* Row 3: Ship-to | Order summary placeholder */
         .row-recipient {
@@ -135,11 +136,13 @@
                 <div class="tote-code">{{ $pivot->tote_code ?? '—' }}</div>
             </div>
             <div class="order-cell">
-                @if ($pivot->shipment?->shipment_reference)
+                @if ($pivot->shipment)
+                    {{-- The PolyBag code, not the order reference: a reference is only unique within one connection (ADR-0007). --}}
+                    @php($scanCode = \App\Services\Scanning\ScanCode::forShipment($pivot->shipment))
                     <div class="barcode-wrap">
-                        {!! $generator->getBarcode($pivot->shipment->shipment_reference, \Picqer\Barcode\BarcodeGeneratorSVG::TYPE_CODE_128, 2, 30) !!}
+                        {!! $generator->getBarcode($scanCode, \Picqer\Barcode\BarcodeGeneratorSVG::TYPE_CODE_128, 2, 30) !!}
                     </div>
-                    <div class="order-ref">{{ $pivot->shipment->shipment_reference }}</div>
+                    <div class="order-ref">{{ $pivot->shipment->shipment_reference }} <span class="scan-code">{{ $scanCode }}</span></div>
                 @endif
             </div>
         </div>

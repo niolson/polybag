@@ -96,9 +96,11 @@
         <div class="barcode-grid">
             @foreach($boxSizes as $boxSize)
                 <div class="barcode-item">
-                    <div class="barcode-code">{{ $boxSize->code }}</div>
-                    <svg class="barcode-svg" data-code="{{ $boxSize->code }}"></svg>
-                    <div class="barcode-label">{{ $boxSize->label }}</div>
+                    {{-- The PolyBag code, which no product barcode can be mistaken for; the operator's code is typed (ADR-0007). --}}
+                    @php($scanCode = \App\Services\Scanning\ScanCode::forBoxSize($boxSize))
+                    <div class="barcode-code">{{ $scanCode }}</div>
+                    <svg class="barcode-svg" data-code="{{ $scanCode }}"></svg>
+                    <div class="barcode-label">{{ $boxSize->code }} · {{ $boxSize->label }}</div>
                     <div class="barcode-dimensions">{{ $boxSize->length }}" x {{ $boxSize->width }}" x {{ $boxSize->height }}"</div>
                 </div>
             @endforeach

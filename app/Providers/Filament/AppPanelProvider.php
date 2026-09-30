@@ -4,6 +4,7 @@ namespace App\Providers\Filament;
 
 use App\Filament\Auth\EmailAuthenticationForEmailUsers;
 use App\Filament\AvatarProviders\LocalAvatarProvider;
+use App\Filament\GlobalSearch\ScanCodeGlobalSearchProvider;
 use App\Filament\Pages\Auth\EditProfile;
 use App\Filament\Pages\Auth\Login;
 use App\Http\Middleware\EnsurePasswordNotExpired;
@@ -83,6 +84,7 @@ class AppPanelProvider extends PanelProvider
             ->sidebarWidth('16rem')
             ->maxContentWidth(Width::ScreenTwoExtraLarge)
             ->sidebarCollapsibleOnDesktop()
+            ->globalSearch(ScanCodeGlobalSearchProvider::class)
             ->globalSearchKeyBindings(['command+k', 'ctrl+k'])
             ->globalSearchFieldSuffix(fn (): ?string => match (Platform::detect()) {
                 Platform::Windows, Platform::Linux => 'CTRL+K',
@@ -112,6 +114,10 @@ class AppPanelProvider extends PanelProvider
             ->renderHook(
                 PanelsRenderHook::HEAD_END,
                 fn (): string => Blade::render('<x-printer-settings-script />'),
+            )
+            ->renderHook(
+                PanelsRenderHook::HEAD_END,
+                fn (): string => Blade::render('<x-global-search-scan-script />'),
             )
             ->middleware([
                 EncryptCookies::class,

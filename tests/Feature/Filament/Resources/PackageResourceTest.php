@@ -328,6 +328,14 @@ it('hides void action on view page for unshipped packages', function (): void {
         ->assertActionHidden('void');
 });
 
+it('titles the view page by package ID, shipped or not', function (PackageStatus $status): void {
+    $package = Package::factory()->create(['status' => $status]);
+
+    $page = Livewire::test(ViewPackage::class, ['record' => $package->id])->instance();
+
+    expect($page instanceof ViewPackage ? (string) $page->getTitle() : null)->toBe("View Package #{$package->id}");
+})->with([PackageStatus::Unshipped, PackageStatus::Shipped]);
+
 it('offers to open a Shopify-shipped package\'s order in the Shopify admin', function (): void {
     $shipment = Shipment::factory()->create([
         'metadata' => ['shopify_order_id' => 'gid://shopify/Order/1001'],
@@ -339,9 +347,9 @@ it('offers to open a Shopify-shipped package\'s order in the Shopify admin', fun
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
         ->assertActionDisabled('void')
-        ->assertActionVisible('open_in_shopify')
-        ->assertActionHasUrl('open_in_shopify', 'https://admin.shopify.com/store/test-shop/orders/1001')
-        ->assertActionShouldOpenUrlInNewTab('open_in_shopify');
+        ->assertActionVisible($openInShopify = TestAction::make('open_in_shopify')->schemaComponent('shopify_shipping_notice', 'infolist'))
+        ->assertActionHasUrl($openInShopify, 'https://admin.shopify.com/store/test-shop/orders/1001')
+        ->assertActionShouldOpenUrlInNewTab($openInShopify);
 });
 
 it('hides the Shopify admin link when the shipment has no Shopify order', function (): void {
@@ -351,14 +359,16 @@ it('hides the Shopify admin link when the shipment has no Shopify order', functi
     ]);
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
-        ->assertActionHidden('open_in_shopify');
+        ->assertSee('Bought through Shopify Shipping')
+        ->assertActionHidden(TestAction::make('open_in_shopify')->schemaComponent('shopify_shipping_notice', 'infolist'));
 });
 
 it('hides the Shopify admin link for a label bought on a carrier account', function (): void {
     $package = Package::factory()->shipped()->create();
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
-        ->assertActionHidden('open_in_shopify');
+        ->assertDontSee('Bought through Shopify Shipping')
+        ->assertDontSee('Open in Shopify');
 });
 
 it('labels an Amazon Buy Shipping package on the view page without the Shopify notice', function (): void {

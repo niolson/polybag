@@ -31,6 +31,8 @@
             lastScaleWeight: null,
             input: '',
             hasShipment: {{ $shipment ? 'true' : 'false' }},
+            scanCodePrefix: @js(\App\Services\Scanning\ScanCode::prefix()),
+            commandCodes: @js($this->scanCommandCodes()),
             pendingTransparencyKey: null,
             transparencyInput: '',
             showTransparencyModal: false,
@@ -57,9 +59,21 @@
                 const trimmed = this.input.trim();
                 if (!trimmed) return;
 
-                // Check for command barcode first (starts with *)
-                if (trimmed.startsWith('*')) {
-                    this.executeCommand(trimmed.substring(1));
+                // A PolyBag code comes first and is never a box, product or
+                // reference (ADR-0007): commands run here, the rest on the server.
+                const upper = trimmed.toUpperCase();
+                if (upper.startsWith(this.scanCodePrefix)) {
+                    const command = this.commandCodes[upper];
+                    const boxCode = this.hasShipment ? this.boxAliasForScanCode(upper) : undefined;
+
+                    if (command) {
+                        this.executeCommand(command);
+                    } else if (boxCode !== undefined) {
+                        this.scanBox(boxCode);
+                    } else {
+                        $wire.openScanCode(trimmed);
+                    }
+
                     this.input = '';
                     return;
                 }
@@ -97,25 +111,27 @@
                 this.input = '';
             },
 
-            executeCommand(code) {
+            // The alias of the active box a Box Size code names, matched by its
+            // numeric ID so leading zeros read as the server's parser reads them.
+            boxAliasForScanCode(upper) {
+                const match = upper.match(new RegExp(`^${this.scanCodePrefix}B(\\d{1,18})$`));
+                const id = match ? Number(match[1]) : 0;
+
+                return id > 0
+                    ? Object.keys(this.boxSizes).find((code) => this.boxSizes[code].id === id)
+                    : undefined;
+            },
+
+            executeCommand(name) {
                 const commands = {
-                    '1': () => this.shipPackage(),
-                    '2': () => $wire.reprintLastLabel(),
-                    '3': () => $wire.cancelLastLabel(),
-                    '4': () => this.zeroScale(),
-                    '0': () => this.clearShipment(),
+                    SHIP: () => this.shipPackage(),
+                    REPRINTLAST: () => $wire.reprintLastLabel(),
+                    VOIDLAST: () => $wire.cancelLastLabel(),
+                    ZEROSCALE: () => this.zeroScale(),
+                    CLEARSHIPMENT: () => this.clearShipment(),
                 };
 
-                const action = commands[code.toUpperCase()];
-                if (action) {
-                    return action();
-                } else {
-                    new FilamentNotification()
-                        .title('Unknown Command')
-                        .body(`Command '${code}' not recognized`)
-                        .danger()
-                        .send();
-                }
+                return commands[name]?.();
             },
 
             async zeroScale() {
@@ -460,7 +476,7 @@
                             x-ref="scanInput"
                             type="text"
                             x-model="input"
-                            x-bind:placeholder="hasShipment ? 'Scan product barcode or box code' : 'Scan shipment barcode or enter ID'"
+                            x-bind:placeholder="hasShipment ? 'Scan product barcode or box code' : 'Scan pack slip or enter order reference'"
                             x-bind:disabled="isShipping"
                             autofocus
                         />
@@ -543,6 +559,42 @@
 
             <button type="submit" hidden>Submit</button>
         </form>
+
+    {{-- A scan that could mean several Shipments: the packer chooses (ADR-0007). --}}
+    @if(! $shipment && $shipmentCandidates)
+    <x-filament::section class="mt-6 col-span-full" icon="heroicon-o-exclamation-triangle" icon-color="warning">
+        <x-slot name="heading">
+            {{ count($shipmentCandidates) }} shipments match “{{ $candidateScan }}”
+        </x-slot>
+        <x-slot name="description">
+            Choose the one you are packing. Scanning the barcode on a PolyBag pack slip opens a single shipment.
+        </x-slot>
+
+        <ul class="divide-y divide-gray-200 dark:divide-white/10">
+            @foreach($shipmentCandidates as $candidate)
+                <li wire:key="shipment-candidate-{{ $candidate['id'] }}" class="flex items-center gap-4 py-3">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="font-medium text-gray-950 dark:text-white">{{ $candidate['reference'] ?? 'No reference' }}</span>
+                            @if($candidate['client'])
+                                <x-filament::badge color="primary">{{ $candidate['client'] }}</x-filament::badge>
+                            @endif
+                            @if($candidate['status'])
+                                <x-filament::badge :color="$candidate['statusColor']">{{ $candidate['status'] }}</x-filament::badge>
+                            @endif
+                        </div>
+                        <div class="text-sm text-gray-500 dark:text-gray-400">
+                            {{ $candidate['recipient'] }}@if($candidate['place']) · {{ $candidate['place'] }}@endif @if($candidate['connection']) · {{ $candidate['connection'] }}@endif · {{ $candidate['code'] }}
+                        </div>
+                    </div>
+                    <x-filament::button color="gray" wire:click="chooseShipment({{ $candidate['id'] }})">
+                        Pack this one
+                    </x-filament::button>
+                </li>
+            @endforeach
+        </ul>
+    </x-filament::section>
+    @endif
 
     @if($shipment)
     <x-filament::section class="mt-6 col-span-full" :has-content-el="false">
@@ -720,7 +772,7 @@
             </template>
         </div>
     </x-filament::section>
-    @else
+    @elseif(! $shipmentCandidates)
     <div class="flex items-center justify-center p-16">
         <div class="text-center max-w-sm">
             <div class="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-primary-50 dark:bg-primary-950">
@@ -731,7 +783,7 @@
             </div>
             <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Ready to pack?</h3>
             <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                Scan a shipment barcode or enter its ID above to get started.
+                Scan a pack slip or enter an order reference above to get started.
             </p>
         </div>
     </div>

@@ -18,18 +18,20 @@ use App\Filament\Resources\ShipmentResource;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\PackageLabel;
+use App\Services\PackageLabels\SessionLastLabel;
 use App\Services\SettingsService;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\RepeatableEntry\TableColumn;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Illuminate\Contracts\View\View;
-use Illuminate\Support\Facades\Session;
 use LogicException;
 
 class ViewPackage extends ViewRecord
@@ -99,47 +101,63 @@ class ViewPackage extends ViewRecord
                 ->visible(fn (): bool => $this->record->status === PackageStatus::Shipped && $this->record->label_data)
                 ->action(fn () => $this->printStoredPackageLabel($this->record->id)),
             PackageResource::makeTrackAction(),
-            Action::make('void')
-                ->label('Void Label')
-                ->icon('heroicon-o-x-circle')
-                ->color('danger')
-                ->requiresConfirmation()
-                ->authorize('voidLabel')
-                ->modalHeading('Void Label')
-                ->modalDescription('This will cancel the label with the carrier. The package will be kept with its dimensions so it can be re-shipped.')
-                ->visible(fn (): bool => $this->record->status === PackageStatus::Shipped
-                    && $this->record->tracking_number
-                    && ($this->record->carrier || $this->shopifyShipped()))
-                // Shopify exposes no void operation, so this can only ever fail
-                // for a label bought through Shopify Shipping.
-                ->disabled(fn (): bool => $this->shopifyShipped())
-                ->tooltip(fn (): ?string => $this->shopifyShipped()
-                    ? 'Void and refund this label in the Shopify admin.'
-                    : null)
-                ->action(function (): void {
-                    $result = app(PackageLabelWorkflow::class)->voidLabel($this->record, auth()->user());
+            // The rare actions go behind a menu, so the header fits beside a
+            // title that is a whole tracking number.
+            ActionGroup::make([
+                Action::make('void')
+                    ->label('Void Label')
+                    ->icon('heroicon-o-x-circle')
+                    ->color('danger')
+                    ->requiresConfirmation()
+                    ->authorize('voidLabel')
+                    ->modalHeading('Void Label')
+                    ->modalDescription('This will cancel the label with the carrier. The package will be kept with its dimensions so it can be re-shipped.')
+                    ->visible(fn (): bool => $this->record->status === PackageStatus::Shipped
+                        && $this->record->tracking_number
+                        && ($this->record->carrier || $this->shopifyShipped()))
+                    // Shopify exposes no void operation, so this can only ever fail
+                    // for a label bought through Shopify Shipping.
+                    ->disabled(fn (): bool => $this->shopifyShipped())
+                    ->tooltip(fn (): ?string => $this->shopifyShipped()
+                        ? 'Void and refund this label in the Shopify admin.'
+                        : null)
+                    ->action(function (): void {
+                        $result = app(PackageLabelWorkflow::class)->voidLabel($this->record, auth()->user());
 
-                    $notification = Notification::make()
-                        ->title($result->title)
-                        ->body($result->message);
+                        $notification = Notification::make()
+                            ->title($result->title)
+                            ->body($result->message);
 
-                    $result->success
-                        ? $notification->success()->send()
-                        : $notification->danger()->send();
-                }),
-            // Where the packer voids a Shopify Shipping label, since the
-            // disabled Void button above cannot: Shopify's API sells labels
-            // but only the admin can cancel and refund one.
-            Action::make('open_in_shopify')
-                ->label('Open in Shopify')
-                ->icon('heroicon-o-arrow-top-right-on-square')
+                        $result->success
+                            ? $notification->success()->send()
+                            : $notification->danger()->send();
+                    }),
+                Action::make('edit')
+                    ->icon('heroicon-o-pencil-square')
+                    ->authorize('update')
+                    ->url(fn (): string => PackageResource::getUrl('edit', ['record' => $this->record])),
+            ])
+                ->label('More actions')
+                ->icon('heroicon-o-ellipsis-vertical')
                 ->color('gray')
-                ->visible(fn (): bool => $this->shopifyAdminOrderUrl() !== null)
-                ->url(fn (): ?string => $this->shopifyAdminOrderUrl(), shouldOpenInNewTab: true),
-            Action::make('edit')
-                ->authorize('update')
-                ->url(fn (): string => PackageResource::getUrl('edit', ['record' => $this->record])),
+                ->button()
+                ->hiddenLabel(),
         ];
+    }
+
+    /**
+     * Where the packer voids a Shopify Shipping label, since the disabled Void
+     * action cannot: Shopify's API sells labels but only the admin can cancel
+     * and refund one.
+     */
+    private function openInShopifyAction(): Action
+    {
+        return Action::make('open_in_shopify')
+            ->label('Open in Shopify')
+            ->icon('heroicon-o-arrow-top-right-on-square')
+            ->color('gray')
+            ->visible(fn (): bool => $this->shopifyAdminOrderUrl() !== null)
+            ->url(fn (): ?string => $this->shopifyAdminOrderUrl(), shouldOpenInNewTab: true);
     }
 
     public function getFooter(): ?View
@@ -248,7 +266,7 @@ class ViewPackage extends ViewRecord
             return;
         }
 
-        Session::put('last_shipped_package_id', $package->id);
+        app(SessionLastLabel::class)->remember($package);
         $package->refresh();
 
         if ($result->response?->labelData) {
@@ -303,14 +321,16 @@ class ViewPackage extends ViewRecord
                             ->placeholder(fn ($record): string => $record->isShopifyShipped()
                                 ? 'Billed by Shopify — not reported through the API'
                                 : '—'),
-                        TextEntry::make('shopify_shipping_notice')
-                            ->hiddenLabel()
+                        Callout::make('Bought through Shopify Shipping')
+                            ->key('shopify_shipping_notice')
+                            ->warning()
                             ->columnSpanFull()
                             ->visible(fn ($record): bool => $record->isShopifyShipped())
-                            ->badge()
-                            ->color('warning')
-                            ->state('Bought through Shopify Shipping — void and refund it in the Shopify admin, not here (use Open in Shopify above). PolyBag returns this package to unshipped once Shopify reports the label voided.'),
-                        Components\Fieldset::make('Dimensions')->columns(3)->schema([
+                            ->description('Void and refund this label in the Shopify admin, not here. PolyBag returns this package to unshipped once Shopify reports the label voided.')
+                            ->footerActions([$this->openInShopifyAction()]),
+                        // Stacked labels: the section's inline labels leave no
+                        // room for a value in a quarter-width column.
+                        Components\Fieldset::make('Dimensions')->inlineLabel(false)->columns(['default' => 2, 'sm' => 4])->schema([
                             TextEntry::make('length')
                                 ->suffix(' in'),
                             TextEntry::make('width')
