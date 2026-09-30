@@ -9,17 +9,20 @@ use App\Enums\PickingStatus;
 use App\Enums\Role;
 use App\Enums\ShipmentStatus;
 use App\Filament\Pages\Pack;
+use App\Filament\Resources\PackageResource;
 use App\Models\BoxSize;
 use App\Models\Client;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\PackageItem;
+use App\Models\PackageLabel;
 use App\Models\Product;
 use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
+use App\Services\PackageLabels\SessionLastLabel;
 use App\Services\SettingsService;
 use Illuminate\Support\Facades\Session;
 use Livewire\Livewire;
@@ -106,6 +109,147 @@ it('navigates to shipment by reference', function (): void {
     Livewire::test(Pack::class)
         ->call('navigateToShipment', $shipment->shipment_reference)
         ->assertRedirect("/pack/{$shipment->id}");
+});
+
+describe('PolyBag codes', function (): void {
+    beforeEach(function (): void {
+        config(['app.scan_code_prefix' => 'PB']);
+    });
+
+    it('opens the shipment on its pack slip', function (): void {
+        $shipment = Shipment::factory()->create();
+
+        Livewire::test(Pack::class)
+            ->call('navigateToShipment', "PBS{$shipment->id}")
+            ->assertRedirect("/pack/{$shipment->id}");
+    });
+
+    it('resumes an unshipped package on the Pack page, and shows a shipped one', function (): void {
+        $draft = Package::factory()->create(['status' => PackageStatus::Unshipped]);
+        $shipped = Package::factory()->shipped()->create();
+
+        Livewire::test(Pack::class)
+            ->call('openScanCode', "PBP{$draft->id}")
+            ->assertRedirect("/pack/{$draft->shipment_id}");
+
+        Livewire::test(Pack::class)
+            ->call('openScanCode', "pbp{$shipped->id}")
+            ->assertRedirect(PackageResource::getUrl('view', ['record' => $shipped]));
+    });
+
+    it('never resumes a different draft than the one scanned', function (): void {
+        $shipment = Shipment::factory()->create();
+        $resumed = Package::factory()->for($shipment)->create(['status' => PackageStatus::Unshipped]);
+        $second = Package::factory()->for($shipment)->create(['status' => PackageStatus::Unshipped]);
+
+        Livewire::test(Pack::class)
+            ->call('openScanCode', "PBP{$second->id}")
+            ->assertNotified('Opened on Its Own Page')
+            ->assertRedirect(PackageResource::getUrl('view', ['record' => $second]));
+
+        Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+            ->call('openScanCode', "PBP{$resumed->id}")
+            ->assertNotified('Already Open')
+            ->call('openScanCode', "PBP{$second->id}")
+            ->assertNotified('Another Package')
+            ->assertNoRedirect();
+    });
+
+    it('applies a box by its code only while packing', function (): void {
+        $box = BoxSize::factory()->create(['code' => 'A1']);
+
+        Livewire::test(Pack::class)
+            ->call('openScanCode', "PBB0{$box->id}")
+            ->assertNotified('No Shipment Loaded');
+    });
+
+    it('says not found for a deleted shipment, even when another has its code as a reference', function (): void {
+        $deletedId = Shipment::factory()->create()->id;
+        Shipment::query()->whereKey($deletedId)->delete();
+        Shipment::factory()->create(['shipment_reference' => "PBS{$deletedId}"]);
+
+        Livewire::test(Pack::class)
+            ->call('navigateToShipment', "PBS{$deletedId}")
+            ->assertNotified('Shipment Not Found')
+            ->assertNoRedirect()
+            ->assertSet('shipmentCandidates', []);
+    });
+
+    it('never looks up an unrecognised code as anything else', function (): void {
+        Shipment::factory()->create(['shipment_reference' => 'PBX12']);
+
+        Livewire::test(Pack::class)
+            ->call('navigateToShipment', 'PBX12')
+            ->assertNotified('Unrecognised Code')
+            ->assertNoRedirect();
+    });
+
+    it('does not switch away from the shipment being packed', function (): void {
+        $packing = Shipment::factory()->create();
+        $other = Shipment::factory()->create(['shipment_reference' => '#2002']);
+
+        Livewire::test(Pack::class, ['shipment_id' => $packing->id])
+            ->call('openScanCode', "PBS{$other->id}")
+            ->assertNotified('Another Shipment')
+            ->assertNoRedirect()
+            ->call('openScanCode', "PBS{$packing->id}")
+            ->assertNotified('Already Open')
+            ->assertNoRedirect();
+    });
+
+    it('rejects an unknown command and a reserved action', function (): void {
+        Livewire::test(Pack::class)
+            ->call('openScanCode', 'PBCSELFDESTRUCT')
+            ->assertNotified('Unknown Command')
+            ->call('openScanCode', 'PBM12')
+            ->assertNotified('Not Available');
+    });
+
+    it('gives the browser every command\'s barcode', function (): void {
+        Livewire::test(Pack::class)
+            ->assertSeeHtml('PBCSHIP')
+            ->assertSeeHtml('PBCZEROSCALE');
+
+        expect((new Pack)->scanCommandCodes())->toMatchArray([
+            'PBCSHIP' => 'SHIP',
+            'PBCREPRINTLAST' => 'REPRINTLAST',
+            'PBCVOIDLAST' => 'VOIDLAST',
+            'PBCZEROSCALE' => 'ZEROSCALE',
+            'PBCCLEARSHIPMENT' => 'CLEARSHIPMENT',
+        ]);
+    });
+});
+
+it('lists shipments sharing a reference instead of opening one', function (): void {
+    $first = Shipment::factory()->create([
+        'shipment_reference' => '#1001',
+        'client_id' => Client::factory()->create(['name' => 'Acme Outfitters'])->id,
+    ]);
+    $second = Shipment::factory()->create([
+        'shipment_reference' => '#1001',
+        'client_id' => Client::factory()->create(['name' => 'Birch & Pine'])->id,
+    ]);
+
+    Livewire::test(Pack::class)
+        ->call('navigateToShipment', '#1001')
+        ->assertNoRedirect()
+        ->assertSet('shipmentCandidates.0.id', $first->id)
+        ->assertSet('shipmentCandidates.1.id', $second->id)
+        ->assertSee('2 shipments match')
+        ->assertSee('Acme Outfitters')
+        ->assertSee('Birch &amp; Pine', escape: false)
+        ->call('chooseShipment', $second->id)
+        ->assertRedirect("/pack/{$second->id}");
+});
+
+it('opens only a shipment it offered to choose from', function (): void {
+    Shipment::factory()->count(2)->create(['shipment_reference' => '#1001']);
+    $other = Shipment::factory()->create();
+
+    Livewire::test(Pack::class)
+        ->call('navigateToShipment', '#1001')
+        ->call('chooseShipment', $other->id)
+        ->assertNoRedirect();
 });
 
 it('shows error notification for invalid shipment reference', function (): void {
@@ -899,7 +1043,7 @@ it('does not let a shipper cancel the last label when someone else shipped it', 
         'shipped_by_user_id' => User::factory()->create(['role' => Role::User])->id,
     ]);
     $this->actingAs(User::factory()->create(['role' => Role::User]));
-    Session::put('last_shipped_package_id', $package->id);
+    app(SessionLastLabel::class)->remember($package);
 
     Livewire::test(Pack::class)
         ->call('cancelLastLabel')
@@ -919,13 +1063,35 @@ it('lets the shipper cancel the last label they shipped', function (): void {
         'shipped_by_user_id' => $shipper->id,
     ]);
     $this->actingAs($shipper);
-    Session::put('last_shipped_package_id', $package->id);
+    app(SessionLastLabel::class)->remember($package);
 
     Livewire::test(Pack::class)
         ->call('cancelLastLabel')
         ->assertNotified('Label Cancelled');
 
     expect($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+})->after(fn () => app(CarrierRegistry::class)->reset());
+
+it('refuses the last-label commands once that label is voided and the package bought again', function (): void {
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('cancelShipment')->never();
+    app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
+
+    $package = Package::factory()->shipped()->create(['carrier' => 'USPS']);
+    app(SessionLastLabel::class)->remember($package);
+
+    // Voided elsewhere, then bought again: the Package's active Label is a new one.
+    $package->activeLabel()->update(['voided_at' => now()]);
+    PackageLabel::createFromPackage($package->fresh());
+
+    Livewire::test(Pack::class)
+        ->call('reprintLastLabel')
+        ->assertNotified('No Label to Reprint')
+        ->assertNotDispatched('print-label')
+        ->call('cancelLastLabel')
+        ->assertNotified('No Label to Cancel');
+
+    expect($package->fresh()->status)->toBe(PackageStatus::Shipped);
 })->after(fn () => app(CarrierRegistry::class)->reset());
 
 it('creates no package draft just for opening a shipment', function (): void {

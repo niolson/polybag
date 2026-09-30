@@ -2,6 +2,8 @@
 
 namespace App\Filament\Pages;
 
+use App\Enums\ScanCommand;
+use App\Services\Scanning\ScanCode;
 use Filament\Pages\Page;
 
 class PrintCommandBarcodes extends Page
@@ -21,12 +23,12 @@ class PrintCommandBarcodes extends Page
 
     public function mount(): void
     {
-        $this->commands = [
-            ['code' => '*1', 'label' => 'Ship Package', 'description' => 'Ship the current package (same as F12)'],
-            ['code' => '*2', 'label' => 'Reprint Last Label', 'description' => 'Reprint the last shipped label'],
-            ['code' => '*3', 'label' => 'Cancel Last Label', 'description' => 'Void/cancel the last shipped label'],
-            ['code' => '*4', 'label' => 'Zero Scale', 'description' => 'Re-zero the PS60 with its platform empty'],
-            ['code' => '*0', 'label' => 'Clear Shipment', 'description' => 'Clear current shipment and start fresh'],
-        ];
+        $this->commands = collect(ScanCommand::cases())
+            ->map(fn (ScanCommand $command): array => [
+                'code' => ScanCode::forCommand($command),
+                'label' => $command->getLabel(),
+                'description' => $command->getDescription(),
+            ])
+            ->all();
     }
 }

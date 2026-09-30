@@ -12,16 +12,23 @@ use App\DataTransferObjects\PackageDrafts\PackageDraftOptions;
 use App\DataTransferObjects\PackageDrafts\ReadyPackageDraft;
 use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PrintRequest;
+use App\Enums\PackageStatus;
 use App\Enums\Role;
+use App\Enums\ScanCodeType;
+use App\Enums\ScanCommand;
 use App\Enums\ShipmentStatus;
 use App\Exceptions\PackageDraftIncompleteException;
 use App\Exceptions\PackageDraftInvalidException;
 use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Concerns\PrintsLabels;
+use App\Filament\Resources\PackageResource;
 use App\Models\Package;
 use App\Models\Product;
 use App\Models\Shipment;
 use App\Services\CacheService;
+use App\Services\PackageLabels\SessionLastLabel;
+use App\Services\Scanning\ScanCode;
+use App\Services\Scanning\ShipmentReferenceResolver;
 use App\Services\SettingsService;
 use App\Services\ShipmentLocationGuard;
 use BackedEnum;
@@ -57,6 +64,16 @@ class Pack extends Page
     public ?Shipment $shipment = null;
 
     public ?string $clientName = null;
+
+    /**
+     * The Shipments a scan could mean, when it meant more than one: the packer
+     * chooses, since a shared order reference must never open one by guessing.
+     *
+     * @var list<array{id: int, code: string, reference: ?string, client: ?string, connection: ?string, recipient: string, place: string, status: ?string, statusColor: string|array<int|string, string>|null}>
+     */
+    public array $shipmentCandidates = [];
+
+    public string $candidateScan = '';
 
     public bool $multiClientEnabled = false;
 
@@ -421,7 +438,7 @@ class Pack extends Page
             return;
         }
 
-        Session::put('last_shipped_package_id', $package->id);
+        app(SessionLastLabel::class)->remember($package);
 
         if ($result->response->labelData) {
             $this->dispatchPrint(PrintRequest::fromShipResponse($result->response, $package));
@@ -486,15 +503,113 @@ class Pack extends Page
     }
 
     /**
-     * Navigate to a shipment by reference (called from JS when no shipment loaded).
+     * Open the Shipment an order reference names (called from JS when no
+     * shipment is loaded). Several matches are listed to choose from; a
+     * PolyBag code is resolved exactly instead.
      */
-    public function navigateToShipment(string $reference): void
+    public function navigateToShipment(string $scan): void
     {
-        $shipment = Shipment::where('shipment_reference', $reference)->first();
+        if (ScanCode::parse($scan) !== null) {
+            $this->openScanCode($scan);
 
-        if (! $shipment) {
-            $this->notifyError('Shipment Not Found', "No shipment found for reference '{$reference}'.");
+            return;
+        }
 
+        $this->shipmentCandidates = [];
+        $this->candidateScan = '';
+
+        $candidates = app(ShipmentReferenceResolver::class)->matching($scan);
+
+        if ($candidates->isEmpty()) {
+            $this->notifyError('Shipment Not Found', "No shipment has the order reference '{$scan}'.");
+
+            return;
+        }
+
+        if ($candidates->count() === 1) {
+            $this->redirect('/pack/'.$candidates->first()->id);
+
+            return;
+        }
+
+        $this->candidateScan = trim($scan);
+        $this->shipmentCandidates = $candidates
+            ->map(fn (Shipment $shipment): array => [
+                'id' => $shipment->id,
+                'code' => ScanCode::forShipment($shipment),
+                'reference' => $shipment->shipment_reference,
+                'client' => $shipment->client?->name,
+                'connection' => $shipment->dataSource?->name,
+                'recipient' => trim("{$shipment->first_name} {$shipment->last_name}"),
+                'place' => trim("{$shipment->city}, {$shipment->state_or_province}", ', '),
+                'status' => $shipment->status->getLabel(),
+                'statusColor' => $shipment->status->getColor(),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Open one of the Shipments the last scan could mean.
+     */
+    public function chooseShipment(int $shipmentId): void
+    {
+        if (! in_array($shipmentId, array_column($this->shipmentCandidates, 'id'), true)) {
+            return;
+        }
+
+        $this->redirect('/pack/'.$shipmentId);
+    }
+
+    /**
+     * Each command's barcode value, for the browser to run it on scan.
+     *
+     * @return array<string, string> Code => command name
+     */
+    public function scanCommandCodes(): array
+    {
+        return collect(ScanCommand::cases())
+            ->mapWithKeys(fn (ScanCommand $command): array => [ScanCode::forCommand($command) => $command->value])
+            ->all();
+    }
+
+    /**
+     * Act on a scanned PolyBag code other than a command the browser ran
+     * itself. The code names its record exactly; what happens depends on
+     * whether a Shipment is being packed (ADR-0007, decision 3).
+     */
+    public function openScanCode(string $scan): void
+    {
+        $code = ScanCode::parse($scan);
+        $type = $code?->type;
+
+        if ($code === null || $type === null) {
+            $this->notifyError('Unrecognised Code', "'".trim($scan)."' starts with this install's barcode prefix, but is not a code PolyBag knows.");
+
+            return;
+        }
+
+        match ($type) {
+            ScanCodeType::Shipment => $this->openScannedShipment(Shipment::find($code->id), $code->scan),
+            ScanCodeType::Package => $this->openScannedPackage(Package::find($code->id), $code->scan),
+            // The browser applies an active box while packing; one reaching here is not that.
+            ScanCodeType::BoxSize => $this->shipment === null
+                ? $this->notifyError('No Shipment Loaded', 'Scan a pack slip before scanning a box.')
+                : $this->notifyError('Box Size Not Available', "{$code->scan} is not an active box size."),
+            ScanCodeType::Command => $this->notifyError('Unknown Command', "'{$code->scan}' is not a command PolyBag knows. Reprint the command sheet if it is an old one."),
+            ScanCodeType::Action => $this->notifyError('Not Available', 'Custom scan actions are not available yet.'),
+        };
+    }
+
+    private function openScannedShipment(?Shipment $shipment, string $code): void
+    {
+        if ($shipment === null) {
+            $this->notifyError('Shipment Not Found', "No shipment has the code {$code}. It may have been deleted.");
+
+            return;
+        }
+
+        if ($this->refusesSwitchTo($shipment, "{$code} is shipment {$shipment->shipment_reference}")) {
             return;
         }
 
@@ -502,23 +617,72 @@ class Pack extends Page
     }
 
     /**
-     * Reprint the label for the last shipped package.
+     * A Package code opens that Package and no other. Scan & Pack resumes a
+     * Shipment's oldest draft, so it opens the scanned draft only when that is
+     * the one; anything else goes to the Package's own page (ADR-0007, decision 3).
      */
-    public function reprintLastLabel(): void
+    private function openScannedPackage(?Package $package, string $code): void
     {
-        $packageId = Session::get('last_shipped_package_id');
-
-        if (! $packageId) {
-            $this->notifyError('No Label to Reprint', 'No package has been shipped in this session.');
+        if ($package === null) {
+            $this->notifyError('Package Not Found', "No package has the code {$code}. It may have been deleted.");
 
             return;
         }
 
-        $package = Package::find($packageId);
+        $named = "{$code} is Package #{$package->id}, for shipment {$package->shipment?->shipment_reference}";
+        $resumedDraftId = $package->status === PackageStatus::Unshipped && $package->shipment
+            ? app(PackageDraftWorkflow::class)->resumeForShipment($package->shipment)?->packageDraftId
+            : null;
+        $isResumedDraft = $resumedDraftId === $package->id;
 
-        if (! $package) {
-            $this->notifyError('Label Not Available', 'The label for the last shipped package is not available.');
+        if ($this->shipment !== null) {
+            $isResumedDraft && $package->shipment_id === $this->shipment->id
+                ? $this->notifyInfo('Already Open', "{$named}, which is the one being packed.")
+                : $this->notifyWarning('Another Package', "{$named}. Clear this shipment first, then scan it again.");
 
+            return;
+        }
+
+        if ($isResumedDraft) {
+            $this->redirect('/pack/'.$package->shipment_id);
+
+            return;
+        }
+
+        if ($package->status === PackageStatus::Unshipped) {
+            $this->notifyWarning('Opened on Its Own Page', "Scan & Pack resumes Package #{$resumedDraftId} for this shipment, not #{$package->id}.");
+        }
+
+        $this->redirect(PackageResource::getUrl('view', ['record' => $package]));
+    }
+
+    /**
+     * While a Shipment is being packed, a scan naming another one does not
+     * switch to it: progress saves on a debounce, and must land first.
+     */
+    private function refusesSwitchTo(?Shipment $target, string $named): bool
+    {
+        if ($this->shipment === null) {
+            return false;
+        }
+
+        if ($target?->id === $this->shipment->id) {
+            $this->notifyInfo('Already Open', "{$named}, which is the one being packed.");
+        } else {
+            $this->notifyWarning('Another Shipment', "{$named}. Clear this one first, then scan it again.");
+        }
+
+        return true;
+    }
+
+    /**
+     * Reprint the label this session last bought.
+     */
+    public function reprintLastLabel(): void
+    {
+        $package = $this->lastLabelPackage('No Label to Reprint');
+
+        if ($package === null) {
             return;
         }
 
@@ -535,30 +699,37 @@ class Pack extends Page
     }
 
     /**
-     * Cancel/void the last shipped label.
+     * The Package of the label this session last bought, or null after telling
+     * the packer why there is none.
+     */
+    private function lastLabelPackage(string $title): ?Package
+    {
+        $package = app(SessionLastLabel::class)->package();
+
+        if (is_string($package)) {
+            $this->notifyError($title, $package);
+
+            return null;
+        }
+
+        return $package;
+    }
+
+    /**
+     * Void the label this session last bought, if this user bought it.
      */
     public function cancelLastLabel(): void
     {
-        $packageId = Session::get('last_shipped_package_id');
+        $package = $this->lastLabelPackage('No Label to Cancel');
 
-        if (! $packageId) {
-            $this->notifyError('No Label to Cancel', 'No package has been shipped in this session.');
-
-            return;
-        }
-
-        $package = Package::with('shipment')->find($packageId);
-
-        if (! $package) {
-            $this->notifyError('Package Not Found', 'The last shipped package could not be found.');
-
+        if ($package === null) {
             return;
         }
 
         $result = app(PackageLabelWorkflow::class)->voidOwnLabel($package, auth()->user());
 
         if ($result->success) {
-            Session::forget('last_shipped_package_id');
+            app(SessionLastLabel::class)->forget();
             $this->notifySuccess('Label Cancelled', $result->message);
 
             return;

@@ -883,30 +883,6 @@ parameters:
 			path: app/Filament/Resources/ProductResource/Pages/EditProduct.php
 
 		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$city\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Filament/Resources/ShipmentResource.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$first_name\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Filament/Resources/ShipmentResource.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$last_name\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Filament/Resources/ShipmentResource.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$state_or_province\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Filament/Resources/ShipmentResource.php
-
-		-
 			message: '#^Anonymous function never returns null so it can be removed from the return type\.$#'
 			identifier: return.unusedType
 			count: 1

@@ -18,6 +18,7 @@ use App\Filament\Resources\ShipmentResource;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\PackageLabel;
+use App\Services\PackageLabels\SessionLastLabel;
 use App\Services\SettingsService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
@@ -31,7 +32,6 @@ use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Illuminate\Contracts\View\View;
-use Illuminate\Support\Facades\Session;
 use LogicException;
 
 class ViewPackage extends ViewRecord
@@ -266,7 +266,7 @@ class ViewPackage extends ViewRecord
             return;
         }
 
-        Session::put('last_shipped_package_id', $package->id);
+        app(SessionLastLabel::class)->remember($package);
         $package->refresh();
 
         if ($result->response?->labelData) {
