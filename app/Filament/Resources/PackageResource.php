@@ -34,6 +34,7 @@ use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Table;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -64,6 +65,23 @@ class PackageResource extends Resource
     public static function getGloballySearchableAttributes(): array
     {
         return ['tracking_number'];
+    }
+
+    /**
+     * The PolyBag ID: every Package has one, drafts included, and it stays short
+     * in a page title where a tracking number would not.
+     */
+    public static function getRecordTitle(?Model $record): string|Htmlable|null
+    {
+        return $record ? "Package #{$record->getKey()}" : static::getModelLabel();
+    }
+
+    /**
+     * The tracking number that was searched for, as the result's title.
+     */
+    public static function getGlobalSearchResultTitle(Model $record): string|Htmlable
+    {
+        return $record->getAttribute('tracking_number') ?? static::getRecordTitle($record);
     }
 
     /**

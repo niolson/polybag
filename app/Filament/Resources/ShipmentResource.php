@@ -95,10 +95,20 @@ class ShipmentResource extends Resource
      */
     public static function getGlobalSearchResultDetails(Model $record): array
     {
-        return [
+        /** @var Shipment $record */
+        // Client, connection and status tell apart Shipments sharing an order reference.
+        return array_filter([
             'Name' => trim("{$record->first_name} {$record->last_name}"),
             'Location' => trim("{$record->city}, {$record->state_or_province}"),
-        ];
+            'Client' => $record->client?->name,
+            'Connection' => $record->dataSource?->name,
+            'Status' => $record->status->getLabel(),
+        ]);
+    }
+
+    public static function getGlobalSearchEloquentQuery(): Builder
+    {
+        return parent::getGlobalSearchEloquentQuery()->with(['client', 'dataSource']);
     }
 
     public static function form(Schema $form): Schema

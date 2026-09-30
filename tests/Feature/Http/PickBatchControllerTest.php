@@ -7,6 +7,7 @@ use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\User;
 use App\Services\PickBatchService;
+use Picqer\Barcode\BarcodeGeneratorSVG;
 
 beforeEach(function (): void {
     $this->user = User::factory()->manager()->create();
@@ -85,6 +86,25 @@ it('returns the pack slips view', function (): void {
     $response->assertOk()
         ->assertViewIs('pick-batches.pack-slips')
         ->assertViewHas('pivotRows');
+});
+
+it('encodes each pack slip barcode as the shipment\'s PolyBag code', function (): void {
+    config(['app.scan_code_prefix' => 'PB']);
+    $this->actingAs($this->user);
+
+    $shipment = Shipment::factory()->create([
+        'picking_status' => PickingStatus::Pending,
+        'shipment_reference' => '#1247',
+    ]);
+    $batch = app(PickBatchService::class)->createFromShipments(collect([$shipment]), $this->user);
+    $generator = new BarcodeGeneratorSVG;
+
+    $this->get(route('pick-batches.pack-slips', $batch))
+        ->assertOk()
+        ->assertSee($generator->getBarcode("PBS{$shipment->id}", BarcodeGeneratorSVG::TYPE_CODE_128, 2, 30), escape: false)
+        ->assertDontSee($generator->getBarcode('#1247', BarcodeGeneratorSVG::TYPE_CODE_128, 2, 30), escape: false)
+        ->assertSee('#1247')
+        ->assertSee("PBS{$shipment->id}");
 });
 
 it('shows tote codes on pack slips', function (): void {

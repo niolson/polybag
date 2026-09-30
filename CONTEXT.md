@@ -113,6 +113,13 @@ The 8.5x11 printer on the workstation for pack slips, customs forms and pick lis
 in the UI; the code name is not worth a churn commit.
 _Avoid_: Report printer (in anything a user reads)
 
+**PolyBag code**:
+A barcode PolyBag prints for scanning: the install's prefix (`SCAN_CODE_PREFIX`, default
+`PB`), a type token, then a body. `PBS216` is Shipment 216, `PBB17` is the warehouse's own
+Box Size 17, and `PBCSHIP` is the Ship command. It names its record exactly and is never looked up as anything else. Order
+references, SKUs, UPCs and tracking numbers are *external identifiers*. See ADR-0007.
+_Avoid_: Record code, Shipment ID (for the scanned form), order number
+
 ## Relationships
 
 - A **Shipment** can produce one or more **Packages**.

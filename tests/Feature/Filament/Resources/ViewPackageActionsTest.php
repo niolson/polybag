@@ -17,6 +17,7 @@ use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\User;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Actions\Testing\TestAction;
 use Livewire\Livewire;
 
@@ -94,7 +95,7 @@ it('offers a manager Pack, the Ship page and the unattended purchase for a ready
         ->assertActionHasUrl('ship', '/ship/'.$package->id);
 })->with([Role::Manager, Role::Admin]);
 
-it('orders a ready draft\'s actions Pack, Ship, Buy and print label, Edit', function (): void {
+it('orders a ready draft\'s actions Pack, Ship, Buy and print label, then Edit in the menu', function (): void {
     $this->actingAs(User::factory()->create(['role' => Role::Admin]));
     $package = viewPackageReadyDraft();
 
@@ -102,6 +103,7 @@ it('orders a ready draft\'s actions Pack, Ship, Buy and print label, Edit', func
     expect($page)->toBeInstanceOf(ViewPackage::class);
 
     $visible = collect($page instanceof ViewPackage ? $page->getCachedHeaderActions() : [])
+        ->flatMap(fn (Action|ActionGroup $action): array => $action instanceof ActionGroup ? $action->getFlatActions() : [$action])
         ->filter(fn (Action $action): bool => $action->isVisible())
         ->map(fn (Action $action): string => $action->getName())
         ->values()

@@ -23,6 +23,7 @@ use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Services\AddressValidationService;
+use App\Services\PackageLabels\SessionLastLabel;
 use App\Services\PackagingService;
 use App\Services\PostageSources\OfferStore;
 use App\Services\SettingsService;
@@ -290,7 +291,7 @@ class ManualShip extends Page implements HasForms
             return;
         }
 
-        Session::put('last_shipped_package_id', $package->id);
+        app(SessionLastLabel::class)->remember($package);
 
         if ($result->response->labelData) {
             $this->dispatchPrint(PrintRequest::fromShipResponse($result->response, $package));
@@ -400,18 +401,10 @@ class ManualShip extends Page implements HasForms
 
     public function reprintLastLabel(): void
     {
-        $packageId = Session::get('last_shipped_package_id');
+        $package = app(SessionLastLabel::class)->package();
 
-        if (! $packageId) {
-            $this->notifyError('No Label to Reprint', 'No package has been shipped in this session.');
-
-            return;
-        }
-
-        $package = Package::find($packageId);
-
-        if (! $package) {
-            $this->notifyError('Label Not Available', 'The label for the last shipped package is not available.');
+        if (is_string($package)) {
+            $this->notifyError('No Label to Reprint', $package);
 
             return;
         }

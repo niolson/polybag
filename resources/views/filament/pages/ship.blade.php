@@ -25,8 +25,9 @@
                         const trimmed = this._scanBuffer.trim();
                         this._scanBuffer = '';
                         clearTimeout(this._scanTimeout);
-                        if (trimmed.startsWith('*')) {
-                            this.executeCommand(trimmed.substring(1));
+                        // The one command sheet barcode that applies here (ADR-0007).
+                        if (trimmed.toUpperCase() === @js(\App\Services\Scanning\ScanCode::forCommand(\App\Enums\ScanCommand::Ship))) {
+                            $wire.ship();
                         }
                         return;
                     }
@@ -35,12 +36,6 @@
                         this._scanBuffer += e.key;
                         clearTimeout(this._scanTimeout);
                         this._scanTimeout = setTimeout(() => { this._scanBuffer = ''; }, 1000);
-                    }
-                },
-
-                executeCommand(code) {
-                    if (code.toUpperCase() === '1') {
-                        $wire.ship();
                     }
                 },
             }"
