@@ -12,6 +12,8 @@ use App\Enums\PackageStatus;
 use App\Enums\PostageSourceKind;
 use App\Enums\ShippingRuleSource;
 use App\Enums\UnlistedServices;
+use App\Http\Integrations\Ups\Requests\CreateShipment as UpsCreateShipment;
+use App\Http\Integrations\Ups\Requests\Rate as UpsRate;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
@@ -24,6 +26,8 @@ use App\Models\ShippingMethodPostageSource;
 use App\Models\ShippingRule;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
+use Saloon\Http\Faking\MockResponse;
+use Saloon\Laravel\Facades\Saloon;
 
 /*
 |--------------------------------------------------------------------------
@@ -131,14 +135,13 @@ function sourceRuleAmazonRate(CarrierService $service, float $price): RateRespon
  *
  * @param  array<int, RateResponse>  $rates
  */
-function sourceRuleAdapter(array $rates, ?RateResponse $preSelected = null): void
+function sourceRuleAdapter(array $rates): void
 {
     $adapter = Mockery::mock(DirectCarrierAdapter::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('isConfigured')->andReturnTrue();
     $adapter->shouldReceive('prepareRateRequest')->andReturnNull();
     $adapter->shouldReceive('getRates')->andReturn(collect($rates));
-    $adapter->shouldReceive('resolvePreSelectedRate')->andReturn($preSelected);
     $adapter->shouldReceive('createShipment')->andReturnUsing(fn (ShipRequest $request): ShipResponse => ShipResponse::success(
         trackingNumber: 'RULE123',
         cost: $request->selectedRate->price,
@@ -157,14 +160,13 @@ function autoShipUnderRule(Package $package): Package
         new PackageAutoShippingRequest(userId: auth()->id(), cleanupOnFailure: false),
     );
 
-    expect($result->success)->toBeTrue();
+    expect($result->success)->toBeTrue("{$result->title}: {$result->message}");
 
     return $package->fresh();
 }
 
 it('highlights and buys the direct rate for Direct, a service, though Amazon\'s is cheaper', function (): void {
-    $direct = sourceRuleDirectRate($this->ground, 9.00);
-    sourceRuleAdapter([sourceRuleAmazonRate($this->ground, 4.00), $direct], preSelected: $direct);
+    sourceRuleAdapter([sourceRuleAmazonRate($this->ground, 4.00), sourceRuleDirectRate($this->ground, 9.00)]);
 
     ShippingRule::factory()->source(ShippingRuleSource::Direct)->create([
         'shipping_method_id' => $this->method->id,
@@ -210,8 +212,7 @@ it('falls through to rate shopping when no source quotes an Any priced source se
 
 it('rate shops when a Use rule names a service the method does not list', function (): void {
     $unlisted = CarrierService::factory()->create(['carrier_id' => $this->ground->carrier_id, 'service_code' => 'OVERNIGHT']);
-    // Only the rule's pre-selection would hand back the unlisted service.
-    sourceRuleAdapter([sourceRuleDirectRate($this->ground, 6.00)], preSelected: sourceRuleDirectRate($unlisted, 2.00));
+    sourceRuleAdapter([sourceRuleDirectRate($this->ground, 6.00), sourceRuleDirectRate($unlisted, 2.00)]);
 
     ShippingRule::factory()->create(['carrier_service_id' => $unlisted->id]);
 
@@ -264,4 +265,100 @@ it('removes every Amazon offer a carrier carries, mapped or not, even under any 
 
     expect(collect($options->rateOptions)->pluck('serviceCode')->all())->toBe(['GROUND'])
         ->and(autoShipUnderRule($this->package)->cost)->toEqual(9.00);
+});
+
+// --- project-review/17 and 18 ------------------------------------------------
+
+it('does not buy a pre-selected direct rate an earlier Exclude rule removes', function (): void {
+    sourceRuleAdapter([sourceRuleDirectRate($this->ground, 9.00), sourceRuleDirectRate($this->express, 12.00)]);
+
+    ShippingRule::factory()->excludeService()->create([
+        'shipping_method_id' => $this->method->id,
+        'carrier_service_id' => $this->ground->id,
+        'priority' => 0,
+    ]);
+    ShippingRule::factory()->source(ShippingRuleSource::Direct)->create([
+        'shipping_method_id' => $this->method->id,
+        'carrier_service_id' => $this->ground->id,
+        'priority' => 10,
+    ]);
+
+    $options = app(PackageShippingWorkflow::class)->prepareRates($this->package);
+    expect(collect($options->rateOptions)->pluck('serviceCode')->all())->not->toContain('GROUND');
+
+    $shipped = autoShipUnderRule($this->package);
+
+    expect($shipped->service)->not->toBe('Ground')
+        ->and($shipped->cost)->toEqual(12.00);
+});
+
+it('buys a UPS/FedEx-style pre-selected direct rate for a shipment with a due-by date', function (): void {
+    $this->package->shipment->update(['deliver_by' => now()->addDays(5)]);
+    $quoted = new RateResponse(
+        carrier: 'MockCarrier', serviceCode: 'GROUND', serviceName: 'Ground', price: 9.00,
+        deliveryDate: now()->addDays(2)->toDateString(),
+        carrierServiceId: $this->ground->id, carrierId: $this->ground->carrier_id,
+    );
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('isConfigured')->andReturnTrue();
+    $adapter->shouldReceive('prepareRateRequest')->andReturnNull();
+    $adapter->shouldReceive('getRates')->andReturn(collect([$quoted]));
+    $adapter->shouldReceive('createShipment')->andReturn(ShipResponse::success(
+        trackingNumber: 'RULE123', cost: 9.00, carrier: 'MockCarrier', service: 'Ground', labelData: base64_encode('label'),
+    ));
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    ShippingRule::factory()->source(ShippingRuleSource::Direct)->create([
+        'shipping_method_id' => $this->method->id,
+        'carrier_service_id' => $this->ground->id,
+    ]);
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $this->package,
+        new PackageAutoShippingRequest(userId: auth()->id(), cleanupOnFailure: false),
+    );
+
+    expect($result->success)->toBeTrue("{$result->title}: {$result->message}");
+});
+
+it('buys a Direct UPS Use rule\'s service through the real UpsAdapter when the shipment has a due-by date', function (): void {
+    $ups = Carrier::factory()->ups()->create(['active' => true]);
+    $upsGround = CarrierService::factory()->upsGround()->for($ups)->create(['active' => true]);
+    createUpsAccount();
+
+    $method = ShippingMethod::factory()->create();
+    $method->carrierServices()->attach($upsGround->id);
+    $package = sourceRulePackage($method);
+    $package->shipment->update(['deliver_by' => now()->addDays(5)]);
+
+    ShippingRule::factory()->source(ShippingRuleSource::Direct)->create([
+        'shipping_method_id' => $method->id,
+        'carrier_service_id' => $upsGround->id,
+    ]);
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        UpsRate::class => MockResponse::make(['RateResponse' => ['RatedShipment' => [[
+            'Service' => ['Code' => '03'],
+            'TotalCharges' => ['MonetaryValue' => '11.00'],
+            'TimeInTransit' => ['ServiceSummary' => ['EstimatedArrival' => [
+                'BusinessDaysInTransit' => '2',
+                'Arrival' => ['Date' => now()->addDays(2)->format('Ymd')],
+            ]]],
+        ]]]]),
+        UpsCreateShipment::class => MockResponse::make(['ShipmentResponse' => ['ShipmentResults' => [
+            'ShipmentIdentificationNumber' => '1Z9999999999999999',
+            'ShipmentCharges' => ['TotalCharges' => ['MonetaryValue' => '11.00']],
+            'PackageResults' => [
+                'TrackingNumber' => '1Z9999999999999999',
+                'ShippingLabel' => ['GraphicImage' => 'R0lGODlhAQABAAAAACw='],
+            ],
+        ]]]),
+    ]);
+
+    $shipped = autoShipUnderRule($package);
+
+    expect($shipped->tracking_number)->toBe('1Z9999999999999999')
+        ->and($shipped->cost)->toEqual(11.00);
 });

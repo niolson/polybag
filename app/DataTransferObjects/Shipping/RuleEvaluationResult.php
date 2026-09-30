@@ -2,34 +2,24 @@
 
 namespace App\DataTransferObjects\Shipping;
 
-use App\Enums\PostageSourceKind;
-
 readonly class RuleEvaluationResult
 {
     /**
-     * A rule may pre-select one thing at most: a direct rate for one service,
-     * a blind purchase, or a scope of quoted rates to choose among. The last
-     * names no rate — its rates are selected among after quoting.
+     * A rule may pre-select one thing at most: a blind purchase, or a scope
+     * of quoted rates to choose among. A scope names no rate — its rates are
+     * selected among after quoting, a direct service's included
+     * (`project-review/18`).
      *
-     * @param  RateResponse|null  $preSelectedRate  A direct service, resolved by its carrier's adapter without rate shopping
      * @param  list<RuleExclusion>  $exclusions
      */
     public function __construct(
-        public ?RateResponse $preSelectedRate = null,
         public ?string $preSelectedBlindPurchaseId = null,
         public ?RuleRateScope $preSelectedScope = null,
         public array $exclusions = [],
     ) {
-        $preSelections = array_filter([$preSelectedRate, $preSelectedBlindPurchaseId, $preSelectedScope], fn (mixed $value): bool => $value !== null);
-
-        if (count($preSelections) > 1) {
-            throw new \InvalidArgumentException('A shipping rule may pre-select one rate, blind purchase or scope, never more than one.');
+        if ($preSelectedBlindPurchaseId !== null && $preSelectedScope !== null) {
+            throw new \InvalidArgumentException('A shipping rule may pre-select one blind purchase or scope, never both.');
         }
-    }
-
-    public function hasPreSelectedRate(): bool
-    {
-        return $this->preSelectedRate !== null;
     }
 
     public function hasPreSelectedBlindPurchase(): bool
@@ -76,18 +66,12 @@ readonly class RuleEvaluationResult
     }
 
     /**
-     * Whether this quoted rate is what the rule chose: the pre-selected
-     * direct service from a carrier account, never the same service resold
-     * through a channel, or a rate within the pre-selected scope.
+     * Whether this quoted rate is what the rule chose: a rate within the
+     * pre-selected scope. A *Direct* rule's scope takes the service from a
+     * carrier account, never the same service resold through a channel.
      */
     public function isPreSelected(RateResponse $rate): bool
     {
-        if ($this->preSelectedRate !== null) {
-            return $rate->sourceKind() === PostageSourceKind::Direct
-                && $rate->carrierServiceId !== null
-                && $rate->carrierServiceId === $this->preSelectedRate->carrierServiceId;
-        }
-
         return $this->preSelectedScope?->matches($rate) ?? false;
     }
 }

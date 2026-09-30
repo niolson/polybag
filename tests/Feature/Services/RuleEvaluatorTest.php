@@ -27,12 +27,12 @@ it('returns empty result when no rules exist', function (): void {
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeFalse()
+    expect($result->hasPreSelectedScope())->toBeFalse()
         ->and($result->shouldFilterRates())->toBeFalse()
         ->and($result->exclusions)->toBe([]);
 });
 
-it('returns pre-selected rate for UseService rule', function (): void {
+it('scopes a UseService rule to the quoted direct rates of its service', function (): void {
     $carrier = Carrier::factory()->create(['name' => 'USPS']);
     $service = CarrierService::factory()->uspsPriority()->create(['carrier_id' => $carrier->id]);
     $method = ShippingMethod::factory()->create();
@@ -47,10 +47,12 @@ it('returns pre-selected rate for UseService rule', function (): void {
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue()
-        ->and($result->preSelectedRate->carrier)->toBe('USPS')
-        ->and($result->preSelectedRate->serviceCode)->toBe('PRIORITY_MAIL')
-        ->and($result->preSelectedRate->price)->toBe(0.0);
+    // A scope, never a rate built before quoting: the rule's choice is judged
+    // on a real price and delivery date (`project-review/18`).
+    expect($result->hasPreSelectedScope())->toBeTrue()
+        ->and($result->preSelectedScope->kinds)->toBe([PostageSourceKind::Direct])
+        ->and($result->preSelectedScope->carrierServiceId)->toBe($service->id)
+        ->and($result->preSelectedScope->strict)->toBeFalse();
 });
 
 it('scopes a Direct rule naming a service sold on a connection to its quoted direct rates', function (): void {
@@ -68,8 +70,7 @@ it('scopes a Direct rule naming a service sold on a connection to its quoted dir
     $result = app(RuleEvaluator::class)->evaluate($shipment);
     $direct = new RateResponse(carrier: Carrier::AMAZON_SHIPPING, serviceCode: 'std-us-swa-mfn', serviceName: 'Amazon Shipping Ground', price: 7.9, carrierServiceId: $service->id);
 
-    expect($result->hasPreSelectedRate())->toBeFalse()
-        ->and($result->hasPreSelectedScope())->toBeTrue()
+    expect($result->hasPreSelectedScope())->toBeTrue()
         ->and($result->preSelectedScope->kinds)->toBe([PostageSourceKind::Direct])
         ->and($result->preSelectedScope->carrierServiceId)->toBe($service->id)
         ->and($result->preSelectedScope->strict)->toBeFalse()
@@ -89,7 +90,7 @@ it('returns excluded service codes for ExcludeService rule', function (): void {
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeFalse()
+    expect($result->hasPreSelectedScope())->toBeFalse()
         ->and($result->shouldFilterRates())->toBeTrue()
         ->and($result->excludes(ruleDirectRate($service)))->toBeTrue();
 });
@@ -117,7 +118,7 @@ it('evaluates rules in priority order', function (): void {
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     // First UseService match wins
-    expect($result->preSelectedRate->serviceCode)->toBe('03');
+    expect($result->preSelectedScope->carrierServiceId)->toBe($groundService->id);
 });
 
 it('skips disabled rules', function (): void {
@@ -132,7 +133,7 @@ it('skips disabled rules', function (): void {
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeFalse();
+    expect($result->hasPreSelectedScope())->toBeFalse();
 });
 
 it('scopes rules to specific shipping method', function (): void {
@@ -151,7 +152,7 @@ it('scopes rules to specific shipping method', function (): void {
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeFalse();
+    expect($result->hasPreSelectedScope())->toBeFalse();
 });
 
 it('matches global rules with null shipping_method_id', function (): void {
@@ -167,8 +168,8 @@ it('matches global rules with null shipping_method_id', function (): void {
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue()
-        ->and($result->preSelectedRate->serviceCode)->toBe('PRIORITY_MAIL');
+    expect($result->hasPreSelectedScope())->toBeTrue()
+        ->and($result->preSelectedScope->carrierServiceId)->toBe($service->id);
 });
 
 it('collects exclude codes before UseService stops evaluation', function (): void {
@@ -192,7 +193,7 @@ it('collects exclude codes before UseService stops evaluation', function (): voi
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue()
+    expect($result->hasPreSelectedScope())->toBeTrue()
         ->and($result->excludes(ruleDirectRate($excludeService)))->toBeTrue()
         ->and($result->excludes(ruleDirectRate($useService)))->toBeFalse();
 });
@@ -215,7 +216,7 @@ it('matches rule with weight condition when package weight satisfies operator', 
 
     $result = app(RuleEvaluator::class)->evaluate($shipment, $package);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('skips rule with weight condition when weight does not match', function (): void {
@@ -234,7 +235,7 @@ it('skips rule with weight condition when weight does not match', function (): v
 
     $result = app(RuleEvaluator::class)->evaluate($shipment, $package);
 
-    expect($result->hasPreSelectedRate())->toBeFalse();
+    expect($result->hasPreSelectedScope())->toBeFalse();
 });
 
 it('matches weight between condition', function (): void {
@@ -253,7 +254,7 @@ it('matches weight between condition', function (): void {
 
     $result = app(RuleEvaluator::class)->evaluate($shipment, $package);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('matches destination_zone condition for continental US', function (): void {
@@ -274,7 +275,7 @@ it('matches destination_zone condition for continental US', function (): void {
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('skips destination_zone condition for non-continental shipment when rule requires continental', function (): void {
@@ -295,7 +296,7 @@ it('skips destination_zone condition for non-continental shipment when rule requ
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeFalse();
+    expect($result->hasPreSelectedScope())->toBeFalse();
 });
 
 it('matches destination_zone condition for non-continental US (AK)', function (): void {
@@ -316,7 +317,7 @@ it('matches destination_zone condition for non-continental US (AK)', function ()
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('matches destination_zone condition for international', function (): void {
@@ -334,7 +335,7 @@ it('matches destination_zone condition for international', function (): void {
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('matches destination_state in condition', function (): void {
@@ -355,7 +356,7 @@ it('matches destination_state in condition', function (): void {
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('skips destination_state not_in condition when state is excluded', function (): void {
@@ -376,7 +377,7 @@ it('skips destination_state not_in condition when state is excluded', function (
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeFalse();
+    expect($result->hasPreSelectedScope())->toBeFalse();
 });
 
 it('matches order_value condition', function (): void {
@@ -394,7 +395,7 @@ it('matches order_value condition', function (): void {
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('matches item_count condition', function (): void {
@@ -417,7 +418,7 @@ it('matches item_count condition', function (): void {
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
     // 3 items x 2 qty = 6, >= 5
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('matches channel condition', function (): void {
@@ -436,7 +437,7 @@ it('matches channel condition', function (): void {
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('skips channel is_not condition when channel matches', function (): void {
@@ -455,7 +456,7 @@ it('skips channel is_not condition when channel matches', function (): void {
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeFalse();
+    expect($result->hasPreSelectedScope())->toBeFalse();
 });
 
 it('matches residential condition', function (): void {
@@ -473,7 +474,7 @@ it('matches residential condition', function (): void {
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('uses the conservative residential fallback when classification is unknown', function (): void {
@@ -494,7 +495,7 @@ it('uses the conservative residential fallback when classification is unknown', 
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('skips residential condition when shipment is commercial', function (): void {
@@ -512,7 +513,7 @@ it('skips residential condition when shipment is commercial', function (): void 
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeFalse();
+    expect($result->hasPreSelectedScope())->toBeFalse();
 });
 
 it('requires all conditions to match (AND logic)', function (): void {
@@ -537,7 +538,7 @@ it('requires all conditions to match (AND logic)', function (): void {
 
     $result = app(RuleEvaluator::class)->evaluate($shipment, $package);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('skips rule when one of multiple conditions fails', function (): void {
@@ -562,7 +563,7 @@ it('skips rule when one of multiple conditions fails', function (): void {
 
     $result = app(RuleEvaluator::class)->evaluate($shipment, $package);
 
-    expect($result->hasPreSelectedRate())->toBeFalse();
+    expect($result->hasPreSelectedScope())->toBeFalse();
 });
 
 it('matches rule with null conditions (backward compatible)', function (): void {
@@ -578,7 +579,7 @@ it('matches rule with null conditions (backward compatible)', function (): void 
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('matches rule with empty conditions array (backward compatible)', function (): void {
@@ -594,7 +595,7 @@ it('matches rule with empty conditions array (backward compatible)', function ()
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('uses calculated weight from items when no package provided', function (): void {
@@ -620,7 +621,7 @@ it('uses calculated weight from items when no package provided', function (): vo
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('uses validated address fields when available for destination conditions', function (): void {
@@ -642,7 +643,7 @@ it('uses validated address fields when available for destination conditions', fu
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('passes unknown condition types (forward compatibility)', function (): void {
@@ -660,7 +661,7 @@ it('passes unknown condition types (forward compatibility)', function (): void {
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('does not apply a client-specific rule to a shipment belonging to a different client', function (): void {
@@ -680,7 +681,7 @@ it('does not apply a client-specific rule to a shipment belonging to a different
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeFalse();
+    expect($result->hasPreSelectedScope())->toBeFalse();
 });
 
 it('applies a global rule (null client_id) to shipments from any client', function (): void {
@@ -698,7 +699,7 @@ it('applies a global rule (null client_id) to shipments from any client', functi
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('applies a client-specific rule only to shipments for that client', function (): void {
@@ -716,7 +717,7 @@ it('applies a client-specific rule only to shipments for that client', function 
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue();
+    expect($result->hasPreSelectedScope())->toBeTrue();
 });
 
 it('matches an Amazon program condition only on an order enrolled in that program', function (string $program, ?array $metadata, bool $matches): void {
@@ -734,7 +735,7 @@ it('matches an Amazon program condition only on an order enrolled in that progra
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBe($matches);
+    expect($result->hasPreSelectedScope())->toBe($matches);
 })->with([
     'prime rule, prime order' => ['prime', ['amazon_order_id' => '111', 'amazon_programs' => ['PRIME']], true],
     'prime rule, premium order' => ['prime', ['amazon_order_id' => '111', 'amazon_programs' => ['PREMIUM']], false],
@@ -869,8 +870,8 @@ it('pre-selects the direct rate for Direct, UPS Ground, never Amazon\'s', functi
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeTrue()
-        ->and($result->preSelectedRate->carrierServiceId)->toBe($ground->id)
+    expect($result->hasPreSelectedScope())->toBeTrue()
+        ->and($result->preSelectedScope->carrierServiceId)->toBe($ground->id)
         ->and($result->isPreSelected(ruleDirectRate($ground)))->toBeTrue()
         ->and($result->isPreSelected(ruleAmazonOffer($ground)))->toBeFalse();
 });
@@ -985,8 +986,7 @@ it('skips a Use rule naming a source the method does not allow', function (Shipp
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeFalse()
-        ->and($result->hasPreSelectedScope())->toBeFalse()
+    expect($result->hasPreSelectedScope())->toBeFalse()
         ->and($result->hasPreSelectedBlindPurchase())->toBeFalse();
 })->with([
     'Amazon, any' => [ShippingRuleSource::Amazon, true],
@@ -1006,7 +1006,7 @@ it('skips a global Use rule naming a service the shipment\'s method does not lis
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->preSelectedRate->carrierServiceId)->toBe($ground->id);
+    expect($result->preSelectedScope->carrierServiceId)->toBe($ground->id);
 });
 
 it('picks nothing for a shipment with no method, and keeps its exclusions', function (): void {
@@ -1021,7 +1021,7 @@ it('picks nothing for a shipment with no method, and keeps its exclusions', func
 
     $result = app(RuleEvaluator::class)->evaluate($shipment);
 
-    expect($result->hasPreSelectedRate())->toBeFalse()
+    expect($result->hasPreSelectedScope())->toBeFalse()
         ->and($result->hasPreSelectedBlindPurchase())->toBeFalse()
         ->and($result->excludes(ruleDirectRate($excluded)))->toBeTrue();
 });
@@ -1035,7 +1035,7 @@ it('never lets a direct Use rule reach a service a method only asks Amazon for',
         'carrier_service_id' => ruleUpsGround()->id,
     ]);
 
-    expect(app(RuleEvaluator::class)->evaluate($shipment)->hasPreSelectedRate())->toBeFalse();
+    expect(app(RuleEvaluator::class)->evaluate($shipment)->hasPreSelectedScope())->toBeFalse();
 });
 
 it('excludes a service from every source for Exclude, any source', function (): void {

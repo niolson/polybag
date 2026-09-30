@@ -1,7 +1,8 @@
 <?php
 
-use App\Contracts\CarrierAdapterInterface;
+use App\Contracts\DirectCarrierAdapter;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
+use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
@@ -21,6 +22,7 @@ use App\Models\ShippingOffer;
 use App\Models\ShippingRule;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
+use Mockery\MockInterface;
 use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
 
@@ -77,6 +79,23 @@ function createBatchContext(): array
     return compact('user', 'batch', 'item', 'package', 'shipment');
 }
 
+/**
+ * A direct adapter quoting the batch context's service, the rate its *Use*
+ * rule selects among (`project-review/18`).
+ */
+function batchQuotingAdapter(): MockInterface
+{
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('isConfigured')->andReturnTrue();
+    $adapter->shouldReceive('prepareRateRequest')->andReturnNull();
+    $adapter->shouldReceive('getRates')->andReturn(collect([
+        new RateResponse('MockCarrier', 'TEST', 'Test Service', 7.50, carrierServiceId: CarrierService::where('service_code', 'TEST')->value('id')),
+    ]));
+
+    return $adapter;
+}
+
 it('updates batch item on successful label generation', function (): void {
     $ctx = createBatchContext();
 
@@ -88,9 +107,7 @@ it('updates batch item on successful label generation', function (): void {
         labelData: base64_encode('fake-label'),
     );
 
-    $mockAdapter = Mockery::mock(CarrierAdapterInterface::class);
-    $mockAdapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
-    $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
+    $mockAdapter = batchQuotingAdapter();
     $mockAdapter->shouldReceive('createShipment')->once()->andReturn($mockResponse);
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $mockAdapter);
 
@@ -114,9 +131,7 @@ it('updates batch item on successful label generation', function (): void {
 it('handles label generation failure', function (): void {
     $ctx = createBatchContext();
 
-    $mockAdapter = Mockery::mock(CarrierAdapterInterface::class);
-    $mockAdapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
-    $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
+    $mockAdapter = batchQuotingAdapter();
     $mockAdapter->shouldReceive('createShipment')->once()->andReturn(
         ShipResponse::failure('Address validation failed')
     );
@@ -143,9 +158,7 @@ it('keeps the package and its unresolved offer when the purchase goes unanswered
     // the shipment was eligible for the next batch, which bought again.
     $ctx = createBatchContext();
 
-    $mockAdapter = Mockery::mock(CarrierAdapterInterface::class);
-    $mockAdapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
-    $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
+    $mockAdapter = batchQuotingAdapter();
     $mockAdapter->shouldReceive('createShipment')->once()
         ->andThrow(new RequestTimeOutException(Mockery::mock(Response::class), 'timed out'));
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $mockAdapter);
@@ -166,9 +179,7 @@ it('keeps the package and its unresolved offer when the carrier accepted but its
     // and is paid for, so the batch must not clean the package up either.
     $ctx = createBatchContext();
 
-    $mockAdapter = Mockery::mock(CarrierAdapterInterface::class);
-    $mockAdapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
-    $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
+    $mockAdapter = batchQuotingAdapter();
     $mockAdapter->shouldReceive('createShipment')->once()
         ->andThrow(new UnreadablePurchaseResponseException('MockCarrier', 'response missing label data'));
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $mockAdapter);
@@ -186,9 +197,7 @@ it('keeps the package and its unresolved offer when the carrier accepted but its
 it('handles exceptions during label generation', function (): void {
     $ctx = createBatchContext();
 
-    $mockAdapter = Mockery::mock(CarrierAdapterInterface::class);
-    $mockAdapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
-    $mockAdapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn ($rate) => $rate);
+    $mockAdapter = batchQuotingAdapter();
     $mockAdapter->shouldReceive('createShipment')->once()->andThrow(new RuntimeException('Carrier API timeout'));
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $mockAdapter);
 

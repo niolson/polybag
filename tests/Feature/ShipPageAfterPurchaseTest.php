@@ -43,7 +43,6 @@ function registerCountingUspsAdapter(int &$purchases): void
         new RateResponse('USPS', 'USPS_GROUND_ADVANTAGE', 'Ground Advantage', 8.50),
         new RateResponse('USPS', 'PRIORITY_MAIL', 'Priority Mail', 12.10),
     ]));
-    $adapter->shouldReceive('resolvePreSelectedRate')->andReturnUsing(fn (RateResponse $rate): RateResponse => $rate);
     $adapter->shouldReceive('createShipment')->andReturnUsing(function () use (&$purchases): ShipResponse {
         $purchases++;
 

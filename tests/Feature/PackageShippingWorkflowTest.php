@@ -21,6 +21,8 @@ use App\Enums\ShippingRuleAction;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\NoActiveCarrierServicesException;
 use App\Exceptions\PackageDraftIncompleteException;
+use App\Http\Integrations\Ups\Requests\CreateShipment as UpsCreateShipment;
+use App\Http\Integrations\Ups\Requests\Rate as UpsRate;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
@@ -41,9 +43,12 @@ use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Mockery\MockInterface;
 use Saloon\Exceptions\Request\RequestException;
 use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
+use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\Response;
+use Saloon\Laravel\Facades\Saloon;
 
 beforeEach(function (): void {
     app(CarrierRegistry::class)->reset();
@@ -95,6 +100,19 @@ function createWorkflowPackage(): Package
     ]);
 
     return $package;
+}
+
+/**
+ * Make a mocked direct adapter quote the workflow package's Ground service,
+ * the rate its *Use* rule selects among (`project-review/18`).
+ */
+function quotingWorkflowGround(MockInterface $adapter, float $price = 7.25): void
+{
+    $adapter->shouldReceive('isConfigured')->andReturnTrue();
+    $adapter->shouldReceive('prepareRateRequest')->andReturnNull();
+    $adapter->shouldReceive('getRates')->andReturn(collect([
+        new RateResponse('MockCarrier', 'GROUND', 'Ground', $price, '3 days', carrierServiceId: CarrierService::where('service_code', 'GROUND')->value('id')),
+    ]));
 }
 
 it('prepares sorted rate options for a package', function (): void {
@@ -558,13 +576,13 @@ it('reports a generic error when shipping raises an unexpected exception', funct
         ->and($result->message)->toBe('An unexpected error occurred. Please try again.');
 });
 
-it('auto ships through a rule preselected rate', function (): void {
+it('auto ships through a rule selected rate', function (): void {
     $this->actingAs($user = User::factory()->create());
     $package = createWorkflowPackage();
 
-    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
-    $adapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn (RateResponse $rate): RateResponse => $rate);
+    quotingWorkflowGround($adapter);
     $adapter->shouldReceive('createShipment')->once()->andReturn(
         ShipResponse::success(
             trackingNumber: 'AUTO123',
@@ -582,8 +600,8 @@ it('auto ships through a rule preselected rate', function (): void {
         new PackageAutoShippingRequest(userId: $user->id, cleanupOnFailure: false),
     );
 
-    // A rule's pre-selected rate never rate-shopped, so the workflow issues
-    // its offer: the recovery record every purchase needs.
+    // The rule selects among quoted rates, so what it buys carries the offer
+    // its quote issued: the recovery record every purchase needs.
     $offer = ShippingOffer::sole();
 
     expect($result->success)->toBeTrue()
@@ -596,9 +614,10 @@ it('auto ships through a rule preselected rate', function (): void {
 });
 
 it('records the account a rule-selected purchase will be bought on', function (): void {
-    // A rule names a service, not an account, so its rate carries none. The
-    // offer records the one the adapter will buy on, so the account check at
-    // purchase runs and recovery asks the account the label was bought on.
+    // A rule names a service, not an account. The offer records the account
+    // the rate was quoted on, so the account check at purchase runs and
+    // recovery asks the account the label was bought on. The real adapter,
+    // so the account is the one UPS quoting resolves, not a mock's.
     $this->actingAs($user = User::factory()->create());
     $package = createWorkflowPackage();
     $account = createUpsAccount();
@@ -608,34 +627,44 @@ it('records the account a rule-selected purchase will be bought on', function ()
         'service_code' => '03',
         'active' => true,
     ]);
+    $package->shipment->shippingMethod->carrierServices()->detach();
     $package->shipment->shippingMethod->carrierServices()->attach($upsGround->id);
     ShippingRule::query()->update(['carrier_service_id' => $upsGround->id]);
 
-    $adapter = Mockery::mock(CarrierAdapterInterface::class);
-    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
-    $adapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn (RateResponse $rate): RateResponse => $rate);
-    $adapter->shouldReceive('createShipment')->once()->andReturn(
-        ShipResponse::success(trackingNumber: 'AUTO456', cost: 7.25, carrier: 'UPS', service: 'UPS Ground', labelData: base64_encode('label'), carrierAccountId: $account->id)
-    );
-
-    app(CarrierRegistry::class)->registerInstance('UPS', $adapter);
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        UpsRate::class => MockResponse::make(['RateResponse' => ['RatedShipment' => [[
+            'Service' => ['Code' => '03'],
+            'TotalCharges' => ['MonetaryValue' => '7.25'],
+        ]]]]),
+        UpsCreateShipment::class => MockResponse::make(['ShipmentResponse' => ['ShipmentResults' => [
+            'ShipmentIdentificationNumber' => '1Z9999999999999999',
+            'ShipmentCharges' => ['TotalCharges' => ['MonetaryValue' => '7.25']],
+            'PackageResults' => [
+                'TrackingNumber' => '1Z9999999999999999',
+                'ShippingLabel' => ['GraphicImage' => 'R0lGODlhAQABAAAAACw='],
+            ],
+        ]]]),
+    ]);
 
     $result = app(PackageShippingWorkflow::class)->autoShip(
         $package,
         new PackageAutoShippingRequest(userId: $user->id, cleanupOnFailure: false),
     );
 
-    $offer = ShippingOffer::sole();
+    $offer = ShippingOffer::whereNotNull('consumed_at')->sole();
 
     expect($result->success)->toBeTrue()
+        ->and($offer->carrier_service_id)->toBe($upsGround->id)
         ->and($offer->carrier_account_id)->toBe($account->id)
         ->and($offer->carrier_account_fingerprint)->toBe($account->fingerprint());
 });
 
 it('still asks for a declared value, rather than failing, on a rule-selected rate that needs one', function (): void {
-    // Fingerprinting the package applies every declared-value code on the
-    // method and can throw before the purchase is reached; the offer is then
-    // issued without one, and the purchase answers as it always has.
+    // Rating the package applies every declared-value code on the method and
+    // throws before anything is offered or bought. A rule's choice is rated
+    // too (`project-review/18`), so it answers as the Ship page does, not
+    // with a generic "Auto Ship Error".
     $package = createWorkflowPackage();
     $declaredValue = SpecialService::create([
         'code' => 'declared_value',
@@ -649,9 +678,9 @@ it('still asks for a declared value, rather than failing, on a rule-selected rat
     $package->shipment->update(['value' => null]);
     $package->shipment->shipmentItems()->update(['value' => null]);
 
-    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
-    $adapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn (RateResponse $rate): RateResponse => $rate);
+    quotingWorkflowGround($adapter);
     $adapter->shouldNotReceive('createShipment');
 
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
@@ -667,10 +696,10 @@ it('does not buy again after a rule-selected purchase went unanswered', function
     // asked (USPS, UPS) and has no answer yet keeps the package blocked.
     $package = createWorkflowPackage();
 
-    $adapter = Mockery::mock(CarrierAdapterInterface::class, RecoversUnresolvedPurchase::class);
+    $adapter = Mockery::mock(DirectCarrierAdapter::class, RecoversUnresolvedPurchase::class);
     $adapter->shouldReceive('recoverPurchase')->once()->andReturnNull();
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
-    $adapter->shouldReceive('resolvePreSelectedRate')->andReturnUsing(fn (RateResponse $rate): RateResponse => $rate);
+    quotingWorkflowGround($adapter);
     $calls = 0;
     $adapter->shouldReceive('createShipment')->andReturnUsing(function () use (&$calls): never {
         $calls++;
@@ -690,30 +719,37 @@ it('does not buy again after a rule-selected purchase went unanswered', function
         ->and($calls)->toBe(1);
 });
 
-it('rate shops when the pre-selected service has no variant for the packaging', function (): void {
-    // ADR-0005 decision 4: null from `resolvePreSelectedRate()` is "no
-    // pre-selection", not a failure. The workflow says so in the log and buys
-    // through rate shopping, where the same filter runs on real rates.
+it('rate shops when nothing quoted is in the rule\'s scope', function (): void {
+    // A *Direct* rule names a service no rate was quoted for, as when no
+    // variant of it fits the packaging (ADR-0005 decision 4). Not a failure:
+    // the workflow says so in the log and buys through rate shopping, with
+    // the rule's exclusions still applied.
     $log = Log::spy();
     $this->actingAs($user = User::factory()->create());
     $package = createWorkflowPackage();
+    $express = CarrierService::factory()->create([
+        'carrier_id' => Carrier::where('name', 'MockCarrier')->value('id'),
+        'name' => 'Express',
+        'service_code' => 'EXPRESS',
+        'active' => true,
+    ]);
+    $package->shipment->shippingMethod->carrierServices()->attach($express->id);
 
     $adapter = Mockery::mock(DirectCarrierAdapter::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
-    $adapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnNull();
     $adapter->shouldReceive('isConfigured')->once()->andReturnTrue();
     $adapter->shouldReceive('prepareRateRequest')->once()->andReturnNull();
     $adapter->shouldReceive('getRates')->once()->andReturn(collect([
-        new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days', carrierServiceId: CarrierService::where('service_code', 'GROUND')->value('id')),
+        new RateResponse('MockCarrier', 'EXPRESS', 'Express', 12.50, '1 day', carrierServiceId: $express->id),
     ]));
     $adapter->shouldReceive('createShipment')
         ->once()
-        ->withArgs(fn ($shipRequest): bool => $shipRequest->selectedRate?->serviceCode === 'GROUND' && $shipRequest->selectedRate->price === 7.25)
+        ->withArgs(fn ($shipRequest): bool => $shipRequest->selectedRate?->serviceCode === 'EXPRESS' && $shipRequest->selectedRate->price === 12.50)
         ->andReturn(ShipResponse::success(
             trackingNumber: 'SHOPPED123',
-            cost: 7.25,
+            cost: 12.50,
             carrier: 'MockCarrier',
-            service: 'Ground',
+            service: 'Express',
             labelData: base64_encode('label'),
         ));
 
@@ -729,20 +765,18 @@ it('rate shops when the pre-selected service has no variant for the packaging', 
         ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
 
     $log->shouldHaveReceived('info', [
-        'Pre-selected service has no variant for this packaging; rate shopping instead',
+        'A shipping rule names a service no source quoted, or an Exclude rule removed, for this package; rate shopping instead',
         Mockery::on(fn (array $context): bool => $context['package_id'] === $package->id
-            && $context['carrier'] === 'MockCarrier'
-            && $context['service_code'] === 'GROUND'
-            && array_key_exists('packaging', $context)),
+            && $context['carrier_service_id'] === CarrierService::where('service_code', 'GROUND')->value('id')),
     ]);
 });
 
 it('passes label format and dpi into auto ship requests', function (): void {
     $package = createWorkflowPackage();
 
-    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
-    $adapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn (RateResponse $rate): RateResponse => $rate);
+    quotingWorkflowGround($adapter);
     $adapter->shouldReceive('createShipment')
         ->once()
         ->withArgs(fn ($shipRequest): bool => $shipRequest->labelFormat === 'zpl' && $shipRequest->labelDpi === 203)
@@ -770,9 +804,9 @@ it('passes label format and dpi into auto ship requests', function (): void {
 it('can preserve an unshipped package when auto ship fails', function (): void {
     $package = createWorkflowPackage();
 
-    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
-    $adapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn (RateResponse $rate): RateResponse => $rate);
+    quotingWorkflowGround($adapter);
     $adapter->shouldReceive('createShipment')->once()->andReturn(
         ShipResponse::failure('Address validation failed')
     );
@@ -793,9 +827,9 @@ it('can preserve an unshipped package when auto ship fails', function (): void {
 it('cleans up an unshipped package when auto ship fails by default', function (): void {
     $package = createWorkflowPackage();
 
-    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
-    $adapter->shouldReceive('resolvePreSelectedRate')->once()->andReturnUsing(fn (RateResponse $rate): RateResponse => $rate);
+    quotingWorkflowGround($adapter);
     $adapter->shouldReceive('createShipment')->once()->andReturn(
         ShipResponse::failure('Address validation failed')
     );
@@ -1099,9 +1133,9 @@ it('carries the report printer flag into an unattended purchase', function (): v
     $package = createWorkflowPackage();
     sendWorkflowPackageAbroad($package);
 
-    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
-    $adapter->shouldReceive('resolvePreSelectedRate')->andReturnUsing(fn ($rate) => $rate);
+    quotingWorkflowGround($adapter);
     $adapter->shouldNotReceive('customsDocumentDelivery');
     $adapter->shouldReceive('createShipment')->once()->andReturn(
         ShipResponse::success(trackingNumber: 'AUTO123', cost: 7.25, carrier: 'MockCarrier', service: 'Ground', labelData: base64_encode('label')),
@@ -1123,7 +1157,6 @@ function refusingAdapter(): void
 {
     $adapter = Mockery::mock(CarrierAdapterInterface::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
-    $adapter->shouldNotReceive('resolvePreSelectedRate');
     $adapter->shouldNotReceive('createShipment');
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
 }
