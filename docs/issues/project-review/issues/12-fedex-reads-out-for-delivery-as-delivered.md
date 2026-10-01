@@ -1,6 +1,6 @@
 # FedEx reads "out for delivery" and "delivery exception" as delivered
 
-Status: needs-triage
+Status: done — 2026-10-01
 
 Repo: `polybag`
 
@@ -76,3 +76,15 @@ it('reads FedEx delivery-stage statuses that are not a delivery', function (stri
   event, since the terminal state keeps them from being refreshed.
 
 ## Comments
+
+- 2026-10-01 — `FedexAdapter::mapTrackingStatus()` looks the status code up exactly in
+  `TRACKING_STATUS_CODES`, where only `DL` is Delivered. It reads the description only for
+  an unknown code, by phrase: "for delivery", exception/delay/hold, "return", then
+  `DELIVERED` (not "undelivered"), then transit. `deliveredAtFallback()` reads the
+  `ACTUAL_DELIVERY` entry of `dateAndTimes` by type. The estimated delivery date had the
+  same index-0 fault and now reads `ESTIMATED_DELIVERY` by type. Regression tests: the
+  Evidence test, extended to unknown codes, and an estimated-date-by-type test in
+  `FedexAdapterTest`. Both fail without the fix. The existing summary-fallback test's
+  fixture gained `type` keys, which every real FedEx reply carries. The one-off re-check
+  command was not built: there are no live tenants, so no Package was wrongly marked
+  Delivered.

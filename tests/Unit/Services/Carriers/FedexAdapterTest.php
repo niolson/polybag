@@ -1344,7 +1344,8 @@ it('defers to the FedEx summary delivery timestamp when the delivered scan event
                                     'description' => 'Delivered',
                                 ],
                                 'dateAndTimes' => [
-                                    ['dateTime' => '2026-04-14T13:45:00Z'],
+                                    ['type' => 'ACTUAL_PICKUP', 'dateTime' => '2026-04-11T09:00:00Z'],
+                                    ['type' => 'ACTUAL_DELIVERY', 'dateTime' => '2026-04-14T13:45:00Z'],
                                 ],
                                 // Delivered scan event, but no date -> null timestamp.
                                 'scanEvents' => [
@@ -1435,6 +1436,49 @@ it('maps FedEx ready for pickup statuses away from pre-transit', function (): vo
     $response = $this->adapter->trackShipment($package);
 
     expect($response->status)->toBe(TrackingStatus::Exception);
+});
+
+it('reads FedEx delivery-stage statuses that are not a delivery', function (string $code, string $description, TrackingStatus $expected): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        TrackShipment::class => MockResponse::make(['output' => ['completeTrackResults' => [['trackResults' => [[
+            'latestStatusDetail' => ['code' => $code, 'description' => $description],
+            'dateAndTimes' => [['type' => 'ACTUAL_PICKUP', 'dateTime' => '2026-04-08T09:00:00Z']],
+            'scanEvents' => [],
+        ]]]]]]),
+    ]);
+
+    $package = Package::factory()->fedex()->create(['carrier' => 'FedEx', 'tracking_number' => '794644790138']);
+    $response = $this->adapter->trackShipment($package);
+
+    expect($response->status)->toBe($expected)
+        ->and($response->deliveredAt)->toBeNull()
+        ->and($response->estimatedDeliveryAt)->toBeNull();
+})->with([
+    'out for delivery' => ['OD', 'On FedEx vehicle for delivery', TrackingStatus::OutForDelivery],
+    'delivery exception' => ['DE', 'Delivery exception', TrackingStatus::Exception],
+    'unknown code, out for delivery text' => ['ZZ', 'On FedEx vehicle for delivery', TrackingStatus::OutForDelivery],
+    'unknown code, delivery exception text' => ['ZZ', 'Delivery exception', TrackingStatus::Exception],
+    'unknown code, undelivered text' => ['ZZ', 'Undelivered', TrackingStatus::PreTransit],
+]);
+
+it('reads a FedEx estimated delivery date by its type, not its position', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        TrackShipment::class => MockResponse::make(['output' => ['completeTrackResults' => [['trackResults' => [[
+            'latestStatusDetail' => ['code' => 'IT', 'description' => 'In transit'],
+            'dateAndTimes' => [
+                ['type' => 'ACTUAL_PICKUP', 'dateTime' => '2026-04-08T09:00:00Z'],
+                ['type' => 'ESTIMATED_DELIVERY', 'dateTime' => '2026-04-11T20:00:00Z'],
+            ],
+            'scanEvents' => [],
+        ]]]]]]),
+    ]);
+
+    $package = Package::factory()->fedex()->create(['carrier' => 'FedEx', 'tracking_number' => '794644790138']);
+    $response = $this->adapter->trackShipment($package);
+
+    expect($response->estimatedDeliveryAt?->toIso8601String())->toBe('2026-04-11T20:00:00+00:00');
 });
 
 it('maps package-level special services and declared value into the ship request', function (): void {
