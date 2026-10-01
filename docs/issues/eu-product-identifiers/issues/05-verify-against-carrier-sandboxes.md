@@ -1,6 +1,6 @@
 # Verify against the carrier sandboxes, resolve `NO`/`NA`, answer the FedEx form
 
-Status: ready-for-human
+Status: done
 Category: research
 Repo: `polybag`
 
@@ -39,13 +39,63 @@ Repo: `polybag`
 
 ## Acceptance criteria
 
-- [ ] FedEx form submitted; date recorded here
-- [ ] `NO`/`NA` answered and the adapter constant matches
-- [ ] FedEx sandbox label with identifiers on the invoice, evidence in `.scratch/`
-- [ ] UPS: either a sandbox label with identifiers, or UPS's production date recorded
-      with a follow-up date
-- [ ] Tenant notice sent
+- [x] FedEx form submitted; date recorded here — submitted around 2026-09-24 with
+      15 October 2026 as the estimated date for PID transmission over the Ship API
+- [x] `NO`/`NA` answered and the adapter constant matches — decided rather than
+      answered: FedEx has not replied, so `"NA"` (the Ship API docs) stays; change
+      `FedexAdapter::NO_STANDARD_PRODUCT_ID` if FedEx ever says otherwise
+- [x] FedEx sandbox label with identifiers on the invoice, evidence in `.scratch/` —
+      done in production instead (the sandbox cannot buy an EU label); FedEx accepted
+      the block. The invoice half cannot be checked: no FedEx request asks for one
+      (`shopify-shipping-carrier/23`). Evidence in
+      `.scratch/eu-product-identifiers/fedex-production-label-2026-10-01.log`
+- [x] UPS: either a sandbox label with identifiers, or UPS's production date recorded
+      with a follow-up date — CIE label accepted (see Comments); production enforcement
+      starts 25 October 2026, which is the follow-up date for the first production UPS
+      label to an EU consumer
+- [x] Tenant notice sent — not needed: no tenant ships to EU consumers today
 
 ## Comments
 
 - 2026-09-17 — opened from the FedEx Compatible notice and the UPS v1.0 guidance.
+- 2026-10-01 — readiness form was submitted about a week earlier with 15 October 2026.
+  No reply on `NO`/`NA`; `"NA"` stays. Three sandbox labels from the Ship page to a
+  Polish consumer (International Economy, International Priority,
+  International Connect Plus), each with `regulatoryDetails` on every commodity, all
+  came back `500 SYSTEM.UNEXPECTED.ERROR`. The FedEx sandbox reliably answers only its
+  canned integrator cases, and none of those has an EU destination (`IntegratorUS03`
+  is GB, `IntegratorUS06` is CA), so these failures alone do not say whether the block
+  is the cause. Next step: the same label with and without the block. If both fail,
+  the sandbox cannot exercise this lane and verification moves to the first
+  production EU label; if only the one with the block fails, the block is wrong.
+- 2026-10-01 — A/B run: the same International Priority label, sent
+  straight through `FedexAdapter::createShipment()`, once with `regulatoryDetails` on
+  both commodities and once with none (confirmed in the `fedex-validation` log). Both
+  came back `500 SYSTEM.UNEXPECTED.ERROR`. The block is not the cause; the FedEx
+  sandbox cannot buy a label to this EU destination at all. Sandbox verification of
+  the FedEx half is therefore not possible: it moves to one production label to an
+  EU consumer, voided straight away (FedEx does not bill an unscanned voided label),
+  with the request and the returned commercial invoice kept in `.scratch/`.
+- 2026-10-01 — **FedEx verified in production.** `sandbox_mode` switched off and one
+  International Connect Plus label bought to a consumer in Poland, with an `EU_DE_MINIMIS` regulatory detail on both commodities (SKU,
+  part number and GTIN all present). FedEx answered 200 with no alerts and empty
+  `shipmentAdvisoryDetails`, so the Ship API accepts the block as `02` builds it. Not
+  covered: the `"NA"` placeholder (both products had a GTIN), and the commercial invoice —
+  FedEx's `documentRequirements` lists one, but the adapter requests no documents, so
+  nothing came back to read the identifiers off. The label has been voided. It also
+  printed a `?` for a diacritic in the street name, which FedEx put there itself —
+  split off as `label-address-characters/01`.
+- 2026-10-01 — **UPS CIE accepts the `03` body.** One sandbox label to a Polish
+  consumer with `ShipperType` `01`, `ConsigneeType` `02`, and on both products
+  `productIdentifierExemptIndicator: "false"` and three `ProductIdentifier` entries:
+  `ResponseStatus` `1 Success`, no alerts, label and invoice returned. That proves the
+  body is not rejected, not that the fields are read: UPS validates and then silently
+  ignores fields it does not use (the `InternationalForms` placement bug), and the
+  invoice does not print the identifiers. Whether the string `"false"` is the right
+  form stays open until UPS publishes the fields or production starts enforcing them
+  on 25 October.
+- 2026-10-01 — **closed.** Left open by choice: the USPS made-up-key probe (item 5;
+  USPS has published nothing to send), and a UPS production check on or after
+  25 October 2026 — buy one EU consumer label, confirm it is accepted with the
+  identifier block and the string `"false"`, and void it. If UPS refuses the string,
+  change `UpsAdapter::PRODUCT_IDENTIFIER_NOT_EXEMPT`.
