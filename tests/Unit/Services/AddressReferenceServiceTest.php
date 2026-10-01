@@ -49,3 +49,13 @@ it('leaves the subdivision option list untouched when aliasing', function (): vo
         ->and($options['AE'])->toBe('Armed Forces (AE)')
         ->and($options)->not->toHaveKey('Armed Forces Europe');
 });
+
+it('upper-cases accented subdivision codes whole', function (): void {
+    // The library codes Estado de México as "Méx."; a byte-wise upper-case
+    // stored it as "MéX.".
+    $service = app(AddressReferenceService::class);
+
+    expect($service->getSubdivisionOptions('MX'))->toHaveKey('MÉX.')
+        ->and($service->normalizeSubdivision('MX', 'Estado de México'))->toBe('MÉX.')
+        ->and($service->normalizeSubdivision('MX', 'MéX.'))->toBe('MÉX.');
+});
