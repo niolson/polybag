@@ -62,3 +62,26 @@ stay silent. At minimum, the "already fulfilled" swallow should not apply to a P
 that has a voided Label.
 
 ## Comments
+
+- 2026-10-01 — Desk research against the official docs (Shopify Admin 2026-07, Amazon
+  Orders v0). Still needs live confirmation.
+  - **Shopify: update in place.** `fulfillmentTrackingInfoUpdate(fulfillmentId,
+    trackingInfoInput, notifyCustomer)` changes the number on an existing fulfillment.
+    Cancel-on-void doesn't give a clean re-export: `fulfillmentCancel` creates **new**
+    fulfillment orders for the cancelled items, with new IDs, so a `fulfillmentCreate`
+    against the stored `fulfillment_order_id` is still refused. `fulfillmentCreate` already
+    selects `fulfillment { id }`, but `exportPackage()` discards it. It has to be stored
+    somewhere a void doesn't delete (the Label row, per ADR-0004, not `PackageExport`).
+    The "has an unfulfillable status= closed" reply is reported by developers but not
+    documented. No documented reply contains "already fulfilled", so the swallow probably
+    can't match it.
+  - **Amazon: probably works already.** The v0 guide says `confirmShipment` called again
+    with the same `packageReferenceId`, order items and quantities edits the package's
+    carrier, method and tracking ID. Ours is the Package ID, which stays the same across a
+    void, so the re-export should replace the dead number. No time window is documented.
+    The risk is `shipmentWasAlreadyConfirmed()`: if Amazon refuses the edit as already
+    shipped, that is recorded as success and the dead number stays.
+  - **Still to verify live:** Shopify's exact `userErrors` for a closed fulfillment order,
+    whether `fulfillmentTrackingInfoUpdate` is refused on old or delivered fulfillments,
+    and Amazon's reply to a re-confirm. The Amazon sandbox only matches its own fixture,
+    so the Amazon check needs a production order.

@@ -39,3 +39,13 @@ items store it as `error_message`.
   (a dedicated exception type), and give database errors the generic message.
 
 ## Comments
+
+- 2026-10-01 — Partly overtaken by `fb40b40` (`03`). A database error before the sale is
+  now caught as `QueryException` and given the generic message, not shown as raw SQL under
+  "Package State Changed". The post-commit half has changed shape: `markShipped()` now runs
+  inside `recordBoughtLabel()`'s transaction, so its own commit is a savepoint.
+  `updateShippedStatus()` and `recordAppliedSpecialServices()` throwing now rolls the
+  whole recording back, and the next attempt recovers the label, which is safe. An
+  `afterCommit` listener on `PackageShipped` now runs on the outer commit, inside
+  `DB::transaction()`, so if it throws, the label is saved but the packer is told
+  "label not recorded". What is left is making that listener step best-effort.

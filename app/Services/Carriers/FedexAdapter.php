@@ -909,11 +909,9 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
                 ->values()
                 ->all();
 
-            $estimatedDeliveryAt = $this->parseFedexDate(
-                data_get($trackResult, 'estimatedDeliveryTimeWindow.window.ends')
-                ?? data_get($trackResult, 'dateAndTimes.0.dateTime')
-                ?? data_get($trackResult, 'estimatedDeliveryTimestamp')
-            );
+            $estimatedDeliveryAt = $this->parseFedexDate(data_get($trackResult, 'estimatedDeliveryTimeWindow.window.ends'))
+                ?? $this->fedexDateOfType($trackResult, 'ESTIMATED_DELIVERY')
+                ?? $this->parseFedexDate(data_get($trackResult, 'estimatedDeliveryTimestamp'));
 
             $deliveredAt = $this->resolveDeliveredAt($events, $trackResult);
             $status = $this->mapTrackingStatus($statusCode, (string) $statusLabel);
@@ -946,26 +944,92 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
         }
     }
 
+    /**
+     * FedEx's status codes, matched exactly. Delivered is terminal — a
+     * delivered Package is never tracked again — so only `DL` reaches it.
+     */
+    private const TRACKING_STATUS_CODES = [
+        'DL' => TrackingStatus::Delivered,
+        'OD' => TrackingStatus::OutForDelivery,
+        'RS' => TrackingStatus::Returned,
+        'DE' => TrackingStatus::Exception,
+        'SE' => TrackingStatus::Exception,
+        'HL' => TrackingStatus::Exception,
+        'HP' => TrackingStatus::Exception,
+        'CA' => TrackingStatus::Exception,
+        'DD' => TrackingStatus::Exception,
+        'DY' => TrackingStatus::Exception,
+        'PD' => TrackingStatus::Exception,
+        'CD' => TrackingStatus::Exception,
+        'OC' => TrackingStatus::PreTransit,
+        'IN' => TrackingStatus::PreTransit,
+        'PU' => TrackingStatus::InTransit,
+        'PX' => TrackingStatus::InTransit,
+        'IT' => TrackingStatus::InTransit,
+        'IX' => TrackingStatus::InTransit,
+        'AR' => TrackingStatus::InTransit,
+        'AF' => TrackingStatus::InTransit,
+        'DP' => TrackingStatus::InTransit,
+        'FD' => TrackingStatus::InTransit,
+        'OF' => TrackingStatus::InTransit,
+        'LO' => TrackingStatus::InTransit,
+        'AA' => TrackingStatus::InTransit,
+        'AD' => TrackingStatus::InTransit,
+        'EA' => TrackingStatus::InTransit,
+        'ED' => TrackingStatus::InTransit,
+        'EO' => TrackingStatus::InTransit,
+        'PF' => TrackingStatus::InTransit,
+        'PL' => TrackingStatus::InTransit,
+        'PM' => TrackingStatus::InTransit,
+        'SF' => TrackingStatus::InTransit,
+        'TR' => TrackingStatus::InTransit,
+        'CC' => TrackingStatus::InTransit,
+        'CP' => TrackingStatus::InTransit,
+        'CH' => TrackingStatus::InTransit,
+    ];
+
+    /**
+     * Read FedEx's status code first; its description only when the code is
+     * one we don't know, and then by whole phrases. The stem "DELIVER" is in
+     * "On FedEx vehicle for delivery" and "Delivery exception", neither of
+     * which is a delivery (`project-review/12`).
+     */
     private function mapTrackingStatus(string $statusCode, string $statusLabel): TrackingStatus
     {
-        $normalizedCode = strtoupper($statusCode);
-        $normalizedLabel = strtoupper($statusLabel);
+        $known = self::TRACKING_STATUS_CODES[strtoupper(trim($statusCode))] ?? null;
+
+        if ($known !== null) {
+            return $known;
+        }
+
+        $label = strtoupper($statusLabel);
 
         return match (true) {
-            str_contains($normalizedCode, 'DL') || str_contains($normalizedLabel, 'DELIVER') => TrackingStatus::Delivered,
-            str_contains($normalizedCode, 'OD') || str_contains($normalizedLabel, 'OUT FOR DELIVERY') => TrackingStatus::OutForDelivery,
-            str_contains($normalizedCode, 'RS') || str_contains($normalizedLabel, 'RETURN') => TrackingStatus::Returned,
-            str_contains($normalizedCode, 'HL')
-                || str_contains($normalizedLabel, 'READY FOR PICKUP')
-                || str_contains($normalizedLabel, 'PICKUP')
-                || str_contains($normalizedLabel, 'HOLD') => TrackingStatus::Exception,
-            str_contains($normalizedCode, 'DE') || str_contains($normalizedCode, 'SE')
-                || str_contains($normalizedLabel, 'EXCEPTION')
-                || str_contains($normalizedLabel, 'DELAY') => TrackingStatus::Exception,
-            str_contains($normalizedCode, 'IT') || str_contains($normalizedCode, 'AR')
-                || str_contains($normalizedLabel, 'TRANSIT') => TrackingStatus::InTransit,
+            str_contains($label, 'FOR DELIVERY') => TrackingStatus::OutForDelivery,
+            str_contains($label, 'EXCEPTION')
+                || str_contains($label, 'DELAY')
+                || str_contains($label, 'HOLD')
+                || str_contains($label, 'READY FOR PICKUP') => TrackingStatus::Exception,
+            str_contains($label, 'RETURN') => TrackingStatus::Returned,
+            preg_match('/(?<!UN)DELIVERED\b/', $label) === 1 => TrackingStatus::Delivered,
+            str_contains($label, 'TRANSIT') || str_contains($label, 'PICKED UP') => TrackingStatus::InTransit,
             default => TrackingStatus::PreTransit,
         };
+    }
+
+    /**
+     * The `dateAndTimes` entry of one type. FedEx lists pickup, tender,
+     * estimated and actual delivery in no promised order, so position means
+     * nothing.
+     *
+     * @param  array<string, mixed>  $summary
+     */
+    private function fedexDateOfType(array $summary, string $type): ?CarbonImmutable
+    {
+        $entry = collect(data_get($summary, 'dateAndTimes', []))
+            ->first(fn (mixed $entry): bool => is_array($entry) && ($entry['type'] ?? null) === $type);
+
+        return $this->parseFedexDate($entry['dateTime'] ?? null);
     }
 
     /**
@@ -1005,9 +1069,8 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
             return null;
         }
 
-        return $this->parseFedexDate(
-            data_get($summary, 'dateAndTimes.0.dateTime') ?? data_get($summary, 'actualDeliveryTimestamp')
-        );
+        return $this->fedexDateOfType($summary, 'ACTUAL_DELIVERY')
+            ?? $this->parseFedexDate(data_get($summary, 'actualDeliveryTimestamp'));
     }
 
     private function parseFedexDate(?string $value): ?CarbonImmutable

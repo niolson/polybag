@@ -85,3 +85,12 @@ The first matches the section's own description and is the safer default for an 
 undated purchase.
 
 ## Comments
+
+- 2026-10-01 — Decided: **the explicit choice wins.** A rule naming Shopify, or Shopify
+  being the method's only choice, keeps buying blind on an order with a due-by date.
+  Shopify's default rate selection keeps the buyer's checkout delivery method where it
+  can, then the shop's preferred carrier and service, then Shopify's recommended rate, so
+  the seller has its own lever there. To build: the method form warns when a method that
+  allows Shopify Shipping has a commitment or *Exclude rates that deliver after the due-by
+  date* on; the toggle's help text stops promising to skip every undated purchase; and the
+  Evidence test is replaced by one pinning the blind purchase.
