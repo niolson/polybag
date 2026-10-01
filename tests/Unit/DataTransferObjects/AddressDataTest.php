@@ -172,3 +172,14 @@ it('stays inside one customs area between two states', function (): void {
 it('crosses a customs boundary when only the origin is foreign', function (): void {
     expect(addressIn('PA')->sharesCustomsZoneWith(addressIn('ON', country: 'CA')))->toBeFalse();
 });
+
+it('places each of the 27 member states in the EU', function (string $country): void {
+    expect(addressIn('', country: $country)->isInEuropeanUnion())->toBeTrue();
+})->with([
+    'AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'ES', 'FI', 'FR', 'GR', 'HR', 'HU',
+    'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PL', 'PT', 'RO', 'SE', 'SI', 'SK',
+]);
+
+it('places European countries outside the union outside the EU', function (string $country): void {
+    expect(addressIn('', country: $country)->isInEuropeanUnion())->toBeFalse();
+})->with(['GB', 'CH', 'NO', 'US']);

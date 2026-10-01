@@ -87,6 +87,17 @@ readonly class AddressData
     }
 
     /**
+     * The 27 EU member states as ISO 3166-1 alpha-2 codes. Greece is `GR` here,
+     * not the `EL` the EU uses in its own nomenclature.
+     *
+     * @var array<int, string>
+     */
+    private const EU_MEMBER_STATES = [
+        'AT', 'BE', 'BG', 'CY', 'CZ', 'DE', 'DK', 'EE', 'ES', 'FI', 'FR', 'GR', 'HR', 'HU',
+        'IE', 'IT', 'LT', 'LU', 'LV', 'MT', 'NL', 'PL', 'PT', 'RO', 'SE', 'SI', 'SK',
+    ];
+
+    /**
      * Overseas military and diplomatic post office subdivisions.
      *
      * @var array<int, string>
@@ -115,6 +126,19 @@ readonly class AddressData
             DestinationZone::UsTerritories->states(),
             true,
         );
+    }
+
+    /**
+     * Whether this address is in an EU member state, which is what decides
+     * whether a customs line carries the EU product identifiers.
+     *
+     * Membership by country code only: Northern Ireland (GB, `BT` postcodes)
+     * and Monaco sit inside the EU customs territory for goods but are out of
+     * scope until a tenant ships there (`eu-product-identifiers` PRD).
+     */
+    public function isInEuropeanUnion(): bool
+    {
+        return in_array(strtoupper(trim($this->country)), self::EU_MEMBER_STATES, true);
     }
 
     /**
