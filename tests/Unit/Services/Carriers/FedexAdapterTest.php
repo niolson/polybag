@@ -480,6 +480,119 @@ it('sends the full destination and explicit residential boolean on rate requests
     });
 })->with([true, false]);
 
+it('sends FedEx its own state code, or none, on international rate requests', function (string $country, string $stored, ?string $expected): void {
+    // Verified against production FedEx 2026-09-30: every stored value below
+    // except US/CA codes failed the whole rate request with
+    // RECIPIENT.ADDRESSSTATEORPROVINCECODE.MAXCHAREXCEEDED.
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Rates::class => MockResponse::make(['output' => ['rateReplyDetails' => []]]),
+    ]);
+
+    $this->adapter->getRates(new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '12345',
+        destinationCountry: $country,
+        destinationCity: 'Somewhere',
+        destinationStateOrProvince: $stored,
+        packages: [new PackageData(weight: 2.0, length: 10, width: 8, height: 4)],
+        destinationStreetAddress: '1 Main St',
+    ), ['INTERNATIONAL_PRIORITY']);
+
+    Saloon::assertSent(function ($request) use ($expected): bool {
+        if (! $request instanceof Rates) {
+            return false;
+        }
+
+        $address = $request->body()->all()['requestedShipment']['recipient']['address'];
+
+        return $expected === null
+            ? ! array_key_exists('stateOrProvinceCode', $address)
+            : ($address['stateOrProvinceCode'] ?? null) === $expected;
+    });
+})->with([
+    'US code' => ['US', 'CA', 'CA'],
+    'Canadian code' => ['CA', 'ON', 'ON'],
+    'Mexican abbreviation' => ['MX', 'PUE.', 'PU'],
+    'Mexico City' => ['MX', 'CDMX', 'DF'],
+    'Indian state name' => ['IN', 'MAHARASHTRA', 'MH'],
+    'Emirate name' => ['AE', 'DUBAI', 'DU'],
+    'Australian state' => ['AU', 'VIC', null],
+    'Japanese prefecture' => ['JP', 'TOKYO', null],
+    'Indian state FedEx has no code for' => ['IN', 'TELANGANA', null],
+]);
+
+it('sends the FedEx state code on an international label request', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => MockResponse::make([
+            'output' => [
+                'transactionShipments' => [
+                    [
+                        'masterTrackingNumber' => '794644790138',
+                        'completedShipmentDetail' => [
+                            'shipmentRating' => ['shipmentRateDetails' => [['totalNetCharge' => 42.10]]],
+                        ],
+                        'pieceResponses' => [
+                            [
+                                'trackingNumber' => '794644790138',
+                                'packageDocuments' => [['encodedLabel' => 'JVBERi0xLjQKYmFzZTY0bGFiZWxkYXRh']],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ]),
+    ]);
+
+    $request = new ShipRequest(
+        fromAddress: new AddressData(
+            firstName: 'Shipping',
+            lastName: 'Center',
+            streetAddress: '123 Warehouse St',
+            city: 'Seattle',
+            stateOrProvince: 'WA',
+            postalCode: '98072',
+            phone: '4255551234',
+        ),
+        toAddress: new AddressData(
+            firstName: 'Ana',
+            lastName: 'López',
+            streetAddress: 'Av Reforma 100',
+            city: 'Puebla',
+            stateOrProvince: 'PUE.',
+            postalCode: '72000',
+            country: 'MX',
+            phone: '2225551234',
+        ),
+        packageData: new PackageData(weight: 2.0, length: 10, width: 8, height: 6),
+        selectedRate: new RateResponse(
+            carrier: 'FedEx',
+            serviceCode: 'INTERNATIONAL_PRIORITY',
+            serviceName: 'FedEx International Priority',
+            price: 42.10,
+            metadata: ['serviceType' => 'INTERNATIONAL_PRIORITY'],
+        ),
+        customsItems: [
+            new CustomsItem(description: 'Dictionaries', quantity: 2, unitValue: 25.00, weight: 0.8),
+        ],
+    );
+
+    expect($this->adapter->createShipment($request)->success)->toBeTrue();
+
+    Saloon::assertSent(function ($request): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $body = $request->body()->all();
+        assertMatchesFedexSchema($body, 'CreateShipmentRequest');
+
+        return $body['requestedShipment']['recipients'][0]['address']['stateOrProvinceCode'] === 'PU'
+            && $body['requestedShipment']['shipper']['address']['stateOrProvinceCode'] === 'WA';
+    });
+});
+
 it('sends only destination postal code and country on sandbox rate requests', function (): void {
     app(SettingsService::class)->set('sandbox_mode', true);
 
