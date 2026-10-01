@@ -1,6 +1,6 @@
 # Product identifier fields
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -55,21 +55,21 @@ and the barcode they already import is what the GTIN fallback reads.
 
 ## Acceptance criteria
 
-- [ ] Migration adds both columns; `Product` fillable and factory updated; the factory's
+- [x] Migration adds both columns; `Product` fillable and factory updated; the factory's
       default `gtin` is a synthetic value with a valid check digit
-- [ ] Product form saves both; an invalid `gtin` is refused with a message naming the
+- [x] Product form saves both; an invalid `gtin` is refused with a message naming the
       check digit
-- [ ] `CustomsItemTest`: `fromPackageItem()` resolves all three identifiers; a product
+- [x] `CustomsItemTest`: `fromPackageItem()` resolves all three identifiers; a product
       with `gtin` null and a 12-digit UPC `barcode` yields that barcode; with a Code 128
       `barcode` yields null; with no SKU yields null for the merchant ID
-- [ ] `ShipRequestTest`: `withScaledCustomsWeights()` on an over-weight request returns
+- [x] `ShipRequestTest`: `withScaledCustomsWeights()` on an over-weight request returns
       items carrying the same three identifiers as before scaling
-- [ ] Database import with all four columns mapped — `manufacturer_part_number`, `gtin`,
+- [x] Database import with all four columns mapped — `manufacturer_part_number`, `gtin`,
       `hs_tariff_number`, `country_of_origin` — writes each to the Product on first
       import, and a re-import with changed values updates each. One assertion per field:
       `ImportReferenceResolver` copies product fields one by one, so a test that checks
       only one of them passes with the other three forgotten
-- [ ] `docs/data-sources/database.md` lists the four fields under *Fields with no default
+- [x] `docs/data-sources/database.md` lists the four fields under *Fields with no default
       mapping*
 
 ## Out of scope

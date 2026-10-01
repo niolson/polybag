@@ -28,6 +28,8 @@ class Product extends Model
         'handling_surcharge',
         'hs_tariff_number',
         'country_of_origin',
+        'manufacturer_part_number',
+        'gtin',
         'active',
         'contains_alcohol',
         'is_media',

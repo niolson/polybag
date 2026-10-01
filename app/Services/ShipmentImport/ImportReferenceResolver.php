@@ -99,6 +99,10 @@ class ImportReferenceResolver
                 'description' => $itemData['description'] ?? null,
                 'barcode' => $itemData['barcode'] ?? null,
                 'weight' => $itemData['weight'] ?? null,
+                'hs_tariff_number' => $itemData['hs_tariff_number'] ?? null,
+                'country_of_origin' => $itemData['country_of_origin'] ?? null,
+                'manufacturer_part_number' => $itemData['manufacturer_part_number'] ?? null,
+                'gtin' => $itemData['gtin'] ?? null,
                 'is_media' => $this->mediaFlagFrom($itemData, $sku),
             ], fn ($value): bool => $value !== null);
 

@@ -167,14 +167,7 @@ readonly class ShipRequest
         $scale = $packageWeight / $totalCustomsWeight;
 
         $scaledItems = array_map(
-            fn (CustomsItem $item): CustomsItem => new CustomsItem(
-                description: $item->description,
-                quantity: $item->quantity,
-                unitValue: $item->unitValue,
-                weight: $this->floorToHundredth($item->weight * $scale),
-                hsTariffNumber: $item->hsTariffNumber,
-                countryOfOrigin: $item->countryOfOrigin,
-            ),
+            fn (CustomsItem $item): CustomsItem => $item->withWeight($this->floorToHundredth($item->weight * $scale)),
             $this->customsItems,
         );
 
