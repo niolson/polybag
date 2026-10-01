@@ -11,6 +11,7 @@ golden array we wrote by hand at the same time as the code that builds it.
 | `shippingV2.json` | [`amzn/selling-partner-api-models`](https://github.com/amzn/selling-partner-api-models) — `models/shipping-api-model/shippingV2.json` | Apache-2.0 |
 | `upsRating.json` | [`UPS-API/api-documentation`](https://github.com/UPS-API/api-documentation) — `Rating.yaml` | MIT |
 | `upsShipping.json` | [`UPS-API/api-documentation`](https://github.com/UPS-API/api-documentation) — `Shipping.yaml` | MIT |
+| `upsAddressValidation.json` | [`UPS-API/api-documentation`](https://github.com/UPS-API/api-documentation) — `AddressValidation.yaml` | MIT |
 | `uspsLabel.json` | **Hand-written here**, off `UspsAdapter` — see below | Ours |
 | `fedexShip.json` | **Hand-written here**, off `FedexAdapter` — see below | Ours |
 
@@ -21,7 +22,7 @@ vendored verbatim in `licenses/` rather than named only in the table above:
 
 | Notice | Covers |
 |---|---|
-| `licenses/UPS-API-api-documentation-LICENSE.txt` | `upsRating.json`, `upsShipping.json` |
+| `licenses/UPS-API-api-documentation-LICENSE.txt` | `upsRating.json`, `upsShipping.json`, `upsAddressValidation.json` |
 | `licenses/amzn-selling-partner-api-models-LICENSE.txt` | `ordersV0.json`, `orders_2026-01-01.json`, `shippingV2.json` |
 | `licenses/amzn-selling-partner-api-models-NOTICE.txt` | `ordersV0.json`, `orders_2026-01-01.json`, `shippingV2.json` |
 
@@ -30,7 +31,7 @@ copies or substantial portions; Apache-2.0 §4 requires a copy of the License an
 upstream NOTICE. All three notice files are byte-for-byte copies of their upstream
 originals.
 
-**All three Amazon files are unmodified copies.** The two UPS files are **modified copies**:
+**All three Amazon files are unmodified copies.** The three UPS files are **modified copies**:
 converted from YAML to JSON and passed through the cardinality fix described below. Both
 transformations are mechanical and reproducible from the refresh script — no schema was
 hand-edited to accommodate our request bodies.
@@ -129,7 +130,7 @@ a handful on arrays, where it means `maxItems`. Validating against the raw file 
 hundreds of false failures. `Shipping.yaml` also contains tab characters inside
 description strings that stop a strict YAML parser.
 
-Refresh both with:
+Refresh all three with:
 
 ```bash
 python3 - <<'EOF'
@@ -151,7 +152,8 @@ def fix(node):
     return node
 
 base = 'https://raw.githubusercontent.com/UPS-API/api-documentation/main/'
-for src, out in [('Rating.yaml', 'upsRating.json'), ('Shipping.yaml', 'upsShipping.json')]:
+for src, out in [('Rating.yaml', 'upsRating.json'), ('Shipping.yaml', 'upsShipping.json'),
+                 ('AddressValidation.yaml', 'upsAddressValidation.json')]:
     raw = urllib.request.urlopen(base + src).read().decode('utf-8')
     raw = raw.replace('\r\n', '\n').replace('\t', ' ')
     json.dump(fix(yaml.safe_load(raw)), open('tests/Fixtures/Schemas/' + out, 'w'), indent=1)

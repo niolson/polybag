@@ -260,14 +260,35 @@ it('rejects a street line longer than 35 characters', function (): void {
 });
 
 it('rejects a null state or postal code', function (string $property): void {
-    // The adapter passes both through untouched, so an address without one
-    // would send null. No test constructs such an address.
     $body = validFedexShipBody();
     $body['requestedShipment']['recipients'][0]['address'][$property] = null;
 
     expect(fn () => assertMatchesFedexSchema($body, 'CreateShipmentRequest'))
         ->toThrow(AssertionFailedError::class, $property);
 })->with(['stateOrProvinceCode', 'postalCode']);
+
+it('rejects a state that is not a two-letter FedEx code', function (string $state): void {
+    // FedEx fails the whole request with STATEORPROVINCECODE.MAXCHAREXCEEDED.
+    $body = validFedexShipBody(['requestedShipment' => ['recipients' => [['address' => ['stateOrProvinceCode' => $state]]]]]);
+
+    expect(fn () => assertMatchesFedexSchema($body, 'CreateShipmentRequest'))
+        ->toThrow(AssertionFailedError::class, 'stateOrProvinceCode');
+})->with(['PUE.', 'VIC', 'MAHARASHTRA']);
+
+it('requires a state for US, Canadian and Puerto Rican addresses', function (string $country): void {
+    $body = validFedexShipBody(['requestedShipment' => ['recipients' => [['address' => ['countryCode' => $country]]]]]);
+    unset($body['requestedShipment']['recipients'][0]['address']['stateOrProvinceCode']);
+
+    expect(fn () => assertMatchesFedexSchema($body, 'CreateShipmentRequest'))
+        ->toThrow(AssertionFailedError::class, 'stateOrProvinceCode');
+})->with(['US', 'CA', 'PR']);
+
+it('accepts an address with no state where FedEx takes none', function (): void {
+    $body = validFedexShipBody(['requestedShipment' => ['recipients' => [['address' => ['countryCode' => 'AU']]]]]);
+    unset($body['requestedShipment']['recipients'][0]['address']['stateOrProvinceCode']);
+
+    assertMatchesFedexSchema($body, 'CreateShipmentRequest');
+});
 
 it('rejects a lower-case country code', function (): void {
     $body = validFedexShipBody(['requestedShipment' => ['recipients' => [['address' => ['countryCode' => 'ca']]]]]);

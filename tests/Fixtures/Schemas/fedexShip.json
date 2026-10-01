@@ -105,9 +105,13 @@
       ]
     },
     "Address": {
-      "description": "buildContact(). streetLines carries the first and, when present, second address line, each cut to 35 characters. city, stateOrProvinceCode and postalCode are passed through from AddressData untouched — an address with no state or postal code would send null for it, which no test constructs. Recipient addresses also carry the resolved residential boolean; shipper addresses omit it.",
+      "description": "buildContact(). streetLines carries the first and, when present, second address line, each cut to 35 characters. city and postalCode are passed through from AddressData untouched — an address with no postal code would send null for it, which no test constructs. stateOrProvinceCode is FedexSubdivision::code(): FedEx's own two-letter code, required for US, CA and PR, and left out for any country FedEx takes no state for, because FedEx rejects the whole request on a state it does not recognize. Recipient addresses also carry the resolved residential boolean; shipper addresses omit it.",
       "type": "object",
-      "required": ["streetLines", "city", "stateOrProvinceCode", "postalCode", "countryCode"],
+      "required": ["streetLines", "city", "postalCode", "countryCode"],
+      "anyOf": [
+        { "not": { "properties": { "countryCode": { "enum": ["US", "CA", "PR"] } } } },
+        { "required": ["stateOrProvinceCode"] }
+      ],
       "additionalProperties": false,
       "properties": {
         "streetLines": {
@@ -117,7 +121,7 @@
           "items": { "type": "string", "minLength": 1, "maxLength": 35 }
         },
         "city": { "type": "string", "minLength": 1 },
-        "stateOrProvinceCode": { "type": "string", "minLength": 1 },
+        "stateOrProvinceCode": { "type": "string", "pattern": "^[A-Z]{2}$" },
         "postalCode": { "type": "string", "minLength": 1 },
         "countryCode": { "type": "string", "pattern": "^[A-Z]{2}$" },
         "residential": { "type": "boolean" }

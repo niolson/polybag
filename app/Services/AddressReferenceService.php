@@ -114,7 +114,7 @@ class AddressReferenceService
         $lookup = [];
 
         foreach ($this->subdivisionRepository->getAll([$countryCode]) as $subdivision) {
-            $code = strtoupper($subdivision->getCode());
+            $code = mb_strtoupper($subdivision->getCode());
 
             $options[$code] = $subdivision->getName();
             $lookup[$this->normalizeLookupKey($code)] = $code;

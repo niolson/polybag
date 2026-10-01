@@ -1436,12 +1436,25 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
             'address' => [
                 'streetLines' => $this->buildStreetLines($address->streetAddress, $address->streetAddress2),
                 'city' => $address->city,
-                'stateOrProvinceCode' => $address->stateOrProvince,
+                ...$this->stateOrProvinceCode($address->country, $address->stateOrProvince),
                 'postalCode' => $address->postalCode,
                 'countryCode' => $address->country,
                 ...($includeResidentialClassification ? ['residential' => $address->isResidential()] : []),
             ],
         ];
+    }
+
+    /**
+     * FedEx fails the whole request on a state it does not recognize, so
+     * send one only when {@see FedexSubdivision} has a FedEx code for it.
+     *
+     * @return array{stateOrProvinceCode?: string}
+     */
+    private function stateOrProvinceCode(?string $country, ?string $subdivision): array
+    {
+        $code = FedexSubdivision::code($country, $subdivision);
+
+        return $code !== null ? ['stateOrProvinceCode' => $code] : [];
     }
 
     /**
@@ -1464,7 +1477,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
         return array_filter([
             'streetLines' => $streetLines === [] ? null : $streetLines,
             'city' => $request->destinationCity,
-            'stateOrProvinceCode' => $request->destinationStateOrProvince,
+            ...$this->stateOrProvinceCode($request->destinationCountry, $request->destinationStateOrProvince),
             'postalCode' => $request->destinationPostalCode,
             'countryCode' => $request->destinationCountry,
             'residential' => $request->residential,
