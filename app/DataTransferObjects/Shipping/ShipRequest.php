@@ -125,6 +125,42 @@ readonly class ShipRequest
     }
 
     /**
+     * The customs items an EU consumer label would declare without the
+     * merchant or manufacturer product identifier.
+     *
+     * EU customs holds a B2C parcel from 1 November 2026 when any line lacks
+     * either, and the carriers' APIs accept the label regardless, so the
+     * operator would hear of it from the customer. The standard identifier (a
+     * GTIN) is never required: both carriers accept its absence.
+     *
+     * The same two gates as {@see zeroValueCustomsItems()} come first: a blind
+     * purchase sends none of our declaration, and a label inside one customs
+     * zone sends none at all. The rule itself covers only goods entering the
+     * EU, so an EU origin is exempt too: {@see AddressData::sharesCustomsZoneWith()}
+     * compares countries outside the US and would call Germany to France a
+     * border, refusing every intra-EU consumer label. A consignee with a
+     * company name is a business, the only signal the app has
+     * (`eu-product-identifiers` PRD), and is never refused here.
+     *
+     * @return list<CustomsItem>
+     */
+    public function customsItemsMissingProductIdentifiers(): array
+    {
+        if ($this->blindOffer !== null || $this->fromAddress->sharesCustomsZoneWith($this->toAddress)) {
+            return [];
+        }
+
+        if ($this->fromAddress->isInEuropeanUnion() || ! $this->toAddress->isInEuropeanUnion() || filled($this->toAddress->company)) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            $this->customsItems,
+            fn (CustomsItem $item): bool => $item->merchantProductId === null || $item->manufacturerProductId === null,
+        ));
+    }
+
+    /**
      * Scale customs item weights proportionally so their total fits inside the
      * package weight.
      *

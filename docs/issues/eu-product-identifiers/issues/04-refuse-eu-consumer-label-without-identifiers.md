@@ -1,6 +1,6 @@
 # Refuse an EU consumer label when a line has no M-PID or NS-PID
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -47,17 +47,17 @@ so.
 
 ## Acceptance criteria
 
-- [ ] `ShipRequestTest`: EU + no company + a line without `manufacturerProductId` is
+- [x] `ShipRequestTest`: EU + no company + a line without `manufacturerProductId` is
       listed; the same with a line whose product has no SKU is listed; EU + company is
       empty; Canada + no company is empty; EU + no company with
       all lines complete is empty; a line missing only the standard identifier is empty;
       the same incomplete line under a `blindOffer` is empty; the same line from a
       German origin to a German consumer is empty
-- [ ] `MissingProductIdentifierTest` beside `ZeroValueCustomsItemTest`: the Ship page
+- [x] `MissingProductIdentifierTest` beside `ZeroValueCustomsItemTest`: the Ship page
       refuses with the SKU and the missing field named; a product with no SKU is
       refused with its description named; the offer is still unclaimed afterwards;
       batch ship records the refusal against the package and continues
-- [ ] The refusal names the product form as where to fix it
+- [x] The refusal names the product form as where to fix it
 
 ## Out of scope
 

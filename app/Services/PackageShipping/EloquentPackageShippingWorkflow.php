@@ -29,6 +29,7 @@ use App\Enums\Role;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
 use App\Exceptions\MissingDeclaredValueException;
+use App\Exceptions\MissingProductIdentifierException;
 use App\Exceptions\PackageDraftIncompleteException;
 use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Exceptions\ZeroValueCustomsItemException;
@@ -477,6 +478,12 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 throw new ZeroValueCustomsItemException($zeroValued);
             }
 
+            // Refused just as outright, and for the same reason: a fix made
+            // once on the product, not per label, so there is no override.
+            if (($unidentified = $shipRequest->customsItemsMissingProductIdentifiers()) !== []) {
+                throw new MissingProductIdentifierException($unidentified);
+            }
+
             if ($request->requireCustomsWeightOverride && $this->requiresCustomsWeightOverride($shipRequest, $request->overrideCustomsWeights)) {
                 return PackageShippingResult::customsWeightOverrideRequired();
             }
@@ -533,6 +540,8 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             return PackageShippingResult::failed('Declared Value Required', $e->getMessage());
         } catch (ZeroValueCustomsItemException $e) {
             return PackageShippingResult::failed('Customs Value Required', $e->getMessage());
+        } catch (MissingProductIdentifierException $e) {
+            return PackageShippingResult::failed('Product Identifier Required', $e->getMessage());
         } catch (ShopifyDeclaredWeightException $e) {
             // Nothing was bought and nothing was claimed — the seller's own
             // declaration would have made the purchase fail, and it was
