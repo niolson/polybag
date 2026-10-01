@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Models\Product;
 use App\Services\ClientContext;
+use App\Support\Gtin;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -22,7 +23,20 @@ class ProductFactory extends Factory
             'barcode' => fake()->ean13(),
             'description' => fake()->words(3, true),
             'weight' => fake()->randomFloat(2, 0.1, 10),
+            'manufacturer_part_number' => fake()->bothify('MPN-####-??'),
+            'gtin' => self::syntheticGtin(),
         ];
+    }
+
+    /**
+     * A GTIN-13 with a valid check digit in GS1's restricted-circulation range
+     * (prefix 20–29), which is never assigned to a real trade item.
+     */
+    public static function syntheticGtin(): string
+    {
+        $digits = '2'.fake()->numerify('###########');
+
+        return $digits.Gtin::checkDigit($digits);
     }
 
     /**

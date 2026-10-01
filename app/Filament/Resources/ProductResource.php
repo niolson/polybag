@@ -8,7 +8,9 @@ use App\Filament\Resources\ProductResource\Pages;
 use App\Models\Location;
 use App\Models\Product;
 use App\Services\SettingsService;
+use App\Support\Gtin;
 use BackedEnum;
+use Closure;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Resources\Resource;
@@ -77,13 +79,6 @@ class ProductResource extends Resource
                     ->maxValue(150)
                     ->suffix('lbs')
                     ->helperText('Weight in pounds'),
-                Forms\Components\TextInput::make('hs_tariff_number')
-                    ->label('HS Tariff Number')
-                    ->maxLength(20)
-                    ->helperText('For international shipments'),
-                Forms\Components\TextInput::make('country_of_origin')
-                    ->maxLength(2)
-                    ->helperText('2-letter country code (e.g., US, CN)'),
                 Forms\Components\TextInput::make('bin_location')
                     ->label('Bin Location')
                     ->maxLength(50)
@@ -103,6 +98,33 @@ class ProductResource extends Resource
                             ->placeholder('0.00')
                             ->helperText('Per-unit surcharge for items requiring special handling (fragile, hazmat, kitting, oversize, etc.).')
                             ->columnSpanFull(),
+                    ]),
+                Section::make('Customs')
+                    ->description('Printed on the customs declaration of international shipments. EU consumer shipments need the SKU and a manufacturer part number on every line.')
+                    ->columns(2)
+                    ->schema([
+                        Forms\Components\TextInput::make('hs_tariff_number')
+                            ->label('HS Tariff Number')
+                            ->maxLength(20)
+                            ->helperText('For international shipments'),
+                        Forms\Components\TextInput::make('country_of_origin')
+                            ->maxLength(2)
+                            ->helperText('2-letter country code (e.g., US, CN)'),
+                        Forms\Components\TextInput::make('manufacturer_part_number')
+                            ->label('Manufacturer Part Number')
+                            ->maxLength(100)
+                            ->helperText('The manufacturer\'s part or model number (EU NS-PID).'),
+                        Forms\Components\TextInput::make('gtin')
+                            ->label('GTIN')
+                            ->maxLength(14)
+                            ->rules([
+                                fn (): Closure => function (string $attribute, mixed $value, Closure $fail): void {
+                                    if (filled($value) && ! Gtin::isValid((string) $value)) {
+                                        $fail('The GTIN must be 8, 12, 13 or 14 digits ending in a valid check digit.');
+                                    }
+                                },
+                            ])
+                            ->helperText('UPC, EAN or GTIN-14 (EU S-PID). Leave blank to use the barcode when it is one.'),
                     ]),
                 Section::make('Compliance')
                     ->description('Declarations about the contents that decide which carrier services and special handling a package gets.')

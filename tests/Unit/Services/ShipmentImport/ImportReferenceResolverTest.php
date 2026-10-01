@@ -88,3 +88,49 @@ it('passes a column mapped to is_media through a database source', function (): 
 
     expect(Product::where('sku', 'BOOK-2')->sole()->is_media)->toBeTrue();
 });
+
+/**
+ * Import one line of `ext_customs_items` for SKU `EU-1` through a Database source
+ * that maps each customs column to its product field.
+ *
+ * @param  array<string, string>  $values
+ */
+function importCustomsColumns(array $values): Product
+{
+    DB::table('ext_customs_items')->delete();
+    DB::table('ext_customs_items')->insert(['shipment_id' => 'A-1', 'sku' => 'EU-1'] + $values);
+
+    $source = new DatabaseSource([
+        'connection' => config('database.default'),
+        'shipment_items_table' => 'ext_customs_items',
+        'field_mapping' => ['shipment_item' => [
+            'sku' => 'sku',
+            'mpn' => 'manufacturer_part_number',
+            'ean' => 'gtin',
+            'tariff' => 'hs_tariff_number',
+            'origin' => 'country_of_origin',
+        ]],
+    ]);
+
+    app(ImportReferenceResolver::class)->productIdFor($source->fetchShipmentItems('A-1')->sole());
+
+    return Product::where('sku', 'EU-1')->sole();
+}
+
+it('writes and then updates each mapped customs column on the product', function (): void {
+    DB::statement('CREATE TEMPORARY TABLE ext_customs_items (shipment_id VARCHAR(255), sku VARCHAR(50), mpn VARCHAR(100), ean VARCHAR(14), tariff VARCHAR(20), origin CHAR(2))');
+
+    $created = importCustomsColumns(['mpn' => 'MFG-1', 'ean' => '4006381333931', 'tariff' => '6912.00', 'origin' => 'CN']);
+
+    expect($created->manufacturer_part_number)->toBe('MFG-1');
+    expect($created->gtin)->toBe('4006381333931');
+    expect($created->hs_tariff_number)->toBe('6912.00');
+    expect($created->country_of_origin)->toBe('CN');
+
+    $updated = importCustomsColumns(['mpn' => 'MFG-2', 'ean' => '036000291452', 'tariff' => '9506.11', 'origin' => 'VN']);
+
+    expect($updated->manufacturer_part_number)->toBe('MFG-2');
+    expect($updated->gtin)->toBe('036000291452');
+    expect($updated->hs_tariff_number)->toBe('9506.11');
+    expect($updated->country_of_origin)->toBe('VN');
+});

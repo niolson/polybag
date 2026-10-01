@@ -105,3 +105,28 @@ it('keeps the declaration inside the package weight across awkward scaling facto
     'one item far too heavy' => [0.5, [12.5], 4],
     'binary-unfriendly scale' => [0.29, [1.1, 2.2, 3.3], 3],
 ]);
+
+it('keeps each line\'s product identifiers when it scales the weight down', function (): void {
+    $request = shipRequestWeighing(0.5, [
+        new CustomsItem(
+            description: 'Snowboard',
+            quantity: 1,
+            unitValue: 699.95,
+            weight: 10.0,
+            hsTariffNumber: '9506.11',
+            countryOfOrigin: 'CA',
+            merchantProductId: 'SKU-12345',
+            manufacturerProductId: 'MFG-67890',
+            standardProductId: '4006381333931',
+        ),
+    ]);
+
+    $scaled = $request->withScaledCustomsWeights()->customsItems[0];
+
+    expect($scaled->weight)->toBeLessThan(10.0)
+        ->and($scaled->merchantProductId)->toBe('SKU-12345')
+        ->and($scaled->manufacturerProductId)->toBe('MFG-67890')
+        ->and($scaled->standardProductId)->toBe('4006381333931')
+        ->and($scaled->hsTariffNumber)->toBe('9506.11')
+        ->and($scaled->countryOfOrigin)->toBe('CA');
+});
