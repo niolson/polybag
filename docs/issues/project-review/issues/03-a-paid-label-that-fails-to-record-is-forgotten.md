@@ -1,6 +1,6 @@
 # A paid label that fails to record is forgotten, and can be bought again
 
-Status: needs-triage
+Status: done — 2026-09-29
 
 Repo: `polybag`
 
@@ -92,3 +92,14 @@ they can be checked (the seller and postage source are known then), so an adapte
 contract violation is found before money moves rather than after.
 
 ## Comments
+
+- 2026-09-29 — Fixed in `fb40b40`, which closed the gap the first option in *What to
+  build* describes, and kept the facts the second one wanted. `recordBoughtLabel()` stamps
+  the Offer and calls `markShipped()` in one transaction, so a failure leaves the Offer
+  unresolved. The next attempt asks USPS, UPS or Amazon for the label under the
+  idempotency key already stored on the Offer, rather than buying under a new one. The
+  reported tracking number is kept in `purchase_context`, the packer is told which seller
+  sold which label (`labelNotRecorded`), and managers are notified. FedEx can't be asked,
+  but it bills only on tender, so an abandoned FedEx label costs nothing. Moving the
+  provenance assertions before `createShipment()` was not done.
+- 2026-10-01 — Status closed; the file had been left open after the fix.

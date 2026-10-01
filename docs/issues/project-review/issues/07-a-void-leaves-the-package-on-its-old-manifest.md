@@ -71,3 +71,14 @@ it('puts a label re-shipped after a void on the next manifest', function (): voi
   to be refused or warned about, that belongs in the void workflow, not here.
 
 ## Comments
+
+- 2026-10-01 — Triage question answered: don't refuse the void. USPS's cancel endpoint
+  cancels a label until its Shipping Services File is created, and after that it submits a
+  refund request for the unused label. Either way the reply reads `CANCELED`, which
+  `UspsAdapter::readCancelReply()` already records as a void. So a manifested label can be
+  voided, and the re-shipped label has to reach the next SCAN form, which is this fix.
+  It is not yet known when USPS creates the file: creating the SCAN form and the first
+  acceptance scan are the likely triggers, and that needs a sandbox test. A refund
+  request returns a `disputeId`; the void message could say "refund requested, pull the
+  old label" for a label that was on a SCAN form. That is optional and separate from the
+  fix.
