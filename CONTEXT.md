@@ -120,6 +120,23 @@ Box Size 17, and `PBCSHIP` is the Ship command. It names its record exactly and 
 references, SKUs, UPCs and tracking numbers are *external identifiers*. See ADR-0007.
 _Avoid_: Record code, Shipment ID (for the scanned form), order number
 
+**Duties terms**:
+Who pays duties and import charges on an international parcel: the carrier account (DDP)
+or the recipient (DDU). Resolved per Shipment from the order, else the client's policy;
+an EU destination with neither is unresolved and cannot be bought. See ADR-0008.
+_Avoid_: Incoterms (the full set is wider than the two PolyBag uses), duties paid (says
+nothing about who)
+
+**Seller tax registration**:
+A number proving import VAT was collected at checkout — IOSS (EU), UK VAT, VOEC (Norway),
+ARN (Australia). The regime fixes where it is valid. The order's registration replaces
+the client's; they are never combined.
+_Avoid_: VAT number (also a recipient's tax ID), tax ID (ambiguous with the recipient's)
+
+**Source-decided terms**:
+The duties terms on a Label bought through a postage source that cannot take ours —
+Amazon Buy Shipping, Shopify Shipping. Recorded as such, never guessed as DDP or DDU.
+
 ## Relationships
 
 - A **Shipment** can produce one or more **Packages**.
@@ -145,6 +162,8 @@ _Avoid_: Record code, Shipment ID (for the scanned form), order number
 - An **Offer** is claimed atomically before purchase. If the source's answer is ambiguous,
   it remains awaiting confirmation and must be recovered or resolved before another purchase
   is attempted.
+- A Shipment's **duties terms** are its own when set, otherwise its client's for the destination; a person changes them by editing the Shipment, never at the Ship page.
+- A rate whose carrier cannot ship the resolved **duties terms** is dropped with a reason, never forced to the other term.
 
 ## Example dialogue
 
