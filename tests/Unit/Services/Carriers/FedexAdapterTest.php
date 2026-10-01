@@ -20,10 +20,15 @@ use App\Models\CarrierService;
 use App\Models\Client;
 use App\Models\Location;
 use App\Models\Package;
+use App\Models\PackageItem;
+use App\Models\Product;
 use App\Models\Shipment;
 use App\Services\Carriers\FedexAdapter;
 use App\Services\SettingsService;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Log;
+use Monolog\Handler\TestHandler;
+use Monolog\Logger as MonologLogger;
 use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\PendingRequest;
@@ -2431,4 +2436,166 @@ it('turns a ship request that got no answer into a decline that says to try agai
         ->and($response->errorMessage)->toBe(FedexAdapter::NO_ANSWER_MESSAGE)
         ->and($response->errorMessage)->toContain('try again')
         ->and($response->errorMessage)->not->toContain('may');
+});
+
+/*
+|--------------------------------------------------------------------------
+| EU product identifiers — eu-product-identifiers/02
+|--------------------------------------------------------------------------
+|
+| Every commodity bound for the EU carries an EU_DE_MINIMIS regulatory detail
+| when it has both a merchant and a manufacturer identifier.
+|
+*/
+
+/**
+ * @param  array<int, CustomsItem>  $customsItems
+ */
+function fedexShipRequestTo(string $country, array $customsItems): ShipRequest
+{
+    return new ShipRequest(
+        fromAddress: new AddressData(
+            firstName: 'Shipping',
+            lastName: 'Center',
+            streetAddress: '123 Warehouse St',
+            city: 'Seattle',
+            stateOrProvince: 'WA',
+            postalCode: '98072',
+            phone: '5551234567',
+        ),
+        toAddress: new AddressData(
+            firstName: 'Anna',
+            lastName: 'Schmidt',
+            streetAddress: 'Hauptstrasse 1',
+            city: $country === 'DE' ? 'Berlin' : 'Toronto',
+            stateOrProvince: $country === 'DE' ? null : 'ON',
+            postalCode: $country === 'DE' ? '10115' : 'M5H 2N2',
+            country: $country,
+            phone: '4930123456',
+        ),
+        packageData: new PackageData(weight: 2.0, length: 8, width: 6, height: 4),
+        selectedRate: new RateResponse(
+            carrier: 'FedEx',
+            serviceCode: 'INTERNATIONAL_PRIORITY',
+            serviceName: 'FedEx International Priority',
+            price: 48.10,
+            metadata: ['serviceType' => 'INTERNATIONAL_PRIORITY'],
+        ),
+        customsItems: $customsItems,
+    );
+}
+
+function identifiedCustomsItem(string $sku, ?string $mpn, ?string $gtin): CustomsItem
+{
+    return new CustomsItem(
+        description: 'Ceramic Mug',
+        quantity: 1,
+        unitValue: 12.0,
+        weight: 0.8,
+        merchantProductId: $sku,
+        manufacturerProductId: $mpn,
+        standardProductId: $gtin,
+    );
+}
+
+/**
+ * The commodities of the one CreateShipment request sent, checked against our schema.
+ *
+ * @return array<int, array<string, mixed>>
+ */
+function sentFedexCommodities(): array
+{
+    $commodities = null;
+
+    Saloon::assertSent(function ($request) use (&$commodities): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        assertMatchesFedexSchema($request->body()->all(), 'CreateShipmentRequest');
+        $commodities = $request->body()->all()['requestedShipment']['customsClearanceDetail']['commodities'];
+
+        return true;
+    });
+
+    return $commodities;
+}
+
+it('sends the EU product identifiers on every commodity bound for the EU', function (): void {
+    fakeFedexShipEndpoints();
+
+    $this->adapter->createShipment(fedexShipRequestTo('DE', [
+        identifiedCustomsItem('SKU-12345', 'MFG-67890', '01234567890128'),
+        identifiedCustomsItem('SKU-22222', 'MFG-22222', '4006381333931'),
+    ]));
+
+    expect(sentFedexCommodities()[0]['regulatoryDetails'])->toBe([[
+        'regulationCode' => 'EU_DE_MINIMIS',
+        'productId' => 'SKU-12345',
+        'productIdType' => 'SKU',
+        'details' => [
+            'merchantProductId' => 'SKU-12345',
+            'nonStandardManufacturerProductId' => 'MFG-67890',
+            'standardManufacturerProductId' => '01234567890128',
+        ],
+    ]])
+        ->and(sentFedexCommodities()[1]['regulatoryDetails'][0]['details']['merchantProductId'])->toBe('SKU-22222');
+});
+
+it('sends NA for a product with no GTIN, from its packed product', function (): void {
+    fakeFedexShipEndpoints();
+
+    $packageItem = PackageItem::factory()->create([
+        'product_id' => Product::factory()->create([
+            'sku' => 'MUG-001',
+            'manufacturer_part_number' => 'MFG-1',
+            'gtin' => null,
+            'barcode' => 'WH-000123',
+        ])->id,
+    ]);
+
+    $this->adapter->createShipment(fedexShipRequestTo('DE', [CustomsItem::fromPackageItem($packageItem->fresh())]));
+
+    expect(sentFedexCommodities()[0]['regulatoryDetails'][0]['details']['standardManufacturerProductId'])->toBe('NA');
+});
+
+it('leaves out the regulatory details of a commodity with no manufacturer part number, and only that one', function (): void {
+    fakeFedexShipEndpoints();
+
+    $this->adapter->createShipment(fedexShipRequestTo('DE', [
+        identifiedCustomsItem('SKU-12345', null, '01234567890128'),
+        identifiedCustomsItem('SKU-22222', 'MFG-22222', null),
+    ]));
+
+    $commodities = sentFedexCommodities();
+
+    expect($commodities[0])->not->toHaveKey('regulatoryDetails')
+        ->and($commodities[1]['regulatoryDetails'][0]['details']['standardManufacturerProductId'])->toBe('NA');
+});
+
+it('sends no regulatory details outside the EU', function (): void {
+    fakeFedexShipEndpoints();
+
+    $this->adapter->createShipment(fedexShipRequestTo('CA', [
+        identifiedCustomsItem('SKU-12345', 'MFG-67890', '01234567890128'),
+    ]));
+
+    expect(sentFedexCommodities()[0])->not->toHaveKey('regulatoryDetails');
+});
+
+it('logs the EU product identifiers in the label request', function (): void {
+    $handler = new TestHandler;
+    Log::extend('fedex-validation-capture', fn (): MonologLogger => new MonologLogger('fedex-validation', [$handler]));
+    config()->set('logging.channels.fedex-validation', ['driver' => 'fedex-validation-capture']);
+    Log::forgetChannel('fedex-validation');
+    fakeFedexShipEndpoints();
+
+    $this->adapter->createShipment(fedexShipRequestTo('DE', [
+        identifiedCustomsItem('SKU-12345', 'MFG-67890', '01234567890128'),
+    ]));
+
+    $labelRequest = collect($handler->getRecords())->firstWhere('message', 'LABEL REQUEST');
+
+    expect($labelRequest->context['payload']['customsClearanceDetail']['commodities'][0]['regulatoryDetails'][0]['regulationCode'])
+        ->toBe('EU_DE_MINIMIS');
 });

@@ -6,6 +6,7 @@ use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\UsesCarrierAccount;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
+use App\DataTransferObjects\Shipping\CustomsItem;
 use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
@@ -112,6 +113,15 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
      * (excepted batteries need package marks, not a declaration).
      */
     private const GROUND_NETWORK_SERVICES = ['FEDEX_GROUND', 'GROUND_HOME_DELIVERY', 'SMART_POST'];
+
+    /**
+     * Sent as `standardManufacturerProductId` when a product has no GTIN. The
+     * Ship API documentation for `regulatoryDetails` says "NA"; the FedEx
+     * Compatible notice of 2026-09-17 says "NO", but summarises the EU rule
+     * rather than the field. `eu-product-identifiers/05` confirms it with the
+     * Compatible integrator mailbox — change it here, and record who said so.
+     */
+    private const NO_STANDARD_PRODUCT_ID = 'NA';
 
     /**
      * Build the per-line-item packageSpecialServices and declaredValue fields
@@ -1519,6 +1529,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
     private function buildCustomsClearanceDetail(ShipRequest $request, ?CarrierAccount $account): array
     {
         $commodities = [];
+        $declaresEuProductIdentifiers = $request->toAddress->isInEuropeanUnion();
 
         foreach ($request->customsItems as $item) {
             $totalValue = round($item->unitValue * $item->quantity, 2);
@@ -1549,6 +1560,10 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
                 $commodity['harmonizedCode'] = $item->hsTariffNumber;
             }
 
+            if ($declaresEuProductIdentifiers && ($regulatoryDetail = $this->euProductIdentifierDetail($item)) !== null) {
+                $commodity['regulatoryDetails'] = [$regulatoryDetail];
+            }
+
             $commodities[] = $commodity;
         }
 
@@ -1570,6 +1585,35 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
                 ],
             ],
             'commodities' => $commodities,
+        ];
+    }
+
+    /**
+     * The `EU_DE_MINIMIS` entry carrying a commodity's EU product identifiers,
+     * or null when it lacks the merchant or manufacturer identifier.
+     *
+     * Both are mandatory members of `details`, so a partial entry is an
+     * invalid body rather than a partial declaration: such a commodity is sent
+     * as it was before the rule. Whether that may be bought at all is decided
+     * before the adapter is reached (`eu-product-identifiers/04`).
+     *
+     * @return array{regulationCode: string, productId: string, productIdType: string, details: array{merchantProductId: string, nonStandardManufacturerProductId: string, standardManufacturerProductId: string}}|null
+     */
+    private function euProductIdentifierDetail(CustomsItem $item): ?array
+    {
+        if ($item->merchantProductId === null || $item->manufacturerProductId === null) {
+            return null;
+        }
+
+        return [
+            'regulationCode' => 'EU_DE_MINIMIS',
+            'productId' => $item->merchantProductId,
+            'productIdType' => 'SKU',
+            'details' => [
+                'merchantProductId' => $item->merchantProductId,
+                'nonStandardManufacturerProductId' => $item->manufacturerProductId,
+                'standardManufacturerProductId' => $item->standardProductId ?? self::NO_STANDARD_PRODUCT_ID,
+            ],
         ];
     }
 

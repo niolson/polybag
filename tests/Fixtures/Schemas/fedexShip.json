@@ -365,7 +365,7 @@
       }
     },
     "Commodity": {
-      "description": "One customs item from buildCustomsClearanceDetail(). name is the description cut to 35 characters and description the same cut to 450. Unlike the package weight and declared value, every number here is sent as a decimal string: quantity and numberOfPieces are the item count, unitPrice is the per-unit value, customsValue and weight are line totals. countryOfManufacture defaults to US when the item has no origin. harmonizedCode is omitted when the item has no HS tariff number.",
+      "description": "One customs item from buildCustomsClearanceDetail(). name is the description cut to 35 characters and description the same cut to 450. Unlike the package weight and declared value, every number here is sent as a decimal string: quantity and numberOfPieces are the item count, unitPrice is the per-unit value, customsValue and weight are line totals. countryOfManufacture defaults to US when the item has no origin. harmonizedCode is omitted when the item has no HS tariff number. regulatoryDetails is present only on an EU-bound commodity with both required product identifiers.",
       "type": "object",
       "required": [
         "name",
@@ -397,7 +397,34 @@
             "value": { "$ref": "#/definitions/DecimalString" }
           }
         },
-        "harmonizedCode": { "type": "string", "minLength": 1 }
+        "harmonizedCode": { "type": "string", "minLength": 1 },
+        "regulatoryDetails": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "$ref": "#/definitions/EuProductIdentifiers" }
+        }
+      }
+    },
+    "EuProductIdentifiers": {
+      "description": "euProductIdentifierDetail(). Sent on a commodity only when the destination is in the EU and the item has both a merchant ID (its SKU) and a manufacturer part number; productId repeats the merchant ID. standardManufacturerProductId is the GTIN, or the literal NA when the product has none.",
+      "type": "object",
+      "required": ["regulationCode", "productId", "productIdType", "details"],
+      "additionalProperties": false,
+      "properties": {
+        "regulationCode": { "type": "string", "enum": ["EU_DE_MINIMIS"] },
+        "productId": { "type": "string", "minLength": 1 },
+        "productIdType": { "type": "string", "enum": ["SKU"] },
+        "details": {
+          "type": "object",
+          "required": ["merchantProductId", "nonStandardManufacturerProductId", "standardManufacturerProductId"],
+          "additionalProperties": false,
+          "properties": {
+            "merchantProductId": { "type": "string", "minLength": 1 },
+            "nonStandardManufacturerProductId": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "standardManufacturerProductId": { "type": "string", "pattern": "^(NA|[0-9]{8}|[0-9]{12,14})$" }
+          }
+        }
       }
     },
     "CustomsMoney": {

@@ -1,6 +1,6 @@
 # FedEx: `EU_DE_MINIMIS` regulatory details on every EU-bound commodity
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -60,16 +60,16 @@ rejecting it.
 
 ## Acceptance criteria
 
-- [ ] `AddressDataTest`: the 27 member codes are in, `GB`, `CH`, `NO`, `US` are out
-- [ ] `fedexShip.json` (`carrier-request-schema-validation/02`) extended with
+- [x] `AddressDataTest`: the 27 member codes are in, `GB`, `CH`, `NO`, `US` are out
+- [x] `fedexShip.json` (`carrier-request-schema-validation/02`) extended with
       `regulatoryDetails`, its `regulationCode` enum and the `details` object, so the
       schema guard catches a misspelled key
-- [ ] `FedexAdapterTest`: a shipment to Germany with all three identifiers sends the
+- [x] `FedexAdapterTest`: a shipment to Germany with all three identifiers sends the
       block above on each commodity; one with no `gtin` and a Code 128 barcode sends
       `"NA"`; one whose product has a SKU but no manufacturer part number sends no
       `regulatoryDetails` on that commodity and the full block on the others; one to
       Canada sends no `regulatoryDetails`
-- [ ] `Log::channel('fedex-validation')` label request shows the block, so a sandbox
+- [x] `Log::channel('fedex-validation')` label request shows the block, so a sandbox
       run in `05` can be read back from the log
 
 ## Out of scope
