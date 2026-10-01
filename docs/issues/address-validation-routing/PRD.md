@@ -52,6 +52,11 @@ not tried again on the schedule, only when someone asks. Google stops being sent
 for countries whose addresses don't use one. Once that is in place, international
 Shipments are validated on the schedule too.
 
+Deliverability stops calling a reference-data match "deliverable": it gains "Verified"
+and "Couldn't verify". Every validator's answer is recorded, FedEx is also asked on the
+Shipments it may validate, and the answers are compared with what actually happened, so
+the routing can be revised from real orders.
+
 The FedEx and UPS validators already exist and are tested against mocked responses, but
 nothing calls them: they cannot be put in the fixed chain without breaking the carriers'
 terms.
@@ -118,6 +123,19 @@ terms.
 25. As an operator in sandbox mode, I want validation to keep using the fake validator
     unless real validation in sandbox is switched on, so that testing does not spend
     requests.
+26. As a shipper, I want an address that matched reference data but has no delivery-point
+    confirmation shown as "Verified", not "Deliverable", so that I know what was actually
+    checked.
+27. As an operator, I want an address no validator could settle shown as "Couldn't
+    verify", not "Not deliverable", so that the exceptions list holds only addresses with
+    evidence against them.
+28. As a maintainer, I want every validator's answer on real orders recorded, including
+    FedEx's on Shipments another validator settled, and later compared with what actually
+    happened to the parcel, so that the routing improves from real data, not test
+    addresses.
+29. As a maintainer, I want UPS validation measured against the other validators before
+    it is trusted, so that a free validator of unknown quality does not accept wrong
+    addresses.
 
 ## Implementation Decisions
 
@@ -128,7 +146,24 @@ terms.
   validator was unavailable records no attempt, so the schedule retries it.
 - **The scheduled validation run** selects Shipments that are not `checked` and have no
   recorded attempt. Manual validation, from the Shipment or Manual Ship, ignores the
-  attempt and always runs.
+  attempt and always runs. Changing a Shipment's shipping method or address clears the
+  attempt, so a Shipment validated before it had a FedEx or UPS method gets the free
+  validator's turn once it has one.
+- **Every validator's answer is logged**, not only the one that settled the address:
+  validator, free or paid, outcome, a reason from a small fixed vocabulary when
+  inconclusive, country, and time. Rows hold verdicts, not copies of the address. This
+  is the evidence for revising the routing from real orders rather than test addresses.
+- **Deliverability says what the evidence supports.** Two values are added:
+  - **`verified`** ("Verified"): matched the reference data at house level, with no
+    delivery-point data. Google international, FedEx international and UPS results land
+    here.
+  - **`unverified`** ("Couldn't verify"): every validator in the chain was tried and
+    none could confirm or reject the address.
+
+  `yes` ("Deliverable") is kept for a confirmed delivery point: USPS DPV, Google's USPS
+  data, FedEx US DPV. `no` ("Not deliverable") is kept for positive evidence the address
+  is wrong. An incomplete Google verdict is inconclusive, not `no`. Existing non-US `yes`
+  rows are backfilled to `verified`.
 - **A validation plan module** takes a Shipment and returns the ordered validators for
   it. It is the only place the routing rules live, and it depends on:
   - the Shipment's country and shipping method;
@@ -142,18 +177,20 @@ terms.
   Shipment. It keeps the existing fallback behaviour: stop once a validator settles the
   address, and report a failure only after every validator has had its turn.
 - **Carrier eligibility.** FedEx is eligible when the shipping method includes a FedEx
-  carrier service. UPS is eligible only when every carrier service on the method is UPS.
-  A Shipment with no shipping method gets neither. These rules encode our reading of the
-  carriers' agreements and belong in one place, so a written clarification from either
-  carrier changes one rule.
+  carrier service or allows Amazon Buy Shipping, which may sell a FedEx label. UPS is
+  eligible only when every carrier service on the method is UPS and the method does not
+  allow Amazon Buy Shipping. A Shipment with no shipping method gets neither: nothing can
+  be bought for it (ADR 0006, amended by `carrier-catalog-reset/16`), but it can still be
+  packed, so USPS and Google still check its address. These rules encode our reading of
+  the carriers' agreements and belong in one place, so a written clarification from
+  either carrier changes one rule.
 - **Per-country lists** live together in one class or data file, each entry citing the
   test it came from:
-  - **FedEx trusted internationally:** AT, CH, CZ, DE, ES, FR, IT, LV, MX, NL, PL.
+  - **FedEx trusted internationally:** AT, CH, CZ, DE, ES, FR, IT, LV, MX, NL, PL, and
+    the lower-coverage DK, FI, LT, LU, NO, SI, CL. A FedEx miss falls through to Google,
+    so a lower-coverage country only saves less.
   - **FedEx excluded:** BE, BR, PT, where it accepts wrong house numbers.
   - **Google unsupported:** HK, LI, UY, where it rejects the region.
-
-  Whether to add the lower-coverage countries (DK, FI, LT, LU, NO, SI, CL) to the trusted
-  list is open; see Further Notes.
 - **FedEx result reading, international.** A match settles the address only when all of
   these hold:
   - FedEx reports it matched.
@@ -161,14 +198,27 @@ terms.
   - The returned house number equals the input number, where the comparison understands
     two-part numbers.
 
-  Anything else is inconclusive. The US reading (resolved, delivery point confirmed,
-  suite flags) stays, with single-organization ZIP precision mapped to "maybe".
+  Anything else is inconclusive. A settled international result is `verified`. The US
+  reading (resolved, delivery point confirmed, suite flags) stays, with
+  single-organization ZIP precision mapped to "maybe".
 - **Google request:** send the administrative area only when the address reference
   service says the country uses one.
-- **UPS notice:** shown with the validation result on the Shipment wherever the result's
-  source is UPS, in UPS's own wording.
+- **UPS** ships together with its notice, which is shown with the validation result on
+  the Shipment wherever the result's source is UPS, in UPS's own wording. Nobody on the
+  project knows how reliable UPS validation is, so before it goes ahead of USPS it gets
+  the same production comparison FedEx had. Until then its valid-address result maps to
+  `verified`.
 - **International on the schedule** is the last step. The scheduled run's US-only filter
   is dropped once the plan and attempt tracking are in, so cost stays bounded.
+- **FedEx shadow check.** When a FedEx-eligible Shipment is settled by another validator,
+  FedEx is asked as well and its answer is logged without changing the result. It is
+  free and builds a side-by-side comparison on real orders. It runs in every country,
+  including the excluded BE, BR and PT, to show whether FedEx improves there. It sits
+  behind a setting, on by default.
+- **Quality against outcomes.** Validator answers are later joined to evidence of whether
+  they were right: address edits after validation, label purchase failures, carrier
+  tracking exceptions, undeliverable returns, deliveries. Choosing those signals is a
+  design decision of its own.
 
 ## Testing Decisions
 
@@ -194,6 +244,10 @@ terms.
 - **Google request:** no administrative area for a country that doesn't use one; one for
   a country that does.
 - **UPS notice:** present on a UPS result, absent on others.
+- **Deliverability:** each validator's results map to the agreed values; a chain that
+  ends inconclusive is `unverified`; the backfill moves non-US `yes` only.
+- **Answer log and shadow check:** one row per validator that answered, none for one
+  that was unavailable; a shadow answer never changes the Shipment's result.
 - **Prior art:** the existing tests for the FedEx, UPS, Google and USPS validators and for
   the validation service already fake each API with mocked responses and assert on the
   Shipment. The UPS request is also validated against UPS's published schema.
@@ -236,24 +290,20 @@ this is a summary:
 **FedEx says not to use its API to determine deliverability.** Its documentation says
 this, and that FedEx does not deliver to every valid address. PolyBag's deliverability
 is a property of the address, not of a carrier. Google's international results are the
-same kind of reference-data match, and PolyBag already records those as deliverable. The
-open decision is whether a FedEx result is presented the same way, or labelled as an
-address match.
+same kind of reference-data match, and PolyBag recorded those as deliverable. Neither
+FedEx nor Google internationally has delivery-point data the way USPS does, which is why
+those results become `verified`, not `yes`.
 
-**Open decisions for triage:**
+**Decisions, 2026-10-01** (at slicing):
 
-- Whether the lower-coverage countries join the FedEx trusted list. It is safe, since a
-  FedEx miss falls through to Google, but it saves less.
-- Whether "includes a FedEx service" should also count Amazon Buy Shipping when Amazon
-  may sell a FedEx label. FedEx is then the carrier of record without being the postage
-  source. The conservative reading counts only the method's own FedEx services.
-- Whether a Shipment with no shipping method may use FedEx when its Client has a FedEx
-  account.
+- The lower-coverage countries join the FedEx trusted list.
+- A method that allows Amazon Buy Shipping counts as FedEx-eligible for validation, since
+  FedEx can then be the carrier of record without being the postage source.
+- A Shipment with no shipping method gets no carrier validator. It is not an error, since
+  it can be packed, but nothing can be bought for it.
+- Deliverability gains `verified` and `unverified`, as above.
+- UPS is measured against the other validators before it is trusted.
+- The FedEx shadow check runs in excluded countries too.
 
-**Suggested order:**
-
-1. The Google state fix and attempt tracking. Both fix live problems on their own.
-2. Then the plan and eligibility.
-3. Then the FedEx international reading and country lists.
-4. Then the UPS notice.
-5. Then international Shipments on the schedule.
+**Issues:** [`issues/`](issues/), `01`–`11`. `01`–`04` and `06` can start immediately;
+`05` is the tracer for the plan.
