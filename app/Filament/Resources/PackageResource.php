@@ -571,6 +571,32 @@ class PackageResource extends Resource
                                 ? $notification->success()->send()
                                 : $notification->danger()->send();
                         }),
+                    // For a label that is already void at its source: one the
+                    // source accepted that PolyBag failed to record, or one
+                    // voided on the carrier's own site. A Shopify label is
+                    // left to the fulfillment synchronizer.
+                    Actions\Action::make('recordVoid')
+                        ->label('Record Void')
+                        ->icon('heroicon-o-document-minus')
+                        ->color('danger')
+                        ->requiresConfirmation()
+                        ->authorize('voidLabel')
+                        ->modalHeading('Record Void')
+                        ->modalDescription('Only for a label already voided with the carrier or postage source. PolyBag will un-ship the package without asking the source to void it, so a label that is still live stays billed.')
+                        ->modalSubmitActionLabel('Record void')
+                        ->visible(fn (Package $record): bool => $record->status === PackageStatus::Shipped
+                            && ! $record->isShopifyShipped())
+                        ->action(function (Package $record): void {
+                            $result = app(PackageLabelWorkflow::class)->recordVoid($record, auth()->user());
+
+                            $notification = Notification::make()
+                                ->title($result->success ? 'Void recorded' : $result->title)
+                                ->body($result->message);
+
+                            $result->success
+                                ? $notification->success()->send()
+                                : $notification->danger()->send();
+                        }),
                 ]),
             ]);
     }

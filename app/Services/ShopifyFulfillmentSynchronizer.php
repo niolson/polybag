@@ -140,20 +140,10 @@ class ShopifyFulfillmentSynchronizer
     {
         $trackingNumber = $package->tracking_number;
 
-        // Drop the Shopify label identifiers along with the shipping data. They
-        // are what ShopifyShippingLabelService uses to recover a half-finished
-        // purchase, and a voided label must never be recovered — re-shipping
-        // this package has to buy a new one.
-        $package->metadata = collect($package->metadata ?? [])
-            ->except([
-                'shopify_shipping_label_id',
-                'shopify_purchase_result_id',
-                'shopify_label_document_url',
-                'shopify_customs_form_url',
-            ])
-            ->all();
-        $package->save();
-
+        // clearShipping() drops the Shopify label identifiers with the shipping
+        // data (`Package::LABEL_METADATA_KEYS`). They are what
+        // ShopifyShippingLabelService uses to recover a half-finished purchase,
+        // and a voided label must never be recovered.
         // Nobody in PolyBag asked for this void; Shopify reported it done.
         $package->clearShipping(VoidReason::VoidedUpstream);
 

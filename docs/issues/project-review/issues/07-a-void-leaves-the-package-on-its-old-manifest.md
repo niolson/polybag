@@ -1,6 +1,6 @@
 # A void leaves the Package on its old manifest, so the re-shipped label is never manifested
 
-Status: needs-triage
+Status: done — 2026-10-01
 
 Repo: `polybag`
 
@@ -82,3 +82,12 @@ it('puts a label re-shipped after a void on the next manifest', function (): voi
   request returns a `disputeId`; the void message could say "refund requested, pull the
   old label" for a label that was on a SCAN form. That is optional and separate from the
   fix.
+- 2026-10-01 — Built. `manifest_id` is now a projected column (`PackageLabel::PROJECTED_COLUMNS`)
+  with a new `package_labels.manifest_id`, backfilled for active labels. `markShipped()`
+  writes it as null on both rows. `clearShipping()` nulls it on the Package only, so the
+  voided Label keeps the form it was on. `ManifestService::markManifested()` stamps both
+  rows from the tracking numbers USPS was sent, only where the Package is still shipped
+  with that number. That covers the success path and the "already manifested" path.
+  Regression tests in `ManifestAfterVoidTest` (the Evidence test, both rows stamped
+  together, and a void during the USPS call) all fail without the fix. The optional
+  "refund requested" void message was not built.
