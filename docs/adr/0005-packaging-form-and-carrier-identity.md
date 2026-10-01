@@ -27,6 +27,13 @@ the same sentence already gave UPS: the adapter sends the packaging and stamps w
 sent. The slicing also added Priority Mail Express flat-rate envelopes as their own
 `CarrierPackaging` cases, since a packer holding one uses the service printed on it.
 
+Amended 2026-09-30 (`project-review/18`) on decision 4's second filter site: there is no
+pre-selection site any more. A shipping rule naming a direct service selects among the
+rates rate shopping quoted, which have already passed the filter, so
+`resolvePreSelectedRate()` is gone from the adapter contract. What decision 4 required of
+it still holds: a rule never buys a rate quoted for packaging the Package is not in, and a
+rule whose service has no compatible rate falls through to rate shopping.
+
 Written after the 2026-09-11 Amazon live run listed thirteen offers — flat-rate envelopes,
 flat-rate boxes and FedEx One Rate — for a parcel in the packer's own 4×6×6 box. The narrow
 fix for that is `amazon-buy-shipping/12`; this document is about why the fix is a fourth

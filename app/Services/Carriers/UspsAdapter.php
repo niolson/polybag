@@ -8,7 +8,6 @@ use App\Contracts\RecoversUnresolvedPurchase;
 use App\Contracts\UsesCarrierAccount;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
-use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
@@ -46,7 +45,6 @@ use App\Services\Carriers\Concerns\IdentifiesCatalogServices;
 use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
 use App\Services\Shipping\ContentsFilter;
-use App\Services\Shipping\PackagingFilter;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -1278,20 +1276,6 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
     public function supportsCarrierManifest(): bool
     {
         return true;
-    }
-
-    public function resolvePreSelectedRate(RateResponse $rate, Package $package): ?RateResponse
-    {
-        $packaging = PackageData::fromPackage($package)->carrierPackaging;
-        $variants = $this->getRates(RateRequest::fromPackage($package), [$rate->serviceCode]);
-
-        // No variant quoted: the rule's own rate stands, subject to the same
-        // filter as everything else, rather than being returned unconditionally.
-        if ($variants->isEmpty()) {
-            $variants = collect([$rate]);
-        }
-
-        return PackagingFilter::keepCompatible($variants, $packaging)->sortBy('price')->first();
     }
 
     public function packagingRequirementFor(RateResponse $rate): PackagingRequirement

@@ -11,7 +11,6 @@ use App\DataTransferObjects\PostageSources\ServiceObservation;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\AmazonPurchasedLabel;
 use App\DataTransferObjects\Shipping\AmazonShippingQuote;
-use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
@@ -40,10 +39,8 @@ use App\Services\Carriers\Concerns\ReadsShippingV2Rates;
 use App\Services\PostageSources\ObservedServiceRecorder;
 use App\Services\PostageSources\OfferStore;
 use App\Services\RateSelector;
-use App\Services\RuleEvaluator;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\Shipping\ContentsFilter;
-use App\Services\Shipping\PackagingFilter;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Exceptions\Request\FatalRequestException;
@@ -338,18 +335,6 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
     public function observationSource(): string
     {
         return self::OBSERVATION_SOURCE;
-    }
-
-    /**
-     * Never reached from a shipping rule: a rule naming Amazon names the
-     * source, and {@see RuleEvaluator} selects among the offers Amazon quotes
-     * rather than pre-selecting a rate for it (`carrier-catalog-reset/07`). Kept
-     * for the contract, and answered the same way a quoted offer would be:
-     * only the packaging filter applies.
-     */
-    public function resolvePreSelectedRate(RateResponse $rate, Package $package): ?RateResponse
-    {
-        return PackagingFilter::keepCompatible(collect([$rate]), PackageData::fromPackage($package)->carrierPackaging)->first();
     }
 
     /**

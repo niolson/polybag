@@ -49,7 +49,6 @@ use App\Services\PostageSources\PostageSourceResolver;
 use App\Services\RateQuoteLogger;
 use App\Services\RateSelector;
 use App\Services\RuleEvaluator;
-use App\Services\Shipping\ContentsFilter;
 use App\Services\ShippingRateService;
 use App\Services\SpecialServiceResolver;
 use Illuminate\Database\QueryException;
@@ -428,9 +427,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
         // Marked through the offer, which points at the row the quote log
         // wrote for exactly this rate. Nothing to mark for a blind purchase,
-        // which logged no quote, or for a rule's pre-selected rate, whose
-        // offer points at no quote row because it never rate-shopped
-        // (`postage-source-split/17`).
+        // which logged no quote (`postage-source-split/17`).
         if ($offer !== null) {
             $this->rateQuoteLogger->markSelected($offer);
         }
@@ -643,16 +640,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 return $result;
             }
 
-            // A rule's pre-selected rate is resolved server-side and never
-            // rate-shopped, so it arrives with no offer. It gets one here: not
-            // because it needs protecting from a browser it never reached, but
-            // because the offer is the recovery record — the claim, the
-            // unresolved state after a timeout, and the handle the carrier is
-            // asked about all live on it (`project-review/02`). A rate from
-            // rate shopping already carries one and is left as it is.
-            if ($selectedRate !== null) {
-                $selectedRate = $this->shippingRateService->offerForUnquotedRate($package, $selectedRate);
-            }
+            // Every rate selected here was rate-shopped, a rule's choice
+            // included, so it names the Offer that quote issued: the claim,
+            // the unresolved state after a timeout, and the handle the carrier
+            // is asked about all live on it (`project-review/02`, `/18`).
 
             // Through purchase() rather than ship(): this is the trusted side
             // of the boundary ship() enforces.
@@ -681,6 +672,15 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         } catch (RequestException $e) {
             logger()->error('AutoShip carrier error', ['package_id' => $package->id, 'error' => $e->getMessage()]);
             $result = PackageShippingResult::failed('Carrier Error', 'Unable to connect to the carrier. Please try again.');
+            $this->cleanupPackage($package, $request, $result);
+
+            return $result;
+        } catch (MissingDeclaredValueException $e) {
+            // Thrown by rate shopping, before anything was offered or bought:
+            // the same refusal the Ship page shows instead of rates, not an
+            // unexpected error. A rule's choice is rate-shopped too
+            // (`project-review/18`), so it reaches here as well.
+            $result = PackageShippingResult::failed('Declared Value Required', $e->getMessage());
             $this->cleanupPackage($package, $request, $result);
 
             return $result;
@@ -832,7 +832,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * direct adapter we do not have and hold no account with.
      *
      * Every rate reaching a purchase carries an offer now — ship() refuses one
-     * that does not, and autoShip() issues one for a rule's pre-selected rate.
+     * that does not, and autoShip() buys only rates rate shopping quoted.
      * The carrier-name fallback is for a caller that bypasses both, and
      * dispatches exactly as a direct offer would.
      */
@@ -1532,11 +1532,13 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         $requirements = $this->offerRequirementsFor($package);
 
         // A rule naming a scope of quoted rates selects among them like any
-        // rate-shopped offer, so a service outside the allowance is refused and named.
-        // Never a blind purchase. A rule naming Amazon buys from Amazon or not
-        // at all (`amazon-buy-shipping/19`); *any priced source* with nothing
-        // quoted in scope falls through to rate shopping, as a pre-selected
-        // direct service with no variant does below.
+        // rate-shopped offer, so a service outside the allowance is refused and named,
+        // and a rate an *Exclude* rule matches is never in it
+        // (`project-review/17`). A *Direct* rule's service is chosen this way
+        // too, on a real quote with a price and a delivery date
+        // (`project-review/18`). Never a blind purchase. A rule naming Amazon
+        // buys from Amazon or not at all (`amazon-buy-shipping/19`); any other
+        // scope with nothing quoted in it falls through to rate shopping.
         $quoted = null;
 
         if ($ruleResult->hasPreSelectedScope()) {
@@ -1558,57 +1560,9 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 return $finish($this->rateSelector->selectForAutomation($rates, $deadline, $method, $requirements, $channel));
             }
 
-            logger()->info('A shipping rule names a service no source quoted for this package; rate shopping instead', [
+            logger()->info('A shipping rule names a service no source quoted, or an Exclude rule removed, for this package; rate shopping instead', [
                 'package_id' => $package->id,
                 ...$scope->toLogContext(),
-            ]);
-        }
-
-        // Only a source that quotes can resolve a pre-selected rate. A blind
-        // selection was handled above without inventing a rate for it.
-        $adapter = $ruleResult->hasPreSelectedRate()
-            ? $this->carrierRegistry->quotingAdapterFor($ruleResult->preSelectedRate->carrier)
-            : null;
-
-        $resolved = $adapter?->resolvePreSelectedRate($ruleResult->preSelectedRate, $package);
-
-        // A rule names a service, and cannot vouch for the contents it
-        // requires: a *Use* rule naming Media Mail buys it only for a Package
-        // that qualifies, the same drop rate shopping applies (ADR-0006
-        // decision 11). Run here because pre-selection never rate-shops.
-        $preSelected = $resolved instanceof RateResponse
-            ? ContentsFilter::keepQualifying(collect([$resolved]), $package->qualifyingContents())->first()
-            : null;
-
-        // A rule's choice is still unattended: the shipping method's on-time
-        // and protection requirements hold against it too.
-        if ($preSelected instanceof RateResponse) {
-            return $finish($this->rateSelector->selectForAutomation(
-                collect([$preSelected]),
-                $deadline,
-                $method,
-                $requirements,
-                $channel,
-            ));
-        }
-
-        // The adapter found no variant of the pre-selected service this
-        // Package's packaging can use (ADR-0005 decision 4), or the service
-        // requires contents the Package does not have. Not a failure: rate
-        // shopping runs the same filters on real rates, and the rule's
-        // exclusions still apply there.
-        if ($resolved instanceof RateResponse) {
-            logger()->info('Pre-selected service requires contents this package does not qualify for; rate shopping instead', [
-                'package_id' => $package->id,
-                'carrier' => $ruleResult->preSelectedRate->carrier,
-                'service_code' => $ruleResult->preSelectedRate->serviceCode,
-            ]);
-        } elseif ($adapter) {
-            logger()->info('Pre-selected service has no variant for this packaging; rate shopping instead', [
-                'package_id' => $package->id,
-                'carrier' => $ruleResult->preSelectedRate->carrier,
-                'service_code' => $ruleResult->preSelectedRate->serviceCode,
-                'packaging' => PackageData::fromPackage($package)->carrierPackaging?->value,
             ]);
         }
 

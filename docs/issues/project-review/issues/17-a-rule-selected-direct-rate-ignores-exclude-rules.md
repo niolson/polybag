@@ -1,6 +1,6 @@
 # A rule-selected direct rate ignores *Exclude* rules
 
-Status: needs-triage
+Status: done — 2026-09-30
 
 Repo: `polybag`
 
@@ -76,3 +76,15 @@ it('does not buy a pre-selected direct rate an earlier Exclude rule removes', fu
   above.
 
 ## Comments
+
+- 2026-09-30 — Fixed with `18`, by its second option rather than either one proposed here.
+  A *Direct* *Use* rule no longer pre-selects a rate: `RuleEvaluator::directResult()`
+  returns a `RuleRateScope` (`kinds: [Direct]`, the rule's service, not strict) for every
+  direct service, as it already did for Amazon Shipping. `selectedRateForAutoShip()`
+  rejects excluded rates before it filters a scope, so an earlier *Exclude* rule that
+  matches the rule's service empties the scope, and the non-strict scope falls through to
+  rate shopping with the exclusions still applied. That path logs "A shipping rule names a
+  service no source quoted, or an Exclude rule removed, for this package; rate shopping
+  instead". The Evidence test is in `ShippingRuleSourceTest` and fails without the change.
+  The Ship page highlight is unchanged: `isPreSelected()` reads the scope, and the
+  excluded rate was never on the page.

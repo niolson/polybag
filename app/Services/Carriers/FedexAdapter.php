@@ -40,7 +40,6 @@ use App\Services\Carriers\Concerns\IdentifiesCatalogServices;
 use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
 use App\Services\SettingsService;
-use App\Services\Shipping\PackagingFilter;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -1022,11 +1021,6 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
     public function supportsCarrierManifest(): bool
     {
         return false;
-    }
-
-    public function resolvePreSelectedRate(RateResponse $rate, Package $package): ?RateResponse
-    {
-        return PackagingFilter::keepCompatible(collect([$rate]), PackageData::fromPackage($package)->carrierPackaging)->first();
     }
 
     public function packagingRequirementFor(RateResponse $rate): PackagingRequirement

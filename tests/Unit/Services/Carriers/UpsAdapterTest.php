@@ -3,7 +3,6 @@
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CustomsItem;
 use App\DataTransferObjects\Shipping\PackageData;
-use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
@@ -16,7 +15,6 @@ use App\Http\Integrations\Ups\Requests\LabelRecovery;
 use App\Http\Integrations\Ups\Requests\Rate;
 use App\Http\Integrations\Ups\Requests\TrackShipment;
 use App\Http\Integrations\Ups\Requests\VoidShipment;
-use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierAccountScope;
@@ -1867,18 +1865,6 @@ it('refuses to classify a packaging code it never sends', function (string $code
     'a pallet' => ['30'],
     'nonsense' => ['zz'],
 ]);
-
-it('keeps a pre-selected rate only when the package meets its packaging requirement', function (): void {
-    $package = Package::factory()->create([
-        'box_size_id' => BoxSize::factory()->carrierPackaging(CarrierPackaging::UpsPak)->create()->id,
-    ]);
-
-    $quotedForAPak = new RateResponse(carrier: 'UPS', serviceCode: '03', serviceName: 'UPS Ground', price: 11.00, metadata: ['serviceCode' => '03', 'packagingCode' => '04'], packagingRequirement: PackagingRequirement::exactly(CarrierPackaging::UpsPak));
-    $rulesRate = new RateResponse(carrier: 'UPS', serviceCode: '03', serviceName: 'UPS Ground', price: 11.00, metadata: ['serviceCode' => '03']);
-
-    expect($this->adapter->resolvePreSelectedRate($quotedForAPak, $package))->toBe($quotedForAPak)
-        ->and($this->adapter->resolvePreSelectedRate($rulesRate, $package))->toBeNull();
-});
 
 // --- Recovery by reference — postage-source-split/18 ------------------------
 

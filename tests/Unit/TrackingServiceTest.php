@@ -111,11 +111,6 @@ it('refreshes a package tracking snapshot and dispatches a status change event',
             return false;
         }
 
-        public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
-        {
-            return $rate;
-        }
-
         public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
         {
             return PackagingRequirement::shipperPackaging();
@@ -220,11 +215,6 @@ it('returns unsupported tracking safely without changing status unexpectedly', f
         public function supportsCarrierManifest(): bool
         {
             return false;
-        }
-
-        public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
-        {
-            return $rate;
         }
 
         public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
@@ -333,11 +323,6 @@ it('notifies operational users when a package enters exception or is stuck in pr
         public function supportsCarrierManifest(): bool
         {
             return false;
-        }
-
-        public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
-        {
-            return $rate;
         }
 
         public function packagingRequirementFor(RateResponse $rate): PackagingRequirement

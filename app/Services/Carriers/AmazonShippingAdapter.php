@@ -32,7 +32,6 @@ use App\Services\PostageSources\ObservedServiceRecorder;
 use App\Services\PostageSources\OffAmazonShippingCheck;
 use App\Services\PostageSources\OfferStore;
 use App\Services\PostageSources\PostageSourceResolver;
-use App\Services\RuleEvaluator;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use Illuminate\Support\Collection;
 use Saloon\Exceptions\Request\FatalRequestException;
@@ -237,17 +236,6 @@ class AmazonShippingAdapter implements AsyncRateQuoting, CarrierPolicy, Recovers
             $source,
             $serviceCodes,
         );
-    }
-
-    /**
-     * Never reached: a *Use* rule naming a service sold on a connection
-     * selects among quoted rates, because a purchase needs the Offer only a
-     * quote issues ({@see RuleEvaluator}). Null sends a caller to rate
-     * shopping rather than to a purchase that could not be made.
-     */
-    public function resolvePreSelectedRate(RateResponse $rate, Package $package): ?RateResponse
-    {
-        return null;
     }
 
     /**

@@ -4,8 +4,6 @@ namespace App\Services;
 
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
-use App\DataTransferObjects\Shipping\PackagingRequirement;
-use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\RuleEvaluationResult;
 use App\DataTransferObjects\Shipping\RuleExclusion;
 use App\DataTransferObjects\Shipping\RuleRateScope;
@@ -19,7 +17,6 @@ use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\ShippingRule;
-use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\ShopifyAdapter;
 use App\Services\PostageSources\MethodSourceAllowance;
 
@@ -134,40 +131,25 @@ class RuleEvaluator
     /**
      * A *Use* rule naming a service sold directly.
      *
-     * A rule names a service, never a packaging (ADR-0005 decision 4). It
-     * does name the catalog service, so the contents drop can judge a rate an
-     * adapter hands back unquoted.
-     *
-     * A service sold on a connection's account, like Amazon Shipping, is
-     * bought against the Offer a quote issues, so there is no rate to
-     * pre-select: the rule selects among quoted direct rates of that service.
-     * An empty scope falls through to rate shopping, as a pre-selected direct
-     * service with no variant does (`carrier-catalog-reset/15`).
+     * The rule selects among the direct rates rate shopping quoted for its
+     * service, never a rate built here: a quote carries the price, the
+     * delivery date and the Offer the purchase is bought against, and the
+     * method's on-time requirement is judged on it (`project-review/18`).
+     * Selecting among quoted rates is also what drops the ones an earlier
+     * *Exclude* rule matches (`project-review/17`). A rule names a service,
+     * never a packaging (ADR-0005 decision 4), so every variant of the service
+     * rate shopping kept for this Package's packaging is in scope. An empty
+     * scope falls through to rate shopping (`carrier-catalog-reset/15`).
      *
      * @param  list<RuleExclusion>  $exclusions
      */
     private function directResult(CarrierService $service, array $exclusions): RuleEvaluationResult
     {
-        if (CarrierRegistry::takesConnection($service->carrier->name)) {
-            return new RuleEvaluationResult(
-                preSelectedScope: new RuleRateScope(
-                    kinds: [PostageSourceKind::Direct],
-                    carrierServiceId: $service->id,
-                    strict: false,
-                ),
-                exclusions: $exclusions,
-            );
-        }
-
         return new RuleEvaluationResult(
-            preSelectedRate: new RateResponse(
-                carrier: $service->carrier->name,
-                serviceCode: $service->service_code,
-                serviceName: $service->name,
-                price: 0.0,
-                packagingRequirement: PackagingRequirement::shipperPackaging(),
+            preSelectedScope: new RuleRateScope(
+                kinds: [PostageSourceKind::Direct],
                 carrierServiceId: $service->id,
-                carrierId: $service->carrier_id,
+                strict: false,
             ),
             exclusions: $exclusions,
         );

@@ -104,3 +104,17 @@ The existing test *auto ships through a rule preselected rate* asserts
   asked whichever account scopes preferred at retry. The Offer now records the account
   `CarrierAccount::resolveForShipment()` gives, the same resolution the purchase re-checks.
   Both have regression tests that fail without the change.
+
+- 2026-09-30 — `offerForUnquotedRate()` is removed by `18`. A *Direct* *Use* rule now
+  selects among rate-shopped rates, and rate shopping issues every rate's Offer, so there
+  is no unquoted rate left to issue one for. The protection holds by construction: every
+  rate `autoShip()` buys names the Offer its quote issued, with the quote fingerprint and
+  the account the adapter quoted on, and goes through `inspect()`, `redeem()` and recovery.
+  The three regression tests still pass with the same assertions, their mocks now quoting
+  the rule's service: a timed-out rule-selected purchase is not bought again; the Offer
+  records the carrier account (now proved against the real `UpsAdapter`, so the account is
+  the one UPS quoting resolved); and a missing declared value still reports "Declared
+  Value Required". That last one is now raised by rate shopping, before any Offer, and
+  `autoShip()` catches it by name. The case this note's second comment kept working, a
+  declared-value code scoped to another service, is refused the same way the Ship page
+  refuses it: rating the package applies every declared-value code on the method.

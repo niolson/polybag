@@ -787,7 +787,7 @@ it('represents a shipping rule that pre-selects a blind purchase', function (): 
 
     $result = app(RuleEvaluator::class)->evaluate($package->shipment->fresh(), $package);
 
-    expect($result->hasPreSelectedRate())->toBeFalse()
+    expect($result->hasPreSelectedScope())->toBeFalse()
         ->and($result->hasPreSelectedBlindPurchase())->toBeTrue()
         ->and($result->preSelectedBlindPurchaseId)->toBe('Shopify:auto');
 });

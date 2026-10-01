@@ -1771,11 +1771,6 @@ class AsyncOfferSourceStub implements AsyncRateQuoting, CarrierAdapterInterface
         return ShipResponse::failure('Not part of this test');
     }
 
-    public function resolvePreSelectedRate(RateResponse $rate, Package $package): RateResponse
-    {
-        return $rate;
-    }
-
     public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
     {
         return PackagingRequirement::shipperPackaging();
