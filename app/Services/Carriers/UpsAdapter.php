@@ -61,6 +61,25 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
     use ResolvesCarrierAccount;
     use ResolvesDeliveredAt;
 
+    /**
+     * `Shipment.ShipperType` / `Shipment.ConsigneeType` codes.
+     */
+    private const PARTY_TYPE_BUSINESS = '01';
+
+    private const PARTY_TYPE_CONSUMER = '02';
+
+    /**
+     * Sent as `productIdentifierExemptIndicator` beside a product's EU product
+     * identifiers. The UPS guidance (v1.0, August 2026) shows the field only in
+     * XML and the vendored spec predates it, so whether the JSON API wants the
+     * string or a boolean is unknown; it is a string here because every other
+     * value in the body is. `eu-product-identifiers/05` confirms it against
+     * UPS — change it here, and record what UPS said.
+     */
+    private const PRODUCT_IDENTIFIER_NOT_EXEMPT = 'false';
+
+    private const PRODUCT_ID_MAX_LENGTH = 100;
+
     private function resolveConnector(?CarrierAccount $account): UpsConnector
     {
         return UpsConnector::getAuthenticatedConnector($account);
@@ -612,6 +631,13 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
                     'Name' => trim($request->fromAddress->company ?: $request->fromAddress->firstName.' '.$request->fromAddress->lastName),
                     'Address' => $this->buildAddress($request->fromAddress),
                 ],
+                // UPS decides from these two whether a shipment falls under
+                // rules that turn on who is buying, the EU product identifiers
+                // among them. Sent on every lane so UPS's own default never
+                // decides: the shipper is always a warehouse, and a consignee
+                // with no company name is the only consumer signal we have.
+                'ShipperType' => self::PARTY_TYPE_BUSINESS,
+                'ConsigneeType' => filled($request->toAddress->company) ? self::PARTY_TYPE_BUSINESS : self::PARTY_TYPE_CONSUMER,
                 'PaymentInformation' => [
                     'ShipmentCharge' => [
                         [
@@ -1444,6 +1470,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
     private function buildCustomsDetail(ShipRequest $request): array
     {
         $products = [];
+        $declaresEuProductIdentifiers = $request->toAddress->isInEuropeanUnion();
 
         foreach ($request->customsItems as $item) {
             $product = [
@@ -1473,6 +1500,11 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
                 $product['CommodityCode'] = $item->hsTariffNumber;
             }
 
+            if ($declaresEuProductIdentifiers && ($identifiers = $this->euProductIdentifiers($item)) !== null) {
+                $product['productIdentifierExemptIndicator'] = self::PRODUCT_IDENTIFIER_NOT_EXEMPT;
+                $product['ProductIdentifier'] = $identifiers;
+            }
+
             $products[] = $product;
         }
 
@@ -1495,6 +1527,45 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
                 ],
             ],
         ];
+    }
+
+    /**
+     * A product's EU product identifiers as UPS lists them, or null when it
+     * lacks the merchant or manufacturer identifier.
+     *
+     * UPS requires both whenever the exempt indicator is false, and the app has
+     * no grounds to say it is true, so a partial list is an invalid body rather
+     * than a partial declaration: such a product is sent as it was before the
+     * rule and UPS applies its own default. Whether that may be bought at all is
+     * decided before the adapter is reached (`eu-product-identifiers/04`). The
+     * standard identifier is optional and UPS has no placeholder for it.
+     *
+     * @return list<array{ProductID: string, ProductIDTypeCode: string}>|null
+     */
+    private function euProductIdentifiers(CustomsItem $item): ?array
+    {
+        if ($item->merchantProductId === null || $item->manufacturerProductId === null) {
+            return null;
+        }
+
+        $identifiers = [
+            '0100' => $item->merchantProductId,
+            '0200' => $item->manufacturerProductId,
+            '0300' => $item->standardProductId,
+        ];
+
+        $list = [];
+
+        foreach ($identifiers as $typeCode => $productId) {
+            if ($productId !== null) {
+                $list[] = [
+                    'ProductID' => mb_substr($productId, 0, self::PRODUCT_ID_MAX_LENGTH),
+                    'ProductIDTypeCode' => (string) $typeCode,
+                ];
+            }
+        }
+
+        return $list;
     }
 
     /**

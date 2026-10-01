@@ -24,6 +24,9 @@ use App\Models\Shipment;
 use App\Models\ShippingOffer;
 use App\Services\Carriers\UpsAdapter;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Log;
+use Monolog\Handler\TestHandler;
+use Monolog\Logger as MonologLogger;
 use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Exceptions\Request\RequestException;
 use Saloon\Exceptions\Request\ServerException;
@@ -1243,7 +1246,7 @@ it('builds an international label request that conforms to the UPS Shipping sche
             return false;
         }
 
-        assertMatchesUpsSchema($request->body()->all(), 'SHIPRequestWrapper', 'upsShipping');
+        assertMatchesUpsSchema($request->body()->all(), 'SHIPRequestWrapper', 'upsShipping', upsShippingSchemaWithProductIdentifiers());
 
         return true;
     });
@@ -2211,3 +2214,228 @@ it('does not read a UPS 2xx it cannot read as a void', function (MockResponse $r
     'not JSON' => fn (): MockResponse => MockResponse::make('<html>gateway</html>', 200),
     'JSON that is not an object' => fn (): MockResponse => MockResponse::make('true', 200),
 ]);
+
+/*
+|--------------------------------------------------------------------------
+| EU product identifiers — eu-product-identifiers/03
+|--------------------------------------------------------------------------
+|
+| Every product bound for the EU carries its ProductIdentifier list and the
+| exempt indicator when it has both a merchant and a manufacturer identifier,
+| and every label names the shipper and consignee type UPS decides it from.
+|
+*/
+
+/**
+ * upsShipping.json with the EU product identifier fields under
+ * InternationalForms_Product, which the vendored Shipping.yaml predates. Taken
+ * from the UPS Ship API guidance "EU Product Identifier (PID) Requirements",
+ * v1.0, August 2026; drop it once UPS republishes the spec with them. Product
+ * is also closed to other keys here, so a misspelled identifier key fails
+ * rather than validating as an unknown property UPS would ignore.
+ *
+ * @return Closure(array<string, mixed>): array<string, mixed>
+ */
+function upsShippingSchemaWithProductIdentifiers(): Closure
+{
+    return function (array $document): array {
+        $product = &$document['components']['schemas']['InternationalForms_Product'];
+
+        $product['properties']['productIdentifierExemptIndicator'] = [
+            'type' => 'string',
+            'enum' => ['true', 'false'],
+        ];
+        $product['properties']['ProductIdentifier'] = [
+            'type' => 'array',
+            'items' => [
+                'type' => 'object',
+                'required' => ['ProductID', 'ProductIDTypeCode'],
+                'additionalProperties' => false,
+                'properties' => [
+                    'ProductID' => ['type' => 'string', 'minLength' => 1, 'maxLength' => 100],
+                    'ProductIDTypeCode' => ['type' => 'string', 'enum' => ['0100', '0200', '0300']],
+                ],
+            ],
+        ];
+        $product['additionalProperties'] = false;
+
+        return $document;
+    };
+}
+
+function upsFrenchAddress(?string $company = null): AddressData
+{
+    return new AddressData(
+        firstName: 'Camille',
+        lastName: 'Martin',
+        company: $company,
+        streetAddress: '10 Rue de Rivoli',
+        city: 'Paris',
+        stateOrProvince: null,
+        postalCode: '75001',
+        country: 'FR',
+        phone: '33140000000',
+    );
+}
+
+function upsIdentifiedCustomsItem(string $sku, ?string $mpn, ?string $gtin): CustomsItem
+{
+    return new CustomsItem(
+        description: 'Ceramic Mug',
+        quantity: 1,
+        unitValue: 12.0,
+        weight: 0.8,
+        hsTariffNumber: '6912.00',
+        countryOfOrigin: 'US',
+        merchantProductId: $sku,
+        manufacturerProductId: $mpn,
+        standardProductId: $gtin,
+    );
+}
+
+/**
+ * The Shipment of the one CreateShipment request sent, checked against the
+ * Shipping schema with the product identifier fields added.
+ *
+ * @return array<string, mixed>
+ */
+function sentUpsShipment(): array
+{
+    $shipment = null;
+
+    Saloon::assertSent(function ($request) use (&$shipment): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        assertMatchesUpsSchema($request->body()->all(), 'SHIPRequestWrapper', 'upsShipping', upsShippingSchemaWithProductIdentifiers());
+        $shipment = $request->body()->all()['ShipmentRequest']['Shipment'];
+
+        return true;
+    });
+
+    return $shipment;
+}
+
+/**
+ * @return array<int, array<string, mixed>>
+ */
+function sentUpsProducts(): array
+{
+    return sentUpsShipment()['ShipmentServiceOptions']['InternationalForms']['Product'];
+}
+
+it('sends the EU product identifiers on every product bound for the EU', function (): void {
+    fakeUpsShipEndpoints();
+
+    $this->adapter->createShipment(upsShipRequestTo(upsFrenchAddress(), customsItems: [
+        upsIdentifiedCustomsItem('SKU-12345', 'MFG-67890', '01234567890128'),
+        upsIdentifiedCustomsItem('SKU-22222', 'MFG-22222', '4006381333931'),
+    ]));
+
+    $products = sentUpsProducts();
+
+    expect($products[0]['productIdentifierExemptIndicator'])->toBe('false')
+        ->and($products[0]['ProductIdentifier'])->toBe([
+            ['ProductID' => 'SKU-12345', 'ProductIDTypeCode' => '0100'],
+            ['ProductID' => 'MFG-67890', 'ProductIDTypeCode' => '0200'],
+            ['ProductID' => '01234567890128', 'ProductIDTypeCode' => '0300'],
+        ])
+        ->and($products[1]['ProductIdentifier'][0]['ProductID'])->toBe('SKU-22222');
+});
+
+it('leaves out the standard identifier of a product with no GTIN, since UPS has no placeholder', function (): void {
+    fakeUpsShipEndpoints();
+
+    $this->adapter->createShipment(upsShipRequestTo(upsFrenchAddress(), customsItems: [
+        upsIdentifiedCustomsItem('SKU-12345', 'MFG-67890', null),
+    ]));
+
+    expect(sentUpsProducts()[0]['ProductIdentifier'])->toBe([
+        ['ProductID' => 'SKU-12345', 'ProductIDTypeCode' => '0100'],
+        ['ProductID' => 'MFG-67890', 'ProductIDTypeCode' => '0200'],
+    ]);
+});
+
+it('leaves out the identifiers and exempt indicator of a product with no manufacturer part number, and only that one', function (): void {
+    fakeUpsShipEndpoints();
+
+    $this->adapter->createShipment(upsShipRequestTo(upsFrenchAddress(), customsItems: [
+        upsIdentifiedCustomsItem('SKU-12345', null, '01234567890128'),
+        upsIdentifiedCustomsItem('SKU-22222', 'MFG-22222', null),
+    ]));
+
+    $products = sentUpsProducts();
+
+    expect($products[0])->not->toHaveKey('ProductIdentifier')
+        ->and($products[0])->not->toHaveKey('productIdentifierExemptIndicator')
+        ->and($products[1]['productIdentifierExemptIndicator'])->toBe('false')
+        ->and($products[1]['ProductIdentifier'])->toHaveCount(2);
+});
+
+it('truncates a product identifier to the 100 characters UPS takes', function (): void {
+    fakeUpsShipEndpoints();
+
+    $this->adapter->createShipment(upsShipRequestTo(upsFrenchAddress(), customsItems: [
+        upsIdentifiedCustomsItem('SKU-12345', str_repeat('M', 120), null),
+    ]));
+
+    expect(sentUpsProducts()[0]['ProductIdentifier'][1]['ProductID'])->toBe(str_repeat('M', 100));
+});
+
+it('sends no product identifiers outside the EU', function (): void {
+    fakeUpsShipEndpoints();
+
+    $this->adapter->createShipment(upsShipRequestTo(upsCanadianAddress(), customsItems: [
+        upsIdentifiedCustomsItem('SKU-12345', 'MFG-67890', '01234567890128'),
+    ]));
+
+    expect(sentUpsProducts()[0])->not->toHaveKey('ProductIdentifier')
+        ->and(sentUpsProducts()[0])->not->toHaveKey('productIdentifierExemptIndicator');
+});
+
+it('names a consignee with a company a business and one without a consumer', function (?string $company, string $consigneeType): void {
+    fakeUpsShipEndpoints();
+
+    $this->adapter->createShipment(upsShipRequestTo(upsFrenchAddress($company), customsItems: [
+        upsIdentifiedCustomsItem('SKU-12345', 'MFG-67890', null),
+    ]));
+
+    $shipment = sentUpsShipment();
+
+    expect($shipment['ShipperType'])->toBe('01')
+        ->and($shipment['ConsigneeType'])->toBe($consigneeType);
+})->with([
+    'a company' => ['Maison Martin SARL', '01'],
+    'no company' => [null, '02'],
+    'a blank company' => ['  ', '02'],
+]);
+
+it('sends the shipper and consignee type on a domestic label too', function (): void {
+    fakeUpsShipEndpoints();
+
+    $this->adapter->createShipment(upsSpecialServiceShipRequest([]));
+
+    $shipment = sentUpsShipment();
+
+    expect($shipment['ShipperType'])->toBe('01')
+        ->and($shipment['ConsigneeType'])->toBe('02');
+});
+
+it('logs the EU product identifiers in the label request', function (): void {
+    $handler = new TestHandler;
+    Log::extend('ups-validation-capture', fn (): MonologLogger => new MonologLogger('ups-validation', [$handler]));
+    config()->set('logging.channels.ups-validation', ['driver' => 'ups-validation-capture']);
+    Log::forgetChannel('ups-validation');
+    fakeUpsShipEndpoints();
+
+    $this->adapter->createShipment(upsShipRequestTo(upsFrenchAddress(), customsItems: [
+        upsIdentifiedCustomsItem('SKU-12345', 'MFG-67890', '01234567890128'),
+    ]));
+
+    $labelRequest = collect($handler->getRecords())->firstWhere('message', 'LABEL REQUEST');
+    $product = $labelRequest->context['payload']['ShipmentRequest']['Shipment']['ShipmentServiceOptions']['InternationalForms']['Product'][0];
+
+    expect($product['productIdentifierExemptIndicator'])->toBe('false')
+        ->and($product['ProductIdentifier'])->toHaveCount(3);
+});

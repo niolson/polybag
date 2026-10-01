@@ -467,10 +467,12 @@ function shopifyAccessScopesResponse(?array $scopes = null): MockResponse
  * @param  array<string, mixed>  $body
  * @param  string  $schema  A schema name, e.g. "ConfirmShipmentRequest" or "RATERequestWrapper"
  * @param  string  $document  Basename of a file in tests/Fixtures/Schemas
+ * @param  (Closure(array<string, mixed>): array<string, mixed>)|null  $amend  Adds to the decoded document what the
+ *                                                                             vendored copy does not have yet; the body is validated against the result
  *
  * @throws AssertionFailedError
  */
-function assertMatchesApiSchema(array $body, string $schema, string $document): void
+function assertMatchesApiSchema(array $body, string $schema, string $document, ?Closure $amend = null): void
 {
     $path = __DIR__.'/Fixtures/Schemas/'.$document.'.json';
 
@@ -479,6 +481,15 @@ function assertMatchesApiSchema(array $body, string $schema, string $document): 
     }
 
     $document_ = json_decode((string) file_get_contents($path), true);
+
+    if ($amend instanceof Closure) {
+        // The validator resolves the document's own "#/..." references against
+        // the file it was given, so the amended copy has to be a file too.
+        $document_ = $amend($document_);
+        $path = (string) tempnam(sys_get_temp_dir(), $document.'-');
+        file_put_contents($path, json_encode($document_));
+        register_shutdown_function(fn (): bool => @unlink($path));
+    }
 
     if (isset($document_['definitions'][$schema])) {
         $pointer = '#/definitions/'.$schema;
@@ -533,9 +544,9 @@ function assertMatchesSpApiSchema(array $body, string $schema, string $document 
  *
  * @param  array<string, mixed>  $body
  */
-function assertMatchesUpsSchema(array $body, string $schema, string $document): void
+function assertMatchesUpsSchema(array $body, string $schema, string $document, ?Closure $amend = null): void
 {
-    assertMatchesApiSchema($body, $schema, $document);
+    assertMatchesApiSchema($body, $schema, $document, $amend);
 }
 
 /**
