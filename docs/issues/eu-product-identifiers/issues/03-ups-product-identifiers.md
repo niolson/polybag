@@ -1,6 +1,6 @@
 # UPS: `ProductIdentifier` on every EU-bound product, plus shipper and consignee type
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -60,18 +60,18 @@ The rate request is not touched; UPS rates without the product list.
 
 ## Acceptance criteria
 
-- [ ] `upsShipping.json` still validates the new body. The vendored spec has
+- [x] `upsShipping.json` still validates the new body. The vendored spec has
       `ShipperType`/`ConsigneeType` but no `ProductIdentifier` — the test that guards
       the schema extends it under `InternationalForms.Product` from the UPS guidance and
       says so, to be replaced when UPS republishes the spec
-- [ ] `UpsAdapterTest`: a shipment to France with all three identifiers sends three
+- [x] `UpsAdapterTest`: a shipment to France with all three identifiers sends three
       `ProductIdentifier` entries and the exempt indicator; one with no standard ID
       sends two; one with no manufacturer ID sends neither the list nor the indicator
       on that product while the other products keep theirs; one to Canada sends none
       and no exempt indicator
-- [ ] `UpsAdapterTest`: a shipment with a company sends `ConsigneeType` `01`, one
+- [x] `UpsAdapterTest`: a shipment with a company sends `ConsigneeType` `01`, one
       without sends `02`; both send `ShipperType` `01`; a domestic label sends both
-- [ ] The label request in `Log::channel('ups-validation')` shows the block
+- [x] The label request in `Log::channel('ups-validation')` shows the block
 
 ## Out of scope
 
