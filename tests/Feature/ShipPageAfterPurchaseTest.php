@@ -29,7 +29,7 @@ afterEach(function (): void {
  * A USPS adapter that quotes two rates and sells one label, counting how many
  * it sold — the whole point of these tests is that the count stays at one.
  */
-function registerCountingUspsAdapter(int &$purchases): void
+function registerCountingUspsAdapter(int &$purchases, string $reportedService = 'Ground Advantage'): void
 {
     $adapter = Mockery::mock(DirectCarrierAdapter::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
@@ -39,18 +39,23 @@ function registerCountingUspsAdapter(int &$purchases): void
     $adapter->shouldReceive('serviceCapability')->andReturn(ServiceCapability::Supported);
     $adapter->shouldReceive('offerCapability')->andReturn(ServiceCapability::Supported);
     $adapter->shouldReceive('offerDeclaredValueCap')->andReturnNull();
-    $adapter->shouldReceive('getRates')->andReturn(collect([
+    // Named as the catalog rows, as a direct adapter's rates are; looked up
+    // when quoted, since the rows are created after the adapter is registered.
+    $adapter->shouldReceive('getRates')->andReturnUsing(fn () => collect([
         new RateResponse('USPS', 'USPS_GROUND_ADVANTAGE', 'Ground Advantage', 8.50),
         new RateResponse('USPS', 'PRIORITY_MAIL', 'Priority Mail', 12.10),
-    ]));
-    $adapter->shouldReceive('createShipment')->andReturnUsing(function () use (&$purchases): ShipResponse {
+    ])->map(fn (RateResponse $rate): RateResponse => $rate->withCatalogIdentity(
+        Carrier::where('name', 'USPS')->value('id'),
+        CarrierService::where('service_code', $rate->serviceCode)->value('id'),
+    )));
+    $adapter->shouldReceive('createShipment')->andReturnUsing(function () use (&$purchases, $reportedService): ShipResponse {
         $purchases++;
 
         return ShipResponse::success(
             trackingNumber: '9400111899223197428490',
             cost: 8.50,
             carrier: 'USPS',
-            service: 'Ground Advantage',
+            service: $reportedService,
             labelData: base64_encode('LABEL-BYTES'),
             labelFormat: 'zpl',
         );
@@ -93,6 +98,19 @@ it('shows the bought label instead of the rate list once the purchase is made', 
 
     expect($purchases)->toBe(1)
         ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
+});
+
+it('names the bought service as the catalog does, not as the carrier described the rate', function (): void {
+    $purchases = 0;
+    registerCountingUspsAdapter($purchases, 'USPS Ground Advantage Machinable Cubic Non-Soft Pack Tier 2');
+    $package = uspsPackage();
+
+    Livewire::test(Ship::class, ['package_id' => $package->id])
+        ->set('selectedRateIndex', 0)
+        ->call('ship')
+        ->assertSee('Label Purchased')
+        ->assertSee('USPS Ground Advantage')
+        ->assertDontSee('Cubic Non-Soft Pack Tier 2');
 });
 
 it('does not buy a second label when ship is called again on the open page', function (): void {

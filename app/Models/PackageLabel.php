@@ -204,6 +204,16 @@ class PackageLabel extends Model
     }
 
     /**
+     * The service as the catalog names it, where this Label was bought as a
+     * catalog service; otherwise the source's own name for it
+     * (`postage-source-split/15`).
+     */
+    public function serviceDisplayName(): ?string
+    {
+        return $this->carrierService->name ?? $this->service;
+    }
+
+    /**
      * @return BelongsTo<User, $this>
      */
     public function purchasedBy(): BelongsTo

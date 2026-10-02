@@ -115,6 +115,25 @@ class ServiceRuleset
     }
 
     /**
+     * The catalog `service_code` an inferred service name is, for this carrier,
+     * or null where the catalog has no row it can be said to be.
+     *
+     * Null is the answer for a name the catalog splits -- UPS Ground Saver is two
+     * rows by weight, and nothing inferred says which -- as well as for one it
+     * does not hold at all. Either way the inferred name stands on its own.
+     */
+    public function catalogServiceCodeFor(?string $carrier, ?string $service): ?string
+    {
+        $lookupKey = CarrierAlias::lookupKey($carrier);
+
+        if ($lookupKey === '' || blank($service)) {
+            return null;
+        }
+
+        return $this->table('catalog-services')['carriers'][$lookupKey][$service] ?? null;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function table(string $name): array
@@ -124,7 +143,7 @@ class ServiceRuleset
 
             $directory = $this->directory ?? resource_path('data/service-inference');
 
-            foreach (['ruleset', 'usps-impb-stc', 'ups-1z-service-indicator', 'label-tokens', 'shopify-preferred-rate-selection'] as $table) {
+            foreach (['ruleset', 'usps-impb-stc', 'ups-1z-service-indicator', 'label-tokens', 'shopify-preferred-rate-selection', 'catalog-services'] as $table) {
                 $path = "{$directory}/{$table}.json";
 
                 $this->tables[$table] = json_decode(

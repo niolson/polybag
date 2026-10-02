@@ -13,6 +13,7 @@ use App\Filament\Resources\PackageResource\RelationManagers\PackageItemsRelation
 use App\Filament\Support\CarrierLogoColumn;
 use App\Filament\Support\LabelVoidNotification;
 use App\Models\Carrier;
+use App\Models\CarrierService;
 use App\Models\Client;
 use App\Models\Location;
 use App\Models\Package;
@@ -44,6 +45,13 @@ use Illuminate\Support\HtmlString;
 class PackageResource extends Resource
 {
     use InteractsWithScoutSearch;
+
+    /**
+     * The Service filter's value for a shipped package whose Label names no
+     * catalog service: a blind purchase nothing was inferred for, an inferred
+     * name the catalog splits, or a Label older than the backfill reached.
+     */
+    private const UNMAPPED_SERVICE = 'unmapped';
 
     protected static ?string $model = Package::class;
 
@@ -285,6 +293,7 @@ class PackageResource extends Resource
             ->modifyQueryUsing(fn (Builder $query) => $query->scopes('withDraftState')->with(array_filter([
                 'shipment',
                 'postageDataSource',
+                'activeLabel.carrierService',
                 app(SettingsService::class)->get('multi_client_enabled', false) ? 'shipment.client' : null,
                 app(SettingsService::class)->get('multi_location_enabled', false) ? 'location' : null,
             ])))
@@ -332,8 +341,24 @@ class PackageResource extends Resource
                         $record->isAmazonShipped() => 'Bought through Amazon Buy Shipping',
                         default => null,
                     }),
+                // The catalog's name where the Label was bought as a catalog
+                // service, so the one service reads alike whichever source
+                // sold it; the source's own words are on hover where they
+                // say something the cell does not.
                 Tables\Columns\TextColumn::make('service')
+                    ->state(fn (Package $record): ?string => $record->serviceDisplayName())
+                    ->tooltip(fn (Package $record): ?string => $record->service !== $record->serviceDisplayName()
+                        ? $record->service
+                        : null)
+                    // Marks the rows that have something on hover.
+                    ->icon(fn (Package $record): ?string => $record->service !== $record->serviceDisplayName()
+                        ? 'heroicon-o-information-circle'
+                        : null)
+                    ->iconPosition('after')
+                    ->iconColor('gray')
                     ->placeholder('—')
+                    // Still wanted: an unmapped Label falls back to the
+                    // source's own name, which for USPS runs long.
                     ->wrap()
                     // A blank service is a fact, not missing data: Shopify never
                     // reports what it bought. Show what was asked for instead,
@@ -435,13 +460,29 @@ class PackageResource extends Resource
                     ->label('Exported')
                     ->trueLabel('Exported')
                     ->falseLabel('Not Exported'),
+                // By the catalog service the active Label was bought as, so one
+                // choice finds a service whatever each source called it.
                 Tables\Filters\SelectFilter::make('service')
-                    ->options(fn () => Package::query()
-                        ->whereNotNull('service')
-                        ->distinct()
-                        ->orderBy('service')
-                        ->pluck('service', 'service')
-                        ->toArray())
+                    ->options(fn (): array => CarrierService::query()
+                        ->with('carrier')
+                        ->orderBy('name')
+                        ->get()
+                        ->groupBy(fn (CarrierService $service): string => $service->carrier->label())
+                        ->sortKeys()
+                        ->map(fn ($services): array => $services->pluck('name', 'id')->all())
+                        ->put('Other', [self::UNMAPPED_SERVICE => 'Not a catalog service'])
+                        ->all())
+                    ->query(fn (Builder $query, array $data): Builder => match ($value = $data['value'] ?? null) {
+                        null, '' => $query,
+                        self::UNMAPPED_SERVICE => $query->whereHas(
+                            'activeLabel',
+                            fn (Builder $label): Builder => $label->whereNull('carrier_service_id'),
+                        ),
+                        default => $query->whereHas(
+                            'activeLabel',
+                            fn (Builder $label): Builder => $label->where('carrier_service_id', (int) $value),
+                        ),
+                    })
                     ->searchable(),
                 Tables\Filters\TernaryFilter::make('manifested')
                     ->label('Manifested')
