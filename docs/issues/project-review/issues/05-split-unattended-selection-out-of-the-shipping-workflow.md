@@ -42,3 +42,11 @@ enforces applies to both entry points.
 Best done together with `02`, which changes the same seam.
 
 ## Comments
+
+- 2026-10-02 — Partly done. `02` and `18` already gave every rule-selected rate the
+  Offer its quote issued, and `autoShip()` uses the same `purchase()` path as `ship()`.
+  The offer requirement now lives in `purchase()` rather than `ship()`, so a non-blind
+  rate with no Offer is refused whichever entry point sent it. What is left is the move
+  itself: unattended selection and its messaging (`selectedRateForAutoShip()` through
+  `refusedForMethodRequirements()`, ~430 lines) into their own service, after which
+  `autoShip()`'s catch blocks need only cover selection's failures.

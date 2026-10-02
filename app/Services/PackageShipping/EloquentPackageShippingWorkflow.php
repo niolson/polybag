@@ -171,33 +171,11 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
     /**
      * Buy what the Ship page chose.
      *
-     * The one entry point the browser reaches, and so the one that trusts
-     * nothing it is handed: a quoted rate must name an offer, because the
-     * offer row is the server's copy of the price, service and metadata and a
-     * rate without one is a description the browser could have written
-     * (`postage-source-split/14`). {@see autoShip()} is the other side of
-     * that boundary — its rates are built server-side and never round-trip —
-     * so trust is decided by entry point rather than by a flag on the request.
-     *
-     * A blind offer carries no rate and is revalidated against the server's
-     * own list in {@see resolveBlindOffer()}, so it is not subject to this.
+     * The one entry point the browser reaches. A quoted rate must name an
+     * offer, as every purchase's must — see {@see purchase()}.
      */
     public function ship(Package $package, PackageShippingRequest $request): PackageShippingResult
     {
-        if ($request->selectedRate !== null && $request->selectedRate->offerId === null) {
-            logger()->warning('Refused a rate from the Ship page that names no offer', [
-                'package_id' => $package->id,
-                'carrier' => $request->selectedRate->carrier,
-                'service_code' => $request->selectedRate->serviceCode,
-            ]);
-
-            return PackageShippingResult::offerUnavailable(
-                'Rate Unavailable',
-                'This rate is not one on file for this package. Get rates again and choose one.',
-                requiresRequote: true,
-            );
-        }
-
         if ($refusal = $this->notReadyToShip($package)) {
             return $refusal;
         }
@@ -250,9 +228,35 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * A blind purchase needs a second, coarser lock on top of this one, because
      * what it buys against belongs to the shipment rather than to the package —
      * see {@see withBlindPurchaseLock()}.
+     *
+     * A quoted rate must name an offer, whichever entry point sent it. The
+     * offer row is the server's copy of the price, service and metadata, so a
+     * rate without one from the Ship page is a description the browser could
+     * have written (`postage-source-split/14`). Automation's rates are built
+     * server-side, but the offer is also the claim and the record a timed-out
+     * purchase is recovered from: bought without one, a timeout can buy twice
+     * (`project-review/02`). So both sides of the trust boundary are held to it
+     * here rather than at either entry point (`project-review/05`).
+     *
+     * A blind offer carries no rate and is revalidated against the server's
+     * own list in {@see resolveBlindOffer()}, so it is not subject to this.
      */
     private function purchase(Package $package, PackageShippingRequest $request): PackageShippingResult
     {
+        if ($request->selectedRate !== null && $request->selectedRate->offerId === null) {
+            logger()->warning('Refused a rate that names no offer', [
+                'package_id' => $package->id,
+                'carrier' => $request->selectedRate->carrier,
+                'service_code' => $request->selectedRate->serviceCode,
+            ]);
+
+            return PackageShippingResult::offerUnavailable(
+                'Rate Unavailable',
+                'This rate is not one on file for this package. Get rates again and choose one.',
+                requiresRequote: true,
+            );
+        }
+
         $lock = Cache::lock("package-purchase:{$package->id}", self::PURCHASE_LOCK_SECONDS);
 
         if (! $lock->get()) {
@@ -654,8 +658,8 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             // the unresolved state after a timeout, and the handle the carrier
             // is asked about all live on it (`project-review/02`, `/18`).
 
-            // Through purchase() rather than ship(): this is the trusted side
-            // of the boundary ship() enforces.
+            // Through purchase(), which holds this rate to the same offer
+            // requirement as the Ship page's; readiness was checked above.
             $result = $this->purchase(
                 $package,
                 new PackageShippingRequest(
