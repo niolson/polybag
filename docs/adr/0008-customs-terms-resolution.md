@@ -85,7 +85,7 @@ party billed.
 ### 5. Sources that cannot take terms are source-decided
 
 Amazon Buy Shipping and Shopify Shipping offers carry terms PolyBag cannot set. They skip
-the filter and the unresolved-EU refusal, are labelled as such on the Ship page, and are
+the filter and the unresolved-EU refusal, are labeled as such on the Ship page, and are
 recorded as `source_decided`. Automation does not buy them for EU, GB, NO or AU
 destinations until a test purchase establishes what the source declares, at which point
 the source gets entries in `duties-support.json` like a carrier.
@@ -108,7 +108,7 @@ batch and automation included; the Ship page shows its findings before rating.
 
 - **Default `ddu`.** Rejected: drops every USPS rate to the six DDP-required countries and
   sends express parcels into €15–25 door fees.
-- **Default `ddp_eu`.** Rejected: bills duties to a carrier account nobody authorised.
+- **Default `ddp_eu`.** Rejected: bills duties to a carrier account nobody authorized.
 - **A third term, "DDP where the rate supports it, else DDU".** Rejected: rate shopping
   would rank a DDU parcel, whose recipient pays at the door, against a DDP one as if they
   were the same purchase. A client who wants USPS DDU to Poland says `PL → ddu` once.
@@ -120,7 +120,7 @@ batch and automation included; the Ship page shows its findings before rating.
   but each install drifts from its own copy and entries lose their sources. Revisit if
   the release cadence hurts.
 - **Merging the order's registration with the client's.** Rejected: see decision 3.
-- **Six-digit HS grouping for the $2,500 export-filing rule.** Deferred in favour of the
+- **Six-digit HS grouping for the $2,500 export-filing rule.** Deferred in favor of the
   customs total, which never under-blocks and needs no HS data.
 
 ## Consequences

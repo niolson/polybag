@@ -37,7 +37,7 @@ So this is a custom `getGlobalSearchResults(string $search)` on `PackageResource
 equivalent override of the concern's constraint method plus a title builder that is
 handed the term), which:
 
-- keeps today's behaviour for `packages.tracking_number` — same word-splitting, same
+- keeps today's behavior for `packages.tracking_number` — same word-splitting, same
   prefix rules;
 - additionally matches `package_labels.tracking_number` via a join or `whereHas`, and
   carries the matched label back to the result so the title can be built from it:
@@ -54,7 +54,7 @@ number into global search and land on the package that explains it.
 
 - [x] A package with one active and two voided labels shows all three on `ViewPackage`
       with the active one distinguished
-- [x] Global search for a voided label's tracking number returns the package, labelled as
+- [x] Global search for a voided label's tracking number returns the package, labeled as
       voided — through the custom results method, with a test that the default
       `toSearchableArray()` path alone would fail
 - [x] Global search for an active label's tracking number is unchanged, and a package

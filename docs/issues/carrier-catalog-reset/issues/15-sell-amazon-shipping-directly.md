@@ -86,7 +86,7 @@ service. Buy Shipping keeps Amazon's own orders.
 - **Automation.** An Amazon Shipping rate is a direct rate. A method listing Amazon
   Shipping Ground buys it unattended when it wins under due-by, like UPS Ground.
   Approvals for orders from other channels stop being read here, and `13` removes them.
-  This is a behaviour change: until now such a purchase needed an approval.
+  This is a behavior change: until now such a purchase needed an approval.
 - **Dates and End of Day.** Its Labels are dated by the Amazon Shipping carrier row (`08`).
   They now carry a `normalized_carrier_id`, which `amazon-shipping-external-orders/06`
   found null because no row matched. End of Day lists Amazon Shipping with no manifest.

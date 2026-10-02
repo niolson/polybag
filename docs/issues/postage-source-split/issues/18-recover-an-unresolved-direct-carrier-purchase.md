@@ -168,7 +168,7 @@ a USPS Ground Advantage label (~$8, `DELETE …/label/{tracking}` before the SSF
 created reverses the EPS charge) and a UPS Ground label (~$17, void within the day
 reverses it if the account is not scan-based). The recovery code can be built against
 the spec without that — the failure being guarded against is exactly a mismatch
-between spec and behaviour, so the production probe is worth its two labels — but
+between spec and behavior, so the production probe is worth its two labels — but
 spending them is the maintainer's call. Note that `9801031` says "or wait until the
 shipment is processed", which is the lag question: if Label Recovery lags the ship
 call by more than the seconds between a timeout and a retry, a "not found" would let

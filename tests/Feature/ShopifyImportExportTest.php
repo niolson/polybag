@@ -974,7 +974,7 @@ it('re-points a replacement even when shipment item import is switched off', fun
 
     expect(Shipment::sole()->shipmentItems)->toBeEmpty();
 
-    // The goods are recorded on the shipment at import time, so recognising a
+    // The goods are recorded on the shipment at import time, so recognizing a
     // replacement never depends on there being items to compare.
     importFulfillmentOrders($this->dataSource, [
         replacementFulfillmentOrder('4402', '4401', '1'),

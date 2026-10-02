@@ -76,10 +76,10 @@ A maintainer decision first:
   attended alternative, as `refusedForMethodRequirements()` does for rates. A
   seller who wants Shopify to choose regardless turns the toggle off for that method. The
   test above becomes the regression test.
-- **The explicit choice wins.** Keep the behaviour, and say so on the form: the help
+- **The explicit choice wins.** Keep the behavior, and say so on the form: the help
   text gains "A Shopify Shipping purchase has no delivery date and is bought anyway when
   a rule names it or it is the method's only choice." Replace the test with one pinning
-  that behaviour.
+  that behavior.
 
 The first matches the section's own description and is the safer default for an unpriced,
 undated purchase.

@@ -78,7 +78,7 @@ it('resolves a UPS service level indicator, and falls through on one it has no e
         ->and($ruleset->upsServiceForServiceIndicator('YN'))->toBeNull();
 });
 
-it('resolves a Shopify selection pair, and falls through on auto and on pairs never seen honoured', function (): void {
+it('resolves a Shopify selection pair, and falls through on auto and on pairs never seen honored', function (): void {
     $ruleset = new ServiceRuleset;
 
     expect($ruleset->shopifySelection('usps:PriorityExpress'))->toBe(['carrier' => 'USPS', 'service' => 'Priority Mail Express'])
@@ -86,7 +86,7 @@ it('resolves a Shopify selection pair, and falls through on auto and on pairs ne
         ->and($ruleset->shopifySelection('auto'))->toBeNull()
         ->and($ruleset->shopifySelection(null))->toBeNull()
         ->and($ruleset->shopifySelection('dhl_express:P'))->toBe(['carrier' => 'DHL Express', 'service' => 'DHL Express Worldwide'])
-        // Oracle-matched for a rate, never bought, so never seen honoured.
+        // Oracle-matched for a rate, never bought, so never seen honored.
         ->and($ruleset->shopifySelection('dhl_express:D'))->toBeNull();
 });
 

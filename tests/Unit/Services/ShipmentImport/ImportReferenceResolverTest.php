@@ -57,7 +57,7 @@ it('leaves a hand-set flag alone when the media field is unmapped or null', func
     'null column' => [['is_media' => null]],
 ]);
 
-it('leaves the flag unchanged and warns on an unrecognised value', function (mixed $value): void {
+it('leaves the flag unchanged and warns on an unrecognized value', function (mixed $value): void {
     $product = Product::factory()->media()->create(['sku' => 'ODD-VALUE']);
     Log::shouldReceive('warning')
         ->withArgs(fn (string $message, array $context): bool => str_contains($message, 'media flag')

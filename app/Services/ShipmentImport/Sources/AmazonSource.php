@@ -138,7 +138,7 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
 
         // Filtered here rather than in the query: SearchOrders v2026-01-01 was
         // not confirmed to accept a fulfillment-channel parameter, and sending
-        // an unrecognised one risks a 400 on every import. Discarding client
+        // an unrecognized one risks a 400 on every import. Discarding client
         // side costs a little bandwidth but keeps `maxResultsPerPage` honest,
         // because the cap below counts orders we keep, not orders we fetched.
         $importFbaOrders = (bool) ($this->config['import_fba_orders'] ?? false);

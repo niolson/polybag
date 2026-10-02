@@ -69,9 +69,9 @@ Two tables, two models, two services, and one seam through the ship path.
 Decisions the issue left open, and why they went the way they did:
 
 **Consumption is one-way, including after a failed purchase.** A failed `createShipment`
-leaves the offer spent. Returning it to the pool would be the friendlier behaviour and the
+leaves the offer spent. Returning it to the pool would be the friendlier behavior and the
 wrong one: a failure response does not prove the source declined, and re-spending an
-identifier it may already have honoured is how a parcel gets two labels. The operator
+identifier it may already have honored is how a parcel gets two labels. The operator
 re-quotes, which costs a round trip and nothing else.
 
 **An offer resolves three ways, and the third one blocks the package.** Confirmed
@@ -126,7 +126,7 @@ where "someone is already buying this" is something they can act on.
 
 **An offer does not survive the sandbox toggle.** `inspect()` and the atomic claim both
 compare the stored environment against `SourceEnvironment::current()`. Sandbox and production
-identifiers differ and so do the hosts that honour the tokens, so an offer quoted in one world
+identifiers differ and so do the hosts that honor the tokens, so an offer quoted in one world
 is a record in the other, never authority — and rejecting it before the claim keeps it from
 being spent into the wrong endpoint and then stranded as unresolved.
 

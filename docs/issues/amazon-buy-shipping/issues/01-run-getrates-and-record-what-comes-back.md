@@ -193,7 +193,7 @@ WanB 7, China Post 4, India Post 4, Shiprocket 3, SF Express 2, Delhivery, DHL, 
    maximum 2949.67", "This shipping service does not deliver from the given source address to
    the destination address"). Discovery can use carrier/service **identity** from this array;
    it cannot branch on machine-readable reasons.
-4. **Amazon normalises to metric internally.** Dimensional limits are evaluated in cm3 against
+4. **Amazon normalizes to metric internally.** Dimensional limits are evaluated in cm3 against
    an INCH request, and `billedWeight` returns in KILOGRAM for a POUND request. Conversion on
    both directions is not optional.
 5. **`availableValueAddedServiceGroups` varies per rate** — 0 for OnTrac, 1 for both UPS
@@ -214,5 +214,5 @@ representative; the *eligibility* is not. A fresh order would be needed to see w
 price in normal operation, and the account has none.
 
 Done 2026-09-02: ADR-0003's `ineligibleRates` claim corrected and the ADR moved to
-**Accepted**, with the sandbox-is-unrepresentative finding and the metric-normalisation
+**Accepted**, with the sandbox-is-unrepresentative finding and the metric-normalization
 consequence folded in.

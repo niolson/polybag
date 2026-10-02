@@ -19,7 +19,7 @@ reason:
 > example payload from the FedEx developer docs is the one known request that produces a
 > valid, complete response from the sandbox API.
 
-"Most request shapes" is the whole difficulty. Nobody has characterised which shapes fail
+"Most request shapes" is the whole difficulty. Nobody has characterized which shapes fail
 or why, so the workaround had to be total — replace everything — and a total replacement
 makes international rating unreachable in sandbox, since the destination is overwritten
 before the request is sent.
@@ -71,7 +71,7 @@ turning it on moves UPS, USPS and Amazon at the same time.
       truncated response
 - [x] Questions 1–5 answered in this file's `## Comments`
 - [x] A recommendation recorded for `buildRateApiRequest()`: narrow the override, keep it
-      as is, or remove it in favour of the runner path
+      as is, or remove it in favor of the runner path
 - [x] If the override stays, its comment is updated to say what is now known about which
       shapes fail — it did not stay; the docblock on `buildRateApiRequest()` now carries
       what is known instead
@@ -168,7 +168,7 @@ open in principle and closed in practice today; the fixtures are `supported: tru
 a note each, and the CA one will answer when the engine does. The LAC one probably needs
 `01210` first, which is left for a day the engine can confirm it.
 
-A review pass caught that the runner was *not* sending these verbatim: the normaliser's
+A review pass caught that the runner was *not* sending these verbatim: the normalizer's
 shipment fix-ups were adding a `totalCustomsValue` to the CA case and removing
 `totalWeight` from the LAC one — exactly the kind of shape change the sandbox keys on.
 Rate fixtures now bypass the fix-ups (placeholders aside) and the sent payload was
@@ -177,7 +177,7 @@ verbatim; only the runner path was affected.
 
 **Q4 — does the sandbox rewrite addresses.** The virtual layer ignores them entirely and
 answers with its own lane (`US 65247 MO -> US 75063 TX` in the body the adapter's shape
-matches) — established across every canned response. The live engine honoured them in
+matches) — established across every canned response. The live engine honored them in
 the two answers it gave, which is suggestive and no more. Both add `ORIGIN/DESTINATION.STATEORPROVINCECODE.CHANGED`
 alerts, which is just the engine filling in the state we never send.
 
@@ -205,15 +205,15 @@ way an international service reaches the Ship page in sandbox mode. Its docblock
 `quotesInternationalLocally()`'s now say "answers this shape with a canned response"
 rather than "rewrites the addresses of the canned payload", which was the wrong layer.
 
-**Also done here.** `FedexTestCaseRunner` has the `rate` branch: it summarises services
+**Also done here.** `FedexTestCaseRunner` has the `rate` branch: it summarizes services
 quoted, the lane the response describes, and whether the body was canned; it creates
 no `Package` for a quote; a 200 that quotes nothing is a failure (`NO_RATES`), not a
 pass; and an undecodable body is reported as `UNDECODABLE_RESPONSE` with the raw bytes
-saved under `--dump-payloads` rather than thrown. The normaliser sends rate payloads as
+saved under `--dump-payloads` rather than thrown. The normalizer sends rate payloads as
 written.
 
 **Left open.** `tests/External/Fedex/` is still empty; a reference test asserting the
 canned body's shape would pin what the adapter now depends on, but the sandbox is not
 under our control and a test that fails when FedEx regenerates its fixtures is a
-judgement call for whoever writes it. The two rate fixtures need re-running when the
+judgment call for whoever writes it. The two rate fixtures need re-running when the
 sandbox engine is answering — the note on each says how to tell.

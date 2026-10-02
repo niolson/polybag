@@ -28,7 +28,7 @@ has not been named. See `05`.
 - [x] A sandbox approval does not authorize production spending, and vice versa
 - [ ] An unapproved service cannot be reached by any automated path — **carried to `07`**,
       which owns a criterion per call site. What is delivered here is the door, not the
-      behaviour: `ServiceApprovalGate` answers no without an approval row and nothing can
+      behavior: `ServiceApprovalGate` answers no without an approval row and nothing can
       obtain a yes another way, but no automated path calls it yet. Left unchecked rather than
       reworded to match what was built — the criterion names the outcome, and the outcome
       arrives with `07`
@@ -125,7 +125,7 @@ because two different questions are asked — see the review notes below.
 
 **The client list is unfiltered, inactive clients included.** A checkbox list submits what it
 shows, so filtering to active clients would let anyone saving the form for an unrelated reason
-silently withdraw an inactive client's approval. Inactive ones are labelled rather than hidden.
+silently withdraw an inactive client's approval. Inactive ones are labeled rather than hidden.
 
 ### From review
 

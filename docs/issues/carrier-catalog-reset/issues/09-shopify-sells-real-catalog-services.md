@@ -203,7 +203,7 @@ itself. A Shopify blind offer is an offer of a real service through Shopify.
   - Exclusions match a blind offer by carrier and service, as a rate. Shopify's `auto`
     is matched only by a rule that names neither. `RuleExclusion` loses `carrierName`
     and `blindPurchaseId`.
-  - The Shopify task is labelled *Shopify Shipping* in exclusion reasons, where it was
+  - The Shopify task is labeled *Shopify Shipping* in exclusion reasons, where it was
     the old row's name *Shopify*.
   - Listed services are offered before `auto`, where the old rows put `auto` first.
   - Amazon is still gated by its hook row. `MethodSourceAllowance::kindsFor()` reads

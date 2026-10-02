@@ -267,7 +267,7 @@ it('asks the adapter which packaging the rate needs, so the browser cannot switc
 
 it('refuses a rate whose packaging the adapter cannot classify, rather than buying it as the shipper\'s own', function (): void {
     // The classifier invariant (ADR-0005 decision 3): an indicator the adapter
-    // does not recognise is refused, never defaulted. The real USPS adapter
+    // does not recognize is refused, never defaulted. The real USPS adapter
     // throws for it; the workflow turns that into a mismatch, not a 500.
     $this->actingAs($user = User::factory()->create());
     $package = createWorkflowPackage();

@@ -42,7 +42,7 @@ pickup, a late one delays the parcel.
 
 ## Decision — 2026-09-03
 
-**8 PM local, held as `pickup_cutoff_hour` on the Shopify carrier row.** Behaviour is
+**8 PM local, held as `pickup_cutoff_hour` on the Shopify carrier row.** Behavior is
 unchanged; what changed is that the value is now a decision recorded in ADR-0002 and stored
 as data, rather than an interim constant with an open question attached.
 
@@ -93,7 +93,7 @@ One test changed meaning rather than being adjusted to pass. "applies the interi
 cutoff even with no Shopify carrier row" asserted a fallback that the row-based policy does not
 have. That path is unreachable: `ShopifyAdapter::getRates()` only advertises services hanging
 off the Shopify carrier row, so no row means no rate offered and no label bought. The test now
-asserts the honest behaviour and records why the case cannot arise.
+asserts the honest behavior and records why the case cannot arise.
 
 `pickup_cutoff_hour` is still not exposed in the carrier form. `05` held it back because an
 operator-set value would have been ambiguous against the interim path; that ambiguity is gone

@@ -19,7 +19,7 @@ November. The operator finds out from a customer, weeks later. The zero-value gu
 already establishes that a defective customs line is refused *before* the purchase, per
 line, in front of every adapter; a missing identifier is the same class of defect.
 
-## Desired behaviour
+## Desired behavior
 
 `ShipRequest` gains `customsItemsMissingProductIdentifiers(): array<CustomsItem>`,
 non-empty when the destination is in the EU, the consignee has no company name, and any
@@ -63,5 +63,5 @@ so.
 
 - A warning mode before November. The carriers accept incomplete data until then, but
   a label that will be held is not one a 3PL wants to sell at any date; if a client
-  needs the softer behaviour it is a per-client setting to add when asked
+  needs the softer behavior it is a per-client setting to add when asked
 - Refusing on a missing standard identifier

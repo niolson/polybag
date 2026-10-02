@@ -42,7 +42,7 @@ class SpecialServiceResolver
     }
 
     /**
-     * This package's codes split into what an offer must honour and what it
+     * This package's codes split into what an offer must honor and what it
      * should add if it can: the method's required codes plus product
      * compliance, then the method's defaults. Superseded by
      * {@see supersedeByMode()}, so a stronger variant only replaces a weaker
@@ -133,7 +133,7 @@ class SpecialServiceResolver
      * binding: a required adult signature makes any plain signature
      * redundant, and a preferred one a preferred plain signature. A required
      * plain signature beside a preferred adult one stays required, because the
-     * preference may not be honoured — dropping it would let an offer with no
+     * preference may not be honored — dropping it would let an offer with no
      * signature at all through.
      *
      * @param  array<int, string>  $required

@@ -52,7 +52,7 @@ connection you test is the connection that runs.
 
 `db_port` is only defaulted when it is left empty. Changing the driver in the form
 rewrites the port to that driver's default, but a value already saved on an existing
-record is honoured as written — a source created before multi-driver support may hold
+record is honored as written — a source created before multi-driver support may hold
 `3306` alongside a non-MySQL driver, and will keep trying 3306 until you change it.
 
 ### SQL Server: the first-contact failure
@@ -404,7 +404,7 @@ The left column is what your query must name the column — with `AS` aliases, u
 
 ### Fields with no default mapping
 
-These internal fields are honoured if you map a column to them, but nothing maps to them
+These internal fields are honored if you map a column to them, but nothing maps to them
 out of the box:
 
 | Internal field | On | Notes |

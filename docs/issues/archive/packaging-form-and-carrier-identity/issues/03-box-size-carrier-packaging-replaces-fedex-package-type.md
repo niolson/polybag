@@ -54,7 +54,7 @@ cast, and the docblock can go.
 
 `BoxSizeResource` and `SetupWizard` replace the *FedEx Package Type* select with a
 *Carrier packaging* select over `CarrierPackaging`, nullable, placeholder "Own packaging",
-grouped or labelled by carrier. Helper text says the thing the ADR's last consequence
+grouped or labeled by carrier. Helper text says the thing the ADR's last consequence
 asks for: a carrier packaging is only useful for a carrier whose account or reseller can
 rate it; declaring a FedEx Pak on a UPS-only install simply yields no matching rates.
 `SetupWizard::createBoxSizes()` (or whatever writes `'fedex_package_type' => …` at line
@@ -73,12 +73,12 @@ outcome and needs a comment saying so.
 `YOUR_PACKAGING` — and the ship body sends `YOUR_PACKAGING` for every rate that is not
 One Rate; only the One Rate request (`fetchOneRateRates()`) names the packaging. So for a
 box size that says `FEDEX_PAK` today, the weight-based Express Saver rate is quoted and
-labelled as customer packaging, and only the One Rate variant is quoted as a Pak.
+labeled as customer packaging, and only the One Rate variant is quoted as a Pak.
 
 Classifying those weight-based rates as `shipperPackaging()` — the ADR's wording as first
 accepted, "FedEx from whether the rate came back from the One Rate request" — would have the
 shared filter drop them for every Package in FedEx packaging, leaving only One Rate. That
-is a behaviour change the ADR did not foresee, and the wrong one: FedEx packaging is
+is a behavior change the ADR did not foresee, and the wrong one: FedEx packaging is
 shippable at weight-based prices, and a warehouse that stocks Paks would lose those rates.
 
 So decision 3 now says for FedEx what it already said for UPS — **the adapter stamps the

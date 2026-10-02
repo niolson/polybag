@@ -11,7 +11,7 @@ weights on its own customs declaration**, and reports it as `UNKNOWN_ERROR` — 
 code, nothing an operator or a log reader can act on.
 
 PolyBag sends the weight of the packed box, read from the scale. Shopify builds the customs
-declaration from **its own product catalogue**. When the catalogue's weights add up to more
+declaration from **its own product catalog**. When the catalog's weights add up to more
 than the box weighs, every international purchase fails, after the box is taped shut.
 
 Isolated by sending PolyBag's exact production input and varying one field at a time: the
@@ -50,13 +50,13 @@ only lever PolyBag holds is the total.
 The 0.1 lb band answers a question review asked and the issue did not. A packed box
 outweighs its contents, so *any* shortfall is somebody being imprecise; within 1.6 oz that
 somebody is the scale, and the nudge costs nothing real because the carrier rounds up to the
-next ounce anyway. Beyond it the catalogue is describing goods that are not in the box, and
+next ounce anyway. Beyond it the catalog is describing goods that are not in the box, and
 no arithmetic makes that true. Rounded up, never to nearest.
 
 **The escape hatch sends the scale weight, unchanged.**
 `ShipRequest::withDeclaredWeightOverride()` waives the refusal, not the reading — nothing is
 over-declared by insisting, and no untrue weight reaches a customs form. What it buys is the
-case PolyBag cannot see: a catalogue corrected in the Shopify admin between the refusal and
+case PolyBag cannot see: a catalog corrected in the Shopify admin between the refusal and
 the retry. Raising `totalWeight` to the declared sum on the operator's confirmation was
 considered and not built — for the observed package it means buying 2.29 lb of postage for a
 0.15 lb parcel, and printing 2.29 lb on the customs form.
@@ -99,7 +99,7 @@ turn it into a prompt rather than a shipping error, beside `MissingDeclaredValue
   creates a replacement (`18`). Three accumulated on one order in an afternoon, and a stale
   stored ID turns every subsequent probe into `FULFILLMENT_ORDER_INVALID` — which reads
   exactly like a result and is not one.
-- **2026-09-09, review** — the live catalogue read was raised as a P1: `lineItem.variant` is
+- **2026-09-09, review** — the live catalog read was raised as a P1: `lineItem.variant` is
   gated behind `read_products`, absent from
   `ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES`, and `activate()` returns early
   for an already-activated source — so a store that predates this would fail every

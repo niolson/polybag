@@ -129,11 +129,11 @@ class InferPackageServices extends Command
     {
         return match (true) {
             // First, because these are the two figures that say whether Shopify
-            // still honours a selection, and a package showing either wants a
-            // person: a decode and an honoured selection naming different
+            // still honors a selection, and a package showing either wants a
+            // person: a decode and an honored selection naming different
             // services means a table is wrong, ours or the carrier's.
-            str_contains($reason, 'but the honoured selection names') => 'decode disagrees with the honoured selection',
-            str_contains($reason, 'sold the label') => 'selection not honoured: another carrier sold the label',
+            str_contains($reason, 'but the honored selection names') => 'decode disagrees with the honored selection',
+            str_contains($reason, 'sold the label') => 'selection not honored: another carrier sold the label',
             str_contains($reason, 'last-mile') => 'USPS last-mile handoff, service not encoded',
             str_contains($reason, 'names no product') => 'service type code names no product',
             str_contains($reason, 'not a valid IMpb') && str_contains($reason, 'no readable label') && str_contains($reason, 'no selection requested') => 'no IMpb, no readable label, no selection',

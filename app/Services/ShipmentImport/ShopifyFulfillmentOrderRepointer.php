@@ -22,7 +22,7 @@ use Illuminate\Support\Collection;
  * new work and the order ends up with two shipments — one of which can never
  * buy a label, because the fulfillment order it names is the closed one.
  *
- * Shopify publishes no supersession link, so a replacement is recognised by
+ * Shopify publishes no supersession link, so a replacement is recognized by
  * inference: an open shipment for the same order at the same location, holding
  * the same goods, whose own fulfillment order this run is no longer offered.
  * That last clause is what separates a replacement from a sibling — one order
@@ -54,15 +54,15 @@ class ShopifyFulfillmentOrderRepointer
             return 0;
         }
 
-        $unrecognised = $this->unrecognised($dataSource, $identities, $offeredIds);
+        $unrecognized = $this->unrecognized($dataSource, $identities, $offeredIds);
 
-        if ($unrecognised->isEmpty()) {
+        if ($unrecognized->isEmpty()) {
             return 0;
         }
 
         $candidates = $this->candidates(
             $dataSource,
-            $unrecognised->map(fn (ShopifyFulfillmentOrderIdentity $identity): string => (string) $identity->orderId)
+            $unrecognized->map(fn (ShopifyFulfillmentOrderIdentity $identity): string => (string) $identity->orderId)
                 ->unique()
                 ->values()
                 ->all(),
@@ -73,7 +73,7 @@ class ShopifyFulfillmentOrderRepointer
             return 0;
         }
 
-        return $this->applyPairs($this->pair($unrecognised, $candidates));
+        return $this->applyPairs($this->pair($unrecognized, $candidates));
     }
 
     /**
@@ -84,7 +84,7 @@ class ShopifyFulfillmentOrderRepointer
      * @param  array<int, string>  $offeredIds
      * @return Collection<int, ShopifyFulfillmentOrderIdentity>
      */
-    private function unrecognised(DataSource $dataSource, Collection $identities, array $offeredIds): Collection
+    private function unrecognized(DataSource $dataSource, Collection $identities, array $offeredIds): Collection
     {
         $known = Shipment::query()
             ->where('data_source_id', $dataSource->id)
@@ -134,15 +134,15 @@ class ShopifyFulfillmentOrderRepointer
      * Match each replacement to the one shipment it can only be, dropping any
      * pairing that is not unique from both ends.
      *
-     * @param  Collection<int, ShopifyFulfillmentOrderIdentity>  $unrecognised
+     * @param  Collection<int, ShopifyFulfillmentOrderIdentity>  $unrecognized
      * @param  Collection<int, Shipment>  $candidates
      * @return array<int, array{0: ShopifyFulfillmentOrderIdentity, 1: Shipment}>
      */
-    private function pair(Collection $unrecognised, Collection $candidates): array
+    private function pair(Collection $unrecognized, Collection $candidates): array
     {
         $pairs = [];
 
-        foreach ($unrecognised as $identity) {
+        foreach ($unrecognized as $identity) {
             $matches = $candidates->filter(
                 fn (Shipment $shipment): bool => $this->isReplacementFor($shipment, $identity),
             );

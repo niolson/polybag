@@ -13,7 +13,7 @@ location ~ \.php$ {
 
 A literal hostname there is resolved **once, when nginx parses its config**, and the
 result is held for the life of the worker process. nginx never looks it up again. So the
-moment the `app` container gets a different IP, nginx keeps dialling the address app used
+moment the `app` container gets a different IP, nginx keeps dialing the address app used
 to have and returns 502 to every dynamic request — indefinitely, until something restarts
 nginx.
 

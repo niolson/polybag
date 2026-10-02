@@ -118,7 +118,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
     /**
      * Sent as `standardManufacturerProductId` when a product has no GTIN. The
      * Ship API documentation for `regulatoryDetails` says "NA"; the FedEx
-     * Compatible notice of 2026-09-17 says "NO", but summarises the EU rule
+     * Compatible notice of 2026-09-17 says "NO", but summarizes the EU rule
      * rather than the field. `eu-product-identifiers/05` confirms it with the
      * Compatible integrator mailbox — change it here, and record who said so.
      */

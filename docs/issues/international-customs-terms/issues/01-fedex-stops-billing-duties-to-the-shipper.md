@@ -20,7 +20,7 @@ weeks after delivery, for every destination — Canada and the UK included — w
 having chosen DDP. UPS and USPS ship DDU, so FedEx is also the one carrier that disagrees
 with the others.
 
-## Desired behaviour
+## Desired behavior
 
 Both requests send `paymentType: RECIPIENT`, with no payor block, so every carrier ships
 DDU until `04`–`08` make the term a decision. `shippingChargesPayment` (transportation)

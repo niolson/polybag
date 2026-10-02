@@ -73,7 +73,7 @@ cache.
 - **`ipv6=off`** stops nginx also issuing an AAAA query. These networks are IPv4
   only, so it is a wasted lookup and one more thing to fail.
 
-### A behaviour change to accept deliberately
+### A behavior change to accept deliberately
 
 With a literal hostname, an unresolvable `app` makes nginx **fail to start** —
 `host not found in upstream`. With the variable form nginx starts normally and
@@ -118,7 +118,7 @@ Also confirm, after the change:
 1. `docker compose ... up -d --build` still brings the stack up clean and `/up`
    returns 200 — the ordinary path is unaffected.
 2. `docker compose ... stop app` leaves nginx **running** and serving static
-   assets, returning 502 only for PHP. This is the behaviour change above; before
+   assets, returning 502 only for PHP. This is the behavior change above; before
    the fix, an nginx started in that state would have refused to start at all.
 3. `/build/` assets and the security headers still behave — the `location` block
    is being edited, so it is worth one look that nothing else in it moved.
@@ -165,7 +165,7 @@ app.  600  IN  A  172.18.0.2
 ```
 
 So `valid=10s` is doing real work rather than restating the record: without it nginx
-would honour the full ten minutes, and the stale window this issue exists to close
+would honor the full ten minutes, and the stale window this issue exists to close
 would still be up to ten minutes wide. An `AAAA` query returns an empty answer, which
 is what `ipv6=off` avoids paying for.
 
@@ -185,7 +185,7 @@ a spacer container, leaving nginx running throughout.
 | `nginx -t` with `app` absent | `[emerg] host not found in upstream "app"` | passes |
 | app stopped: nginx | would refuse to start | stays up, 502 for PHP, 200 for `/build/` |
 
-The last two rows are the behaviour change the issue asked to accept deliberately, now
+The last two rows are the behavior change the issue asked to accept deliberately, now
 observed rather than predicted. The before-column 502 confirms the harness can actually
 detect the bug — the recovery in the after-column is not a test that passes either way.
 

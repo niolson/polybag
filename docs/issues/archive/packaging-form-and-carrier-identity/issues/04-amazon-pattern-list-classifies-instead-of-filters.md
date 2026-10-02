@@ -56,7 +56,7 @@ that have no side effect. This is "one filter, shared" in the sense the ADR mean
 predicate, one vocabulary — and the docblock on `isBuyable()` says why it is called from
 two places.
 
-`isBuyable()` otherwise keeps `hasPrintableDocument()`, `honoursRequiredServices()`,
+`isBuyable()` otherwise keeps `hasPrintableDocument()`, `honorsRequiredServices()`,
 `answersRequiredGroupsForFree()` and **rule 3** — the `CONTENT_RESTRICTED_SERVICES` drop
 for Media Mail and Bound Printed Matter, which outlives this ADR.
 

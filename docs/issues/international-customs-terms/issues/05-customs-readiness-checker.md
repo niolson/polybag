@@ -19,7 +19,7 @@ each grew separately and are only discovered when *Buy* is pressed. This PRD add
 rules. `UspsAdapter::buildCustomsForm()` also declares `US` as the origin of any item
 without one, and always claims `NO EEI 30.37(a)`.
 
-## Desired behaviour
+## Desired behavior
 
 `CustomsReadiness` takes the Shipment, the Package's customs lines and the resolved terms,
 and returns findings, each *block* or *warn*, with a message, the offending lines, and a

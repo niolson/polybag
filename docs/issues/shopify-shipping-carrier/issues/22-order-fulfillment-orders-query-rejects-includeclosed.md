@@ -30,7 +30,7 @@ Both reasons are worth keeping.
 **The import is a working backstop.** `ShopifyFulfillmentOrderRepointer` re-points on the
 next import run, as `repointFulfillmentOrder()`'s own docblock says it will. Verified end
 to end on one shipment: after the void the import moved it onto the replacement, carried
-`source_record_id` with it, and created no duplicate. The visible behaviour was correct on
+`source_record_id` with it, and created no duplicate. The visible behavior was correct on
 a fifteen-minute delay, so nothing surfaced.
 
 **Mocks validate no arguments.** Six tests covered the re-point, all against `MockResponse`

@@ -18,7 +18,7 @@ through `ShippingRateService`, so `01`'s filter does not cover it. Once `04` and
 let flat-rate rates survive as `exactly(…)` requirements, `UspsAdapter`'s "cheapest
 variant" for a small box would be the flat-rate envelope and an automated rule would buy
 it unseen. This slice closes that path **before** either of them opens it. Still no
-observable behaviour change: every rate is `shipperPackaging()` and every Package's
+observable behavior change: every rate is `shipperPackaging()` and every Package's
 packaging is null, so nothing is filtered yet and nothing returns null yet.
 
 ### The contract

@@ -23,7 +23,7 @@ adapter transliterates; the only `Str::ascii()` calls in the app are lookup keys
 A `?` in a street name is a routing and delivery risk on exactly the lanes — Poland,
 Czechia, Germany, the Nordics, Iberia — that the EU product identifier work is about.
 
-## Desired behaviour
+## Desired behavior
 
 Every free-text field `FedexAdapter` puts on a `CreateShipment` body is sent as ASCII,
 transliterated with `Str::ascii()` (`ę` → `e`, `ł` → `l`, `ß` → `ss`, `ø` → `o`):

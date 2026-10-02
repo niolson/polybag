@@ -54,7 +54,7 @@ Route::get('/qz/provision-script/{platform}', [QzProvisionScriptController::clas
     ->name('qz.provision-script')
     ->middleware('auth');
 
-// Acknowledgement from the QZ Tray integration that a label reached a printer.
+// Acknowledgment from the QZ Tray integration that a label reached a printer.
 // Batch printing fires one of these per label, so the rate cap is generous.
 Route::post('/labels/{package}/printed', [LabelPrintController::class, 'store'])
     ->name('labels.printed')

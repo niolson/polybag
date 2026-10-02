@@ -55,7 +55,7 @@ The detect half is not in question: **no purchase should be attempted with a cus
 worth zero**, and the operator should be told which item and why, before the label is
 bought rather than after. What to do next is a policy question:
 
-1. **Withhold and hand it back**, the way `19` does for a weight that cannot be honoured —
+1. **Withhold and hand it back**, the way `19` does for a weight that cannot be honored —
    name the item, refuse, let the operator fix the value at source. **Recommended.**
 2. **Substitute a nominal value** — `$1`, or a per-client default, the convention for goods
    of no commercial value. Cheaper for the operator, but PolyBag would be writing a number
@@ -65,7 +65,7 @@ bought rather than after. What to do next is a policy question:
    remedy stays with the person who can see the goods.
 
 `19` established the discipline option 2 runs against: PolyBag does not over-declare to get
-a box out the door, and the remedy lives with whoever owns the catalogue.
+a box out the door, and the remedy lives with whoever owns the catalog.
 
 Whichever is chosen, **the per-line case needs the same answer as the all-free case.** A
 guard that only checks the sum lets the quiet, worse failure through.
@@ -75,7 +75,7 @@ guard that only checks the sum lets the quiet, worse failure through.
 `120502` is UPS's. Whether USPS and FedEx refuse a zero-value customs line, accept it, or
 print it as `$0.00` is **unknown and untested** — all three build declarations from the same
 `CustomsItem` list, so whatever is decided belongs in front of the adapters rather than
-inside `UpsAdapter`. Shopify is unaffected: it builds its declaration from its own catalogue
+inside `UpsAdapter`. Shopify is unaffected: it builds its declaration from its own catalog
 and never sees ours (`19`).
 
 ## Test notes

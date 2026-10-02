@@ -58,7 +58,7 @@ decision to make, not a bug to fix.
 ## Worth knowing before deciding
 
 - This is presentation only. No count, gate or manifest is wrong today — `02` and `07` verified
-  the exclusion behaviour and it is covered by `ManifestServiceTest`, `EndOfDayTest` and
+  the exclusion behavior and it is covered by `ManifestServiceTest`, `EndOfDayTest` and
   `EndOfDayManifestTest`.
 - Nothing here is urgent in the ordinary sense, but it gets *more* confusing as soon as the
   first real Shopify label is bought: the row will sit at `—` on a day when Shopify labels

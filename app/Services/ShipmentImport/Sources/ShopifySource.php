@@ -251,7 +251,7 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
      * Delegated whole to {@see ShopifyFulfillmentOrderRepointer}: what belongs
      * here is only the reading of Shopify's own shape into the identity that
      * survives a replacement — the order, the assigned location, and the goods.
-     * All three are already on the mapped row, so recognising a replacement
+     * All three are already on the mapped row, so recognizing a replacement
      * costs no extra request and does not depend on item import being on.
      *
      * @param  Collection<int, array<string, mixed>>  $shipments
@@ -442,9 +442,9 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
      * measurement to decide whether Shopify will declare more weight in customs
      * than the box was weighed at. One conversion table
      * because two would eventually disagree, and a disagreement here reads as a
-     * catalogue defect rather than as a bug.
+     * catalog defect rather than as a bug.
      *
-     * An unrecognised unit passes its value through unconverted: Shopify's
+     * An unrecognized unit passes its value through unconverted: Shopify's
      * `WeightUnit` enum has four members and all four are handled, so a fifth
      * would be a new one whose scale we do not know, and inventing a factor for
      * it would be worse than taking the number at face value.

@@ -35,10 +35,10 @@ the pieces every later slice reuses.
   - **What it skips:** Shipments that have shipped or been deleted.
 - **Print path.**
   - The report-print code in the QZ Tray component accepts an optional receipt. When QZ
-    reports the job sent, it posts the receipt to a new acknowledgement endpoint, the
+    reports the job sent, it posts the receipt to a new acknowledgment endpoint, the
     same way labels acknowledge a print.
   - **Messages to the user:** "Sent to the printer", with a hint to reprint if no paper
-    came out. A failed print says the slip was not recorded. A failed acknowledgement
+    came out. A failed print says the slip was not recorded. A failed acknowledgment
     offers Mark as printed for the same receipt.
 - **Job size limit.** The shared print path owns the limit for every caller. A run of more
   than about 200 slips (exact figure set here) is sent as consecutive QZ jobs of at most

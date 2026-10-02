@@ -56,5 +56,5 @@ None - can start immediately.
     approval concept and decision 5's client opt-in do not stand. ADR-0006's *Supersedes
     in part* was corrected before acceptance to name both.
   - `shopify-shipping-carrier/09` now leads with the rule in force since #253, keeps the
-    stricter rule it shipped as a labelled record, and strikes the outdated criterion.
+    stricter rule it shipped as a labeled record, and strikes the outdated criterion.
     The README's Shopify row was corrected to match.

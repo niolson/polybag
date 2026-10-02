@@ -117,7 +117,7 @@ Write-Ok "Certificate saved to $certPath"
 #
 # Java .properties escaping for the Windows path: backslashes doubled and the colon
 # escaped, e.g. C\:\\Program Files\\QZ Tray\\polybag-qz.crt. This is exactly how
-# java.util.Properties serialises a path, and what QZ Tray's parser expects.
+# java.util.Properties serializes a path, and what QZ Tray's parser expects.
 $overridePath = ($certPath -replace '\\', '\\') -replace ':', '\:'
 $propsPath = Join-Path $QzDir "qz-tray.properties"
 

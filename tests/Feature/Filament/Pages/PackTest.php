@@ -175,12 +175,12 @@ describe('PolyBag codes', function (): void {
             ->assertSet('shipmentCandidates', []);
     });
 
-    it('never looks up an unrecognised code as anything else', function (): void {
+    it('never looks up an unrecognized code as anything else', function (): void {
         Shipment::factory()->create(['shipment_reference' => 'PBX12']);
 
         Livewire::test(Pack::class)
             ->call('navigateToShipment', 'PBX12')
-            ->assertNotified('Unrecognised Code')
+            ->assertNotified('Unrecognized Code')
             ->assertNoRedirect();
     });
 

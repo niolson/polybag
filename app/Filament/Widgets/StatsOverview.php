@@ -100,7 +100,7 @@ class StatsOverview extends BaseWidget
      * complete.
      *
      * Where either week left postage unpriced, the week-over-week change is
-     * withheld along with its colour and arrow. A percentage between two
+     * withheld along with its color and arrow. A percentage between two
      * subtotals is not a percentage between two spends, and an understated
      * last week inflates it without looking any different — the strongest
      * claim on the card would be the one nobody measured.

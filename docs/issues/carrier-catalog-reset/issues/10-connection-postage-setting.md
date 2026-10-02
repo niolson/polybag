@@ -41,7 +41,7 @@ method, or until `13` the approvals, would not.
   `EloquentPackageShippingWorkflow`, and the reference in `ServiceApprovalPolicy`'s
   docblock.
 - **Migrate existing connections so nothing changes on deploy.** The defaults above are
-  for new connections only. The migration sets existing ones from today's behaviour
+  for new connections only. The migration sets existing ones from today's behavior
   before dropping the column:
   - An Amazon connection gets *packer and automation*, since approvals are today's only
     gate. *Packer only* here would silently stop approved automation.

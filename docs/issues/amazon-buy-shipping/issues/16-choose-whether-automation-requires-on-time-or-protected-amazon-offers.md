@@ -64,7 +64,7 @@ the Label was bought, and only a Buy Shipping offer can be protected.
 
 Either, both, or neither can be on:
 
-- **Neither**: today's behaviour. On-time offers come first, and if none is on time,
+- **Neither**: today's behavior. On-time offers come first, and if none is on time,
   automation falls back to the cheapest late offer.
 - **On-time only**: late offers are never bought, protected or not.
 - **Protection only**: a protected offer is bought even when its date is late, because

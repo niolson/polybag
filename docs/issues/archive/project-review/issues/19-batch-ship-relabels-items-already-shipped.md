@@ -55,7 +55,7 @@ it('never batches a package holding items an earlier package already shipped', f
 
 ## What to build
 
-Decide which of two behaviours you want, and test it:
+Decide which of two behaviors you want, and test it:
 
 - **Skip it.** Add `Partly shipped` to `getIneligibilityReason()` when any Package of the
   Shipment is shipped. Batch ship assumes one box per order, and a partly shipped order

@@ -107,7 +107,7 @@ Four. Three on `Package` and one on the label workflow. Two already have a trans
 and two gain one. Where a writer sets projected columns on both rows — `markShipped()`,
 `recordInferredService()` — it builds both writes from one `PROJECTED_COLUMNS`-keyed
 array. Every writer ends with the assertion. **Lock order is the `packages` row first, then
-`package_labels`**, in all four, so a print acknowledgement racing a void cannot
+`package_labels`**, in all four, so a print acknowledgment racing a void cannot
 deadlock.
 
 - `markShipped()`: after the `UPDATE` succeeds, insert the label row from the same

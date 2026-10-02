@@ -68,7 +68,7 @@ it('withdraws an earlier inference the current ruleset contradicts, under --appl
     // Inferred under the ruleset before the selection rung existed: the IMpb
     // decoded Ground Advantage. The purchase asked for Priority Mail and
     // Shopify named the carrier, so the current ruleset reads that selection as
-    // honoured, finds it disagrees with the decode, and refuses both -- which
+    // honored, finds it disagrees with the decode, and refuses both -- which
     // must take the stored value with it rather than leave it reported under a
     // ruleset that now contradicts it.
     $package = Package::factory()->shipped()->create([
@@ -79,11 +79,11 @@ it('withdraws an earlier inference the current ruleset contradicts, under --appl
         'service_inference_method' => 'usps-impb-stc',
         'service_ruleset_version' => '2026-09-09',
         'requested_service' => "Shopify's USPS Priority Mail",
-        'metadata' => ['shopify_honoured_selection' => 'usps:Priority'],
+        'metadata' => ['shopify_honored_selection' => 'usps:Priority'],
     ]);
 
     $this->artisan('app:infer-package-services')
-        ->expectsOutputToContain('decode disagrees with the honoured selection')
+        ->expectsOutputToContain('decode disagrees with the honored selection')
         ->assertSuccessful();
 
     expect($package->fresh()->service)->toBe('USPS Ground Advantage');

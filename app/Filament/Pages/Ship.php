@@ -585,7 +585,7 @@ class Ship extends Page
      * Buy at the weight on the scale, knowing the seller declares more.
      *
      * Sends nothing different — the refusal is waived, not the reading. What it
-     * buys is the case PolyBag cannot see: a catalogue corrected in the Shopify
+     * buys is the case PolyBag cannot see: a catalog corrected in the Shopify
      * admin between the refusal and this click, which our own copy of the
      * numbers would not know about.
      */

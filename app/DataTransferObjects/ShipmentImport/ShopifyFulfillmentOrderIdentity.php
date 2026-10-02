@@ -10,7 +10,7 @@ use App\Services\ShopifyGoodsFingerprint;
  *
  * Shopify replaces a fulfillment order outright when a label bought against it
  * is voided, and exposes no edge saying which one replaced which, so a
- * replacement can only be recognised by what it describes: the same order, at
+ * replacement can only be recognized by what it describes: the same order, at
  * the same location, for the same goods.
  */
 final readonly class ShopifyFulfillmentOrderIdentity

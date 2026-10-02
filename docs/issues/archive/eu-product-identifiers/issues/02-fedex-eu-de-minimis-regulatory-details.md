@@ -17,7 +17,7 @@ value, weight and HS code per commodity and no `regulatoryDetails`. From 1 Novem
 FedEx makes the product identifiers mandatory on EU-bound B2C shipments and EU customs
 holds anything without them.
 
-## Desired behaviour
+## Desired behavior
 
 `AddressData` gains `isInEuropeanUnion()` — true for the EU27 country codes, nothing
 else. It sits beside `isMilitary()` and `isUsTerritory()`.

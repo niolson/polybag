@@ -61,7 +61,7 @@ In `AmazonBuyShippingAdapter`, add a third predicate to `isBuyable()`:
 
 ```php
 return $this->hasPrintableDocument($rate)
-    && $this->honoursRequiredServices($rate, $request)
+    && $this->honorsRequiredServices($rate, $request)
     && $this->answersRequiredGroupsForFree($rate, $request)
     && $this->fitsThePackaging($rate, $request);
 ```
@@ -157,7 +157,7 @@ classifier ADR-0005 decision 5 describes, shipped by
 [`packaging-form-and-carrier-identity/04`](../../archive/packaging-form-and-carrier-identity/issues/04-amazon-pattern-list-classifies-instead-of-filters.md):
 a flat-rate envelope or box token is `exactly()` that packaging, `_ONE_RATE` is `anyOf()`
 every FedEx packaging, and `fitsThePackaging()` is now `requirement->accepts(carrierPackaging)`
-rather than a list of its own. The visible behaviour for a plain box is unchanged; a box
+rather than a list of its own. The visible behavior for a plain box is unchanged; a box
 size declared as USPS or FedEx packaging now sees the matching offers. Rule 3 stays here
 as `carriesPermittedContent()`. The observations-first ordering is untouched.
 

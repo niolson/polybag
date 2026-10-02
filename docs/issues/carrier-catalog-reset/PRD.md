@@ -124,7 +124,7 @@ looks like.
 
 ## Constraints from the app
 
-Existing behaviour that has to survive, whatever the model.
+Existing behavior that has to survive, whatever the model.
 
 - **Ship dates are looked up by carrier name.**
   - `ShippingRateService::shipDatesFor()` keys quoting by carrier name.
@@ -208,7 +208,7 @@ explicitly.
 6. **The shipping method is where the unattended allowance lives.** Rules narrow it or
    pick within it, per client or per condition. No other table grants unattended spend.
    A setting that only narrows, such as the connection's postage setting below, is not a
-   grant. For rules this is a behaviour change, because today a rule can name any service.
+   grant. For rules this is a behavior change, because today a rule can name any service.
 7. **Speed is guarded by the due-by date, not by a list of services.** This was decided in
    `amazon-buy-shipping/15` (wontfix) and `17`. The method's due-by and OTDR
    requirements already refuse rates that are too slow. Revisiting that decision is out
@@ -387,7 +387,7 @@ into scope for Media Mail.
   qualifies, and neither does a Package with no items, such as one from Manual Ship.
 - **The requirement is a property of the service** (guideline 13), held as
   `carrier_services.required_contents`, a nullable enum whose one case is `media`. USPS
-  Media Mail's `CarrierService` requires media contents, and every source honours it:
+  Media Mail's `CarrierService` requires media contents, and every source honors it:
   - **Direct USPS:** a Media Mail rate is dropped before its Offer is issued.
   - **Shopify:** no Media Mail blind offer is made.
   - **Amazon:** a mapped Media Mail offer is dropped inside the adapter, as
@@ -424,7 +424,7 @@ into scope for Media Mail.
 - **Known limit:** Shopify `auto` cannot be constrained. If the buyer chose Media Mail at
   checkout, Shopify may buy it whatever the contents (ADR-0003 decision 5).
 - **Other content classes.** Bound Printed Matter is for advertising, promotional and
-  directory material such as catalogues and phone books, not ordinary books. It is not
+  directory material such as catalogs and phone books, not ordinary books. It is not
   authored as a direct USPS service. Amazon's `USPS_PTP_BPM` is no longer dropped,
   because Amazon checks the order's products for it. It is shown to the packer and never
   bought unattended, even under *any service*. Nothing in PolyBag vouches for the
@@ -543,7 +543,7 @@ source kind that may sell for the method:
   client and sells only blind, so its setting is that client's consent.
 - Defaults:
   - Shopify: *does not sell postage*, today's opt-in default.
-  - Amazon: *packer only*, which is today's behaviour when nothing is approved.
+  - Amazon: *packer only*, which is today's behavior when nothing is approved.
 - **Amazon Shipping for other channels is a direct sale**, not channel postage. No
   postage setting applies to it. `offers_off_amazon_shipping` and the scope decide
   whether a connection sells it at all, as a carrier account's scopes do, and a method
@@ -564,13 +564,13 @@ source kind that may sell for the method:
   - *Direct, USPS Ground Advantage*.
   - *Any priced source, USPS Ground Advantage*, which rate-shops the service across direct
     and Amazon.
-  - *Amazon Buy Shipping, any*, which is today's `19` behaviour.
+  - *Amazon Buy Shipping, any*, which is today's `19` behavior.
   - *Direct, Amazon Shipping Ground*, for an order from another channel.
   - *Shopify, auto*.
 
   A blind purchase never enters *any priced source*.
 - ***Use* picks within the method's allowance.** The form lists only the method's services
-  and the sources the method allows. This is a behaviour change: today a rule can name any
+  and the sources the method allows. This is a behavior change: today a rule can name any
   service, and a rule with no method applies to every method. A shipment with no method
   allows nothing, so no *Use* rule picks for it (see
   [No shipping method](#no-shipping-method)).
@@ -755,7 +755,7 @@ on the rule and two on the connection.
       maps to an authored UPS Ground Saver Media carrying the media requirement.
       PolyBag's check guards it, so Amazon's is not needed. BPM stays dropped.
     - Direct USPS Bound Printed Matter and Library Mail stay out of scope. BPM is for
-      catalogues, phone books and similar material, and sending ordinary books by BPM
+      catalogs, phone books and similar material, and sending ordinary books by BPM
       appears to breach USPS's terms.
 
 ## Comments
@@ -797,7 +797,7 @@ Reviewed against the code and the recorded decisions. The goals stand.
 - Question 10: products are marked as media, and Media Mail is offered only when every
   item in the Package qualifies. It is a property of the service, so it binds Amazon too.
   This brings ADR-0005's foreseen per-product declaration into scope; see *Media Mail*.
-- Question 11: accepted. BPM stays off the direct catalog, since it is for catalogues and
+- Question 11: accepted. BPM stays off the direct catalog, since it is for catalogs and
   phone books, not books.
 - The per-product media flag, applied to every source including Amazon, stands for now.
   Filling it from Amazon's catalog classification (BMVD) during the barcode lookup is
@@ -854,7 +854,7 @@ everything below, and the maintainer agreed each change.
     special-service scoping to direct tasks.
   - `04` makes `USPS_PTP_BPM` attended-only.
   - `07` keeps direct *Use* rules working on shipments with no method, and makes the
-    Ship page default honour the rule's source.
+    Ship page default honor the rule's source.
   - `12` checks references before deleting the `Amazon` row.
   - `13` adds the production-switch guard. Later dropped: only a development install
     switches.

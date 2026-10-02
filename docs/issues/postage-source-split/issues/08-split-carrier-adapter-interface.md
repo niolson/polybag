@@ -32,8 +32,8 @@ against `ShopifyShippingLabelService::fulfillmentFor()`. Making it `implements` 
 should be close to a signature change.
 
 **So `ShopifyAdapter`'s tracking, void and manifest methods are now dead code, not live
-behaviour.** The acceptance criterion below said "no longer implements tracking or manifest
-methods at all", which read as *move this behaviour*; it is now *delete these unreachable
+behavior.** The acceptance criterion below said "no longer implements tracking or manifest
+methods at all", which read as *move this behavior*; it is now *delete these unreachable
 implementations*. Nothing routes to them: a Shopify-bought package records its physical carrier
 and its postage source, so dispatch never asks `ShopifyAdapter` anything, and no package
 records `carrier = 'Shopify'`. Two things to keep while deleting:
@@ -73,7 +73,7 @@ are carrier-wide stay in carrier policy.
 Largest blast radius in this feature — it touches all four adapters. The safety net is
 `UspsAdapterTest`, `FedexAdapterTest`, `UpsAdapterTest`, `ShopifyAdapterTest` and
 `CarrierRegistryTest`; none of them should need rewriting to keep passing. `07` added three more
-that hold the dispatch behaviour this slice is re-plumbing underneath — `PostageSourceDispatchTest`
+that hold the dispatch behavior this slice is re-plumbing underneath — `PostageSourceDispatchTest`
 (including that the carrier is never asked about a Shopify label), `ShopifyPostageSourceTest`
 (the mapping table, empty events, voided and unmatched fulfillments) and
 `ShopifyFulfillmentSynchronizerTest`. Those assertions should survive the refactor unchanged;
@@ -146,7 +146,7 @@ up. Neither holds — Shopify's API has no field in which to request a special s
 the honest statement is that the offer cannot guarantee one.
 
 It excludes on a hard requirement exactly as the decision demands, and drops the preference
-without excluding when the service is only a default. That second case is behaviour the ADR did
+without excluding when the service is only a default. That second case is behavior the ADR did
 not speak to, and dropping a preference an offer cannot express is the right answer to it.
 
 ### Test churn

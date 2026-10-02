@@ -33,7 +33,7 @@ PRD. It is not part of this issue.
 - [x] With the media field mapped, an import creates and updates products with the flag
       set from the source row
 - [x] With it unmapped, an import leaves an existing product's flag untouched
-- [x] An unrecognised value leaves the flag unchanged and does not fail the import
+- [x] An unrecognized value leaves the flag unchanged and does not fail the import
 - [x] The Database driver reference documents the field
 
 ## Blocked by

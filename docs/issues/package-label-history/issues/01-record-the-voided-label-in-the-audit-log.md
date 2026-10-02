@@ -26,7 +26,7 @@ tracking number into a local before calling `clearShipping()` and writes it into
 ## What to build
 
 Capture the values from the **database row, inside the transaction, under a row lock** —
-not from `$this`. The model instance the caller holds may predate a print acknowledgement
+not from `$this`. The model instance the caller holds may predate a print acknowledgment
 (`label_printed_at` is written by a separate request when the printer reports back) or a
 tracking refresh from the queue. `label_printed_at` is the field that matters most here
 — it is what distinguishes a number in a database from a parcel with a dead label on it

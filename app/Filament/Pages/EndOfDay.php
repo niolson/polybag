@@ -86,7 +86,7 @@ class EndOfDay extends Page
                 $shipDate = $shipDateService->getShipDate($carrier, $locationId);
                 $nextShipDate = $shipDateService->getNextPickupDay($carrier, $locationId);
                 // The carrier-level question — does this carrier run a manifest
-                // programme? Whether a given package may go on one we create is
+                // program? Whether a given package may go on one we create is
                 // a postage-source question, enforced by boughtOnCarrierAccount()
                 // on the manifest count below.
                 $supportsManifest = $registry->policyFor($carrier->name)?->supportsCarrierManifest() ?? false;

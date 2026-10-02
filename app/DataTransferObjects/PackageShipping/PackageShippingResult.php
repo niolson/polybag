@@ -101,7 +101,7 @@ readonly class PackageShippingResult
      * Carries the message from {@see ShopifyDeclaredWeightException},
      * which is the only place both numbers are known. Leaves the package intact
      * for the same reason the offer failures do: nothing was bought, and the
-     * remedy — a product weight in the seller's catalogue — is somewhere else
+     * remedy — a product weight in the seller's catalog — is somewhere else
      * entirely. Dissolving the packed box while somebody goes to fix it would
      * be the worst possible response.
      */

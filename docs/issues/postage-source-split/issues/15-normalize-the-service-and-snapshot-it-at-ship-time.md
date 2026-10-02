@@ -73,7 +73,7 @@ onto the package when it ships**, exactly as `03` did for the carrier.
     `UPS Ground` …). Either the ruleset gains a `service_code` per selection or the
     inferrer resolves its output through the same normalizer; the former is smaller and
     keeps the ruleset the single vocabulary.
-- Resolving to nothing is a valid outcome. An unrecognised service normalizes to null
+- Resolving to nothing is a valid outcome. An unrecognized service normalizes to null
   and the package still ships.
 - Snapshot, never recompute on read: an alias or catalog edit must not rewrite what a
   past package, export or report meant. Same rule as `03`.
@@ -120,7 +120,7 @@ exists. Anything else stays null. Run once as a command, idempotent, reported pe
   inferred service carries no tier and never will.
 - Reporting that groups by service. That is what this unblocks, not what it builds.
 - A display-only shortening of the USPS string in the list column was considered and
-  skipped 2026-09-18 in favour of doing this properly.
+  skipped 2026-09-18 in favor of doing this properly.
 
 ## Acceptance criteria
 
@@ -128,7 +128,7 @@ exists. Anything else stays null. Run once as a command, idempotent, reported pe
 - [ ] A normalized identity is written at ship time and on inference, and never
       recomputed on read
 - [ ] Editing a catalog row or an alias does not change any already-shipped package
-- [ ] An unrecognised service normalizes to null and the package still ships
+- [ ] An unrecognized service normalizes to null and the package still ships
 - [ ] Direct USPS variants (`Machinable Single-piece`, cubic tiers 1–3, `Nonstandard`) all
       snapshot to `USPS_GROUND_ADVANTAGE`; the same holds for Priority Mail and Express
 - [ ] An Amazon offer bought through a promoted or aliased observed service snapshots to

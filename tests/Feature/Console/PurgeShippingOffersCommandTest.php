@@ -97,7 +97,7 @@ it('purges an offer the source declined, which resolved nothing to recover', fun
     expect(ShippingOffer::count())->toBe(0);
 });
 
-it('honours a retention of zero as keep forever', function (): void {
+it('honors a retention of zero as keep forever', function (): void {
     Setting::updateOrCreate(
         ['key' => 'shipping_offer_retention_days'],
         ['value' => '0', 'type' => 'integer', 'group' => 'system'],

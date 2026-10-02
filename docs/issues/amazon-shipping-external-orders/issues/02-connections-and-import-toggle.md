@@ -61,7 +61,7 @@ None - can start immediately
 `data_sources.import_enabled` (boolean, default on, so every existing row is backfilled
 on). `DataSource::importing()` (active **and** import on) is what the scheduled import in
 `routes/console.php` and `shipments:import --all` select; `--source-id` and
-`RunDataSourceImportJob` check `importsOrders()` and skip. The resource is labelled
+`RunDataSourceImportJob` check `importsOrders()` and skip. The resource is labeled
 Connection(s); the URL (`/data-sources`), model, table and classes keep their names.
 
 With import off the form hides the import schedule, *Existing Shipments*, the channel and

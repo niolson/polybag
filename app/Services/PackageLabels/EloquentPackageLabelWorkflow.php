@@ -176,7 +176,7 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
             $printedAt = now();
 
             // Package row first, then its label: the lock order every writer
-            // keeps, so a print acknowledgement racing a void cannot deadlock.
+            // keeps, so a print acknowledgment racing a void cannot deadlock.
             $package->forceFill(['label_printed_at' => $printedAt])->save();
 
             // Exactly one, thrown rather than skipped: the structural assertion

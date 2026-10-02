@@ -16,7 +16,7 @@ Once the data exists, something has to turn the order, the client and the destin
 into one answer before rating, and the rate list has to respect what each carrier can do
 with it.
 
-## Desired behaviour
+## Desired behavior
 
 **Resolver.** A `CustomsTermsResolver` returns a `ResolvedCustomsTerms` DTO for a
 Shipment and destination: the duties term (or *unresolved*), where it came from (`order`,

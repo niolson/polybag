@@ -18,11 +18,11 @@ use App\Services\CarrierNormalizer;
  * the failure this exists to avoid, not a better outcome than silence.
  *
  * The carrier is known before any rung runs, so every rung only has to choose a
- * service within a known carrier. An unrecognised carrier is a clean stop.
+ * service within a known carrier. An unrecognized carrier is a clean stop.
  *
- * Two rungs read the artefact -- the tracking number, then the label -- and a
+ * Two rungs read the artifact -- the tracking number, then the label -- and a
  * third reads the request that produced it: the `preferredRateSelection` Shopify
- * honoured. That one runs last and only fills in where the artefact declines,
+ * honored. That one runs last and only fills in where the artifact declines,
  * because what was asked for is weaker evidence than what was produced, and
  * where the two disagree the ladder reports the disagreement rather than
  * preferring either.
@@ -56,16 +56,16 @@ class ServiceInferrer
             $package->carrierOfRecordName(),
             $package->tracking_number,
             $package->label_data,
-            self::honouredSelectionOn($package),
+            self::honoredSelectionOn($package),
         );
     }
 
     /**
      * The Shopify selection a saved package was bought with, where it can still
-     * be read as honoured.
+     * be read as honored.
      *
      * Read from the one key the purchase writes for exactly this purpose --
-     * `shopify_honoured_selection`, the pair only when Shopify itself named the
+     * `shopify_honored_selection`, the pair only when Shopify itself named the
      * carrier, null otherwise -- rather than reassembled from the raw pair and
      * the tracking company. Those two are written only when present, and
      * metadata is merged over what a package already carries and survives a
@@ -77,14 +77,14 @@ class ServiceInferrer
      * package whose label was voided and not re-bought keeps the key and must
      * not be read.
      */
-    private static function honouredSelectionOn(Package $package): ?string
+    private static function honoredSelectionOn(Package $package): ?string
     {
         if (blank($package->requested_service)) {
             return null;
         }
 
         $metadata = is_array($package->metadata) ? $package->metadata : [];
-        $pair = $metadata['shopify_honoured_selection'] ?? null;
+        $pair = $metadata['shopify_honored_selection'] ?? null;
 
         return is_string($pair) && filled($pair) ? $pair : null;
     }
@@ -104,7 +104,7 @@ class ServiceInferrer
      * Shopify for, or null where the choice was left to Shopify or the carrier
      * of record is not Shopify's own report. It is the last rung, and it also
      * checks the first two: a decode that names a different service from an
-     * honoured selection is two sources disagreeing, and the ladder declines
+     * honored selection is two sources disagreeing, and the ladder declines
      * rather than picking one.
      */
     public function inferFrom(
@@ -143,14 +143,14 @@ class ServiceInferrer
     }
 
     /**
-     * A decode stands unless an honoured selection names a different service.
+     * A decode stands unless an honored selection names a different service.
      *
      * Rung 1 decodes what the carrier encoded and rung 3 knows what Shopify was
-     * asked for; Shopify has been observed to honour a selection every time it
+     * asked for; Shopify has been observed to honor a selection every time it
      * sells with one, so the two disagreeing means a table is wrong -- ours or
      * the carrier's -- and which one is not something this ladder can settle.
      * The disagreement is what the coverage command counts; it is also the
-     * running check that Shopify still honours selections at all. And it is
+     * running check that Shopify still honors selections at all. And it is
      * marked as a contradiction rather than a plain miss, because a package
      * already carrying the decoded value under an older ruleset should lose it:
      * `Package::withdrawInferredService()` acts on this result and no other.
@@ -162,7 +162,7 @@ class ServiceInferrer
         }
 
         return ServiceInference::contradicted(
-            "{$decoded->method} decoded {$decoded->service} but the honoured selection names {$selected->service}"
+            "{$decoded->method} decoded {$decoded->service} but the honored selection names {$selected->service}"
         );
     }
 
@@ -307,17 +307,17 @@ class ServiceInferrer
     }
 
     /**
-     * Rung 3 — the `preferredRateSelection` Shopify honoured.
+     * Rung 3 — the `preferredRateSelection` Shopify honored.
      *
      * Weaker than either rung above, because it reads the request and not the
-     * result. What makes it evidence at all is Shopify's behaviour, established
+     * result. What makes it evidence at all is Shopify's behavior, established
      * by purchase: a pair with no matching rate fails synchronously and buys
      * nothing, so a purchase that succeeded with a selection is one Shopify
-     * matched a rate to. The check that it was honoured is the carrier: Shopify
+     * matched a rate to. The check that it was honored is the carrier: Shopify
      * reports the carrier of record itself, and a selection whose carrier is not
      * that one was not what got bought.
      *
-     * The table holds only pairs seen honoured, so `auto`, an unlisted pair and
+     * The table holds only pairs seen honored, so `auto`, an unlisted pair and
      * a pair whose carrier does not match all fall through.
      */
     private function fromRequestedSelection(?string $pair, string $carrier): ServiceInference
@@ -329,7 +329,7 @@ class ServiceInferrer
         $selection = $this->ruleset->shopifySelection($pair);
 
         if ($selection === null) {
-            return ServiceInference::inconclusive("selection {$pair} is not one seen honoured");
+            return ServiceInference::inconclusive("selection {$pair} is not one seen honored");
         }
 
         if (CarrierAlias::lookupKey($selection['carrier']) !== CarrierAlias::lookupKey($carrier)) {

@@ -42,7 +42,7 @@ FedEx Pak are real rates for that packaging and the narrower reading would drop 
 
 | # | Slice | Status | Depends on |
 |---|---|---|---|
-| [`01`](issues/01-packaging-requirement-on-every-rate-and-the-shared-filter.md) | `CarrierPackaging` enum, `PackagingRequirement`, the field on `RateResponse` and its round-trips, `carrierPackaging` on `PackageData` (always null for now), the shared filter at the rate-shopping site, every adapter stamping `shipperPackaging()`. **No behaviour change.** Closes `amazon-buy-shipping/08` | needs-triage | nothing |
+| [`01`](issues/01-packaging-requirement-on-every-rate-and-the-shared-filter.md) | `CarrierPackaging` enum, `PackagingRequirement`, the field on `RateResponse` and its round-trips, `carrierPackaging` on `PackageData` (always null for now), the shared filter at the rate-shopping site, every adapter stamping `shipperPackaging()`. **No behavior change.** Closes `amazon-buy-shipping/08` | needs-triage | nothing |
 | [`02`](issues/02-pre-selection-filters-before-it-chooses.md) | `resolvePreSelectedRate()` returns `?RateResponse`, filters before choosing a variant, and `selectedRateForAutoShip()` falls through to rate shopping on null | needs-triage | `01` |
 | [`03`](issues/03-box-size-carrier-packaging-replaces-fedex-package-type.md) | `box_sizes.carrier_packaging` with a lossless data migration from `fedex_package_type`, the two forms, `PackageData::fromPackage()`, FedEx mapping at the request boundary, `CONTEXT.md` terms | needs-triage | `01` |
 | [`04`](issues/04-amazon-pattern-list-classifies-instead-of-filters.md) | `fitsThePackaging()` rules 1–2 become the classifier that stamps each Amazon rate's requirement; rule 3 stays a drop. The first thing an operator can *buy* because of this ADR | needs-triage | `02`, `03` |
@@ -52,7 +52,7 @@ FedEx Pak are real rates for that packaging and the narrower reading would drop 
 
 `01` and `02` are the plumbing, and ship with every rate saying `shipperPackaging()` so
 nothing a user sees changes; `02` is separate because it changes an interface across five
-adapters and carries the one behaviour change worth a release-note line. `03` is the
+adapters and carries the one behavior change worth a release-note line. `03` is the
 schema. `04` is the payoff the ADR promises "with no direct USPS adapter work". `05` is the
 cost the ADR says is deferred rather than avoided — a working filter in the busiest adapter
 changes what it keeps. `06` is a decision, not a step. `07` is the UPS twin of `05`, not

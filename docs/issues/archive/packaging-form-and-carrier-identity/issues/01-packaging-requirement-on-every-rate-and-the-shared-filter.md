@@ -11,7 +11,7 @@ Repo: `polybag`
 
 ## What to build
 
-The vocabulary and the plumbing, shipped with **no behaviour change**: every rate says
+The vocabulary and the plumbing, shipped with **no behavior change**: every rate says
 `shipperPackaging()`, every Package's carrier packaging is null, so the filter keeps
 everything. What this slice proves is that the requirement reaches every place a rate
 goes — adapter, `ShippingRateService`, Livewire state, the offer store, the purchase —
@@ -182,7 +182,7 @@ Pint clean.
 For `02` and `03`: read the Package's packaging at the pre-selection site the way rate
 shopping and the purchase re-check already do — `PackageData::fromPackage($package)->carrierPackaging`
 — so that `03` wiring `fromPackage()` lights up all three sites together.
-The FedEx One Rate comment is the one place where a rate is knowingly mislabelled
+The FedEx One Rate comment is the one place where a rate is knowingly mislabeled
 `shipperPackaging()` until `03` — `03` should flip it to `exactly(…)` in the same change that
 adds the column, or a Package in FedEx packaging loses One Rate at the filter.
 
@@ -345,8 +345,8 @@ and buy the other, because both read the same bytes. What the check is, is *cons
 what it is not is *authoritative*, and the reason is broader than packaging: a direct
 rate's carrier, service, price and metadata are all restated by the browser, and were
 before this issue existed. The invariant the consistency depends on — read only what the
-ship body sends; never let an unrecognised indicator fall through to `shipperPackaging()`
-— is now on the interface docblock, and is `05`'s to honour when USPS's classifier
+ship body sends; never let an unrecognized indicator fall through to `shipperPackaging()`
+— is now on the interface docblock, and is `05`'s to honor when USPS's classifier
 becomes real.
 
 The reviewer's remedy — restore the quoted rate server-side behind an opaque identifier,

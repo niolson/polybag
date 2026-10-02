@@ -41,7 +41,7 @@ Advantage on the first `auto` purchase and has sold USPS repeatedly since. FedEx
 irrelevant either way — Shopify Shipping does not sell it through this API at all.
 
 **Every label bought here is a test label**: free, `Test: True` in the order timeline,
-registered with the carrier and trackable (UPS's own tracking page recognised one, showed
+registered with the carrier and trackable (UPS's own tracking page recognized one, showed
 it as *label created*, and moved it to *cancelled* after the void), but never a moving
 parcel. USPS test labels come back as USPS's own `SAMPLE - DO NOT MAIL` artwork; UPS's carry
 no visible marking.
@@ -106,7 +106,7 @@ source.
 notification for the `shippingDatetime` sent, and accepts a midnight value without altering
 it. After the 8 PM cutoff PolyBag sends tomorrow at 00:00, so a label bought at 20:05 local
 schedules the customer's shipping confirmation for four hours later. Defensible — the parcel
-does ship that day — but a behaviour nobody chose, following from `pickup_cutoff_hour`, a
+does ship that day — but a behavior nobody chose, following from `pickup_cutoff_hour`, a
 column with **no UI**: `CarrierForm` exposes only `name` and `active`, and the value is 20
 for USPS and Shopify, `null` for FedEx and UPS. "Scheduled" is approximate: one email
 scheduled for 10:28 arrived at 10:34.
@@ -122,7 +122,7 @@ scheduled for 10:28 arrived at 10:34.
   these by number. `postage-source-split/02` and `/07` repointed at `17`.
 - **2026-09-09** — question 2's premise found to be wrong: the shop's label format setting
   offers Thermal / Letter / A4, which are **paper sizes, all PDF**. Nothing in the help
-  centre, the printer list or the schema reference offers ZPL or says what would produce it.
+  center, the printer list or the schema reference offers ZPL or says what would produce it.
   Corrected in the service's code comment, the PRD, `14` and the README.
 - **2026-09-09** — question 4 folded back in: it had been *skipped*, not answered, because
   `notify_customer` was off. Turned on and re-run — one notification, no duplicate — and the

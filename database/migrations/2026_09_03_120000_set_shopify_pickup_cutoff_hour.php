@@ -8,7 +8,7 @@ return new class extends Migration
     /**
      * Carry the interim Shopify cutoff off the constant in ShipDateService and onto
      * the carrier row, where every other carrier's cutoff already lives. The value
-     * is unchanged, so no shipped install changes behaviour; what changes is that
+     * is unchanged, so no shipped install changes behavior; what changes is that
      * the policy is now data rather than a branch in the service.
      *
      * Matching by name or alias is right *here* and nowhere else: a migration acts

@@ -317,7 +317,7 @@ class UnattendedRateSelector
     /**
      * Every rate quoted names a deactivated service or carrier.
      *
-     * Not an attended selection: the Ship page shows those rates greyed out
+     * Not an attended selection: the Ship page shows those rates grayed out
      * and the purchase refuses them, so sending the operator there would
      * leave them with nothing to choose. What helps is reactivating the
      * service or carrier, or a shipping method that lists an active one.

@@ -17,7 +17,7 @@ manufacturer part number or a GTIN, and `CustomsItem` — the one DTO every cust
 declaration is built from — carries neither. Nothing an adapter does in `02` or `03`
 can send what the model does not hold.
 
-## Desired behaviour
+## Desired behavior
 
 Two new nullable columns on `products`:
 

@@ -44,7 +44,7 @@ against a general checklist. Area A's:
 
 Every finding is one of:
 
-- **Confirmed** — a Pest test asserting the required behaviour fails against `main`.
+- **Confirmed** — a Pest test asserting the required behavior fails against `main`.
   The test is in the issue and becomes the regression test of the fix. The probes are
   not committed as failing tests.
 - **Plausible** — the code plainly allows it, but no test reaches it cheaply; the issue
@@ -95,19 +95,19 @@ Invariants 3, 4, 5 and 6 hold. `clearShipping()` locks the Package row, guards o
 `status = shipped`, voids exactly one Label and asserts the pair before commit.
 `markLabelPrinted()`, `recordInferredService()` and `withdrawInferredService()` keep the
 same lock order and refuse a zero-row Label update. Reprint (`labelForReprint()`, the
-print acknowledgement, the batch print) reads only a shipped Package's current
+print acknowledgment, the batch print) reads only a shipped Package's current
 `label_data`, so nothing can print a voided Label. `ManifestService::createManifest()`
 refuses any non-direct Package, and `getUnmanifestedPackages()` filters on
 `boughtOnCarrierAccount()`. The dispatcher routes Shopify and Amazon void and tracking by
 the recorded `postage_data_source_id`, and refuses rather than falls back for a source it
-doesn't recognise. The synchronizer finds a fulfillment by tracking number, and one
+doesn't recognize. The synchronizer finds a fulfillment by tracking number, and one
 without a match is no answer rather than someone else's.
 
 Invariant 1 holds for channel postage and for the manifest, but not for a direct void or
 tracking (`06`). Invariant 2 holds for the Package's shipping columns, but not for three
 things kept outside them: its manifest (`07`), the sales channel's copy of the tracking
 number (`09`), and a void the source accepted but PolyBag failed to record (`10`). The
-void action itself isn't authorised (`08`).
+void action itself isn't authorized (`08`).
 
 ## Area B: candidates dropped
 
@@ -117,7 +117,7 @@ void action itself isn't authorised (`08`).
   only answer a just-voided number can give is pre-transit.
 - *Overlapping Shopify syncs void a re-shipped Label.* Only possible if two runs overlap,
   and the schedule has `withoutOverlapping()`.
-- *A print acknowledgement lands on a re-shipped Label.* The QZ acknowledgement is keyed by
+- *A print acknowledgment lands on a re-shipped Label.* The QZ acknowledgment is keyed by
   Package, but it arrives seconds after the print, well before a void and re-ship could
   complete.
 - *Rate-shop scopes buy on a second account that void then misses.* `resolve()` quotes
@@ -141,13 +141,13 @@ From ADR-0002 decisions 4–9, ADR-0003 and ADR-0006 decisions 1–4 and 10:
 4. An adapter's answer to a purchase is either a decline (the source sold nothing) or an
    unknown outcome that stays unresolved for recovery. A source that can be asked about a
    purchase never turns an unknown into a decline.
-5. The carrier of record is the physical carrier, normalized for behaviour and snapshotted
+5. The carrier of record is the physical carrier, normalized for behavior and snapshotted
    when the Label is bought; normalization runs before any carrier-policy lookup
    (ADR-0002 decisions 1 and 5).
 6. Observation, normalization and the allowance stay separate; discovery never creates
    catalog rows, and a mapping names the same service (ADR-0003 decision 2, ADR-0006
    decision 2).
-7. A hard-required special service excludes an offer that can't honour it, judged per
+7. A hard-required special service excludes an offer that can't honor it, judged per
    offer for Amazon; a default is a preference and never excludes (ADR-0002 decision 8).
 8. A void or tracking answer is read from what the source said, not only from its HTTP
    status.
