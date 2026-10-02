@@ -26,6 +26,7 @@ use App\Enums\PostageSource;
 use App\Enums\Role;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
+use App\Exceptions\LabelNotRecoverableException;
 use App\Exceptions\MissingDeclaredValueException;
 use App\Exceptions\MissingProductIdentifierException;
 use App\Exceptions\PackageDraftIncompleteException;
@@ -161,13 +162,6 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
     }
 
     /**
-     * How long one package's purchase may hold the line before the lock is
-     * assumed abandoned. Generous on purpose: it spans an external label call,
-     * and a lock that expires mid-purchase is worse than one held too long.
-     */
-    private const PURCHASE_LOCK_SECONDS = 180;
-
-    /**
      * Buy what the Ship page chose.
      *
      * The one entry point the browser reaches. A quoted rate must name an
@@ -209,6 +203,46 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         }
 
         return null;
+    }
+
+    /**
+     * The settle step a purchase runs first, on its own — *Ask again* on
+     * the package page (`postage-source-split/16`).
+     *
+     * Under the same per-package lock as a purchase, so it cannot ask a source
+     * about an offer a purchase is settling at the same moment. Buys nothing.
+     */
+    public function checkEarlierPurchases(Package $package, string $labelFormat = 'pdf', ?int $labelDpi = null, ?int $userId = null): ?PackageShippingResult
+    {
+        $offer = $this->unaccountedPurchases($package)->first();
+
+        if ($offer === null) {
+            return null;
+        }
+
+        // A request has to name what it buys; recovery reads only the label
+        // format, the user and the offer's own rate from it.
+        $request = new PackageShippingRequest(
+            selectedRate: $this->rateFromOffer($offer),
+            labelFormat: $labelFormat,
+            labelDpi: $labelDpi,
+            userId: $userId,
+        );
+
+        $lock = PurchaseLock::for($package);
+
+        if (! $lock->get()) {
+            return PackageShippingResult::offerUnavailable(
+                'Purchase In Progress',
+                'Postage for this package is being bought right now. Wait for that attempt to finish, then check again.',
+            );
+        }
+
+        try {
+            return $this->settleEarlierPurchases($package, $request);
+        } finally {
+            $lock->release();
+        }
     }
 
     /**
@@ -256,7 +290,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             );
         }
 
-        $lock = Cache::lock("package-purchase:{$package->id}", self::PURCHASE_LOCK_SECONDS);
+        $lock = PurchaseLock::for($package);
 
         if (! $lock->get()) {
             return PackageShippingResult::offerUnavailable(
@@ -314,7 +348,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             return $buy();
         }
 
-        $lock = Cache::lock("shipment-blind-purchase:{$package->shipment_id}", self::PURCHASE_LOCK_SECONDS);
+        $lock = Cache::lock("shipment-blind-purchase:{$package->shipment_id}", PurchaseLock::SECONDS);
 
         if (! $lock->get()) {
             return PackageShippingResult::offerUnavailable(
@@ -934,11 +968,26 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             ->filter(fn (mixed $trackingNumber): bool => is_string($trackingNumber))
             ->implode(', ');
 
+        $offer = $stillUnresolved->first();
+        $seller = $offer->sellerName();
+
+        $unrecoverable = $offer->purchase_context[OfferStore::UNRECOVERABLE_REASON] ?? null;
+
+        $message = match (true) {
+            is_string($unrecoverable) => "{$seller} sold a label for this package earlier that PolyBag failed to save, and it cannot be fetched: {$unrecoverable} "
+                .'No other label can be bought until a manager records it on the package page and, if it should not be used, voids it.',
+            $offer->purchase_reference !== null => "{$seller} sold a label for this package earlier, but PolyBag failed to save it. "
+                .'No other label can be bought until it is recorded, which a manager can do on the package page.',
+            $this->postageSources->sellerFor($offer) instanceof RecoversUnresolvedPurchase => "PolyBag tried to buy a label for this package earlier and never heard back from {$seller}, so it may already exist. "
+                ."No other label can be bought until that is settled. Try again in a few minutes, since each try asks {$seller} again. "
+                .'If it keeps happening, a manager can settle it on the package page.',
+            default => "PolyBag tried to buy a label for this package earlier and never heard back from {$seller}, so it may already exist. "
+                .'No other label can be bought until a manager settles it on the package page.',
+        };
+
         return PackageShippingResult::offerUnavailable(
-            'Earlier Purchase Unresolved',
-            'A previous attempt to buy postage for this package did not report back, so a label may already exist. '
-            .($reported !== '' ? "The carrier reported tracking number {$reported}. " : '')
-            .'Check the carrier or channel for a label on this package before buying again.',
+            PackageShippingResult::UNFINISHED_PURCHASE,
+            $message.($reported !== '' ? " {$seller} reported tracking number {$reported}." : ''),
         );
     }
 
@@ -1012,6 +1061,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 $request->labelDpi,
                 $offer,
             ));
+        } catch (LabelNotRecoverableException $e) {
+            $this->offerStore->recordUnrecoverableLabel($offer, $e->sourceReason);
+
+            return null;
         } catch (\Exception $e) {
             logger()->error('Could not ask a postage source about an unresolved purchase', [
                 'package_id' => $package->id,

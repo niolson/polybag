@@ -135,6 +135,11 @@ it('applies the selected rate index from the workflow to the form on mount', fun
         {
             return PackageShippingResult::failed('Unused', 'Unused');
         }
+
+        public function checkEarlierPurchases(Package $package, string $labelFormat = 'pdf', ?int $labelDpi = null, ?int $userId = null): ?PackageShippingResult
+        {
+            return null;
+        }
     });
 
     $component = Livewire::test(Ship::class, ['package_id' => $package->id]);
@@ -258,6 +263,11 @@ function countingRatesWorkflow()
         public function autoShip(Package $package, PackageAutoShippingRequest $request): PackageShippingResult
         {
             return PackageShippingResult::failed('Unused', 'Unused');
+        }
+
+        public function checkEarlierPurchases(Package $package, string $labelFormat = 'pdf', ?int $labelDpi = null, ?int $userId = null): ?PackageShippingResult
+        {
+            return null;
         }
     };
 }

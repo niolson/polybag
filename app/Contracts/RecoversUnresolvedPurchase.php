@@ -4,6 +4,7 @@ namespace App\Contracts;
 
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Exceptions\LabelNotRecoverableException;
 use App\Services\PostageSources\OfferStore;
 
 /**
@@ -47,6 +48,13 @@ interface RecoversUnresolvedPurchase
      * - **null** — still unknown. The source could not be reached, or answered
      *   something that does not settle the question. The package stays blocked,
      *   which is the safe end of the trade.
+     *
+     * A fourth, thrown rather than returned: {@see LabelNotRecoverableException}
+     * when the source says the label exists but will never be handed over
+     * again. The package stays blocked, and the source's reason is kept on the
+     * offer for the person who has to record it.
+     *
+     * @throws LabelNotRecoverableException
      */
     public function recoverPurchase(ShipRequest $request): ?ShipResponse;
 }

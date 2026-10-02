@@ -75,10 +75,21 @@ function uspsMultipart(string $trackingNumber): MockResponse
     );
 }
 
-function uspsKeyNotFound(): MockResponse
+function uspsKeyNotFound(int $lookBackDays = 7): MockResponse
 {
     return MockResponse::make(['apiVersion' => '/labels/v3/', 'error' => ['code' => '400', 'message' => 'Bad Request', 'errors' => [
-        ['title' => 'Bad Request', 'detail' => 'Idempotency-Key not found for a mailing date within the last 7 days', 'code' => '160412', 'source' => ['parameter' => 'Header: X-Idempotency-Key']],
+        ['title' => 'Bad Request', 'detail' => "Idempotency-Key not found for a mailing date within the last {$lookBackDays} days", 'code' => '160412', 'source' => ['parameter' => 'Header: X-Idempotency-Key']],
+    ]]], 400);
+}
+
+/**
+ * TEM's answer for a label that exists but whose mailing date has passed
+ * (2026-10-02), matching USPS's documented reprint rule.
+ */
+function uspsPastMailingDate(string $mailingDate = '2026-09-29'): MockResponse
+{
+    return MockResponse::make(['apiVersion' => '/labels/v3/', 'error' => ['code' => '400', 'message' => 'Bad Request', 'errors' => [
+        ['title' => 'Bad Request', 'detail' => "Label is unavailable for reprint past its mailingDate of {$mailingDate}", 'code' => '160981', 'source' => ['parameter' => 'trackingNumber']],
     ]]], 400);
 }
 
@@ -187,6 +198,100 @@ it('buys a USPS label afresh once USPS is certain the earlier attempt bought not
     Saloon::assertSent(Label::class);
 });
 
+// USPS finds a key only for a mailing date inside its look-back — 7 days in
+// production — so past it "not found" says nothing about the label.
+it('keeps a USPS package blocked when the attempt is older than USPS looks back', function (): void {
+    $stalled = purchaseWithNoAnswer($this->package, uspsGroundAdvantage($this->package), [...uspsAuthFakes(), Label::class => noAnswer()]);
+    $stalled->forceFill(['consumed_at' => now()->subDays(10)])->save();
+
+    Saloon::fake([...uspsAuthFakes(), LabelReprint::class => uspsKeyNotFound(), Label::class => uspsMultipart('9400111899223456789012')]);
+
+    $result = app(PackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: uspsGroundAdvantage($this->package)));
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Unfinished Label Purchase')
+        ->and($stalled->fresh()->isAwaitingPurchaseConfirmation())->toBeTrue()
+        ->and($this->package->fresh()->status)->toBe(PackageStatus::Unshipped);
+
+    Saloon::assertNotSent(Label::class);
+});
+
+it('believes a key not found for as long as USPS says it looks back', function (): void {
+    $stalled = purchaseWithNoAnswer($this->package, uspsGroundAdvantage($this->package), [...uspsAuthFakes(), Label::class => noAnswer()]);
+    $stalled->forceFill(['consumed_at' => now()->subDays(10)])->save();
+
+    // TEM's wording: a 14-day look-back covers a 10-day-old attempt.
+    Saloon::fake([...uspsAuthFakes(), LabelReprint::class => uspsKeyNotFound(14), Label::class => uspsMultipart('9400111899223456789012')]);
+
+    $result = app(PackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: uspsGroundAdvantage($this->package)));
+
+    expect($result->success)->toBeTrue()
+        ->and($stalled->fresh()->purchase_failed_at)->not->toBeNull();
+});
+
+// `postage-source-split/16`'s *Check again*: the same settle step, run on its
+// own, buying nothing whatever the answer.
+it('checks a stranded USPS purchase on demand and ships on the label USPS still has', function (): void {
+    $stalled = purchaseWithNoAnswer($this->package, uspsGroundAdvantage($this->package), [...uspsAuthFakes(), Label::class => noAnswer()]);
+
+    Saloon::fake([...uspsAuthFakes(), LabelReprint::class => uspsMultipart('9200190414219000000011')]);
+
+    $result = app(PackageShippingWorkflow::class)->checkEarlierPurchases($this->package, 'zpl', 203);
+
+    expect($result?->success)->toBeTrue()
+        ->and($this->package->fresh()->tracking_number)->toBe('9200190414219000000011')
+        ->and($stalled->fresh()->purchase_reference)->toBe('9200190414219000000011');
+
+    Saloon::assertNotSent(Label::class);
+});
+
+it('settles a stranded USPS purchase on demand when USPS is certain nothing was bought, and buys nothing', function (): void {
+    $stalled = purchaseWithNoAnswer($this->package, uspsGroundAdvantage($this->package), [...uspsAuthFakes(), Label::class => noAnswer()]);
+
+    Saloon::fake([...uspsAuthFakes(), LabelReprint::class => uspsKeyNotFound()]);
+
+    expect(app(PackageShippingWorkflow::class)->checkEarlierPurchases($this->package))->toBeNull()
+        ->and($stalled->fresh()->purchase_failed_at)->not->toBeNull()
+        ->and($this->package->fresh()->status)->toBe(PackageStatus::Unshipped);
+
+    Saloon::assertNotSent(Label::class);
+});
+
+it('reports a purchase still unknown when checked on demand', function (): void {
+    purchaseWithNoAnswer($this->package, uspsGroundAdvantage($this->package), [...uspsAuthFakes(), Label::class => noAnswer()]);
+
+    Saloon::fake([...uspsAuthFakes(), LabelReprint::class => noAnswer()]);
+
+    $result = app(PackageShippingWorkflow::class)->checkEarlierPurchases($this->package);
+
+    expect($result?->success)->toBeFalse()
+        ->and($result?->title)->toBe('Unfinished Label Purchase');
+});
+
+// A label exists and USPS will never send it again: not "nothing bought",
+// and not worth asking again. The reason is kept for the person who records it.
+it('keeps a USPS package blocked and says why when USPS will not reprint past the mailing date', function (): void {
+    $stalled = purchaseWithNoAnswer($this->package, uspsGroundAdvantage($this->package), [...uspsAuthFakes(), Label::class => noAnswer()]);
+
+    Saloon::fake([...uspsAuthFakes(), LabelReprint::class => uspsPastMailingDate(), Label::class => uspsMultipart('9400111899223456789012')]);
+
+    $result = app(PackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: uspsGroundAdvantage($this->package)));
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Unfinished Label Purchase')
+        ->and($result->message)->toContain('USPS will not send a label again after its mailing date of Sep 29, 2026.')
+        ->and($stalled->fresh()->isAwaitingPurchaseConfirmation())->toBeTrue()
+        ->and($stalled->fresh()->purchase_context[OfferStore::UNRECOVERABLE_REASON])->toBe('USPS will not send a label again after its mailing date of Sep 29, 2026.')
+        ->and($stalled->fresh()->purchase_context[UspsAdapter::PURCHASE_CONTEXT_KEY])->toBeString()
+        ->and($this->package->fresh()->status)->toBe(PackageStatus::Unshipped);
+
+    Saloon::assertNotSent(Label::class);
+});
+
+it('has nothing to check on a package with no unaccounted purchase', function (): void {
+    expect(app(PackageShippingWorkflow::class)->checkEarlierPurchases($this->package))->toBeNull();
+});
+
 it('keeps a USPS package blocked when the reprint itself gets no answer', function (): void {
     $stalled = purchaseWithNoAnswer($this->package, uspsGroundAdvantage($this->package), [...uspsAuthFakes(), Label::class => noAnswer()]);
 
@@ -195,7 +300,7 @@ it('keeps a USPS package blocked when the reprint itself gets no answer', functi
     $result = app(PackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: uspsGroundAdvantage($this->package)));
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Earlier Purchase Unresolved')
+        ->and($result->title)->toBe('Unfinished Label Purchase')
         ->and($stalled->fresh()->isAwaitingPurchaseConfirmation())->toBeTrue()
         // Asked and unanswered: the real unknown the purge command reports.
         ->and($stalled->fresh()->recovery_unanswered_at)->not->toBeNull()
@@ -249,6 +354,23 @@ it('buys a UPS label afresh once UPS is certain the earlier attempt created noth
         ->and($stalled->fresh()->purchase_failure_reason)->toContain('nothing was bought');
 });
 
+// UPS publishes no look-back for Label Recovery, so its "not found" is
+// trusted only as far back as USPS's: older, a person checks the account.
+it('keeps a UPS package blocked when the attempt is older than its not-found is trusted', function (): void {
+    $stalled = purchaseWithNoAnswer($this->package, upsGround($this->package), [...upsAuthFake(), UpsCreateShipment::class => noAnswer()]);
+    $stalled->forceFill(['consumed_at' => now()->subDays(10)])->save();
+
+    Saloon::fake([...upsAuthFake(), LabelRecovery::class => upsNotFound(), UpsCreateShipment::class => upsShipped('1Z9999999999999999')]);
+
+    $result = app(PackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: upsGround($this->package)));
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Unfinished Label Purchase')
+        ->and($stalled->fresh()->isAwaitingPurchaseConfirmation())->toBeTrue();
+
+    Saloon::assertNotSent(UpsCreateShipment::class);
+});
+
 it('keeps a UPS package blocked when Label Recovery itself gets no answer', function (): void {
     $stalled = purchaseWithNoAnswer($this->package, upsGround($this->package), [...upsAuthFake(), UpsCreateShipment::class => noAnswer()]);
 
@@ -257,7 +379,7 @@ it('keeps a UPS package blocked when Label Recovery itself gets no answer', func
     $result = app(PackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: upsGround($this->package)));
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Earlier Purchase Unresolved')
+        ->and($result->title)->toBe('Unfinished Label Purchase')
         ->and($stalled->fresh()->recovery_unanswered_at)->not->toBeNull();
 
     Saloon::assertNotSent(UpsCreateShipment::class);
@@ -469,7 +591,7 @@ it('names the tracking number UPS reported when recovery cannot find the label e
     $second = $workflow->ship($this->package->fresh(), new PackageShippingRequest(selectedRate: upsGround($this->package)));
 
     expect($first->message)->toContain('1ZREVIEW')
-        ->and($second->title)->toBe('Earlier Purchase Unresolved')
+        ->and($second->title)->toBe('Unfinished Label Purchase')
         ->and($second->message)->toContain('1ZREVIEW');
 });
 

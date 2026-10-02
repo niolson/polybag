@@ -16,6 +16,7 @@ use App\Enums\ServiceEvidence;
 use App\Http\Integrations\Amazon\Requests\CancelAmazonShipment;
 use App\Http\Integrations\Amazon\Requests\ConfirmShipment;
 use App\Http\Integrations\Amazon\Requests\GetAdditionalInputsSchema;
+use App\Http\Integrations\Amazon\Requests\GetShipmentDocuments;
 use App\Http\Integrations\Amazon\Requests\GetShipmentTracking;
 use App\Http\Integrations\Amazon\Requests\GetShippingRates;
 use App\Http\Integrations\Amazon\Requests\PurchaseShipment;
@@ -1698,6 +1699,91 @@ it('recovers a purchase whose reply never arrived instead of buying a second lab
     Saloon::assertSentCount(2);
 });
 
+/**
+ * Amazon's `getShipmentDocuments` answer for a shipment already bought, in the
+ * shape of the published example.
+ */
+function amazonShipmentDocumentsResponse(string $shipmentId = 'amzn1.sid.abc123', string $trackingId = 'D10012345678901'): MockResponse
+{
+    return MockResponse::make(['payload' => [
+        'shipmentId' => $shipmentId,
+        'packageDocumentDetail' => [
+            'packageClientReferenceId' => '1',
+            'trackingId' => $trackingId,
+            'packageDocuments' => [[
+                'type' => 'LABEL',
+                'format' => 'ZPL',
+                'contents' => base64_encode('REFETCHED-LABEL'),
+            ]],
+        ],
+    ]]);
+}
+
+// `postage-source-split/16`: a sale Amazon confirmed is fetched by its
+// shipment ID, never replayed — the purchase tokens may long have expired.
+it('fetches the documents of a sale Amazon confirmed but was never saved, instead of replaying the purchase', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->first();
+    $offer = ShippingOffer::where('public_id', $rate->offerId)->firstOrFail();
+    $offer->forceFill(['consumed_at' => now(), 'purchase_reference' => 'amzn1.sid.abc123'])->save();
+
+    Saloon::fake([GetShipmentDocuments::class => amazonShipmentDocumentsResponse()]);
+
+    $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: $rate));
+
+    $package = $this->package->fresh();
+
+    expect($result->success)->toBeTrue()
+        ->and($package->status)->toBe(PackageStatus::Shipped)
+        ->and($package->tracking_number)->toBe('D10012345678901')
+        ->and(base64_decode((string) $package->label_data))->toBe('REFETCHED-LABEL')
+        ->and($package->postage_source)->toBe(PostageSource::PostageDataSource)
+        ->and(AmazonBuyShippingAdapter::shipmentIdFor($package))->toBe('amzn1.sid.abc123');
+
+    Saloon::assertNotSent(PurchaseShipment::class);
+    // An Amazon order's own postage: Amazon refuses format and dpi here.
+    Saloon::assertSent(fn (GetShipmentDocuments $request): bool => $request->resolveEndpoint() === '/shipping/v2/shipments/amzn1.sid.abc123/documents'
+        && $request->query()->all() === ['packageClientReferenceId' => (string) $this->package->id]);
+});
+
+it('keeps the tracking number the purchase reported over the one a re-fetch returns', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->first();
+    $offer = ShippingOffer::where('public_id', $rate->offerId)->firstOrFail();
+    $offer->forceFill(['consumed_at' => now(), 'purchase_reference' => 'amzn1.sid.abc123'])->save();
+    app(OfferStore::class)->recordReportedTrackingNumber($offer, 'TBA000000000001');
+
+    // The sandbox has answered a re-fetch with a different, made-up number.
+    Saloon::fake([GetShipmentDocuments::class => amazonShipmentDocumentsResponse(trackingId: '1234567890')]);
+
+    app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: $rate));
+
+    expect($this->package->fresh()->tracking_number)->toBe('TBA000000000001');
+});
+
+it('keeps the package blocked when Amazon will not return a confirmed sale\'s documents', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->first();
+    ShippingOffer::where('public_id', $rate->offerId)->update(['consumed_at' => now(), 'purchase_reference' => 'amzn1.sid.abc123']);
+
+    Saloon::fake([GetShipmentDocuments::class => MockResponse::make(['errors' => [['code' => 'InternalFailure', 'message' => 'Try again.']]], 500)]);
+
+    $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: $rate));
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Unfinished Label Purchase')
+        ->and($this->package->fresh()->status)->toBe(PackageStatus::Unshipped);
+
+    Saloon::assertNotSent(PurchaseShipment::class);
+});
+
+it('fakes getShipmentDocuments in the published response shape', function (): void {
+    assertMatchesSpApiSchema(amazonShipmentDocumentsResponse()->body()->all(), 'GetShipmentDocumentsResponse', 'shippingV2');
+});
+
 it('keeps the package blocked when the source cannot say whether a label exists', function (): void {
     Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
 
@@ -1715,7 +1801,7 @@ it('keeps the package blocked when the source cannot say whether a label exists'
     ));
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Earlier Purchase Unresolved')
+        ->and($result->title)->toBe('Unfinished Label Purchase')
         ->and($result->requiresRequote)->toBeFalse()
         ->and($this->package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });

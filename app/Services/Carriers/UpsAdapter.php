@@ -34,6 +34,7 @@ use App\Http\Integrations\Ups\UpsConnector;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Package;
+use App\Models\ShippingOffer;
 use App\Services\Carriers\Concerns\BuildsCustomerReferences;
 use App\Services\Carriers\Concerns\ConsultsCarrierPolicyForOffers;
 use App\Services\Carriers\Concerns\DecodesJsonResponses;
@@ -164,6 +165,16 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
     private const RECOVERY_NOT_FOUND = '9801031';
 
     private const RECOVERY_VOIDED = '9801040';
+
+    /**
+     * How old an attempt may be for UPS's "not found" to count as nothing
+     * bought. UPS publishes no window for Label Recovery, and the 2026-09-18
+     * probe only showed it finding a shipment seconds old, so this is a guess
+     * on the safe side, matching USPS's production look-back: older than this,
+     * a person checks the UPS account instead (`postage-source-split/16`).
+     * Unverified — raise it if a production case shows UPS finding older ones.
+     */
+    private const RECOVERY_TRUST_DAYS = 7;
 
     /**
      * UPS accepts two reference numbers, each up to 35 characters. Which level
@@ -1141,6 +1152,12 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
      * account's "not found" says nothing about the shipment — see
      * {@see purchasingAccountChanged()}.
      */
+    private function recoveryLookupCovers(ShippingOffer $offer): bool
+    {
+        return $offer->consumed_at !== null
+            && $offer->consumed_at->isAfter(now()->subDays(self::RECOVERY_TRUST_DAYS - 1));
+    }
+
     public function recoverPurchase(ShipRequest $request): ?ShipResponse
     {
         $offer = $request->offer;
@@ -1196,6 +1213,18 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
                 'status' => $response->status(),
                 'codes' => $codes,
             ]);
+
+            // Past the window UPS is trusted to look back, "not found" could
+            // be a shipment it no longer finds: unknown, for a person to check
+            // (`postage-source-split/16`).
+            if (in_array(self::RECOVERY_NOT_FOUND, $codes, true) && ! $this->recoveryLookupCovers($offer)) {
+                Log::channel('ups-validation')->warning('UPS Label Recovery "not found" is not trusted for a purchase this old', [
+                    'offer' => $recoveryKey,
+                    'attempted_at' => $offer->consumed_at?->toIso8601String(),
+                ]);
+
+                return null;
+            }
 
             if (array_intersect($codes, [self::RECOVERY_NOT_FOUND, self::RECOVERY_VOIDED]) !== []) {
                 $message = data_get($errors, '0.message') ?? 'UPS has no shipment for the earlier purchase attempt.';

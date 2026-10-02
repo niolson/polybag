@@ -46,6 +46,12 @@ class OfferStore
      */
     public const REPORTED_TRACKING_NUMBER = 'reported_tracking_number';
 
+    /**
+     * Where the source's reason lives when it said a label exists and will
+     * never be handed over again ({@see recordUnrecoverableLabel()}).
+     */
+    public const UNRECOVERABLE_REASON = 'unrecoverable_reason';
+
     public function issue(Package $package, OfferDraft $draft): ShippingOffer
     {
         // The datetime cast formats the instant in whatever zone it arrives
@@ -270,6 +276,20 @@ class OfferStore
      * the next attempt will ask about, from one that was asked about and got
      * no usable answer, which is the real unknown a person has to look at.
      */
+    /**
+     * The source says the label exists and will never be handed over again.
+     *
+     * Kept on the offer so the person who has to record the label is told
+     * why, and is not sent to ask a question whose answer cannot change. The
+     * offer stays unaccounted for.
+     */
+    public function recordUnrecoverableLabel(ShippingOffer $offer, string $reason): void
+    {
+        $offer->forceFill([
+            'purchase_context' => [...($offer->purchase_context ?? []), self::UNRECOVERABLE_REASON => $reason],
+        ])->save();
+    }
+
     public function recordUnansweredRecovery(ShippingOffer $offer): void
     {
         ShippingOffer::query()

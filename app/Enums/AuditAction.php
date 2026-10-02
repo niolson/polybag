@@ -18,6 +18,7 @@ enum AuditAction: string implements HasLabel
     case BatchStarted = 'batch_started';
     case ManifestCreated = 'manifest_created';
     case AddressValidationFailed = 'address_validation_failed';
+    case PurchaseResolvedByHand = 'purchase_resolved_by_hand';
 
     // Observer-driven (CRUD on config models)
     case ModelCreated = 'model_created';
@@ -48,6 +49,7 @@ enum AuditAction: string implements HasLabel
             self::BatchStarted => 'Batch Started',
             self::ManifestCreated => 'Manifest Created',
             self::AddressValidationFailed => 'Address Validation Failed',
+            self::PurchaseResolvedByHand => 'Purchase Resolved by Hand',
             self::ModelCreated => 'Created',
             self::ModelUpdated => 'Updated',
             self::ModelDeleted => 'Deleted',

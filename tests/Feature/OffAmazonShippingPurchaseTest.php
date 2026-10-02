@@ -10,6 +10,7 @@ use App\Enums\ServiceEvidence;
 use App\Http\Integrations\Amazon\AmazonSpApiConnector;
 use App\Http\Integrations\Amazon\Requests\CancelAmazonShipment;
 use App\Http\Integrations\Amazon\Requests\ConfirmShipment;
+use App\Http\Integrations\Amazon\Requests\GetShipmentDocuments;
 use App\Http\Integrations\Amazon\Requests\GetShipmentTracking;
 use App\Http\Integrations\Amazon\Requests\GetShippingRates;
 use App\Http\Integrations\Amazon\Requests\PurchaseShipment;
@@ -392,6 +393,32 @@ it('recovers an off-Amazon purchase whose reply never arrived on the connection 
     Saloon::assertSentCount(2);
     Saloon::assertSent(fn (PurchaseShipment $request, $response): bool => sentByConnection($response->getPendingRequest(), $this->connection)
         && $request->headers()->get('x-amzn-IdempotencyKey') === $rate->offerId);
+});
+
+it('fetches a confirmed off-Amazon sale\'s documents on its connection, in the format the purchase would choose', function (): void {
+    Saloon::fake([GetShippingRates::class => externalRatesResponse()]);
+
+    $rate = quoteExternalRate($this->package);
+    $offer = ShippingOffer::where('public_id', $rate->offerId)->firstOrFail();
+    $offer->forceFill(['consumed_at' => now(), 'purchase_reference' => 'amzn1.sid.external-1'])->save();
+
+    Saloon::fake([GetShipmentDocuments::class => MockResponse::make(['payload' => [
+        'shipmentId' => 'amzn1.sid.external-1',
+        'packageDocumentDetail' => [
+            'packageClientReferenceId' => (string) $this->package->id,
+            'trackingId' => 'TBA123456789000',
+            'packageDocuments' => [['type' => 'LABEL', 'format' => 'PNG', 'contents' => base64_encode('EXTERNAL-LABEL-BYTES')]],
+        ],
+    ]])]);
+
+    $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: $rate));
+
+    expect($result->success)->toBeTrue()
+        ->and($this->package->fresh()->tracking_number)->toBe('TBA123456789000');
+
+    Saloon::assertNotSent(PurchaseShipment::class);
+    Saloon::assertSent(fn (GetShipmentDocuments $request, $response): bool => sentByConnection($response->getPendingRequest(), $this->connection)
+        && ($request->query()->get('format')) === 'PNG');
 });
 
 it('buys only the value-added services the Amazon Shipping quote was priced with', function (): void {

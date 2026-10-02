@@ -744,17 +744,18 @@ class Package extends Model
      * from whichever pointer happens to be set. See ADR-0002.
      *
      * @param  int|null  $carrierServiceId  The catalog service the Label was bought as, from the server's copy of the rate. Recorded on the Label only. Null for a blind purchase: what Shopify was asked for stays the requested preference (ADR-0003 decision 7), and an inferred service resolves through the ruleset here instead.
+     * @param  bool  $announce  Whether to dispatch {@see PackageShipped}, which queues the channel export. False only for a label recorded to be voided at once: the package is then also held from every other export path until {@see releaseForExport()}.
      *
      * @throws \InvalidArgumentException If the postage source and the response's pointers disagree, or the service evidence contradicts the service value
      * @throws \RuntimeException If the package state changed (optimistic locking)
      */
-    public function markShipped(ShipResponse $response, PostageSource $postageSource, ?int $shippedByUserId = null, ?int $carrierServiceId = null): void
+    public function markShipped(ShipResponse $response, PostageSource $postageSource, ?int $shippedByUserId = null, ?int $carrierServiceId = null, bool $announce = true): void
     {
         // Before the transaction, so a rejected provenance writes nothing at all.
         $this->assertProvenanceIsConsistent($postageSource, $response);
         $this->assertServiceEvidenceIsConsistent($response);
 
-        DB::transaction(function () use ($response, $postageSource, $shippedByUserId, $carrierServiceId): void {
+        DB::transaction(function () use ($response, $postageSource, $shippedByUserId, $carrierServiceId, $announce): void {
             $normalizedCarrierId = app(CarrierNormalizer::class)->resolve($response->carrier)?->id;
 
             // A blind purchase names no catalog service, but the service the
@@ -828,7 +829,10 @@ class Package extends Model
                     'delivered_at' => null,
                     'tracking_details' => null,
                     'tracking_checked_at' => null,
-                    'exported' => false,
+                    // A label recorded to be voided is held from every export
+                    // path, the scheduled export included, which select and
+                    // skip on this flag; releaseForExport() lets it go.
+                    'exported' => ! $announce,
                     'updated_at' => $now,
                 ]);
 
@@ -859,7 +863,30 @@ class Package extends Model
         $this->load('shipment.shipmentItems');
         $this->shipment->updateShippedStatus();
 
-        PackageShipped::dispatch($this, $this->shipment);
+        // Not announced for a label recorded only to be voided at once
+        // (`postage-source-split/16`): announcing queues the channel export,
+        // which a fast worker would run before the void lands.
+        if ($announce) {
+            PackageShipped::dispatch($this, $this->shipment);
+        }
+    }
+
+    /**
+     * Let a label recorded with `announce: false` reach the channel after all:
+     * its void was refused, so the package really is shipped on it.
+     */
+    public function releaseForExport(): void
+    {
+        $released = DB::table('packages')
+            ->where('id', $this->id)
+            ->where('status', PackageStatus::Shipped->value)
+            ->update(['exported' => false, 'updated_at' => now()]);
+
+        $this->refresh();
+
+        if ($released > 0) {
+            PackageShipped::dispatch($this, $this->shipment);
+        }
     }
 
     /**

@@ -11,6 +11,12 @@ use App\Models\Package;
 
 readonly class PackageShippingResult
 {
+    /**
+     * The refusal while an earlier purchase on the package is unaccounted for
+     * (`postage-source-split/16`).
+     */
+    public const UNFINISHED_PURCHASE = 'Unfinished Label Purchase';
+
     public function __construct(
         public bool $success,
         public ?string $title = null,

@@ -18,6 +18,7 @@ use App\Models\Client;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\PackageLabel;
+use App\Services\PostageSources\UnresolvedPurchaseResolver;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
@@ -66,6 +67,15 @@ class PackageResource extends Resource
     protected static int $globalSearchResultsLimit = 10;
 
     protected static ?bool $shouldSplitGlobalSearchTerms = false;
+
+    /**
+     * The URL of the Packages list filtered to those with an unfinished label
+     * purchase.
+     */
+    public static function unresolvedPurchasesUrl(): string
+    {
+        return static::getUrl('index', ['filters' => ['unresolved_purchase' => ['isActive' => true]]]);
+    }
 
     /**
      * @return array<string>
@@ -418,6 +428,15 @@ class PackageResource extends Resource
                     ->visible(fn () => app(SettingsService::class)->get('multi_location_enabled', false)),
                 Tables\Filters\SelectFilter::make('status')
                     ->options(PackageStatus::class),
+                // `postage-source-split/16`: packages that cannot be bought for
+                // until a person settles an earlier purchase.
+                Tables\Filters\Filter::make('unresolved_purchase')
+                    ->label('Unfinished label purchase')
+                    ->toggle()
+                    ->query(fn (Builder $query): Builder => $query->whereIn(
+                        'packages.id',
+                        app(UnresolvedPurchaseResolver::class)->needingAPerson()->select('package_id'),
+                    )),
                 Tables\Filters\SelectFilter::make('draft_state')
                     ->label('Draft')
                     ->options(PackageDraftState::class)
