@@ -11,9 +11,10 @@ readonly class RateRequest
 {
     /**
      * @param  array<PackageData>  $packages
-     * @param  array<int, string>  $specialServiceCodes
+     * @param  array<int, string>  $specialServiceCodes  Every code the source is asked for: the hard-required ones and the preferences it can express
      * @param  array<string, array<string, mixed>>  $specialServiceConfig  Per-code config values (e.g. declared_value amount)
      * @param  int|null  $shippingMethodId  The shipping method the package is quoted under. No adapter reads it — it is eligibility, not price: `ShippingRateService::buildRatingTasks()` derives from the method which sources are asked at all and which of their services, so a method swap changes the price *list* without changing any price on it. It is here so that {@see fingerprint()} covers that: an offer quoted under a method that permitted its carrier must not stay spendable once the shipment moves to one that does not.
+     * @param  array<int, string>  $requiredSpecialServiceCodes  The subset of `$specialServiceCodes` an offer must honour or be dropped (ADR-0002 decision 8); the rest are preferences an offer that cannot express them keeps its place without. Set from the package by {@see fromPackage()}, narrowed per source by `ShippingRateService::buildTask()`, and read by a source that filters its own offers by what each can add — Amazon Buy Shipping. In {@see fingerprint()}: a preference that becomes a requirement changes which offers may be bought, so an offer quoted as preferring it must not stay spendable.
      * @param  CarrierAccount|null  $carrierAccount  The account a direct adapter rates on, resolved by `PostageSourceResolver` and handed over per call rather than stored on the adapter, which the registry shares between tasks. Null when nobody resolved one, and a direct adapter then resolves it as it always has. Left out of {@see fingerprint()}: which account quoted is bound separately, by the offer's account id and billing fingerprint.
      */
     public function __construct(
@@ -38,6 +39,7 @@ readonly class RateRequest
         public ?string $destinationStreetAddress = null,
         public ?string $destinationStreetAddress2 = null,
         public ?CarrierAccount $carrierAccount = null,
+        public array $requiredSpecialServiceCodes = [],
     ) {}
 
     public static function fromPackage(Package $package, ?AddressData $destination = null): self
@@ -57,6 +59,7 @@ readonly class RateRequest
 
         $resolver = app(SpecialServiceResolver::class);
         $specialServiceCodes = $resolver->resolveForPackage($package);
+        $requiredSpecialServiceCodes = $resolver->resolveByModeForPackage($package)['required'];
 
         return new self(
             originPostalCode: $origin->postalCode ?? '',
@@ -78,6 +81,7 @@ readonly class RateRequest
             shippingMethodId: $shipment->shipping_method_id,
             destinationStreetAddress: $destination->streetAddress,
             destinationStreetAddress2: $destination->streetAddress2,
+            requiredSpecialServiceCodes: $requiredSpecialServiceCodes,
         );
     }
 
@@ -156,6 +160,11 @@ readonly class RateRequest
         return in_array($code, $this->specialServiceCodes, true);
     }
 
+    public function requiresSpecialService(string $code): bool
+    {
+        return in_array($code, $this->requiredSpecialServiceCodes, true);
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -173,9 +182,12 @@ readonly class RateRequest
 
     /**
      * @param  array<int, string>  $codes
+     * @param  array<int, string>|null  $requiredCodes  Which of `$codes` are hard requirements; null keeps those already required that are still asked for
      */
-    public function withSpecialServiceCodes(array $codes): self
+    public function withSpecialServiceCodes(array $codes, ?array $requiredCodes = null): self
     {
+        $requiredCodes = array_values(array_intersect($requiredCodes ?? $this->requiredSpecialServiceCodes, $codes));
+
         return new self(
             originPostalCode: $this->originPostalCode,
             destinationPostalCode: $this->destinationPostalCode,
@@ -198,6 +210,7 @@ readonly class RateRequest
             destinationStreetAddress: $this->destinationStreetAddress,
             destinationStreetAddress2: $this->destinationStreetAddress2,
             carrierAccount: $this->carrierAccount,
+            requiredSpecialServiceCodes: $requiredCodes,
         );
     }
 
@@ -225,6 +238,7 @@ readonly class RateRequest
             destinationStreetAddress: $this->destinationStreetAddress,
             destinationStreetAddress2: $this->destinationStreetAddress2,
             carrierAccount: $this->carrierAccount,
+            requiredSpecialServiceCodes: $this->requiredSpecialServiceCodes,
         );
     }
 
@@ -255,6 +269,7 @@ readonly class RateRequest
             destinationStreetAddress: $this->destinationStreetAddress,
             destinationStreetAddress2: $this->destinationStreetAddress2,
             carrierAccount: $account,
+            requiredSpecialServiceCodes: $this->requiredSpecialServiceCodes,
         );
     }
 }

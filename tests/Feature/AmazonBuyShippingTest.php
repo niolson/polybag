@@ -11,6 +11,7 @@ use App\Enums\CarrierPackaging;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
+use App\Enums\PostageSourceKind;
 use App\Enums\ServiceEvidence;
 use App\Http\Integrations\Amazon\Requests\CancelAmazonShipment;
 use App\Http\Integrations\Amazon\Requests\ConfirmShipment;
@@ -31,6 +32,8 @@ use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\ShippingMethodPostageSource;
 use App\Models\ShippingOffer;
+use App\Models\SourceServiceMapping;
+use App\Models\SpecialService;
 use App\Models\User;
 use App\Services\AmazonBuyShippingService;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
@@ -44,6 +47,7 @@ use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShippingRateService;
 use App\Services\TrackingService;
 use Database\Seeders\ReferenceDataSeeder;
+use Database\Seeders\SpecialServiceSeeder;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\Request;
@@ -410,37 +414,216 @@ it('names a rate by the carrier service somebody mapped it to', function (): voi
     // Seen once so there is an identity to map, then mapped by hand.
     amazonAdapter()->getRates(RateRequest::fromPackage($this->package), []);
 
-    $usps = Carrier::firstOrCreate(['name' => 'USPS']);
-    $groundAdvantage = $usps->carrierServices()->create([
-        'name' => 'Ground Advantage',
-        'service_code' => 'USPS_GROUND_ADVANTAGE',
+    $ontrac = Carrier::factory()->create(['name' => 'OnTrac']);
+    $ground = $ontrac->carrierServices()->create([
+        'name' => 'Ground',
+        'service_code' => 'ONTRAC_GROUND',
     ]);
 
     app(ObservedServiceMapper::class)->map(
         ObservedService::where('external_carrier_id', 'ONTRAC')->firstOrFail(),
-        $groundAdvantage,
+        $ground,
     );
 
     $rates = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), []);
 
-    expect($rates->first()->carrier)->toBe('USPS')
-        ->and($rates->first()->serviceCode)->toBe('USPS_GROUND_ADVANTAGE')
-        ->and($rates->first()->serviceName)->toBe('Ground Advantage')
+    expect($rates->first()->carrier)->toBe('OnTrac')
+        ->and($rates->first()->carrierId)->toBe($ontrac->id)
+        ->and($rates->first()->carrierServiceId)->toBe($ground->id)
+        ->and($rates->first()->serviceCode)->toBe('ONTRAC_GROUND')
+        ->and($rates->first()->serviceName)->toBe('Ground')
         // The identity is unchanged by naming it: approval is still keyed on
         // what Amazon called it.
         ->and($rates->first()->observedService->externalServiceId)->toBe('ONTRAC_MFN_GROUND');
+});
+
+it('ignores a mapping onto another carrier\'s service', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    $ontrac = Carrier::factory()->create(['name' => 'OnTrac']);
+    $groundAdvantage = Carrier::firstOrCreate(['name' => 'USPS'])->carrierServices()->create([
+        'name' => 'Ground Advantage',
+        'service_code' => 'USPS_GROUND_ADVANTAGE',
+    ]);
+
+    // Written before the mapper refused one.
+    SourceServiceMapping::map(PostageSourceKind::Amazon, 'ONTRAC', 'ONTRAC_MFN_GROUND', $groundAdvantage->id);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->first();
+
+    expect($rate->carrier)->toBe('OnTrac')
+        ->and($rate->carrierId)->toBe($ontrac->id)
+        ->and($rate->carrierServiceId)->toBeNull()
+        ->and($rate->serviceCode)->toBe('ONTRAC_MFN_GROUND');
+});
+
+it('keeps Amazon\'s carrier of record when the mapped carrier is one it cannot name', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    // No OnTrac row and no alias, so the mapper cannot tell this is wrong.
+    $groundAdvantage = Carrier::firstOrCreate(['name' => 'USPS'])->carrierServices()->create([
+        'name' => 'Ground Advantage',
+        'service_code' => 'USPS_GROUND_ADVANTAGE',
+    ]);
+    SourceServiceMapping::map(PostageSourceKind::Amazon, 'ONTRAC', 'ONTRAC_MFN_GROUND', $groundAdvantage->id);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->first();
+
+    // The mapping names the service; who carries the parcel is still Amazon's word.
+    expect($rate->carrier)->toBe('OnTrac')
+        ->and($rate->carrierId)->toBeNull()
+        ->and($rate->carrierServiceId)->toBe($groundAdvantage->id);
 });
 
 it('drops an offer that cannot honour a hard-required signature, and keeps the one that can', function (): void {
     Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
 
     $request = RateRequest::fromPackage($this->package)
-        ->withSpecialServiceCodes(['signature_required']);
+        ->withSpecialServiceCodes(['signature_required'], requiredCodes: ['signature_required']);
 
     $rates = amazonAdapter()->getRates($request, []);
 
     // OnTrac offers no Confirmation group at all; UPS offers one.
     expect($rates->pluck('carrier')->all())->toBe(['UPS']);
+});
+
+it('keeps an Amazon offer that cannot add a signature the method only prefers', function (): void {
+    (new SpecialServiceSeeder)->run();
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    amazonShippingMethodFor($this->package);
+    $this->package->shipment->fresh()->shippingMethod->specialServices()->attach(
+        SpecialService::where('code', 'signature_required')->value('id'),
+        ['mode' => 'default'],
+    );
+
+    $rates = app(ShippingRateService::class)->getShippingRates($this->package->id);
+
+    // OnTrac offers no Confirmation group; a preference must not remove it.
+    expect($rates->pluck('carrier')->sort()->values()->all())->toBe(['OnTrac', 'UPS']);
+});
+
+it('drops an Amazon offer that cannot add a signature the method requires', function (): void {
+    (new SpecialServiceSeeder)->run();
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    amazonShippingMethodFor($this->package);
+    $this->package->shipment->fresh()->shippingMethod->specialServices()->attach(
+        SpecialService::where('code', 'signature_required')->value('id'),
+        ['mode' => 'required'],
+    );
+
+    $rates = app(ShippingRateService::class)->getShippingRates($this->package->id);
+
+    expect($rates->pluck('carrier')->all())->toBe(['UPS']);
+});
+
+it('holds a required signature when the method only prefers an adult one', function (): void {
+    (new SpecialServiceSeeder)->run();
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse(),
+        PurchaseShipment::class => amazonPurchaseResponse(),
+    ]);
+
+    amazonShippingMethodFor($this->package);
+    $method = $this->package->shipment->fresh()->shippingMethod;
+    $method->specialServices()->attach(SpecialService::where('code', 'signature_required')->value('id'), ['mode' => 'required']);
+    $method->specialServices()->attach(SpecialService::where('code', 'adult_signature_required')->value('id'), ['mode' => 'default']);
+
+    $rates = app(ShippingRateService::class)->getShippingRates($this->package->id);
+
+    // The adult signature is a preference; the plain one is still owed.
+    expect($rates->pluck('carrier')->all())->toBe(['UPS']);
+
+    app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(
+        selectedRate: $rates->first(),
+        labelFormat: 'zpl',
+    ));
+
+    // UPS offers no adult signature, so the required plain one is bought.
+    Saloon::assertSent(fn (Request $request): bool => $request instanceof PurchaseShipment
+        && $request->body()->all()['requestedValueAddedServices'] === [['id' => 'SIGNATURE_CONFIRMATION']]);
+});
+
+it('buys a preferred signature on a mapped Amazon offer whatever the catalog scopes', function (): void {
+    (new SpecialServiceSeeder)->run();
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse(),
+        PurchaseShipment::class => amazonPurchaseResponse(),
+    ]);
+
+    // Seen once so there is an identity to map.
+    amazonAdapter()->getRates(RateRequest::fromPackage($this->package), []);
+
+    $ups = Carrier::firstOrCreate(['name' => 'UPS']);
+    $saver = $ups->carrierServices()->create(['name' => 'Next Day Air Saver', 'service_code' => '13']);
+    $ground = $ups->carrierServices()->create(['name' => 'Ground', 'service_code' => '03']);
+
+    // Catalog scoping says only UPS Ground carries a signature. It binds
+    // direct offers only (ADR-0006 decision 10).
+    $signature = SpecialService::where('code', 'signature_required')->sole();
+    $signature->carrierServices()->attach($ground->id);
+
+    app(ObservedServiceMapper::class)->map(
+        ObservedService::where('external_service_id', 'UPS_PTP_NEXT_DAY_AIR_SAVER')->firstOrFail(),
+        $saver,
+    );
+
+    amazonShippingMethodFor($this->package);
+    $this->package->shipment->fresh()->shippingMethod->specialServices()->attach($signature->id, ['mode' => 'default']);
+
+    $rate = app(ShippingRateService::class)->getShippingRates($this->package->id)->firstWhere('carrier', 'UPS');
+
+    // Fresh: the first quote cached the shipment's method before it changed.
+    app(EloquentPackageShippingWorkflow::class)->ship($this->package->fresh(), new PackageShippingRequest(
+        selectedRate: $rate,
+        labelFormat: 'zpl',
+    ));
+
+    Saloon::assertSent(fn (Request $request): bool => $request instanceof PurchaseShipment
+        && $request->body()->all()['requestedValueAddedServices'] === [['id' => 'SIGNATURE_CONFIRMATION']]);
+});
+
+it('drops an offer that can add only an adult signature when a plain one is required', function (): void {
+    (new SpecialServiceSeeder)->run();
+
+    $adultOnly = amazonEligibleRates()[1];
+    $adultOnly['availableValueAddedServiceGroups'][0]['valueAddedServices'] = [
+        ['id' => 'ADULT_SIGNATURE_CONFIRMATION', 'name' => 'Adult signature confirmation', 'cost' => ['unit' => 'USD', 'value' => 8.50]],
+        ['id' => 'NO_CONFIRMATION', 'name' => 'No confirmation', 'cost' => ['unit' => 'USD', 'value' => 0.0]],
+    ];
+
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse([$adultOnly])]);
+
+    amazonShippingMethodFor($this->package);
+    $this->package->shipment->fresh()->shippingMethod->specialServices()->attach(
+        SpecialService::where('code', 'signature_required')->value('id'),
+        ['mode' => 'required'],
+    );
+
+    // Its purchase would ask for a plain signature it does not have, and the
+    // required group would then be answered with no confirmation at all.
+    expect(app(ShippingRateService::class)->getShippingRates($this->package->id))->toBeEmpty();
+});
+
+it('retires an offer when a special service it was quoted as preferring becomes required', function (): void {
+    (new SpecialServiceSeeder)->run();
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    amazonShippingMethodFor($this->package);
+    $method = $this->package->shipment->fresh()->shippingMethod;
+    $signatureId = SpecialService::where('code', 'signature_required')->value('id');
+    $method->specialServices()->attach($signatureId, ['mode' => 'default']);
+
+    $ontrac = app(ShippingRateService::class)->getShippingRates($this->package->id)->firstWhere('carrier', 'OnTrac');
+    $offer = ShippingOffer::where('public_id', $ontrac->offerId)->sole();
+
+    expect($offer->quoteInputsChangedSince($this->package))->toBeFalse();
+
+    $method->specialServices()->updateExistingPivot($signatureId, ['mode' => 'required']);
+
+    // OnTrac cannot add a signature, and one is now owed.
+    expect($offer->quoteInputsChangedSince($this->package))->toBeTrue();
 });
 
 it('drops an offer it could not print, before any money is spent', function (): void {

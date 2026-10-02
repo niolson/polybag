@@ -19,6 +19,7 @@ use App\Models\CarrierAccountScope;
 use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\ShippingOffer;
+use App\Models\SpecialService;
 use App\Models\User;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\ManifestService;
@@ -28,9 +29,11 @@ use App\Services\ShippingRateService;
 use App\Services\TrackingService;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
+use Database\Seeders\SpecialServiceSeeder;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\PendingRequest;
+use Saloon\Http\Request;
 use Saloon\Laravel\Facades\Saloon;
 
 /**
@@ -389,4 +392,45 @@ it('recovers an off-Amazon purchase whose reply never arrived on the connection 
     Saloon::assertSentCount(2);
     Saloon::assertSent(fn (PurchaseShipment $request, $response): bool => sentByConnection($response->getPendingRequest(), $this->connection)
         && $request->headers()->get('x-amzn-IdempotencyKey') === $rate->offerId);
+});
+
+it('buys only the value-added services the Amazon Shipping quote was priced with', function (): void {
+    (new SpecialServiceSeeder)->run();
+
+    // Shaped like the Confirmation group Buy Shipping offers on UPS; the
+    // sandbox's Amazon Shipping Ground reply has none, so this is assumed.
+    $rate = amazonShippingGroundRate();
+    $rate['availableValueAddedServiceGroups'] = [[
+        'groupId' => 'VAS_GROUP_ID_CONFIRMATION',
+        'groupDescription' => 'Confirmation',
+        'isRequired' => true,
+        'valueAddedServices' => [
+            ['id' => 'SIGNATURE_CONFIRMATION', 'name' => 'Signature confirmation', 'cost' => ['unit' => 'USD', 'value' => 2.50]],
+            ['id' => 'NO_CONFIRMATION', 'name' => 'No confirmation', 'cost' => ['unit' => 'USD', 'value' => 0.0]],
+        ],
+    ]];
+
+    Saloon::fake([
+        GetShippingRates::class => externalRatesResponse([$rate]),
+        PurchaseShipment::class => externalPurchaseResponse(),
+    ]);
+
+    // A preference Amazon Shipping is never asked for at quote time.
+    $this->package->shipment->shippingMethod->specialServices()->attach(
+        SpecialService::where('code', 'signature_required')->value('id'),
+        ['mode' => 'default'],
+    );
+
+    $quoted = quoteExternalRate($this->package->fresh());
+
+    expect($quoted->price)->toBe(7.9);
+
+    app(EloquentPackageShippingWorkflow::class)->ship($this->package->fresh(), new PackageShippingRequest(
+        selectedRate: $quoted,
+        labelFormat: 'pdf',
+    ));
+
+    // The $7.90 quoted was without a signature, so none is bought.
+    Saloon::assertSent(fn (Request $request): bool => $request instanceof PurchaseShipment
+        && $request->body()->all()['requestedValueAddedServices'] === [['id' => 'NO_CONFIRMATION']]);
 });

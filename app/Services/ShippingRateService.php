@@ -50,7 +50,7 @@ use Illuminate\Support\Collection;
 use Saloon\Http\Senders\GuzzleSender;
 
 /**
- * @phpstan-type RatingTask array{key: string, source: string, label: string, candidate: PostageSourceCandidate, carrierAccount: CarrierAccount|null, serviceCodes: array<int, string>, specialServiceCodes: array<int, string>}
+ * @phpstan-type RatingTask array{key: string, source: string, label: string, candidate: PostageSourceCandidate, carrierAccount: CarrierAccount|null, serviceCodes: array<int, string>, specialServiceCodes: array<int, string>, requiredSpecialServiceCodes: array<int, string>}
  * @phpstan-type ServiceAssignment array{candidate: PostageSourceCandidate, source: string, services: Collection<int, CarrierService>, serviceCodes: array<int, string>|null}
  */
 class ShippingRateService
@@ -392,7 +392,7 @@ class ShippingRateService
             $this->blindPurchaseOffers = $this->blindPurchaseOffers->merge($source->blindPurchaseOffers(
                 $rateRequest
                     ->withShipDate($shipDates[$task['key']])
-                    ->withSpecialServiceCodes($task['specialServiceCodes']),
+                    ->withSpecialServiceCodes($task['specialServiceCodes'], $task['requiredSpecialServiceCodes']),
                 $task['serviceCodes'],
             ));
         }
@@ -471,17 +471,7 @@ class ShippingRateService
         $shipment = $package->shipment;
         $shippingMethod = $shipment->shippingMethod;
 
-        $resolver = app(SpecialServiceResolver::class);
-        $methodCodes = $resolver->methodCodesByMode($shippingMethod);
-        $productCodes = $resolver->resolveProductRequiredCodes($package)->keys()->all();
-        $requiredCodes = array_values(array_unique([...$methodCodes['required'], ...$productCodes]));
-        $defaultCodes = array_values(array_diff($methodCodes['default'], $requiredCodes));
-
-        // Superseded variants never travel together (adult signature implies signature)
-        if (in_array('adult_signature_required', [...$requiredCodes, ...$defaultCodes], true)) {
-            $requiredCodes = array_values(array_diff($requiredCodes, ['signature_required']));
-            $defaultCodes = array_values(array_diff($defaultCodes, ['signature_required']));
-        }
+        ['required' => $requiredCodes, 'default' => $defaultCodes] = app(SpecialServiceResolver::class)->resolveByModeForPackage($package);
 
         $this->exclusions = [];
         $this->blindPurchaseOffers = collect();
@@ -753,7 +743,7 @@ class ShippingRateService
 
                 $taskRateRequest = $rateRequest
                     ->withShipDate($shipDates[$key])
-                    ->withSpecialServiceCodes($task['specialServiceCodes'])
+                    ->withSpecialServiceCodes($task['specialServiceCodes'], $task['requiredSpecialServiceCodes'])
                     ->withCarrierAccount($task['carrierAccount']);
 
                 if ($adapter instanceof AsyncRateQuoting) {
@@ -996,6 +986,7 @@ class ShippingRateService
         $destinationCountry = $rateRequest->destinationCountry;
         $registry = app(CarrierRegistry::class);
         $specialServiceCodes = [];
+        $requiredSpecialServiceCodes = [];
         $scoped = $candidate->isDirect();
         $label = $sourceName === ShopifyAdapter::CARRIER_NAME
             ? ShopifyAdapter::SOURCE_LABEL
@@ -1041,6 +1032,7 @@ class ShippingRateService
             }
 
             $specialServiceCodes[] = $code;
+            $requiredSpecialServiceCodes[] = $code;
         }
 
         foreach ($defaultCodes as $code) {
@@ -1081,6 +1073,15 @@ class ShippingRateService
             $specialServiceCodes[] = $code;
         }
 
+        // A direct carrier takes one signature on the wire, so a preferred
+        // adult signature that survived replaces the required plain one it
+        // implies. A channel source keeps both and buys the strongest each
+        // offer has.
+        if ($candidate->isDirect()) {
+            $specialServiceCodes = SpecialServiceResolver::normalizeCodes(collect($specialServiceCodes))->values()->all();
+            $requiredSpecialServiceCodes = array_values(array_intersect($requiredSpecialServiceCodes, $specialServiceCodes));
+        }
+
         return [
             ...$task,
             'candidate' => $candidate,
@@ -1089,6 +1090,9 @@ class ShippingRateService
             // direct source is asked by its services' own codes.
             'serviceCodes' => $serviceCodes ?? $services->pluck('service_code')->values()->all(),
             'specialServiceCodes' => $specialServiceCodes,
+            // A source that filters its own offers by what each can add needs
+            // to know which codes are requirements and which are preferences.
+            'requiredSpecialServiceCodes' => $requiredSpecialServiceCodes,
         ];
     }
 

@@ -3,11 +3,14 @@
 namespace App\Services;
 
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\Enums\PostageSource;
+use App\Enums\PostageSourceKind;
 use App\Exceptions\MissingDeclaredValueException;
 use App\Models\CarrierService;
 use App\Models\CarrierServiceSpecialService;
 use App\Models\Package;
 use App\Models\ShippingMethod;
+use App\Models\ShippingOffer;
 use App\Models\SpecialService;
 use Illuminate\Support\Collection;
 
@@ -39,6 +42,25 @@ class SpecialServiceResolver
     }
 
     /**
+     * This package's codes split into what an offer must honour and what it
+     * should add if it can: the method's required codes plus product
+     * compliance, then the method's defaults. Superseded by
+     * {@see supersedeByMode()}, so a stronger variant only replaces a weaker
+     * one it is at least as binding as.
+     *
+     * @return array{required: array<int, string>, default: array<int, string>}
+     */
+    public function resolveByModeForPackage(Package $package): array
+    {
+        $package->loadMissing('shipment.shippingMethod');
+
+        $byMode = $this->methodCodesByMode($package->shipment?->shippingMethod);
+        $required = array_values(array_unique([...$byMode['required'], ...$this->resolveProductRequiredCodes($package)->keys()->all()]));
+
+        return self::supersedeByMode($required, array_values(array_diff($byMode['default'], $required)));
+    }
+
+    /**
      * Special service codes to send when purchasing a label for a selected
      * rate. Default-mode codes are filtered against the selected carrier
      * service's scope, mirroring what rate shopping stripped, so the purchase
@@ -46,21 +68,30 @@ class SpecialServiceResolver
      * product compliance) are never stripped — a rate that couldn't satisfy
      * them was excluded at rate time.
      *
+     * Catalog scoping binds direct offers only (ADR-0006 decision 10). A
+     * source that quotes per offer — Amazon Buy Shipping — keeps every
+     * default, and its purchase asks for those the offer itself can add.
+     *
+     * @param  ShippingOffer|null  $offer  The offer being redeemed, which says who sold the rate when the rate itself cannot
      * @return array<int, string>
      */
-    public function resolveForPackageAndRate(Package $package, RateResponse $rate): array
+    public function resolveForPackageAndRate(Package $package, RateResponse $rate, ?ShippingOffer $offer = null): array
     {
-        $package->loadMissing('shipment.shippingMethod');
+        $byMode = $this->resolveByModeForPackage($package);
+        $requiredCodes = collect($byMode['required']);
+        $defaultCodes = collect($byMode['default']);
 
-        $byMode = $this->methodCodesByMode($package->shipment?->shippingMethod);
-        $requiredCodes = collect($byMode['required'])
-            ->merge($this->resolveProductRequiredCodes($package)->keys())
-            ->unique();
-        $defaultCodes = collect($byMode['default'])->diff($requiredCodes);
+        // The offer is the server's record of who sold the rate; a rate
+        // rebuilt from it at purchase no longer carries its observed identity.
+        $direct = $offer !== null
+            ? $offer->postage_source === PostageSource::CarrierAccount
+            : $rate->sourceKind() === PostageSourceKind::Direct;
 
-        $carrierService = CarrierService::where('service_code', $rate->serviceCode)
-            ->whereHas('carrier', fn ($query) => $query->where('name', $rate->carrier))
-            ->first();
+        $carrierService = $direct
+            ? CarrierService::where('service_code', $rate->serviceCode)
+                ->whereHas('carrier', fn ($query) => $query->where('name', $rate->carrier))
+                ->first()
+            : null;
 
         if ($carrierService && $defaultCodes->isNotEmpty()) {
             $shipment = $package->shipment;
@@ -71,7 +102,12 @@ class SpecialServiceResolver
             );
         }
 
-        return self::normalizeCodes($requiredCodes->merge($defaultCodes)->unique())->values()->all();
+        $codes = $requiredCodes->merge($defaultCodes)->unique();
+
+        // A direct carrier takes one signature on the wire. A source that
+        // picks per offer keeps a required plain signature beside a preferred
+        // adult one, and buys the strongest the offer has.
+        return ($direct ? self::normalizeCodes($codes) : $codes)->values()->all();
     }
 
     /**
@@ -88,6 +124,34 @@ class SpecialServiceResolver
         }
 
         return $codes;
+    }
+
+    /**
+     * {@see normalizeCodes()} that respects which codes are owed.
+     *
+     * A stronger variant replaces a weaker one only when it is at least as
+     * binding: a required adult signature makes any plain signature
+     * redundant, and a preferred one a preferred plain signature. A required
+     * plain signature beside a preferred adult one stays required, because the
+     * preference may not be honoured — dropping it would let an offer with no
+     * signature at all through.
+     *
+     * @param  array<int, string>  $required
+     * @param  array<int, string>  $default
+     * @return array{required: array<int, string>, default: array<int, string>}
+     */
+    public static function supersedeByMode(array $required, array $default): array
+    {
+        $weaker = ['signature_required'];
+
+        if (in_array('adult_signature_required', $required, true)) {
+            $required = array_values(array_diff($required, $weaker));
+            $default = array_values(array_diff($default, $weaker));
+        } elseif (in_array('adult_signature_required', $default, true)) {
+            $default = array_values(array_diff($default, $weaker));
+        }
+
+        return ['required' => $required, 'default' => $default];
     }
 
     /**

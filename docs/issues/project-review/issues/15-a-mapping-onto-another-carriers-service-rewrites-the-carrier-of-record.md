@@ -1,6 +1,6 @@
 # A mapping onto another carrier's service rewrites the carrier of record
 
-Status: needs-triage
+Status: done — 2026-10-01
 
 Repo: `polybag`
 
@@ -54,3 +54,25 @@ mismatch never surfaces operationally, which is why nobody would notice it.
   asserts the behaviour this issue removes.
 
 ## Comments
+
+- 2026-10-01 — Fixed as proposed, with refusal rather than confirmation.
+  `AmazonBuyShippingAdapter::ratesFrom()` takes the offer's carrier and `carrier_id` from
+  Amazon's `carrierName` through `CarrierNormalizer`, mapped or not. Amazon's own name
+  stands when nothing resolves. The mapping supplies only the service: code, name and
+  `carrier_service_id`. `mappedService()` also ignores a mapping whose service belongs to
+  another carrier than the one Amazon's name resolves to, so a mapping written before
+  this change neither renames the offer nor authorizes automation. When the name resolves
+  to nothing, the mapping still applies, but the carrier of record stays Amazon's name
+  with no `carrier_id`.
+  `ObservedServiceMapper::map()` and `promote()` throw the new
+  `CrossCarrierMappingException` when the observation's carrier name (else its carrier
+  id) resolves to a different carrier. Aliases count. `carrierFor()` exposes that
+  resolution. On the page, *Assign* lists only that carrier's services once the carrier
+  is known, and every service otherwise. Its helper text names the carrier the source
+  reported either way. *Author service* defaults its carrier through the same
+  resolution, and both actions turn a refusal into a danger notification.
+  Tests: the existing mapped-name test now maps OnTrac onto an OnTrac service. New
+  `AmazonBuyShippingTest` cases cover a cross-carrier mapping that is ignored, and the
+  unresolvable-carrier case. `UnmappedObservedServicesTest` covers the filtered options,
+  an *Assign* onto another carrier's service rejected by the form, a refused *Author
+  service*, and an alias-resolved refusal in the mapper.
