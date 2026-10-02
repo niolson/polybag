@@ -39,6 +39,7 @@ use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\PostageSources\OfferStore;
 use App\Services\SettingsService;
+use App\Services\ShippingRateService;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Log;
@@ -675,6 +676,36 @@ it('auto ships through a rule selected rate', function (): void {
         ->and($offer->purchase_reference)->toBe('AUTO123')
         ->and($offer->quote_fingerprint)->not->toBeNull()
         ->and($offer->expires_at)->not->toBeNull();
+});
+
+it('refuses an auto-ship rate carrying no offer before any adapter is called', function (): void {
+    // Automation's rates are built server-side, but the offer is also the
+    // claim and the record a timed-out purchase is recovered from. Bought
+    // without one, a timeout can buy twice (`project-review/02`), so the
+    // purchase demands it whichever entry point sent the rate (`/05`).
+    $this->actingAs($user = User::factory()->create());
+    $package = createWorkflowPackage();
+
+    $this->partialMock(ShippingRateService::class, function (MockInterface $mock): void {
+        $mock->shouldReceive('getShippingRates')->andReturn(collect([
+            new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days', carrierServiceId: CarrierService::where('service_code', 'GROUND')->value('id')),
+        ]));
+        $mock->shouldReceive('soleBlindPurchaseOfferForAutomation')->andReturnNull();
+    });
+
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('createShipment')->never()->andReturn(ShipResponse::failure('unexpected'));
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package,
+        new PackageAutoShippingRequest(userId: $user->id, cleanupOnFailure: false),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Rate Unavailable')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 
 it('records the account a rule-selected purchase will be bought on', function (): void {
