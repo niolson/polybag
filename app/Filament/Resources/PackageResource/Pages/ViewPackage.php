@@ -15,6 +15,7 @@ use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Concerns\PrintsLabels;
 use App\Filament\Resources\PackageResource;
 use App\Filament\Resources\ShipmentResource;
+use App\Filament\Support\LabelVoidNotification;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\PackageLabel;
@@ -25,7 +26,6 @@ use Filament\Actions\ActionGroup;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\RepeatableEntry\TableColumn;
 use Filament\Infolists\Components\TextEntry;
-use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components;
 use Filament\Schemas\Components\Callout;
@@ -122,15 +122,7 @@ class ViewPackage extends ViewRecord
                         ? 'Void and refund this label in the Shopify admin.'
                         : null)
                     ->action(function (): void {
-                        $result = app(PackageLabelWorkflow::class)->voidLabel($this->record, auth()->user());
-
-                        $notification = Notification::make()
-                            ->title($result->title)
-                            ->body($result->message);
-
-                        $result->success
-                            ? $notification->success()->send()
-                            : $notification->danger()->send();
+                        LabelVoidNotification::send(app(PackageLabelWorkflow::class)->voidLabel($this->record, auth()->user()));
                     }),
                 Action::make('edit')
                     ->icon('heroicon-o-pencil-square')

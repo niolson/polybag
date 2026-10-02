@@ -404,7 +404,7 @@ class DatabaseSource implements DataSourceInterface, ExportDestinationInterface
         return 'database';
     }
 
-    public function exportPackage(array $data): void
+    public function exportPackage(array $data): ?string
     {
         $exportConfig = $this->config['export'] ?? [];
 
@@ -430,6 +430,8 @@ class DatabaseSource implements DataSourceInterface, ExportDestinationInterface
             [],
             fn (int $affected): array => ['affected_rows' => $affected],
         );
+
+        return null;
     }
 
     public function validateExportConfiguration(): void

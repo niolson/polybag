@@ -11,6 +11,7 @@ use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\PackageResource\Pages;
 use App\Filament\Resources\PackageResource\RelationManagers\PackageItemsRelationManager;
 use App\Filament\Support\CarrierLogoColumn;
+use App\Filament\Support\LabelVoidNotification;
 use App\Models\Carrier;
 use App\Models\Client;
 use App\Models\Location;
@@ -26,7 +27,6 @@ use Filament\Forms;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\TextInput;
 use Filament\GlobalSearch\GlobalSearchResult;
-use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components;
 use Filament\Schemas\Components\Html;
@@ -561,15 +561,7 @@ class PackageResource extends Resource
                             ? 'Bought through Shopify Shipping — void and refund it in the Shopify admin. PolyBag un-ships the package once Shopify reports the label voided.'
                             : null)
                         ->action(function (Package $record): void {
-                            $result = app(PackageLabelWorkflow::class)->voidLabel($record, auth()->user());
-
-                            $notification = Notification::make()
-                                ->title($result->title)
-                                ->body($result->message);
-
-                            $result->success
-                                ? $notification->success()->send()
-                                : $notification->danger()->send();
+                            LabelVoidNotification::send(app(PackageLabelWorkflow::class)->voidLabel($record, auth()->user()));
                         }),
                     // For a label that is already void at its source: one the
                     // source accepted that PolyBag failed to record, or one
@@ -587,15 +579,10 @@ class PackageResource extends Resource
                         ->visible(fn (Package $record): bool => $record->status === PackageStatus::Shipped
                             && ! $record->isShopifyShipped())
                         ->action(function (Package $record): void {
-                            $result = app(PackageLabelWorkflow::class)->recordVoid($record, auth()->user());
-
-                            $notification = Notification::make()
-                                ->title($result->success ? 'Void recorded' : $result->title)
-                                ->body($result->message);
-
-                            $result->success
-                                ? $notification->success()->send()
-                                : $notification->danger()->send();
+                            LabelVoidNotification::send(
+                                app(PackageLabelWorkflow::class)->recordVoid($record, auth()->user()),
+                                successTitle: 'Void recorded',
+                            );
                         }),
                 ]),
             ]);

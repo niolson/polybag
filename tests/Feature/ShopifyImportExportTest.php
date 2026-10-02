@@ -12,6 +12,7 @@ use App\Models\DataSourceLocation;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\PackageExport;
+use App\Models\PackageLabel;
 use App\Models\Shipment;
 use App\Services\ShipmentImport\ImportResult;
 use App\Services\ShipmentImport\PackageExportService;
@@ -473,6 +474,70 @@ it('treats an already fulfilled shopify response as idempotent success', functio
     expect($result->success)->toBeTrue()
         ->and($export->status)->toBe(PackageExportStatus::Succeeded)
         ->and($package->fresh()->exported)->toBeTrue();
+});
+
+it('remembers the fulfillment on the label it exported, so a void can cancel it', function (): void {
+    $exportSource = DataSource::factory()->create([
+        'source_type' => ShopifySource::class,
+        'name' => 'Shopify Export',
+        'settings' => [
+            'shop_domain' => 'test-shop.myshopify.com',
+            'export_enabled' => true,
+        ],
+        'secret_settings' => ['client_id' => 'test-client-id', 'client_secret' => 'test-client-secret'],
+    ]);
+    $shipment = Shipment::factory()->create([
+        'data_source_id' => $exportSource->id,
+        'metadata' => ['shopify_fulfillment_order_id' => 'gid://shopify/FulfillmentOrder/2020'],
+    ]);
+    $package = Package::factory()->shipped()->create([
+        'shipment_id' => $shipment->id,
+        'tracking_number' => 'TRACK-2020',
+        'carrier' => 'USPS',
+        'exported' => false,
+    ]);
+    Saloon::fake([GraphQL::class => fulfillmentSuccessResponse()]);
+
+    (new PackageExportService)->exportPackage($package);
+
+    expect($package->labels()->sole()->shopify_fulfillment_id)->toBe('gid://shopify/Fulfillment/1');
+});
+
+it('does not read already fulfilled as success once the package has had a label voided', function (): void {
+    $exportSource = DataSource::factory()->create([
+        'source_type' => ShopifySource::class,
+        'name' => 'Shopify Export',
+        'settings' => [
+            'shop_domain' => 'test-shop.myshopify.com',
+            'export_enabled' => true,
+        ],
+        'secret_settings' => ['client_id' => 'test-client-id', 'client_secret' => 'test-client-secret'],
+    ]);
+    $shipment = Shipment::factory()->create([
+        'data_source_id' => $exportSource->id,
+        'metadata' => ['shopify_fulfillment_order_id' => 'gid://shopify/FulfillmentOrder/2021'],
+    ]);
+    $package = Package::factory()->shipped()->create([
+        'shipment_id' => $shipment->id,
+        'tracking_number' => 'TRACK-2021',
+        'carrier' => 'USPS',
+        'exported' => false,
+    ]);
+    // What fulfilled the order may be the voided label's fulfillment, which
+    // carries a tracking number that will never scan.
+    PackageLabel::factory()->create([
+        'package_id' => $package->id,
+        'tracking_number' => 'TRACK-DEAD',
+        'voided_at' => now()->subDay(),
+    ]);
+    Saloon::fake([GraphQL::class => fulfillmentUserErrorResponse('Fulfillment order is already fulfilled.')]);
+
+    $result = (new PackageExportService)->exportPackage($package);
+    $export = PackageExport::query()->where('package_id', $package->id)->firstOrFail();
+
+    expect($result->success)->toBeFalse()
+        ->and($export->status)->toBe(PackageExportStatus::PermanentlyFailed)
+        ->and($package->fresh()->exported)->toBeFalse();
 });
 
 it('skips the shopify fulfillment for a package shopify sold the label for', function (): void {

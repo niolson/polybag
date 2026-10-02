@@ -126,6 +126,15 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
         }
         GRAPHQL;
 
+    private const FULFILLMENT_CANCEL_MUTATION = <<<'GRAPHQL'
+        mutation CancelFulfillment($id: ID!) {
+          fulfillmentCancel(id: $id) {
+            fulfillment { id status }
+            userErrors { field message }
+          }
+        }
+        GRAPHQL;
+
     public function __construct(array $config)
     {
         $this->config = $config;
@@ -499,8 +508,11 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
      * there is nothing credentials are needed for, and a seller who rotates
      * them after the label was bought would otherwise fail an export that had
      * already succeeded at purchase time.
+     *
+     * Returns the fulfillment's ID, which the Label keeps so that a void can
+     * cancel it ({@see cancelFulfillment()}).
      */
-    public function exportPackage(array $data): void
+    public function exportPackage(array $data): ?string
     {
         if (filled($data['_shopify_shipping_label_id'] ?? null)) {
             Log::info('Skipping Shopify fulfillment for a Shopify Shipping label', [
@@ -508,7 +520,7 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
                 'package' => $data['_package_reference_id'] ?? null,
             ]);
 
-            return;
+            return null;
         }
 
         $this->validateExportConfiguration();
@@ -579,11 +591,64 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
                 'already fulfilled',
             ));
 
-            if ($allPermanent) {
-                return;
+            // An earlier Label's fulfillment is the likeliest thing to have
+            // fulfilled the order, and it carries a dead tracking number. Read
+            // as success, the export would leave the customer holding it
+            // (`project-review/09`).
+            if ($allPermanent && ! ($data['_has_voided_label'] ?? false)) {
+                return null;
             }
 
             throw new PermanentExportException($message);
+        }
+
+        $fulfillmentId = $json['data']['fulfillmentCreate']['fulfillment']['id'] ?? null;
+
+        return filled($fulfillmentId) ? (string) $fulfillmentId : null;
+    }
+
+    /**
+     * Cancel a fulfillment an export created, after its Label was voided.
+     *
+     * Shopify reopens the goods on a fulfillment order of its own choosing,
+     * often a new one, so the caller re-points the shipment afterwards.
+     *
+     * Succeeds only when Shopify hands back this fulfillment as `CANCELLED`.
+     * An answer that names no fulfillment is not a cancel. Read as one, the
+     * void would report success while the customer keeps the dead number.
+     *
+     * @throws RuntimeException when Shopify refuses, cannot be asked, or does not confirm the cancel
+     */
+    public function cancelFulfillment(string $fulfillmentId): void
+    {
+        $this->validateExportConfiguration();
+
+        $json = $this->connector->send(
+            new GraphQL(self::FULFILLMENT_CANCEL_MUTATION, ['id' => $fulfillmentId])
+        )->json();
+
+        if (! empty($json['errors'])) {
+            throw new RuntimeException('Shopify GraphQL error: '.implode('; ', array_map(
+                fn (array $error): string => (string) ($error['message'] ?? 'Unknown GraphQL error'),
+                $json['errors'],
+            )));
+        }
+
+        $userErrors = $json['data']['fulfillmentCancel']['userErrors'] ?? [];
+
+        if (! empty($userErrors)) {
+            throw new RuntimeException('Shopify refused to cancel the fulfillment: '.implode('; ', array_map(
+                fn (array $error): string => (string) ($error['message'] ?? 'Unknown error'),
+                $userErrors,
+            )));
+        }
+
+        $fulfillment = $json['data']['fulfillmentCancel']['fulfillment'] ?? null;
+
+        if (($fulfillment['id'] ?? null) !== $fulfillmentId || ($fulfillment['status'] ?? null) !== 'CANCELLED') {
+            throw new RuntimeException(
+                'Shopify did not confirm the fulfillment was cancelled (status: '.($fulfillment['status'] ?? 'none').')'
+            );
         }
     }
 

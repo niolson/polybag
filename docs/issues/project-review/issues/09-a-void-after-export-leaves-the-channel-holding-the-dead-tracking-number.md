@@ -1,6 +1,6 @@
 # A void after export leaves the sales channel holding the voided tracking number
 
-Status: needs-triage
+Status: done — 2026-10-02 (Shopify; Amazon relies on the Orders v0 docs)
 
 Repo: `polybag`
 
@@ -85,3 +85,85 @@ that has a voided Label.
     whether `fulfillmentTrackingInfoUpdate` is refused on old or delivered fulfillments,
     and Amazon's reply to a re-confirm. The Amazon sandbox only matches its own fixture,
     so the Amazon check needs a production order.
+- 2026-10-02 — Triage: **cancel on void** for Shopify (shape 2). Updating in place leaves
+  the fulfillment order closed until the re-ship, and the re-ship can be days later or
+  bought through Shopify Shipping, which needs an open fulfillment order:
+  `shippingLabelPurchase` can't buy against a closed one. Cancelling keeps Shopify's state
+  matching PolyBag's: a voided Package is unshipped in both. Shopify's own assistant
+  describes the same flow (`fulfillmentCancel`, then `fulfillmentCreate` against the
+  replacement fulfillment order). The build needs:
+  - **Keep the fulfillment ID.** `exportPackage()` already selects `fulfillment { id }`;
+    store it on the Label row (ADR-0004), not on `PackageExport`, because `clearShipping()`
+    deletes those rows.
+  - **Cancel after a void is recorded.** Covers operator voids and Record Void. Shopify
+    Shipping Labels are skipped: they never ran `fulfillmentCreate`, and their void
+    already goes through the Shopify admin.
+  - **Re-point the Shipment.** `fulfillmentCancel` opens a *new* fulfillment order, so
+    `fulfillment_order_id` and `source_record_id` have to move to it, the way
+    `ShopifyFulfillmentSynchronizer::repointFulfillmentOrder()` already does for Shopify
+    Shipping voids. Pull that logic out and share it; don't copy it.
+  - **Report a failed cancel.** The void stands (the carrier has already voided the
+    label), but the operator is told that Shopify still shows the old number.
+  - **Narrow the swallow.** The "already fulfilled" swallow must not apply to a Package
+    that has a voided Label.
+  - **Verify on the test store** (`polybag-test.myshopify.com`): export, void, cancel,
+    re-ship by direct Label, then repeat with a Shopify Shipping re-ship.
+
+  Amazon is not covered by this decision. The 2026-10-01 research suggests a re-confirm with
+  the same `packageReferenceId` already replaces the number. That needs a production order
+  to confirm; split it out when the Shopify side is built.
+- 2026-10-02 — **Shopify built.**
+  - `ShopifySource::exportPackage()` returns the fulfillment ID, and
+    `ExportDestinationInterface::exportPackage()` now returns `?string`.
+    `PackageExportService` stores the ID in `package_labels.shopify_fulfillment_id`, but
+    only for the shipment's own Shopify source and only on the active Label with the
+    exported tracking number.
+  - `EloquentPackageLabelWorkflow` calls `ShopifyFulfillmentCanceller` after an operator
+    void or a Record Void. It reads the ID from the Label just voided and sends
+    `fulfillmentCancel`. On success it re-points the Shipment through
+    `ShopifyFulfillmentOrderReplacer`, which is the synchronizer's re-point logic moved
+    into its own class so both paths use it. If the cancel fails, the void stands and
+    `LabelVoidResult::$warning` puts a persistent notification on screen telling the
+    operator to cancel the fulfillment in the Shopify admin.
+  - The "already fulfilled" swallow no longer applies to a Package that has a voided
+    Label.
+  - Tests: `tests/Feature/ShopifyFulfillmentCancelOnVoidTest.php`, plus two in
+    `ShopifyImportExportTest.php`.
+  - **Still to run live** on `polybag-test.myshopify.com`. Check:
+    - which fulfillment order `fulfillmentCancel` reopens the goods on (the same one or a
+      new one; the re-point handles both);
+    - what Shopify says when it refuses (for example, a delivered fulfillment);
+    - that the re-ship works both ways: a direct Label export, and a Shopify Shipping
+      purchase.
+  - **Amazon:** goes by the Orders v0 docs, because there is no practical way to test
+    with a production order. A re-confirm with the same `packageReferenceId` replaces the
+    tracking number, so nothing is built. One risk is left open:
+    `shipmentWasAlreadyConfirmed()` still reads an "already confirmed" refusal as success
+    even after a void. The same `_has_voided_label` guard would turn it into a visible
+    failure.
+- 2026-10-02 — **Live run on the test store, first half.** A direct Label was exported,
+  then voided. `fulfillmentCancel` succeeded. The Shopify timeline shows "PolyBag canceled
+  fulfillment" and the order is unarchived (Shopify had auto-archived it once fulfilled).
+  The goods came back on a **new** fulfillment order: `…/22140102770902` was replaced by
+  `…/22140109783254`, and the Shipment was re-pointed at the new one (audit 39299). The
+  timeline's "Service: Manual" is Shopify's name for merchant-managed fulfillment, not
+  the shipping service; `FulfillmentInput` has no field for that. Still to run: re-ship
+  the Package by direct Label and by Shopify Shipping, and a cancel Shopify refuses.
+- 2026-10-02 — **Live run, second half.**
+  - **Direct re-ship:** the new fulfillment `…/7266964111574` sits on the re-pointed
+    fulfillment order `…/22140109783254`, confirmed by querying the fulfillment's
+    `fulfillmentOrders`.
+  - **Shopify Shipping re-ship** after a void and cancel: works.
+  - **Repeated cancel is not refused.** The fulfillment was cancelled in the admin
+    (17:17:47), then voided in PolyBag. `fulfillmentCancel` on the already-cancelled
+    fulfillment returned no `userErrors`, so no warning showed. The Shipment was
+    re-pointed onto the fulfillment order the admin cancel had opened (`…/22140181020886`,
+    OPEN). So cancelling in the admin before or after the void is harmless.
+  - **Still unseen:** a real refusal and its text. The refusal path is covered only by
+    faked responses.
+- 2026-10-02 — Code review: `cancelFulfillment()` now succeeds only when Shopify returns
+  the same fulfillment ID with status `CANCELLED`. Before, a reply with no
+  `fulfillmentCancel` or no `fulfillment` passed as a success. Checked live: repeating
+  `fulfillmentCancel` on the already-cancelled `…/7267003007190` returns that fulfillment
+  as `CANCELLED` with no `userErrors`. So an admin cancel followed by a PolyBag void still
+  passes the check and shows no warning.

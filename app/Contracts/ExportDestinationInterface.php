@@ -13,8 +13,11 @@ interface ExportDestinationInterface
      * Export package data to the external destination
      *
      * @param  array<string, mixed>  $data  Mapped field data
+     * @return string|null The destination's own ID for the record the export created, when it
+     *                     reports one and something here needs it later — Shopify's fulfillment,
+     *                     which a void has to cancel. Null for every other destination.
      */
-    public function exportPackage(array $data): void;
+    public function exportPackage(array $data): ?string;
 
     /**
      * Validate the export configuration

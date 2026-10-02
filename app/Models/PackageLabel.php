@@ -80,6 +80,7 @@ class PackageLabel extends Model
         'purchased_at',
         'purchased_by_user_id',
         'source_label_reference',
+        'shopify_fulfillment_id',
         'voided_at',
         'voided_by_user_id',
         'void_reason',

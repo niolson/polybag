@@ -732,6 +732,10 @@ class Pack extends Page
             app(SessionLastLabel::class)->forget();
             $this->notifySuccess('Label Cancelled', $result->message);
 
+            if ($result->warning !== null) {
+                $this->notifyWarning('Sales channel not updated', $result->warning);
+            }
+
             return;
         }
 

@@ -8,14 +8,19 @@ final readonly class LabelVoidResult
         public bool $success,
         public string $title,
         public string $message,
+        public ?string $warning = null,
     ) {}
 
-    public static function success(?string $message = null): self
+    /**
+     * @param  string|null  $warning  something the void could not put right itself, for the operator to
+     */
+    public static function success(?string $message = null, ?string $warning = null): self
     {
         return new self(
             success: true,
             title: 'Label voided',
             message: $message ?? 'The label has been voided.',
+            warning: $warning,
         );
     }
 
