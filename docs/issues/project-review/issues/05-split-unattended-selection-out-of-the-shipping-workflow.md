@@ -1,6 +1,6 @@
 # Split unattended rate selection out of the shipping workflow
 
-Status: needs-triage
+Status: done — 2026-10-02
 
 Repo: `polybag`
 
@@ -50,3 +50,9 @@ Best done together with `02`, which changes the same seam.
   itself: unattended selection and its messaging (`selectedRateForAutoShip()` through
   `refusedForMethodRequirements()`, ~430 lines) into their own service, after which
   `autoShip()`'s catch blocks need only cover selection's failures.
+- 2026-10-02 — Done. Unattended selection and its operator messages moved to
+  `App\Services\PackageShipping\UnattendedRateSelector` (`select()` and `refusal()`,
+  415 lines); the workflow is down to 1,536 lines and buys. Behavior-preserving: the
+  suite passed unchanged. `autoShip()`'s catch blocks were left as they are, since they
+  also cover purchase steps before `buyPostage()`'s own `try`, and narrowing them would
+  change what a batch job sees for an unexpected error.
