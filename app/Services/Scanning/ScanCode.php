@@ -12,7 +12,7 @@ use InvalidArgumentException;
 /**
  * A PolyBag code: the install's prefix, a type token, then a body, as in
  * `PBS216` for Shipment 216 (ADR-0007). A scan with the prefix is always one:
- * if its token or body is not understood it is unrecognised, and it is never
+ * if its token or body is not understood it is unrecognized, and it is never
  * looked up as anything else.
  */
 final readonly class ScanCode
@@ -99,7 +99,7 @@ final readonly class ScanCode
         return self::prefix().ScanCodeType::Command->value.$command->value;
     }
 
-    public function isRecognised(): bool
+    public function isRecognized(): bool
     {
         return $this->type !== null;
     }

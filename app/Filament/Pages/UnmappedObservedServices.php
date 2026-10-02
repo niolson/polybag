@@ -282,7 +282,7 @@ class UnmappedObservedServices extends Page implements HasTable
     }
 
     /**
-     * Carrier services this observation may be mapped onto, labelled the way a
+     * Carrier services this observation may be mapped onto, labeled the way a
      * person picking one needs to read them — "USPS — Ground Advantage", not
      * "Ground Advantage" three times.
      *

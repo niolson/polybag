@@ -7,7 +7,7 @@ namespace App\Exceptions\Carriers;
  *
  * Thrown by an adapter's packaging classifier instead of defaulting the rate
  * to the shipper's own packaging — ADR-0005 decision 3's invariant that an
- * indicator the classifier does not recognise must not fall through. At rate
+ * indicator the classifier does not recognize must not fall through. At rate
  * shopping the adapter's own filter keeps this from happening; at purchase the
  * metadata is browser-restated, and the workflow turns this into a refusal.
  */

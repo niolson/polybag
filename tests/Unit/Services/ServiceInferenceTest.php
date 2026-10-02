@@ -344,7 +344,7 @@ describe('carrier aliasing', function (): void {
     });
 });
 
-describe('rung 3 — the honoured Shopify selection', function (): void {
+describe('rung 3 — the honored Shopify selection', function (): void {
     /**
      * A package bought through Shopify with an explicit pair, as the purchase
      * records it: the pair in metadata beside the carrier Shopify reported, and
@@ -358,7 +358,7 @@ describe('rung 3 — the honoured Shopify selection', function (): void {
             'metadata' => [
                 'shopify_tracking_company' => $carrier,
                 'shopify_requested_service_code' => $pair,
-                'shopify_honoured_selection' => $pair,
+                'shopify_honored_selection' => $pair,
             ],
         ], $attributes));
     }
@@ -385,7 +385,7 @@ describe('rung 3 — the honoured Shopify selection', function (): void {
             ->and($inference->method)->toBe(ServiceInferrer::METHOD_USPS_STC);
     });
 
-    it('declines when the decode and the honoured selection name different services', function (): void {
+    it('declines when the decode and the honored selection name different services', function (): void {
         // Priority Mail asked for, a Ground Advantage number returned. Two
         // sources disagreeing is a wrong table somewhere, not a tie to break.
         $inference = inferrer()->infer(shopifySelected('usps:Priority', 'USPS', [
@@ -399,7 +399,7 @@ describe('rung 3 — the honoured Shopify selection', function (): void {
 
     it('declines a selection whose carrier is not the one that sold the label', function (): void {
         // Asked for USPS, and Shopify reports UPS sold it: whatever happened,
-        // the selection was not honoured and names nothing about this label.
+        // the selection was not honored and names nothing about this label.
         $inference = inferrer()->infer(shopifySelected('usps:Priority', 'UPS', [
             'tracking_number' => ups1zWithIndicator('59'),
         ]));
@@ -408,7 +408,7 @@ describe('rung 3 — the honoured Shopify selection', function (): void {
             ->and($inference->reason)->toContain('sold the label');
     });
 
-    it('reads nothing into auto or a pair never seen honoured', function (string $pair): void {
+    it('reads nothing into auto or a pair never seen honored', function (string $pair): void {
         expect(inferrer()->infer(shopifySelected($pair, 'UPS', [
             'tracking_number' => ups1zWithIndicator('59'),
         ]))->isResolved())->toBeFalse();
@@ -456,14 +456,14 @@ describe('rung 3 — the honoured Shopify selection', function (): void {
         // The raw pair and the tracking company are each written only when
         // present and both survive a void, so a re-ship that omits the company
         // would leave the voided label's beside this label's pair. The purchase
-        // writes `shopify_honoured_selection` unconditionally -- null here,
+        // writes `shopify_honored_selection` unconditionally -- null here,
         // because Shopify named no carrier -- and that is the only key read.
         $package = shopifySelected('ups_shipping:59', 'UPS', [
             'tracking_number' => ups1zWithIndicator('59'),
             'metadata' => [
                 'shopify_tracking_company' => 'UPS',
                 'shopify_requested_service_code' => 'ups_shipping:59',
-                'shopify_honoured_selection' => null,
+                'shopify_honored_selection' => null,
             ],
         ]);
 

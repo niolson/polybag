@@ -387,7 +387,7 @@ it('recovers an off-Amazon purchase whose reply never arrived on the connection 
         ->and($package->postage_data_source_id)->toBe($this->connection->id)
         ->and($offer->fresh()->purchase_reference)->toBe('amzn1.sid.external-1');
 
-    // One quote and one purchase. The recovery *is* the retry, recognised by
+    // One quote and one purchase. The recovery *is* the retry, recognized by
     // its idempotency key — a second `purchaseShipment` would be a second label.
     Saloon::assertSentCount(2);
     Saloon::assertSent(fn (PurchaseShipment $request, $response): bool => sentByConnection($response->getPendingRequest(), $this->connection)

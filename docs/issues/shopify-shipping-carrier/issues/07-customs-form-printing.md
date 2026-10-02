@@ -28,7 +28,7 @@ Incoterm `DDU`, reason for export `SALE`, line items.
 
 **A precondition that bites before any of this:** an international Shopify purchase fails
 unless every variant has `harmonizedSystemCode` and `countryCodeOfOrigin` set in the Shopify
-catalogue, and those **cannot** be sent in the purchase. It also fails when the box weighs
+catalog, and those **cannot** be sent in the purchase. It also fails when the box weighs
 less than Shopify's declared item weights, which is `19`. Both surface after packing.
 
 ## Decision — 2026-09-10: print it, with four constraints

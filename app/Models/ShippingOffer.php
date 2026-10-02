@@ -26,7 +26,7 @@ use Illuminate\Support\Str;
  *
  * Consumption is one-way. An offer whose purchase failed is not returned to the
  * pool: re-quoting is cheap and correct, while re-spending an identifier the
- * source may already have honoured is neither.
+ * source may already have honored is neither.
  *
  * @property string $public_id
  * @property int $package_id

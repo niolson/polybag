@@ -46,7 +46,7 @@ it('separates whether a carrier manifests at all from whether this package may g
     $direct = Package::factory()->usps()->create();
     $shopifyBought = shippedShopifyPackage();
 
-    // Both parcels are carried by USPS, which runs a SCAN form programme. Only
+    // Both parcels are carried by USPS, which runs a SCAN form program. Only
     // one of them was tendered on an account of ours, and a SCAN form is a claim
     // that it was.
     expect($registry->policyFor('USPS')?->supportsCarrierManifest())->toBeTrue()
@@ -55,7 +55,7 @@ it('separates whether a carrier manifests at all from whether this package may g
         ->and($dispatcher->supportsPackageManifest($shopifyBought))->toBeFalse();
 });
 
-it('reports a carrier with no manifest programme as ineligible even when we bought the label', function (): void {
+it('reports a carrier with no manifest program as ineligible even when we bought the label', function (): void {
     $package = Package::factory()->fedex()->create();
 
     expect(app(CarrierRegistry::class)->policyFor('FedEx')?->supportsCarrierManifest())->toBeFalse()

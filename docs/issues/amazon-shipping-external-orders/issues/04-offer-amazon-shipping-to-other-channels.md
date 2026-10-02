@@ -175,7 +175,7 @@ column change and the constraint rejected a row with no target. SQLite relies on
 - **Rules live in `CarrierAccountScope`'s `saving` hook** and throw `DomainException`.
   The form checks the same rules first so the operator gets a field error. The band walk
   is now `scopeMatchingSlot()` + `precedenceFor()` on the scope, shared by
-  `resolveForShipment()` (behaviour unchanged, its tests untouched) and the sibling
+  `resolveForShipment()` (behavior unchanged, its tests untouched) and the sibling
   `DataSource::resolveOffAmazonShipping()`.
 - **Ineligible connections are filtered before the walk**, as inactive accounts are in
   `resolveForShipment()`, so a client row for an inactive connection gives way to the

@@ -19,7 +19,7 @@ return new class extends Migration
             // in the row was unpriced, which is the same species of lie as
             // storing 0.00 on an unpriced package. Null means "never computed
             // for this row", and readers fall back to `package_count`, which is
-            // the behaviour that predates this column.
+            // the behavior that predates this column.
             $table->unsignedInteger('costed_package_count')
                 ->nullable()
                 ->after('package_count');

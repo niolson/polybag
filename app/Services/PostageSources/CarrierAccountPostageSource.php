@@ -50,7 +50,7 @@ class CarrierAccountPostageSource implements PostageSourceOperations
 
     /**
      * We bought it, so the only remaining question is carrier policy: does this
-     * carrier run a manifest programme at all?
+     * carrier run a manifest program at all?
      */
     public function supportsPackageManifest(Package $package): bool
     {

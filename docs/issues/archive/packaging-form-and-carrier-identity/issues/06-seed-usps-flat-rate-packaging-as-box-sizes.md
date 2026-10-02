@@ -1,6 +1,6 @@
 # Seed USPS flat-rate packaging as Box Sizes?
 
-Status: done — option 1, shipped 2026-09-16; the starter set carries the six Priority Mail flat-rate packagings (seven rows, the medium box in both shapes) with `carrier_packaging` stamped, and code `16` — already labelled the padded envelope — is stamped on reseed
+Status: done — option 1, shipped 2026-09-16; the starter set carries the six Priority Mail flat-rate packagings (seven rows, the medium box in both shapes) with `carrier_packaging` stamped, and code `16` — already labeled the padded envelope — is stamped on reseed
 
 Repo: `polybag`
 

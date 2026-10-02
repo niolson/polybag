@@ -31,7 +31,7 @@ source.
     sends none, and each Amazon offer carries Amazon's own 10-minute window.
 - **Shopify.** The Shopify connection gains *Date Shopify's choice as*, a carrier select
   that defaults to USPS. It sits on the connection form, which is Admin-only.
-  - Until `09`, every Shopify blind offer is dated by it. That keeps Shopify's behaviour:
+  - Until `09`, every Shopify blind offer is dated by it. That keeps Shopify's behavior:
     the old 8 PM on the `Shopify` row matched USPS's.
   - From `09`, only `auto` is. An offer requesting a service is dated by that service's
     carrier.

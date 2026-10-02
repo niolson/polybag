@@ -10,7 +10,7 @@ namespace App\DataTransferObjects\PostageSources;
  * a catalog but never a stable offer set; what survives across quotes is which
  * services exist, which is exactly this.
  *
- * {@see $eligible} is the one judgement carried across, and it is coarse on
+ * {@see $eligible} is the one judgment carried across, and it is coarse on
  * purpose. Amazon returns `ineligibleRates` entries whose reason `code` is
  * `UNKNOWN` on every single one — the real content sits in prose messages
  * ("Expression 'L * W * H' = 11880 exceeds maximum 2949.67") that nothing

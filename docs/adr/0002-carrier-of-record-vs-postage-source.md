@@ -534,7 +534,7 @@ this ADR, so almost no affected rows exist yet. `carrier` is recoverable from
 `metadata.shopify_tracking_company`, falling back to `service`; `postage_data_source_id` from the
 shipment's data source. This is the cheapest this change will ever be.~~
 
-**Superseded 2026-09-04.** The rule in the paragraph above stands and was honoured — the
+**Superseded 2026-09-04.** The rule in the paragraph above stands and was honored — the
 postage-source filter landed in the same commit as the backfill. The recovery scheme in this
 one was never built, and should not be read as describing what runs.
 

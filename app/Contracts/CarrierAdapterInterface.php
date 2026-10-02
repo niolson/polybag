@@ -58,7 +58,7 @@ interface CarrierAdapterInterface extends PostageOfferSource
      * authority: the classifier must read exactly the fields the ship body
      * sends and nothing else, so that no metadata can classify as the
      * shipper's packaging while buying the carrier's. An indicator or code the
-     * classifier does not recognise must not fall through to
+     * classifier does not recognize must not fall through to
      * `shipperPackaging()` — it throws instead, and the purchase path turns
      * that into a refusal. Authority — the quoted rate restored server-side
      * behind an opaque identifier, as an offer already is — is

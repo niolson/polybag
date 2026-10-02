@@ -3,7 +3,7 @@
     "notes": [
         "The version is the date this ruleset last changed, and it is what lands in",
         "packages.service_ruleset_version. Bump it whenever any table in this directory",
-        "changes, so an inference recorded under an older ruleset can be recognised and",
+        "changes, so an inference recorded under an older ruleset can be recognized and",
         "re-derived. Each table carries its own upstream provenance and effective date.",
         "Versions compare as strings because they are ISO dates; a package whose stamp",
         "sorts below this one was inferred under an older ruleset."

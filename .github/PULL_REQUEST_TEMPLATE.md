@@ -4,7 +4,7 @@
 
 ## Why
 
-<!-- The problem this solves. If it changes carrier behaviour, say which carrier and what the API does differently now. -->
+<!-- The problem this solves. If it changes carrier behavior, say which carrier and what the API does differently now. -->
 
 ## How it was tested
 

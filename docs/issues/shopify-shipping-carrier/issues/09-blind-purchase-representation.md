@@ -27,7 +27,7 @@ A type, two contracts, a column, and a second radio group.
 - **`clients.blind_purchase_enabled`** — off by default, per client, and in Settings for a
   single-client install.
 - **The Ship page** lists offers in their own block below the rates, dashed and
-  warning-coloured, behind a panel saying price and service are unknown. Selecting one
+  warning-colored, behind a panel saying price and service are unknown. Selecting one
   clears the rate selection and vice versa; shipping opens a confirmation modal naming what
   is not known — including that the label cannot be voided from PolyBag — and only the
   confirmation buys anything. Consent resets after every attempt.

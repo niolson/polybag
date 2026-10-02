@@ -234,11 +234,11 @@ class ShopifyShippingLabelService
      * The weight Shopify will put on the customs form, item by item — asked for
      * twice, because the better answer is the one that can be refused.
      *
-     * `inventoryItem.measurement.weight` is the live catalogue value and the
+     * `inventoryItem.measurement.weight` is the live catalog value and the
      * one preferred. `FulfillmentOrderLineItem.weight`, which the import
      * already reads, is a snapshot taken when the order was placed. The two
      * normally agree, and the difference is the whole point: the declaration is
-     * built at purchase time from the catalogue, so a merchant who corrects a
+     * built at purchase time from the catalog, so a merchant who corrects a
      * product weight in response to a refusal has to be able to retry
      * successfully, and the snapshot alone would keep refusing.
      *
@@ -291,7 +291,7 @@ class ShopifyShippingLabelService
      * carrier rounds up to the next ounce regardless, so declaring the sum
      * instead of the reading costs nothing and says nothing meaningfully
      * untrue. A wider gap than that is not the scale being imprecise, it is the
-     * catalogue describing goods that are not in the box, and no amount of
+     * catalog describing goods that are not in the box, and no amount of
      * arithmetic here makes that true.
      */
     public const DECLARED_WEIGHT_TOLERANCE = 0.1;
@@ -576,7 +576,7 @@ class ShopifyShippingLabelService
      * An inactive or non-Shopify recorded source is likewise no answer rather
      * than a reason to look elsewhere.
      *
-     * Before a package ships there is no provenance to honour, so the purchase
+     * Before a package ships there is no provenance to honor, so the purchase
      * path still resolves through the shipment's import source — which is where
      * the fulfillment order it will buy against lives.
      */
@@ -704,7 +704,7 @@ class ShopifyShippingLabelService
     }
 
     /**
-     * What Shopify's catalogue says this fulfillment order's goods weigh, in
+     * What Shopify's catalog says this fulfillment order's goods weigh, in
      * pounds, or null when that cannot be established.
      *
      * Null is "cannot ask", never "nothing" — a fulfillment order Shopify no
@@ -724,7 +724,7 @@ class ShopifyShippingLabelService
      * logged and whatever data came back is used, which for a denied
      * `lineItem.variant` traversal is still the order-time snapshot.
      *
-     * Per line item the live catalogue weight is preferred and the snapshot is
+     * Per line item the live catalog weight is preferred and the snapshot is
      * the fallback. A line item with neither contributes nothing, which is what
      * Shopify itself declares for it.
      */
@@ -738,7 +738,7 @@ class ShopifyShippingLabelService
             logger()->warning('Shopify would not fully report what it will declare in customs', [
                 'fulfillment_order_id' => $fulfillmentOrderId,
                 'errors' => $json['errors'],
-                'hint' => 'Reading the live catalogue weight needs the read_products scope; '
+                'hint' => 'Reading the live catalog weight needs the read_products scope; '
                     .'without it the order-time snapshot is used instead.',
             ]);
         }

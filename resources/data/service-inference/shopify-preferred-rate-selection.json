@@ -5,7 +5,7 @@
         "which is also what ShopifyAdapter writes to metadata.shopify_requested_service_code.",
         "",
         "This is the weakest rung and runs last. A selection is what was asked for, not",
-        "what was observed: the tracking number and the label are the artefact Shopify",
+        "what was observed: the tracking number and the label are the artifact Shopify",
         "produced, this is the request that produced it. It fills in only where both",
         "of those decline -- a UPS service whose 1Z indicator is not yet tabled, a",
         "carrier whose number encodes nothing -- and where a decode disagrees with the",
@@ -13,16 +13,16 @@
         "",
         "A pair is evidence only when Shopify's own report of the carrier agrees with",
         "the carrier the pair asked for. The rung compares the two before it reads",
-        "this table, so a selection Shopify did not honour resolves to nothing.",
+        "this table, so a selection Shopify did not honor resolves to nothing.",
         "",
         "Service names are the same vocabulary the other tables use -- USPS's product",
         "names as the Service Type Code appendix spells them, UPS names as CarrierSeeder",
         "spells them -- so a decode and a selection for the same service compare equal."
     ],
     "provenance": {
-        "source": "issue shopify-shipping-carrier/02: preferredRateSelection is honoured, and each carrier's own vocabulary is passed through",
+        "source": "issue shopify-shipping-carrier/02: preferredRateSelection is honored, and each carrier's own vocabulary is passed through",
         "observed_on": [
-            "Honouring, established by purchase rather than assumed. A pair with no",
+            "Honoring, established by purchase rather than assumed. A pair with no",
             "matching rate fails synchronously with RATES_NOT_FOUND and buys nothing, so a",
             "purchase that succeeded with a selection is one Shopify matched a rate to.",
             "USPS: a production purchase with usps:PriorityExpress came back priced an",

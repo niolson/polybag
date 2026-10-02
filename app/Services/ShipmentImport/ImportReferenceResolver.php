@@ -160,7 +160,7 @@ class ImportReferenceResolver
             return false;
         }
 
-        Log::warning('Unrecognised media flag on import; product flag left unchanged', [
+        Log::warning('Unrecognized media flag on import; product flag left unchanged', [
             'sku' => $sku,
             'value' => is_scalar($value) ? $value : get_debug_type($value),
         ]);

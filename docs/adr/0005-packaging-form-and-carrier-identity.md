@@ -21,7 +21,7 @@ on one point of decision 3: the accepted text had FedEx set a rate's requirement
 whether it came back from the One Rate request. Reading the adapter showed the ordinary
 rate request sends no `packagingType` and the ship body labels every non-One-Rate rate as
 `YOUR_PACKAGING`, so under that wording a Package in a FedEx Pak would have every
-weight-based FedEx rate filtered out and keep only One Rate — a behaviour change nobody
+weight-based FedEx rate filtered out and keep only One Rate — a behavior change nobody
 wanted, since FedEx packaging ships at weight-based prices too. FedEx now follows the rule
 the same sentence already gave UPS: the adapter sends the packaging and stamps what it
 sent. The slicing also added Priority Mail Express flat-rate envelopes as their own
@@ -139,7 +139,7 @@ from the packaging code they sent on the request, Amazon from the serviceId. For
 that means every rate from a request that named FedEx packaging — the ordinary rates,
 Saturday and One Rate alike — is `exactly(…)`, and every rate from a `YOUR_PACKAGING`
 request is `shipperPackaging()`; a Package in a FedEx Pak keeps its weight-based rates,
-each honestly quoted and labelled for the Pak. A service sold both in the shipper's
+each honestly quoted and labeled for the Pak. A service sold both in the shipper's
 packaging and in the carrier's is not one rate with two answers; it is two rates — FedEx
 Express Saver quoted for the packer's box and FedEx Express Saver quoted for the Pak —
 each with one.
@@ -345,7 +345,7 @@ leaves it for its own issue.
 - `CarrierAdapterInterface::resolvePreSelectedRate()` changes return type to `?RateResponse`;
   five implementations and `selectedRateForAutoShip()` change with it. A rule that
   pre-selects a service the Package's packaging cannot use now rate-shops instead of buying,
-  which is a behaviour change worth a line in the release notes.
+  which is a behavior change worth a line in the release notes.
 - A `BoxSize` with a `carrier_packaging` set is only useful for a carrier whose adapter or
   reseller can rate it; nothing prevents declaring a FedEx Pak on a UPS-only account, and the
   outcome is simply no matching rates. The Box Size form can say so.
@@ -354,7 +354,7 @@ leaves it for its own issue.
 
 Tracked as issues under `docs/issues/archive/packaging-form-and-carrier-identity/`, ordered so
 that `RateResponse` and the shared filter ship first, wired at both sites, with every
-adapter returning `shipperPackaging()` (no behaviour change), then the `BoxSize` column and
+adapter returning `shipperPackaging()` (no behavior change), then the `BoxSize` column and
 the FedEx migration, then the Amazon classifier replacing `12`'s filter, and last the direct
 USPS mapping. This document records the decision and why; it is not a checklist and does
 not get updated as work lands.

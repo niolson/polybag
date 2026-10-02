@@ -81,7 +81,7 @@ Pack slips become their own step, independent of picking.
 22. As a shipper without the print bridge installed, I want to view the slips in the browser and then mark those slips as printed, so that I can still use PolyBag.
 23. As a manager, I want every printed mark (automatic or manual) to record who did it, so that an unexpected mark can be traced.
 24. As a shipper, I want marking slips as printed by hand to record the slips I actually viewed, so that marking a slip I viewed before its items changed does not hide the change.
-25. As a shipper, I want a late acknowledgement of an older print never to overwrite a newer one, so that an outdated warning does not come back and the right person stays recorded.
+25. As a shipper, I want a late acknowledgment of an older print never to overwrite a newer one, so that an outdated warning does not come back and the right person stays recorded.
 26. As a shipper, I want a large run sent as several print jobs of limited size, so that one failure cannot leave me retrying hundreds of slips.
 27. As a shipper, I want Shipments that are in an in-progress pick batch left off the page, with a line saying how many were left off and why and linking to those batches, so that I do not print a second slip without its tote code.
 28. As a shipper, I want a Shipment whose pick batch is cancelled to reappear on the page, so that it is not stranded.
@@ -201,15 +201,15 @@ Pack slips become their own step, independent of picking.
   (`pack_slip_items_version`, `pack_slip_receipt_issued_at`), or nothing is stored. It
   then writes those two values plus `pack_slip_printed_at` (now) and
   `pack_slip_printed_by`. So a duplicate redemption changes nothing, and a late
-  acknowledgement of an older document cannot overwrite a newer print, bring back an
+  acknowledgment of an older document cannot overwrite a newer print, bring back an
   outdated warning, or change the recorded user. Shipments that have since shipped or
   been deleted are skipped. Redeeming changes nothing but these fields.
 - **Manual mark.** "Mark as printed" redeems the receipt of the document the user viewed,
-  exactly like an automatic acknowledgement. It never records a print against the
+  exactly like an automatic acknowledgment. It never records a print against the
   Shipment's current state. If an import changed a Shipment's items after the user
   viewed its slip, marking that view printed leaves the Shipment out of date. It is
   always an explicit action and never happens automatically. It is also the recovery path
-  when a print succeeded but its acknowledgement did not reach the server.
+  when a print succeeded but its acknowledgment did not reach the server.
 - **Item versioning.** `items_version` is incremented atomically (a database increment,
   not read-modify-write) when a Shipment's items are created or deleted, or when an
   item's product or quantity changes. `ShipmentItem` model events cover this for UI
@@ -228,11 +228,11 @@ Pack slips become their own step, independent of picking.
 ### Print path in the browser
 
 - The existing report-print listener gains an optional receipt. When the print bridge
-  reports the job sent, it posts the receipt to a new acknowledgement endpoint, in the
-  same way labels post their print acknowledgement. Success is reported as "Sent to the
+  reports the job sent, it posts the receipt to a new acknowledgment endpoint, in the
+  same way labels post their print acknowledgment. Success is reported as "Sent to the
   printer", not "Printed", and names the recovery: if paper did not come out, reprint
-  from the Printed tab. A failed print or a failed acknowledgement is shown to the user.
-  A failed acknowledgement says the slips were sent but not recorded, and offers Mark as
+  from the Printed tab. A failed print or a failed acknowledgment is shown to the user.
+  A failed acknowledgment says the slips were sent but not recorded, and offers Mark as
   printed for the same receipt.
 - One print run is one print-bridge job. On failure, nothing in the run is marked.
 - Every HTML view of pack slips (from the new page, a pick batch, or a Shipment) carries
@@ -293,12 +293,12 @@ Pack slips become their own step, independent of picking.
   and opens it at Scan & Pack.
 - Matching stays exact (after trimming whitespace). An ERP barcode that differs from the
   stored reference (zero-padding, a prefix, a check digit) is out of scope. When a real
-  tenant needs it, the fix is a normalisation rule on the connection, not a global one;
+  tenant needs it, the fix is a normalization rule on the connection, not a global one;
   see Out of Scope.
 
 ## Testing Decisions
 
-A good test here drives the behaviour a user or the print bridge sees: which Shipments a
+A good test here drives the behavior a user or the print bridge sees: which Shipments a
 tab lists, what a receipt redemption records, what a page shows or hides. It does not
 assert on query structure or on which method was called.
 
@@ -317,7 +317,7 @@ assert on query structure or on which method was called.
   nothing. Redeeming an older receipt after a newer one leaves the newer print, its
   user and its current state in place. Manual Mark as printed of a view whose items
   have since changed leaves the Shipment out of date. Prior art: the label print
-  acknowledgement tests.
+  acknowledgment tests.
 - **Item versioning** (feature): an import that changes an item's product or quantity,
   adds one or removes one increments `items_version`, and one that changes nothing
   doesn't. The authoritative-items bulk delete increments it; this test must fail if
@@ -351,7 +351,7 @@ assert on query structure or on which method was called.
 - Identifying which copy of a slip was scanned. The barcode names the Shipment
   (ADR-0007); putting a document version in it would reopen that ADR. An old copy left
   in a tote after a current reprint is a floor-process matter.
-- Normalising scanned references (padding, prefixes, check digits, case) before matching.
+- Normalizing scanned references (padding, prefixes, check digits, case) before matching.
   Recorded as a `needs-info` follow-up, to be picked up when a real ERP needs it.
 - Named or stored print runs ("reprint run #14"). The Printed tab sorted by most recent
   covers jams.
@@ -366,7 +366,7 @@ assert on query structure or on which method was called.
 
 ## Further Notes
 
-- The existing behaviour of marking batch pack slips printed when they render is a defect
+- The existing behavior of marking batch pack slips printed when they render is a defect
   this PRD fixes. It should not be kept for compatibility.
 - The ERP workflow this was designed around: the ERP prints a slip per shipment whose
   barcode encodes the ERP's shipment primary key, and the same key is what the ERP's

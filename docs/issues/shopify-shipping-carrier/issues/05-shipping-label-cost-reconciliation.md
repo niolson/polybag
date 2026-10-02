@@ -37,7 +37,7 @@ For the timeline route:
 
 1. **What does it read in another locale or currency?** `$` is not a currency. A shop
    billing in CAD or EUR, or an admin in another language, may render a sentence the parse
-   does not recognise — and a regex that quietly matches nothing writes null cost, which is
+   does not recognize — and a regex that quietly matches nothing writes null cost, which is
    the state we already have.
 2. **How is an event tied to a label?** The event is on the order, not the label. One order
    can carry several purchases and a void, and `06` allows several packages per shipment.

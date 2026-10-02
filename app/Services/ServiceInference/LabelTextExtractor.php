@@ -42,7 +42,7 @@ class LabelTextExtractor
     }
 
     /**
-     * The format this extractor recognised, for the inference method stamp.
+     * The format this extractor recognized, for the inference method stamp.
      */
     public function formatOf(?string $labelData): ?string
     {

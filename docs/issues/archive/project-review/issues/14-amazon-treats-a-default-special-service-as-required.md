@@ -11,17 +11,17 @@ Verified: confirmed (test below fails on `main` at `6d47232`).
 
 ## Problem
 
-A shipping method attaches special services in two modes. **Required** must be honoured
+A shipping method attaches special services in two modes. **Required** must be honored
 or the offer is excluded (ADR-0002 decision 8). **Default** is a preference: an offer that
 can't express it keeps its place and is bought without it.
 `ShippingRateService::buildTask()` says so ("A preference this offer cannot express is
 dropped, not fatal"), and the direct adapters behave that way.
 
 The Buy Shipping task receives required and default codes as one list,
-`RateRequest::$specialServiceCodes`. `AmazonBuyShippingAdapter::honoursRequiredServices()`
+`RateRequest::$specialServiceCodes`. `AmazonBuyShippingAdapter::honorsRequiredServices()`
 then drops every offer whose value-added service groups can't provide *each* code in that
 list. So a default `signature_required` excludes OnTrac exactly as a required one would.
-The method's own docblock contradicts this: it says a default nobody can honour "is
+The method's own docblock contradicts this: it says a default nobody can honor "is
 dropped from the purchase instead", which `confirmationPreferences()` does at purchase.
 Quoting never gets that far.
 
@@ -54,14 +54,14 @@ it('keeps an Amazon offer that cannot add a signature the method only prefers', 
 ```
 
 With no special service attached, the same test passes. The existing
-`drops an offer that cannot honour a hard-required signature` test covers the required case
+`drops an offer that cannot honor a hard-required signature` test covers the required case
 and should keep passing.
 
 ## What to build
 
 - Carry required and default codes separately to the adapter. `RateRequest` could gain
   `requiredSpecialServiceCodes`, or `buildTask()` could pass the two lists. Then
-  `honoursRequiredServices()` checks only the required ones.
+  `honorsRequiredServices()` checks only the required ones.
 - Keep asking for the defaults at purchase where the offer offers them, as
   `confirmationPreferences()` already does.
 - In `resolveForPackageAndRate()`, apply catalog scoping to direct rates only, and leave
@@ -70,13 +70,13 @@ and should keep passing.
 ## Comments
 
 - 2026-10-01 — Fixed as proposed. `RateRequest` gained `requiredSpecialServiceCodes`, the
-  subset of `specialServiceCodes` an offer must honour. `ShippingRateService::buildTask()`
+  subset of `specialServiceCodes` an offer must honor. `ShippingRateService::buildTask()`
   fills it with the codes that survived its required loop, and both per-task requests
   pass it through `withSpecialServiceCodes($codes, $requiredCodes)`. A call that leaves
   out the second argument keeps the codes that were already required and are still asked
   for. It is left out of `fingerprint()`: it splits codes the digest already covers,
   and decides which offers are listed, not what any of them costs.
-  `AmazonBuyShippingAdapter::honoursRequiredServices()` now checks only the required
+  `AmazonBuyShippingAdapter::honorsRequiredServices()` now checks only the required
   codes. Defaults are still asked for at purchase where the offer has the group, as before.
   `SpecialServiceResolver::resolveForPackageAndRate()` looks up the catalog service only
   for a rate whose `sourceKind()` is `Direct`, so an Amazon offer keeps its defaults.

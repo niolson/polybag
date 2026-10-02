@@ -17,7 +17,7 @@ snapshot. `07` and `08` follow its shape.
 `UpsAdapter` sends only the transportation charge, so every UPS international parcel is
 DDU, and no registration, recipient tax ID or export filing reaches UPS.
 
-## Desired behaviour
+## Desired behavior
 
 **Rate and ship requests** carry the resolved terms. DDP adds a second `ShipmentCharge`,
 Type `02`, `BillShipper` on the same account, so the rate includes UPS's Duty and Tax

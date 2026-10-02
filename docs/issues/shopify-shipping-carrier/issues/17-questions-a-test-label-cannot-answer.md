@@ -11,7 +11,7 @@ labels are free test labels. Three could not be answered there at any price. The
 blocker: **a real store, shipping a real parcel that physically moves.**
 
 A test label is more real than it sounds — it is registered with the carrier, and `01`
-watched UPS's own tracking page recognise one, show it as *label created*, and move it to
+watched UPS's own tracking page recognize one, show it as *label created*, and move it to
 *cancelled* when the label was voided. What it never does is get scanned. Everything below
 turns on a scan.
 

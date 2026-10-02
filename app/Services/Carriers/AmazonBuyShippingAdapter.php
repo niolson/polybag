@@ -189,8 +189,8 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
      * `availableValueAddedServiceGroups` varies by rate, and `01` found the
      * Confirmation group on every UPS and USPS offer and on none of OnTrac's.
      * Saying `Supported` here and then dropping the individual rates that
-     * cannot honour a hard requirement — see {@see honoursRequiredServices()} — keeps the
-     * judgement at the offer seam where ADR-0002 decision 8 puts it, instead of
+     * cannot honor a hard requirement — see {@see honorsRequiredServices()} — keeps the
+     * judgment at the offer seam where ADR-0002 decision 8 puts it, instead of
      * excluding Amazon wholesale for a service most of its offers do carry.
      */
     public function offerCapability(string $serviceCode): ServiceCapability
@@ -867,7 +867,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
     {
         return $this->hasPrintableDocument($rate)
             && $this->needsNoAdditionalInputs($rate)
-            && $this->honoursRequiredServices($rate, $request)
+            && $this->honorsRequiredServices($rate, $request)
             && $this->answersRequiredGroupsForFree($rate, $this->wantedValueAddedServices($request))
             && $this->fitsThePackaging($rate, $request)
             && $this->carriesPermittedContent($rate, $request, $mapped)
@@ -894,7 +894,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
     }
 
     /**
-     * Drop an offer that cannot honour a service the shipment hard-requires.
+     * Drop an offer that cannot honor a service the shipment hard-requires.
      *
      * This is ADR-0002 decision 8 applied where Amazon's data actually lives:
      * the Confirmation group is per rate, so OnTrac Ground is excluded from a
@@ -908,7 +908,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
      * {@see AmazonBuyShippingService::confirmationPreferences()} does at
      * purchase by asking only for what the offer's groups contain.
      */
-    private function honoursRequiredServices(array $rate, RateRequest $request): bool
+    private function honorsRequiredServices(array $rate, RateRequest $request): bool
     {
         $offered = collect($rate['availableValueAddedServiceGroups'] ?? [])
             ->flatMap(fn (array $group): array => collect($group['valueAddedServices'] ?? [])->pluck('id')->all());
@@ -923,7 +923,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
             }
 
             // Exactly the option the purchase will ask for. An offer that can
-            // add only an adult signature does not honour a required plain
+            // add only an adult signature does not honor a required plain
             // one: the purchase asks for what the package wants, not for a
             // stronger substitute, so the group would go unanswered.
             if (! $offered->contains($vas)) {

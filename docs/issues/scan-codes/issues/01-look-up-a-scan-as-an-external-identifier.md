@@ -21,7 +21,7 @@ ADR-0007 decision 2 records this as an interim limitation until this issue ships
 workaround today is the Shipments list search, which is not intercepted, and packing
 such a product some other way.
 
-## Proposed behaviour
+## Proposed behavior
 
 An explicit, one-shot "next scan as text" mode on Scan & Pack:
 
@@ -37,7 +37,7 @@ Global search keeps no escape of its own; the list pages' searches are the way o
 ## Open questions
 
 - Command barcode, button, or both? Both is proposed, so the flow stays scanner-only.
-- Should the Ship page's page-wide listener honour it? It only knows `SHIP` today.
+- Should the Ship page's page-wide listener honor it? It only knows `SHIP` today.
 
 ## Acceptance
 

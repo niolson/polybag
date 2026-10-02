@@ -74,7 +74,7 @@ double-click or two workstations buying the same direct label. `withBlindPurchas
 covers blind purchases only; a direct purchase is protected by nothing but the
 `status === Shipped` read, which races. So: redeem for the atomic claim, and in the
 `RequestTimeOutException` catch, when the seller is not a `RecoversUnresolvedPurchase`,
-call `recordFailure($offer, 'timeout')` so the package stays buyable — today's behaviour
+call `recordFailure($offer, 'timeout')` so the package stays buyable — today's behavior
 plus the claim. A seller that *can* recover keeps the strict block. An admin action for
 the unresolved state is a separate issue, since even Amazon's recovery can return `null`
 indefinitely (`16`).
@@ -198,7 +198,7 @@ when it is the package that changed, and the purge handles the rest.
    `resolvePreSelectedRate()` deliberately has no id, so the refusal cannot sit in the
    shared body: the locks and the purchase move to a private `purchase()` that both entry
    points call, `ship()` checks for the id before calling it, and `autoShip()` calls it
-   directly. Unattended behaviour is unchanged.
+   directly. Unattended behavior is unchanged.
 6. `buyPostage()` already restores from the offer when there is an id; direct rates now
    take that branch. In the `RequestTimeOutException` catch: if `$offer !== null` and the
    adapter is not a `RecoversUnresolvedPurchase`, `recordFailure($offer, 'Timed out; the
@@ -247,7 +247,7 @@ when it is the package that changed, and the purge handles the rest.
 
 - The packaging check's *consistency* invariant — that each classifier reads exactly the
   fields the ship body sends and refuses unknown ones — lives on the interface docblock;
-  `packaging-form-and-carrier-identity/05` honoured it for USPS on 2026-09-16.
+  `packaging-form-and-carrier-identity/05` honored it for USPS on 2026-09-16.
 - Blind purchases (`blindPurchaseOffersFor()`), which already carry no rate.
 - An admin action to resolve an unresolved offer by hand — `16`.
 - Logging quotes for rule-selected and blind purchases so the log can answer "was that

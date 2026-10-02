@@ -8,7 +8,7 @@ namespace App\Services\ShipmentImport;
  *
  * Each driver takes a different shape, and the wrong keys are not harmless:
  * Laravel's Postgres connector writes `charset` into the DSN as
- * `client_encoding`, so a MySQL-flavoured `utf8mb4` makes every PostgreSQL
+ * `client_encoding`, so a MySQL-flavored `utf8mb4` makes every PostgreSQL
  * connection fail at connect time. `collation` and `strict` are MySQL-only, and
  * SQL Server needs its TLS arguments instead. Both the import runtime
  * (`DataSourceFactory`) and the form's Test Connection action build their
@@ -111,7 +111,7 @@ class ImportConnectionConfig
      * Statements that cap server-side execution time, in the order to try them.
      * More than one only because MySQL and MariaDB disagree: MySQL 5.7.8+ spells
      * it `max_execution_time` in milliseconds, MariaDB spells it
-     * `max_statement_time` in seconds, and neither recognises the other's
+     * `max_statement_time` in seconds, and neither recognizes the other's
      * variable — so which one works identifies the server.
      *
      * @return list<string>

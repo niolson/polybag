@@ -17,7 +17,7 @@ use Carbon\CarbonImmutable;
  * silently half-implemented in one adapter but not another; the abstract hook
  * makes that omission impossible to write by accident.
  *
- * Note: a delivered event whose timestamp is null is skipped in favour of the
+ * Note: a delivered event whose timestamp is null is skipped in favor of the
  * fallback (rather than short-circuiting to null), so a carrier that publishes a
  * separate summary delivery date still surfaces it.
  */

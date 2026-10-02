@@ -54,7 +54,7 @@ the maintainer on 2026-10-01:
 
 ## Acceptance criteria
 
-- [ ] `Deliverability` has `verified` and `unverified` cases with labels, colours and
+- [ ] `Deliverability` has `verified` and `unverified` cases with labels, colors and
       icons
 - [ ] A Google international match is recorded as `verified`; a Google USPS-data match
       as `yes`

@@ -184,7 +184,7 @@ it('lets a zero-value item ship domestically, where no declaration is made', fun
     expect($result->success)->toBeTrue();
 });
 
-it('does not apply to a blind purchase, whose seller declares from its own catalogue', function (): void {
+it('does not apply to a blind purchase, whose seller declares from its own catalog', function (): void {
     $package = packageWithItemValues([0.0]);
 
     $request = ShipRequest::fromPackageAndBlindOffer($package, new BlindPurchaseOffer(

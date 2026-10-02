@@ -17,7 +17,7 @@ PolyBag cannot set the duties terms on a label bought through Amazon or Shopify,
 not yet know what either declares. Without a rule, `04`'s filter would treat them as
 DDU-or-DDP guesses, and automation could buy them into the EU on terms nobody knows.
 
-## Desired behaviour
+## Desired behavior
 
 Offers and blind purchases from these sources skip `04`'s filter and the unresolved-EU
 refusal. The Ship page labels them "Duties: decided by Amazon" or "Duties: decided by
@@ -47,7 +47,7 @@ close.
 
 ## Acceptance criteria
 
-- [ ] An Amazon offer into the EU is listed for a client with no EU terms, and labelled
+- [ ] An Amazon offer into the EU is listed for a client with no EU terms, and labeled
 - [ ] Batch ship and auto-ship do not buy an Amazon offer into the EU, and say why; a
       domestic Amazon offer is unaffected
 - [ ] A Shopify blind purchase into the EU, pre-selected by a shipping rule, is held by

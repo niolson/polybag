@@ -44,7 +44,7 @@ every OnTrac offer.
   - *Any priced source, USPS Ground Advantage* rate-shops that service across direct
     rates and mapped Amazon offers, and selects through `selectForAutomation()`. A blind
     purchase never enters *any priced source*.
-  - *Amazon Buy Shipping, any* is `amazon-buy-shipping/19`'s behaviour, strict: an
+  - *Amazon Buy Shipping, any* is `amazon-buy-shipping/19`'s behavior, strict: an
     acceptable Amazon offer or nothing. Until `15`, the Amazon kind also covers
     off-Amazon Amazon Shipping, because the Amazon adapter still quotes both. From `15`,
     that is *Direct, Amazon Shipping Ground*.
@@ -83,9 +83,9 @@ every OnTrac offer.
     Buy Shipping or Shopify is skipped. Without this, every global *Use* rule would stop
     applying to Manual Ship and to imports with no matching method, and nothing says it
     should.
-  - This is a behaviour change: today a rule can name any service in the catalog, on any
+  - This is a behavior change: today a rule can name any service in the catalog, on any
     method.
-- **The Ship page honours the rule's source.** `selectedRateIndex()` matches a
+- **The Ship page honors the rule's source.** `selectedRateIndex()` matches a
   pre-selected rate on carrier and code string. A mapped Amazon offer already carries
   the mapped carrier and code, so *Direct, UPS Ground* can highlight Amazon's UPS Ground
   as the default today. Match on source and `carrierServiceId` instead.

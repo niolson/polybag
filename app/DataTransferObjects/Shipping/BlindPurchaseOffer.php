@@ -19,7 +19,7 @@ use App\Services\RateSelector;
  *
  * What it does carry is enough to buy: the source that sells it and the
  * selection to ask that source for. `serviceCode` is a *preference*, not a
- * service — Shopify may honour `usps:GroundAdvantage` or ignore it, and the
+ * service — Shopify may honor `usps:GroundAdvantage` or ignore it, and the
  * response is the only record of what actually happened.
  *
  * Its identity is the source and the catalog service it requests, or `auto`,

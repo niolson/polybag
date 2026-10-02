@@ -148,7 +148,7 @@ Three defects, all found before merge:
   is precisely the drift the column exists to prevent: a shipment re-pointed from Shopify shop
   A to shop B would have had A's label read with B's credentials. A shipped package now
   resolves to its recorded source or to no answer. The purchase path still resolves through the
-  shipment, since a package that has not shipped has no provenance to honour.
+  shipment, since a package that has not shipped has no provenance to honor.
 
 ## Still unverified
 
@@ -157,7 +157,7 @@ not accepted the Shopify Shipping ToS), so the mapping table, the claim that `di
 advances past `LABEL_PURCHASED` at all, and the `events` question below are all confirmed
 against the documentation and nothing else. If `displayStatus` turns out to sit still in
 practice, this slice's tracking is inert rather than wrong — the dispatch and the void
-behaviour stand either way.
+behavior stand either way.
 
 ## Blocked by
 

@@ -1,7 +1,7 @@
 # Contributing to PolyBag
 
 Thanks for taking an interest. This document covers what you need to know before
-opening a pull request: the licence position, the contributor agreement, and the local
+opening a pull request: the license position, the contributor agreement, and the local
 development loop.
 
 ## Before you write any code
@@ -11,16 +11,16 @@ development loop.
 PolyBag is licensed under the [Business Source License 1.1](LICENSE). You may read,
 modify, and run it for personal, educational, internal evaluation, and development
 purposes. You may **not** use it for a production commercial purpose until the change
-date, **March 11, 2030**, when the licence converts to Apache-2.0.
+date, **March 11, 2030**, when the license converts to Apache-2.0.
 
-BSL 1.1 is not an OSI-approved licence. We say this plainly here so nobody contributes
+BSL 1.1 is not an OSI-approved license. We say this plainly here so nobody contributes
 under a misunderstanding about what they are contributing to. If you need different
 terms, contact `license@polybag.app`.
 
-Separately from the licence: the **PolyBag** name, logo, and `polybag.app` branding are
+Separately from the license: the **PolyBag** name, logo, and `polybag.app` branding are
 not licensed with the code, and the 2030 Apache-2.0 conversion will not change that —
 Apache-2.0 grants no trademark rights either. Fork it under your own name. See the
-[Licence](README.md#licence) section in the README.
+[License](README.md#license) section in the README.
 
 ### Contributions require a CLA
 
@@ -30,7 +30,7 @@ commercial terms and under the eventual Apache-2.0 conversion. A sign-off alone
 (DCO-style) does not grant that, so we ask for a **Contributor License Agreement**.
 
 The CLA does not take your copyright away. You keep it, and you keep the right to use
-your own contribution however you like. It grants POLYBAG.APP LLC a licence broad
+your own contribution however you like. It grants POLYBAG.APP LLC a license broad
 enough to keep shipping the project under both sets of terms.
 
 There is no bot and no click-through yet. **Open your pull request first** — a
@@ -115,7 +115,7 @@ account to run them against.
 
 ## Testing expectations
 
-Every behavioural change needs a test. Most should be feature tests.
+Every behavioral change needs a test. Most should be feature tests.
 
 - Create them with `php artisan make:test --pest SomeFeatureTest` (add `--unit` for a
   unit test). Note that the name must not include the suite directory.
@@ -155,10 +155,10 @@ git push --no-verify
   `package-export-ledger`.
 - Commit subjects are imperative and sentence case: "Print a package reference on carrier
   labels", not "feat: add reference printing". No Conventional Commits.
-- Keep a pull request to one concern. A drive-by reformat buried in a behaviour change is
+- Keep a pull request to one concern. A drive-by reformat buried in a behavior change is
   the hardest kind of diff to review.
 - Fill in the pull request template — particularly how you tested it, and whether it
-  touches carrier API behaviour.
+  touches carrier API behavior.
 - CI must be green: Pint, PHPStan, Pest, the browser suite, the Docker build, the image
   CVE scan, Semgrep, and Hadolint.
 

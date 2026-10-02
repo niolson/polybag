@@ -124,7 +124,7 @@ failure at Amazon, so catching it after the money is not catching it.
 `isRequired` on every UPS and USPS offer and **absent from OnTrac's**. Two consequences:
 
 - `offerCapability()` answers `Supported` for signature and adult signature, and the
-  per-*rate* judgement happens after the quote: an offer that cannot honour a hard-required
+  per-*rate* judgment happens after the quote: an offer that cannot honor a hard-required
   service is dropped, and the offers beside it are not. Answering at `offerCapability()`
   would have excluded Amazon wholesale for a service most of its offers carry, which is the
   conflation ADR-0002 decision 8 exists to undo.
@@ -180,7 +180,7 @@ twice in one list, once direct and once resold, at different prices.
 - **`AmazonOrderItems`** extracts what `PackageExportService::buildAmazonExportContext()` did
   privately, and adds the Shipping v2 `Item` shape beside the `confirmShipment` one, so the
   all-or-nothing completeness rule has one home. Its exception is
-  `MissingAmazonOrderItemsException extends PermanentExportException`, so export behaviour is
+  `MissingAmazonOrderItemsException extends PermanentExportException`, so export behavior is
   byte-identical and the adapter can catch the narrower type to *decline an offer* rather
   than fail an export.
 - **The export gate is on the stored `shipmentId`, not the postage source**, and it is set in
@@ -291,7 +291,7 @@ source). It stays covered by test; the order was confirmed by the purchase regar
   valid body the purchase was refused because the order had already shipped ("doesn't exist
   in Rigel"). *Superseded the same evening by the live run above.*
 - **`accountNoLongerResolves()` is still a comparison rather than plumbing.** `ShipRequest`
-  now carries the offer, so the account *could* be named — but making adapters honour it
+  now carries the offer, so the account *could* be named — but making adapters honor it
   means touching `ResolvesCarrierAccount` in all three direct adapters, which is a
   direct-carrier change with no Amazon in it. Left where `02` put it.
 - **The 60-second rate cache and the eight-minute offer window still only coincide.** `02`

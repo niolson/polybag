@@ -36,7 +36,7 @@ Package. ADR-0004 decisions 4, 6 and 7 say which is which and why.
 |---|---|---|---|
 | [`01`](issues/01-record-the-voided-label-in-the-audit-log.md) | Fix the audit capture so a void records what it voided, from the locked row | ready-for-agent | nothing — ships first, on its own |
 | [`02`](issues/02-package-labels-table-and-the-one-active-label-invariant.md) | Table, model, factory, backfill, the four write paths, void reason and user, `source_label_reference`, invariant, integrity command, the two Filament forms that could edit the projection, fixtures, MySQL CI job. **No reader changes** | ready-for-agent | ADR accepted, `01` |
-| [`03`](issues/03-print-history-on-the-label.md) | Print count, first print, and acknowledgements that arrive after a void | needs-triage | `02` |
+| [`03`](issues/03-print-history-on-the-label.md) | Print count, first print, and acknowledgments that arrive after a void | needs-triage | `02` |
 | [`04`](issues/04-void-provenance.md) | What each carrier says back on void | ready-for-human | access to each source's sandbox or live account |
 | [`05`](issues/05-label-history-on-the-package-and-tracking-lookup.md) | Label history on `ViewPackage`; tracking lookup resolves through voided labels | ready-for-agent | `02` |
 

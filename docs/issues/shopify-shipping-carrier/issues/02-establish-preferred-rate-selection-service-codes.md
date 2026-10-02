@@ -1,4 +1,4 @@
-# Find out whether preferredRateSelection works, and catalogue the codes that do
+# Find out whether preferredRateSelection works, and catalog the codes that do
 
 Status: done — 2026-09-09; second pass 2026-09-17
 
@@ -8,12 +8,12 @@ Repo: `polybag`
 
 `ShippingLabelPurchaseInput.preferredRateSelection { carrierCode, serviceCode }` is how a
 specific carrier and service would be requested. Two things were unknown: **whether it is
-honoured at all** (a community report held that Shopify ignores it outright), and **what
+honored at all** (a community report held that Shopify ignores it outright), and **what
 service codes are valid** — Shopify publishes no list and the schema cannot enumerate them.
 
 ## What was found
 
-**1. It is honoured.** A deliberately invalid service code comes back synchronously with a
+**1. It is honored.** A deliberately invalid service code comes back synchronously with a
 `RATES_NOT_FOUND` user error, no purchase result, and the fulfillment order untouched. The
 community report does not hold against the 2026-07 API.
 
@@ -87,10 +87,10 @@ accounted for rather than open:
 
 **One thing deliberately not done.** `ShopifyAdapter` still records `service: null` and
 `ServiceEvidence::Unknown` for every purchase, including one made with an explicit pair
-Shopify is now known to honour. That is a weaker claim than the evidence supports, and it
+Shopify is now known to honor. That is a weaker claim than the evidence supports, and it
 belongs to `11`'s inference ladder rather than here. Raised there — and built there
 2026-09-16 as the ladder's third rung, which fills in where the tracking number and label
-decline and treats a decode that disagrees with an honoured pair as a reason to resolve
+decline and treats a decode that disagrees with an honored pair as a reason to resolve
 nothing.
 
 ## The negatives, so nobody probes them twice
@@ -179,4 +179,4 @@ shipped code.
 
 - `01` — the purchases that unblocked this
 - `14` — the capture campaign this is the instrument for
-- `11` — where the "an honoured selection is evidence" question belongs
+- `11` — where the "an honored selection is evidence" question belongs

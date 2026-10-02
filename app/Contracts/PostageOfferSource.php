@@ -35,7 +35,7 @@ interface PostageOfferSource
     public function isConfigured(): bool;
 
     /**
-     * Whether an offer from here can honour a special service code.
+     * Whether an offer from here can honor a special service code.
      *
      * The offer seam, not carrier policy (ADR-0002 decision 8). A direct carrier
      * consults {@see CarrierPolicy::serviceCapability()} and nothing else

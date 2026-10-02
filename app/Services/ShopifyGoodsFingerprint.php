@@ -10,7 +10,7 @@ use App\Models\ShipmentItem;
  *
  * Shopify replaces a fulfillment order outright rather than reopening it, and
  * publishes no edge saying which one replaced which, so a replacement can only
- * be recognised by what it describes. Order and assigned location get most of
+ * be recognized by what it describes. Order and assigned location get most of
  * the way there and stop exactly where it matters: one order can hold several
  * fulfillment orders at one location, split by `fulfillmentOrderSplit`, and
  * those differ only in their line items. Without this a sibling that closed for

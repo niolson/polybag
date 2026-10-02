@@ -16,7 +16,7 @@ Repo: `polybag`
 Nothing in the schema can hold a duties policy, a seller tax registration, a recipient tax
 ID or an export ITN, so no adapter can send one.
 
-## Desired behaviour
+## Desired behavior
 
 **Enums.** `DutiesTerms` (`Ddp`, `Ddu`); `TaxRegistrationRegime` (`Ioss`, `UkVat`, `Voec`,
 `Arn`), each case knowing its destinations (via `AddressData::isInEuropeanUnion()` for

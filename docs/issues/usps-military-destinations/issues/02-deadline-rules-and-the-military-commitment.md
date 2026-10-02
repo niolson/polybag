@@ -29,7 +29,7 @@ Priority Mail Express Military Service is a 2–3 day *estimate* to selected pos
 with no money-back guarantee, which does not match `guaranteedDelivery: true` from the
 API. The Ship page shows the packer whatever USPS said.
 
-## Desired behaviour
+## Desired behavior
 
 To be decided in triage; the options are not equivalent:
 

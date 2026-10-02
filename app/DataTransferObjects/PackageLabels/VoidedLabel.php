@@ -8,7 +8,7 @@ use Carbon\CarbonImmutable;
  * What a package's label looked like the instant before it was voided.
  *
  * Built from the database row under the void's own row lock, never from a model
- * instance: the instance the caller holds may predate a print acknowledgement or a
+ * instance: the instance the caller holds may predate a print acknowledgment or a
  * tracking refresh, and `label_printed_at` — the field that tells a number in a
  * database apart from a parcel with a dead label on it — is exactly the one most
  * likely to be stale there.

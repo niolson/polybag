@@ -19,7 +19,7 @@ The `search` endpoint returns `PM` for every destination, so the adapter drops i
 outright rather than let it undercut `PL` on domestic addresses. A military large box
 therefore pays $1.41 more than it should, on every label.
 
-## Desired behaviour
+## Desired behavior
 
 For a military destination, `PL` and `PM` swap roles: `PM` is kept and classified
 `exactly(UspsLargeFlatRateBox)`, and `PL` is dropped, so the shared packaging filter

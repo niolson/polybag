@@ -584,7 +584,7 @@ class Pack extends Page
         $type = $code?->type;
 
         if ($code === null || $type === null) {
-            $this->notifyError('Unrecognised Code', "'".trim($scan)."' starts with this install's barcode prefix, but is not a code PolyBag knows.");
+            $this->notifyError('Unrecognized Code', "'".trim($scan)."' starts with this install's barcode prefix, but is not a code PolyBag knows.");
 
             return;
         }

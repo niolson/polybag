@@ -46,7 +46,7 @@ jobs:
       # docker/nginx.conf deliberately re-declares all security headers inside
       # the /build/ location (nginx does not inherit add_header into a location
       # that sets its own). The generic header-redefinition rule is a pattern
-      # matcher that flags every add_header in a location and cannot recognise
+      # matcher that flags every add_header in a location and cannot recognize
       # that fix, so it is excluded — the rest of p/security-audit still runs.
       - name: Run Semgrep
         run: >

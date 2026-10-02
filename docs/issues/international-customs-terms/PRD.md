@@ -17,7 +17,7 @@ the decisions below. The product-identifier half of the EU change had already sh
 [`eu-product-identifiers`](../archive/eu-product-identifiers/PRD.md); this is the rest.
 
 No tenant ships to EU consumers yet, and there are no live tenants, so nothing here has
-to preserve current behaviour.
+to preserve current behavior.
 
 ## The problem
 
@@ -201,7 +201,7 @@ accepted the DDP terms.
 ## Non-goals
 
 - Filing EEI. PolyBag records the ITN; the operator files in AESDirect.
-- Licensed goods. PolyBag has no ECCN data and does not check for export licences.
+- Licensed goods. PolyBag has no ECCN data and does not check for export licenses.
 - Anything a Shopify Shipping or Amazon Buy Shipping label declares — their terms are
   source-decided until verified (`09`).
 

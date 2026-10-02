@@ -51,7 +51,7 @@ point is to let data be destroyed.
 
 **The first run after this deploys will purge a backlog**, not a day's worth: every shipment
 that has been eligible since retention was configured becomes eligible at once. That is the
-intended behaviour and the whole point of the policy, but it is irreversible, and the rows it
+intended behavior and the whole point of the policy, but it is irreversible, and the rows it
 touches include `label_data`, so it is worth knowing before it happens rather than after.
 
 Two things worth doing per deployment, neither of which this change does:

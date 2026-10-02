@@ -29,7 +29,7 @@ readonly class ShipRequest
      * @param  array<string, array<string, mixed>>  $specialServiceConfig  Per-code config values (e.g. declared_value amount)
      * @param  array<int, string>  $references  Identifiers to print on the label, longest-lived first; carriers truncate to their own limits
      * @param  ShippingOffer|null  $offer  The purchase authority behind $selectedRate, when the source issued one. Server-side only and never serialized: it holds the opaque tokens that actually buy the label, which is why an adapter reads them from here rather than from the rate. ADR-0002 decision 4.
-     * @param  bool  $overrideDeclaredWeight  The operator has been shown that the seller declares more weight for the goods than the box was weighed at, and has asked for the purchase to be attempted anyway — at the scale weight, unchanged. Nothing is over-declared by it; it exists so a catalogue corrected between the refusal and the retry, or a reading of ours that was wrong, is not a dead end.
+     * @param  bool  $overrideDeclaredWeight  The operator has been shown that the seller declares more weight for the goods than the box was weighed at, and has asked for the purchase to be attempted anyway — at the scale weight, unchanged. Nothing is over-declared by it; it exists so a catalog corrected between the refusal and the retry, or a reading of ours that was wrong, is not a dead end.
      */
     public function __construct(
         public AddressData $fromAddress,
@@ -105,7 +105,7 @@ readonly class ShipRequest
      * addresses, since a Canadian location shipping into Canada declares
      * nothing and one shipping into Pennsylvania declares everything — and a
      * blind purchase sends none of ours, the seller building its own from its
-     * own catalogue, so a zero here would be refused on an array nobody reads.
+     * own catalog, so a zero here would be refused on an array nobody reads.
      * Everywhere else, a line at `$0.00` is either refused by the carrier after
      * the box is closed or printed as an understated declaration, so the answer
      * is checked before the purchase.

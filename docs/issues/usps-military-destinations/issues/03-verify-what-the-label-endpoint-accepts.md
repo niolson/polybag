@@ -48,5 +48,5 @@ to test against and is the one that needs a person to read USPS's published list
 ## Acceptance criteria
 
 - [ ] Each buy above recorded with outcome, no tracking numbers or account identifiers
-- [ ] Validator behaviour on the three address formats recorded
+- [ ] Validator behavior on the three address formats recorded
 - [ ] Any rejection that `01` or `02` should handle is fed back into those issues

@@ -17,7 +17,7 @@ class FedexTestCaseNormalizer
 
         // A rate fixture goes out as written, placeholders aside. The sandbox
         // matches rate requests on their shape, so the shipment fix-ups below —
-        // a synthesised totalCustomsValue, a dropped totalWeight, a label option
+        // a synthesized totalCustomsValue, a dropped totalWeight, a label option
         // — would change what it answers and the fixture would no longer be
         // FedEx's own documented case.
         if ($testCase->requestType === 'rate') {

@@ -15,7 +15,7 @@ Repo: `polybag`
 `UspsAdapter` never sends `prepayDutiesTaxesFees`, so USPS cannot be used into the six EU
 countries that require DDP, and no registration reaches the customs form.
 
-## Desired behaviour
+## Desired behavior
 
 **Purchase.** The label request sends `prepayDutiesTaxesFees: true` when the resolved term
 is DDP. The returned `prepaidDutiesTaxesFees` total is stored in

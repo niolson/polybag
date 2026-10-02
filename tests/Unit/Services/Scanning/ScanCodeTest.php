@@ -38,11 +38,11 @@ it('reads a scan without the prefix as an external identifier', function (string
     'a box code' => ['01'],
 ]);
 
-it('reads the prefix with anything it does not understand as unrecognised, never as external', function (string $scan): void {
+it('reads the prefix with anything it does not understand as unrecognized, never as external', function (string $scan): void {
     $code = ScanCode::parse($scan);
 
     expect($code)->not->toBeNull()
-        ->and($code?->isRecognised())->toBeFalse();
+        ->and($code?->isRecognized())->toBeFalse();
 })->with([
     'an unknown type token' => ['PBX12'],
     'a record with a word body' => ['PBSABC'],

@@ -19,7 +19,7 @@ selected driver.
   PostgreSQL is 5432 and SQL Server is 1433
 
 `DataSourceForm::openTestConnection()` duplicates the same block and adds
-`PDO::ATTR_TIMEOUT => 10`, which `pdo_sqlsrv` does not honour the way it does for
+`PDO::ATTR_TIMEOUT => 10`, which `pdo_sqlsrv` does not honor the way it does for
 MySQL (SQL Server uses a DSN-level `LoginTimeout`, and
 `PDO::SQLSRV_ATTR_QUERY_TIMEOUT` for statements).
 
@@ -121,7 +121,7 @@ what a reader should expect to find:
   and `pdo_sqlsrv` via unixODBC plus a version-pinned MS ODBC Driver 18 `.deb` with a
   hardcoded per-arch SHA256. The config fix alone would not have made either driver
   work.
-- **`PDO::ATTR_TIMEOUT` on `sqlsrv` was worse than "not honoured"**, which is what this
+- **`PDO::ATTR_TIMEOUT` on `sqlsrv` was worse than "not honored"**, which is what this
   issue assumed. `pdo_sqlsrv` throws `SQLSTATE[IMSSP]` on the attribute before reaching
   the server, so it would have failed every SQL Server connection outright regardless of
   credentials. That reasoning is in the docblock on `withConnectTimeout()`.
@@ -144,5 +144,5 @@ this closure:
 The migration question — existing `DataSource` rows holding `3306` with a non-MySQL
 driver — was resolved by leaving them, which the issue judged "probably fine". Port is
 user-visible and editable, and `build()` only falls back to the driver default when
-`db_port` is empty, so a stored `3306` is honoured as written rather than silently
+`db_port` is empty, so a stored `3306` is honored as written rather than silently
 corrected.

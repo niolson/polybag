@@ -279,7 +279,7 @@ Harder:
   allowlist, price ceiling — rather than an enumerated list. Not required on day one: Amazon can
   filter after the quote.
 - Reporting has to tolerate services that existed for exactly one parcel.
-- **Amazon normalises to metric internally** and does not say so. It evaluated dimensional
+- **Amazon normalizes to metric internally** and does not say so. It evaluated dimensional
   limits in cm3 against an INCH request and returned `billedWeight` in KILOGRAM for a POUND
   request. Conversion is needed in both directions at the DTO boundary, and a unit assumption
   anywhere in that path is a silent wrong answer rather than an error.

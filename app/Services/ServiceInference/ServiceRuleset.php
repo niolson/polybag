@@ -92,7 +92,7 @@ class ServiceRuleset
 
     /**
      * The carrier and service a Shopify `carrier:service` selection pair names,
-     * or null for a pair the table has never seen honoured.
+     * or null for a pair the table has never seen honored.
      *
      * Null is the answer for `auto` and for anything else without a carrier
      * prefix, since those leave the choice to Shopify and name nothing.

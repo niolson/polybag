@@ -35,7 +35,7 @@ appears in production, at any tenant, without anyone buying a label.
 
 ## What to build
 
-Four pieces, in the existing seams. None changes behaviour for a domestic offer.
+Four pieces, in the existing seams. None changes behavior for a domestic offer.
 
 ### 1. Drop a rate that requires additional inputs, at quote time
 
@@ -105,7 +105,7 @@ would need the format carried, which `23` flagged before the Amazon row landed.
 
 ## Tests
 
-Fixtures synthesised from `tests/Fixtures/Schemas/shippingV2.json` and validated against
+Fixtures synthesized from `tests/Fixtures/Schemas/shippingV2.json` and validated against
 it, the way `03` built its suite from `01`'s capture:
 
 - a rate with `requiresAdditionalInputs: true` → no offer issued, observation recorded,

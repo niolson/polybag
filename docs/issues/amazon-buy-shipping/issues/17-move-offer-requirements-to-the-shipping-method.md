@@ -42,7 +42,7 @@ Help text, in words a seller reads:
   Amazon orders. It is the method's speed guarantee, and it replaces the service-class
   filter `15` proposed: an Overnight method with a one-day commitment excludes a Ground
   rate because Ground arrives too late, whatever the service is called. This is
-  a behaviour change for non-Amazon orders, which `16` deliberately left on the old
+  a behavior change for non-Amazon orders, which `16` deliberately left on the old
   fallback, so the PR must call it out. The OTDR field applies only to Amazon's own orders
   (`channelType: AMAZON`). Off-Amazon Amazon Shipping orders do not count toward the
   account's OTDR.

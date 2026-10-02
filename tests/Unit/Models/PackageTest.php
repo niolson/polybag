@@ -77,12 +77,12 @@ it('ships with a null normalized identity when the raw carrier is unrecognized',
     $package->markShipped(ShipResponse::success(
         trackingNumber: 'TRACKING-1',
         cost: 8.50,
-        carrier: 'Uncatalogued Carrier',
+        carrier: 'Uncataloged Carrier',
         service: 'Ground',
     ), PostageSource::CarrierAccount);
 
     expect($package->status)->toBe(PackageStatus::Shipped)
-        ->and($package->carrier)->toBe('Uncatalogued Carrier')
+        ->and($package->carrier)->toBe('Uncataloged Carrier')
         ->and($package->normalized_carrier_id)->toBeNull();
 });
 

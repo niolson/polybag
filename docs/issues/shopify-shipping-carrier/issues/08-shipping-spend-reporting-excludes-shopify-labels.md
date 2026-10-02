@@ -56,7 +56,7 @@ Payments scopes, matches heuristically, and covers only Shopify Payments shops.
   nullable key now matches by equality OR both sides being null. And **`StatsOverview`
   disclosed this week's unpriced packages while comparing against last week's total**,
   which has the same hole — an understated last week inflates the percentage and looks no
-  different from a measured one, while carrying a colour and a trend arrow. The change is
+  different from a measured one, while carrying a color and a trend arrow. The change is
   withheld whenever either week is incomplete.
 - Widget cache payloads changed shape, so keys are versioned (`…:v2`) and
   `InvalidateDashboardCache` follows — without that, an entry written by the previous
@@ -64,6 +64,6 @@ Payments scopes, matches heuristically, and covers only Shopify Payments shops.
 - `stats:aggregate` had no test coverage before this, for a reason worth recording: SQLite
   has no date type, so a date-cast column round-trips as `"Y-m-d H:i:s"` and the command's
   `BETWEEN` on plain Y-m-d bounds matches nothing under the test database. The new tests
-  normalise `packages.ship_date` to what MySQL would hold.
+  normalize `packages.ship_date` to what MySQL would hold.
 - **Spun out `12`** — `ClientBillingReport` has the identical `COALESCE(SUM(p.cost), 0)` on
   its own query path, where the number is *invoiced* rather than displayed.

@@ -25,7 +25,7 @@ which exists and is tested — can't be used without breaking the FedEx agreemen
   - the existing settings: fake carriers, demo mode, sandbox mode, real validation in
     sandbox, Google enabled — moved here from `AppServiceProvider`
 - **`AddressValidationService` asks the plan** for each Shipment instead of taking a fixed
-  list, keeping today's behaviour: stop once settled, report a failure only after every
+  list, keeping today's behavior: stop once settled, report a failure only after every
   validator has had its turn.
 - **US and PR order:** FedEx when eligible, then USPS, then Google. UPS is added in
   [07](07-ups-validation-and-notice.md).

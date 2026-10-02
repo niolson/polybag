@@ -26,9 +26,9 @@ written the fix, say so — we will work through it with you rather than around 
 
 | Stage | Target |
 | --- | --- |
-| Acknowledgement that a human has read it | 5 business days |
+| Acknowledgment that a human has read it | 5 business days |
 | Initial assessment — severity, whether we can reproduce it | 10 business days |
-| Fix or a dated plan for one | 90 days from acknowledgement |
+| Fix or a dated plan for one | 90 days from acknowledgment |
 
 This is a small project. Those are the numbers we believe we can actually meet, not
 aspirational ones. If a deadline slips we will tell you rather than go quiet.
@@ -70,14 +70,14 @@ There are no tagged releases yet. Only the current `main` branch is supported �
 land there, and self-hosted deployments should track it. If you are running an older
 commit, please confirm the issue still reproduces on `main` before reporting.
 
-## A note on the licence
+## A note on the license
 
 PolyBag is **source-available, not open source**. It is licensed under the
 [Business Source License 1.1](LICENSE) — you may read, modify, and run it for personal,
 educational, internal evaluation, and development use, but not for a production
-commercial purpose. The licence converts to Apache-2.0 on March 11, 2030.
+commercial purpose. The license converts to Apache-2.0 on March 11, 2030.
 
-This does not restrict security research in any way, and we will not use the licence as
+This does not restrict security research in any way, and we will not use the license as
 grounds for a complaint against anyone reporting in good faith under this policy. We
 mention it only so you know what you are looking at. For commercial terms, contact
 `license@polybag.app`.

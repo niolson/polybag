@@ -27,7 +27,7 @@ the Shipment today.
 
 Answer against a development store before writing code.
 
-## Desired behaviour (once answered)
+## Desired behavior (once answered)
 
 `ShopifySource` sets `duties_terms: ddp` when the order carries duties, and leaves it null
 otherwise — never `ddu`, since "no duties on the order" is not a decision to ship DDU. It

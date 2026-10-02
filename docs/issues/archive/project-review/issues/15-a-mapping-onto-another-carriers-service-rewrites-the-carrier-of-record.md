@@ -51,7 +51,7 @@ mismatch never surfaces operationally, which is why nobody would notice it.
   form already guesses the carrier with `matchingCarrierId()`. That guess matches carrier
   names only; it should go through `CarrierNormalizer` so aliases count too.
 - Change the existing test to map onto a service of the same carrier. As written, it
-  asserts the behaviour this issue removes.
+  asserts the behavior this issue removes.
 
 ## Comments
 

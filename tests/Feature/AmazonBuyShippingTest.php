@@ -475,7 +475,7 @@ it('keeps Amazon\'s carrier of record when the mapped carrier is one it cannot n
         ->and($rate->carrierServiceId)->toBe($groundAdvantage->id);
 });
 
-it('drops an offer that cannot honour a hard-required signature, and keeps the one that can', function (): void {
+it('drops an offer that cannot honor a hard-required signature, and keeps the one that can', function (): void {
     Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
 
     $request = RateRequest::fromPackage($this->package)
@@ -1868,7 +1868,7 @@ it('holds an offer nothing can be asked to buy any more', function (): void {
 });
 
 /**
- * A cross-border offer, synthesised from the Shipping v2 schema rather than
+ * A cross-border offer, synthesized from the Shipping v2 schema rather than
  * captured: no foreign order exists in the account (`09`). Its shape follows
  * what Amazon support stated on 2026-09-16 — the customs declaration is a
  * `CUSTOM_FORM` document declared in the print option's
@@ -1950,7 +1950,7 @@ function amazonAdditionalInputsSchema(): array
     ];
 }
 
-it('synthesises international fixtures that conform to the published Shipping v2 schema', function (): void {
+it('synthesizes international fixtures that conform to the published Shipping v2 schema', function (): void {
     assertMatchesSpApiSchema(amazonInternationalRate(requiresAdditionalInputs: true), 'Rate', 'shippingV2');
     assertMatchesSpApiSchema(amazonInternationalRate(customsFormMandatory: true), 'Rate', 'shippingV2');
     assertMatchesSpApiSchema(amazonPurchaseWithCustomsFormResponse()->body()->all(), 'PurchaseShipmentResponse', 'shippingV2');

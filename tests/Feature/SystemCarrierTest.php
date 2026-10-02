@@ -49,7 +49,7 @@ describe('a system carrier', function (): void {
         expect(Carrier::whereKey($ups->id)->exists())->toBeTrue();
     });
 
-    it('can be deactivated and relabelled', function (): void {
+    it('can be deactivated and relabeled', function (): void {
         $ups = Carrier::factory()->ups()->system()->create();
 
         $ups->update(['active' => false, 'display_name' => 'Brown']);

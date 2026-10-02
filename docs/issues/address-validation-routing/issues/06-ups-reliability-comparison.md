@@ -30,7 +30,7 @@ Run the same method against UPS's production XAV endpoint:
 Raw captures carry real addresses and go in `.scratch/`, not the repo. Record the summary,
 the conclusions, and the resulting mapping in this file's Comments.
 
-This is HITL: it needs production UPS credentials and a maintainer's judgement on the
+This is HITL: it needs production UPS credentials and a maintainer's judgment on the
 result.
 
 ## Acceptance criteria

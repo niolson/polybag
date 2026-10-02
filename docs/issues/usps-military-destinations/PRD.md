@@ -24,7 +24,7 @@ are marked unverified.
 
 ## What the app already does for a military address
 
-- `AddressData::isMilitary()` recognises `AA`/`AE`/`AP` as the state and `APO`/`FPO`/`DPO`
+- `AddressData::isMilitary()` recognizes `AA`/`AE`/`AP` as the state and `APO`/`FPO`/`DPO`
   as the city.
 - `ShippingRateService` only asks a carrier for rates when it has a cataloged service
   marked `can_ship_to_military_addresses`; every seeded USPS service is, UPS and FedEx
@@ -39,7 +39,7 @@ are marked unverified.
 |---|---|---|
 | `PM` — Large Flat Rate Box at the APO/FPO/DPO price — is returned alongside `PL`, $1.41 cheaper, for **every** destination, military or not | AA, AE, AP and two domestic ZIPs all return both | `PM` dropped everywhere; a military large box pays the `PL` price |
 | Priority Mail and Ground Advantage carry `commitment.name: "MILITARY"` with **no** `scheduleDeliveryDate` and `guaranteedDelivery: false` | all three ZIPs | `RateSelector::isOnTime()` treats a dateless rate as *not* on time, so a shipping rule with a delivery deadline can never pick them — see `02` |
-| Priority Mail Express is offered to all three ZIPs; to AE and AP it says `"2 Days"`, `guaranteedDelivery: true`, with a scheduled date; to AA it says `"MILITARY"` | AE: 2 days at $63.94, AP: 2 days at $52.06, AA: `MILITARY` at $63.94 | Shown as quoted. With a deadline rule it is the only USPS rate with a date, so it is what automation buys. Whether USPS honours a guarantee to an APO — its public description of Priority Mail Express Military Service says it does not — is unverified |
+| Priority Mail Express is offered to all three ZIPs; to AE and AP it says `"2 Days"`, `guaranteedDelivery: true`, with a scheduled date; to AA it says `"MILITARY"` | AE: 2 days at $63.94, AP: 2 days at $52.06, AA: `MILITARY` at $63.94 | Shown as quoted. With a deadline rule it is the only USPS rate with a date, so it is what automation buys. Whether USPS honors a guarantee to an APO — its public description of Priority Mail Express Military Service says it does not — is unverified |
 | Military zones are 07/08 for Priority Mail regardless of continent (the zone is to the gateway) | AE 07, AP 07, AA 08 | Nothing depends on zone; noted only so a "wrong zone" report is not chased |
 | Flat-rate envelopes and boxes are all offered to military ZIPs | every indicator `05` classifies came back | Handled by `05`; nothing military-specific |
 

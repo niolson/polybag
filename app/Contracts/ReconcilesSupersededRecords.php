@@ -12,7 +12,7 @@ use Illuminate\Support\Collection;
  * `source_record_id` is the whole of a shipment's identity at import time, so
  * a source that re-keys a record hands the import work it has never seen and
  * a second shipment is created for goods that already have one. A source that
- * can recognise its own replacements says so by implementing this, and is
+ * can recognize its own replacements says so by implementing this, and is
  * given the chance to re-point the shipments it already owns before the batch
  * write keys off the new identifier.
  */

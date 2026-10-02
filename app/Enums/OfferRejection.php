@@ -33,7 +33,7 @@ enum OfferRejection: string
 
     /**
      * Quoted in the other world. Sandbox and production identifiers differ, and
-     * so do the hosts they are honoured by, so an offer outlives the toggle
+     * so do the hosts they are honored by, so an offer outlives the toggle
      * only as a record — never as authority.
      */
     case EnvironmentChanged = 'environment_changed';

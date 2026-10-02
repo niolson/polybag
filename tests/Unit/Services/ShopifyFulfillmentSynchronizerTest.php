@@ -253,7 +253,7 @@ it('stops asking about labels too old to be voided', function (): void {
     expect($this->synchronizer->candidates())->toHaveCount(1);
 });
 
-it('honours a configured void-check window', function (): void {
+it('honors a configured void-check window', function (): void {
     config(['services.shopify.label_void_check_days' => 2]);
     shippedShopifyPackage(['shipped_at' => now()->subDays(3)]);
 

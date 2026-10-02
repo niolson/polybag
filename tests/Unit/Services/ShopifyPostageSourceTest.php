@@ -109,7 +109,7 @@ it('reports a voided label as untrackable rather than as a delivery status', fun
         ->and($response->message)->toContain('voided');
 });
 
-it('records no status for a display status it does not recognise', function (): void {
+it('records no status for a display status it does not recognize', function (): void {
     $response = app(ShopifyPostageSource::class)
         ->trackingFrom(shopifyFulfillment(['displayStatus' => 'SOMETHING_NEW']));
 

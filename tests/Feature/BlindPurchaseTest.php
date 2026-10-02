@@ -863,7 +863,7 @@ it('turns a withheld Shopify purchase into a prompt rather than a shipping error
         ->and($result->message)->toContain('2.29 lb')
         ->and($result->message)->toContain('0.15 lb')
         // Nothing was bought, and the fix is a product weight in somebody
-        // else's catalogue. Dissolving the packed box while they go and correct
+        // else's catalog. Dissolving the packed box while they go and correct
         // it would be the worst possible answer.
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
@@ -897,7 +897,7 @@ it('asks the packer before insisting, then buys at the scale weight', function (
 it('never offers to scale customs weights for a blind purchase', function (): void {
     // The remedy behind that prompt rewrites the customs items PolyBag sends,
     // and a blind purchase sends none: the seller builds the declaration from
-    // its own catalogue. Asking would put a confirmation in front of the packer
+    // its own catalog. Asking would put a confirmation in front of the packer
     // that changes nothing, then fail for the reason they thought they had
     // resolved.
     $package = blindPurchasePackage();

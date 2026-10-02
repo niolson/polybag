@@ -535,7 +535,7 @@ class Package extends Model
         $updated = DB::transaction(function () use ($projected, $upgradable): int {
             // Package row first, then its label — the lock order every writer
             // keeps, so this cannot deadlock against a void or a print
-            // acknowledgement. Only a shipped package has a label to keep in
+            // acknowledgment. Only a shipped package has a label to keep in
             // step; the inference command does not filter by status.
             $updated = DB::table('packages')
                 ->where('id', $this->id)
@@ -1019,7 +1019,7 @@ class Package extends Model
     {
         $voidedLabel = DB::transaction(function () use ($reason, $voidedByUserId): VoidedLabel {
             // Snapshot the row under its own lock rather than trusting $this: the
-            // instance may predate a print acknowledgement or a tracking refresh.
+            // instance may predate a print acknowledgment or a tracking refresh.
             $row = DB::table('packages')
                 ->where('id', $this->id)
                 ->lockForUpdate()

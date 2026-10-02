@@ -14,7 +14,7 @@ charge normally. The line looks complete. Nothing on it says postage is missing.
 
 Same root cause as `08` — `packages.cost` is null when the seller reports no price — but a
 different query path and a materially different consequence: `08` produced a misleading
-dashboard number, this produces **an invoice that is wrong in the client's favour**.
+dashboard number, this produces **an invoice that is wrong in the client's favor**.
 Shopify Shipping prompted it; any package with a null cost bills the same way.
 
 It is the only open item in this directory that is presently wrong in a way that moves
@@ -51,7 +51,7 @@ is disclosure to bridge that, not a billing mechanism.
   postage"* — with a `danger` badge on the detail line.
 - **Unpriced postage only**, a toggle filter on the billable event log: the reconciliation
   view, and nothing else.
-- Both CSVs gain an **Unpriced Packages** column, and the detail export honours the toggle.
+- Both CSVs gain an **Unpriced Packages** column, and the detail export honors the toggle.
 
 `line_total` is unchanged and still under-bills by the missing postage. That is the half
 this does not fix, and the badge is what stops it going out unnoticed.

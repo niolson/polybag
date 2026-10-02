@@ -17,7 +17,7 @@ pack slip screens or indicators.
 
 - **New setting.** `pack_slips_enabled` is a tenant-wide setting, on by default for new
   and existing installs, in the same Settings section as picking.
-- **Relabel picking.** `picking_enabled` is relabelled "PolyBag prints pick batches".
+- **Relabel picking.** `picking_enabled` is relabeled "PolyBag prints pick batches".
   "Require picking before shipping" stays nested under it, and its help text says pack
   slips then print from pick batches.
 - **When it is off, these are hidden:**

@@ -84,7 +84,7 @@ one the workflow asked to leave intact.
 - `PackageShippingResult::failed()` for a carrier timeout, and the `RequestException`
   case, should set `leavePackageIntact: true`. An unanswered purchase is not a clean
   failure.
-- `GenerateLabelJob::handleFailure()` should honour `$result->leavePackageIntact`, and
+- `GenerateLabelJob::handleFailure()` should honor `$result->leavePackageIntact`, and
   should also refuse to delete when `OfferStore::awaitingPurchaseConfirmation()` is
   non-empty, as a backstop for the `Throwable` branch, which has no result to read.
 - `cleanupPackage()` gets the same backstop.

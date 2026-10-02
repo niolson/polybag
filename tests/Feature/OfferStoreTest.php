@@ -230,7 +230,7 @@ it('refuses an offer from the other environment, and does not consume it', funct
     app(SettingsService::class)->clearCache();
 
     // Sandbox and production service identifiers differ, and so do the hosts
-    // that honour the tokens. An offer quoted in one world is a record in the
+    // that honor the tokens. An offer quoted in one world is a record in the
     // other, never authority.
     expect($store->inspect($package, $offer->public_id)->rejection)->toBe(OfferRejection::EnvironmentChanged)
         ->and($store->redeem($package, $offer->public_id)->rejection)->toBe(OfferRejection::EnvironmentChanged)

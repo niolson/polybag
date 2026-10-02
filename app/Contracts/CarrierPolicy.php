@@ -10,7 +10,7 @@ use App\Enums\ServiceCapability;
  * One of the two halves `CarrierAdapterInterface` used to bundle (ADR-0002
  * decision 7). Everything here is a fact about USPS, FedEx or UPS that holds
  * whoever bought the label: what the carrier will and will not carry, how much
- * value it will insure, whether it runs a manifest programme at all.
+ * value it will insure, whether it runs a manifest program at all.
  *
  * It is deliberately *not* where voiding, tracking or per-package manifest
  * eligibility live — those follow the postage source, and are declared on
@@ -33,7 +33,7 @@ interface CarrierPolicy
      * - Prohibited: carrier policy or legal restriction
      * - NotImplemented: not coded yet; the service is silently skipped
      *
-     * Whether a *particular offer* can honour the code is a separate question —
+     * Whether a *particular offer* can honor the code is a separate question —
      * see {@see CarrierAdapterInterface::offerCapability()}.
      */
     public function serviceCapability(string $serviceCode): ServiceCapability;
@@ -50,7 +50,7 @@ interface CarrierPolicy
     public function supportsMultiPackage(): bool;
 
     /**
-     * Whether this carrier runs an end-of-day manifest (SCAN form) programme at
+     * Whether this carrier runs an end-of-day manifest (SCAN form) program at
      * all — the question `EndOfDay` asks once per carrier row to decide whether
      * to offer a manifest button.
      *

@@ -406,7 +406,7 @@ it('refuses a packer\'s purchase of an offer for a deactivated service', functio
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 
-it('greys out an offer for a deactivated service on the Ship page and will not select it', function (): void {
+it('grays out an offer for a deactivated service on the Ship page and will not select it', function (): void {
     $this->actingAs(User::factory()->admin()->create());
     $package = packageForDiscoveredQuote();
     registerQuotingAdapter([discoveredRate(3.00, 'USPS_PTP_PRI', carrierServiceId: deactivatedService()->id), directRate(9.00)]);

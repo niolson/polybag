@@ -18,7 +18,7 @@ on qualifying shipments from 25 October 2026. It also decides *whether* a shipme
 qualifies from `Shipment.ShipperType` and `Shipment.ConsigneeType`, which the adapter
 has never sent, so today UPS is classifying our shipments by its own default.
 
-## Desired behaviour
+## Desired behavior
 
 On every EU-bound shipment with a customs declaration, each `Product` gains:
 

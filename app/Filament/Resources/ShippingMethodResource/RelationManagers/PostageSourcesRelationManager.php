@@ -45,7 +45,7 @@ class PostageSourcesRelationManager extends RelationManager
                         modifyRuleUsing: fn (Unique $rule): Unique => $rule->where('shipping_method_id', $this->getOwnerRecord()->getKey()),
                     )
                     ->validationMessages(['unique' => 'This method already allows that source.']),
-                // One column for every kind, labelled as each kind means it,
+                // One column for every kind, labeled as each kind means it,
                 // so nobody sees the shared name.
                 Forms\Components\Toggle::make('unlisted_services')
                     ->label(fn (Get $get): string => self::kindFrom($get)?->unlistedServicesLabel() ?? '')

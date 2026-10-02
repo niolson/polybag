@@ -129,7 +129,7 @@ class ShopifyAdapter implements BlindPurchaseSource
      * Not modesty about what USPS or UPS would do — the point is that Shopify
      * chooses the carrier and the rate itself, after the purchase, so any
      * promise made at quote time is one we have no way to keep. ADR-0002
-     * decision 8 puts this judgement on the offer for exactly that reason:
+     * decision 8 puts this judgment on the offer for exactly that reason:
      * asked as carrier policy it has no honest answer, because there is no
      * carrier yet.
      *
@@ -456,14 +456,14 @@ class ShopifyAdapter implements BlindPurchaseSource
         // and rung 1 answers only where the 1Z service indicator is one the
         // ruleset has evidence for; a consolidator handoff stops rung 1 outright,
         // by design, rather than decoding the last mile. Where both decline, an
-        // explicit selection Shopify honoured is the last thing left to read.
+        // explicit selection Shopify honored is the last thing left to read.
         //
         // The selection is the third rung, and it is evidence only where the
         // carrier Shopify reports can vouch for it. When Shopify omits the
         // tracking company the carrier above was filled in from the request, and
         // a request agreeing with itself is no check at all -- so the ladder
         // gets the pair only when Shopify named the carrier.
-        $honouredSelection = $serviceCode !== null && filled($label->trackingCompany)
+        $honoredSelection = $serviceCode !== null && filled($label->trackingCompany)
             ? $offer->serviceCode
             : null;
 
@@ -480,7 +480,7 @@ class ShopifyAdapter implements BlindPurchaseSource
                 $carrier,
                 $label->trackingNumber,
                 $label->labelData,
-                $honouredSelection,
+                $honoredSelection,
             );
         } catch (\Throwable $e) {
             logger()->error('Shopify label bought, but service inference failed', [
@@ -545,9 +545,9 @@ class ShopifyAdapter implements BlindPurchaseSource
                 // merged over what the package already carries and survives a
                 // void, so a key only written when present would let a voided
                 // label's value stand in for this purchase's -- and this one
-                // says whether the selection may be read as honoured, which is
+                // says whether the selection may be read as honored, which is
                 // exactly the thing a previous label must not vouch for.
-                'shopify_honoured_selection' => $honouredSelection,
+                'shopify_honored_selection' => $honoredSelection,
             ],
         );
     }

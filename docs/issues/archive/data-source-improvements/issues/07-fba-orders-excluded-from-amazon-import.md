@@ -39,7 +39,7 @@ The issue asked whether Amazon's v2026-01-01 `SearchOrders` supports a
 **Not resolved, and deliberately not guessed at.** The v0 spec vendored at
 `tests/Fixtures/Schemas/ordersV0.json` does carry `FulfillmentChannels`, but we call
 `/orders/2026-01-01/orders` and no v2026-01-01 model is vendored anywhere in the repo to
-check it against. Sending an unrecognised query parameter risks a 400 on *every* import,
+check it against. Sending an unrecognized query parameter risks a 400 on *every* import,
 which is a much worse failure than the bandwidth saved, so the filter is client-side with
 that reasoning recorded in a comment at the call site. Worth revisiting if the
 v2026-01-01 model is ever vendored.

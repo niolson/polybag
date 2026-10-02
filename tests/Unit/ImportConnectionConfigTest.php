@@ -35,7 +35,7 @@ it('never sends utf8mb4 to PostgreSQL', function () use ($base): void {
         ->and($config)->not->toHaveKeys(['collation', 'strict']);
 });
 
-it('honours a custom PostgreSQL schema', function () use ($base): void {
+it('honors a custom PostgreSQL schema', function () use ($base): void {
     $config = ImportConnectionConfig::build($base + ['db_driver' => 'pgsql', 'db_schema' => 'wms']);
 
     expect($config['search_path'])->toBe('wms');
@@ -130,7 +130,7 @@ it('applies no connect timeout to a file-based driver', function (): void {
 // ── Statement timeout (query preview) ─────────────────────────────────────────
 
 it('caps MySQL statement time in milliseconds, with the MariaDB spelling as a fallback', function (): void {
-    // Neither server recognises the other's variable, so both are offered and
+    // Neither server recognizes the other's variable, so both are offered and
     // whichever one is accepted identifies the server.
     expect(ImportConnectionConfig::statementTimeoutStatements('mysql', 10))->toBe([
         'SET SESSION max_execution_time = 10000',

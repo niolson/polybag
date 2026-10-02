@@ -7,8 +7,8 @@ browser connected to a local scale and printers.
 Built with Laravel 13, Filament 5, Livewire 4, Tailwind CSS 4, MySQL, and Redis.
 
 > PolyBag is source-available under the Business Source License 1.1. Production
-> commercial use requires a commercial licence until the applicable change date.
-> See [Licence](#licence).
+> commercial use requires a commercial license until the applicable change date.
+> See [License](#license).
 
 ## Features
 
@@ -235,12 +235,12 @@ retailer. **Carrier Account Scopes** select credentials from the Location and Cl
 See [CONTEXT.md](CONTEXT.md) for the glossary and
 [architecture decisions](docs/adr/) for structural context.
 
-## Licence
+## License
 
 PolyBag is source-available, not open source. It is licensed under the
 [Business Source License 1.1](LICENSE).
 
-The licence permits reading, modifying, redistributing, and running the code for
+The license permits reading, modifying, redistributing, and running the code for
 personal, educational, non-commercial, internal evaluation, and development use. It
 does not permit production use intended to generate revenue or commercial advantage.
 

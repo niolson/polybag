@@ -149,11 +149,11 @@ None.
   `programs` are ignored. Re-imports already replace the Shipment's metadata, so the list
   refreshes with no extra code.
 - **Meaning.** `App\Enums\AmazonOrderProgram` (`Prime`, `Premium`) holds the code map
-  (`codes()`), the label and badge colour, and `forShipment()` / `appliesTo()`. A
+  (`codes()`), the label and badge color, and `forShipment()` / `appliesTo()`. A
   Shipment with no `amazon_programs`, whether from another channel or imported before
   this, has no programs. `17` should read programs through it rather than the metadata.
 - **Rule condition.** `amazon_program` with `data.program` of `prime` or `premium`, in
-  `RuleEvaluator` and as an *Amazon Program* block in the Shipping Rule form, summarised
+  `RuleEvaluator` and as an *Amazon Program* block in the Shipping Rule form, summarized
   as *Amazon Prime* / *Amazon Premium* in the rules table. Like the other conditions, a
   malformed one without a program passes; the form requires the field.
 - **Visible.** A badge beside the client badge on Pack, and in the *Package Details*

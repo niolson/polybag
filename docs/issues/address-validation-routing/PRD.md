@@ -174,7 +174,7 @@ terms.
     sandbox, Google enabled).
 
   `AddressValidationService` stops taking a fixed list and asks the plan for each
-  Shipment. It keeps the existing fallback behaviour: stop once a validator settles the
+  Shipment. It keeps the existing fallback behavior: stop once a validator settles the
   address, and report a failure only after every validator has had its turn.
 - **Carrier eligibility.** FedEx is eligible when the shipping method includes a FedEx
   carrier service or allows Amazon Buy Shipping, which may sell a FedEx label. UPS is

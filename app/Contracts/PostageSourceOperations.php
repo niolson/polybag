@@ -61,7 +61,7 @@ interface PostageSourceOperations
      * A SCAN form is a claim that we tendered these parcels on our own account,
      * which is false for channel-bought postage whatever carrier is carrying it.
      * Distinct from {@see CarrierPolicy::supportsCarrierManifest()}, which asks
-     * whether the carrier runs a manifest programme at all.
+     * whether the carrier runs a manifest program at all.
      */
     public function supportsPackageManifest(Package $package): bool;
 }

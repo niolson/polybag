@@ -159,6 +159,6 @@ postage setting and by rules. The approvals table, page and gate go.
   own, *Inactive Services Only*, telling the operator to reactivate rather than change the
   method. The method's carrier services list gained an *Active* column that reads both.
 - **2026-09-26** — Extended to packers. `InactiveCatalog` names what a set of rates names that
-  is inactive, and why. The Ship page lists such an offer greyed out, with an *Inactive*
+  is inactive, and why. The Ship page lists such an offer grayed out, with an *Inactive*
   badge and the reason, and neither highlights nor accepts it; the purchase refuses it
   (*Service Inactive*), which covers a page quoted before the service was deactivated.

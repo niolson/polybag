@@ -70,7 +70,7 @@ it('does not quote at all', function (): void {
         ->and(method_exists($this->adapter, 'resolvePreSelectedRate'))->toBeFalse();
 });
 
-it('advertises catalogued selections as priceless offers for a Shopify-sourced package', function (): void {
+it('advertises cataloged selections as priceless offers for a Shopify-sourced package', function (): void {
     seedShopifyCarrierServices();
     $package = shopifyPackage();
     allowBlindPurchase($package);
@@ -521,7 +521,7 @@ it('records the carrier Shopify actually picked, not the one that was asked for'
     Saloon::fake([
         MockResponse::make(purchaseAccepted()),
         // Asked for USPS; Shopify bought DHL eCommerce, a carrier PolyBag has
-        // no account with and no catalogued service for.
+        // no account with and no cataloged service for.
         MockResponse::make(purchasePurchased('PDF', 'DHL eCommerce')),
     ]);
     Http::fake(['*' => Http::response('LABEL-BYTES')]);
@@ -641,14 +641,14 @@ it('infers the service from the label at purchase time, and records how it was i
         ->and($package->confirmedService())->toBeNull();
 });
 
-it('falls back to the honoured selection when the number and the label both decline', function (): void {
+it('falls back to the honored selection when the number and the label both decline', function (): void {
     seedShopifyCarrierServices();
     $package = shopifyPackage();
 
     Saloon::fake([
         MockResponse::make(purchaseAccepted()),
         // A service type code naming no product, over label bytes with no text:
-        // both artefact rungs decline, and the pair Shopify honoured is what is
+        // both artifact rungs decline, and the pair Shopify honored is what is
         // left. Shopify names the carrier, which is what vouches for the pair.
         MockResponse::make(purchasePurchased(trackingNumber: SHOPIFY_IMPB_STC_NAMING_NO_PRODUCT)),
     ]);
@@ -695,7 +695,7 @@ it('does not let a voided label\'s carrier vouch for the selection on the label 
     seedShopifyCarrierServices();
     $package = shopifyPackage();
 
-    // First label: Shopify names the carrier, so the selection is honoured and
+    // First label: Shopify names the carrier, so the selection is honored and
     // the purchase says so.
     Saloon::fake([
         MockResponse::make(purchaseAccepted()),
@@ -706,7 +706,7 @@ it('does not let a voided label\'s carrier vouch for the selection on the label 
     $response = $this->adapter->createShipment(shopifyShipRequest($package, 'usps:GroundAdvantage'));
     $package->markShipped($response, $response->postageSource);
 
-    expect($package->refresh()->metadata['shopify_honoured_selection'])->toBe('usps:GroundAdvantage')
+    expect($package->refresh()->metadata['shopify_honored_selection'])->toBe('usps:GroundAdvantage')
         ->and($package->service_inference_method)->toBe(ServiceInferrer::METHOD_SHOPIFY_SELECTION);
 
     // Void it the way `ShopifyFulfillmentSynchronizer::applyVoid()` does: the
@@ -734,7 +734,7 @@ it('does not let a voided label\'s carrier vouch for the selection on the label 
 
     expect($package->service)->toBeNull()
         ->and($package->service_evidence)->toBe(ServiceEvidence::Unknown)
-        ->and($package->metadata['shopify_honoured_selection'])->toBeNull()
+        ->and($package->metadata['shopify_honored_selection'])->toBeNull()
         // And the historical re-run path reads the same answer off the row.
         ->and(app(ServiceInferrer::class)->infer($package)->isResolved())->toBeFalse();
 });
@@ -1050,7 +1050,7 @@ it('refuses to buy again when a bought label can no longer be read', function ()
 });
 
 /**
- * Shopify builds the customs declaration from its own catalogue and refuses a
+ * Shopify builds the customs declaration from its own catalog and refuses a
  * label whose `totalWeight` falls below the sum of it, reporting the refusal as
  * `UNKNOWN_ERROR` after the box is taped shut. The numbers throughout are the
  * ones from package 207: a 0.15 lb box against 1.76 + 0.53 lb of declared goods.
@@ -1079,7 +1079,7 @@ it('withholds an international purchase whose box weighs less than Shopify decla
 
 it('buys at the declared weight when the box falls short by less than the tolerance', function (): void {
     // Physically a packed box outweighs its contents, so a hundredth of a pound
-    // the wrong way is the scale, not the catalogue — and Shopify will not take
+    // the wrong way is the scale, not the catalog — and Shopify will not take
     // the reading either way.
     seedShopifyCarrierServices();
     $package = internationalShopifyPackage(2.28);
@@ -1127,7 +1127,7 @@ it('multiplies the declared unit weight by the quantity being fulfilled', functi
 
 it('sends the scale weight unchanged once the operator has insisted', function (): void {
     // Nothing is over-declared by insisting. What it buys is the case PolyBag
-    // cannot see: a catalogue corrected between the refusal and the retry.
+    // cannot see: a catalog corrected between the refusal and the retry.
     seedShopifyCarrierServices();
     $package = internationalShopifyPackage(0.15);
 
@@ -1182,7 +1182,7 @@ it('does not withhold a purchase on the strength of a line-item page it could no
     Saloon::assertSent(fn (GraphQL $r): bool => sentTotalWeight($r) === 0.15);
 });
 
-it('falls back to the order-time weight when the live catalogue is denied', function (): void {
+it('falls back to the order-time weight when the live catalog is denied', function (): void {
     // A token without `read_products` cannot traverse `lineItem.variant`, and
     // Shopify nulls the field rather than the response. The snapshot rides on
     // the same request precisely so the check survives that, degraded rather
@@ -1218,7 +1218,7 @@ it('never fails a purchase because it could not read what Shopify will declare',
     Saloon::assertSent(fn (GraphQL $r): bool => sentTotalWeight($r) === 0.15);
 });
 
-it('prefers the live catalogue weight over the order-time snapshot', function (): void {
+it('prefers the live catalog weight over the order-time snapshot', function (): void {
     // The reason both are asked for. A merchant who corrects a product weight
     // after a refusal has to be able to retry successfully, and the snapshot
     // still names the weight the order was placed at.
@@ -1226,7 +1226,7 @@ it('prefers the live catalogue weight over the order-time snapshot', function ()
     $package = internationalShopifyPackage(3.0);
 
     Saloon::fake([
-        // Catalogue corrected down to 1.0; the order still remembers 9.0.
+        // Catalog corrected down to 1.0; the order still remembers 9.0.
         MockResponse::make(declaredItemWeights([[1.0, 1]], snapshot: [9.0])),
         MockResponse::make(purchaseAccepted()),
         MockResponse::make(purchasePurchased()),
@@ -1391,7 +1391,7 @@ function internationalShopifyPackage(float $weight): Package
  * told the weight of.
  *
  * `$snapshot` is the order-time `FulfillmentOrderLineItem.weight` for the same
- * items, defaulting to whatever the live catalogue says. `$deniedLive` drops
+ * items, defaulting to whatever the live catalog says. `$deniedLive` drops
  * the `lineItem.variant` traversal the way a token without `read_products`
  * does — nulled data beside an errors array, not a dead response.
  *

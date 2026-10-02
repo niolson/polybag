@@ -90,7 +90,7 @@ question would promise a packer an offer that throws on the way back out.
 
 Two kinds of carrier row fail the tighter gate, and the conflict message names both: a resale
 channel's row (Shopify holds one so its offers have services to hang off) and a policy-only row
-(a courier Shopify picked, kept so its cutoffs and manifest behaviour come out right — ADR-0002
+(a courier Shopify picked, kept so its cutoffs and manifest behavior come out right — ADR-0002
 option D). No adapter registered today is policy-only, so the two predicates agree by luck
 rather than by construction, which is the reason to state the stronger one.
 

@@ -8,7 +8,7 @@ Repo: `polybag`
 
 `ShipDateService::getShipDate()` applies two rules, not one: the carrier's cutoff hour and
 the carrier's **pickup-day set**. Issue `06` settled the cutoff for Shopify at 8 PM. Nobody
-has decided the pickup days, and the current behaviour is an accident rather than a choice.
+has decided the pickup days, and the current behavior is an accident rather than a choice.
 
 `CarrierSeeder` creates the Shopify carrier row and its `auto` service and stops — it seeds
 no `carrier_location` pivot row. So `pickupDaysFor()` falls through to
@@ -60,7 +60,7 @@ per-warehouse. Seeding Mon–Sat globally would assert something about every ins
 ## Decision — 2026-09-04
 
 **Monday–Friday, as the default for every carrier, with Saturday left to the per-location
-config that already exists.** Behaviour is unchanged; what changed is that the value is a
+config that already exists.** Behavior is unchanged; what changed is that the value is a
 recorded decision rather than the consequence of a pivot row nobody seeds.
 
 **1. Do the shops hand parcels over on Saturday?** Some do, and we do not have the Saturday

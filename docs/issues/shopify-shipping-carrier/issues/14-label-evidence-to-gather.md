@@ -49,12 +49,12 @@ actually bought. For each capture record together:
   API. Screenshot it.
 - **`Order.events` for the price**, which `05` needs and which this campaign produces for
   free. Repeated purchases and voids against one order are exactly the ambiguous case it
-  needs characterised.
+  needs characterized.
 
 **Captures go in `.scratch/`, never in the repo.** A real label carries the recipient's name
 and address, and this is a public repository. Only the *derived* token belongs in
 `label-tokens.json`, named by description rather than by a path to something uncommitted.
-Where a test needs a fixture, synthesise one.
+Where a test needs a fixture, synthesize one.
 
 **Use the free probe from `02` first.** A pair sent with a past ship date reports whether
 Shopify has a rate for it without buying, so every capture can be confirmed available before
@@ -72,7 +72,7 @@ given client's Shopify admin actually offers.
 | USPS | US | **Done.** 342 service type codes resolve USPS domestic on the tracking number alone. Rung 2 **descoped** — Shopify passes USPS's own label through, so a token could be sourced from our labels, but rung 1 already answers |
 | UPS | US, CA | **Rung 1 done; rung 2 permanently closed.** UPS offers ZPL or GIF and no PDF, so Shopify's PDF is a wrapped raster necessarily. The 1Z indicator table is built. Token on the printed face: `UPS GROUND SAVER` — and that label is a **consolidator**, USPS last mile, dual `1Z` + IMpb |
 | FedEx | US | **Closed — not sold through the Shopify API** (`01`, PRD), and every other FedEx label PolyBag holds came with its service confirmed. Domestic tokens from sandbox PDFs stay in the table unconsumed; international prints `IP`/`XQ`, left alone for the same reason |
-| DHL | US, intl | **Express, confirmed by purchase 2026-09-17** — Shopify's code is `dhl_express`, and `dhl_express:P` (Express Worldwide, international only) is honoured and in the selection table. The returned document is DHL's canned sample label, with a text layer, printing `EXPRESS WORLDWIDE` — tokened with that caveat. Test tracking number is a placeholder, not the printed waybill. No separate customs document came back. The eCommerce ZPL token from vendor docs stays, unconfirmed against any Shopify label |
+| DHL | US, intl | **Express, confirmed by purchase 2026-09-17** — Shopify's code is `dhl_express`, and `dhl_express:P` (Express Worldwide, international only) is honored and in the selection table. The returned document is DHL's canned sample label, with a text layer, printing `EXPRESS WORLDWIDE` — tokened with that caveat. Test tracking number is a placeholder, not the printed waybill. No separate customs document came back. The eCommerce ZPL token from vendor docs stays, unconfirmed against any Shopify label |
 | Canada Post | CA | Nothing. PDF or ZPL |
 | Purolator | CA | Nothing |
 | Australia Post | AU | Nothing |
@@ -89,7 +89,7 @@ given client's Shopify admin actually offers.
 | BRT Bartolini | IT | Nothing |
 | Poste Italiane | IT | Nothing. S10 candidate |
 
-**Prioritise by where clients actually ship from**, not down the list. A US-only install
+**Prioritize by where clients actually ship from**, not down the list. A US-only install
 never sees fourteen of these.
 
 ## Documentation work
@@ -117,7 +117,7 @@ falling through is the correct outcome if the answer is only ever a class.
 
 ## What to answer
 
-1. **Which carriers does our install base actually use?** Everything prioritises off this,
+1. **Which carriers does our install base actually use?** Everything prioritizes off this,
    and nobody should gather labels for fourteen carriers nobody ships with. It is a business
    question this repository cannot answer, and it gates the remaining seventeen carriers.
 2. **Is a UPU S10 service indicator specific enough to be a service?** If not, S10 is
@@ -127,8 +127,8 @@ falling through is the correct outcome if the answer is only ever a class.
 
 ## Acceptance criteria
 
-- [ ] A prioritised carrier list, ordered by our own install base
-- [ ] For each prioritised carrier: at least one captured label per service, with the admin's
+- [ ] A prioritized carrier list, ordered by our own install base
+- [ ] For each prioritized carrier: at least one captured label per service, with the admin's
       record of what was bought alongside it
 - [ ] `label-tokens.json` extended from those captures, every token traceable to a label we
       hold
@@ -151,7 +151,7 @@ falling through is the correct outcome if the answer is only ever a class.
   and UPS sell through the API there. Two caveats on reading such captures: tokens and number
   families are real evidence, but a test label never moves, so nothing gathered here says
   anything about scan-level movement.
-- **2026-09-09** — `02` confirmed `preferredRateSelection` is honoured and seeded the pairs,
+- **2026-09-09** — `02` confirmed `preferredRateSelection` is honored and seeded the pairs,
   so captures can be taken deliberately rather than by taking what `auto` hands back. That was
   the blocker named here.
 - **2026-09-09** — first two labels read. **UPS Ground Saver is a consolidator, and `auto`

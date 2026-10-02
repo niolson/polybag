@@ -549,7 +549,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             // Nothing was bought and nothing was claimed — the seller's own
             // declaration would have made the purchase fail, and it was
             // withheld before the mutation. The packer is shown both numbers
-            // and may insist; only they can, since the remedy is a catalogue
+            // and may insist; only they can, since the remedy is a catalog
             // PolyBag does not own.
             return PackageShippingResult::declaredWeightOverrideRequired($e->getMessage());
         } catch (UnreadablePurchaseResponseException $e) {
@@ -1494,7 +1494,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * Never for a blind purchase. The remedy behind this prompt is
      * {@see ShipRequest::withScaledCustomsWeights()}, which rewrites the
      * `customsItems` array — and a blind purchase does not send one: the seller
-     * builds the declaration from its own catalogue, so the scaling is applied
+     * builds the declaration from its own catalog, so the scaling is applied
      * to an array nobody reads. Asking anyway would put a confirmation in front
      * of an operator that changes nothing, and then fail the purchase for the
      * reason they thought they had just resolved. Shopify's version of this

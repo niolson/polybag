@@ -103,7 +103,7 @@ back and the label's rate indicator in a comment here.
 this slice. It classifies from the same `rateIndicator` / `mailClass` the ship body sends,
 which is what makes the purchase-time check consistent with the purchase — so the
 classifier must be **exhaustive** over the indicators USPS returns for the mail classes
-the adapter keeps, and an indicator it does not recognise must not fall through to
+the adapter keeps, and an indicator it does not recognize must not fall through to
 `shipperPackaging()`. Refuse it or classify it conservatively; do not default it. The
 authority question (the browser restates the metadata) is `postage-source-split/14`, not
 this issue.
@@ -206,7 +206,7 @@ the SKU is USPS echoing the indicator back. `uspsLabel.json` needed no extension
   and is absent. `isValidRate()` and `isValidRateIndicator()` read the same table
   (replacing the Library/Media deny-list), so the filter never keeps a pair the
   classifier would refuse. One existing test had fabricated a Ground Advantage/`PA`
-  row; its fixture now says Express. Whether a restated mail class is *authorised* is
+  row; its fixture now says Express. Whether a restated mail class is *authorized* is
   still `postage-source-split/14`; this only stops it being *classified*.
 - `isValidRate()`'s `FLATS` exemption is by indicator (`FE`, `FA`, `FP`, `E4`, `E6`),
   so `PRIORITY_MAIL_INTERNATIONAL` `SP`/`FLATS` — a real large envelope — stays dropped.

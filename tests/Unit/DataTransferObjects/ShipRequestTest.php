@@ -101,7 +101,7 @@ it('never requires the standard identifier', function (): void {
         ->toBe([]);
 });
 
-it('lists nothing for a blind purchase, whose seller declares from its own catalogue', function (): void {
+it('lists nothing for a blind purchase, whose seller declares from its own catalog', function (): void {
     $request = shipRequestFor(consigneeIn('FR'), [lineIdentifiedBy('SKU-1', null)], blindOffer: new BlindPurchaseOffer(
         source: 'Shopify',
         sourceLabel: 'Shopify Shipping',

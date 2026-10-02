@@ -36,7 +36,7 @@ to the one that bought the label:
   account at all;
 - the Package's location changes.
 
-The carrier then refuses the void ("not found" or not authorised on that account), and
+The carrier then refuses the void ("not found" or not authorized on that account), and
 the operator gets "Void failed" for a label that is still live and billed. PolyBag has no
 other way to void it. Tracking fails the same way, and for USPS the ADR-0002 entitlement
 note means it cannot succeed: tracking data belongs to the account that bought the

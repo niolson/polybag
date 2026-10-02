@@ -1,6 +1,6 @@
 # Void provenance: the carrier-side references
 
-Status: ready-for-human — the only work here is characterising live void responses
+Status: ready-for-human — the only work here is characterizing live void responses
 
 Repo: `polybag`
 

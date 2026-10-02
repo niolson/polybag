@@ -14,7 +14,7 @@ Repo: `polybag`
 ## What to build
 
 Rating resolves the package's postage sources first, then asks each one for the
-method's services it can sell. Behaviour does not change while the `Shopify` and
+method's services it can sell. Behavior does not change while the `Shopify` and
 `Amazon` rows still exist, with the one exception the second acceptance criterion names.
 What changes is that no caller hands the resolver a list of carrier names any more, and
 rating no longer groups a method's services by carrier to decide whom to ask. Every later
@@ -63,7 +63,7 @@ issue removes.
   - A direct account sells a service when its adapter supports the code. Add an adapter
     method for that question. For USPS, the answer is the keys of
     `SHIPPER_PACKAGING_INDICATORS`. UPS and FedEx answer yes for any code of their own
-    carrier's catalog, so their behaviour does not change.
+    carrier's catalog, so their behavior does not change.
   - Shopify sells what its catalog rows name, until `09`.
   - Amazon is asked when the method lists the hook row, until `12`. The gate covers both
     Amazon instances: the order's own Amazon connection and the off-Amazon scoped
@@ -89,7 +89,7 @@ issue removes.
     excludes Shopify before scoping runs, and a default one is stripped.
   - Amazon ignores the service list it is asked with, so scoping mapped services could
     only exclude Amazon outright. Its offers are judged one by one on the value-added
-    services each returns (`honoursRequiredServices()`, ADR-0002 decision 8).
+    services each returns (`honorsRequiredServices()`, ADR-0002 decision 8).
   - The capability and declared-value checks (`offerCapability()`,
     `offerDeclaredValueCap()`) still run for every source, as today.
 - **The same resolution serves every caller.** `sellersForShippingMethod()` (the batch
@@ -112,11 +112,11 @@ issue removes.
 
 ## Acceptance criteria
 
-- [x] Rating, blind-offer, batch-ship and auto-ship behaviour is unchanged apart from the
+- [x] Rating, blind-offer, batch-ship and auto-ship behavior is unchanged apart from the
       next criterion, and the existing suite passes
 - [x] On a method whose only service a configured direct account cannot sell, that
       account does not count as a seller, so a Shopify blind offer can be the sole
-      choice. This is the one intended behaviour change
+      choice. This is the one intended behavior change
 - [x] A quote calls `resolve()` once. `resolve()` takes no carrier names, and
       `ShippingRateService` never groups services by carrier name to choose whom to ask.
       Adapter lookup by a resolved carrier's locked name is allowed
@@ -139,7 +139,7 @@ issue removes.
 
 - **2026-09-24** — Second review: the per-carrier special-service scoping inside a task
   spanning carriers was dropped. It could never run for Shopify, and for Amazon it could
-  only exclude the source wholesale. The `rate_shop` behaviour was pinned, because
+  only exclude the source wholesale. The `rate_shop` behavior was pinned, because
   source-first resolution would otherwise have started quoting accounts the purchase
   path then refuses.
 - **2026-09-25** — Re-reviewed against the code after `05` shipped. `05` kept the registry
@@ -153,7 +153,7 @@ issue removes.
   - UPS and FedEx sell any code of their own catalog;
   - `offer()` reads the ship date by task key;
   - exclusion messages use `label()`;
-  - the sole-choice change is named as the one intended behaviour change.
+  - the sole-choice change is named as the one intended behavior change.
 
   The conflict removal is reachable-by-construction, not only by `05`'s guard, and the
   three conflict tests are replaced with the maintainer's approval. Now

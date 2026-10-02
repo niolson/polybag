@@ -111,7 +111,7 @@ COPY --from=assets /app/public/build public/build
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 RUN composer dump-autoload --optimize
 
-# Set permissions — o+rX normalises source files regardless of host umask
+# Set permissions — o+rX normalizes source files regardless of host umask
 RUN chmod -R o+rX . \
     && chown -R www-data:www-data storage bootstrap/cache \
     && chmod -R 775 storage bootstrap/cache

@@ -15,7 +15,7 @@ Repo: `polybag`
 After `01` FedEx ships everything DDU. It has to follow the resolved terms instead, and
 send the registration, recipient tax ID and export filing.
 
-## Desired behaviour
+## Desired behavior
 
 The rate request and `buildCustomsClearanceDetail()` take the resolved term: DDP sends
 `dutiesPayment.paymentType: SENDER` with the payor account, DDU sends `RECIPIENT`.

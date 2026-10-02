@@ -5,7 +5,7 @@ integration has a bring-your-own-credentials path, and this document is the map 
 which credentials you need, where each one goes, and which parts of the `.env` and the
 UI describe services you cannot use.
 
-Read the [licence](../LICENSE) first. PolyBag is source-available under BSL 1.1, not
+Read the [license](../LICENSE) first. PolyBag is source-available under BSL 1.1, not
 open source — running it in production for a commercial purpose is not permitted before
 the change date. Self-hosting for personal, educational, evaluation, and development use
 is.
@@ -316,7 +316,7 @@ They are not broken; they are just not aimed at you.
 
 ## Related documents
 
-- [`README.md`](../README.md) — features, hardware integration, setup, and the licence.
+- [`README.md`](../README.md) — features, hardware integration, setup, and the license.
 - [`CONTRIBUTING.md`](../CONTRIBUTING.md) — development loop and the contributor agreement.
 - [`SECURITY.md`](../SECURITY.md) — private vulnerability reporting.
 - [`docs/qz-tray-provisioning.md`](qz-tray-provisioning.md) — suppressing the QZ Tray

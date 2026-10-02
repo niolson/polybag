@@ -119,7 +119,7 @@ class PackageExportService
                     // Set in both worlds, unlike the rest of the Amazon context:
                     // it is what suppresses a second confirmation, and a sandbox
                     // export that skipped the suppression would double-confirm
-                    // exactly where the behaviour is meant to be exercised.
+                    // exactly where the behavior is meant to be exercised.
                     $data['_amazon_shipment_id'] = AmazonBuyShippingAdapter::shipmentIdFor($package);
 
                     // Also set in both worlds. An FBA order has nothing to

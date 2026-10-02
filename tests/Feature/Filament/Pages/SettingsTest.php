@@ -734,7 +734,7 @@ it('refuses to save a carrier with no pickup days rather than storing an empty s
     // An empty set says nothing a carrier's absence from this list does not
     // already say — both fall back to the Mon-Fri default — and storing one used
     // to date labels for Sundays. Rejected rather than accepted and normalized,
-    // so the form never shows nothing ticked beside behaviour that is Mon-Fri.
+    // so the form never shows nothing ticked beside behavior that is Mon-Fri.
     $location = Location::factory()->create(['is_default' => true, 'country' => 'US', 'phone' => null]);
     $carrier = Carrier::factory()->create(['name' => 'USPS', 'active' => true]);
 

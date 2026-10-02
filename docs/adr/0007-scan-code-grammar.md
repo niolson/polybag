@@ -101,8 +101,8 @@ identifiers attached to records. They are never PolyBag's own identity.
 
 **Boundaries.** Surrounding whitespace is ignored. The prefix and token match in any case.
 A record body is 1 to 18 digits naming a positive ID, and leading zeros are ignored
-(`PBS0216` is `PBS216`, and `PBS0` is unrecognised). A command body is 1 to 32 letters. The
-prefix alone, an unknown token, or a body of the wrong kind is an unrecognised PolyBag
+(`PBS0216` is `PBS216`, and `PBS0` is unrecognized). A command body is 1 to 32 letters. The
+prefix alone, an unknown token, or a body of the wrong kind is an unrecognized PolyBag
 code.
 
 ### 2. A PolyBag code names its record exactly, or nothing
@@ -111,7 +111,7 @@ code.
 |---|---|
 | A PolyBag code whose record exists | That record, and only that record |
 | A PolyBag code whose record does not exist | "Not found". No other lookup is tried |
-| The prefix, then an unknown token or a malformed body | "Unrecognised PolyBag code". No other lookup is tried |
+| The prefix, then an unknown token or a malformed body | "Unrecognized PolyBag code". No other lookup is tried |
 | Anything else | An external identifier, looked up in the current context |
 
 A code with PolyBag's prefix is never looked up as an order reference, box code or product.
@@ -133,7 +133,7 @@ External identifiers can be ambiguous. When an order reference matches several S
 Scan & Pack lists them with client, connection, status and recipient, and the packer
 chooses. It never takes the first match.
 
-### 3. Codes are recognised everywhere; what happens depends on the page
+### 3. Codes are recognized everywhere; what happens depends on the page
 
 A scan passes through three steps: parse the code, resolve the record, then let the
 current page decide what to do with it. The parser and the record lookups are shared; the
@@ -222,11 +222,11 @@ checking what its existing identifiers begin with (`scan-codes/03`).
 ## Foreseen, not decided
 
 - **Page-wide scanning** (navigation barcodes scanned without clicking into an input). A
-  focused scan input stays the reliable path. Recognising a scan by typing speed is a
+  focused scan input stays the reliable path. Recognizing a scan by typing speed is a
   heuristic, since scanners' keystroke delays are configurable, and it acts too late when
   the characters have already gone into a weight or address field. The stronger form is a
   scanner configured to send a prefix (such as the AIM identifier `]C0` for Code 128) that
-  PolyBag recognises; it needs setting up at each station.
+  PolyBag recognizes; it needs setting up at each station.
 - **Operator-defined actions**: what one may do, and whether it is scoped to a Client or
   Location.
 - **Switching Shipments by scan** mid-pack, once the pending save can be awaited.
@@ -273,7 +273,7 @@ depends on each install's SKUs, so the install chooses.
 ## Trade-off
 
 Codes are longer than the first draft's (`PBS216` against `S216`), and a PolyBag code is
-not something people recognise the way they recognise an order number. The slip keeps the
+not something people recognize the way they recognize an order number. The slip keeps the
 reference in large print for people, with the code beside it in small type. Code 128
 encodes the digit run compactly, so the barcode grows by little. A deleted-and-reimported
 Shipment gets a new ID, and its old slip then finds nothing. That is shown as "not found",
@@ -296,7 +296,7 @@ never as a different Shipment, except after a restore (decision 5).
 
 ## Implementation
 
-1. `SCAN_CODE_PREFIX` in config, and a parser returning the type and body, or "unrecognised".
+1. `SCAN_CODE_PREFIX` in config, and a parser returning the type and body, or "unrecognized".
 2. The pack slip encodes `PBS<id>`, with the code printed beside the reference.
 3. Scan & Pack routes PolyBag codes to the parser and external strings to the reference
    lookup, which lists several matches to choose from.

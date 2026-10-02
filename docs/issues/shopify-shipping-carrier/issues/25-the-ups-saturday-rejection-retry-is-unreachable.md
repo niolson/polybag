@@ -49,7 +49,7 @@ a Saturday, `ItemizedCharges[]` carries code `300` for the surcharge, and
 So the day map is reproducing, less reliably, a thing the response already says per row, and
 the two-request mixed dance exists to reconstruct a list UPS hands over in one call.
 
-`AvailableServicesOption` is not the answer here: in shop mode the indicator is honoured
+`AvailableServicesOption` is not the answer here: in shop mode the indicator is honored
 and the option is a no-op, and the schema's "indicator ignored" wording turns out to
 describe a combination UPS rejects outright.
 

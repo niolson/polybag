@@ -14,7 +14,7 @@ that look like one, and separating them is most of the work.
 ### 1. The sandbox answers most request shapes with truncated JSON
 
 The FedEx sandbox returns unparseable, truncated responses for the majority of request
-shapes. Nobody has characterised the rule. It is not known whether the trigger is payload
+shapes. Nobody has characterized the rule. It is not known whether the trigger is payload
 size, a particular field, the service codes requested, the international/domestic split,
 or something else entirely — only that the example payload from FedEx's developer docs is
 one request known to come back valid and complete.
@@ -29,7 +29,7 @@ codes, one package at 1 lb.
 That makes the sandbox usable for the domestic happy path and makes international
 **structurally unreachable**: the addresses are overwritten inside PolyBag before the
 request leaves the app, so no international rate request ever reaches FedEx in sandbox
-mode, and the sandbox's own behaviour toward international requests has never been
+mode, and the sandbox's own behavior toward international requests has never been
 observed.
 
 FedEx's sandbox separately rewrites addresses and forces domestic services when a request
