@@ -21,6 +21,13 @@ interface PackageLabelWorkflow
      */
     public function voidOwnLabel(Package $package, User $user): LabelVoidResult;
 
+    /**
+     * Record the active label as voided without asking the postage source, for
+     * a manager: a void the source accepted that PolyBag failed to record, or
+     * one made on the source's own site.
+     */
+    public function recordVoid(Package $package, User $user): LabelVoidResult;
+
     public function labelForReprint(Package $package, User $user): LabelReprintResult;
 
     /**

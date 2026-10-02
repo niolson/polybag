@@ -60,10 +60,6 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
             if (! $response->success) {
                 return LabelVoidResult::failure('Void failed', $response->message ?? 'Failed to cancel the label.');
             }
-
-            $package->clearShipping(VoidReason::Operator, $user->id);
-
-            return LabelVoidResult::success($response->message);
         } catch (\RuntimeException $e) {
             return LabelVoidResult::failure('Package State Changed', $e->getMessage());
         } catch (RequestException) {
@@ -71,6 +67,53 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
         } catch (\Exception) {
             return LabelVoidResult::failure('Cancel Error', 'An unexpected error occurred.');
         }
+
+        try {
+            $package->clearShipping(VoidReason::Operator, $user->id);
+
+            return LabelVoidResult::success($response->message);
+        } catch (\PDOException|\LogicException $e) {
+            // The source has voided the label, and asking it again would be
+            // refused, so "try again" is the wrong advice (`project-review/10`).
+            // PDOException covers QueryException and DeadlockException, which
+            // are RuntimeExceptions but no sign of a race with another void.
+            logger()->error('A label was voided at its source but the void could not be recorded', [
+                'package_id' => $package->id,
+                'tracking_number' => $package->tracking_number,
+                'error' => $e->getMessage(),
+            ]);
+
+            return LabelVoidResult::failure(
+                'Voided, not recorded',
+                'The label was voided, but PolyBag could not record it, so the package still shows as shipped. '
+                .'A manager can use Record Void on the Packages table to un-ship it without voiding it again.',
+            );
+        } catch (\RuntimeException $e) {
+            return LabelVoidResult::failure('Package State Changed', $e->getMessage());
+        }
+    }
+
+    public function recordVoid(Package $package, User $user): LabelVoidResult
+    {
+        if ($user->cannot('voidLabel', $package)) {
+            return LabelVoidResult::failure('Access Denied', 'Only a manager can record a void.');
+        }
+
+        if ($package->status !== PackageStatus::Shipped) {
+            return LabelVoidResult::failure('Package Not Found', 'The package could not be found or is not shipped.');
+        }
+
+        try {
+            $package->clearShipping(VoidReason::Recorded, $user->id);
+        } catch (\PDOException $e) {
+            logger()->error('Could not record a void', ['package_id' => $package->id, 'error' => $e->getMessage()]);
+
+            return LabelVoidResult::failure('Cancel Error', 'An unexpected error occurred. Please try again.');
+        } catch (\RuntimeException $e) {
+            return LabelVoidResult::failure('Package State Changed', $e->getMessage());
+        }
+
+        return LabelVoidResult::success('The void was recorded and the package can be shipped again. Nothing was sent to the postage source.');
     }
 
     public function labelForReprint(Package $package, User $user): LabelReprintResult

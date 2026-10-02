@@ -198,10 +198,7 @@ class ManifestService
                     'package_count' => count($alreadyManifested),
                 ]);
 
-                $marked = Package::query()
-                    ->whereIn('tracking_number', $alreadyManifested)
-                    ->whereNull('manifest_id')
-                    ->update(['manifest_id' => $externalManifest->id]);
+                $marked = $this->markManifested($alreadyManifested, $externalManifest);
                 $totalMarkedExternally += $marked;
 
                 logger()->warning('USPS SCAN Form: marked packages as already manifested', [
@@ -238,8 +235,7 @@ class ManifestService
                     'package_count' => $remainingPackages->count(),
                 ]);
 
-                Package::whereIn('id', $remainingPackages->pluck('id'))
-                    ->update(['manifest_id' => $manifest->id]);
+                $this->markManifested($remainingPackages->pluck('tracking_number')->all(), $manifest);
 
                 return $manifest;
             });
@@ -255,6 +251,39 @@ class ManifestService
         }
 
         return ['success' => false, 'error' => 'USPS SCAN Form failed after multiple retries.'];
+    }
+
+    /**
+     * Put the Labels with these tracking numbers on a manifest: each shipped
+     * Package still carrying one, and its active Label, together.
+     *
+     * Keyed by the tracking numbers USPS was sent rather than by Package, so a
+     * Package voided while USPS was answering, or voided and re-shipped since,
+     * is not stamped with a form its current Label is not on
+     * (`project-review/07`).
+     *
+     * @param  array<int, string>  $trackingNumbers
+     * @return int The number of Packages marked
+     */
+    private function markManifested(array $trackingNumbers, Manifest $manifest): int
+    {
+        return DB::transaction(function () use ($trackingNumbers, $manifest): int {
+            $packageIds = Package::query()
+                ->whereIn('tracking_number', $trackingNumbers)
+                ->where('status', PackageStatus::Shipped)
+                ->whereNull('manifest_id')
+                ->lockForUpdate()
+                ->pluck('id');
+
+            Package::query()->whereKey($packageIds)->update(['manifest_id' => $manifest->id]);
+
+            DB::table('package_labels')
+                ->whereIn('package_id', $packageIds)
+                ->whereNull('voided_at')
+                ->update(['manifest_id' => $manifest->id, 'updated_at' => now()]);
+
+            return $packageIds->count();
+        });
     }
 
     /**

@@ -122,21 +122,10 @@ class AmazonPostageSource implements PostageSourceOperations
             );
         }
 
-        // Amazon's identifiers go with the label. The shipment ID in particular
-        // is what tells the channel export "Amazon already confirmed this order,
-        // do not confirm it again" — left behind after a void, a re-ship on a
-        // direct carrier account would skip the confirmation and the order
-        // would never be marked shipped on Amazon. Same treatment Shopify's
-        // void gives its label identifiers.
-        $package->metadata = collect($package->metadata ?? [])
-            ->except([
-                AmazonBuyShippingAdapter::SHIPMENT_ID_KEY,
-                AmazonBuyShippingAdapter::CARRIER_ID_KEY,
-                AmazonBuyShippingAdapter::SERVICE_ID_KEY,
-            ])
-            ->all();
-        $package->save();
-
+        // Amazon's identifiers go with the label, but only when the void is
+        // recorded: `Package::clearShipping()` drops them in its transaction
+        // (`Package::LABEL_METADATA_KEYS`). Dropped here, a failure to record
+        // left a shipped Package that no retry could void (`project-review/10`).
         return CancelResponse::success('Amazon cancelled the shipment.');
     }
 

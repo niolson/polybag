@@ -11,6 +11,9 @@ use App\Models\AuditLog;
 use App\Models\Package;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
 
@@ -358,4 +361,81 @@ it('lets a shipper reprint a label another shipper bought', function (): void {
 
     expect($result->success)->toBeTrue()
         ->and($result->printRequest)->not->toBeNull();
+});
+
+/**
+ * Fail the next update of `package_labels` with a database error, once. Not a
+ * deadlock: Laravel leaves a deadlocked savepoint for the outer transaction to
+ * roll back, and every test runs inside one.
+ */
+function failNextLabelUpdate(): void
+{
+    $failed = false;
+
+    DB::listen(function (QueryExecuted $query) use (&$failed): void {
+        if (! $failed && str_starts_with(strtolower($query->sql), 'update "package_labels"')) {
+            $failed = true;
+
+            throw new QueryException($query->connectionName, $query->sql, $query->bindings, new Exception('SQLSTATE[HY000]: General error: 1021 Disk full'));
+        }
+    });
+}
+
+it('says a label was voided but not recorded, and lets a manager record it without voiding again', function (): void {
+    $package = Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'tracking_number' => '9400111899223456789012',
+    ]);
+    $manager = User::factory()->manager()->create();
+
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('cancelShipment')->once()->andReturn(CancelResponse::success('Label voided successfully.'));
+    app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
+
+    failNextLabelUpdate();
+    $voided = app(PackageLabelWorkflow::class)->voidLabel($package, $manager);
+
+    expect($voided->success)->toBeFalse()
+        ->and($voided->title)->toBe('Voided, not recorded')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
+
+    $recorded = app(PackageLabelWorkflow::class)->recordVoid($package->fresh(), $manager);
+
+    expect($recorded->success)->toBeTrue()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped)
+        ->and($package->labels()->sole()->void_reason)->toBe(VoidReason::Recorded)
+        ->and($package->labels()->sole()->voided_by_user_id)->toBe($manager->id);
+});
+
+it('limits recording a void to managers', function (): void {
+    $shipper = User::factory()->create(['role' => Role::User]);
+    $package = Package::factory()->shipped()->create(['carrier' => 'USPS', 'shipped_by_user_id' => $shipper->id]);
+
+    $result = app(PackageLabelWorkflow::class)->recordVoid($package, $shipper);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Access Denied')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
+});
+
+it('drops the label identifiers a source recorded only when the void is recorded', function (): void {
+    $package = Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'tracking_number' => '9400111899223456789012',
+        'metadata' => [
+            'amazon_shipment_id' => 'amzn-shipment-1',
+            'amazon_carrier_id' => 'USPS',
+            'shopify_shipping_label_id' => 'gid://shopify/ShippingLabel/1',
+            'unrelated' => 'kept',
+        ],
+    ]);
+
+    failNextLabelUpdate();
+
+    expect(fn () => $package->clearShipping(VoidReason::Operator))->toThrow(PDOException::class)
+        ->and($package->fresh()->metadata)->toHaveKey('amazon_shipment_id');
+
+    $package->fresh()->clearShipping(VoidReason::Operator);
+
+    expect($package->fresh()->metadata)->toBe(['unrelated' => 'kept']);
 });

@@ -1,6 +1,6 @@
 # A void the source accepted can fail to record, and can't be retried
 
-Status: needs-triage
+Status: done — 2026-10-01
 
 Repo: `polybag`
 
@@ -45,3 +45,24 @@ This is area A's `03` for the void: the source has acted and PolyBag hasn't reco
   commits or rolls back with the void. Do the same in `applyVoid()` for consistency.
 
 ## Comments
+- 2026-10-01 — Built both halves.
+  - **Recording a void.** `voidLabel()` now asks the source and records the void as two
+    separate steps. If recording fails with a database error (`PDOException`, which
+    includes `QueryException` and `DeadlockException`) or a broken invariant
+    (`LogicException`) after the source said yes, it says **Voided, not recorded**,
+    logs it, and points a manager to the new **Record Void** action.
+    `PackageLabelWorkflow::recordVoid()` (manager only) un-ships the Package with the new
+    `VoidReason::Recorded` and asks no source. That also covers a label voided on the
+    carrier's own site. The table action is hidden for Shopify Labels, which the
+    synchronizer reconciles.
+  - **Label metadata.** `clearShipping()` now drops the label's source identifiers
+    (`Package::LABEL_METADATA_KEYS`: Amazon's shipment, carrier and service IDs, and
+    Shopify's label, purchase result and document keys) inside its own transaction.
+    `AmazonPostageSource::voidLabel()` and `ShopifyFulfillmentSynchronizer::applyVoid()`
+    no longer save the metadata themselves.
+  - **Tests.** In `PackageLabelWorkflowTest`: a recording failure after a source void,
+    then Record Void; manager-only; and identifiers kept when recording fails and dropped
+    when it succeeds. In `PackageResourceTest`: the table action, hidden for Shopify and
+    for non-managers. The tests inject a plain database error rather than a deadlock:
+    Laravel leaves a deadlocked savepoint for the outer transaction to roll back, and
+    every test runs inside one.

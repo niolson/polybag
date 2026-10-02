@@ -18,6 +18,7 @@ use App\Enums\VoidReason;
 use App\Events\PackageCancelled;
 use App\Events\PackageShipped;
 use App\Services\CarrierNormalizer;
+use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
@@ -35,6 +36,26 @@ use Laravel\Scout\Searchable;
 
 class Package extends Model
 {
+    /**
+     * Metadata a postage source records about the Label it sold, which goes
+     * with the Label when it is voided. Amazon's shipment ID tells the export
+     * the order is already confirmed; Shopify's label ID is what recovers a
+     * half-finished purchase. Left on a re-shipped Package, either would act
+     * on a dead label. Dropped inside `clearShipping()`'s transaction, so
+     * they go if and only if the void is recorded (`project-review/10`).
+     *
+     * @var list<string>
+     */
+    public const LABEL_METADATA_KEYS = [
+        AmazonBuyShippingAdapter::SHIPMENT_ID_KEY,
+        AmazonBuyShippingAdapter::CARRIER_ID_KEY,
+        AmazonBuyShippingAdapter::SERVICE_ID_KEY,
+        'shopify_shipping_label_id',
+        'shopify_purchase_result_id',
+        'shopify_label_document_url',
+        'shopify_customs_form_url',
+    ];
+
     use HasFactory, Searchable;
 
     protected $fillable = [
@@ -756,6 +777,8 @@ class Package extends Model
                 'shipped_at' => $now,
                 'ship_date' => $response->shipDate?->format('Y-m-d'),
                 'shipped_by_user_id' => $shippedByUserId,
+                // A new label is on no manifest yet, whatever the last one was on.
+                'manifest_id' => null,
             ];
 
             // Optimistic locking - ensure package hasn't been shipped already
@@ -1006,6 +1029,7 @@ class Package extends Model
             }
 
             $voidedLabel = VoidedLabel::fromRow($row);
+            $metadata = json_decode((string) $row->metadata, true);
 
             // Optimistic locking - ensure package is still shipped
             $updated = DB::table('packages')
@@ -1035,12 +1059,18 @@ class Package extends Model
                     'shipped_at' => null,
                     'ship_date' => null,
                     'shipped_by_user_id' => null,
+                    // The voided Label row keeps it; the Package's next Label
+                    // has to reach the next SCAN form (`project-review/07`).
+                    'manifest_id' => null,
                     'tracking_status' => null,
                     'tracking_updated_at' => null,
                     'delivered_at' => null,
                     'tracking_details' => null,
                     'tracking_checked_at' => null,
                     'exported' => false,
+                    'metadata' => is_array($metadata)
+                        ? json_encode(array_diff_key($metadata, array_flip(self::LABEL_METADATA_KEYS)))
+                        : $row->metadata,
                     'updated_at' => now(),
                 ]);
 

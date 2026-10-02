@@ -15,6 +15,7 @@ use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\Role;
 use App\Enums\ServiceCapability;
+use App\Enums\VoidReason;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
 use App\Filament\Resources\PackageResource\Pages\ViewPackage;
 use App\Models\DataSource;
@@ -82,6 +83,39 @@ it('hides void action for unshipped packages', function (): void {
 
     Livewire::test(ListPackages::class)
         ->assertActionHidden(TestAction::make('void')->table($package));
+});
+
+it('records a void from the packages table without asking the postage source', function (): void {
+    $package = Package::factory()->shipped()->for(Shipment::factory())->create(['carrier' => 'USPS']);
+
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('cancelShipment')->never();
+    app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
+
+    Livewire::test(ListPackages::class)
+        ->callAction(TestAction::make('recordVoid')->table($package))
+        ->assertNotified('Void recorded');
+
+    expect($package->fresh()->status)->toBe(PackageStatus::Unshipped)
+        ->and($package->labels()->sole()->void_reason)->toBe(VoidReason::Recorded);
+});
+
+it('leaves recording a Shopify void to the fulfillment synchronizer', function (): void {
+    $package = Package::factory()->shipped()->create([
+        'postage_source' => PostageSource::PostageDataSource,
+        'postage_data_source_id' => createShopifyDataSource()->id,
+    ]);
+
+    Livewire::test(ListPackages::class)
+        ->assertActionHidden(TestAction::make('recordVoid')->table($package));
+});
+
+it('hides recording a void from a user who is not a manager', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $package = Package::factory()->shipped()->create(['carrier' => 'USPS']);
+
+    Livewire::test(ListPackages::class)
+        ->assertActionHidden(TestAction::make('recordVoid')->table($package));
 });
 
 it('keeps the Shopify void guidance visible when Shopify reports no carrier', function (): void {

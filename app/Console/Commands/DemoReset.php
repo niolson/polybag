@@ -456,6 +456,7 @@ class DemoReset extends Command
             'ship_date' => $shipDate,
             'shipped_at' => $shippedAt->format('Y-m-d H:i:s'),
             'shipped_by_user_id' => $userIds === [] ? null : $userIds[array_rand($userIds)],
+            'manifest_id' => $this->manifestIdFor($manifests, $carrier, $shipDate, $locationId),
         ];
 
         $packageId = DB::table('packages')->insertGetId($projected + [
@@ -468,7 +469,6 @@ class DemoReset extends Command
             'length' => round(mt_rand(600, 1800) / 100, 2),
             'status' => PackageStatus::Shipped->value,
             'exported' => false,
-            'manifest_id' => $this->manifestIdFor($manifests, $carrier, $shipDate, $locationId),
             'created_at' => $createdAt->format('Y-m-d H:i:s'),
             'updated_at' => $shippedAt->format('Y-m-d H:i:s'),
         ]);
