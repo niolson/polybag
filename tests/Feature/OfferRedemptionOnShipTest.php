@@ -291,7 +291,7 @@ it('leaves an offer unresolved when a seller that can be asked later never answe
     );
 
     expect($blocked->success)->toBeFalse()
-        ->and($blocked->title)->toBe('Earlier Purchase Unresolved');
+        ->and($blocked->title)->toBe('Unfinished Label Purchase');
 });
 
 it('refuses to buy while an earlier purchase is unaccounted for', function (): void {
@@ -315,7 +315,7 @@ it('refuses to buy while an earlier purchase is unaccounted for', function (): v
     );
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Earlier Purchase Unresolved')
+        ->and($result->title)->toBe('Unfinished Label Purchase')
         ->and($result->leavePackageIntact)->toBeTrue()
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
@@ -338,7 +338,7 @@ it('keeps a stalled channel purchase blocked when its source can no longer be fo
     );
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Earlier Purchase Unresolved')
+        ->and($result->title)->toBe('Unfinished Label Purchase')
         ->and($stalled->fresh()->isAwaitingPurchaseConfirmation())->toBeTrue();
 });
 

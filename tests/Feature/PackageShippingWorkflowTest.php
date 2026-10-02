@@ -810,7 +810,7 @@ it('does not buy again after a rule-selected purchase went unanswered', function
 
     expect($first->title)->toBe('Carrier Timeout')
         ->and(ShippingOffer::whereNotNull('consumed_at')->sole()->isAwaitingPurchaseConfirmation())->toBeTrue()
-        ->and($second->title)->toBe('Earlier Purchase Unresolved')
+        ->and($second->title)->toBe('Unfinished Label Purchase')
         ->and($calls)->toBe(1);
 });
 

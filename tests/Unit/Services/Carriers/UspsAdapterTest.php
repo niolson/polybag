@@ -276,6 +276,25 @@ it('cancels an international label', function (): void {
     Saloon::assertSent(CancelInternationalLabel::class);
 });
 
+// Past the Shipping Services File, the same call opens a refund request.
+it('voids a label USPS can only refund, naming the dispute', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        PaymentAuthorization::class => MockResponse::make(['paymentAuthorizationToken' => 'test_payment_token']),
+        CancelLabel::class => MockResponse::make(['trackingNumber' => '9400111899223456789012', 'status' => 'DISPUTED', 'disputeId' => 'D-12345'], 200),
+    ]);
+
+    $package = Package::factory()->shipped()->for(Shipment::factory()->create(['country' => 'US']))->create([
+        'carrier' => 'USPS',
+        'tracking_number' => '9400111899223456789012',
+    ]);
+
+    $response = $this->adapter->cancelShipment('9400111899223456789012', $package);
+
+    expect($response->success)->toBeTrue()
+        ->and($response->message)->toContain('refund request (dispute D-12345)');
+});
+
 it('does not read a USPS cancel reply without CANCELED as a void', function (MockResponse $reply, string $message): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),

@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\PackageStatus;
 use App\Events\PackageShipped;
 use App\Listeners\ExportShippedPackage;
 use App\Models\Package;
@@ -67,4 +68,15 @@ it('does not retry permanent export failures', function (): void {
     (new ExportShippedPackage)->handle(new PackageShipped($package, $shipment));
 
     expect(true)->toBeTrue();
+});
+
+it('does not export a package whose label was voided before the job ran', function (): void {
+    $shipment = Shipment::factory()->create();
+    $package = Package::factory()->create(['shipment_id' => $shipment->id, 'status' => PackageStatus::Unshipped]);
+
+    $mock = Mockery::mock(PackageExportService::class);
+    $mock->shouldNotReceive('exportPackage');
+    app()->instance(PackageExportService::class, $mock);
+
+    (new ExportShippedPackage)->handle(new PackageShipped($package, $shipment));
 });

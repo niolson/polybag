@@ -12,6 +12,7 @@ use App\Exceptions\MissingAmazonOrderItemsException;
 use App\Http\Integrations\Amazon\AmazonSpApiConnector;
 use App\Http\Integrations\Amazon\Requests\CancelAmazonShipment;
 use App\Http\Integrations\Amazon\Requests\GetAdditionalInputsSchema;
+use App\Http\Integrations\Amazon\Requests\GetShipmentDocuments;
 use App\Http\Integrations\Amazon\Requests\GetShipmentTracking;
 use App\Http\Integrations\Amazon\Requests\PurchaseShipment;
 use App\Models\DataSource;
@@ -378,6 +379,64 @@ class AmazonBuyShippingService
         // recording the preference instead would print a 300 DPI label at 203
         // and size it wrong.
         return $this->labelFrom($result, $payload['requestedDocumentSpecification']['dpi'] ?? null);
+    }
+
+    /**
+     * The documents of a shipment Amazon already sold, fetched by the shipment
+     * ID it returned — the recovery for a confirmed sale whose Label was never
+     * saved (`postage-source-split/16`).
+     *
+     * Nothing is bought, so neither the offer's purchase tokens nor the
+     * connection's postage setting matter: the shipment exists and is paid
+     * for. Only the connection that sold it can be asked for its documents.
+     * An Amazon order's own postage takes no `format` or `dpi` — Amazon applies
+     * the purchase's — so the DPI recorded is this workstation's, the best
+     * guess for a ZPL label; Amazon Shipping for another channel is asked for
+     * the format the purchase would have chosen.
+     *
+     * @throws AmazonLabelPurchaseException when Amazon answers without the label, or the connection is gone
+     * @throws RequestException on a transport failure
+     */
+    public function documentsFor(Package $package, ShippingOffer $offer, ShipRequest $request): AmazonPurchasedLabel
+    {
+        $offer->loadMissing('postageDataSource');
+        $source = $offer->postageDataSource;
+        $shipmentId = (string) $offer->purchase_reference;
+
+        if (! $source || $source->source_type !== AmazonSource::class || $shipmentId === '') {
+            throw new AmazonLabelPurchaseException(
+                'The Amazon account this label was bought on is no longer available, so its documents cannot be fetched.'
+            );
+        }
+
+        $specification = $this->postageSourceResolver->isAmazonOrder($package)
+            ? []
+            : $this->documentSpecification(
+                ($offer->rate_metadata ?? [])['supportedDocumentSpecifications'] ?? [],
+                $request->labelFormat,
+                $request->labelDpi,
+            );
+
+        $response = $this->connectorFor($source)->send(new GetShipmentDocuments(
+            $shipmentId,
+            (string) $package->getKey(),
+            $specification['format'] ?? null,
+            $specification['dpi'] ?? null,
+            self::BUSINESS_ID,
+        ));
+
+        if (! $response->successful()) {
+            throw new AmazonLabelPurchaseException(
+                "Amazon did not return the documents of shipment {$shipmentId}: ".$this->describeErrors($response)
+            );
+        }
+
+        $result = $response->json('payload', []);
+
+        return $this->labelFrom([
+            'shipmentId' => $result['shipmentId'] ?? $shipmentId,
+            'packageDocumentDetails' => [$result['packageDocumentDetail'] ?? []],
+        ], $specification['dpi'] ?? $request->labelDpi);
     }
 
     /**

@@ -7,6 +7,8 @@ use App\Enums\PostageSource;
 use App\Enums\SourceEnvironment;
 use App\Exceptions\MissingDeclaredValueException;
 use App\Services\PostageSources\OfferStore;
+use App\Services\ShipmentImport\Sources\AmazonSource;
+use App\Services\ShipmentImport\Sources\ShopifySource;
 use Database\Factories\ShippingOfferFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -122,6 +124,35 @@ class ShippingOffer extends Model
     public function carrierAccount(): BelongsTo
     {
         return $this->belongsTo(CarrierAccount::class);
+    }
+
+    /**
+     * Whether the source has said a label exists for this offer: it confirmed
+     * the sale, or it said the label exists and will not be sent again
+     * (`OfferStore::UNRECOVERABLE_REASON`). Either way "nothing was bought"
+     * is no longer a true answer.
+     */
+    public function isKnownSold(): bool
+    {
+        return $this->purchase_reference !== null
+            || filled($this->purchase_context[OfferStore::UNRECOVERABLE_REASON] ?? null);
+    }
+
+    /**
+     * Who sold it, as a person would look it up: the carrier for a direct
+     * account, the marketplace for a channel's postage.
+     */
+    public function sellerName(): string
+    {
+        if ($this->postage_source !== PostageSource::PostageDataSource) {
+            return $this->carrier;
+        }
+
+        return match ($this->postageDataSource?->source_type) {
+            ShopifySource::class => 'Shopify',
+            AmazonSource::class => 'Amazon',
+            default => $this->carrier,
+        };
     }
 
     /**
@@ -268,6 +299,23 @@ class ShippingOffer extends Model
     public function scopeWithRecordedLabel(Builder $query): void
     {
         $query->whereExists($this->labelSinceConsumed(...));
+    }
+
+    /**
+     * Spent offers nothing accounts for: the source's answer never arrived, or
+     * it confirmed a sale whose Label was never saved. The two kinds a purchase
+     * path refuses to buy past, and what a person resolves by hand when the
+     * source cannot be asked (`postage-source-split/16`).
+     *
+     * @param  Builder<$this>  $query
+     */
+    public function scopeUnaccounted(Builder $query): void
+    {
+        $query->whereNotNull('consumed_at')
+            ->whereNull('purchase_failed_at')
+            ->where(fn (Builder $query) => $query
+                ->whereNull('purchase_reference')
+                ->orWhereNotExists($this->labelSinceConsumed(...)));
     }
 
     /**

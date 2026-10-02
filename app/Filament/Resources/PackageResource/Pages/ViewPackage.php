@@ -16,6 +16,7 @@ use App\Filament\Concerns\PrintsLabels;
 use App\Filament\Resources\PackageResource;
 use App\Filament\Resources\ShipmentResource;
 use App\Filament\Support\LabelVoidNotification;
+use App\Filament\Support\ResolveUnaccountedPurchaseAction;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\PackageLabel;
@@ -306,6 +307,9 @@ class ViewPackage extends ViewRecord
         return $infolist
             ->columns(2)
             ->schema([
+                // Above everything else: while it stands, nothing can be
+                // bought for this package (`postage-source-split/16`).
+                ResolveUnaccountedPurchaseAction::callout(),
                 Section::make('Package Details')
                     ->inlineLabel()
                     ->schema([

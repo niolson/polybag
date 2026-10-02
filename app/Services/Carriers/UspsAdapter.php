@@ -24,6 +24,7 @@ use App\Enums\TrackingStatus;
 use App\Exceptions\Carriers\CarrierException;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
+use App\Exceptions\LabelNotRecoverableException;
 use App\Http\Integrations\USPS\Requests\CancelInternationalLabel;
 use App\Http\Integrations\USPS\Requests\CancelLabel;
 use App\Http\Integrations\USPS\Requests\InternationalLabel;
@@ -37,6 +38,7 @@ use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Package;
+use App\Models\ShippingOffer;
 use App\Services\Carriers\Concerns\BuildsCustomerReferences;
 use App\Services\Carriers\Concerns\ConsultsCarrierPolicyForOffers;
 use App\Services\Carriers\Concerns\DecodesJsonResponses;
@@ -136,11 +138,30 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
      * in production on 2026-09-18 (`postage-source-split/18`): no label was
      * ever bought under the key, or one was and has since been cancelled.
      * Either way nothing usable exists and the package may be quoted again.
-     * Every other reprint error leaves the question open.
+     * Every other reprint error leaves the question open, and so does "not
+     * found" for an attempt older than USPS looks back — see
+     * {@see keyLookupCovers()}.
      */
     private const REPRINT_KEY_NOT_FOUND = '160412';
 
     private const REPRINT_LABEL_CANCELLED = '160979';
+
+    /**
+     * "Label is unavailable for reprint past its mailingDate of …", seen in
+     * TEM 2026-10-02 on a confirmed sale whose Label was never saved, three
+     * days after it was bought. The label exists and USPS will not hand it
+     * over again. USPS documents the rule: "Labels can only be reprinted up to
+     * the mailing date", which is the ship date the purchase sent, so a label
+     * is recoverable through its ship date and no later.
+     */
+    private const REPRINT_PAST_MAILING_DATE = '160981';
+
+    /**
+     * How far back, in days, USPS finds a label by its idempotency key when
+     * its error does not say: production's "for a mailing date within the
+     * last 7 days" (2026-09-18). TEM says 14.
+     */
+    private const REPRINT_LOOKBACK_DAYS = 7;
 
     /**
      * Where the purchase's `X-Idempotency-Key` lives on the offer.
@@ -553,6 +574,36 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
      * it is settled the way `14`'s carve-out settled every direct offer —
      * the alternative strands the package behind a question with no answer.
      */
+    /**
+     * Whether a "key not found" can be believed for this attempt.
+     *
+     * USPS keeps keys only for labels whose mailing date falls inside its
+     * look-back, and says how long that is in the error itself. A mailing date
+     * is never before the purchase, so an attempt inside the window is one
+     * USPS would have found; outside it, a label bought under the key reads
+     * exactly like none. A day short of the window, for the difference between
+     * our clock and USPS's mailing day.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function keyLookupCovers(ShippingOffer $offer, array $payload): bool
+    {
+        if ($offer->consumed_at === null) {
+            return false;
+        }
+
+        $days = self::REPRINT_LOOKBACK_DAYS;
+
+        foreach ($payload['error']['errors'] ?? [] as $error) {
+            if ((string) ($error['code'] ?? '') === self::REPRINT_KEY_NOT_FOUND
+                && preg_match('/within the last (\d+) days/i', (string) ($error['detail'] ?? ''), $matches) === 1) {
+                $days = (int) $matches[1];
+            }
+        }
+
+        return $offer->consumed_at->isAfter(now()->subDays(max($days - 1, 0)));
+    }
+
     public function recoverPurchase(ShipRequest $request): ?ShipResponse
     {
         $offer = $request->offer;
@@ -615,8 +666,35 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
                 'codes' => $codes,
             ]);
 
-            if (array_intersect($codes, [self::REPRINT_KEY_NOT_FOUND, self::REPRINT_LABEL_CANCELLED]) !== []) {
+            if (in_array(self::REPRINT_LABEL_CANCELLED, $codes, true)) {
                 return ShipResponse::failure($this->describeLabelError($payload));
+            }
+
+            if (in_array(self::REPRINT_PAST_MAILING_DATE, $codes, true)) {
+                Log::channel('usps-validation')->warning('USPS will not reprint a label past its mailing date', [
+                    'offer' => $offer->public_id,
+                    'detail' => $this->describeLabelError($payload),
+                ]);
+
+                $mailingDate = preg_match('/mailingDate of (\d{4}-\d{2}-\d{2})/', $this->describeLabelError($payload), $matches)
+                    ? ' of '.CarbonImmutable::parse($matches[1])->format('M j, Y')
+                    : '';
+
+                throw new LabelNotRecoverableException("USPS will not send a label again after its mailing date{$mailingDate}.");
+            }
+
+            if (in_array(self::REPRINT_KEY_NOT_FOUND, $codes, true)) {
+                if ($this->keyLookupCovers($offer, $payload)) {
+                    return ShipResponse::failure($this->describeLabelError($payload));
+                }
+
+                // Older than USPS looks back: "not found" is all it can say
+                // about any key that old, a real label's included. Unknown,
+                // so the package waits for a person (`postage-source-split/16`).
+                Log::channel('usps-validation')->warning('USPS cannot look back far enough to say what became of a purchase', [
+                    'offer' => $offer->public_id,
+                    'attempted_at' => $offer->consumed_at?->toIso8601String(),
+                ]);
             }
 
             return null;
@@ -1242,17 +1320,37 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
     }
 
     /**
-     * A 2xx is not USPS's answer: the v3 cancel reply's `status` is, and only
-     * `CANCELED` means the label was cancelled or its refund requested
-     * (observed in production as `{"trackingNumber": …, "status": "CANCELED"}`).
+     * A 2xx is not USPS's answer: the v3 cancel reply's `status` is. Two of
+     * them void the label. `CANCELED` — no Shipping Services File yet, so the
+     * label is simply cancelled (observed in production as
+     * `{"trackingNumber": …, "status": "CANCELED"}`). `DISPUTED` — the file
+     * exists, so USPS opened a refund request instead, with a `disputeId`, and
+     * decides later whether to pay it (documented, not yet observed). Either
+     * way the label must not be used, so the package is free to ship again.
      * A reply without a status cannot be read.
      */
     private function readCancelReply(Response $response, string $trackingNumber): CancelResponse
     {
-        $status = data_get($this->decodeJsonSafely($response), 'status');
+        $payload = $this->decodeJsonSafely($response);
+        $status = data_get($payload, 'status');
 
         if ($status === 'CANCELED') {
             return CancelResponse::success('Label voided successfully.');
+        }
+
+        if ($status === 'DISPUTED') {
+            $disputeId = data_get($payload, 'disputeId');
+
+            Log::channel('usps-validation')->info('USPS opened a refund request rather than cancelling a label', [
+                'tracking_number' => $trackingNumber,
+                'dispute_id' => $disputeId,
+            ]);
+
+            return CancelResponse::success(
+                'Label voided. USPS could no longer cancel it outright, so it opened a refund request'
+                .(is_scalar($disputeId) && (string) $disputeId !== '' ? " (dispute {$disputeId})" : '')
+                .'. USPS decides whether to refund it.',
+            );
         }
 
         if (is_string($status) && $status !== '') {

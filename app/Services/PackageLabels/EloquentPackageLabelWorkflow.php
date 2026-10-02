@@ -83,8 +83,7 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
                 'error' => $e->getMessage(),
             ]);
 
-            return LabelVoidResult::failure(
-                'Voided, not recorded',
+            return LabelVoidResult::voidedNotRecorded(
                 'The label was voided, but PolyBag could not record it, so the package still shows as shipped. '
                 .'A manager can use Record Void on the Packages table to un-ship it without voiding it again.',
             );

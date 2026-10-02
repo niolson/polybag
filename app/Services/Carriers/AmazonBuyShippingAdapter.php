@@ -484,8 +484,16 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
             return null;
         }
 
+        // A sale Amazon confirmed has a shipment ID, and its documents can be
+        // fetched by it however old the purchase tokens are. Without one, the
+        // only handle is replaying the purchase under the same idempotency
+        // key (`postage-source-split/16`).
+        $confirmed = filled($request->offer->purchase_reference);
+
         try {
-            $label = app(AmazonBuyShippingService::class)->purchase($package, $request->offer, $request);
+            $label = $confirmed
+                ? app(AmazonBuyShippingService::class)->documentsFor($package, $request->offer, $request)
+                : app(AmazonBuyShippingService::class)->purchase($package, $request->offer, $request);
         } catch (\Throwable $e) {
             logger()->warning('Could not establish what became of an Amazon purchase', [
                 'package_id' => $package->id,
@@ -494,6 +502,24 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
             ]);
 
             return null;
+        }
+
+        // The tracking number the purchase reply gave, where one was kept: in
+        // the sandbox a re-fetch has returned a different one
+        // (`amazon-shipping-external-orders/01`), and the purchase's is the
+        // one Amazon sold.
+        $reported = $request->offer->purchase_context[OfferStore::REPORTED_TRACKING_NUMBER] ?? null;
+
+        if ($confirmed && is_string($reported) && $reported !== '') {
+            $label = new AmazonPurchasedLabel(
+                shipmentId: $label->shipmentId,
+                trackingId: $reported,
+                labelData: $label->labelData,
+                labelFormat: $label->labelFormat,
+                labelDpi: $label->labelDpi,
+                customsFormData: $label->customsFormData,
+                customsFormFormat: $label->customsFormFormat,
+            );
         }
 
         return $this->shipResponse($label, $request, $package);
@@ -562,15 +588,29 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
             postageDataSourceId: $offer->postage_data_source_id
                 ?? app(AmazonBuyShippingService::class)->postageSourceFor($package)?->id,
             sourceLabelReference: $label->shipmentId,
-            metadata: array_filter([
-                self::SHIPMENT_ID_KEY => $label->shipmentId,
-                // Amazon's own carrier identifier, not our `Carrier` row's name.
-                // `getTracking` takes it, and a courier we hold no row for has
-                // no other handle.
-                self::CARRIER_ID_KEY => $metadata['amazonCarrierId'] ?? null,
-                self::SERVICE_ID_KEY => $metadata['amazonServiceId'] ?? null,
-            ], fn (?string $value): bool => filled($value)),
+            metadata: self::labelMetadata($offer, $label->shipmentId),
         );
+    }
+
+    /**
+     * What a package keeps about a label Amazon sold: the shipment ID that
+     * cancellation and the documents call take, and Amazon's own carrier and
+     * service identifiers. The carrier ID is not our `Carrier` row's name;
+     * `getTracking` takes it, and a courier we hold no row for has no other
+     * handle. Also what a label recorded by hand keeps
+     * (`postage-source-split/16`), or it could be neither voided nor tracked.
+     *
+     * @return array<string, string>
+     */
+    public static function labelMetadata(ShippingOffer $offer, ?string $shipmentId): array
+    {
+        $metadata = $offer->rate_metadata ?? [];
+
+        return array_filter([
+            self::SHIPMENT_ID_KEY => $shipmentId,
+            self::CARRIER_ID_KEY => $metadata['amazonCarrierId'] ?? null,
+            self::SERVICE_ID_KEY => $metadata['amazonServiceId'] ?? null,
+        ], fn (mixed $value): bool => is_string($value) && $value !== '');
     }
 
     /**

@@ -16,6 +16,7 @@ use App\Filament\Resources\ShipmentResource;
 use App\Models\LabelBatchItem;
 use App\Models\Package;
 use App\Models\Shipment;
+use App\Services\PostageSources\UnresolvedPurchaseResolver;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 use Illuminate\Support\Facades\Cache;
@@ -35,8 +36,8 @@ class ExceptionsWidget extends BaseWidget
 
     protected function getStats(): array
     {
-        // v2 added `needs_shipping_method`; an entry cached before it would lack the key.
-        $counts = Cache::remember('widget:exceptions:v2', 300, fn (): array => $this->queryCounts());
+        // v3 added `unresolved_purchases`; an entry cached before it would lack the key.
+        $counts = Cache::remember('widget:exceptions:v3', 300, fn (): array => $this->queryCounts());
 
         return [
             Stat::make('Undeliverable Shipments', $counts['undeliverable'])
@@ -64,6 +65,11 @@ class ExceptionsWidget extends BaseWidget
                 ->descriptionIcon('heroicon-m-exclamation-circle')
                 ->color($counts['needs_shipping_method'] > 0 ? 'warning' : 'success')
                 ->url(ShipmentResource::needsShippingMethodUrl()),
+            Stat::make('Unfinished Label Purchases', $counts['unresolved_purchases'])
+                ->description('Packages that cannot be bought for until settled')
+                ->descriptionIcon('heroicon-m-question-mark-circle')
+                ->color($counts['unresolved_purchases'] > 0 ? 'danger' : 'success')
+                ->url(PackageResource::unresolvedPurchasesUrl()),
             Stat::make('Unmapped Shipping References', $counts['unmapped_references'])
                 ->description('Last 90 days, need mapping')
                 ->descriptionIcon('heroicon-m-link')
@@ -92,6 +98,7 @@ class ExceptionsWidget extends BaseWidget
                 ->distinct('shipping_method_reference')
                 ->count('shipping_method_reference'),
             'needs_shipping_method' => Shipment::query()->needingShippingMethod()->count(),
+            'unresolved_purchases' => app(UnresolvedPurchaseResolver::class)->needingAPerson()->distinct()->count('package_id'),
             'tracking_exceptions' => Package::query()
                 ->where('status', PackageStatus::Shipped)
                 ->where('tracking_status', TrackingStatus::Exception)
