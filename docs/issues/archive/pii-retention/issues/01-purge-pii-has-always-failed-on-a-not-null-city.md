@@ -24,7 +24,7 @@ anything, in any deployment, and `pii_retention_days` — configurable globally 
 Settings and per channel on the Channel resource — has described a policy that does not run.
 
 Found while implementing
-[`shopify-shipping-carrier/07`](../../shopify-shipping-carrier/issues/07-customs-form-printing.md),
+[`shopify-shipping-carrier/07`](../../../shopify-shipping-carrier/issues/07-customs-form-printing.md),
 whose constraint 2 requires the purge to null a stored customs form "alongside `label_data`".
 That constraint could not have held, and writing a test for it is what surfaced this.
 

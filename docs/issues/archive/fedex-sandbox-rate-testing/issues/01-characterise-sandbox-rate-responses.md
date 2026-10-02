@@ -7,7 +7,7 @@ Repo: **`polybag`**
 
 ## Parent
 
-`docs/issues/fedex-sandbox-rate-testing/PRD.md`
+`docs/issues/archive/fedex-sandbox-rate-testing/PRD.md`
 
 ## Problem
 

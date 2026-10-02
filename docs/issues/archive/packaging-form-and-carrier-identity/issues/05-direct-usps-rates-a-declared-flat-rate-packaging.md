@@ -6,7 +6,7 @@ Repo: `polybag`
 
 ## Parent
 
-[ADR-0005](../../../adr/0005-packaging-form-and-carrier-identity.md), the USPS half of
+[ADR-0005](../../../../adr/0005-packaging-form-and-carrier-identity.md), the USPS half of
 decision 3, "Physical-form filtering stays inside the adapters", and the *Trade-off*
 section — this is the cost the ADR says is deferred rather than avoided.
 

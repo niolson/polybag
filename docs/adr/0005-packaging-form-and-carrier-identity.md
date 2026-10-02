@@ -16,7 +16,7 @@ See `0006-carriers-are-carriers-sources-are-policy.md`.
 Proposed 2026-09-15 and accepted the same day after four review passes, each of which is
 recorded below and under "Options considered" so that the rejected shapes stay rejected.
 
-Amended 2026-09-15, while slicing into `docs/issues/packaging-form-and-carrier-identity/`,
+Amended 2026-09-15, while slicing into `docs/issues/archive/packaging-form-and-carrier-identity/`,
 on one point of decision 3: the accepted text had FedEx set a rate's requirement from
 whether it came back from the One Rate request. Reading the adapter showed the ordinary
 rate request sends no `packagingType` and the ship body labels every non-One-Rate rate as
@@ -352,7 +352,7 @@ leaves it for its own issue.
 
 ## Implementation
 
-Tracked as issues under `docs/issues/packaging-form-and-carrier-identity/`, ordered so
+Tracked as issues under `docs/issues/archive/packaging-form-and-carrier-identity/`, ordered so
 that `RateResponse` and the shared filter ship first, wired at both sites, with every
 adapter returning `shipperPackaging()` (no behaviour change), then the `BoxSize` column and
 the FedEx migration, then the Amazon classifier replacing `12`'s filter, and last the direct

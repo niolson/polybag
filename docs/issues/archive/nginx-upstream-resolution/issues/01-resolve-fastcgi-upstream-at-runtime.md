@@ -7,7 +7,7 @@ Repo: **`polybag`**
 
 ## Parent
 
-`docs/issues/nginx-upstream-resolution/PRD.md`
+`docs/issues/archive/nginx-upstream-resolution/PRD.md`
 
 ## Problem
 

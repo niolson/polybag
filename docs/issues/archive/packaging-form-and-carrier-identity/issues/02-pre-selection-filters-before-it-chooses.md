@@ -6,7 +6,7 @@ Repo: `polybag`
 
 ## Parent
 
-[ADR-0005](../../../adr/0005-packaging-form-and-carrier-identity.md), decision 4 — the
+[ADR-0005](../../../../adr/0005-packaging-form-and-carrier-identity.md), decision 4 — the
 second site, and "the empty outcome is part of the contract".
 
 ## What to build

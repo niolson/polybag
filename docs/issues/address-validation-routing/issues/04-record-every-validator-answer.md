@@ -26,7 +26,7 @@ representative; every validator answer on a real Shipment is better evidence.
   - the country, and whether the run was scheduled or manual
   - the time
 - **Rows hold verdicts, not addresses.** The address is already on the Shipment; a second
-  copy here would widen what [pii-retention](../../pii-retention/) has to purge. A row
+  copy here would widen what [pii-retention](../../archive/pii-retention/) has to purge. A row
   is deleted with its Shipment.
 - **Unavailable is not logged as an answer.** A validator that couldn't run is either not
   logged or logged as unavailable, so it never counts as a data point.

@@ -6,7 +6,7 @@ Repo: `polybag`
 
 ## Parent
 
-[ADR-0005](../../../adr/0005-packaging-form-and-carrier-identity.md), decisions 1 and 2,
+[ADR-0005](../../../../adr/0005-packaging-form-and-carrier-identity.md), decisions 1 and 2,
 and the FedEx half of decision 3.
 
 ## What to build
