@@ -1,6 +1,6 @@
 # An error after the label is recorded reports a shipped Package as failed
 
-Status: needs-triage
+Status: done — 2026-10-02
 
 Repo: `polybag`
 
@@ -49,3 +49,8 @@ items store it as `error_message`.
   `afterCommit` listener on `PackageShipped` now runs on the outer commit, inside
   `DB::transaction()`, so if it throws, the label is saved but the packer is told
   "label not recorded". What is left is making that listener step best-effort.
+- 2026-10-02 — Done. `recordBoughtLabel()`'s catch now reads the Package's active Label
+  back before reporting a failure. If it carries the sold tracking number, the commit
+  landed and only post-commit work (a `PackageShipped` listener, or queueing one) threw:
+  that is logged as a warning and the purchase is reported as shipped, so the Ship page
+  prints and batch ship counts the label. Tested for `ship()` and `autoShip()`.

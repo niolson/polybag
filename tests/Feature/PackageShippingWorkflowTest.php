@@ -451,6 +451,70 @@ it('keeps a sold label recoverable when recording it fails, rather than buying a
         ->and($offer->fresh()->purchase_reference)->toBe('TRACK123');
 });
 
+it('reports a recorded label as shipped when post-ship work fails after the commit', function (): void {
+    // PackageShipped's listeners run once the label has committed. One of them
+    // throwing used to be reported as "label not recorded", with no print.
+    $log = Log::spy();
+    $package = createWorkflowPackage();
+    $buyer = User::factory()->create(['role' => Role::User]);
+    Schema::drop('audit_logs');
+    $rate = new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days');
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('createShipment')->once()->andReturn(ShipResponse::success(
+        trackingNumber: 'TRACK123',
+        cost: 7.25,
+        carrier: 'MockCarrier',
+        service: 'Ground',
+        labelData: base64_encode('label'),
+    ));
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate), userId: $buyer->id),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped)
+        ->and($package->fresh()->tracking_number)->toBe('TRACK123')
+        ->and($buyer->notifications()->count())->toBe(0);
+
+    $log->shouldHaveReceived('warning', [
+        'Recorded a label but post-ship work failed',
+        Mockery::on(fn (array $context): bool => $context['tracking_number'] === 'TRACK123'),
+    ]);
+    $log->shouldNotHaveReceived('error', ['Bought a label but could not record it', Mockery::any()]);
+});
+
+it('counts an auto-shipped label as bought when post-ship work fails after the commit', function (): void {
+    $this->actingAs($user = User::factory()->create());
+    $package = createWorkflowPackage();
+    Schema::drop('audit_logs');
+
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    quotingWorkflowGround($adapter);
+    $adapter->shouldReceive('createShipment')->once()->andReturn(ShipResponse::success(
+        trackingNumber: 'AUTO123',
+        cost: 7.25,
+        carrier: 'MockCarrier',
+        service: 'Ground',
+        labelData: base64_encode('label'),
+    ));
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package,
+        new PackageAutoShippingRequest(userId: $user->id),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($result->summaryMessage())->toContain('AUTO123')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
+});
+
 it('asks again for a label the source confirmed but PolyBag never recorded, rather than buying another', function (): void {
     // Amazon stamps the offer the moment it confirms, outside the transaction
     // that saves the Label. That stamp survives a failed save, so the offer

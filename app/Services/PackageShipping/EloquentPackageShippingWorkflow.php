@@ -1077,6 +1077,23 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
             return null;
         } catch (\Throwable $e) {
+            if ($this->labelWasRecorded($package, $response)) {
+                // The commit landed and something after it — a PackageShipped
+                // listener, or queueing one — threw. The label is saved, so the
+                // purchase succeeded; reporting it as unrecorded would stop the
+                // print and count a bought label as a failure.
+                logger()->warning('Recorded a label but post-ship work failed', [
+                    'package_id' => $package->id,
+                    'tracking_number' => $response->trackingNumber,
+                    'exception' => $e::class,
+                    'error' => $e->getMessage(),
+                ]);
+
+                $package->refresh();
+
+                return null;
+            }
+
             if ($offer !== null && $response->trackingNumber !== null) {
                 try {
                     $this->offerStore->recordReportedTrackingNumber($offer, $response->trackingNumber);
@@ -1103,6 +1120,25 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
             return PackageShippingResult::labelNotRecorded($seller, $response->trackingNumber, $recoverable);
         }
+    }
+
+    /**
+     * Whether the package's active label is this one, read back from the database.
+     *
+     * Best effort: when the database is what failed, it reads as unrecorded and
+     * the caller takes the safe path.
+     */
+    private function labelWasRecorded(Package $package, ShipResponse $response): bool
+    {
+        if ($response->trackingNumber === null) {
+            return false;
+        }
+
+        return rescue(
+            fn (): bool => $package->activeLabel()->where('tracking_number', $response->trackingNumber)->exists(),
+            false,
+            report: false,
+        );
     }
 
     /**
