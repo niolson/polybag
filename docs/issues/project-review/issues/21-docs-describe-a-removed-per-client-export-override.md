@@ -1,6 +1,6 @@
 # Docs describe a per-client export override that was removed
 
-Status: needs-triage
+Status: done — 2026-10-02
 
 Repo: `polybag`
 
@@ -32,3 +32,12 @@ routing will look for, or reintroduce, an override the product decided against.
   something that exists.
 
 ## Comments
+
+- 2026-10-02 — Corrected all three places, plus two the ticket missed: the `README.md`
+  settings table listed "export override" under Clients (now "label reference", which the
+  Clients form does hold), and `AGENTS.md`'s *Security & Configuration* said import/export
+  credentials "may be overridden per client" (now: each `DataSource` is optionally
+  assigned to a client). The docblock names the two destinations the code uses; the
+  `AGENTS.md` export line describes them and says the override was removed on purpose; the
+  example commit subject is now `Skip partly shipped orders in batch ship` (`19`).
+  Documentation only, so no test.

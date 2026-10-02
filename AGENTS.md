@@ -208,7 +208,7 @@ Supported drivers:
 - **Amazon** — Via SP-API with per-source client credentials + refresh token
 
 Import sources: `app/Services/ShipmentImport/Sources/` — `DatabaseSource`, `ShopifySource`, `AmazonSource`
-Export: `app/Services/ShipmentImport/PackageExportService.php` — supports per-client export destination overrides
+Export: `app/Services/ShipmentImport/PackageExportService.php` — exports to the Shipment's originating connection when its export is enabled, plus, in multi-client mode, every active connection with global export on. There is no per-client export override; it was removed on purpose
 
 Do not conflate a Shipment's import source with a Package's postage source. They can differ,
 although marketplace postage is deliberately bound to the originating Shopify or Amazon
@@ -346,11 +346,11 @@ where the flag is `false`.
 
 ## Contributing
 
-Keep commits focused, with short imperative subjects (`Add per-client export destination override to PackageExportService`). PRs should explain user-visible impact, note schema or config changes, link related issues, and include screenshots for Filament/UI changes. Flag follow-up steps such as migrations, seeders, or workstation hardware setup. See `CONTRIBUTING.md`.
+Keep commits focused, with short imperative subjects (`Skip partly shipped orders in batch ship`). PRs should explain user-visible impact, note schema or config changes, link related issues, and include screenshots for Filament/UI changes. Flag follow-up steps such as migrations, seeders, or workstation hardware setup. See `CONTRIBUTING.md`.
 
 ## Security & Configuration
 
-Never commit secrets: `.env` values, carrier credentials, data source credentials, OAuth tokens, database connection strings, or private QZ signing keys. `.env` holds infrastructure and base URLs; operational credentials live encrypted in the App Settings, Carrier Accounts, and Connections UIs. Carrier credentials live on `CarrierAccount` records and may be scoped by location and client through `CarrierAccountScope`; import/export credentials live on `DataSource` records and may be overridden per client.
+Never commit secrets: `.env` values, carrier credentials, data source credentials, OAuth tokens, database connection strings, or private QZ signing keys. `.env` holds infrastructure and base URLs; operational credentials live encrypted in the App Settings, Carrier Accounts, and Connections UIs. Carrier credentials live on `CarrierAccount` records and may be scoped by location and client through `CarrierAccountScope`; import/export credentials live on `DataSource` records, each optionally assigned to a client.
 
 If you touch printing, scale, OAuth, pack slips, or carrier account routing, document the workstation, callback URL, certificate, or client-scope implications in the PR.
 

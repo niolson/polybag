@@ -1516,6 +1516,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             ? $selection
             : $selection->holdingBlindOffers($heldBlind, $channel->name);
 
+        // A blind purchase is never held to the method's requirements: a rule
+        // naming it, or its being the method's only choice, is the operator's
+        // consent to an undated purchase, due-by date or not
+        // (`project-review/20`). The method form says so.
         if ($ruleResult->hasPreSelectedBlindPurchase()) {
             $blindOffer = $this->shippingRateService
                 ->blindPurchaseOffersFor($package)

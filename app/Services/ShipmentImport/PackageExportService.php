@@ -30,8 +30,8 @@ class PackageExportService
 
     /**
      * Export a shipped package's data to all configured destinations:
-     *  1. The client's explicit export override, or the shipment's originating data source.
-     *  2. Every active data source with global_export enabled (fan-out; deduped against #1).
+     *  1. The shipment's originating data source, when its export is enabled.
+     *  2. Every active data source with global_export and export enabled (fan-out; deduped against #1).
      *     Global fan-out is a multi-client feature; in single-client mode the toggle is
      *     hidden in the UI and exports are strictly source-scoped.
      */

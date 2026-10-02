@@ -21,6 +21,7 @@ use App\Models\Product;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
+use App\Models\ShippingMethodPostageSource;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\SettingsService;
@@ -305,6 +306,27 @@ it('saves both requirements from the shipping method form', function (): void {
 
     expect($method->excludes_late_rates)->toBeFalse()
         ->and($method->otdr_protection_orders->all())->toBe([OtdrProtectedOrders::Prime, OtdrProtectedOrders::Other]);
+});
+
+it('warns that Shopify Shipping is bought without a delivery date when the method allows it and orders can have a due-by date', function (): void {
+    $this->actingAs(User::factory()->admin()->create());
+    $method = ShippingMethod::factory()->create(['commitment_days' => null, 'excludes_late_rates' => true]);
+    ShippingMethodPostageSource::factory()->shopify()->for($method)->create();
+
+    Livewire::test(EditShippingMethod::class, ['record' => $method->id])
+        ->assertSeeText('Shopify Shipping is bought without a delivery date')
+        ->fillForm(['excludes_late_rates' => false])
+        ->assertDontSeeText('Shopify Shipping is bought without a delivery date')
+        ->fillForm(['commitment_days' => 3])
+        ->assertSeeText('Shopify Shipping is bought without a delivery date');
+});
+
+it('does not warn about Shopify Shipping on a method that does not allow it', function (): void {
+    $this->actingAs(User::factory()->admin()->create());
+    $method = ShippingMethod::factory()->create(['commitment_days' => 3, 'excludes_late_rates' => true]);
+
+    Livewire::test(EditShippingMethod::class, ['record' => $method->id])
+        ->assertDontSeeText('Shopify Shipping is bought without a delivery date');
 });
 
 it('hides the OTDR choice when no Amazon connection is active, and keeps what was saved', function (): void {
