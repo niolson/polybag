@@ -217,8 +217,9 @@ it('quotes a direct rate behind an offer that records everything the purchase ne
         ->and($offer->quote_fingerprint)->toBe(RateRequest::fromPackage($package->fresh())->fingerprint())
         ->and($offer->carrier_account_fingerprint)->toBe($account->fingerprint())
         // The window closes with the quoted ship day, in the location's
-        // timezone; the column carries whole seconds.
-        ->and($offer->expires_at->timestamp)->toBe($shipDay->endOfDay()->timestamp)
+        // timezone: at the start of the next day, since the column carries
+        // whole seconds.
+        ->and($offer->expires_at->timestamp)->toBe($shipDay->addDay()->startOfDay()->timestamp)
         ->and($offer->expires_at->isFuture())->toBeTrue();
 
     // One offer per rate, one quote per rate, and every rate the Ship page
@@ -251,7 +252,42 @@ it('windows a direct offer on the day the carrier was quoted for, read once', fu
 
     $offer = ShippingOffer::where('public_id', $rates->first()->offerId)->firstOrFail();
 
-    expect($offer->expires_at->timestamp)->toBe($quotedFor->endOfDay()->timestamp);
+    expect($offer->expires_at->timestamp)->toBe($quotedFor->addDay()->timestamp);
+});
+
+/**
+ * The window used to end at `endOfDay()`, whose 23:59:59.999999 the column
+ * stored as 23:59:59: an offer quoted in the ship day's last second was
+ * issued already expired, and CI failed whenever it ran across midnight in
+ * the location's timezone.
+ */
+it('keeps a direct offer quoted in the ship day\'s last second buyable until midnight', function (): void {
+    $this->actingAs($user = User::factory()->create());
+    $this->travelTo(CarbonImmutable::parse('2026-10-01 23:59:59.500000', 'America/New_York'));
+    ['package' => $package] = packageQuotedByFakeUsps();
+    $shipDay = CarbonImmutable::now('America/New_York')->startOfDay();
+
+    $this->partialMock(ShipDateService::class, function (MockInterface $mock) use ($shipDay): void {
+        $mock->shouldReceive('getShipDate')->andReturn($shipDay);
+    });
+
+    $quoted = rateOptionFromShipPage($package);
+    $offer = ShippingOffer::where('public_id', $quoted->offerId)->firstOrFail();
+
+    expect($offer->hasExpired())->toBeFalse();
+
+    // From midnight the ship day it was quoted for is over.
+    $this->travelTo(CarbonImmutable::parse('2026-10-02 00:00:00', 'America/New_York'));
+    expect($offer->fresh()->hasExpired())->toBeTrue();
+
+    $this->travelTo(CarbonImmutable::parse('2026-10-01 23:59:59.900000', 'America/New_York'));
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: $quoted, userId: $user->id),
+    );
+
+    expect($result->success)->toBeTrue("{$result->title}: {$result->message}")
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
 });
 
 it('buys what the offer says when the browser restates the rate', function (): void {

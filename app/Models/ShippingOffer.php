@@ -6,6 +6,7 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\Enums\PostageSource;
 use App\Enums\SourceEnvironment;
 use App\Exceptions\MissingDeclaredValueException;
+use App\Services\PostageSources\OfferStore;
 use Database\Factories\ShippingOfferFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -166,11 +167,13 @@ class ShippingOffer extends Model
 
     /**
      * An offer with no published window has not expired — the absence of an
-     * expiry is not an expiry of zero.
+     * expiry is not an expiry of zero. The window is exclusive: an offer has
+     * expired from the instant `expires_at` names, as
+     * {@see OfferStore} reads it when it looks for a live offer.
      */
     public function hasExpired(): bool
     {
-        return $this->expires_at !== null && $this->expires_at->isPast();
+        return $this->expires_at !== null && ! $this->expires_at->isFuture();
     }
 
     public function isConsumed(): bool
