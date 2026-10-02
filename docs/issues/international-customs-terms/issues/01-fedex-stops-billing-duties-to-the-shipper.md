@@ -31,7 +31,8 @@ block does.
 
 ## Acceptance criteria
 
-- [x] An international FedEx rate request sends `dutiesPayment.paymentType: RECIPIENT`
+- [x] ~~An international FedEx rate request sends `dutiesPayment.paymentType: RECIPIENT`~~
+      Withdrawn 2026-10-02: FedEx rating accepts only `SENDER` (see Comments)
 - [x] An international FedEx ship request sends `RECIPIENT` with no duties payor, and
       `commercialInvoice.termsOfSale: DDU`
 - [x] Transportation is still billed `SENDER` to the resolved account
@@ -59,3 +60,13 @@ block does.
   before the fix. The FedEx certification commands (`FedexRunEtdTestCase`,
   `FedexRunConsolidationTestCase`) send FedEx's own scripted test-case bodies and are
   unchanged.
+- 2026-10-02 — Production rating refused the rate half within the hour:
+  `400 RATE.PAYMENTTYPE.NOTALLOWED`, "Only allowed payment type is SENDER", which broke
+  every international FedEx quote. The rate request is back to `SENDER`. A quote bills no
+  one, and the price is read from `totalNetCharge`, which excludes duties, so nothing about
+  who pays changes; the ship request still sends `RECIPIENT` and `termsOfSale: DDU`.
+  The same day, production label `878074409098` to Poland (FedEx International Connect
+  Plus) was bought with `dutiesPayment: {paymentType: RECIPIENT}` and no payor, and
+  `commercialInvoice.termsOfSale: DDU`; FedEx accepted it with no alerts, and the waybill
+  copy prints `T/C: S 210726418` (transportation, sender's account) and `D/T: R` (duties
+  and taxes, recipient). The ship half of this issue is proved. The label was voided.

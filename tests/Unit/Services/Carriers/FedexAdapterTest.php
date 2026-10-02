@@ -286,7 +286,9 @@ it('fetches rates from FedEx API', function (): void {
     Saloon::assertSent(Rates::class);
 });
 
-it('uses request countries and bills duties to the recipient when building FedEx rate payloads', function (): void {
+// FedEx's Rate API refuses any duties payment type but SENDER
+// (RATE.PAYMENTTYPE.NOTALLOWED); only the ship request bills the recipient.
+it('uses request countries and sends the only duties payment type FedEx rating accepts', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         Rates::class => MockResponse::make([
@@ -311,7 +313,7 @@ it('uses request countries and bills duties to the recipient when building FedEx
 
         return ($body['requestedShipment']['shipper']['address']['countryCode'] ?? null) === 'CA'
             && ($body['requestedShipment']['recipient']['address']['countryCode'] ?? null) === 'US'
-            && ($body['requestedShipment']['customsClearanceDetail']['dutiesPayment'] ?? null) === ['paymentType' => 'RECIPIENT'];
+            && ($body['requestedShipment']['customsClearanceDetail']['dutiesPayment'] ?? null) === ['paymentType' => 'SENDER'];
     });
 });
 
