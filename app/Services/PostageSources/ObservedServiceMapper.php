@@ -2,11 +2,13 @@
 
 namespace App\Services\PostageSources;
 
+use App\Exceptions\CrossCarrierMappingException;
 use App\Filament\Pages\UnmappedObservedServices;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\ObservedService;
 use App\Models\SourceServiceMapping;
+use App\Services\CarrierNormalizer;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -27,16 +29,26 @@ use Illuminate\Support\Facades\DB;
  *
  * A decision is one {@see SourceServiceMapping} row, written or removed here
  * and nowhere else. Observations are never touched.
+ *
+ * A mapping names the service, never the carrier. Where the source's carrier
+ * name resolves to one of ours, only that carrier's services can be chosen;
+ * where it resolves to nothing, the choice is the person's, and the page
+ * shows them what the source called the carrier.
  */
 class ObservedServiceMapper
 {
+    public function __construct(private CarrierNormalizer $normalizer) {}
+
     /**
      * Alias an observed identity onto a service we already have a row for.
      *
      * @return int observations the mapping now covers
+     *
+     * @throws CrossCarrierMappingException when the service belongs to another carrier than the one the source named
      */
     public function map(ObservedService $observation, CarrierService $carrierService): int
     {
+        $this->ensureSameCarrier($observation, $carrierService->carrier);
         $this->writeMapping($observation, $carrierService);
 
         return $this->coverage($observation);
@@ -52,6 +64,8 @@ class ObservedServiceMapper
      * of that, not a shortcut past it.
      *
      * @return int observations the mapping now covers
+     *
+     * @throws CrossCarrierMappingException when the carrier is not the one the source named
      */
     public function promote(
         ObservedService $observation,
@@ -61,6 +75,8 @@ class ObservedServiceMapper
         bool $canShipToPoBoxes = false,
         bool $canShipToMilitaryAddresses = false,
     ): int {
+        $this->ensureSameCarrier($observation, $carrier);
+
         DB::transaction(function () use (
             $observation,
             $carrier,
@@ -101,6 +117,24 @@ class ObservedServiceMapper
             ->delete();
 
         return $this->coverage($observation);
+    }
+
+    /**
+     * The carrier the source says carries this service, when we hold a row
+     * or an alias for it.
+     */
+    public function carrierFor(ObservedService $observation): ?Carrier
+    {
+        return $this->normalizer->resolve($observation->external_carrier_name ?? $observation->external_carrier_id);
+    }
+
+    private function ensureSameCarrier(ObservedService $observation, Carrier $carrier): void
+    {
+        $observed = $this->carrierFor($observation);
+
+        if ($observed !== null && ! $observed->is($carrier)) {
+            throw CrossCarrierMappingException::between($observed->label(), $carrier->label());
+        }
     }
 
     private function writeMapping(ObservedService $observation, CarrierService $carrierService): void

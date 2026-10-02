@@ -357,7 +357,7 @@ class AmazonShippingAdapter implements AsyncRateQuoting, CarrierPolicy, Recovers
             ->filter(fn (array $pair): bool => $pair[1] instanceof CarrierService
                 && in_array($pair[1]->service_code, $serviceCodes, true)
                 && $this->isBuyable($pair[0], $request, $pair[1]))
-            ->map(function (array $pair) use ($package, $expiresAt, $offerStore, $quote, $source, $marketplace): RateResponse {
+            ->map(function (array $pair) use ($package, $expiresAt, $offerStore, $quote, $source, $marketplace, $request): RateResponse {
                 /** @var CarrierService $service */
                 [$rate, $service] = $pair;
 
@@ -376,6 +376,9 @@ class AmazonShippingAdapter implements AsyncRateQuoting, CarrierPolicy, Recovers
                     purchaseContext: [
                         'requestToken' => $quote->requestToken,
                         'rateId' => (string) $rate['rateId'],
+                        // None, since {@see offerCapability()} implements none:
+                        // the purchase must not add what this price left out.
+                        AmazonBuyShippingService::QUOTED_SPECIAL_SERVICES_KEY => $request->specialServiceCodes,
                     ],
                     expiresAt: $expiresAt,
                     marketplace: $marketplace,

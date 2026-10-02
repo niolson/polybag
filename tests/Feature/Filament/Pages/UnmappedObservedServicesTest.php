@@ -4,12 +4,15 @@ use App\DataTransferObjects\PostageSources\ServiceObservation;
 use App\Enums\PostageSourceKind;
 use App\Enums\Role;
 use App\Enums\SourceEnvironment;
+use App\Exceptions\CrossCarrierMappingException;
 use App\Filament\Pages\UnmappedObservedServices;
 use App\Models\Carrier;
+use App\Models\CarrierAlias;
 use App\Models\CarrierService;
 use App\Models\ObservedService;
 use App\Models\SourceServiceMapping;
 use App\Models\User;
+use App\Services\PostageSources\ObservedServiceMapper;
 use App\Services\PostageSources\ObservedServiceRecorder;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -92,6 +95,75 @@ it('aliases an observed service onto an existing carrier service', function (): 
         ->and($mapping->external_carrier_id)->toBe('USPS')
         ->and($mapping->external_service_id)->toBe('USPS_GROUND_ADVANTAGE')
         ->and($mapping->carrier_service_id)->toBe($carrierService->id);
+});
+
+it('refuses to map a service onto another carrier\'s', function (): void {
+    Carrier::factory()->create(['name' => 'OnTrac']);
+    $groundAdvantage = CarrierService::factory()
+        ->for(Carrier::factory()->create(['name' => 'USPS']))
+        ->create(['name' => 'Ground Advantage']);
+
+    $observation = ObservedService::factory()->create();
+
+    Livewire::test(UnmappedObservedServices::class)
+        ->callAction(TestAction::make('assign')->table($observation), [
+            'carrier_service_id' => $groundAdvantage->id,
+        ])
+        // Not even on the list: only OnTrac's services are offered.
+        ->assertHasFormErrors(['carrier_service_id']);
+
+    expect(SourceServiceMapping::count())->toBe(0);
+});
+
+it('counts a carrier alias when deciding which carrier a service belongs to', function (): void {
+    $ontrac = Carrier::factory()->create(['name' => 'OnTrac Logistics']);
+    CarrierAlias::factory()->for($ontrac)->create(['alias' => 'OnTrac']);
+    $groundAdvantage = CarrierService::factory()
+        ->for(Carrier::factory()->create(['name' => 'USPS']))
+        ->create();
+
+    expect(fn () => app(ObservedServiceMapper::class)->map(ObservedService::factory()->create(), $groundAdvantage))
+        ->toThrow(CrossCarrierMappingException::class);
+});
+
+it('refuses to author a service for another carrier than the source named', function (): void {
+    Carrier::factory()->create(['name' => 'OnTrac']);
+    $usps = Carrier::factory()->create(['name' => 'USPS']);
+
+    $observation = ObservedService::factory()->create();
+
+    Livewire::test(UnmappedObservedServices::class)
+        ->callAction(TestAction::make('author')->table($observation), [
+            'carrier_id' => $usps->id,
+            'service_code' => 'ONTRAC_MFN_GROUND',
+            'name' => 'OnTrac Ground',
+        ])
+        ->assertNotified('Not created');
+
+    expect(CarrierService::where('service_code', 'ONTRAC_MFN_GROUND')->exists())->toBeFalse()
+        ->and(SourceServiceMapping::count())->toBe(0);
+});
+
+it('offers only the named carrier\'s services once that carrier is known', function (): void {
+    $ontrac = Carrier::factory()->create(['name' => 'OnTrac']);
+    $ontracGround = CarrierService::factory()->for($ontrac)->create(['name' => 'Ground']);
+    $groundAdvantage = CarrierService::factory()
+        ->for(Carrier::factory()->create(['name' => 'USPS']))
+        ->create(['name' => 'Ground Advantage']);
+
+    $known = ObservedService::factory()->create();
+    $unknown = ObservedService::factory()->create([
+        'external_carrier_id' => 'LSO',
+        'external_carrier_name' => 'LSO',
+        'external_service_id' => 'LSO_GROUND',
+    ]);
+
+    $options = fn (ObservedService $record): array => (new ReflectionMethod(UnmappedObservedServices::class, 'carrierServiceOptions'))
+        ->invoke(null, $record);
+
+    expect(array_keys($options($known)))->toBe([$ontracGround->id])
+        // No carrier here matches LSO, so the choice is the person's.
+        ->and(array_keys($options($unknown)))->toEqualCanonicalizing([$ontracGround->id, $groundAdvantage->id]);
 });
 
 it('carries one mapping across the environments the same service was seen in', function (): void {

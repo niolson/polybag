@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Enums\Role;
 use App\Enums\SourceEnvironment;
+use App\Exceptions\CrossCarrierMappingException;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\Location;
@@ -166,21 +167,28 @@ class UnmappedObservedServices extends Page implements HasTable
                     ->schema([
                         Forms\Components\Select::make('carrier_service_id')
                             ->label('Carrier Service')
-                            ->options(fn (): array => static::carrierServiceOptions())
+                            ->options(fn (ObservedService $record): array => static::carrierServiceOptions($record))
                             ->default(fn (ObservedService $record): ?int => $record->mapped_carrier_service_id)
+                            ->helperText(fn (ObservedService $record): string => static::carrierHint($record))
                             ->searchable()
                             ->required(),
                     ])
-                    ->action(function (ObservedService $record, array $data): void {
+                    ->action(function (ObservedService $record, array $data, Actions\Action $action): void {
                         $carrierService = CarrierService::findOrFail($data['carrier_service_id']);
 
-                        $mapped = app(ObservedServiceMapper::class)->map($record, $carrierService);
+                        try {
+                            $mapped = app(ObservedServiceMapper::class)->map($record, $carrierService);
 
-                        Notification::make()
-                            ->success()
-                            ->title("Mapped to {$carrierService->name}")
-                            ->body(static::coverage($mapped))
-                            ->send();
+                            Notification::make()
+                                ->success()
+                                ->title("Mapped to {$carrierService->name}")
+                                ->body(static::coverage($mapped))
+                                ->send();
+                        } catch (CrossCarrierMappingException $e) {
+                            Notification::make()->danger()->title('Not mapped')->body($e->getMessage())->send();
+
+                            $action->halt();
+                        }
                     }),
 
                 Actions\Action::make('author')
@@ -229,23 +237,29 @@ class UnmappedObservedServices extends Page implements HasTable
                             ->label('Can ship to military addresses')
                             ->default(false),
                     ])
-                    ->action(function (ObservedService $record, array $data): void {
+                    ->action(function (ObservedService $record, array $data, Actions\Action $action): void {
                         $carrier = Carrier::findOrFail($data['carrier_id']);
 
-                        $mapped = app(ObservedServiceMapper::class)->promote(
-                            observation: $record,
-                            carrier: $carrier,
-                            serviceCode: $data['service_code'],
-                            serviceName: $data['name'],
-                            canShipToPoBoxes: (bool) $data['can_ship_to_po_boxes'],
-                            canShipToMilitaryAddresses: (bool) $data['can_ship_to_military_addresses'],
-                        );
+                        try {
+                            $mapped = app(ObservedServiceMapper::class)->promote(
+                                observation: $record,
+                                carrier: $carrier,
+                                serviceCode: $data['service_code'],
+                                serviceName: $data['name'],
+                                canShipToPoBoxes: (bool) $data['can_ship_to_po_boxes'],
+                                canShipToMilitaryAddresses: (bool) $data['can_ship_to_military_addresses'],
+                            );
 
-                        Notification::make()
-                            ->success()
-                            ->title("Created {$carrier->label()} {$data['name']}")
-                            ->body(static::coverage($mapped))
-                            ->send();
+                            Notification::make()
+                                ->success()
+                                ->title("Created {$carrier->label()} {$data['name']}")
+                                ->body(static::coverage($mapped))
+                                ->send();
+                        } catch (CrossCarrierMappingException $e) {
+                            Notification::make()->danger()->title('Not created')->body($e->getMessage())->send();
+
+                            $action->halt();
+                        }
                     }),
 
                 Actions\Action::make('unmap')
@@ -268,15 +282,24 @@ class UnmappedObservedServices extends Page implements HasTable
     }
 
     /**
-     * Carrier services, labelled the way a person picking one needs to read
-     * them — "USPS — Ground Advantage", not "Ground Advantage" three times.
+     * Carrier services this observation may be mapped onto, labelled the way a
+     * person picking one needs to read them — "USPS — Ground Advantage", not
+     * "Ground Advantage" three times.
+     *
+     * A mapping names the service, never the carrier, so when the source's
+     * carrier resolves to one of ours only that carrier's services are offered.
+     * When it resolves to nothing, every service is, and {@see carrierHint()}
+     * says what the source called the carrier.
      *
      * @return array<int, string>
      */
-    protected static function carrierServiceOptions(): array
+    protected static function carrierServiceOptions(ObservedService $record): array
     {
+        $carrier = app(ObservedServiceMapper::class)->carrierFor($record);
+
         return CarrierService::query()
             ->with('carrier')
+            ->when($carrier, fn ($query) => $query->where('carrier_id', $carrier->getKey()))
             ->get()
             ->sortBy(fn (CarrierService $service): string => $service->carrier->label().' '.$service->name)
             ->mapWithKeys(fn (CarrierService $service): array => [
@@ -285,18 +308,24 @@ class UnmappedObservedServices extends Page implements HasTable
             ->all();
     }
 
+    protected static function carrierHint(ObservedService $record): string
+    {
+        $reported = $record->external_carrier_name ?? $record->external_carrier_id;
+        $carrier = app(ObservedServiceMapper::class)->carrierFor($record);
+
+        return $carrier !== null
+            ? "{$reported} carries this service, so only {$carrier->label()} services are listed. If none is it, author one."
+            : "The source says {$reported} carries this service, and no carrier here matches that name. Map it only onto a service {$reported} itself provides.";
+    }
+
     /**
      * The carrier row this observation probably belongs to, as a starting point
-     * a human then confirms or changes. A guess in a form default, not a match.
+     * a human then confirms or changes. Resolved the way the adapter resolves
+     * the carrier of record, so an alias counts too.
      */
     protected static function matchingCarrierId(ObservedService $record): ?int
     {
-        $name = Str::lower(Str::squish($record->external_carrier_name ?? $record->external_carrier_id));
-
-        return Carrier::query()
-            ->get()
-            ->first(fn (Carrier $carrier): bool => Str::lower(Str::squish($carrier->name)) === $name)
-            ?->getKey();
+        return app(ObservedServiceMapper::class)->carrierFor($record)?->getKey();
     }
 
     /**

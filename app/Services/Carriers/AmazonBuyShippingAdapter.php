@@ -36,11 +36,13 @@ use App\Models\SourceServiceMapping;
 use App\Services\AmazonBuyShippingService;
 use App\Services\CarrierNormalizer;
 use App\Services\Carriers\Concerns\ReadsShippingV2Rates;
+use App\Services\PostageSources\ObservedServiceMapper;
 use App\Services\PostageSources\ObservedServiceRecorder;
 use App\Services\PostageSources\OfferStore;
 use App\Services\RateSelector;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\Shipping\ContentsFilter;
+use App\Services\SpecialServiceResolver;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Exceptions\Request\FatalRequestException;
@@ -612,26 +614,29 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
         $expiresAt = now()->addSeconds(AmazonBuyShippingService::OFFER_WINDOW_SECONDS);
         $offerStore = app(OfferStore::class);
 
-        $catalogCarrierId = $this->catalogCarrierResolver();
+        $catalogCarrier = $this->catalogCarrierResolver();
         $destination = AddressData::fromShipment($package->shipment);
 
         return collect($quote->rates)
-            ->filter(fn (array $rate): bool => $this->isBuyable($rate, $request, $destination, $this->mappedService($rate, $mappings)))
+            ->filter(fn (array $rate): bool => $this->isBuyable($rate, $request, $destination, $this->mappedService($rate, $mappings, $catalogCarrier)))
             ->map(function (array $rate) use (
-                $package, $mappings, $expiresAt, $offerStore, $quote, $source, $marketplace, $catalogCarrierId
+                $package, $mappings, $expiresAt, $offerStore, $quote, $source, $marketplace, $catalogCarrier, $request
             ): RateResponse {
                 $carrierId = (string) $rate['carrierId'];
                 $serviceId = (string) $rate['serviceId'];
-                $mapped = $this->mappedService($rate, $mappings);
+                $mapped = $this->mappedService($rate, $mappings, $catalogCarrier);
 
                 // The catalog identity ADR-0006 decision 10 binds requirements
                 // to. The service only when somebody mapped it; the carrier
-                // from Amazon's own name for it, mapped or not, so an unmapped
-                // offer still says who carries it.
+                // always from Amazon's own name for it, because a mapping names
+                // the service and never who carries the parcel (ADR-0002
+                // decision 1).
+                $amazonCarrierName = (string) ($rate['carrierName'] ?? $carrierId);
+                $normalizedCarrier = $catalogCarrier($amazonCarrierName);
                 $carrierServiceId = $mapped?->id;
-                $normalizedCarrierId = $mapped->carrier_id ?? $catalogCarrierId((string) ($rate['carrierName'] ?? $carrierId));
+                $normalizedCarrierId = $normalizedCarrier?->id;
 
-                $carrier = $mapped?->carrier->name ?? (string) ($rate['carrierName'] ?? $carrierId);
+                $carrier = $normalizedCarrier->name ?? $amazonCarrierName;
                 $serviceName = $mapped->name ?? (string) ($rate['serviceName'] ?? $serviceId);
                 $price = round((float) ($rate['totalCharge']['value'] ?? 0), 2);
                 $currency = (string) ($rate['totalCharge']['unit'] ?? 'USD');
@@ -656,6 +661,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
                     purchaseContext: [
                         'requestToken' => $quote->requestToken,
                         'rateId' => (string) $rate['rateId'],
+                        AmazonBuyShippingService::QUOTED_SPECIAL_SERVICES_KEY => $request->specialServiceCodes,
                     ],
                     expiresAt: $expiresAt,
                     marketplace: $marketplace,
@@ -694,33 +700,47 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
     /**
      * The catalog service somebody mapped this offer's identity to, if any.
      *
+     * A mapping onto another carrier's service is not one: it names a
+     * different service, so it neither renames the offer nor authorizes
+     * automation to buy it. {@see ObservedServiceMapper::map()} refuses to
+     * write one; this ignores any written before it did.
+     *
      * @param  array<string, mixed>  $rate
      * @param  Collection<string, SourceServiceMapping>  $mappings  keyed by {@see SourceServiceMapping::key()}
+     * @param  \Closure(string): ?Carrier  $catalogCarrier
      */
-    private function mappedService(array $rate, Collection $mappings): ?CarrierService
+    private function mappedService(array $rate, Collection $mappings, \Closure $catalogCarrier): ?CarrierService
     {
-        return $mappings->get(SourceServiceMapping::key(
+        $mapped = $mappings->get(SourceServiceMapping::key(
             (string) ($rate['carrierId'] ?? ''),
             (string) ($rate['serviceId'] ?? ''),
         ))?->carrierService;
+
+        $carrier = $catalogCarrier((string) ($rate['carrierName'] ?? $rate['carrierId'] ?? ''));
+
+        if ($mapped !== null && $carrier !== null && $mapped->carrier_id !== $carrier->id) {
+            return null;
+        }
+
+        return $mapped;
     }
 
     /**
-     * Resolves Amazon's carrier name to a `Carrier` id, once per name per
-     * quote: a reply names two or three carriers across several offers, and
+     * Resolves Amazon's carrier name to a `Carrier`, once per name per quote:
+     * a reply names two or three carriers across several offers, and
      * {@see CarrierNormalizer::resolve()} reads the carrier table each call.
      * Null only for a carrier with no row and no alias.
      *
-     * @return \Closure(string): ?int
+     * @return \Closure(string): ?Carrier
      */
     private function catalogCarrierResolver(): \Closure
     {
         $normalizer = app(CarrierNormalizer::class);
         $resolved = [];
 
-        return function (string $carrierName) use ($normalizer, &$resolved): ?int {
+        return function (string $carrierName) use ($normalizer, &$resolved): ?Carrier {
             if (! array_key_exists($carrierName, $resolved)) {
-                $resolved[$carrierName] = $normalizer->resolve($carrierName)?->id;
+                $resolved[$carrierName] = $normalizer->resolve($carrierName);
             }
 
             return $resolved[$carrierName];
@@ -882,17 +902,18 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
      * it at `offerCapability()` would have excluded Amazon entirely, and doing
      * it at purchase would have excluded it after the money.
      *
-     * `$specialServiceCodes` here is already the hard-required set plus the
-     * defaults `ShippingRateService` decided this source could be asked for; a
-     * default nobody can honour is dropped from the purchase instead, which is
-     * what {@see AmazonBuyShippingService::confirmationPreferences()} does.
+     * Only the hard-required codes are checked. A method's default is a
+     * preference: an offer that cannot add it keeps its place and is bought
+     * without it, which is what
+     * {@see AmazonBuyShippingService::confirmationPreferences()} does at
+     * purchase by asking only for what the offer's groups contain.
      */
     private function honoursRequiredServices(array $rate, RateRequest $request): bool
     {
         $offered = collect($rate['availableValueAddedServiceGroups'] ?? [])
             ->flatMap(fn (array $group): array => collect($group['valueAddedServices'] ?? [])->pluck('id')->all());
 
-        foreach ($request->specialServiceCodes as $code) {
+        foreach ($request->requiredSpecialServiceCodes as $code) {
             $vas = self::SUPPORTED_SERVICES[$code] ?? null;
 
             // Declared value rides on the package rather than on a
@@ -901,6 +922,10 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
                 continue;
             }
 
+            // Exactly the option the purchase will ask for. An offer that can
+            // add only an adult signature does not honour a required plain
+            // one: the purchase asks for what the package wants, not for a
+            // stronger substitute, so the group would go unanswered.
             if (! $offered->contains($vas)) {
                 return false;
             }
@@ -986,12 +1011,16 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
     {
         $offered = collect($metadata['availableValueAddedServiceGroups'] ?? [])
             ->flatMap(fn (array $group): array => collect($group['valueAddedServices'] ?? [])->pluck('id')->all());
+        $purchasable = AmazonBuyShippingService::purchasableSpecialServices($request);
 
-        return collect(self::SUPPORTED_SERVICES)
+        // A required plain signature can travel beside a preferred adult one,
+        // and the purchase buys only the stronger the offer has.
+        return SpecialServiceResolver::normalizeCodes(collect(self::SUPPORTED_SERVICES)
             ->filter(fn (string $vas, string $code): bool => $code !== 'declared_value'
-                && $request->hasSpecialService($code)
+                && in_array($code, $purchasable, true)
                 && $offered->contains($vas))
-            ->keys()
+            ->keys())
+            ->values()
             ->all();
     }
 }
