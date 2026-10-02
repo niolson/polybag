@@ -58,7 +58,7 @@ it('refuses a CREATE TABLE export query (self-referential DDL)', function (): vo
         ],
     ]);
 
-    expect(fn () => $source->exportPackage([]))->toThrow(InvalidArgumentException::class);
+    expect(fn (): ?string => $source->exportPackage([]))->toThrow(InvalidArgumentException::class);
 });
 
 it('still runs a legitimate UPDATE mark_exported query', function (): void {
@@ -150,6 +150,6 @@ it('caps the export write as well', function (): void {
         ],
     ]);
 
-    expect(fn () => $source->exportPackage(['tracking_number' => 'TRK1']))->toThrow(RuntimeException::class);
+    expect(fn (): ?string => $source->exportPackage(['tracking_number' => 'TRK1']))->toThrow(RuntimeException::class);
     expect(DB::table('dest')->where('note', 'TRK1')->count())->toBe(0);
 });

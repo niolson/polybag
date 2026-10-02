@@ -255,7 +255,7 @@ it('throws when exporting without a configured query', function (): void {
         'field_mapping' => [],
     ]);
 
-    expect(fn () => $source->exportPackage(['tracking_number' => 'TRK1']))
+    expect(fn (): ?string => $source->exportPackage(['tracking_number' => 'TRK1']))
         ->toThrow(InvalidArgumentException::class, 'Export query is not configured');
 });
 
