@@ -1,6 +1,6 @@
 # FedEx: send label text as ASCII so diacritics do not print as `?`
 
-Status: ready-for-agent
+Status: done — 2026-10-02
 Category: bug
 Repo: `polybag`
 
@@ -46,12 +46,12 @@ that case on `fedex-validation`.
 
 ## Acceptance criteria
 
-- [ ] `FedexAdapterTest`: a recipient with `Zwycięstwa 27B`, city `Łódź` and name
+- [x] `FedexAdapterTest`: a recipient with `Zwycięstwa 27B`, city `Łódź` and name
       `Zoë Ørsted` is sent as `Zwyciestwa 27B`, `Lodz`, `Zoe Orsted`; the shipper is
       transliterated the same way; a commodity described `Café crème` is sent as
       `Cafe creme`
-- [ ] A field that transliterates to blank is sent as the original, and logged
-- [ ] `fedexShip.json` still validates every body
+- [x] A field that transliterates to blank is sent as the original, and logged
+- [x] `fedexShip.json` still validates every body
 - [ ] One production label to a destination with a diacritic, voided straight away,
       prints with no `?` (record it here; the raw capture goes in `.scratch/`)
 
@@ -66,3 +66,18 @@ that case on `fedex-validation`.
 
 - 2026-10-01 — opened from the production verification label for
   `eu-product-identifiers/05`.
+- 2026-10-02 — Built. `FedexAdapter::labelText()` runs `Str::ascii()` over each
+  free-text field, and where that leaves nothing (a name wholly in CJK) sends the text
+  as entered and logs `FedEx label text has no ASCII form; sending it as entered` on
+  `fedex-validation`, with the field name only so the log carries no address. It is
+  applied in `buildContact()` (person name, company name, city, for both shipper and
+  recipient), in `buildStreetLines()` (shared by the label and the rate request, so the
+  two bodies cannot drift), to the rate request's destination city, and to commodity
+  `name` and `description`. Street lines are now cut to 35 with `mb_substr()` after
+  transliterating, so a long line keeps 35 letters rather than 35 bytes, and a fallback
+  line can no longer be split mid-character. Codes and postal codes are untouched.
+  Four tests in `FedexAdapterTest`, all failing before the change: a Polish recipient
+  and a shipper with `ø`/`ü`/`ß`/`é` sent as ASCII with the body validated against
+  `fedexShip.json`; a long Polish street cut to 35 after transliterating; a CJK name
+  sent as entered and logged; and the rate request's destination city and street.
+  The production label check in the last acceptance criterion is still to do.

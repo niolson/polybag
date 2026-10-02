@@ -44,6 +44,7 @@ use App\Services\SettingsService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Exceptions\Request\RequestException;
 use Saloon\Exceptions\Request\Statuses\GatewayTimeoutException;
@@ -1495,14 +1496,14 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
     ): array {
         return [
             'contact' => array_filter([
-                'personName' => trim($address->firstName.' '.$address->lastName),
-                'companyName' => $address->company,
+                'personName' => $this->labelText(trim($address->firstName.' '.$address->lastName), 'personName'),
+                'companyName' => $this->labelText($address->company, 'companyName'),
                 'phoneNumber' => $address->phone ?? $fallbackPhone,
                 'phoneExtension' => $address->phoneExtension,
             ]),
             'address' => [
                 'streetLines' => $this->buildStreetLines($address->streetAddress, $address->streetAddress2),
-                'city' => $address->city,
+                'city' => $this->labelText($address->city, 'city'),
                 ...$this->stateOrProvinceCode($address->country, $address->stateOrProvince),
                 'postalCode' => $address->postalCode,
                 'countryCode' => $address->country,
@@ -1543,7 +1544,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
 
         return array_filter([
             'streetLines' => $streetLines === [] ? null : $streetLines,
-            'city' => $request->destinationCity,
+            'city' => $this->labelText($request->destinationCity, 'city'),
             ...$this->stateOrProvinceCode($request->destinationCountry, $request->destinationStateOrProvince),
             'postalCode' => $request->destinationPostalCode,
             'countryCode' => $request->destinationCountry,
@@ -1557,9 +1558,39 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
     private function buildStreetLines(?string $streetAddress, ?string $streetAddress2): array
     {
         return array_values(array_filter(array_map(
-            fn (?string $line): ?string => filled($line) ? substr($line, 0, 35) : null,
+            fn (?string $line): ?string => filled($line) ? mb_substr($this->labelText($line, 'streetLines'), 0, 35) : null,
             [$streetAddress, $streetAddress2],
         )));
+    }
+
+    /**
+     * Free text as FedEx should print it: transliterated to ASCII.
+     *
+     * FedEx prints a character outside its label code page as `?` on both the
+     * label and the waybill copy, and drops it from the 2D barcode
+     * (`label-address-characters/01`). Text with no ASCII form at all — a name
+     * written wholly in CJK — is sent as entered rather than blank, so FedEx
+     * refuses it with a named error instead of printing a nameless label.
+     *
+     * @return ($text is null ? null : string)
+     */
+    private function labelText(?string $text, string $field): ?string
+    {
+        if (blank($text)) {
+            return $text;
+        }
+
+        $ascii = Str::ascii($text);
+
+        if (blank($ascii)) {
+            Log::channel('fedex-validation')->warning('FedEx label text has no ASCII form; sending it as entered', [
+                'field' => $field,
+            ]);
+
+            return $text;
+        }
+
+        return $ascii;
     }
 
     /**
@@ -1598,8 +1629,8 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
             $totalValue = round($item->unitValue * $item->quantity, 2);
 
             $commodity = [
-                'name' => mb_substr($item->description, 0, 35),
-                'description' => mb_substr($item->description, 0, 450),
+                'name' => mb_substr($this->labelText($item->description, 'commodityName'), 0, 35),
+                'description' => mb_substr($this->labelText($item->description, 'commodityDescription'), 0, 450),
                 'countryOfManufacture' => $item->countryOfOrigin ?? 'US',
                 'quantity' => (string) $item->quantity,
                 'quantityUnits' => 'PCS',

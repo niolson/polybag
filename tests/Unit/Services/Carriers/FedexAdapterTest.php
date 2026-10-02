@@ -2643,3 +2643,156 @@ it('logs the EU product identifiers in the label request', function (): void {
     expect($labelRequest->context['payload']['customsClearanceDetail']['commodities'][0]['regulatoryDetails'][0]['regulationCode'])
         ->toBe('EU_DE_MINIMIS');
 });
+
+/*
+|--------------------------------------------------------------------------
+| Label text sent as ASCII
+|--------------------------------------------------------------------------
+|
+| FedEx printed `?` for the `ę` in a Polish street name on both the label
+| and the waybill copy, and dropped it from the 2D barcode
+| (`label-address-characters/01`). Free text goes out transliterated.
+|
+*/
+
+/**
+ * The `requestedShipment` of the one CreateShipment request sent, checked against our schema.
+ *
+ * @return array<string, mixed>
+ */
+function sentFedexRequestedShipment(): array
+{
+    $requestedShipment = null;
+
+    Saloon::assertSent(function ($request) use (&$requestedShipment): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        assertMatchesFedexSchema($request->body()->all(), 'CreateShipmentRequest');
+        $requestedShipment = $request->body()->all()['requestedShipment'];
+
+        return true;
+    });
+
+    return $requestedShipment;
+}
+
+function fedexShipRequestToPoland(
+    string $recipientFirstName = 'Zoë',
+    string $recipientLastName = 'Ørsted',
+    string $recipientStreet = 'Zwycięstwa 27B',
+): ShipRequest {
+    return new ShipRequest(
+        fromAddress: new AddressData(
+            firstName: 'Søren',
+            lastName: 'Müller',
+            streetAddress: 'Straße der Einheit 5',
+            city: 'Malmö',
+            stateOrProvince: 'WA',
+            postalCode: '98072',
+            company: 'Café Größe',
+            phone: '5551234567',
+        ),
+        toAddress: new AddressData(
+            firstName: $recipientFirstName,
+            lastName: $recipientLastName,
+            streetAddress: $recipientStreet,
+            city: 'Łódź',
+            stateOrProvince: null,
+            postalCode: '90-001',
+            country: 'PL',
+            streetAddress2: 'Mieszkanie 4 – piętro 2',
+            company: 'Żółw Sp. z o.o.',
+            phone: '48221234567',
+        ),
+        packageData: new PackageData(weight: 2.0, length: 8, width: 6, height: 4),
+        selectedRate: new RateResponse(
+            carrier: 'FedEx',
+            serviceCode: 'FEDEX_INTERNATIONAL_CONNECT_PLUS',
+            serviceName: 'FedEx International Connect Plus',
+            price: 38.20,
+            metadata: ['serviceType' => 'FEDEX_INTERNATIONAL_CONNECT_PLUS'],
+        ),
+        customsItems: [
+            new CustomsItem(description: 'Café crème', quantity: 1, unitValue: 12.0, weight: 0.8),
+        ],
+    );
+}
+
+it('sends names, address lines, cities and commodity text to FedEx as ASCII', function (): void {
+    fakeFedexShipEndpoints();
+
+    expect($this->adapter->createShipment(fedexShipRequestToPoland())->success)->toBeTrue();
+
+    $requestedShipment = sentFedexRequestedShipment();
+    $recipient = $requestedShipment['recipients'][0];
+    $shipper = $requestedShipment['shipper'];
+    $commodity = $requestedShipment['customsClearanceDetail']['commodities'][0];
+
+    expect($recipient['contact']['personName'])->toBe('Zoe Orsted')
+        ->and($recipient['contact']['companyName'])->toBe('Zolw Sp. z o.o.')
+        ->and($recipient['address']['streetLines'])->toBe(['Zwyciestwa 27B', 'Mieszkanie 4 - pietro 2'])
+        ->and($recipient['address']['city'])->toBe('Lodz')
+        ->and($recipient['address']['postalCode'])->toBe('90-001')
+        ->and($recipient['address']['countryCode'])->toBe('PL')
+        ->and($shipper['contact']['personName'])->toBe('Soren Muller')
+        ->and($shipper['contact']['companyName'])->toBe('Cafe Grosse')
+        ->and($shipper['address']['streetLines'])->toBe(['Strasse der Einheit 5'])
+        ->and($shipper['address']['city'])->toBe('Malmo')
+        ->and($commodity['name'])->toBe('Cafe creme')
+        ->and($commodity['description'])->toBe('Cafe creme');
+});
+
+it('cuts a FedEx street line to 35 characters after transliterating it', function (): void {
+    fakeFedexShipEndpoints();
+
+    $this->adapter->createShipment(fedexShipRequestToPoland(recipientStreet: 'ul. Księcia Józefa Poniatowskiego 1234'));
+
+    expect(sentFedexRequestedShipment()['recipients'][0]['address']['streetLines'][0])
+        ->toBe('ul. Ksiecia Jozefa Poniatowskiego 1');
+});
+
+it('sends the original text when transliterating would leave a FedEx field blank, and logs it', function (): void {
+    $handler = new TestHandler;
+    Log::extend('fedex-validation-capture', fn (): MonologLogger => new MonologLogger('fedex-validation', [$handler]));
+    config()->set('logging.channels.fedex-validation', ['driver' => 'fedex-validation-capture']);
+    Log::forgetChannel('fedex-validation');
+    fakeFedexShipEndpoints();
+
+    $this->adapter->createShipment(fedexShipRequestToPoland('山田', '太郎'));
+
+    expect(sentFedexRequestedShipment()['recipients'][0]['contact']['personName'])->toBe('山田 太郎');
+
+    $warning = collect($handler->getRecords())
+        ->firstWhere('message', 'FedEx label text has no ASCII form; sending it as entered');
+
+    expect($warning)->not->toBeNull()
+        ->and($warning->context)->toBe(['field' => 'personName']);
+});
+
+it('sends the destination address on a rate request as ASCII', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Rates::class => MockResponse::make(['output' => ['rateReplyDetails' => []]]),
+    ]);
+
+    $this->adapter->getRates(new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '90-001',
+        destinationCountry: 'PL',
+        destinationCity: 'Łódź',
+        packages: [new PackageData(weight: 2.0, length: 10, width: 8, height: 4)],
+        destinationStreetAddress: 'Zwycięstwa 27B',
+    ), ['FEDEX_INTERNATIONAL_CONNECT_PLUS']);
+
+    Saloon::assertSent(function ($request): bool {
+        if (! $request instanceof Rates) {
+            return false;
+        }
+
+        $address = $request->body()->all()['requestedShipment']['recipient']['address'];
+
+        return $address['city'] === 'Lodz' && $address['streetLines'] === ['Zwyciestwa 27B'];
+    });
+});
