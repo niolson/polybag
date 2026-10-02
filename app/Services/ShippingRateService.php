@@ -317,7 +317,10 @@ class ShippingRateService
      * Issue the direct-carrier offer for one rate and return the rate naming it.
      *
      * `postage_source = CarrierAccount`, the account the adapter quoted on, and
-     * no purchase context. Its window ends with the ship day it was quoted for.
+     * no purchase context. Its window ends with the ship day it was quoted for,
+     * stored as the start of the next day: the column keeps whole seconds, so
+     * an `endOfDay()` of 23:59:59.999999 would be stored as 23:59:59 and an
+     * offer quoted in the day's last second would be issued already expired.
      */
     private function issueDirectOffer(
         OfferStore $offerStore,
@@ -341,7 +344,7 @@ class ShippingRateService
             // The packaging requirement travels with the metadata so the
             // purchase-time check classifies what the server quoted.
             rateMetadata: $rate->packagingRequirement->intoRateMetadata($rate->metadata),
-            expiresAt: $shipDate?->endOfDay(),
+            expiresAt: $shipDate?->addDay()->startOfDay(),
             rateQuoteId: $quoteId,
             quoteFingerprint: $quoteFingerprint,
             carrierAccountFingerprint: $carrierAccountFingerprint,

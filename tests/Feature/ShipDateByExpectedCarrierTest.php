@@ -502,7 +502,7 @@ describe('quoting', function (): void {
         expect($requests)->toHaveCount(1)
             ->and($requests[0]->shipDate?->toDateString())->toBe('2026-04-02')
             ->and($offer->expires_at->timestamp)
-            ->toBe(CarbonImmutable::parse('2026-04-01', 'America/New_York')->endOfDay()->timestamp);
+            ->toBe(CarbonImmutable::parse('2026-04-02', 'America/New_York')->timestamp);
     });
 
     it('quotes Amazon Buy Shipping with no date', function (): void {
