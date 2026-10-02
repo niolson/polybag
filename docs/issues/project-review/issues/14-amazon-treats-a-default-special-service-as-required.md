@@ -1,6 +1,6 @@
 # Amazon Buy Shipping treats a method's default special service as required
 
-Status: needs-triage
+Status: done — 2026-10-01
 
 Repo: `polybag`
 
@@ -68,3 +68,43 @@ and should keep passing.
   an Amazon offer's defaults to its own value-added service groups.
 
 ## Comments
+
+- 2026-10-01 — Fixed as proposed. `RateRequest` gained `requiredSpecialServiceCodes`, the
+  subset of `specialServiceCodes` an offer must honour. `ShippingRateService::buildTask()`
+  fills it with the codes that survived its required loop, and both per-task requests
+  pass it through `withSpecialServiceCodes($codes, $requiredCodes)`. A call that leaves
+  out the second argument keeps the codes that were already required and are still asked
+  for. It is left out of `fingerprint()`: it splits codes the digest already covers,
+  and decides which offers are listed, not what any of them costs.
+  `AmazonBuyShippingAdapter::honoursRequiredServices()` now checks only the required
+  codes. Defaults are still asked for at purchase where the offer has the group, as before.
+  `SpecialServiceResolver::resolveForPackageAndRate()` looks up the catalog service only
+  for a rate whose `sourceKind()` is `Direct`, so an Amazon offer keeps its defaults.
+  Regression tests in `AmazonBuyShippingTest`: the Evidence test, which now expects
+  `['OnTrac', 'UPS']`, plus a required-mode counterpart through `ShippingRateService`
+  that still drops OnTrac. In `SpecialServiceResolverTest`, an Amazon-quoted rate mapped
+  to a scoped-out service keeps its default, and the same service quoted direct does not.
+  The Evidence test and the resolver test fail without the fix. The existing hard-required
+  adapter test now marks its code as required.
+- 2026-10-01 — A review of the first pass found three gaps, each confirmed by a failing
+  test. (1) A required plain signature beside a preferred adult one was dropped as
+  superseded, so Amazon admitted offers with no signature at all.
+  `SpecialServiceResolver::supersedeByMode()` now lets the adult signature replace the
+  plain one only when it is at least as binding. `resolveByModeForPackage()` gives
+  rating, purchase and the fingerprint the same split. `buildTask()` still sends a direct
+  carrier one signature. An Amazon offer keeps both, and the purchase buys the strongest
+  the offer has. The filter does not accept an adult signature for a required plain one:
+  a later review found that the purchase never asks for that substitute, so an offer with
+  only `ADULT_SIGNATURE_CONFIRMATION` answered its required group with
+  `NO_CONFIRMATION` (test: `drops an offer that can add only an adult signature when a
+  plain one is required`).
+  (2) `requiredSpecialServiceCodes` was left out of `fingerprint()`, so an offer quoted
+  while a signature was preferred stayed spendable after it became required.
+  `fromPackage()` now fills the field and the fingerprint covers it. (3) The purchase-side
+  scoping change never took effect, because `rateFromOffer()` rebuilds the rate without
+  its observed identity, so every redeemed rate read as direct.
+  `resolveForPackageAndRate()` now takes the offer, and `ShipRequest` passes it. The
+  offer's `postage_source` decides direct or not. Tests: `holds a required signature
+  when the method only prefers an adult one`, `retires an offer when a special service
+  it was quoted as preferring becomes required`, and `buys a preferred signature on a
+  mapped Amazon offer whatever the catalog scopes`.

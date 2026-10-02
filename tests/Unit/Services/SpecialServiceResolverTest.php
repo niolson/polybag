@@ -1,5 +1,6 @@
 <?php
 
+use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\HazmatClass;
 use App\Exceptions\MissingDeclaredValueException;
@@ -172,6 +173,39 @@ it('keeps default codes unscoped for the selected rate carrier', function (): vo
     // No Saturday scope rows exist for any USPS service — unrestricted
     expect(app(SpecialServiceResolver::class)->resolveForPackageAndRate($package, $rate))
         ->toBe(['saturday_delivery']);
+});
+
+it('leaves an Amazon offer its defaults whatever the mapped service is scoped to', function (): void {
+    $saturday = resolverSpecialService('saturday_delivery');
+
+    $fedex = Carrier::factory()->fedex()->create();
+    CarrierService::factory()->fedexGround()->for($fedex)->create();
+    $overnight = CarrierService::factory()->for($fedex)->create([
+        'name' => 'FedEx Priority Overnight',
+        'service_code' => 'PRIORITY_OVERNIGHT',
+    ]);
+    $saturday->carrierServices()->attach($overnight->id);
+
+    $shippingMethod = ShippingMethod::factory()->create();
+    $shippingMethod->specialServices()->attach($saturday->id, ['mode' => 'default']);
+
+    $shipment = Shipment::factory()->for($shippingMethod)->create();
+    $package = Package::factory()->for($shipment)->create();
+
+    // Mapped onto FedEx Ground, which the catalog scopes Saturday away from.
+    $rate = new RateResponse(
+        carrier: 'FedEx',
+        serviceCode: 'FEDEX_GROUND',
+        serviceName: 'FedEx Ground',
+        price: 9.00,
+        observedService: new ObservedServiceIdentity('amazon', 'FEDEX', 'FEDEX_PTP_GROUND'),
+    );
+
+    // Catalog scoping binds direct offers only (ADR-0006 decision 10).
+    expect(app(SpecialServiceResolver::class)->resolveForPackageAndRate($package, $rate))
+        ->toBe(['saturday_delivery'])
+        ->and(app(SpecialServiceResolver::class)->resolveForPackageAndRate($package, fedexRateFor('FEDEX_GROUND')))
+        ->toBeEmpty();
 });
 
 it('applies restricted_countries when resolving for a selected rate', function (): void {

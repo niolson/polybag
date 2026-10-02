@@ -174,6 +174,8 @@ it('binds the offer to the scoped connection, never the shipment\'s import sourc
         ->and($offer->purchase_context)->toBe([
             'requestToken' => 'amzn1.rq.external-request-token',
             'rateId' => 'b1a4a1f0-0c4f-4a47-9d2e-5c6f0a1e7a11',
+            // Quoted with no special services, so none may be bought.
+            'specialServiceCodes' => [],
         ])
         ->and($offer->rate_quote_id)->not->toBeNull()
         ->and($offer->quote_fingerprint)->not->toBeNull();

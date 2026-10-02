@@ -305,7 +305,7 @@ readonly class ShipRequest
         );
 
         $resolver = app(SpecialServiceResolver::class);
-        $specialServiceCodes = $resolver->resolveForPackageAndRate($package, $rate);
+        $specialServiceCodes = $resolver->resolveForPackageAndRate($package, $rate, $offer);
 
         return new self(
             fromAddress: $fromAddress,

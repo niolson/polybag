@@ -64,6 +64,12 @@ class AmazonBuyShippingService
     public const BUSINESS_ID = 'AmazonShipping_US';
 
     /**
+     * The `purchase_context` key an Amazon offer keeps the special service
+     * codes it was quoted with under — see {@see purchasableSpecialServices()}.
+     */
+    public const QUOTED_SPECIAL_SERVICES_KEY = 'specialServiceCodes';
+
+    /**
      * The formats to ask Amazon for, per workstation label format, in order.
      *
      * ZPL and PNG carry the label alone; the PDF is joined with a pack slip
@@ -704,7 +710,7 @@ class AmazonBuyShippingService
                 continue;
             }
 
-            $wanted = collect(self::confirmationPreferences($request))
+            $wanted = collect(self::confirmationPreferences(self::purchasableSpecialServices($request)))
                 ->first(fn (string $id): bool => $available->contains($id));
 
             if ($wanted !== null) {
@@ -757,17 +763,38 @@ class AmazonBuyShippingService
     }
 
     /**
+     * The special services a purchase may ask Amazon for: those this package
+     * still wants that the offer was also quoted with.
+     *
+     * The price on an offer is for the rate as quoted, so a code the quote
+     * left out — every code, for Amazon Shipping, which implements none — is
+     * never added at purchase, where its surcharge would be paid unseen. An
+     * offer that recorded nothing is held to the package alone, as before.
+     *
+     * @return array<int, string>
+     */
+    public static function purchasableSpecialServices(ShipRequest $request): array
+    {
+        $quoted = $request->offer?->purchase_context[self::QUOTED_SPECIAL_SERVICES_KEY] ?? null;
+
+        return is_array($quoted)
+            ? array_values(array_intersect($request->specialServiceCodes, $quoted))
+            : $request->specialServiceCodes;
+    }
+
+    /**
      * Amazon's confirmation service IDs for the special services we model, most
      * specific first — adult signature supersedes signature, the same way it
      * does everywhere else in the app.
      *
+     * @param  array<int, string>  $codes
      * @return list<string>
      */
-    public static function confirmationPreferences(ShipRequest $request): array
+    public static function confirmationPreferences(array $codes): array
     {
         return array_values(array_filter([
-            $request->hasSpecialService('adult_signature_required') ? 'ADULT_SIGNATURE_CONFIRMATION' : null,
-            $request->hasSpecialService('signature_required') ? 'SIGNATURE_CONFIRMATION' : null,
+            in_array('adult_signature_required', $codes, true) ? 'ADULT_SIGNATURE_CONFIRMATION' : null,
+            in_array('signature_required', $codes, true) ? 'SIGNATURE_CONFIRMATION' : null,
         ]));
     }
 
