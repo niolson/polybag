@@ -286,7 +286,7 @@ it('fetches rates from FedEx API', function (): void {
     Saloon::assertSent(Rates::class);
 });
 
-it('uses request countries when building FedEx rate payloads', function (): void {
+it('uses request countries and bills duties to the recipient when building FedEx rate payloads', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         Rates::class => MockResponse::make([
@@ -311,7 +311,7 @@ it('uses request countries when building FedEx rate payloads', function (): void
 
         return ($body['requestedShipment']['shipper']['address']['countryCode'] ?? null) === 'CA'
             && ($body['requestedShipment']['recipient']['address']['countryCode'] ?? null) === 'US'
-            && ($body['requestedShipment']['customsClearanceDetail']['dutiesPayment']['paymentType'] ?? null) === 'SENDER';
+            && ($body['requestedShipment']['customsClearanceDetail']['dutiesPayment'] ?? null) === ['paymentType' => 'RECIPIENT'];
     });
 });
 
@@ -1025,7 +1025,7 @@ it('creates shipment and sends the resolved residential classification', functio
     'unknown falls back to residential' => [null, true],
 ]);
 
-it('uses the ship-from country for FedEx customs duties payment', function (): void {
+it('bills FedEx customs duties to the recipient and transportation to the sender account', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         CreateShipment::class => MockResponse::make([
@@ -1116,7 +1116,17 @@ it('uses the ship-from country for FedEx customs duties payment', function (): v
 
         $body = $request->body()->all();
 
-        return ($body['requestedShipment']['customsClearanceDetail']['dutiesPayment']['payor']['responsibleParty']['address']['countryCode'] ?? null) === 'CA';
+        expect(data_get($body, 'requestedShipment.customsClearanceDetail.dutiesPayment'))->toBe(['paymentType' => 'RECIPIENT'])
+            ->and(data_get($body, 'requestedShipment.customsClearanceDetail.commercialInvoice'))->toBe([
+                'shipmentPurpose' => 'SOLD',
+                'termsOfSale' => 'DDU',
+            ])
+            ->and(data_get($body, 'requestedShipment.shippingChargesPayment'))->toBe([
+                'paymentType' => 'SENDER',
+                'payor' => ['responsibleParty' => ['accountNumber' => ['value' => 'test_account']]],
+            ]);
+
+        return true;
     });
 });
 

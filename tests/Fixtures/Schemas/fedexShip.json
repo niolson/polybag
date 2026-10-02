@@ -313,48 +313,26 @@
       ]
     },
     "CustomsClearanceDetail": {
-      "description": "buildCustomsClearanceDetail(). Goods are always declared as sold, with duties billed to the sender's account in the ship-from country. createShipment() refuses to send a customs shipment with no items, so commodities is never empty.",
+      "description": "buildCustomsClearanceDetail(). Goods are always declared as sold. Duties are billed to the recipient (DDU) with no payor, and the commercial invoice declares DDU, until customs terms are resolved per Shipment (ADR-0008). createShipment() refuses to send a customs shipment with no items, so commodities is never empty.",
       "type": "object",
       "required": ["commercialInvoice", "dutiesPayment", "commodities"],
       "additionalProperties": false,
       "properties": {
         "commercialInvoice": {
           "type": "object",
-          "required": ["shipmentPurpose"],
+          "required": ["shipmentPurpose", "termsOfSale"],
           "additionalProperties": false,
           "properties": {
-            "shipmentPurpose": { "type": "string", "enum": ["SOLD"] }
+            "shipmentPurpose": { "type": "string", "enum": ["SOLD"] },
+            "termsOfSale": { "type": "string", "enum": ["DDU"] }
           }
         },
         "dutiesPayment": {
           "type": "object",
-          "required": ["paymentType", "payor"],
+          "required": ["paymentType"],
           "additionalProperties": false,
           "properties": {
-            "paymentType": { "type": "string", "enum": ["SENDER"] },
-            "payor": {
-              "type": "object",
-              "required": ["responsibleParty"],
-              "additionalProperties": false,
-              "properties": {
-                "responsibleParty": {
-                  "type": "object",
-                  "required": ["address", "accountNumber"],
-                  "additionalProperties": false,
-                  "properties": {
-                    "address": {
-                      "type": "object",
-                      "required": ["countryCode"],
-                      "additionalProperties": false,
-                      "properties": {
-                        "countryCode": { "type": "string", "pattern": "^[A-Z]{2}$" }
-                      }
-                    },
-                    "accountNumber": { "$ref": "#/definitions/AccountNumber" }
-                  }
-                }
-              }
-            }
+            "paymentType": { "type": "string", "enum": ["RECIPIENT"] }
           }
         },
         "commodities": {
