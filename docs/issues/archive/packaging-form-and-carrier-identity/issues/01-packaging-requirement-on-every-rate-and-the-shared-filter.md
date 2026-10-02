@@ -6,7 +6,7 @@ Repo: `polybag`
 
 ## Parent
 
-[ADR-0005](../../../adr/0005-packaging-form-and-carrier-identity.md), decisions 3 and 4
+[ADR-0005](../../../../adr/0005-packaging-form-and-carrier-identity.md), decisions 3 and 4
 (the rate-shopping site only; the pre-selection site is `02`).
 
 ## What to build
@@ -352,5 +352,5 @@ becomes real.
 The reviewer's remedy — restore the quoted rate server-side behind an opaque identifier,
 as `rateFromOffer()` already does for an offer — is an extension of ADR-0002's offer model
 to direct carriers, and is filed as
-[`postage-source-split/14`](../../postage-source-split/issues/14-quote-direct-carrier-rates-behind-an-opaque-identifier.md),
+[`postage-source-split/14`](../../../postage-source-split/issues/14-quote-direct-carrier-rates-behind-an-opaque-identifier.md),
 `needs-triage`. Not a blocker for this slice; worth landing before or alongside `05`.

@@ -18,7 +18,7 @@
             "supported": true,
             "skip_reason": null,
             "notes": [
-                "Sent verbatim to the sandbox 2026-09-17: 503 SERVICE.UNAVAILABLE.ERROR after ~3.3s on every attempt (12 of 12 that day). The sandbox has no canned response for this shape and its live rating engine was not answering; the payload itself was never rejected. Re-run when the engine is back — see docs/issues/fedex-sandbox-rate-testing.",
+                "Sent verbatim to the sandbox 2026-09-17: 503 SERVICE.UNAVAILABLE.ERROR after ~3.3s on every attempt (12 of 12 that day). The sandbox has no canned response for this shape and its live rating engine was not answering; the payload itself was never rejected. Re-run when the engine is back — see docs/issues/archive/fedex-sandbox-rate-testing.",
                 "On the one attempt that day the engine did answer, it returned 400 COUNTRY.POSTALCODE.INVALID for the origin: Mexico City postal codes are five digits and the source gives '1210', which looks like a lost leading zero. Left as FedEx wrote it; try '01210' when the engine is answering."
             ],
             "api": "Rate API",

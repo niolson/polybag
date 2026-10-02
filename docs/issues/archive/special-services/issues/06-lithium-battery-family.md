@@ -5,7 +5,7 @@ Type: AFK
 
 ## Parent
 
-`docs/issues/special-services/implementation-priorities.md` (Wave 3)
+`docs/issues/archive/special-services/implementation-priorities.md` (Wave 3)
 
 ## Decision (made 2026-07-08, approved by Nick in planning conversation)
 

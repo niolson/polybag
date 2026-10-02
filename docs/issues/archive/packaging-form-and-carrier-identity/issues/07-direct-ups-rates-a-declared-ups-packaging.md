@@ -6,7 +6,7 @@ Repo: `polybag`
 
 ## Parent
 
-[ADR-0005](../../../adr/0005-packaging-form-and-carrier-identity.md), the UPS half of
+[ADR-0005](../../../../adr/0005-packaging-form-and-carrier-identity.md), the UPS half of
 decision 3 ("UPS from the `PackagingType` it sent"). Not scheduled by the ADR's
 implementation order; optional, until a customer stocks UPS packaging.
 

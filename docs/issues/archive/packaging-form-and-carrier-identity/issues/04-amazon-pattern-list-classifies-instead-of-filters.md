@@ -6,7 +6,7 @@ Repo: `polybag`
 
 ## Parent
 
-[ADR-0005](../../../adr/0005-packaging-form-and-carrier-identity.md), decision 5, and
+[ADR-0005](../../../../adr/0005-packaging-form-and-carrier-identity.md), decision 5, and
 "What this buys immediately".
 
 ## What to build

@@ -6,7 +6,7 @@ Repo: `polybag`
 
 ## Parent
 
-[ADR-0005](../../../adr/0005-packaging-form-and-carrier-identity.md), "Foreseen, not
+[ADR-0005](../../../../adr/0005-packaging-form-and-carrier-identity.md), "Foreseen, not
 decided — seeding carrier packaging as box sizes".
 
 ## What to decide

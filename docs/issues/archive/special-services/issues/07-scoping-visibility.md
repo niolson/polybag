@@ -5,7 +5,7 @@ Type: AFK
 
 ## Parent
 
-`docs/issues/special-services/implementation-priorities.md`
+`docs/issues/archive/special-services/implementation-priorities.md`
 
 ## What to build
 

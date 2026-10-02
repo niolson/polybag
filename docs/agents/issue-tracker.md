@@ -36,10 +36,24 @@ captures that carry customer addresses.
 - A file that is getting hard to read from the top is the signal to compress it. An issue
   is read by someone deciding what to do next, and a narrative of how the answer was
   reached buries the answer
-- **Resolved issues stay in place.** Set `Status: done` and leave the file where it is —
-  the implementation record under `## Comments` is why the file is kept. Nothing is
-  deleted or moved to an archive; `README.md` in `docs/issues/` is the index of what is
-  still open, and the `Status:` grep there is how you get that view
+- **Resolved issues are kept, never deleted.** Set `Status: done` (or `wontfix`) — the
+  implementation record under `## Comments` is why the file is kept
+- **A finished directory moves to `docs/issues/archive/<feature-slug>/`.** A directory is
+  finished when every issue file in it is `done` or `wontfix`; a `reference` file, such as
+  the PRD, does not hold it open. In the change that closes its last issue:
+  - `git mv docs/issues/<feature-slug> docs/issues/archive/<feature-slug>` so history follows
+  - Update every reference that spells out a path — `docs/issues/<feature-slug>/…` or a
+    relative link — across the repo: code and test comments, migrations, `resources/data`,
+    ADRs, other issue files, and `README.md`, whose row moves from Open work to Closed.
+    `grep -rn '<feature-slug>' --exclude-dir={vendor,node_modules,.git,storage} .` finds them
+  - The short form `<feature-slug>/NN` needs no change; the slug is the issue's identity
+    wherever its directory lives. So a slug must stay unique across `docs/issues/` and
+    `archive/` — never reuse an archived slug for a new feature
+  - A directory reopened by new work moves back out the same way, rather than gaining a
+    new file inside `archive/`
+- `README.md` in `docs/issues/` is the index of what is still open, and the `Status:` grep
+  there is how you get that view. It searches `archive/` too, so a stray open status in an
+  archived directory still shows up
 
 ## This is a public repository
 

@@ -31,7 +31,7 @@ of the data needs research first — which tracking exception codes mean "bad ad
 each carrier, and whether returns are recorded at all today. Expect to start with the
 cheapest signals (address edits, purchase failures, delivered) and add the others later.
 
-Whatever is built must respect [pii-retention](../../pii-retention/): report on verdicts
+Whatever is built must respect [pii-retention](../../archive/pii-retention/): report on verdicts
 and outcomes, not on copies of addresses.
 
 ## Acceptance criteria

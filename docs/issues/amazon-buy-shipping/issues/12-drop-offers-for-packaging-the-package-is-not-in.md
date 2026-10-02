@@ -154,7 +154,7 @@ no-box-size case sets it null explicitly rather than trusting the helper's defau
 
 Rules 1 and 2 now live in `AmazonBuyShippingAdapter::classifyPackaging()` as the
 classifier ADR-0005 decision 5 describes, shipped by
-[`packaging-form-and-carrier-identity/04`](../../packaging-form-and-carrier-identity/issues/04-amazon-pattern-list-classifies-instead-of-filters.md):
+[`packaging-form-and-carrier-identity/04`](../../archive/packaging-form-and-carrier-identity/issues/04-amazon-pattern-list-classifies-instead-of-filters.md):
 a flat-rate envelope or box token is `exactly()` that packaging, `_ONE_RATE` is `anyOf()`
 every FedEx packaging, and `fitsThePackaging()` is now `requirement->accepts(carrierPackaging)`
 rather than a list of its own. The visible behaviour for a plain box is unchanged; a box
