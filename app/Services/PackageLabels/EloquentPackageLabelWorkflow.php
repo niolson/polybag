@@ -13,6 +13,7 @@ use App\Models\AuditLog;
 use App\Models\Package;
 use App\Models\User;
 use App\Services\PostageSources\PostageSourceDispatcher;
+use App\Services\ShopifyFulfillmentCanceller;
 use Illuminate\Support\Facades\DB;
 use Saloon\Exceptions\Request\RequestException;
 
@@ -20,6 +21,7 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
 {
     public function __construct(
         private readonly PostageSourceDispatcher $dispatcher,
+        private readonly ShopifyFulfillmentCanceller $shopifyFulfillments,
     ) {}
 
     public function voidLabel(Package $package, User $user): LabelVoidResult
@@ -70,8 +72,6 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
 
         try {
             $package->clearShipping(VoidReason::Operator, $user->id);
-
-            return LabelVoidResult::success($response->message);
         } catch (\PDOException|\LogicException $e) {
             // The source has voided the label, and asking it again would be
             // refused, so "try again" is the wrong advice (`project-review/10`).
@@ -91,6 +91,8 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
         } catch (\RuntimeException $e) {
             return LabelVoidResult::failure('Package State Changed', $e->getMessage());
         }
+
+        return LabelVoidResult::success($response->message, $this->takeBackFromChannel($package));
     }
 
     public function recordVoid(Package $package, User $user): LabelVoidResult
@@ -113,7 +115,28 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
             return LabelVoidResult::failure('Package State Changed', $e->getMessage());
         }
 
-        return LabelVoidResult::success('The void was recorded and the package can be shipped again. Nothing was sent to the postage source.');
+        return LabelVoidResult::success(
+            'The void was recorded and the package can be shipped again. Nothing was sent to the postage source.',
+            $this->takeBackFromChannel($package),
+        );
+    }
+
+    /**
+     * Take the voided Label's tracking number back off the sales channel.
+     *
+     * Read from the Label just voided, which is the Package's newest. Shopify
+     * is the only channel with anything to take back: an Amazon re-confirm with
+     * the same package reference replaces the number on the order, per the
+     * Orders v0 docs (not yet seen on a production order).
+     *
+     * @return string|null what the operator has to put right on the channel
+     */
+    private function takeBackFromChannel(Package $package): ?string
+    {
+        return $this->shopifyFulfillments->cancelAfterVoid(
+            $package,
+            $package->labels()->latest('id')->value('shopify_fulfillment_id'),
+        );
     }
 
     public function labelForReprint(Package $package, User $user): LabelReprintResult

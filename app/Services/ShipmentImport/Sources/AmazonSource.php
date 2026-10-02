@@ -302,7 +302,7 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
      * shipment ID is the only thing that says so. A package re-pointed at
      * another data source keeps it, and correctly stays unconfirmed here.
      */
-    public function exportPackage(array $data): void
+    public function exportPackage(array $data): ?string
     {
         $shipmentReference = filled($data['shipment_reference'] ?? null)
             ? (string) $data['shipment_reference']
@@ -337,7 +337,7 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
                 'package' => $data['_package_reference_id'] ?? null,
             ]);
 
-            return;
+            return null;
         }
 
         $this->validateExportConfiguration();
@@ -427,7 +427,7 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
             $status = $response->status();
 
             if ($this->shipmentWasAlreadyConfirmed($errors)) {
-                return;
+                return null;
             }
 
             if ($status >= 400 && $status < 500 && ! in_array($status, [401, 403, 408, 425, 429], true)) {
@@ -436,6 +436,8 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
 
             throw new RuntimeException($message);
         }
+
+        return null;
     }
 
     /** @param list<array<string, mixed>> $errors */

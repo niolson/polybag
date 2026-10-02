@@ -1013,6 +1013,7 @@ class Package extends Model
      * ship again with its items and measurements (ADR-0004 decision 2).
      *
      * @throws \RuntimeException If the package state changed (optimistic locking)
+     * @throws \LogicException If the package is shipped but has no active label to void
      */
     public function clearShipping(VoidReason $reason, ?int $voidedByUserId = null): void
     {

@@ -9,6 +9,7 @@ use App\Exceptions\PermanentExportException;
 use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\PackageExport;
+use App\Models\PackageLabel;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\Carriers\ShopifyAdapter;
 use App\Services\SettingsService;
@@ -107,6 +108,11 @@ class PackageExportService
                     // itself when it sells the label, and closes the fulfillment
                     // order doing it, so the export has nothing left to tell it.
                     $data['_shopify_shipping_label_id'] = ShopifyAdapter::shippingLabelIdFor($package);
+
+                    // Whether an "already fulfilled" reply may be read as
+                    // success. Not after a void: what fulfilled the order may
+                    // be the dead Label's fulfillment (`project-review/09`).
+                    $data['_has_voided_label'] = $package->labels()->whereNotNull('voided_at')->exists();
                 }
 
                 if ($source->source_type === AmazonSource::class) {
@@ -126,7 +132,12 @@ class PackageExportService
                     }
                 }
 
-                $driver->exportPackage($data);
+                $createdRecordId = $driver->exportPackage($data);
+
+                if ($createdRecordId !== null && $source->source_type === ShopifySource::class && $source->is($primary)) {
+                    $this->rememberShopifyFulfillment($package, $createdRecordId);
+                }
+
                 $export->update([
                     'status' => PackageExportStatus::Succeeded,
                     'last_error' => null,
@@ -538,6 +549,32 @@ class PackageExportService
 
         if ($succeededCount === count($destinationIds)) {
             $package->update(['exported' => true]);
+        }
+    }
+
+    /**
+     * Keep the fulfillment on the Label it reports, so a void can cancel it.
+     *
+     * Only the shipment's own Shopify source is remembered. That is where the
+     * fulfillment order lives, and where a void asks for the cancel.
+     *
+     * Matched on the tracking number as well as on being active: a Label voided
+     * while this export was in flight has gone, and its replacement's row must
+     * not inherit a fulfillment that carries the old number.
+     */
+    private function rememberShopifyFulfillment(Package $package, string $fulfillmentId): void
+    {
+        $remembered = PackageLabel::query()
+            ->where('package_id', $package->id)
+            ->whereNull('voided_at')
+            ->where('tracking_number', $package->tracking_number)
+            ->update(['shopify_fulfillment_id' => $fulfillmentId]);
+
+        if ($remembered === 0) {
+            $this->log('warning', 'Shopify fulfillment created for a Label that is no longer active', [
+                'package_id' => $package->id,
+                'shopify_fulfillment_id' => $fulfillmentId,
+            ]);
         }
     }
 

@@ -71,12 +71,14 @@ function fakeExportSource(bool $exportEnabled = true, ?string $exportError = nul
             return 'test';
         }
 
-        public function exportPackage(array $data): void
+        public function exportPackage(array $data): ?string
         {
             if (self::$staticExportError) {
                 throw new RuntimeException(self::$staticExportError, self::$staticExportCode);
             }
             self::$exportedData[] = $data;
+
+            return null;
         }
 
         public function validateExportConfiguration(): void
@@ -648,7 +650,7 @@ it('does not resend to a successful destination when another destination is retr
             return 'failing-test';
         }
 
-        public function exportPackage(array $data): void
+        public function exportPackage(array $data): ?string
         {
             self::$attempts++;
 
@@ -848,7 +850,7 @@ it('does not retry a permanent client error response', function (): void {
             return 'permanent-test';
         }
 
-        public function exportPackage(array $data): void
+        public function exportPackage(array $data): ?string
         {
             throw new PermanentExportException('Order is already shipped');
         }
@@ -898,7 +900,7 @@ it('retries recoverable invalid configuration errors', function (): void {
             return 'configuration-test';
         }
 
-        public function exportPackage(array $data): void
+        public function exportPackage(array $data): ?string
         {
             throw new InvalidArgumentException('OAuth is not configured yet.');
         }
@@ -947,7 +949,7 @@ it('retries database exceptions with non-numeric SQLSTATE codes', function (): v
             return 'database-deadlock-test';
         }
 
-        public function exportPackage(array $data): void
+        public function exportPackage(array $data): ?string
         {
             $previous = new class('deadlock detected') extends PDOException
             {
@@ -1086,9 +1088,11 @@ it('handles a package deleted while its destination is exporting', function (): 
             return 'deleting-test';
         }
 
-        public function exportPackage(array $data): void
+        public function exportPackage(array $data): ?string
         {
             Package::query()->whereKey(self::$packageId)->delete();
+
+            return null;
         }
 
         public function validateExportConfiguration(): void {}
