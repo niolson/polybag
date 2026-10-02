@@ -44,8 +44,8 @@ not) marked `selected`, rather than re-quoting the alternatives that are already
 ## Open questions
 
 - **Cost.** A shadow quote is a carrier call per package. USPS and UPS rating are free;
-  FedEx rating is free today, but FedEx has already started metering tracking, so a
-  free rate call is not a promise either. On a batch of hundreds this is hundreds of rate
+  FedEx rating and tracking are free today, but FedEx meters other APIs and could
+  start charging for these, so a free rate call is not a promise either. On a batch of hundreds this is hundreds of rate
   calls a day for a report. Sample rather than quote everything? Quote only
   rule-selected purchases, where the rule is what's being audited?
 - **Timing.** The quote should be for the ship date and the package as shipped; both are

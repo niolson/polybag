@@ -78,8 +78,8 @@ composer run dev   # serve + queue workers + scheduler + Vite, via concurrently
 
 Set `FAKE_CARRIERS=true` in `.env`. It swaps in fake carrier adapters and a fake address
 validator, so you can exercise the rate, label, and validation paths without carrier
-credentials — and without spending money, since USPS address validation and FedEx
-tracking are billed per request.
+credentials — and without spending money, since USPS address validation is billed per
+request.
 
 ## The loop
 

@@ -32,7 +32,7 @@ review and is wrong for two of the three:
 |---|---|---|---|
 | USPS | **Yes** — postage leaves the EPS account at label creation; refund on request | **Yes** — reprint by `X-Idempotency-Key` returns the original label and metadata | No |
 | UPS | **Yes** unless the account is on scan-based billing; void within 90 days reverses it | **Yes** — Label Recovery by `ReferenceNumber` + `ShipperNumber` returns the label and tracking number | Not usably — both reference slots carry the client's references |
-| FedEx | No — billed on tender | No lookup on the Ship API; Track-by-reference would find it, metered | — |
+| FedEx | No — billed on tender | No lookup on the Ship API; Track-by-reference would find it | — |
 
 So today a USPS or UPS timeout followed by a retry can buy a second label the tenant pays
 for, and the carrier already had the answer.
@@ -63,7 +63,7 @@ slot, and the reference goes on the label with it. Whether Label Recovery answer
 CIE sandbox, and whether it finds a label that was never tendered, is the second probe.
 
 **FedEx.** Nothing on the Ship API retrieves a shipment by reference. Track-by-reference
-would, but it is a metered call answering a question with no money behind it. FedEx keeps
+would, but it would be answering a question with no money behind it. FedEx keeps
 the `14` carve-out, deliberately; only its wording changes.
 
 ## What to build
@@ -325,8 +325,8 @@ Then:
   leaves it the only path for a recovery that keeps answering `null`.
 - Sending `X-Idempotency-Key` for its manifest side effect (it lands in the Shipping
   Services File as the External Reference ID). Useful, but a reporting question.
-- FedEx track-by-reference recovery. Not worth a metered call for a label FedEx will
-  not bill.
+- FedEx track-by-reference recovery. Not worth building for a label FedEx will not
+  bill.
 
 ## Blocked by
 
