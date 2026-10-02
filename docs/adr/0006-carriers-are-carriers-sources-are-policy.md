@@ -3,7 +3,7 @@
 ## Status
 
 Accepted — 2026-09-24. Records the decisions in
-`docs/issues/carrier-catalog-reset/PRD.md`. The maintainer settled every question in it
+`docs/issues/archive/carrier-catalog-reset/PRD.md`. The maintainer settled every question in it
 on 2026-09-24.
 
 Revised the same day after a second review against the code. Amazon Shipping becomes a
@@ -485,5 +485,5 @@ Harder:
 
 ## Implementation
 
-Tracked as issues under `docs/issues/carrier-catalog-reset/`. This document records the
+Tracked as issues under `docs/issues/archive/carrier-catalog-reset/`. This document records the
 decisions and why. It is not a checklist.

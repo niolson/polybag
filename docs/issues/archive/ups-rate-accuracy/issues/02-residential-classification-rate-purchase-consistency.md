@@ -2,7 +2,7 @@
 
 # Use consistent residential classification for UPS and FedEx rating and purchase
 
-Status: implemented
+Status: done
 Category: bug
 Repo: `polybag`
 
