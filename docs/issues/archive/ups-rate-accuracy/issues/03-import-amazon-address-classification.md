@@ -2,7 +2,7 @@
 
 # Import Amazon address classification and persist explicit residential data
 
-Status: implemented
+Status: done
 Category: bug
 Repo: `polybag`
 

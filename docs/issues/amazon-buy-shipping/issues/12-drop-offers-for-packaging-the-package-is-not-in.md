@@ -175,7 +175,7 @@ cannot be purchased; please try a different selection…". None of the eight has
 either service as eligible.
 
 Rule 3 is replaced by
-[`carrier-catalog-reset/04`](../../carrier-catalog-reset/issues/04-media-mail-and-bpm-through-shopify-and-amazon.md)
+[`carrier-catalog-reset/04`](../../archive/carrier-catalog-reset/issues/04-media-mail-and-bpm-through-shopify-and-amazon.md)
 under ADR-0006 decision 10:
 
 - Media Mail is dropped only for a Package that does not qualify. The requirement comes

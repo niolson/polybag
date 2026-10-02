@@ -8,7 +8,7 @@ Repo: `polybag`
 
 ## Parent
 
-[PRD](../PRD.md). [ADR-0006](../../../adr/0006-carriers-are-carriers-sources-are-policy.md)
+[PRD](../PRD.md). [ADR-0006](../../../../adr/0006-carriers-are-carriers-sources-are-policy.md)
 records its decisions.
 
 ## What to build

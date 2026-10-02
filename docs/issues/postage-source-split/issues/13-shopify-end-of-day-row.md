@@ -1,6 +1,6 @@
 # Decide what the Shopify row on End of Day should show
 
-Status: needs-triage
+Status: wontfix
 
 Repo: `polybag`
 
@@ -79,3 +79,12 @@ None. `07` merged 2026-09-03 (PR #164).
 
 - `06-shopify-ship-date-policy` — why End Shipping Day on this row matters
 - `07-dispatch-by-postage-source` — the postage-source manifest gate
+
+## Comments
+
+- **2026-10-02** — **Wontfix: superseded by `carrier-catalog-reset`.** `09` deleted the
+  `Shopify` carrier row (migration `remove_shopify_carrier`), so End of Day has no Shopify
+  row to show. `08` answered the question this issue posed: a Shopify label is counted on
+  its carrier of record's row, and an `auto` purchase is dated by the connection's *Date
+  Shopify's choice as* carrier, so the escape hatch `06` relied on is that carrier's End
+  Shipping Day. The one gap `08` left is filed as `end-of-day-count/01`.
