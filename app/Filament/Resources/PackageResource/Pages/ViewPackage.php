@@ -31,7 +31,9 @@ use Filament\Schemas\Components;
 use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Contracts\View\View;
+use Illuminate\Support\HtmlString;
 use LogicException;
 
 class ViewPackage extends ViewRecord
@@ -278,6 +280,27 @@ class ViewPackage extends ViewRecord
         return $this->record instanceof Package ? $this->record->shopifyAdminOrderUrl() : null;
     }
 
+    /**
+     * A Label's service under its carrier: the catalog's name, and where the
+     * source called it something else, that name on hover behind the same
+     * marker the Packages list uses.
+     */
+    private static function labelServiceHelperText(PackageLabel $label): string|Htmlable|null
+    {
+        $displayName = $label->serviceDisplayName();
+
+        if ($displayName === null || $displayName === $label->service) {
+            return $displayName;
+        }
+
+        return new HtmlString(sprintf(
+            '<span title="%s" class="inline-flex items-center gap-1">%s%s</span>',
+            e($label->service),
+            e($displayName),
+            svg('heroicon-o-information-circle', 'h-4 w-4 text-gray-400')->toHtml(),
+        ));
+    }
+
     public function infolist(Schema $infolist): Schema
     {
         return $infolist
@@ -305,7 +328,14 @@ class ViewPackage extends ViewRecord
                                 $record->isAmazonShipped() => 'Carrier (via Amazon Buy Shipping)',
                                 default => 'Carrier',
                             }),
-                        TextEntry::make('service'),
+                        // The catalog's name, with the source's own beneath it
+                        // when the two differ: "Ground Advantage" over the
+                        // USPS rate description it was bought as.
+                        TextEntry::make('service')
+                            ->state(fn ($record): ?string => $record->serviceDisplayName())
+                            ->helperText(fn ($record): ?string => $record->service !== $record->serviceDisplayName()
+                                ? $record->service
+                                : null),
                         TextEntry::make('cost')
                             ->money('USD')
                             // Shopify never reports what a label cost, so an
@@ -427,7 +457,7 @@ class ViewPackage extends ViewRecord
                         RepeatableEntry::make('labels')
                             ->hiddenLabel()
                             ->state(fn (Package $record): array => $record->labels
-                                ->loadMissing(['purchasedBy', 'voidedBy'])
+                                ->loadMissing(['purchasedBy', 'voidedBy', 'carrierService'])
                                 ->sortBy([['purchased_at', 'desc'], ['id', 'desc']])
                                 ->values()
                                 ->all())
@@ -454,7 +484,7 @@ class ViewPackage extends ViewRecord
                                 TextEntry::make('carrier')
                                     ->label('Carrier')
                                     ->placeholder('—')
-                                    ->helperText(fn (PackageLabel $record): ?string => $record->service),
+                                    ->helperText(fn (PackageLabel $record): string|Htmlable|null => self::labelServiceHelperText($record)),
                                 TextEntry::make('tracking_number')
                                     ->label('Tracking Number')
                                     ->fontFamily('mono')

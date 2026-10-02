@@ -19,6 +19,7 @@ use App\Events\PackageCancelled;
 use App\Events\PackageShipped;
 use App\Services\CarrierNormalizer;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
+use App\Services\CatalogServiceResolver;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
@@ -479,6 +480,19 @@ class Package extends Model
     }
 
     /**
+     * The service as the catalog names it, where the active Label was bought as
+     * a catalog service; otherwise the source's own name for it.
+     *
+     * Read off the Label's snapshot, never resolved again here, so a catalog
+     * edit renames what the screen calls a past Label but never changes which
+     * service it was (`postage-source-split/15`).
+     */
+    public function serviceDisplayName(): ?string
+    {
+        return $this->activeLabel?->serviceDisplayName() ?? $this->service;
+    }
+
+    /**
      * Record a service we derived ourselves, or leave the package alone.
      *
      * A narrow path of its own rather than a reuse of `markShipped()`, which is a
@@ -518,6 +532,9 @@ class Package extends Model
             'service_ruleset_version' => $inference->rulesetVersion,
         ];
 
+        // Snapshotted beside the name, on the Label only, as a purchase records it.
+        $carrierServiceId = app(CatalogServiceResolver::class)->forInferredService($this->normalized_carrier_id, $inference->service);
+
         $upgradable = function (QueryBuilder $query) use ($inference): void {
             $query
                 ->where('service_evidence', ServiceEvidence::Unknown->value)
@@ -532,7 +549,7 @@ class Package extends Model
                 });
         };
 
-        $updated = DB::transaction(function () use ($projected, $upgradable): int {
+        $updated = DB::transaction(function () use ($projected, $upgradable, $carrierServiceId): int {
             // Package row first, then its label — the lock order every writer
             // keeps, so this cannot deadlock against a void or a print
             // acknowledgment. Only a shipped package has a label to keep in
@@ -551,7 +568,10 @@ class Package extends Model
                 ->where('package_id', $this->id)
                 ->whereNull('voided_at')
                 ->where($upgradable)
-                ->update(PackageLabel::projectionFrom($projected) + ['updated_at' => now()]);
+                ->update(PackageLabel::projectionFrom($projected) + [
+                    'carrier_service_id' => $carrierServiceId,
+                    'updated_at' => now(),
+                ]);
 
             if ($labelUpdated !== 1) {
                 throw new \LogicException(
@@ -626,7 +646,10 @@ class Package extends Model
                 ->where('package_id', $this->id)
                 ->whereNull('voided_at')
                 ->where('service_evidence', ServiceEvidence::Inferred->value)
-                ->update(PackageLabel::projectionFrom($projected) + ['updated_at' => now()]);
+                ->update(PackageLabel::projectionFrom($projected) + [
+                    'carrier_service_id' => null,
+                    'updated_at' => now(),
+                ]);
 
             if ($labelUpdated !== 1) {
                 throw new \LogicException(
@@ -720,7 +743,7 @@ class Package extends Model
      * so the caller passes the discriminator rather than letting it be inferred
      * from whichever pointer happens to be set. See ADR-0002.
      *
-     * @param  int|null  $carrierServiceId  The catalog service the Label was bought as, from the server's copy of the rate. Recorded on the Label only. Null for a blind purchase: what Shopify was asked for stays the requested preference (ADR-0003 decision 7).
+     * @param  int|null  $carrierServiceId  The catalog service the Label was bought as, from the server's copy of the rate. Recorded on the Label only. Null for a blind purchase: what Shopify was asked for stays the requested preference (ADR-0003 decision 7), and an inferred service resolves through the ruleset here instead.
      *
      * @throws \InvalidArgumentException If the postage source and the response's pointers disagree, or the service evidence contradicts the service value
      * @throws \RuntimeException If the package state changed (optimistic locking)
@@ -733,6 +756,12 @@ class Package extends Model
 
         DB::transaction(function () use ($response, $postageSource, $shippedByUserId, $carrierServiceId): void {
             $normalizedCarrierId = app(CarrierNormalizer::class)->resolve($response->carrier)?->id;
+
+            // A blind purchase names no catalog service, but the service the
+            // ladder derived from its label may be one (`postage-source-split/15`).
+            if ($carrierServiceId === null && $response->serviceEvidence === ServiceEvidence::Inferred) {
+                $carrierServiceId = app(CatalogServiceResolver::class)->forInferredService($normalizedCarrierId, $response->service);
+            }
 
             // Carriers that record facts of their own (Shopify reports which
             // carrier it picked, and its own label ID) merge into whatever the

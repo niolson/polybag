@@ -131,7 +131,7 @@
                             <x-filament::icon icon="heroicon-o-check-circle" class="w-6 h-6 text-success-500 flex-shrink-0" />
                             <div class="text-sm text-gray-700 dark:text-gray-300 space-y-1">
                                 <p class="font-medium text-gray-900 dark:text-white">
-                                    {{ $package->carrier }} {{ $package->service }}
+                                    {{ $package->carrier }} {{ $package->serviceDisplayName() }}
                                     @if($package->cost !== null) — ${{ number_format((float) $package->cost, 2) }} @endif
                                 </p>
                                 @if($package->tracking_number)

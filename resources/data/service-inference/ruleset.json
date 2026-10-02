@@ -1,5 +1,5 @@
 {
-    "version": "2026-09-17",
+    "version": "2026-10-02",
     "notes": [
         "The version is the date this ruleset last changed, and it is what lands in",
         "packages.service_ruleset_version. Bump it whenever any table in this directory",
@@ -12,6 +12,7 @@
         "usps-impb-stc.json": "USPS IMpb Service Type Codes, used by the tracking-number rung",
         "ups-1z-service-indicator.json": "UPS service level indicators, used by the tracking-number rung",
         "label-tokens.json": "Service tokens printed on label plaintext, used by the label rung",
-        "shopify-preferred-rate-selection.json": "The service each Shopify preferredRateSelection pair names, used by the requested-selection rung"
+        "shopify-preferred-rate-selection.json": "The service each Shopify preferredRateSelection pair names, used by the requested-selection rung",
+        "catalog-services.json": "The catalog service each inferred service name is, snapshotted beside the inferred service"
     }
 }

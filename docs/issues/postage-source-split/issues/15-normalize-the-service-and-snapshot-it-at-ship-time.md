@@ -1,6 +1,6 @@
 # Normalize the service and snapshot it at ship time
 
-Status: needs-triage
+Status: done — catalog service on the Label only, read through the active Label; run `app:backfill-label-catalog-services --apply` on each database
 
 Repo: `polybag`
 
@@ -124,23 +124,58 @@ exists. Anything else stays null. Run once as a command, idempotent, reported pe
 
 ## Acceptance criteria
 
-- [ ] Raw `service` string is preserved unchanged on every package and every label row
-- [ ] A normalized identity is written at ship time and on inference, and never
+- [x] Raw `service` string is preserved unchanged on every package and every label row
+- [x] A normalized identity is written at ship time and on inference, and never
       recomputed on read
-- [ ] Editing a catalog row or an alias does not change any already-shipped package
-- [ ] An unrecognized service normalizes to null and the package still ships
-- [ ] Direct USPS variants (`Machinable Single-piece`, cubic tiers 1–3, `Nonstandard`) all
+- [x] Editing a catalog row or an alias does not change any already-shipped package
+- [x] An unrecognized service normalizes to null and the package still ships
+- [x] Direct USPS variants (`Machinable Single-piece`, cubic tiers 1–3, `Nonstandard`) all
       snapshot to `USPS_GROUND_ADVANTAGE`; the same holds for Priority Mail and Express
-- [ ] An Amazon offer bought through a promoted or aliased observed service snapshots to
+- [x] An Amazon offer bought through a promoted or aliased observed service snapshots to
       that row; an unmapped one snapshots to null
-- [ ] An inferred Shopify service resolves to the same row a direct purchase would
-- [ ] Packages list shows the catalog name and keeps the raw string on hover; the Service
+- [x] An inferred Shopify service resolves to the same row a direct purchase would
+- [x] Packages list shows the catalog name and keeps the raw string on hover; the Service
       filter selects by catalog row and offers "unmapped"
-- [ ] `ViewPackage` shows both names
-- [ ] Channel exports are byte-for-byte unchanged
-- [ ] Backfill command is idempotent and reports resolved / unresolved counts per source
+- [x] `ViewPackage` shows both names
+- [x] Channel exports are byte-for-byte unchanged
+- [x] Backfill command is idempotent and reports resolved / unresolved counts per source
 
 ## Blocked by
 
 None. Cheaper after `14` (the snapshot then reads off a server-restored rate), and
 `amazon-buy-shipping/05` is already in place for the Amazon leg.
+
+## Decisions — 2026-10-02
+
+Much of *What to build* had already landed with `carrier-catalog-reset` (2026-09-24):
+`shipping_offers` carries `carrier_service_id` and `rate_metadata`, and
+`package_labels.carrier_service_id` (restrict on delete) is written at purchase from the
+offer. Direct USPS, UPS, FedEx, Amazon Shipping and mapped Amazon Buy Shipping purchases
+were already snapshotted. What this issue added:
+
+- **Label only, no `packages` column.** The catalog-reset migration recorded the identity
+  on the Label and deliberately not on the projection; that stands. The Packages list
+  eager-loads `activeLabel.carrierService`, and the Service filter is a `whereHas` on the
+  active Label. `Package::serviceDisplayName()` is the one reader.
+- **Inferred services resolve through the ruleset.** A new table,
+  `resources/data/service-inference/catalog-services.json`, maps each name the inference
+  rungs emit to a catalog `service_code` per carrier, which keeps the ruleset the single
+  vocabulary. Ruleset version bumped to `2026-10-02`. `CatalogServiceResolver` reads it;
+  `markShipped()` uses it for an inferred blind purchase, `recordInferredService()` writes
+  it, and `withdrawInferredService()` clears it.
+- **UPS Ground Saver stays unmapped.** The catalog splits it by weight (92 / 93), and
+  neither the 1Z indicator `YW` nor the label says which. DHL SmartMail Parcel Ground has
+  no catalog row either. Both are noted in the table.
+- **Rate detail.** Answered by `14`: the USPS mail class, processing category and rate
+  indicator are in `shipping_offers.rate_metadata`. No new columns.
+- **`->wrap()` kept** on the Service column, against *Then the readers*. An unmapped
+  Label falls back to the source's own name, which for USPS runs long.
+- **Backfill.** `app:backfill-label-catalog-services` reports by default and writes under
+  `--apply`, only where `carrier_service_id` is null. Inferred services go through the
+  ruleset table. Confirmed services go through Amazon's `SourceServiceMapping` where the
+  active Label still carries Amazon's identity, and otherwise by name: whole-name match
+  ignoring case and ®, plus, for USPS only, the longest catalog name the reported service
+  starts with (`UPS Ground` is a prefix of `UPS Ground Saver`, so prefix matching is
+  USPS-only). Labels older than `normalized_carrier_id` resolve their carrier from the raw
+  name for the lookup, without writing it; that column is `03`'s. Local report-only run:
+  every Label resolved except one inferred UPS Ground Saver.

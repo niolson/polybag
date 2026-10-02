@@ -54,4 +54,24 @@ class LabelBatchItem extends Model
     {
         return $this->belongsTo(Package::class);
     }
+
+    /**
+     * The service as the catalog names it, read off the Label this item
+     * bought; otherwise the name the source reported at purchase.
+     *
+     * The Label is found by tracking number among all the package's Labels,
+     * not as the active one, so an item whose Label was later voided and
+     * re-bought still names what this batch bought (`postage-source-split/15`).
+     * Reads `package.labels.carrierService`, which a list should eager-load.
+     */
+    public function serviceDisplayName(): ?string
+    {
+        if ($this->tracking_number === null || $this->package === null) {
+            return $this->service;
+        }
+
+        $label = $this->package->labels->firstWhere('tracking_number', $this->tracking_number);
+
+        return $label?->carrierService->name ?? $this->service;
+    }
 }

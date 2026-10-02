@@ -1,0 +1,51 @@
+{
+    "notes": [
+        "The catalog service each inferred service name is, per carrier, so an inference",
+        "snapshots the same CarrierService row a direct purchase of that service would.",
+        "Issue postage-source-split/15.",
+        "",
+        "Keyed by the service names the other tables emit -- this ruleset's own vocabulary --",
+        "and naming CarrierService.service_code, which is a code and not a name: the catalog",
+        "calls USPS Ground Advantage 'Ground Advantage', and an operator may rename a row,",
+        "but the code is the seeder's key and does not move.",
+        "",
+        "Carrier keys are matched through CarrierAlias::lookupKey against the canonical",
+        "carrier name, as label-tokens.json is.",
+        "",
+        "A name absent here resolves to no catalog service, and the package still ships with",
+        "the inferred name as its service. Two are absent on purpose:",
+        "",
+        "  UPS Ground Saver -- the catalog splits it by weight (92 under 1 lb, 93 at 1 lb and",
+        "  over), and neither the 1Z indicator YW nor the label says which side a parcel fell.",
+        "  DHL SmartMail Parcel Ground -- DHL eCommerce has no catalog row."
+    ],
+    "carriers": {
+        "usps": {
+            "USPS Ground Advantage": "USPS_GROUND_ADVANTAGE",
+            "Priority Mail": "PRIORITY_MAIL",
+            "Priority Mail Express": "PRIORITY_MAIL_EXPRESS",
+            "Media Mail": "MEDIA_MAIL",
+            "Parcel Select": "PARCEL_SELECT"
+        },
+        "ups": {
+            "UPS Ground": "03",
+            "UPS 3 Day Select": "12",
+            "UPS 2nd Day Air": "02",
+            "UPS 2nd Day Air A.M.": "59",
+            "UPS Next Day Air Saver": "13",
+            "UPS Next Day Air": "01",
+            "UPS Worldwide Express": "07",
+            "UPS Worldwide Expedited": "08",
+            "UPS Worldwide Saver": "65",
+            "UPS Standard": "11"
+        },
+        "fedex": {
+            "FedEx Express Saver®": "FEDEX_EXPRESS_SAVER",
+            "FedEx Ground®": "FEDEX_GROUND",
+            "FedEx Priority Overnight®": "PRIORITY_OVERNIGHT"
+        },
+        "dhl express": {
+            "DHL Express Worldwide": "P"
+        }
+    }
+}
