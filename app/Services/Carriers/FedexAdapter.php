@@ -452,8 +452,10 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
                 ] : []),
                 ...($this->isInternational($request) ? [
                     'customsClearanceDetail' => [
+                        // Duties are the recipient's (DDU) until customs terms
+                        // are resolved per Shipment (ADR-0008).
                         'dutiesPayment' => [
-                            'paymentType' => 'SENDER',
+                            'paymentType' => 'RECIPIENT',
                         ],
                         'commodities' => [
                             [
@@ -638,7 +640,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
                     );
                 }
 
-                $requestedShipment['customsClearanceDetail'] = $this->buildCustomsClearanceDetail($request, $account);
+                $requestedShipment['customsClearanceDetail'] = $this->buildCustomsClearanceDetail($request);
             }
 
             // Build special service types
@@ -1587,9 +1589,14 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
     /**
      * Build customs clearance detail for international shipments.
      *
+     * Duties and import charges are billed to the recipient (DDU), and the
+     * commercial invoice says so, until customs terms are resolved per
+     * Shipment (ADR-0008). Transportation stays billed to the sender's
+     * account through `shippingChargesPayment`.
+     *
      * @return array<string, mixed>
      */
-    private function buildCustomsClearanceDetail(ShipRequest $request, ?CarrierAccount $account): array
+    private function buildCustomsClearanceDetail(ShipRequest $request): array
     {
         $commodities = [];
         $declaresEuProductIdentifiers = $request->toAddress->isInEuropeanUnion();
@@ -1633,19 +1640,10 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
         return [
             'commercialInvoice' => [
                 'shipmentPurpose' => 'SOLD',
+                'termsOfSale' => 'DDU',
             ],
             'dutiesPayment' => [
-                'paymentType' => 'SENDER',
-                'payor' => [
-                    'responsibleParty' => [
-                        'address' => [
-                            'countryCode' => $request->fromAddress->country,
-                        ],
-                        'accountNumber' => [
-                            'value' => $this->resolveAccountNumber($account),
-                        ],
-                    ],
-                ],
+                'paymentType' => 'RECIPIENT',
             ],
             'commodities' => $commodities,
         ];

@@ -65,16 +65,8 @@ function validFedexCommodity(array $overrides = []): array
 function validFedexCustomsClearanceDetail(array $overrides = []): array
 {
     return array_replace_recursive([
-        'commercialInvoice' => ['shipmentPurpose' => 'SOLD'],
-        'dutiesPayment' => [
-            'paymentType' => 'SENDER',
-            'payor' => [
-                'responsibleParty' => [
-                    'address' => ['countryCode' => 'US'],
-                    'accountNumber' => ['value' => '123456789'],
-                ],
-            ],
-        ],
+        'commercialInvoice' => ['shipmentPurpose' => 'SOLD', 'termsOfSale' => 'DDU'],
+        'dutiesPayment' => ['paymentType' => 'RECIPIENT'],
         'commodities' => [validFedexCommodity()],
     ], $overrides);
 }
@@ -484,13 +476,27 @@ it('rejects a commodity name longer than 35 characters', function (): void {
     ]), 'CreateShipmentRequest'))->toThrow(AssertionFailedError::class, 'commodities[0].name');
 });
 
-it('rejects a duties payor without a country', function (): void {
+it('rejects duties billed to the sender until customs terms are resolved', function (): void {
+    expect(fn () => assertMatchesFedexSchema(validFedexShipBody([
+        'requestedShipment' => ['customsClearanceDetail' => validFedexCustomsClearanceDetail(['dutiesPayment' => ['paymentType' => 'SENDER']])],
+    ]), 'CreateShipmentRequest'))->toThrow(AssertionFailedError::class, 'dutiesPayment.paymentType');
+});
+
+it('rejects a duties payor on recipient-paid duties', function (): void {
+    expect(fn () => assertMatchesFedexSchema(validFedexShipBody([
+        'requestedShipment' => ['customsClearanceDetail' => validFedexCustomsClearanceDetail([
+            'dutiesPayment' => ['payor' => ['responsibleParty' => ['accountNumber' => ['value' => '123456789']]]],
+        ])],
+    ]), 'CreateShipmentRequest'))->toThrow(AssertionFailedError::class, 'dutiesPayment');
+});
+
+it('rejects a commercial invoice without terms of sale', function (): void {
     $detail = validFedexCustomsClearanceDetail();
-    unset($detail['dutiesPayment']['payor']['responsibleParty']['address']);
+    unset($detail['commercialInvoice']['termsOfSale']);
 
     expect(fn () => assertMatchesFedexSchema(validFedexShipBody([
         'requestedShipment' => ['customsClearanceDetail' => $detail],
-    ]), 'CreateShipmentRequest'))->toThrow(AssertionFailedError::class, 'responsibleParty.address');
+    ]), 'CreateShipmentRequest'))->toThrow(AssertionFailedError::class, 'termsOfSale');
 });
 
 it('rejects an empty shipment special service list', function (): void {

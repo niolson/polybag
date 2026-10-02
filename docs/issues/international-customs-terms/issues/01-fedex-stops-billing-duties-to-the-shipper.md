@@ -1,6 +1,6 @@
 # FedEx stops billing duties to the shipper on every international label
 
-Status: ready-for-agent
+Status: done — 2026-10-02
 Category: bug
 Repo: `polybag`
 
@@ -31,9 +31,31 @@ block does.
 
 ## Acceptance criteria
 
-- [ ] An international FedEx rate request sends `dutiesPayment.paymentType: RECIPIENT`
-- [ ] An international FedEx ship request sends `RECIPIENT` with no duties payor, and
+- [x] An international FedEx rate request sends `dutiesPayment.paymentType: RECIPIENT`
+- [x] An international FedEx ship request sends `RECIPIENT` with no duties payor, and
       `commercialInvoice.termsOfSale: DDU`
-- [ ] Transportation is still billed `SENDER` to the resolved account
-- [ ] `fedexShip.json` (the hand-written request schema) accepts the new body; the FedEx
+- [x] Transportation is still billed `SENDER` to the resolved account
+- [x] `fedexShip.json` (the hand-written request schema) accepts the new body; the FedEx
       adapter tests that assert the old `SENDER` duties block are updated
+
+## Comments
+
+- 2026-10-02 — `FedexAdapter::buildRateApiRequest()` and
+  `buildCustomsClearanceDetail()` now send `dutiesPayment.paymentType: RECIPIENT` with
+  no payor block, and the ship request's `commercialInvoice` gains `termsOfSale: DDU`.
+  `shippingChargesPayment` is unchanged: `SENDER`, billed to the resolved account.
+  `buildCustomsClearanceDetail()` no longer takes the `CarrierAccount`, since the duties
+  payor was its only use; `07` adds the term (and the payor, for DDP) back as an input.
+  `fedexShip.json` now pins the DDU body exactly — `paymentType` enumerates only
+  `RECIPIENT`, `payor` is not allowed, and `termsOfSale` is required with only `DDU` —
+  so `07` must widen it when DDP returns. Tests: the rate-payload test in
+  `FedexAdapterTest` asserts the whole `dutiesPayment` block is `RECIPIENT`; the
+  former *uses the ship-from country for FedEx customs duties payment* test became
+  *bills FedEx customs duties to the recipient and transportation to the sender
+  account*, asserting `dutiesPayment`, `commercialInvoice` and `shippingChargesPayment`
+  against the schema. `FedexSchemaValidationTest` replaces *rejects a duties payor
+  without a country* with three guards: `SENDER` duties, a payor on `RECIPIENT`
+  duties, and a commercial invoice without `termsOfSale` are all rejected. All failed
+  before the fix. The FedEx certification commands (`FedexRunEtdTestCase`,
+  `FedexRunConsolidationTestCase`) send FedEx's own scripted test-case bodies and are
+  unchanged.
