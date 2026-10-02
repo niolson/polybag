@@ -52,7 +52,7 @@ that case on `fedex-validation`.
       `Cafe creme`
 - [x] A field that transliterates to blank is sent as the original, and logged
 - [x] `fedexShip.json` still validates every body
-- [ ] One production label to a destination with a diacritic, voided straight away,
+- [x] One production label to a destination with a diacritic, voided straight away,
       prints with no `?` (record it here; the raw capture goes in `.scratch/`)
 
 ## Out of scope
@@ -81,3 +81,8 @@ that case on `fedex-validation`.
   `fedexShip.json`; a long Polish street cut to 35 after transliterating; a CJK name
   sent as entered and logged; and the rate request's destination city and street.
   The production label check in the last acceptance criterion is still to do.
+- 2026-10-02 — Verified in production. FedEx International Connect Plus label
+  `878074409098` to `Zwycięstwa 27B`, Rybnik, Poland (Shipment 6745), bought and printed
+  from `main` after #319: the street prints as `ZWYCIESTWA 27B` on the label and
+  `Zwyciestwa 27B` on the waybill copy, with no `?`, and voided the same day. The request
+  and response are in `.scratch/label-address-characters/2026-10-02-878074409098-poland.log`.

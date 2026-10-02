@@ -453,10 +453,12 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
                 ] : []),
                 ...($this->isInternational($request) ? [
                     'customsClearanceDetail' => [
-                        // Duties are the recipient's (DDU) until customs terms
-                        // are resolved per Shipment (ADR-0008).
+                        // FedEx's Rate API accepts only SENDER here
+                        // (RATE.PAYMENTTYPE.NOTALLOWED otherwise). A quote
+                        // bills no one, and totalNetCharge excludes duties;
+                        // the ship request is what bills them to the recipient.
                         'dutiesPayment' => [
-                            'paymentType' => 'RECIPIENT',
+                            'paymentType' => 'SENDER',
                         ],
                         'commodities' => [
                             [
