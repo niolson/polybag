@@ -143,7 +143,7 @@ the application database.
 | Database, Shopify, and Amazon credentials, schedules, and marketplace postage | Connections |
 | Carrier services, service classes, packaging, and shipping rules | Shipping Config |
 | Amazon observed-service mapping and unattended-purchase approval | Map Carrier Services |
-| Per-client return address, branding, and export override | Clients |
+| Per-client return address, branding, and label reference | Clients |
 | Image-label, raw-label, and document printers; format, DPI, and scale | Device Settings in each browser |
 | Database, Redis, mail, SSO, Google validation, Gotenberg | `.env` |
 

@@ -792,6 +792,35 @@ it('represents a shipping rule that pre-selects a blind purchase', function (): 
         ->and($result->preSelectedBlindPurchaseId)->toBe('Shopify:auto');
 });
 
+/**
+ * `project-review/20`: the explicit choice wins over the method's on-time
+ * requirement. A blind purchase has no delivery date, and is bought anyway.
+ */
+it('auto-ships a blind purchase for an order with a due-by date on a method that excludes late rates', function (bool $byRule): void {
+    $package = blindPurchasePackage(withUspsRate: $byRule);
+    allowBlindPurchase($package);
+    $package->shipment->shippingMethod->update(['excludes_late_rates' => true, 'commitment_days' => 2]);
+    $package->shipment->update(['deliver_by' => now()->addDays(2)]);
+    $source = registerBlindSource();
+    $source->shouldReceive('createShipment')->once()->andReturn(blindShipResponse());
+    if ($byRule) {
+        ShippingRule::factory()->source(ShippingRuleSource::Shopify)->create([
+            'shipping_method_id' => $package->shipment->shipping_method_id,
+            'action' => ShippingRuleAction::UseService,
+            'carrier_service_id' => null,
+            'any_service' => true,
+        ]);
+    }
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $package,
+        new PackageAutoShippingRequest(cleanupOnFailure: false),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
+})->with(['sole choice' => false, 'rule' => true]);
+
 it('auto-ships a blind purchase selected by a rule on a mixed shipping method', function (): void {
     $package = blindPurchasePackage(withUspsRate: true);
     allowBlindPurchase($package);

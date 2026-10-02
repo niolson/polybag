@@ -1,6 +1,6 @@
 # Automation buys a blind purchase for an order its method requires on time
 
-Status: needs-triage
+Status: done — 2026-10-02
 
 Repo: `polybag`
 
@@ -94,3 +94,15 @@ undated purchase.
   allows Shopify Shipping has a commitment or *Exclude rates that deliver after the due-by
   date* on; the toggle's help text stops promising to skip every undated purchase; and the
   Evidence test is replaced by one pinning the blind purchase.
+- 2026-10-02 — Built as decided. `ShippingMethodResource` shows a warning callout,
+  *Shopify Shipping is bought without a delivery date*, in *Automated Purchases* when the
+  method has a `shopify` postage-source row and either a commitment or *Exclude rates that
+  deliver after the due-by date* on. It is reactive to both fields and points the seller at
+  the Shopify admin's preferred carrier and service. The toggle's help text now says a
+  Shopify Shipping purchase has no delivery date and is bought anyway when a rule names it
+  or it is the method's only choice. No change to `selectedRateForAutoShip()` beyond a
+  comment that records the decision. The Evidence test is replaced in
+  `BlindPurchaseTest` by *auto-ships a blind purchase for an order with a due-by date on a
+  method that excludes late rates*, for both the sole-choice and rule paths. Two form
+  tests in `ShippingMethodOfferRequirementsTest` cover the callout appearing,
+  disappearing, and staying off for a method that doesn't allow Shopify.
