@@ -811,12 +811,6 @@ parameters:
 			path: app/Filament/Resources/PickBatches/Pages/ViewPickBatch.php
 
 		-
-			message: '#^Cannot call method pickBatchShipments\(\) on Illuminate\\Database\\Eloquent\\Model\|int\|string\.$#'
-			identifier: method.nonObject
-			count: 1
-			path: app/Filament/Resources/PickBatches/Pages/ViewPickBatch.php
-
-		-
 			message: '#^Parameter \#1 \$batch of method App\\Services\\PickBatchService\:\:cancel\(\) expects App\\Models\\PickBatch, Illuminate\\Database\\Eloquent\\Model\|int\|string\|null given\.$#'
 			identifier: argument.type
 			count: 1
@@ -824,12 +818,6 @@ parameters:
 
 		-
 			message: '#^Parameter \#1 \$batch of method App\\Services\\PickBatchService\:\:complete\(\) expects App\\Models\\PickBatch, Illuminate\\Database\\Eloquent\\Model\|int\|string\|null given\.$#'
-			identifier: argument.type
-			count: 1
-			path: app/Filament/Resources/PickBatches/Pages/ViewPickBatch.php
-
-		-
-			message: '#^Parameter \#1 \$batch of method App\\Services\\PickBatchService\:\:summaryRows\(\) expects App\\Models\\PickBatch, Illuminate\\Database\\Eloquent\\Model\|int\|string\|null given\.$#'
 			identifier: argument.type
 			count: 1
 			path: app/Filament/Resources/PickBatches/Pages/ViewPickBatch.php

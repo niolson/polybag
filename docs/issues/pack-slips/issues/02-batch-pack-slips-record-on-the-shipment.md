@@ -2,7 +2,7 @@
 
 # Pick batch pack slips record prints on the Shipment, plus Print Both
 
-Status: needs-triage
+Status: done
 Category: enhancement
 Created: 2026-09-30
 
@@ -15,43 +15,98 @@ Created: 2026-09-30
 Pack slips printed from a pick batch are recorded in the same way as those printed from a
 Shipment's page, on the Shipment and through receipts.
 
-- **Print mode.** The batch's pack slip print sends a receipt with the job and is
-  acknowledged when QZ reports the job sent. This fixes the current defect where the
-  batch marks slips printed as soon as the PDF renders, before QZ has accepted anything.
-- **View mode.** The batch's pack slip view carries its receipt and the Mark as printed
-  control from slice 01.
-- **Print Both** prints the picking summary and then the pack slips; only the pack slips
-  carry receipts. The separate Picking Summary and Pack Slips buttons stay, so either
-  order works.
-- **Large batches.** A batch can hold up to 500 Shipments. Its pack slips, alone or
-  through Print Both, go through the shared print path from slice 01, which splits them
-  into jobs no larger than the job size limit, each with its own receipt, in tote order.
-- **Batch Shipments table.** The "Slip Printed" and "Slip Printed At" columns on the batch
-  page read the Shipment's printed state instead of batch membership.
-- **Migration.** Copy the latest printed time from pick-batch membership onto each
-  Shipment, and set its `pack_slip_items_version` to the Shipment's current
-  `items_version`. Then drop the column from pick-batch membership. The batch's
-  `summary_printed_at` stays.
+Slice 01 already built much of this. Do not rebuild it:
+
+- The batch's Pack Slips button in print mode already sends receipt-carrying jobs through
+  `printPackSlipJobs`, split at `PackSlipRenderer::SLIPS_PER_PRINT_JOB` (200) in tote
+  order, and acknowledges each job when QZ reports it sent.
+- The batch's browser view (`PickBatchController::packSlips`) already carries its receipt
+  and Mark as printed, because every view `PackSlipRenderer` draws does.
+
+What is left:
+
+- **Stop writing membership.** The print action still sets `pack_slip_printed_at` on
+  pick-batch membership as soon as the PDF renders
+  (`ViewPickBatch::getHeaderActions()`, `printPackSlips`), before QZ has accepted
+  anything. Remove that write; the receipt acknowledgment is now the only record.
+- **Print Both.** A new header action in print mode prints the picking summary and then
+  the pack slips (with tote codes); only the pack slips carry receipts. The separate
+  Picking Summary and Pack Slips buttons stay, so either order works.
+  - **Two printers.** The summary goes to the document printer (`printReport`); the slips
+    go to the image label printer on a 4x6 page (`printPackSlipJobs`). "Summary first"
+    means the order the jobs are sent in. Do not combine them into one PDF.
+  - **One event, awaited.** `print-report` is fire-and-forget today, so two dispatches
+    cannot guarantee order. Print Both dispatches one event whose listener awaits
+    `printReport()` for the summary and only then calls `printPackSlipJobs()`.
+  - **Summary failure stops the run.** If the summary print fails, no slips are sent and
+    the user is told the summary failed and no slips were printed. This matches a pack
+    slip run, which stops at its first failed job.
+  - **Large batches.** A batch can hold up to 500 Shipments; its slips go through the
+    same job splitting as the Pack Slips button.
+- **Batch Shipments table.** The "Slip Printed" and "Slip Printed At" columns in
+  `PickBatchShipmentsRelationManager` read the Shipment's `pack_slip_printed_at` instead
+  of batch membership.
+- **Migration.** For each Shipment, take the latest `pack_slip_printed_at` across its
+  pick-batch memberships (a Shipment can be in more than one batch, for example after a
+  cancelled one) and copy it onto the Shipment, but only where the Shipment's own
+  `pack_slip_printed_at` is null or older. Slice 01 is live, so a newer print from the
+  Shipment's page must survive. On copied rows:
+  - set `pack_slip_items_version` to the Shipment's current `items_version`;
+  - leave `pack_slip_receipt_issued_at` null. Slice 01's redemption relies on this so
+    the first real receipt of the same version replaces the migrated print;
+  - leave `pack_slip_printed_by_user_id` null, because membership never recorded a user.
+    The Shipment page then shows "Printed …" with no "by".
+
+  Then drop `pack_slip_printed_at` from `pick_batch_shipments`, and from
+  `PickBatchShipment`'s fillable and casts. The batch's `summary_printed_at` stays.
+
+**Out of scope:** `summary_printed_at` is still set when the summary PDF renders rather
+than when QZ sends it (the same defect this slice fixes for slips). Leave it as is; it
+records nothing about a Shipment.
 
 ## Acceptance criteria
 
-- [ ] Printing a batch's pack slips records nothing until QZ reports the job sent, then
-      marks every Shipment in the batch printed, with the user.
-- [ ] Marking a viewed batch as printed records it against that view's receipt.
-- [ ] Print Both prints the summary, then the slips (with tote codes), and records only
-      the slips.
-- [ ] The Picking Summary and Pack Slips buttons still work alone, in either order.
-- [ ] The migration copies existing printed times onto Shipments and drops the old
-      column.
-- [ ] A batch larger than the job size limit prints its slips as several jobs, and a
-      failure part-way records only the jobs before it. Print Both still prints the
-      summary first.
-- [ ] The batch page's Slip Printed columns show the Shipment's printed state, including
+- [x] Printing a batch's pack slips records nothing until QZ reports the job sent, then
+      marks every Shipment in the batch printed, with the user. No membership row is
+      written.
+- [x] Marking a viewed batch as printed records it against that view's receipt
+      (regression test; slice 01 built it).
+- [x] Print Both sends the summary to the document printer, then the slips (with tote
+      codes) to the label printer, and records only the slips.
+- [x] If Print Both's summary print fails, no slips are sent, nothing is recorded, and
+      the user is told.
+- [x] The Picking Summary and Pack Slips buttons still work alone, in either order.
+- [x] A batch larger than the job size limit prints its slips as several jobs through
+      Print Both, and a failure part-way records only the jobs before it.
+- [x] The migration copies the latest membership print time onto each Shipment, sets the
+      items version, leaves the issue time and user null, does not overwrite a newer
+      Shipment print, and drops the old column. Tested with a Shipment in two batches and
+      a Shipment already printed from its page.
+- [x] After migration, redeeming a receipt for a migrated Shipment records the new print.
+- [x] The batch page's Slip Printed columns show the Shipment's printed state, including
       a print made from the Shipment's page.
-- [ ] Nothing still reads or writes pack slip printed state on pick-batch membership.
+- [x] Nothing still reads or writes pack slip printed state on pick-batch membership.
+- [x] Manual check at review: Print Both with a real QZ Tray prints the summary on the
+      document printer, then the slips on the label printer, and records the slips.
 
 ## Blocked by
 
 - [01 — Print a pack slip for one Shipment](01-print-one-shipments-pack-slip.md)
 
 ## Comments
+
+- 2026-10-03 — Refreshed after slice 01 shipped: noted what 01 already built, specified
+  the migration's user, issue time and no-overwrite rules, and settled Print Both's
+  printers, ordering and summary-failure behavior. `summary_printed_at` on render is out
+  of scope. Moved to `ready-for-agent`.
+- 2026-10-03 — Implemented on branch `pack-slips-02`.
+  - Print Both dispatches one `print-pick-batch` event carrying the summary PDF and the
+    slip jobs. The QZ Tray listener awaits `printReport()` before `printPackSlipJobs()`,
+    and on a failed summary keeps `printReport`'s reason and adds that no slips were sent.
+    Covered in a browser test (`tests/Browser/PrintBothTest.php`) with QZ Tray stubbed.
+  - The batch Shipments table refreshes on `pack-slips-printed`, so a print run's
+    acknowledgments show without a reload.
+  - The migration's `down()` restores the column and gives every membership its
+    Shipment's printed time, since which batch printed it is not recoverable.
+- 2026-10-03 — Done. Verified with a real QZ Tray: Print Both printed the summary and then
+  the slips from a new pick batch.

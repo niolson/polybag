@@ -15,14 +15,12 @@ class PickBatchShipment extends Model
         'shipment_id',
         'tote_code',
         'picked_at',
-        'pack_slip_printed_at',
     ];
 
     protected function casts(): array
     {
         return [
             'picked_at' => 'datetime',
-            'pack_slip_printed_at' => 'datetime',
         ];
     }
 

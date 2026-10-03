@@ -549,6 +549,20 @@
                 printPackSlipJobs(event.jobs || []);
             });
 
+            // A pick batch's Print Both: the summary to the document printer, then the
+            // slips to the label printer. A summary that fails stops the run before any
+            // slip is sent, as a failed job stops a pack slip run.
+            Livewire.on('print-pick-batch', async (event) => {
+                if (!await printReport(event.summary)) {
+                    // printReport has shown why; say what that means for the slips.
+                    showStatus(`${statusText.textContent} No pack slips were sent or recorded as printed.`, 'error', null, false);
+
+                    return;
+                }
+
+                await printPackSlipJobs(event.jobs || []);
+            });
+
             Livewire.on('print-batch-labels', async (event) => {
                 const labels = event.labels || [];
                 if (labels.length === 0) return;
