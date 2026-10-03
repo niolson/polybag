@@ -89,6 +89,28 @@ Questions 7 and 8 come free with the first real Shopify shipment anyone makes �
 on a package that was going to ship anyway. Question 10 needs a deliberate second purchase
 and a USPS API call, and can be split off again if it holds the other two up.
 
+## Comments
+
+- **2026-10-03** — **7 and 8 answered in shape, from a test label after all.** UK labels go
+  through Auctane (`14`), and its test carrier *simulates* the scans the US carriers' test
+  labels never make — so "a test label never moves", below, is true of the US and false of
+  the UK. Package 235, an InPost test label bought through PolyBag from the London location,
+  came back through the existing synchronizer with nine fulfillment events:
+  `LABEL_PURCHASED` (London), `CONFIRMED` *Shipment Data Uploaded*, six `IN_TRANSIT` —
+  *Processed*, *Scanned at Test Carrier crossdock facility*, a pallet scan, *Crossing border*,
+  *Received in destination country*, *Out for delivery* — and `DELIVERED`; `displayStatus`
+  reached `DELIVERED` and PolyBag set `delivered_at`.
+
+  So for **7**: `Fulfillment.events` is not limited to the purchase node — Shopify writes
+  movement events for shipments it tracks itself, and the shipped query and mapping read
+  them as intended. For **8**: `displayStatus` advances to the end. Two details for the
+  mapping: *Out for delivery* arrived as an **`IN_TRANSIT` event**, not `OUT_FOR_DELIVERY`,
+  so `STATUS_MAP`'s `OUT_FOR_DELIVERY` row was not exercised; and `CARRIER_PICKED_UP` never
+  appeared. What a simulation cannot say, and a real parcel still must: whether real carriers'
+  scans arrive the same way, with what delay, and which statuses they use. Every simulated
+  event carries the same second, and the scans come from Cheektowaga, NY, for a London-to-
+  London parcel. **10** is untouched.
+
 ## Blocked by
 
 Nothing in this repository. Waiting on access to a real store shipping real parcels.

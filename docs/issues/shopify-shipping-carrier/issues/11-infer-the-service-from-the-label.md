@@ -308,6 +308,15 @@ of inference methods — never to relabel a decoded value as `confirmed`.
   repointing at the order's one open replacement (what `applyVoid()` does when the void goes
   through PolyBag), and `19`'s guard correctly refused the purchase at 0.15 lb against a
   2.29 lb declaration.
+- **2026-10-03** — **Sending a pair shrinks what the label rungs have to do.** `02`'s UK
+  pass found that the admin's own GraphQL traffic gives each rate's exact `carrierCode` and
+  `serviceCode`, so a pair can now be found for any country the development store has a
+  location in — eight UK services confirmed, two of them only by purchase. Rung 3 already
+  treats an honored pair as evidence. So a purchase made with a pair has its service from the
+  request, and rungs 1 and 2 matter only for purchases left to Shopify (`auto`). That makes
+  the coverage measurement a question about `auto` purchases, and lowers the stakes of
+  `14`'s label gathering — which got dearer the same night, since UK test labels carry no
+  carrier evidence.
 
 ## Related
 

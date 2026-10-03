@@ -55,7 +55,9 @@ only what needs a parcel to physically move.
    both tables and the purchase-time hook are built and running against real labels. What
    remains is the **coverage measurement** ADR-0003 asks for, which needs Shopify packages to
    run over, and tokens for the other seventeen carriers, which is gated on the install-base
-   question. Both US carriers are finished and neither wants more labels. The UPU S10
+   question — and, outside the US, on real purchases, since UK test labels are Auctane
+   placeholders (2026-10-03). Both matter less than they did: a purchase made by pair has its
+   service from the request (`11` rung 3), and `02` can now find pairs for any country. Both US carriers are finished and neither wants more labels. The UPU S10
    question in `14` is independent and pickable any time. (`11`'s FedEx `IP`/`XQ` item was
    descoped 2026-09-16: no FedEx label reaches the ladder.)
 3. **[`23`](shopify-shipping-carrier/issues/23-which-carriers-return-a-separate-customs-document.md)'s
@@ -74,8 +76,10 @@ only what needs a parcel to physically move.
 
 **Not scheduled.**
 [`17`](shopify-shipping-carrier/issues/17-questions-a-test-label-cannot-answer.md) waits on a
-real store shipping a real parcel — two of its three questions come free with the first one
-anybody makes, so it is watching rather than working. `04` is `wontfix`, reopening if the
+real store shipping a real parcel. Questions 7 and 8 were answered in shape on 2026-10-03 by a
+UK test label, whose simulated scans came through as fulfillment events; their timing on a
+real carrier still comes free with the first real shipment, so it is watching rather than
+working. `04` is `wontfix`, reopening if the
 15-minute void window ever costs someone something.
 
 **Two open inputs this repository cannot supply.** Which carriers our install base actually

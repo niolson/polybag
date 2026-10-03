@@ -1,6 +1,6 @@
 # Gather the label evidence the inference tables need
 
-Status: ready-for-human — both US carriers are finished; the other seventeen are gated on the install-base question
+Status: ready-for-human — both US carriers are finished; the other seventeen are gated on the install-base question, and outside the US on real purchases
 
 Repo: `polybag`
 
@@ -189,6 +189,13 @@ falling through is the correct outcome if the answer is only ever a class.
   every UK carrier, from this one label — and an Evri purchase the same night returned the
   same placeholder number format. PolyBag recorded the carrier as raw `yodel`, with
   no catalog carrier, since there is no Yodel or InPost row.
+- **2026-10-03** — **What this does to priorities.** Two things moved at once. Gathering got
+  dearer: outside the US every capture is a real purchase, because a test label answers none
+  of the four questions. And it matters less: `02` can now find a pair for any service in any
+  country the development store has a location in, and `11`'s rung 3 takes an honored pair
+  as the service. A purchase PolyBag makes by pair needs no label evidence at all; only
+  purchases left to Shopify do. So before paying for captures for a carrier, ask whether its
+  clients will buy by pair — if they will, that carrier needs a seeded pair, not a label.
 
 ## Blocked by
 
