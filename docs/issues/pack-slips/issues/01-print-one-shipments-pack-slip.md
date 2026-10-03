@@ -2,7 +2,7 @@
 
 # Print a pack slip for one Shipment and record it on the Shipment
 
-Status: needs-triage
+Status: ready-for-agent
 Category: enhancement
 Created: 2026-09-30
 

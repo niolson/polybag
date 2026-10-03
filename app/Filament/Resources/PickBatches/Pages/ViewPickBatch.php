@@ -4,17 +4,15 @@ namespace App\Filament\Resources\PickBatches\Pages;
 
 use App\Enums\PickBatchStatus;
 use App\Filament\Resources\PickBatches\PickBatchResource;
-use App\Models\Location;
 use App\Models\PickBatch;
 use App\Services\GotenbergService;
+use App\Services\PackSlips\PackSlipRenderer;
 use App\Services\PickBatchService;
-use App\Services\SettingsService;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
-use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\On;
-use Picqer\Barcode\BarcodeGeneratorSVG;
+use LogicException;
 use Throwable;
 
 class ViewPickBatch extends ViewRecord
@@ -81,17 +79,16 @@ class ViewPickBatch extends ViewRecord
                 ->icon('heroicon-o-document-text')
                 ->visible(fn (): bool => $this->printMode)
                 ->action(function (): void {
-                    $this->record->load('pickBatchShipments.shipment.shipmentItems.product');
+                    try {
+                        $pdf = app(PackSlipRenderer::class)->pdf(app(PickBatchService::class)->packSlipRun($this->pickBatch()));
+                    } catch (Throwable $e) {
+                        $this->notifyRendererUnavailable($e);
 
-                    $this->printDocument('pick-batches.pack-slips', [
-                        'pickBatch' => $this->record,
-                        'pivotRows' => $this->record->pickBatchShipments->sortBy('tote_code'),
-                        'generator' => new BarcodeGeneratorSVG,
-                        'logoDataUri' => $this->resolveLogoDataUri($this->record),
-                        'defaultLocation' => Location::getDefault(),
-                    ], function (): void {
-                        $this->record->pickBatchShipments()->update(['pack_slip_printed_at' => now()]);
-                    });
+                        return;
+                    }
+
+                    $this->dispatch('print-report', data: base64_encode($pdf));
+                    $this->record->pickBatchShipments()->update(['pack_slip_printed_at' => now()]);
                 }),
 
             Action::make('complete')
@@ -130,25 +127,15 @@ class ViewPickBatch extends ViewRecord
         ];
     }
 
-    private function resolveLogoDataUri(PickBatch $pickBatch): ?string
+    private function pickBatch(): PickBatch
     {
-        $path = $pickBatch->client?->logo
-            ?? app(SettingsService::class)->get('pack_slip_logo');
+        $record = $this->getRecord();
 
-        if (blank($path) || ! Storage::disk('public')->exists($path)) {
-            return null;
+        if (! $record instanceof PickBatch) {
+            throw new LogicException('View Pick Batch was opened for a record that is not a pick batch.');
         }
 
-        $content = Storage::disk('public')->get($path);
-        $mimeType = match (strtolower(pathinfo($path, PATHINFO_EXTENSION))) {
-            'svg' => 'image/svg+xml',
-            'jpg', 'jpeg' => 'image/jpeg',
-            'gif' => 'image/gif',
-            'webp' => 'image/webp',
-            default => 'image/png',
-        };
-
-        return 'data:'.$mimeType.';base64,'.base64_encode($content);
+        return $record;
     }
 
     /**
@@ -163,11 +150,16 @@ class ViewPickBatch extends ViewRecord
             $this->dispatch('print-report', data: base64_encode($pdf));
             $onSuccess();
         } catch (Throwable $e) {
-            Notification::make()
-                ->danger()
-                ->title('PDF renderer unavailable')
-                ->body($e->getMessage())
-                ->send();
+            $this->notifyRendererUnavailable($e);
         }
+    }
+
+    private function notifyRendererUnavailable(Throwable $e): void
+    {
+        Notification::make()
+            ->danger()
+            ->title('PDF renderer unavailable')
+            ->body($e->getMessage())
+            ->send();
     }
 }

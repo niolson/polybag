@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\DataTransferObjects\PackSlips\PackSlipRun;
 use App\Enums\PickBatchStatus;
 use App\Enums\PickingStatus;
 use App\Enums\ShipmentStatus;
@@ -173,6 +174,26 @@ class PickBatchService
                 $shipment->update(['picking_status' => PickingStatus::Pending]);
             }
         });
+    }
+
+    /**
+     * The batch's pack slips, in tote order, each carrying its tote code.
+     */
+    public function packSlipRun(PickBatch $batch): PackSlipRun
+    {
+        $rows = $batch->pickBatchShipments()
+            ->whereNotNull('shipment_id')
+            ->get(['shipment_id', 'tote_code'])
+            ->sortBy('tote_code', SORT_NATURAL)
+            ->values();
+
+        return new PackSlipRun(
+            shipmentIds: $rows->pluck('shipment_id')->map(fn (mixed $id): int => (int) $id)->unique()->values()->all(),
+            toteCodes: $rows->filter(fn (PickBatchShipment $row): bool => filled($row->tote_code))
+                ->mapWithKeys(fn (PickBatchShipment $row): array => [(int) $row->shipment_id => (string) $row->tote_code])
+                ->all(),
+            title: "Pack Slips — Batch #{$batch->id}",
+        );
     }
 
     /**

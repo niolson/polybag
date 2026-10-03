@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Pack Slips — Batch #{{ $pickBatch->id }}</title>
+    <title>{{ $title }}</title>
     <style>
         @page { size: 4in 6in; margin: 0; }
         * { box-sizing: border-box; }
@@ -91,13 +91,17 @@
         <a href="javascript:history.back()">Back</a>
     </div>
 
-    @foreach ($pivotRows as $pivot)
+    @foreach ($slips as $slip)
+    @php
+        $client = $slip->client;
+        $shipment = $slip->shipment;
+    @endphp
     <div class="slip">
         {{-- Row 1: Logo | Return address --}}
         <div class="row-header">
             <div class="logo-cell">
-                @if (!empty($logoDataUri))
-                    <img src="{{ $logoDataUri }}" alt="Logo">
+                @if (!empty($slip->logoDataUri))
+                    <img src="{{ $slip->logoDataUri }}" alt="Logo">
                 @endif
             </div>
             <div class="return-address-cell">
@@ -129,36 +133,35 @@
             </div>
         </div>
 
-        {{-- Row 2: Tote | Order + barcode --}}
+        {{-- Row 2: Tote | Order + barcode. The tote only exists for a slip printed from a pick batch. --}}
         <div class="row-tote">
+            @if ($slip->toteCode !== null)
             <div class="tote-cell">
                 <div class="tote-label">Tote</div>
-                <div class="tote-code">{{ $pivot->tote_code ?? '—' }}</div>
+                <div class="tote-code">{{ $slip->toteCode }}</div>
             </div>
+            @endif
             <div class="order-cell">
-                @if ($pivot->shipment)
-                    {{-- The PolyBag code, not the order reference: a reference is only unique within one connection (ADR-0007). --}}
-                    @php($scanCode = \App\Services\Scanning\ScanCode::forShipment($pivot->shipment))
-                    <div class="barcode-wrap">
-                        {!! $generator->getBarcode($scanCode, \Picqer\Barcode\BarcodeGeneratorSVG::TYPE_CODE_128, 2, 30) !!}
-                    </div>
-                    <div class="order-ref">{{ $pivot->shipment->shipment_reference }} <span class="scan-code">{{ $scanCode }}</span></div>
-                @endif
+                {{-- The PolyBag code, not the order reference: a reference is only unique within one connection (ADR-0007). --}}
+                <div class="barcode-wrap">
+                    {!! $generator->getBarcode($slip->scanCode, \Picqer\Barcode\BarcodeGeneratorSVG::TYPE_CODE_128, 2, 30) !!}
+                </div>
+                <div class="order-ref">{{ $shipment->shipment_reference }} <span class="scan-code">{{ $slip->scanCode }}</span></div>
             </div>
         </div>
 
         {{-- Row 3: Ship-to address | Order summary placeholder --}}
         <div class="row-recipient">
             <div class="ship-to-cell">
-                <div class="name">{{ trim(($pivot->shipment?->first_name ?? '').' '.($pivot->shipment?->last_name ?? '')) }}</div>
-                @if ($pivot->shipment?->company)
-                    <div class="addr">{{ $pivot->shipment->company }}</div>
+                <div class="name">{{ trim(($shipment->first_name ?? '').' '.($shipment->last_name ?? '')) }}</div>
+                @if ($shipment->company)
+                    <div class="addr">{{ $shipment->company }}</div>
                 @endif
-                <div class="addr">{{ $pivot->shipment?->address1 }}</div>
-                @if ($pivot->shipment?->address2)
-                    <div class="addr">{{ $pivot->shipment->address2 }}</div>
+                <div class="addr">{{ $shipment->address1 }}</div>
+                @if ($shipment->address2)
+                    <div class="addr">{{ $shipment->address2 }}</div>
                 @endif
-                <div class="addr">{{ $pivot->shipment?->city }}, {{ $pivot->shipment?->state_or_province }} {{ $pivot->shipment?->postal_code }}</div>
+                <div class="addr">{{ $shipment->city }}, {{ $shipment->state_or_province }} {{ $shipment->postal_code }}</div>
             </div>
             <div class="order-summary-cell"></div>
         </div>
@@ -173,7 +176,7 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach ($pivot->shipment?->shipmentItems ?? [] as $item)
+                @foreach ($shipment->shipmentItems as $item)
                 <tr>
                     <td>{{ $item->product?->sku ?? '—' }}</td>
                     <td>{{ $item->product?->name ?? '—' }}</td>
