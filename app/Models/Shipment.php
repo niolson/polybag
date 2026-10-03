@@ -293,6 +293,16 @@ class Shipment extends Model
     }
 
     /**
+     * Record that these Shipments' items changed, which makes any slip already
+     * printed for them out of date. A database increment, so concurrent writers
+     * never lose a change. Call it in the same transaction as the item write.
+     */
+    public static function incrementItemsVersion(int ...$shipmentIds): void
+    {
+        static::query()->whereKey($shipmentIds)->increment('items_version');
+    }
+
+    /**
      * The in-progress pick batch this Shipment is in, if any.
      */
     public function activePickBatch(): ?PickBatch
