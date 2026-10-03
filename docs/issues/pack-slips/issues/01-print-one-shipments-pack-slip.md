@@ -2,7 +2,7 @@
 
 # Print a pack slip for one Shipment and record it on the Shipment
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Created: 2026-09-30
 
@@ -79,7 +79,7 @@ the pieces every later slice reuses.
       with its own receipt, and stops at the first failure with earlier jobs recorded.
       This is tested at the service level with a run just over the limit.
 - [x] `CONTEXT.md` defines pack slip.
-- [ ] Manual check at review: a real QZ Tray print acknowledges, and a disconnected QZ
+- [x] Manual check at review: a real QZ Tray print acknowledges, and a disconnected QZ
       Tray does not.
 
 ## Blocked by
@@ -111,4 +111,8 @@ None - can start immediately.
   and been scaled up. There is no setting, because there is only the 4x6 layout. The
   batch's Pack Slips button now uses the same receipt-carrying path; it still also marks
   batch membership printed on render until slice 02.
+- 2026-10-03 — Done. Verified with a real QZ Tray: the slip prints 4x6 on the label
+  printer and is recorded. Gotenberg now honors a document's own `@page` size, and the
+  QZ status banner is `wire:ignore` so a Livewire re-render keeps it
+  (`tests/Browser/PrintBannerTest.php`).
 
