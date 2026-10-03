@@ -1,6 +1,6 @@
 # Find out whether preferredRateSelection works, and catalog the codes that do
 
-Status: done — 2026-09-09; second pass 2026-09-17
+Status: done — 2026-09-09; second pass 2026-09-17; UK pass 2026-10-03
 
 Repo: `polybag`
 
@@ -36,7 +36,9 @@ wrong one: weight is an *input to the rate lookup*, so it produces `RATES_NOT_FO
 every pair including the valid ones, and reads as a universal miss. That false negative cost
 the first hour. The ship date is inert to the rate engine, which is what makes it usable.
 
-**3. There is no Shopify vocabulary — only each carrier's own, passed through.**
+**3. There is no Shopify vocabulary — only each carrier's own, passed through.** True of the
+three US carriers probed here; **not** of the UK carriers, whose codes are Shopify's own
+snake_case keys — see *The UK pass* below.
 
 - **USPS:** PascalCase, matched **case-sensitively**. `Priority` finds a rate, `priority`
   does not. `GroundAdvantage`, `Priority`, `PriorityExpress`, `MediaMail`.
@@ -168,6 +170,64 @@ rates only under `ENVELOPE`. PolyBag knows a box size's type (`BoxSizeType`: Box
 Padded Mailer), and the latter two are plausibly Shopify's `SOFT_PACK`. Whether that changes
 any rate PolyBag can actually buy is untested; noted here so the `BOX` constant is not
 mistaken for a fact about the parcel.
+
+## The UK pass: Shopify's own keys, read from the admin
+
+2026-10-03, against shipment 6981 / package 235 (0.35 lb, 4×6×6 box), London E12 to London
+NW9, from a London location on the development store. The rig's `enumerate.php` now takes a
+fifth argument, a JSON file merged over the origin address, because PolyBag's origin for
+this order is still the Woodinville location.
+
+**Guessing failed outright.** Thirty-six spellings missed — Royal Mail's own `TPN`/`TPS`
+product codes, `Tracked24`, DHL's `N` under seven carrier names, and so on — while
+`dhl_express:P` matched on the same package from the US origin, so the oracle was working.
+
+**The admin's own traffic gave the answer.** On the order's *Shipping service* screen,
+DevTools → Network shows two admin GraphQL responses that settle a carrier without guessing:
+
+- `availableShippingCarriers` — every carrier code the shop can see: `usps`, `dhl_express`,
+  `ups_shipping`, `fedex`, `canada_post`, `ups_ca`, `purolator`, `hermes_uk`, `dpd_uk`,
+  `yodel`, `royal_mail`, `dhl_express_uk`.
+- `shippingRates` — each rate offered for the order, with its `carrierCode` and
+  `serviceCode` beside the admin's display name.
+
+UK service codes are **snake_case, prefixed with the carrier code** — nothing like the
+carrier's own product codes. Six of the nine rates the admin offered match through
+`preferredRateSelection`:
+
+| Admin name | `carrier:service` |
+|---|---|
+| Royal Mail Tracked 24® | `royal_mail:royal_mail_tracked_24` |
+| Royal Mail Tracked 48® | `royal_mail:royal_mail_tracked_48` |
+| Royal Mail Tracked 24® with Signature | `royal_mail:royal_mail_tracked_24_with_signature` |
+| Royal Mail Tracked 48® with Signature | `royal_mail:royal_mail_tracked_48_with_signature` |
+| DPD UK Next Day | `dpd_uk:dpd_uk_next_day` |
+| DHL Express Domestic | `dhl_express_uk:dhl_express_uk_express_domestic` |
+
+**UK DHL is a separate carrier**, `dhl_express_uk`, not `dhl_express` with a UK origin.
+
+**Evri and InPost do not match**, though the admin offered them for the same order:
+`hermes_uk:hermes_uk_parcelshop_dropoff`, `…_dropoff_nextday` and
+`yodel:yodel_direct_store_to_door` (InPost UK trades under Yodel's carrier code) miss under
+every variation tried — a UK phone and none, `SOFT_PACK` and `ENVELOPE`, 2 lb and 5 lb, and
+other carrier spellings — with Royal Mail matching as the control each time. Most likely
+they are admin-only, as FedEx is in the US. Note that `availableShippingCarriers` lists
+`fedex` too, so a carrier's presence there does not mean the label API sells it.
+
+**Not offered for this parcel, so their misses mean nothing yet:** the other services on
+the admin's *Preferred services* screens — Evri Shop to Shop (and Next Day), DPD UK Two Day,
+Classic, Air Classic and Air Express, Royal Mail Tracked 24/48 with Local Collect, DHL
+Express Domestic Pickup Point, Express Worldwide and Express Worldwide Pickup Point. Guessed
+in the same pattern (`dpd_uk:dpd_uk_two_day`, …) and all missed; read rule 5.
+
+**Two side findings.** An origin with no phone returns `FULFILLMENT_ORDER_INVALID` for every
+pair — an error about the wrong field, with the fulfillment order untouched. And whether the
+US carriers *also* answer to snake_case keys of this kind is untested: `usps_ground_advantage`
+missed on 2026-09-09, but that was a guess, not a key read from the admin.
+
+**Not seeded.** PolyBag buys from the Package's Location address, so these pairs are
+unbuyable until a UK Location exists to send them from. The probe lists are `uk.json`,
+`uk-admin.json` and `uk-round2.json` in the rig.
 
 ## Spun out
 

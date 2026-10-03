@@ -55,8 +55,9 @@ only what needs a parcel to physically move.
    both tables and the purchase-time hook are built and running against real labels. What
    remains is the **coverage measurement** ADR-0003 asks for, which needs Shopify packages to
    run over, and tokens for the other seventeen carriers, which is gated on the install-base
-   question. Both US carriers are finished and neither wants more labels. `11` item 5 (FedEx
-   `IP`/`XQ`) and the UPU S10 question in `14` are independent and pickable any time.
+   question. Both US carriers are finished and neither wants more labels. The UPU S10
+   question in `14` is independent and pickable any time. (`11`'s FedEx `IP`/`XQ` item was
+   descoped 2026-09-16: no FedEx label reaches the ladder.)
 3. **[`23`](shopify-shipping-carrier/issues/23-which-carriers-return-a-separate-customs-document.md)'s
    two open rows**, now that
    [`07`](shopify-shipping-carrier/issues/07-customs-form-printing.md)'s gate reads the
@@ -100,7 +101,8 @@ and the evidence overlaps. What came out of it, beyond the individual issues:
   new carrier is "what does this carrier call it", not "what would Shopify call this".
 - **USPS international is a vocabulary gap, not an absence of rates** — the admin's own rate
   list offers three USPS international services for a parcel the oracle finds no `usps:` code
-  for. Worth a second pass with USPS's published product identifiers.
+  for. The second pass found them 2026-09-17: the codes are the full USPS product name in
+  PascalCase (`usps:PriorityMailInternational`), now in the selection table (`02`).
 - **Four separate vocabularies turned up in one campaign**: Shopify's service codes, label
   tokens as printed, UPS's tracking-number service indicators, and each carrier's API codes.
   The UPS indicators are the dangerous one — they match UPS's API codes on every domestic
@@ -116,7 +118,8 @@ and the evidence overlaps. What came out of it, beyond the individual issues:
 
 ### Done
 
-`01` `02` `04` (wontfix) `06` `07` `08` `09` `10` `15` `16` `18` `19` `20` `21` `22` `24`,
+`01` `02` `04` (wontfix) `06` `07` `08` `09` `10` `15` `16` `18` `19` `20` `21` `22` `24`
+`25` `26`,
 plus `11`'s ladder and hook, `12`'s flag half, and `23`'s capability and its USPS, UPS and
 FedEx rows. Each file carries its own record.
 

@@ -72,15 +72,15 @@ given client's Shopify admin actually offers.
 | USPS | US | **Done.** 342 service type codes resolve USPS domestic on the tracking number alone. Rung 2 **descoped** — Shopify passes USPS's own label through, so a token could be sourced from our labels, but rung 1 already answers |
 | UPS | US, CA | **Rung 1 done; rung 2 permanently closed.** UPS offers ZPL or GIF and no PDF, so Shopify's PDF is a wrapped raster necessarily. The 1Z indicator table is built. Token on the printed face: `UPS GROUND SAVER` — and that label is a **consolidator**, USPS last mile, dual `1Z` + IMpb |
 | FedEx | US | **Closed — not sold through the Shopify API** (`01`, PRD), and every other FedEx label PolyBag holds came with its service confirmed. Domestic tokens from sandbox PDFs stay in the table unconsumed; international prints `IP`/`XQ`, left alone for the same reason |
-| DHL | US, intl | **Express, confirmed by purchase 2026-09-17** — Shopify's code is `dhl_express`, and `dhl_express:P` (Express Worldwide, international only) is honored and in the selection table. The returned document is DHL's canned sample label, with a text layer, printing `EXPRESS WORLDWIDE` — tokened with that caveat. Test tracking number is a placeholder, not the printed waybill. No separate customs document came back. The eCommerce ZPL token from vendor docs stays, unconfirmed against any Shopify label |
+| DHL | US, intl | UK domestic is a separate carrier, `dhl_express_uk`, **reachable by pair** 2026-10-03: Express Domestic. **Express, confirmed by purchase 2026-09-17** — Shopify's code is `dhl_express`, and `dhl_express:P` (Express Worldwide, international only) is honored and in the selection table. The returned document is DHL's canned sample label, with a text layer, printing `EXPRESS WORLDWIDE` — tokened with that caveat. Test tracking number is a placeholder, not the printed waybill. No separate customs document came back. The eCommerce ZPL token from vendor docs stays, unconfirmed against any Shopify label |
 | Canada Post | CA | Nothing. PDF or ZPL |
 | Purolator | CA | Nothing |
 | Australia Post | AU | Nothing |
 | Sendle | AU | Nothing. A reseller — check for a last-mile handoff |
-| Royal Mail | UK | Nothing. S10 candidate |
-| Evri | UK | Nothing |
-| Yodel | UK | Nothing |
-| DPD | UK, FR | Nothing |
+| Royal Mail | UK | **Reachable by pair** 2026-10-03 (`02`): Tracked 24 and 48, each with or without signature. No label yet. S10 candidate |
+| Evri | UK | Offered in the admin 2026-10-03 (carrier code `hermes_uk`), but **no pair matches through the API** (`02`) — most likely admin-only, as FedEx is |
+| Yodel | UK | Trades as **InPost UK** (carrier code still `yodel`). Offered in the admin 2026-10-03 as InPost Direct: Store to Door, but **no pair matches through the API** (`02`) — most likely admin-only |
+| DPD | UK, FR | UK is carrier `dpd_uk`, **reachable by pair** 2026-10-03: Next Day. No label yet |
 | Colissimo | FR | Nothing. S10 candidate |
 | Chronopost | FR | Nothing |
 | Mondial Relay | FR | Nothing. Parcel-shop network — the "service" may not be a service at all |
@@ -169,6 +169,14 @@ falling through is the correct outcome if the answer is only ever a class.
   font subset tags between a USPS-bought and a Shopify-bought label for the same package. So
   USPS tokens could be sourced from our own labels — and are **descoped anyway**, because rung
   1 already answers for that carrier.
+- **2026-10-03** — a London location on the development store, shipping to another London
+  address, was offered nine rates by the admin across five carriers, priced in GBP. `02`'s
+  UK pass then found their codes by reading the admin's own GraphQL traffic: Royal Mail,
+  DPD UK and DHL Express UK are reachable by pair; Evri and InPost are not. **InPost is
+  Yodel**, renamed, under carrier code `yodel` — not a twentieth carrier. So the UK half is
+  as free to gather as the US half was, and the S10 question can be put to real Royal Mail
+  numbers; DHL Express being sold domestically in the UK bears on question 3. Captures still
+  need a UK Location in PolyBag, since a purchase ships from the Package's Location.
 
 ## Blocked by
 
