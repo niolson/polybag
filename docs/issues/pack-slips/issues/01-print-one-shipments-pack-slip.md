@@ -61,24 +61,24 @@ the pieces every later slice reuses.
 
 ## Acceptance criteria
 
-- [ ] A Shipper can print a Shipment's pack slip from its page. After QZ reports the job
+- [x] A Shipper can print a Shipment's pack slip from its page. After QZ reports the job
       sent, the Shipment shows it as printed, with the time and the user.
-- [ ] A failed QZ print records nothing and tells the user.
-- [ ] Viewing the slip and using Mark as printed records it against the viewed receipt.
-- [ ] A tampered, expired or other-user receipt is refused.
-- [ ] Redeeming a receipt twice changes nothing. Redeeming an older receipt after a newer
+- [x] A failed QZ print records nothing and tells the user.
+- [x] Viewing the slip and using Mark as printed records it against the viewed receipt.
+- [x] A tampered, expired or other-user receipt is refused.
+- [x] Redeeming a receipt twice changes nothing. Redeeming an older receipt after a newer
       one leaves the newer print and its user in place.
-- [ ] A Shipment shipped between rendering and redemption is skipped.
-- [ ] A slip is branded from its Shipment's Client, and falls back to the tenant logo.
-- [ ] A slip has the tote row only when a tote code is given, and always shows the scan
+- [x] A Shipment shipped between rendering and redemption is skipped.
+- [x] A slip is branded from its Shipment's Client, and falls back to the tenant logo.
+- [x] A slip has the tote row only when a tote code is given, and always shows the scan
       code and reference.
-- [ ] A batched Shipment's page reprint says the tote code is omitted.
-- [ ] The existing pick batch pack slips still render through the new renderer, with no
+- [x] A batched Shipment's page reprint says the tote code is omitted.
+- [x] The existing pick batch pack slips still render through the new renderer, with no
       visible change.
-- [ ] The print path splits a run over the limit into jobs of at most that size, each
+- [x] The print path splits a run over the limit into jobs of at most that size, each
       with its own receipt, and stops at the first failure with earlier jobs recorded.
       This is tested at the service level with a run just over the limit.
-- [ ] `CONTEXT.md` defines pack slip.
+- [x] `CONTEXT.md` defines pack slip.
 - [ ] Manual check at review: a real QZ Tray print acknowledges, and a disconnected QZ
       Tray does not.
 
@@ -87,3 +87,23 @@ the pieces every later slice reuses.
 None - can start immediately.
 
 ## Comments
+
+- 2026-10-03 — Implemented on branch `pack-slips-01`; awaiting the manual QZ Tray check.
+  Decisions made while building it:
+  - One QZ job holds at most 200 slips (`PackSlipRenderer::SLIPS_PER_PRINT_JOB`).
+  - A receipt is sealed with `Crypt` (the app key), not a signed URL, and lives 24 hours
+    (`PackSlipReceipts::LIFETIME_SECONDS`) so a view left open across a shift can still be
+    marked printed.
+  - The user column is `pack_slip_printed_by_user_id`, matching the repo's other
+    `*_by_user_id` foreign keys, rather than the PRD's `pack_slip_printed_by`.
+  - Redemption records only on an open Shipment, which skips void Shipments as well as
+    shipped ones. A receipt replaces a stored print of the same version that has no issue
+    time, which is what slice 02's migration writes.
+  - The queue index in the PRD's schema is left to slice 04, where its query is written.
+  - Print-mode batch slips used to be drawn without the batch's Client, so they lost the
+    return address and footer. The renderer now brands each slip from its own Shipment's
+    Client, which fixes this.
+  - The pick batch's browser view already carries a receipt and Mark as printed, since
+    every view the renderer draws does. The batch's print mode still records on batch
+    membership until slice 02.
+

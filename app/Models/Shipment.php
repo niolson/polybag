@@ -297,11 +297,11 @@ class Shipment extends Model
      */
     public function activePickBatch(): ?PickBatch
     {
-        return PickBatch::query()
+        return once(fn (): ?PickBatch => PickBatch::query()
             ->where('status', PickBatchStatus::InProgress)
             ->whereHas('pickBatchShipments', fn (Builder $query) => $query->where('shipment_id', $this->id))
             ->latest('id')
-            ->first();
+            ->first());
     }
 
     /**

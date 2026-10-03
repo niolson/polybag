@@ -120,6 +120,15 @@ Box Size 17, and `PBCSHIP` is the Ship command. It names its record exactly and 
 references, SKUs, UPCs and tracking numbers are *external identifiers*. See ADR-0007.
 _Avoid_: Record code, Shipment ID (for the scanned form), order number
 
+**Pack slip**:
+The paper that travels with a Shipment's order to the packing bench: ship-to, items, the
+Client's branding, and the Shipment's PolyBag code for Scan & Pack. It is **printed** when
+the print bridge reported the job sent to the printer, or a user marked the viewed slip
+printed; never whether paper physically came out, which the bridge cannot see. It is **out
+of date** when the Shipment's items have changed since the latest recorded slip was drawn.
+The printed state lives on the Shipment, wherever the slip was printed from.
+_Avoid_: Invoice, packing list (customers say both)
+
 **Duties terms**:
 Who pays duties and import charges on an international parcel: the carrier account (DDP)
 or the recipient (DDU). Resolved per Shipment from the order, else the client's policy;

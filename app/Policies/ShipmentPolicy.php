@@ -35,6 +35,14 @@ class ShipmentPolicy
     }
 
     /**
+     * Pack slips are floor paperwork: every role that packs may print them.
+     */
+    public function printPackSlip(User $user, Shipment $shipment): bool
+    {
+        return true;
+    }
+
+    /**
      * Whether another package may be packed and bought for this shipment. Once
      * it has shipped, another package is a reshipment — a lost or damaged
      * parcel, or the wrong item sent — and a second spend on postage, so it
