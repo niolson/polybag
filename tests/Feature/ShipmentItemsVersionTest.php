@@ -136,7 +136,7 @@ describe('imports', function (): void {
     it('rolls back an import, bulk delete included, when the increment fails', function (): void {
         failTheItemsVersionIncrement();
 
-        expect(fn () => versionedImporter()->import($this->shipment, collect([
+        expect(fn (): array => versionedImporter()->import($this->shipment, collect([
             ['sku' => 'KEPT', 'quantity' => 1],
         ]), $this->source))->toThrow(RuntimeException::class, 'Increment failed');
 
@@ -147,7 +147,7 @@ describe('imports', function (): void {
     it('rolls back an imported quantity change when the increment fails', function (): void {
         failTheItemsVersionIncrement();
 
-        expect(fn () => versionedImporter()->import($this->shipment, collect([
+        expect(fn (): array => versionedImporter()->import($this->shipment, collect([
             ['sku' => 'KEPT', 'quantity' => 5],
             ['sku' => 'DROPPED', 'quantity' => 1],
         ]), $this->source))->toThrow(RuntimeException::class);
