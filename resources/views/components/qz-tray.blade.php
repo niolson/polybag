@@ -1,5 +1,6 @@
-<!-- QZ Tray Status Banner -->
-<div id="qz-status" class="mb-4 hidden items-center justify-between gap-4 rounded-lg border px-4 py-3 text-sm">
+<!-- QZ Tray Status Banner. Managed entirely by the script below; wire:ignore keeps a
+     Livewire re-render (such as the one after pack slips are recorded) from resetting it. -->
+<div id="qz-status" wire:ignore class="mb-4 hidden items-center justify-between gap-4 rounded-lg border px-4 py-3 text-sm">
     <span id="qz-status-text">Connecting to the label printer...</span>
     <button
         id="qz-status-button"
