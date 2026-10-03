@@ -78,8 +78,8 @@ given client's Shopify admin actually offers.
 | Australia Post | AU | Nothing |
 | Sendle | AU | Nothing. A reseller — check for a last-mile handoff |
 | Royal Mail | UK | **Reachable by pair** 2026-10-03 (`02`): Tracked 24 and 48, each with or without signature. No label yet. S10 candidate |
-| Evri | UK | Carrier code `hermes_uk`. Offered 2026-10-03, but **no pair matches** (`02`); presumably sold, as InPost was, but **not selectable by name** — the right pair is refused (`02`) |
-| Yodel | UK | Trades as **InPost UK** (carrier code still `yodel`). Its pair is refused by name (`02`), but **bought with no selection** 2026-10-03: a test label that carries no InPost evidence (see comment) |
+| Evri | UK | Carrier code `hermes_uk`. Offered 2026-10-03; the oracle cannot see it (`02`'s drop-off blind spot), so its pairs are **assumed** to work as InPost's does — unconfirmed |
+| Yodel | UK | Trades as **InPost UK** (carrier code still `yodel`). **Bought by pair** 2026-10-03, `yodel:yodel_direct_store_to_door`, though the oracle cannot see it (`02`). Test labels carry no InPost evidence (see comment) |
 | DPD | UK, FR | UK is carrier `dpd_uk`, **reachable by pair** 2026-10-03: Next Day. No label yet |
 | Colissimo | FR | Nothing. S10 candidate |
 | Chronopost | FR | Nothing |
@@ -178,7 +178,7 @@ falling through is the correct outcome if the answer is only ever a class.
   as US ones were, is answered — no — in the next comment.
 - **2026-10-03, later** — **UK test labels are not free evidence after all.** A purchase with
   no selection from the new London Location bought InPost (`yodel`) — so InPost is sold
-  through the API, though not by name (`02`). But what came back is **Auctane's generic
+  through the API — and, it turned out the same evening, by name too (`02`). But what came back is **Auctane's generic
   test label** (Auctane owns ShipStation and ShipEngine, which suggests who Shopify buys UK
   labels through): branded `AUCTANE`, stamped *Test Label - Do Not Ship*, a full-page bitmap
   with no text layer (`pdffonts` lists nothing; created by PDFsharp, combined by Ruby

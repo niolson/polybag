@@ -187,7 +187,8 @@ DevTools → Network shows two admin GraphQL responses that settle a carrier wit
 
 - `availableShippingCarriers` — every carrier code the shop can see: `usps`, `dhl_express`,
   `ups_shipping`, `fedex`, `canada_post`, `ups_ca`, `purolator`, `hermes_uk`, `dpd_uk`,
-  `yodel`, `royal_mail`, `dhl_express_uk`.
+  `yodel`, `royal_mail`, `dhl_express_uk`. It includes `fedex`, which the label API does not
+  sell, so presence here proves nothing about the API.
 - `shippingRates` — each rate offered for the order, with its `carrierCode` and
   `serviceCode` beside the admin's display name.
 
@@ -206,39 +207,37 @@ carrier's own product codes. Six of the nine rates the admin offered match throu
 
 **UK DHL is a separate carrier**, `dhl_express_uk`, not `dhl_express` with a UK origin.
 
-**Evri and InPost do not match**, though the admin offered them for the same order:
+**Evri and InPost do not match through the oracle — and the oracle is what is wrong.**
 `hermes_uk:hermes_uk_parcelshop_dropoff`, `…_dropoff_nextday` and
-`yodel:yodel_direct_store_to_door` (InPost UK trades under Yodel's carrier code) miss under
-every variation tried — a UK phone and none, `SOFT_PACK` and `ENVELOPE`, 2 lb and 5 lb, and
-other carrier spellings — with Royal Mail matching as the control each time. **They are not
-admin-only:** a purchase with no selection on the same package bought InPost (`yodel`),
-the cheapest rate offered. So the API sells them, but **not by name**: the admin's keys are
-the right ones and the label API refuses them anyway. Checked against a second order
-(shipment 6982, package 237), where Royal Mail matched as the control and these missed:
+`yodel:yodel_direct_store_to_door` (InPost UK trades under Yodel's carrier code) return
+`RATES_NOT_FOUND` with a past ship date under every variation tried, while Royal Mail matches
+as the control: a UK phone and none, `SOFT_PACK` and `ENVELOPE`, 2 lb and 5 lb, the admin's
+own 8.6 × 5.4 × 1.6 in sample box at its 5.88 lb, other carrier spellings, 46 of
+ShipStation's own Yodel and Evri codes (Shopify's UK labels come from Auctane, its owner —
+`14`), and the admin's composite rate key (`yodel-yodel_direct_store_to_door`, which misses
+for Royal Mail too). The admin's own purchase request for InPost sends exactly
+`yodel` / `yodel_direct_store_to_door`.
 
-- the admin's own pairs, again;
-- **ShipStation's codes** — Shopify's UK labels come from Auctane (`14`), ShipStation's
-  owner — 46 pairs: carriers `yodel` and `yodel_walleted` with ShipStation's Yodel services
-  (`yodel_direct_service`, `yodel_send_print_at_home`, …, and the 24/48 Xpect and Xpress
-  codes), and carriers `hermes_uk`, `hermes` and `hermescorp` with its Evri services
-  (`hermes_domestic_parcelshop_dropoff`, its `_next_day`, the postable, locker and corporate
-  codes);
-- the admin's composite rate key as the service (`yodel-yodel_direct_store_to_door`), which
-  misses for Royal Mail too, so the label API does not take that form at all.
+Then the same pair was sent **with a real ship date** (shipment 6983 / package 238) and was
+enqueued and `PURCHASED` — an InPost label, tracking company `yodel`. A pair that does not
+match is refused synchronously with `RATES_NOT_FOUND` and never enqueued (finding 1), so the
+selection was honored.
 
-Then InPost was bought for that order **from the admin**, and the admin's own record of the
-label names it `carrierCode: yodel`, `serviceCode: yodel_direct_store_to_door` — the pair
-the API had just refused. So the vocabulary is right and the selection is refused: Evri
-and InPost can be had through the API only by leaving the choice to Shopify. Why is
-unknown; both are drop-off services, which is the only thing they share that the six
-matching services do not. (`availableShippingCarriers` also lists `fedex`, which the label API does not sell, so
-presence there proves nothing either way.)
+**So the oracle has a blind spot: for a drop-off service, the ship date is not inert.**
+Presumably the rate exists only for days the parcel can be dropped off, so a past date reads
+exactly like an unknown code. Finding 2's premise — "the ship date is inert to the rate
+engine" — holds for every US carrier and for Royal Mail, DPD UK and DHL Express UK, and is
+false for InPost. **Evri is assumed to behave the same, unconfirmed** — proving it costs a
+purchase and a fulfillment order. The consequence for every future carrier: an oracle miss
+on a drop-off, locker or parcel-shop service proves nothing, and the only test is a
+purchase.
 
 **Not offered for this parcel, so their misses mean nothing yet:** the other services on
 the admin's *Preferred services* screens — Evri Shop to Shop (and Next Day), DPD UK Two Day,
 Classic, Air Classic and Air Express, Royal Mail Tracked 24/48 with Local Collect, DHL
 Express Domestic Pickup Point, Express Worldwide and Express Worldwide Pickup Point. Guessed
-in the same pattern (`dpd_uk:dpd_uk_two_day`, …) and all missed; read rule 5.
+in the same pattern (`dpd_uk:dpd_uk_two_day`, …) and all missed; read rule 5, and for the
+drop-off and pickup-point ones, the blind spot above as well.
 
 **Two side findings.** An origin with no phone returns `FULFILLMENT_ORDER_INVALID` for every
 pair — an error about the wrong field, with the fulfillment order untouched. And whether the
