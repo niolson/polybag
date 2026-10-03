@@ -1,6 +1,6 @@
 # Record a blind purchase as the selected quote
 
-Status: needs-triage — blocked by `shopify-shipping-carrier/05`; nothing to build before it
+Status: needs-triage — unblocked 2026-10-03: `shopify-shipping-carrier/05` now records a USD Shopify label's cost, within the hour of purchase
 
 Repo: `polybag`
 
@@ -61,3 +61,6 @@ for a different ship day than the label's, are the questions to answer first.
   points at its quote row and `markSelected()` marks it. Blind purchases are the gap that
   remains, and the shadow-quote job moved out of scope, so its cost and timing questions
   went with it.
+- **2026-10-03** — `shopify-shipping-carrier/05` shipped. The cost reaches
+  `package_labels.cost` by an hourly sync rather than at purchase, so the `selected` row would be
+  written then or updated when the cost lands. USD only; other currencies stay null.

@@ -47,6 +47,13 @@ Schedule::command('packages:sync-shopify-fulfillments')
     ->withoutOverlapping()
     ->runInBackground();
 
+// A Shopify Shipping label's price is reported nowhere but the order timeline,
+// so it is read from there after the purchase (`shopify-shipping-carrier/05`).
+Schedule::command('packages:sync-shopify-label-costs')
+    ->hourly()
+    ->withoutOverlapping()
+    ->runInBackground();
+
 // Detection, not prevention: the writers keep each package and its label
 // record consistent by construction, and this names anything that slipped
 // past them. Report only — the repair is a person's decision (ADR-0004).

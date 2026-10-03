@@ -68,6 +68,11 @@ return [
         // carry no tracking updates — so without a bound the poll would grow to
         // cover every Shopify label ever bought.
         'label_void_check_days' => env('SHOPIFY_LABEL_VOID_CHECK_DAYS', 30),
+        // How far back to keep looking for a label's price in its order
+        // timeline. The event is written at purchase, so a label not priced
+        // within this window never will be; it bounds the hourly poll for
+        // labels priced in a currency PolyBag does not record.
+        'label_cost_check_days' => env('SHOPIFY_LABEL_COST_CHECK_DAYS', 7),
     ],
 
     'oauth' => [
