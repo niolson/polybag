@@ -67,9 +67,11 @@ only what needs a parcel to physically move.
    [`amazon-buy-shipping/09`](amazon-buy-shipping/issues/09-international-purchase-and-customs.md)
    buys a cross-border label; FedEx's `NotRequested` row is honest today and stale the
    day `shippingDocumentSpecification` or ETD is sent. Neither blocks anything.
-4. **[`05`](shopify-shipping-carrier/issues/05-shipping-label-cost-reconciliation.md)** —
-   build last, but gather its evidence (`Order.events` after every purchase) in the course of
-   everything above. Then return to `12`.
+4. **[`05`](shopify-shipping-carrier/issues/05-shipping-label-cost-reconciliation.md)'s
+   refund side.** Cost recovery shipped 2026-10-03 (USD labels, read from the order timeline).
+   What remains is reconciling refunds for voided labels, blocked on
+   `package-label-history/04`. `12`'s charging question now covers only what is left
+   unpriced.
 5. One `needs-triage` item, blocking nothing:
    [`13`](shopify-shipping-carrier/issues/13-split-shopify-fulfillment-orders-per-package.md)
    (blocked on a multi-package packing workflow that does not exist).

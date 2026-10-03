@@ -22,7 +22,7 @@ everything below follows from that being the whole surface.
 | Rate quoting | **Does not exist.** No rates query on any version. A purchase probe sent with a past ship date reports whether a rate *matched* without buying — see `02` |
 | Buying a label | `shippingLabelPurchase`, asynchronous — poll `node(id:)` until `PURCHASED` / `PURCHASE_FAILED`. Keys off a **fulfillment order ID**, so only Shopify-imported shipments are eligible |
 | Choosing a service | `preferredRateSelection` **is honored** (`02`). Each carrier's own vocabulary passed through — USPS in Shopify's PascalCase, UPS's numeric codes, DHL's letter codes. 17 pairs seeded |
-| Label cost | Not on the label. Written into the order timeline as prose — *"PolyBag purchased a shipping label for $5.68."* — readable via `Order.events`. See `05` |
+| Label cost | Not on the label. Written into the order timeline as prose — *"PolyBag purchased a shipping label for $5.68."* — on an event that names the label by ID. Recorded hourly for USD labels by `packages:sync-shopify-label-costs`. See `05` |
 | Voiding | **No mutation.** Voiding happens in the Shopify admin, and it closes the fulfillment order permanently and creates a replacement — see `18` and `21` |
 | PDF vs ZPL | **Always PDF.** The purchase input has no format field, and the shop's label format setting is a *paper size* applied at print time that never reaches the document at `shippingDocuments[].url`. What PolyBag downloads is always 4×6 |
 | Customs | International purchases return a separate `CUSTOMS_FORM` document — PDF, three Letter pages. HS code and country of origin must already be on the Shopify catalog; they cannot be sent in the purchase |
@@ -53,7 +53,8 @@ Two decisions that look like omissions and are not:
 
 **`packages.cost` is left null, not `0.00`.** A fabricated zero would read as a free label
 everywhere cost is totalled. `08` fixed the reporting consequence; `12` carries the
-billing one.
+billing one. Since 2026-10-03 `05` fills it in within the hour for a USD label, from the
+order timeline; anything it cannot price exactly stays null.
 
 **The carrier of record is the carrier Shopify picked**, translated from Shopify's
 internal code (`ups_shipping` → UPS) through `ShopifyShippingLabelService::CARRIER_NAMES`,

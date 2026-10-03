@@ -1,6 +1,6 @@
 # Client billing invoices unpriced postage as $0.00
 
-Status: needs-triage — flag half shipped 2026-09-08; what to charge waits on `05`
+Status: needs-triage — flag half shipped 2026-09-08; `05` now prices USD Shopify labels, so what to charge covers only what is left
 
 Repo: `polybag`
 
@@ -58,11 +58,26 @@ this does not fix, and the badge is what stops it going out unnoticed.
 
 ## Still open
 
-What to actually charge. Better answered after `05` — if it supplies real costs for most
-Shopify labels, the remaining population may be small enough that reconciling by hand is
-the whole answer and no billing rule is needed.
+What to actually charge for the packages still unpriced. `05` shipped 2026-10-03: a
+Shopify label priced in USD gets its exact cost from the order timeline within the hour,
+on `packages.cost`, so this report's postage and `line_total` include it with no change
+here. What is left unpriced is now:
+
+- **Shopify labels in another currency**, such as GBP from a London Location. Cost columns
+  are USD by convention, so these stay null
+- **anything `05`'s parse refused**, and labels older than its seven-day window
+- **manual ships and failed cost writes**, as before
+
+That population may be small enough that reconciling by hand is the whole answer and no
+billing rule is needed. Measure it on a real install before deciding.
 
 ## Related
 
 - `08` — the same defect on the reporting path, done
 - `05` — the cost recovery this waits on
+
+## Comments
+
+- **2026-10-03** — `05` shipped: USD Shopify labels now carry their real cost, so this
+  report bills them correctly with no change of its own. *Still open* restated around what
+  remains unpriced.
