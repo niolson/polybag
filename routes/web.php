@@ -7,6 +7,8 @@ use App\Http\Controllers\Auth\SsoCallbackController;
 use App\Http\Controllers\CspReportController;
 use App\Http\Controllers\LabelPrintController;
 use App\Http\Controllers\OAuthCallbackController;
+use App\Http\Controllers\PackSlipController;
+use App\Http\Controllers\PackSlipPrintController;
 use App\Http\Controllers\PickBatchController;
 use App\Http\Controllers\QzProvisionScriptController;
 use App\Http\Controllers\QzSignController;
@@ -59,6 +61,16 @@ Route::get('/qz/provision-script/{platform}', [QzProvisionScriptController::clas
 Route::post('/labels/{package}/printed', [LabelPrintController::class, 'store'])
     ->name('labels.printed')
     ->middleware(['auth', 'throttle:300,1']);
+
+Route::get('/shipments/{shipment}/pack-slip', [PackSlipController::class, 'shipment'])
+    ->name('shipments.pack-slip')
+    ->middleware('auth');
+
+// Redeems a pack slip receipt: from the QZ Tray integration once a job is sent,
+// or from Mark as printed on a pack slip view. One request per print job.
+Route::post('/pack-slips/printed', [PackSlipPrintController::class, 'store'])
+    ->name('pack-slips.printed')
+    ->middleware(['auth', 'throttle:120,1']);
 
 Route::middleware(['auth', 'manager'])->group(function (): void {
     Route::get('/pick-batches/{pickBatch}/summary', [PickBatchController::class, 'summary'])

@@ -496,6 +496,20 @@ class ShipmentResource extends Resource
                         TextEntry::make('picking_status')
                             ->badge()
                             ->visible(fn () => app(SettingsService::class)->get('picking_enabled', false)),
+                        TextEntry::make('pack_slip')
+                            ->label('Pack Slip')
+                            ->state(fn (Shipment $record): string => $record->hasPrintedPackSlip()
+                                ? 'Printed '.$record->pack_slip_printed_at?->timezone(Location::timezone())->format('M j, Y g:i A')
+                                    .($record->packSlipPrintedBy ? ' by '.$record->packSlipPrintedBy->name : '')
+                                : 'Not printed')
+                            ->color(fn (Shipment $record): ?string => $record->hasPrintedPackSlip() ? null : 'gray'),
+                        TextEntry::make('active_pick_batch')
+                            ->label('Pick Batch')
+                            ->state(fn (Shipment $record): ?string => $record->activePickBatch() ? 'Batch #'.$record->activePickBatch()->id : null)
+                            ->url(fn (Shipment $record): ?string => ($batch = $record->activePickBatch()) && PickBatchResource::canView($batch)
+                                ? PickBatchResource::getUrl('view', ['record' => $batch])
+                                : null)
+                            ->visible(fn (Shipment $record): bool => $record->activePickBatch() !== null),
                         TextEntry::make('client.name')
                             ->label('Client')
                             ->placeholder('—')

@@ -84,8 +84,8 @@ it('returns the pack slips view', function (): void {
     $response = $this->get(route('pick-batches.pack-slips', $batch));
 
     $response->assertOk()
-        ->assertViewIs('pick-batches.pack-slips')
-        ->assertViewHas('pivotRows');
+        ->assertViewIs('pack-slips.slips')
+        ->assertViewHas('slips');
 });
 
 it('encodes each pack slip barcode as the shipment\'s PolyBag code', function (): void {

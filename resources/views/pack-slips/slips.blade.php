@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Pack Slips — Batch #{{ $pickBatch->id }}</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>{{ $title }}</title>
     <style>
         @page { size: 4in 6in; margin: 0; }
         * { box-sizing: border-box; }
@@ -78,7 +79,9 @@
         .row-footer .footer-label { font-weight: bold; color: #111; margin-bottom: 1px; }
         .row-footer .footer-block + .footer-block { margin-top: 0.05in; }
 
-        .actions { padding: 0.5cm; }
+        .actions { padding: 0.5cm; display: flex; gap: 0.5em; align-items: center; flex-wrap: wrap; }
+        .mark-status { font-size: 9pt; }
+        .mark-status.error { color: #b91c1c; }
         @media print { .actions { display: none; } }
     </style>
 </head>
@@ -88,16 +91,60 @@
     @endif
     <div class="actions">
         <button onclick="window.print()">Print</button>
+        @if ($receipt)
+            {{-- Records exactly what this page drew. If the items have changed since, the Shipment stays out of date. --}}
+            <button type="button" id="mark-printed">Mark as printed</button>
+            <span id="mark-status" class="mark-status" role="status"></span>
+        @endif
         <a href="javascript:history.back()">Back</a>
     </div>
+    @if ($receipt)
+    <script>
+        document.getElementById('mark-printed').addEventListener('click', async (event) => {
+            const button = event.currentTarget;
+            const status = document.getElementById('mark-status');
+            button.disabled = true;
+            status.className = 'mark-status';
+            status.textContent = 'Recording…';
 
-    @foreach ($pivotRows as $pivot)
+            try {
+                const response = await fetch(@json(route('pack-slips.printed')), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                    },
+                    body: JSON.stringify({ receipt: @json($receipt) }),
+                });
+                const body = await response.json().catch(() => ({}));
+
+                if (!response.ok) {
+                    throw new Error(body.error || body.message || `HTTP ${response.status}`);
+                }
+
+                status.textContent = (body.recorded === 1 ? 'Recorded 1 pack slip as printed.' : `Recorded ${body.recorded} pack slips as printed.`)
+                    + (body.skipped > 0 ? ` ${body.skipped} skipped: shipped, removed, or already recorded by a newer print.` : '');
+            } catch (error) {
+                button.disabled = false;
+                status.className = 'mark-status error';
+                status.textContent = `Not recorded: ${error.message}`;
+            }
+        });
+    </script>
+    @endif
+
+    @foreach ($slips as $slip)
+    @php
+        $client = $slip->client;
+        $shipment = $slip->shipment;
+    @endphp
     <div class="slip">
         {{-- Row 1: Logo | Return address --}}
         <div class="row-header">
             <div class="logo-cell">
-                @if (!empty($logoDataUri))
-                    <img src="{{ $logoDataUri }}" alt="Logo">
+                @if (!empty($slip->logoDataUri))
+                    <img src="{{ $slip->logoDataUri }}" alt="Logo">
                 @endif
             </div>
             <div class="return-address-cell">
@@ -129,36 +176,35 @@
             </div>
         </div>
 
-        {{-- Row 2: Tote | Order + barcode --}}
+        {{-- Row 2: Tote | Order + barcode. The tote only exists for a slip printed from a pick batch. --}}
         <div class="row-tote">
+            @if ($slip->toteCode !== null)
             <div class="tote-cell">
                 <div class="tote-label">Tote</div>
-                <div class="tote-code">{{ $pivot->tote_code ?? '—' }}</div>
+                <div class="tote-code">{{ $slip->toteCode }}</div>
             </div>
+            @endif
             <div class="order-cell">
-                @if ($pivot->shipment)
-                    {{-- The PolyBag code, not the order reference: a reference is only unique within one connection (ADR-0007). --}}
-                    @php($scanCode = \App\Services\Scanning\ScanCode::forShipment($pivot->shipment))
-                    <div class="barcode-wrap">
-                        {!! $generator->getBarcode($scanCode, \Picqer\Barcode\BarcodeGeneratorSVG::TYPE_CODE_128, 2, 30) !!}
-                    </div>
-                    <div class="order-ref">{{ $pivot->shipment->shipment_reference }} <span class="scan-code">{{ $scanCode }}</span></div>
-                @endif
+                {{-- The PolyBag code, not the order reference: a reference is only unique within one connection (ADR-0007). --}}
+                <div class="barcode-wrap">
+                    {!! $generator->getBarcode($slip->scanCode, \Picqer\Barcode\BarcodeGeneratorSVG::TYPE_CODE_128, 2, 30) !!}
+                </div>
+                <div class="order-ref">{{ $shipment->shipment_reference }} <span class="scan-code">{{ $slip->scanCode }}</span></div>
             </div>
         </div>
 
         {{-- Row 3: Ship-to address | Order summary placeholder --}}
         <div class="row-recipient">
             <div class="ship-to-cell">
-                <div class="name">{{ trim(($pivot->shipment?->first_name ?? '').' '.($pivot->shipment?->last_name ?? '')) }}</div>
-                @if ($pivot->shipment?->company)
-                    <div class="addr">{{ $pivot->shipment->company }}</div>
+                <div class="name">{{ trim(($shipment->first_name ?? '').' '.($shipment->last_name ?? '')) }}</div>
+                @if ($shipment->company)
+                    <div class="addr">{{ $shipment->company }}</div>
                 @endif
-                <div class="addr">{{ $pivot->shipment?->address1 }}</div>
-                @if ($pivot->shipment?->address2)
-                    <div class="addr">{{ $pivot->shipment->address2 }}</div>
+                <div class="addr">{{ $shipment->address1 }}</div>
+                @if ($shipment->address2)
+                    <div class="addr">{{ $shipment->address2 }}</div>
                 @endif
-                <div class="addr">{{ $pivot->shipment?->city }}, {{ $pivot->shipment?->state_or_province }} {{ $pivot->shipment?->postal_code }}</div>
+                <div class="addr">{{ $shipment->city }}, {{ $shipment->state_or_province }} {{ $shipment->postal_code }}</div>
             </div>
             <div class="order-summary-cell"></div>
         </div>
@@ -173,7 +219,7 @@
                 </tr>
             </thead>
             <tbody>
-                @foreach ($pivot->shipment?->shipmentItems ?? [] as $item)
+                @foreach ($shipment->shipmentItems as $item)
                 <tr>
                     <td>{{ $item->product?->sku ?? '—' }}</td>
                     <td>{{ $item->product?->name ?? '—' }}</td>
