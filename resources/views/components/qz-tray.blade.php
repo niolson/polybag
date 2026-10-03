@@ -1,6 +1,11 @@
 <!-- QZ Tray Status Banner -->
 <div id="qz-status" class="mb-4 hidden items-center justify-between gap-4 rounded-lg border px-4 py-3 text-sm">
     <span id="qz-status-text">Connecting to the label printer...</span>
+    <button
+        id="qz-status-button"
+        type="button"
+        class="hidden shrink-0 font-semibold underline underline-offset-4"
+    ></button>
     <a
         id="qz-status-action"
         href="{{ \App\Filament\Pages\DeviceSettings::getUrl() }}"
@@ -15,9 +20,11 @@
         const statusBanner = document.getElementById('qz-status');
         const statusText = document.getElementById('qz-status-text');
         const statusAction = document.getElementById('qz-status-action');
+        const statusButton = document.getElementById('qz-status-button');
 
-        // Show status during initial connection
-        function showStatus(message, type = 'info', actionLabel = null) {
+        // Show status during initial connection. `button` is an in-page action,
+        // `{ label, onClick }`, shown instead of the Device Settings link.
+        function showStatus(message, type = 'info', actionLabel = null, autoHide = type === 'success', button = null) {
             statusBanner.classList.remove(
                 'hidden', 'border-green-200', 'border-red-200', 'border-amber-200', 'border-gray-200',
                 'bg-green-50', 'bg-red-50', 'bg-amber-50', 'bg-gray-50',
@@ -38,9 +45,12 @@
             statusText.textContent = message;
             statusAction.textContent = actionLabel || '';
             statusAction.classList.toggle('hidden', !actionLabel);
+            statusButton.textContent = button?.label || '';
+            statusButton.onclick = button?.onClick || null;
+            statusButton.classList.toggle('hidden', !button);
 
             // Auto-hide success messages
-            if (type === 'success') {
+            if (autoHide) {
                 setTimeout(hideStatus, 3000);
             }
         }
@@ -247,49 +257,55 @@
             }
         }
 
+        // Send a document (8.5x11) to the report printer via QZ Tray. Throws on any
+        // failure; resolves once QZ reports the job sent to the printer.
+        async function sendReport(base64Data, format = 'pdf') {
+            const printer = getReportPrinter();
+
+            if (!printer) {
+                const error = new Error('No document printer configured. Go to Device Settings.');
+                error.isConfiguration = true;
+                throw error;
+            }
+
+            if (!qz.websocket.isActive()) {
+                showStatus('Reconnecting to QZ Tray...', 'info');
+                await initQZTray(true);
+            }
+
+            const config = qz.configs.create(printer, {
+                size: { width: 8.5, height: 11 },
+                units: 'in',
+                scaleContent: true
+            });
+
+            const isImageFormat = format === 'image' || format === 'png' || format === 'gif';
+
+            const data = [{
+                type: 'pixel',
+                format: isImageFormat ? 'image' : 'pdf',
+                flavor: 'base64',
+                data: base64Data
+            }];
+
+            await qz.print(config, data);
+        }
+
         // Print report (8.5x11) via QZ Tray.
         // Returns whether it printed. Reports rather than throws, because the
         // callers that print paperwork alongside a label must not lose the label
         // print to a failure on the paper half — but they do have to be able to
         // tell the difference, so the outcome cannot be silent either.
         async function printReport(base64Data, format = 'pdf') {
-            const printer = getReportPrinter();
-
-            if (!printer) {
-                showStatus('No document printer configured. Go to Device Settings.', 'error');
-                return false;
-            }
-
             try {
-                if (!qz.websocket.isActive()) {
-                    showStatus('Reconnecting to QZ Tray...', 'info');
-                    await initQZTray(true);
-                }
-
                 showStatus('Printing document...', 'info');
-
-                const config = qz.configs.create(printer, {
-                    size: { width: 8.5, height: 11 },
-                    units: 'in',
-                    scaleContent: true
-                });
-
-                const isImageFormat = format === 'image' || format === 'png' || format === 'gif';
-
-                const data = [{
-                    type: 'pixel',
-                    format: isImageFormat ? 'image' : 'pdf',
-                    flavor: 'base64',
-                    data: base64Data
-                }];
-
-                await qz.print(config, data);
+                await sendReport(base64Data, format);
                 hideStatus();
 
                 return true;
             } catch (error) {
                 console.error('Report print error:', error);
-                showStatus(`Document print failed: ${error.message || 'Unknown error'}`, 'error');
+                showStatus(error.isConfiguration ? error.message : `Document print failed: ${error.message || 'Unknown error'}`, 'error');
 
                 return false;
             }
@@ -349,6 +365,117 @@
             }
         }
 
+        // Redeem a pack slip receipt: the slips it names are recorded as printed.
+        // Returns whether the server recorded it.
+        async function acknowledgePackSlips(receipt) {
+            try {
+                const response = await fetch(@json(route('pack-slips.printed')), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                        'Accept': 'application/json',
+                    },
+                    body: JSON.stringify({ receipt }),
+                    keepalive: true,
+                });
+
+                if (!response.ok) {
+                    console.error(`Failed to record pack slip print: HTTP ${response.status}`);
+                    return false;
+                }
+
+                return true;
+            } catch (error) {
+                console.error('Failed to record pack slip print:', error);
+                return false;
+            }
+        }
+
+        const slipCount = (n) => n === 1 ? '1 pack slip' : `${n} pack slips`;
+
+        // Print a run of pack slips, sent by the server as consecutive jobs of
+        // bounded size, each with its own receipt. A job is recorded only once QZ
+        // reports it sent; the run stops at the first job that fails, and the jobs
+        // before it stay recorded. "Sent" is as far as QZ can see: a printer that
+        // jams afterwards is recovered by reprinting.
+        async function printPackSlipJobs(jobs) {
+            const total = jobs.reduce((sum, job) => sum + job.count, 0);
+            const unrecorded = [];
+            let sent = 0;
+            let failure = null;
+
+            for (const job of jobs) {
+                showStatus(jobs.length > 1
+                    ? `Sending pack slips ${sent + 1}–${sent + job.count} of ${total} to the printer...`
+                    : `Sending ${slipCount(job.count)} to the printer...`, 'info');
+
+                try {
+                    await sendReport(job.data, 'pdf');
+                } catch (error) {
+                    console.error('Pack slip print error:', error);
+                    failure = error.message || 'Unknown error';
+                    break;
+                }
+
+                sent += job.count;
+
+                if (!await acknowledgePackSlips(job.receipt)) {
+                    unrecorded.push(job);
+                }
+            }
+
+            const unrecordedCount = unrecorded.reduce((sum, job) => sum + job.count, 0);
+            const recordedCount = sent - unrecordedCount;
+            const parts = [];
+            let type;
+
+            if (failure && sent === 0) {
+                parts.push(`Pack slips did not print: ${failure}. Nothing was recorded as printed.`);
+                type = 'error';
+            } else if (failure) {
+                parts.push(`Pack slips stopped: ${failure}. ${sent} of ${total} were sent to the printer; the other ${total - sent} were not sent or recorded.`);
+                type = 'error';
+            } else {
+                parts.push(`Sent ${slipCount(total)} to the printer. If no paper came out, reprint.`);
+                type = 'success';
+            }
+
+            if (unrecordedCount > 0) {
+                parts.push(`${slipCount(unrecordedCount)} sent but not recorded as printed.`);
+                type = type === 'error' ? 'error' : 'warning';
+            }
+
+            const markPrinted = unrecorded.length === 0 ? null : {
+                label: 'Mark as printed',
+                onClick: async () => {
+                    const stillUnrecorded = [];
+
+                    for (const job of unrecorded) {
+                        if (!await acknowledgePackSlips(job.receipt)) {
+                            stillUnrecorded.push(job);
+                        }
+                    }
+
+                    if (stillUnrecorded.length === 0) {
+                        showStatus(`Recorded ${slipCount(unrecordedCount)} as printed.`, 'success');
+                    } else {
+                        unrecorded.splice(0, unrecorded.length, ...stillUnrecorded);
+                        showStatus('Could not record the pack slips as printed. Try again, or use Mark as printed on the viewed slips.', 'error', null, false, markPrinted);
+                    }
+
+                    Livewire.dispatch('pack-slips-printed');
+                },
+            };
+
+            // Kept on screen: the reprint hint is the point of the message.
+            showStatus(parts.join(' '), type, null, false, markPrinted);
+
+            if (recordedCount > 0) {
+                Livewire.dispatch('pack-slips-printed');
+            }
+        }
+
         // Listen for print events from Livewire
         document.addEventListener('livewire:init', () => {
             Livewire.on('print-label', async (event) => {
@@ -392,6 +519,10 @@
 
             Livewire.on('print-report', (event) => {
                 printReport(event.data);
+            });
+
+            Livewire.on('print-pack-slips', (event) => {
+                printPackSlipJobs(event.jobs || []);
             });
 
             Livewire.on('print-batch-labels', async (event) => {
