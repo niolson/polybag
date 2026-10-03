@@ -227,8 +227,10 @@ selection was honored.
 Presumably the rate exists only for days the parcel can be dropped off, so a past date reads
 exactly like an unknown code. Finding 2's premise — "the ship date is inert to the rate
 engine" — holds for every US carrier and for Royal Mail, DPD UK and DHL Express UK, and is
-false for InPost. **Evri is assumed to behave the same, unconfirmed** — proving it costs a
-purchase and a fulfillment order. The consequence for every future carrier: an oracle miss
+false for InPost and Evri. **Evri confirmed the same night** (shipment 6984 / package 239):
+`hermes_uk:hermes_uk_parcelshop_dropoff` with a real ship date was enqueued and `PURCHASED`,
+tracking company `hermes_uk`. Evri is not the cheapest rate on these parcels — InPost is —
+so this one cannot have been Shopify's own choice. The consequence for every future carrier: an oracle miss
 on a drop-off, locker or parcel-shop service proves nothing, and the only test is a
 purchase.
 

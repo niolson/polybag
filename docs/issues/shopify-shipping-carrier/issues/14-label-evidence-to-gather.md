@@ -78,7 +78,7 @@ given client's Shopify admin actually offers.
 | Australia Post | AU | Nothing |
 | Sendle | AU | Nothing. A reseller — check for a last-mile handoff |
 | Royal Mail | UK | **Reachable by pair** 2026-10-03 (`02`): Tracked 24 and 48, each with or without signature. No label yet. S10 candidate |
-| Evri | UK | Carrier code `hermes_uk`. Offered 2026-10-03; the oracle cannot see it (`02`'s drop-off blind spot), so its pairs are **assumed** to work as InPost's does — unconfirmed |
+| Evri | UK | Carrier code `hermes_uk`. **Bought by pair** 2026-10-03, `hermes_uk:hermes_uk_parcelshop_dropoff`, though the oracle cannot see it (`02`). Test label tracking number is the same Auctane placeholder as InPost's |
 | Yodel | UK | Trades as **InPost UK** (carrier code still `yodel`). **Bought by pair** 2026-10-03, `yodel:yodel_direct_store_to_door`, though the oracle cannot see it (`02`). Test labels carry no InPost evidence (see comment) |
 | DPD | UK, FR | UK is carrier `dpd_uk`, **reachable by pair** 2026-10-03: Next Day. No label yet |
 | Colissimo | FR | Nothing. S10 candidate |
@@ -186,7 +186,8 @@ falling through is the correct outcome if the answer is only ever a class.
   number, `GB.GB.<yyyymmdd>.<13 digits>.1`. No carrier token, no carrier number family. So
   unlike the US, where Shopify passed USPS's own sample label through, a UK test label
   answers none of this issue's four questions; that needs a real purchase. Assumed true of
-  every UK carrier, from this one label. PolyBag recorded the carrier as raw `yodel`, with
+  every UK carrier, from this one label — and an Evri purchase the same night returned the
+  same placeholder number format. PolyBag recorded the carrier as raw `yodel`, with
   no catalog carrier, since there is no Yodel or InPost row.
 
 ## Blocked by
