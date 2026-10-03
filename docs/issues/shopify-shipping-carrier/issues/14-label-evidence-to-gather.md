@@ -78,8 +78,8 @@ given client's Shopify admin actually offers.
 | Australia Post | AU | Nothing |
 | Sendle | AU | Nothing. A reseller — check for a last-mile handoff |
 | Royal Mail | UK | **Reachable by pair** 2026-10-03 (`02`): Tracked 24 and 48, each with or without signature. No label yet. S10 candidate |
-| Evri | UK | Offered in the admin 2026-10-03 (carrier code `hermes_uk`), but **no pair matches through the API** (`02`) — most likely admin-only, as FedEx is |
-| Yodel | UK | Trades as **InPost UK** (carrier code still `yodel`). Offered in the admin 2026-10-03 as InPost Direct: Store to Door, but **no pair matches through the API** (`02`) — most likely admin-only |
+| Evri | UK | Carrier code `hermes_uk`. Offered 2026-10-03, but **no pair matches** (`02`); presumably sold, as InPost was; ShipStation's codes not yet tried |
+| Yodel | UK | Trades as **InPost UK** (carrier code still `yodel`). No pair matches (`02`), but **bought with no selection** 2026-10-03: a test label that carries no InPost evidence (see comment) |
 | DPD | UK, FR | UK is carrier `dpd_uk`, **reachable by pair** 2026-10-03: Next Day. No label yet |
 | Colissimo | FR | Nothing. S10 candidate |
 | Chronopost | FR | Nothing |
@@ -173,10 +173,21 @@ falling through is the correct outcome if the answer is only ever a class.
   address, was offered nine rates by the admin across five carriers, priced in GBP. `02`'s
   UK pass then found their codes by reading the admin's own GraphQL traffic: Royal Mail,
   DPD UK and DHL Express UK are reachable by pair; Evri and InPost are not. **InPost is
-  Yodel**, renamed, under carrier code `yodel` — not a twentieth carrier. So the UK half is
-  as free to gather as the US half was, and the S10 question can be put to real Royal Mail
-  numbers; DHL Express being sold domestically in the UK bears on question 3. Captures still
-  need a UK Location in PolyBag, since a purchase ships from the Package's Location.
+  Yodel**, renamed, under carrier code `yodel` — not a twentieth carrier. DHL Express being
+  sold domestically in the UK bears on question 3. Whether UK test labels are free evidence,
+  as US ones were, is answered — no — in the next comment.
+- **2026-10-03, later** — **UK test labels are not free evidence after all.** A purchase with
+  no selection from the new London Location bought InPost (`yodel`) — so InPost is sold
+  through the API, though no pair for it is known yet. But what came back is **Auctane's generic
+  test label** (Auctane owns ShipStation and ShipEngine, which suggests who Shopify buys UK
+  labels through): branded `AUCTANE`, stamped *Test Label - Do Not Ship*, a full-page bitmap
+  with no text layer (`pdffonts` lists nothing; created by PDFsharp, combined by Ruby
+  CombinePDF), two 4×6 pages — the label and a page of QR codes — and a placeholder tracking
+  number, `GB.GB.<yyyymmdd>.<13 digits>.1`. No carrier token, no carrier number family. So
+  unlike the US, where Shopify passed USPS's own sample label through, a UK test label
+  answers none of this issue's four questions; that needs a real purchase. Assumed true of
+  every UK carrier, from this one label. PolyBag recorded the carrier as raw `yodel`, with
+  no catalog carrier, since there is no Yodel or InPost row.
 
 ## Blocked by
 

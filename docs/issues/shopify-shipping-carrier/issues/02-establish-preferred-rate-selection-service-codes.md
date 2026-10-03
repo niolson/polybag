@@ -210,9 +210,14 @@ carrier's own product codes. Six of the nine rates the admin offered match throu
 `hermes_uk:hermes_uk_parcelshop_dropoff`, `…_dropoff_nextday` and
 `yodel:yodel_direct_store_to_door` (InPost UK trades under Yodel's carrier code) miss under
 every variation tried — a UK phone and none, `SOFT_PACK` and `ENVELOPE`, 2 lb and 5 lb, and
-other carrier spellings — with Royal Mail matching as the control each time. Most likely
-they are admin-only, as FedEx is in the US. Note that `availableShippingCarriers` lists
-`fedex` too, so a carrier's presence there does not mean the label API sells it.
+other carrier spellings — with Royal Mail matching as the control each time. **They are not
+admin-only:** a purchase with no selection on the same package bought InPost (`yodel`),
+the cheapest rate offered. So the API sells them, and **no pair for them has been found
+yet** — which may mean only that the admin's keys are not the label API's. Shopify's UK
+labels come from Auctane (`14`), so ShipStation's own codes — `hermes:hermes_domestic_parcelshop_dropoff`,
+`yodel_walleted:yodel_direct_service` and the like — are the next candidates
+(`uk-shipengine.json` in the rig); they need an open fulfillment order to probe. (`availableShippingCarriers` also lists `fedex`, which the label API does not sell, so
+presence there proves nothing either way.)
 
 **Not offered for this parcel, so their misses mean nothing yet:** the other services on
 the admin's *Preferred services* screens — Evri Shop to Shop (and Next Day), DPD UK Two Day,
