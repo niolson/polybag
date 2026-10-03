@@ -212,11 +212,26 @@ carrier's own product codes. Six of the nine rates the admin offered match throu
 every variation tried — a UK phone and none, `SOFT_PACK` and `ENVELOPE`, 2 lb and 5 lb, and
 other carrier spellings — with Royal Mail matching as the control each time. **They are not
 admin-only:** a purchase with no selection on the same package bought InPost (`yodel`),
-the cheapest rate offered. So the API sells them, and **no pair for them has been found
-yet** — which may mean only that the admin's keys are not the label API's. Shopify's UK
-labels come from Auctane (`14`), so ShipStation's own codes — `hermes:hermes_domestic_parcelshop_dropoff`,
-`yodel_walleted:yodel_direct_service` and the like — are the next candidates
-(`uk-shipengine.json` in the rig); they need an open fulfillment order to probe. (`availableShippingCarriers` also lists `fedex`, which the label API does not sell, so
+the cheapest rate offered. So the API sells them, but **not by name**: the admin's keys are
+the right ones and the label API refuses them anyway. Checked against a second order
+(shipment 6982, package 237), where Royal Mail matched as the control and these missed:
+
+- the admin's own pairs, again;
+- **ShipStation's codes** — Shopify's UK labels come from Auctane (`14`), ShipStation's
+  owner — 46 pairs: carriers `yodel` and `yodel_walleted` with ShipStation's Yodel services
+  (`yodel_direct_service`, `yodel_send_print_at_home`, …, and the 24/48 Xpect and Xpress
+  codes), and carriers `hermes_uk`, `hermes` and `hermescorp` with its Evri services
+  (`hermes_domestic_parcelshop_dropoff`, its `_next_day`, the postable, locker and corporate
+  codes);
+- the admin's composite rate key as the service (`yodel-yodel_direct_store_to_door`), which
+  misses for Royal Mail too, so the label API does not take that form at all.
+
+Then InPost was bought for that order **from the admin**, and the admin's own record of the
+label names it `carrierCode: yodel`, `serviceCode: yodel_direct_store_to_door` — the pair
+the API had just refused. So the vocabulary is right and the selection is refused: Evri
+and InPost can be had through the API only by leaving the choice to Shopify. Why is
+unknown; both are drop-off services, which is the only thing they share that the six
+matching services do not. (`availableShippingCarriers` also lists `fedex`, which the label API does not sell, so
 presence there proves nothing either way.)
 
 **Not offered for this parcel, so their misses mean nothing yet:** the other services on

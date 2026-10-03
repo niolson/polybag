@@ -111,3 +111,9 @@ logged as the `selected` quote row, so *Rate Comparison* covers blind purchases.
   expect) folded in as the section above rather than kept as a second plan.
 - **2026-10-03** — `postage-source-split/17` narrowed to recording a blind purchase as the
   selected quote, and now waits on this issue for the cost that row needs.
+- **2026-10-03** — a third route checked and closed. The Shopify **admin's** own
+  `ShippingLabel` carries `totalPrice`, `priceUsd`, `carrierCode` and `serviceCode` — seen in
+  its GraphQL traffic for an InPost label (£4.25 / $5.61). The **public** Admin API's
+  `ShippingLabel` (2026-07, introspected) has none of them: `cancellable`, `id`, `location`,
+  `printed`, `shippingDocuments`, `trackingInfo` only. So the stored `source_label_reference`
+  cannot be read back for a price; the two routes above stand.
