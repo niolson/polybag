@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ $title }}</title>
     <style>
         @page { size: 4in 6in; margin: 0; }
@@ -78,7 +79,9 @@
         .row-footer .footer-label { font-weight: bold; color: #111; margin-bottom: 1px; }
         .row-footer .footer-block + .footer-block { margin-top: 0.05in; }
 
-        .actions { padding: 0.5cm; }
+        .actions { padding: 0.5cm; display: flex; gap: 0.5em; align-items: center; flex-wrap: wrap; }
+        .mark-status { font-size: 9pt; }
+        .mark-status.error { color: #b91c1c; }
         @media print { .actions { display: none; } }
     </style>
 </head>
@@ -88,8 +91,48 @@
     @endif
     <div class="actions">
         <button onclick="window.print()">Print</button>
+        @if ($receipt)
+            {{-- Records exactly what this page drew. If the items have changed since, the Shipment stays out of date. --}}
+            <button type="button" id="mark-printed">Mark as printed</button>
+            <span id="mark-status" class="mark-status" role="status"></span>
+        @endif
         <a href="javascript:history.back()">Back</a>
     </div>
+    @if ($receipt)
+    <script>
+        document.getElementById('mark-printed').addEventListener('click', async (event) => {
+            const button = event.currentTarget;
+            const status = document.getElementById('mark-status');
+            button.disabled = true;
+            status.className = 'mark-status';
+            status.textContent = 'Recording…';
+
+            try {
+                const response = await fetch(@json(route('pack-slips.printed')), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                    },
+                    body: JSON.stringify({ receipt: @json($receipt) }),
+                });
+                const body = await response.json().catch(() => ({}));
+
+                if (!response.ok) {
+                    throw new Error(body.error || body.message || `HTTP ${response.status}`);
+                }
+
+                status.textContent = (body.recorded === 1 ? 'Recorded 1 pack slip as printed.' : `Recorded ${body.recorded} pack slips as printed.`)
+                    + (body.skipped > 0 ? ` ${body.skipped} skipped: shipped, removed, or already recorded by a newer print.` : '');
+            } catch (error) {
+                button.disabled = false;
+                status.className = 'mark-status error';
+                status.textContent = `Not recorded: ${error.message}`;
+            }
+        });
+    </script>
+    @endif
 
     @foreach ($slips as $slip)
     @php

@@ -6,6 +6,7 @@ use App\Models\PickBatch;
 use App\Services\PackSlips\PackSlipRenderer;
 use App\Services\PickBatchService;
 use Illuminate\Contracts\View\View;
+use Illuminate\Http\Request;
 
 class PickBatchController extends Controller
 {
@@ -16,8 +17,8 @@ class PickBatchController extends Controller
         return view('pick-batches.summary', compact('pickBatch', 'rows'));
     }
 
-    public function packSlips(PickBatch $pickBatch, PickBatchService $pickBatches, PackSlipRenderer $renderer): View
+    public function packSlips(Request $request, PickBatch $pickBatch, PickBatchService $pickBatches, PackSlipRenderer $renderer): View
     {
-        return $renderer->view($pickBatches->packSlipRun($pickBatch));
+        return $renderer->view($pickBatches->packSlipRun($pickBatch), $request->user());
     }
 }

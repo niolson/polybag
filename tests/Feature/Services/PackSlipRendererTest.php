@@ -7,6 +7,7 @@ use App\Models\PickBatchShipment;
 use App\Models\Product;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
+use App\Models\User;
 use App\Services\PackSlips\PackSlipRenderer;
 use App\Services\PickBatchService;
 use App\Services\SettingsService;
@@ -23,7 +24,7 @@ afterEach(function (): void {
 
 function renderPackSlips(PackSlipRun $run): string
 {
-    return app(PackSlipRenderer::class)->view($run)->render();
+    return app(PackSlipRenderer::class)->view($run, User::factory()->create())->render();
 }
 
 it('brands each slip from its own Shipment\'s Client', function (): void {
@@ -36,7 +37,7 @@ it('brands each slip from its own Shipment\'s Client', function (): void {
     $a = Shipment::factory()->create(['client_id' => $acme->id]);
     $b = Shipment::factory()->create(['client_id' => $globex->id]);
 
-    $slips = app(PackSlipRenderer::class)->view(new PackSlipRun([$a->id, $b->id]))->getData()['slips'];
+    $slips = app(PackSlipRenderer::class)->view(new PackSlipRun([$a->id, $b->id]), User::factory()->create())->getData()['slips'];
 
     expect($slips[0]->logoDataUri)->toBe('data:image/png;base64,'.base64_encode('acme-logo'))
         ->and($slips[1]->logoDataUri)->toBe('data:image/png;base64,'.base64_encode('globex-logo'));
@@ -53,7 +54,7 @@ it('falls back to the tenant pack slip logo when the Client has none', function 
     $client = Client::factory()->create(['logo' => null]);
     $shipment = Shipment::factory()->create(['client_id' => $client->id]);
 
-    $slips = app(PackSlipRenderer::class)->view(PackSlipRun::forShipment($shipment->id))->getData()['slips'];
+    $slips = app(PackSlipRenderer::class)->view(PackSlipRun::forShipment($shipment->id), User::factory()->create())->getData()['slips'];
 
     expect($slips[0]->logoDataUri)->toBe('data:image/png;base64,'.base64_encode('tenant-logo'));
 });
@@ -89,7 +90,7 @@ it('draws slips in run order and skips Shipments that no longer exist', function
     $second = Shipment::factory()->create();
 
     $slips = app(PackSlipRenderer::class)
-        ->view(new PackSlipRun([$second->id, 999999, $first->id]))
+        ->view(new PackSlipRun([$second->id, 999999, $first->id]), User::factory()->create())
         ->getData()['slips'];
 
     expect(array_map(fn ($slip) => $slip->shipment->id, $slips))->toBe([$second->id, $first->id]);

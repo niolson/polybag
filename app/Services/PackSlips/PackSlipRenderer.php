@@ -3,10 +3,12 @@
 namespace App\Services\PackSlips;
 
 use App\DataTransferObjects\PackSlips\PackSlip;
+use App\DataTransferObjects\PackSlips\PackSlipPrintJob;
 use App\DataTransferObjects\PackSlips\PackSlipRun;
 use App\Models\Client;
 use App\Models\Location;
 use App\Models\Shipment;
+use App\Models\User;
 use App\Services\GotenbergService;
 use App\Services\Scanning\ScanCode;
 use App\Services\SettingsService;
@@ -23,41 +25,73 @@ class PackSlipRenderer
 {
     public const string VIEW = 'pack-slips.slips';
 
+    /**
+     * The most slips one print-bridge job holds. A longer run is sent as several
+     * jobs, each with its own receipt, so one failure costs at most this many.
+     */
+    public const int SLIPS_PER_PRINT_JOB = 200;
+
     public function __construct(
         private readonly GotenbergService $gotenberg,
         private readonly SettingsService $settings,
+        private readonly PackSlipReceipts $receipts,
     ) {}
 
     /**
-     * @param  array<string, mixed>  $extra  additional view data
+     * The browser view, carrying the receipt its Mark as printed control redeems.
      */
-    public function view(PackSlipRun $run, array $extra = []): View
+    public function view(PackSlipRun $run, User $user): View
     {
-        return view(self::VIEW, $this->viewData($run, $extra));
+        $receipt = $this->receipts->issue($run->shipmentIds, $user);
+
+        return view(self::VIEW, [
+            ...$this->viewData($run),
+            'receipt' => $this->receipts->seal($receipt),
+        ]);
     }
 
     /**
-     * @param  array<string, mixed>  $extra  additional view data
+     * The run as print-bridge jobs, in run order.
+     *
+     * @return list<PackSlipPrintJob>
      *
      * @throws \RuntimeException if the PDF renderer is unavailable
      */
-    public function pdf(PackSlipRun $run, array $extra = []): string
+    public function printJobs(PackSlipRun $run, User $user): array
     {
-        return $this->gotenberg->pdfFromView(self::VIEW, $this->viewData($run, $extra));
+        return array_map(function (PackSlipRun $chunk) use ($user): PackSlipPrintJob {
+            $receipt = $this->receipts->issue($chunk->shipmentIds, $user);
+
+            return new PackSlipPrintJob(
+                pdf: $this->gotenberg->pdfFromView(self::VIEW, $this->viewData($chunk)),
+                receipt: $this->receipts->seal($receipt),
+                count: $receipt->count(),
+            );
+        }, $run->chunk(self::SLIPS_PER_PRINT_JOB));
     }
 
     /**
-     * @param  array<string, mixed>  $extra
+     * A PDF with no receipt, for the pick batch print that still records on batch
+     * membership.
+     *
+     * @throws \RuntimeException if the PDF renderer is unavailable
+     */
+    public function pdf(PackSlipRun $run): string
+    {
+        return $this->gotenberg->pdfFromView(self::VIEW, $this->viewData($run));
+    }
+
+    /**
      * @return array<string, mixed>
      */
-    private function viewData(PackSlipRun $run, array $extra): array
+    private function viewData(PackSlipRun $run): array
     {
         return [
             'title' => $run->title,
             'slips' => $this->slips($run),
             'generator' => new BarcodeGeneratorSVG,
             'defaultLocation' => Location::getDefault(),
-            ...$extra,
+            'receipt' => null,
         ];
     }
 

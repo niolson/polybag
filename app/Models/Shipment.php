@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\Deliverability;
 use App\Enums\PackageStatus;
+use App\Enums\PickBatchStatus;
 use App\Enums\PickingStatus;
 use App\Enums\ShipmentStatus;
 use App\Models\Concerns\HasDefaultClient;
@@ -80,6 +81,9 @@ class Shipment extends Model
         'picking_status' => PickingStatus::class,
         'deliver_by' => 'date',
         'metadata' => 'array',
+        'items_version' => 'integer',
+        'pack_slip_items_version' => 'integer',
+        'pack_slip_printed_at' => 'datetime',
     ];
 
     protected static function booted(): void
@@ -262,6 +266,42 @@ class Shipment extends Model
 
         // 3. No deadline
         return null;
+    }
+
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function packSlipPrintedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'pack_slip_printed_by_user_id');
+    }
+
+    /**
+     * Whether a pack slip has ever been recorded as printed for this Shipment.
+     */
+    public function hasPrintedPackSlip(): bool
+    {
+        return $this->pack_slip_items_version !== null;
+    }
+
+    /**
+     * Whether the items have changed since the latest recorded slip was drawn.
+     */
+    public function packSlipIsOutOfDate(): bool
+    {
+        return $this->hasPrintedPackSlip() && $this->items_version > $this->pack_slip_items_version;
+    }
+
+    /**
+     * The in-progress pick batch this Shipment is in, if any.
+     */
+    public function activePickBatch(): ?PickBatch
+    {
+        return PickBatch::query()
+            ->where('status', PickBatchStatus::InProgress)
+            ->whereHas('pickBatchShipments', fn (Builder $query) => $query->where('shipment_id', $this->id))
+            ->latest('id')
+            ->first();
     }
 
     /**
