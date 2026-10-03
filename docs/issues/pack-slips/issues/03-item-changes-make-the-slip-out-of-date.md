@@ -2,7 +2,7 @@
 
 # Item changes make the latest pack slip out of date
 
-Status: needs-triage
+Status: done
 Category: enhancement
 Created: 2026-09-30
 
@@ -25,30 +25,54 @@ pack slip is out of date.
     neither does an address or other header change.
 - **One transaction.** The item write and its increment commit together or not at all:
   one Shipment's item import (including the bulk delete) runs in a single transaction,
-  and so does each UI create, edit or delete of an item.
+  and so does each UI create, edit, delete or bulk delete of items.
+  - Neither transaction exists today. Wrap the `ShipmentItemImporter::import()` call in
+    `ShipmentImportService` in one transaction per Shipment.
+  - For UI writes, `ShipmentItem::save()` and `delete()` each run in their own
+    transaction, so every write through the model commits with its increment. A
+    transaction around the Filament action would not be enough: the bulk delete
+    action catches each record's exception and carries on, so it would commit a delete
+    whose increment failed.
+  - The bulk delete action fetches records and deletes them one at a time, so model
+    events fire.
 - **Out of date** means `items_version > pack_slip_items_version`.
 - **Shipment page.** It shows the slip as "Changed since printed".
 - **Scan & Pack.** A non-blocking warning: "This Shipment's latest pack slip is out of
   date". It refers to the latest recorded slip, not the paper that was scanned.
+- **Note.** `Shipment::query()->increment()` also updates the Shipment's `updated_at`.
+  Check whether anything sorts on or detects changes by `updated_at`, and decide on
+  purpose whether the increment should touch it.
 
 ## Acceptance criteria
 
-- [ ] An import that adds, removes or changes the product or quantity of an item
+- [x] An import that adds, removes or changes the product or quantity of an item
       increments the version. A re-import with no item change does not.
-- [ ] The authoritative-items bulk delete increments the version, and the test fails if
+- [x] The authoritative-items bulk delete increments the version, and the test fails if
       that explicit increment is removed.
-- [ ] A UI edit, create or delete of an item increments the version. An address-only
-      change does not.
-- [ ] A failure injected into the increment rolls back the item change, both for an
-      import (including the bulk delete) and for a UI edit.
-- [ ] An item change after the version was read (including one made during rendering)
+- [x] A UI edit, create or delete of an item increments the version, and so does a bulk
+      delete of items. An address-only change does not.
+- [x] A failure injected into the increment rolls back the item change, both for an
+      import (including the bulk delete) and for a UI edit or bulk delete.
+- [x] An item change after the version was read (including one made during rendering)
       leaves the slip out of date after redemption.
-- [ ] Manually marking a view as printed after its items changed leaves the Shipment out
+- [x] Manually marking a view as printed after its items changed leaves the Shipment out
       of date.
-- [ ] The Shipment page shows "Changed since printed". Scan & Pack warns without blocking.
+- [x] The Shipment page shows "Changed since printed". Scan & Pack warns without blocking.
 
 ## Blocked by
 
 - [01 — Print a pack slip for one Shipment](01-print-one-shipments-pack-slip.md)
 
 ## Comments
+
+**2026-10-03 — done.** `ShipmentItem` model events call `Shipment::incrementItemsVersion()`
+on create, on a product, quantity or Shipment change, and on delete. The model's `save()`
+and `delete()` each run in a transaction (see *One transaction* above). The importer
+runs each Shipment's items in one transaction and increments the version after the
+authoritative bulk delete. The increment updates the Shipment's `updated_at` on purpose:
+the Ship page keys its rate cache on it, and changing items should requote. The
+Shipment page shows "Changed since printed." in the Pack Slip entry, in warning color.
+Scan & Pack sends a *Pack Slip Out of Date* warning and still opens the Shipment. Tests
+are in `tests/Feature/ShipmentItemsVersionTest.php`. A failed increment is injected
+with `DB::beforeExecuting`. Each of two tests was checked by removing the code it
+guards: the bulk delete's explicit increment, and the model-level transaction.

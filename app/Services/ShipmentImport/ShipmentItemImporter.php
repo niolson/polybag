@@ -6,6 +6,7 @@ use App\Models\DataSource;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 class ShipmentItemImporter
 {
@@ -17,6 +18,9 @@ class ShipmentItemImporter
      * Import pre-fetched item rows for a shipment. Items are fetched upstream
      * (before the batch write) so they can feed the source checksum.
      *
+     * One transaction covers the shipment's item writes and the items-version
+     * increments they make, so a failure leaves neither behind.
+     *
      * @param  Collection<int, covariant array<string, mixed>>  $items
      * @return array{items_created: int, items_updated: int, products_created: int, products_updated: int}
      */
@@ -26,6 +30,15 @@ class ShipmentItemImporter
             return $this->emptyStats();
         }
 
+        return DB::transaction(fn (): array => $this->importItems($shipment, $items, $record));
+    }
+
+    /**
+     * @param  Collection<int, covariant array<string, mixed>>  $items
+     * @return array{items_created: int, items_updated: int, products_created: int, products_updated: int}
+     */
+    private function importItems(Shipment $shipment, Collection $items, DataSource $record): array
+    {
         $stats = $this->emptyStats();
         $importedShipmentItemIds = [];
         $hasUnresolvedItems = false;
@@ -102,9 +115,14 @@ class ShipmentItemImporter
             && $importedShipmentItemIds !== []
             && ! $hasUnresolvedItems
             && ! $shipment->packages()->exists()) {
-            $shipment->shipmentItems()
+            $removed = $shipment->shipmentItems()
                 ->whereNotIn('id', $importedShipmentItemIds)
                 ->delete();
+
+            // A bulk delete fires no model events, so it increments the version itself.
+            if ($removed > 0) {
+                Shipment::incrementItemsVersion($shipment->id);
+            }
         }
 
         return $stats;

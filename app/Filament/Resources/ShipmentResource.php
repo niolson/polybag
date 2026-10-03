@@ -499,10 +499,15 @@ class ShipmentResource extends Resource
                         TextEntry::make('pack_slip')
                             ->label('Pack Slip')
                             ->state(fn (Shipment $record): string => $record->hasPrintedPackSlip()
-                                ? 'Printed '.$record->pack_slip_printed_at?->timezone(Location::timezone())->format('M j, Y g:i A')
+                                ? ($record->packSlipIsOutOfDate() ? 'Changed since printed. ' : '')
+                                    .'Printed '.$record->pack_slip_printed_at?->timezone(Location::timezone())->format('M j, Y g:i A')
                                     .($record->packSlipPrintedBy ? ' by '.$record->packSlipPrintedBy->name : '')
                                 : 'Not printed')
-                            ->color(fn (Shipment $record): ?string => $record->hasPrintedPackSlip() ? null : 'gray'),
+                            ->color(fn (Shipment $record): ?string => match (true) {
+                                ! $record->hasPrintedPackSlip() => 'gray',
+                                $record->packSlipIsOutOfDate() => 'warning',
+                                default => null,
+                            }),
                         TextEntry::make('active_pick_batch')
                             ->label('Pick Batch')
                             ->state(fn (Shipment $record): ?string => $record->activePickBatch() ? 'Batch #'.$record->activePickBatch()->id : null)
