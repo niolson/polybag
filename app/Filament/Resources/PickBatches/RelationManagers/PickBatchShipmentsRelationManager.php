@@ -20,9 +20,11 @@ class PickBatchShipmentsRelationManager extends RelationManager
 
     /**
      * Re-render the table when the batch is changed by the parent page (e.g. "Mark All Picked"),
-     * which otherwise leaves this nested Livewire component showing stale rows.
+     * or when the browser records its pack slips as printed, either of which otherwise leaves
+     * this nested Livewire component showing stale rows.
      */
     #[On('pick-batch-updated')]
+    #[On('pack-slips-printed')]
     public function refreshShipments(): void {}
 
     public function table(Table $table): Table
@@ -57,14 +59,14 @@ class PickBatchShipmentsRelationManager extends RelationManager
                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->placeholder('—')
                     ->toggleable(isToggledHiddenByDefault: true),
-                Tables\Columns\IconColumn::make('pack_slip_printed_at')
+                Tables\Columns\IconColumn::make('shipment.pack_slip_printed_at')
                     ->label('Slip Printed')
                     ->boolean()
                     ->trueIcon('heroicon-o-printer')
                     ->trueColor('success')
                     ->falseIcon('heroicon-o-minus-circle')
                     ->falseColor('gray'),
-                Tables\Columns\TextColumn::make('pack_slip_printed_at')
+                Tables\Columns\TextColumn::make('shipment.pack_slip_printed_at')
                     ->label('Slip Printed At')
                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->placeholder('—')
