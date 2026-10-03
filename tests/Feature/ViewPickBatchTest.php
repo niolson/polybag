@@ -95,10 +95,19 @@ it('prints batch pack slips through the pack slip renderer, branded per Shipment
             return '%PDF-fake';
         });
 
-    Livewire::test(ViewPickBatch::class, ['record' => $batch->id])
+    $page = Livewire::test(ViewPickBatch::class, ['record' => $batch->id])
         ->set('printMode', true)
         ->callAction('printPackSlips')
-        ->assertDispatched('print-report', data: base64_encode('%PDF-fake'));
+        ->assertDispatched('print-pack-slips')
+        ->assertNotDispatched('print-report');
+
+    // Pack slips are 4x6 label stock, so they go through the pack slip path to the
+    // label printer, not to the document printer as a report.
+    $jobs = collect($page->effects['dispatches'])->firstWhere('name', 'print-pack-slips')['params']['jobs'];
+
+    expect($jobs)->toHaveCount(1)
+        ->and($jobs[0]['count'])->toBe(1)
+        ->and(base64_decode($jobs[0]['data']))->toBe('%PDF-fake');
 
     // Print mode used to draw slips without the Client, losing its return address and footer.
     expect($rendered)->toContain('Thanks for shopping with Acme')

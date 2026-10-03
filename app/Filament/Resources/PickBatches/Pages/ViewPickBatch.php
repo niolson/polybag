@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\PickBatches\Pages;
 
+use App\DataTransferObjects\PackSlips\PackSlipPrintJob;
 use App\Enums\PickBatchStatus;
 use App\Filament\Resources\PickBatches\PickBatchResource;
 use App\Models\PickBatch;
@@ -80,14 +81,20 @@ class ViewPickBatch extends ViewRecord
                 ->visible(fn (): bool => $this->printMode)
                 ->action(function (): void {
                     try {
-                        $pdf = app(PackSlipRenderer::class)->pdf(app(PickBatchService::class)->packSlipRun($this->pickBatch()));
+                        $jobs = app(PackSlipRenderer::class)->printJobs(
+                            app(PickBatchService::class)->packSlipRun($this->pickBatch()),
+                            auth()->user(),
+                        );
                     } catch (Throwable $e) {
                         $this->notifyRendererUnavailable($e);
 
                         return;
                     }
 
-                    $this->dispatch('print-report', data: base64_encode($pdf));
+                    $this->dispatch('print-pack-slips', jobs: array_map(
+                        fn (PackSlipPrintJob $job): array => $job->toBrowserPayload(),
+                        $jobs,
+                    ));
                     $this->record->pickBatchShipments()->update(['pack_slip_printed_at' => now()]);
                 }),
 

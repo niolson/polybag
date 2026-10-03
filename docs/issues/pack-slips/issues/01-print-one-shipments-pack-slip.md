@@ -106,4 +106,9 @@ None - can start immediately.
   - The pick batch's browser view already carries a receipt and Mark as printed, since
     every view the renderer draws does. The batch's print mode still records on batch
     membership until slice 02.
+- 2026-10-03 — Pack slips print on the image label printer with a 4x6 page. Since the 4x6
+  redesign in May (`21f6233`), they had gone to the document printer with a letter page
+  and been scaled up. There is no setting, because there is only the 4x6 layout. The
+  batch's Pack Slips button now uses the same receipt-carrying path; it still also marks
+  batch membership printed on render until slice 02.
 

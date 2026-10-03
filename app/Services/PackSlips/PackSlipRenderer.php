@@ -71,17 +71,6 @@ class PackSlipRenderer
     }
 
     /**
-     * A PDF with no receipt, for the pick batch print that still records on batch
-     * membership.
-     *
-     * @throws \RuntimeException if the PDF renderer is unavailable
-     */
-    public function pdf(PackSlipRun $run): string
-    {
-        return $this->gotenberg->pdfFromView(self::VIEW, $this->viewData($run));
-    }
-
-    /**
      * @return array<string, mixed>
      */
     private function viewData(PackSlipRun $run): array

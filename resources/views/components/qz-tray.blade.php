@@ -175,6 +175,41 @@
             });
         }
 
+        // Label stock is always 4x6 on the thermal printer.
+        function labelStockConfig(printer) {
+            return qz.configs.create(printer, {
+                size: { width: 4, height: 6 },
+                units: 'in',
+                margins: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 },
+                scaleContent: true
+            });
+        }
+
+        // Send pack slips to the image label printer. They are laid out on 4x6
+        // label stock, so the document printer's letter page would only scale
+        // them up. Throws on any failure; resolves once QZ reports the job sent.
+        async function sendPackSlips(base64Data) {
+            const printer = PrinterSettings.imageLabelPrinter();
+
+            if (!printer) {
+                const error = new Error('No PDF/image label printer is configured. Go to Device Settings.');
+                error.isConfiguration = true;
+                throw error;
+            }
+
+            if (!qz.websocket.isActive()) {
+                showStatus('Reconnecting to QZ Tray...', 'info');
+                await initQZTray(true);
+            }
+
+            await qz.print(labelStockConfig(printer), [{
+                type: 'pixel',
+                format: 'pdf',
+                flavor: 'base64',
+                data: base64Data
+            }]);
+        }
+
         // Print label via QZ Tray.
         // Throws on any failure so callers can tell a real print from a no-op —
         // the label printed flag on the package depends on this.
@@ -231,13 +266,7 @@
                     orientation = 'portrait';
                 }
 
-                // Label is always 4x6 on thermal printer
-                const config = qz.configs.create(printer, {
-                    size: { width: 4, height: 6 },
-                    units: 'in',
-                    margins: { top: 0.05, right: 0.05, bottom: 0.05, left: 0.05 },
-                    scaleContent: true
-                });
+                const config = labelStockConfig(printer);
 
                 const data = [{
                     type: 'pixel',
@@ -257,55 +286,49 @@
             }
         }
 
-        // Send a document (8.5x11) to the report printer via QZ Tray. Throws on any
-        // failure; resolves once QZ reports the job sent to the printer.
-        async function sendReport(base64Data, format = 'pdf') {
-            const printer = getReportPrinter();
-
-            if (!printer) {
-                const error = new Error('No document printer configured. Go to Device Settings.');
-                error.isConfiguration = true;
-                throw error;
-            }
-
-            if (!qz.websocket.isActive()) {
-                showStatus('Reconnecting to QZ Tray...', 'info');
-                await initQZTray(true);
-            }
-
-            const config = qz.configs.create(printer, {
-                size: { width: 8.5, height: 11 },
-                units: 'in',
-                scaleContent: true
-            });
-
-            const isImageFormat = format === 'image' || format === 'png' || format === 'gif';
-
-            const data = [{
-                type: 'pixel',
-                format: isImageFormat ? 'image' : 'pdf',
-                flavor: 'base64',
-                data: base64Data
-            }];
-
-            await qz.print(config, data);
-        }
-
         // Print report (8.5x11) via QZ Tray.
         // Returns whether it printed. Reports rather than throws, because the
         // callers that print paperwork alongside a label must not lose the label
         // print to a failure on the paper half — but they do have to be able to
         // tell the difference, so the outcome cannot be silent either.
         async function printReport(base64Data, format = 'pdf') {
+            const printer = getReportPrinter();
+
+            if (!printer) {
+                showStatus('No document printer configured. Go to Device Settings.', 'error');
+                return false;
+            }
+
             try {
+                if (!qz.websocket.isActive()) {
+                    showStatus('Reconnecting to QZ Tray...', 'info');
+                    await initQZTray(true);
+                }
+
                 showStatus('Printing document...', 'info');
-                await sendReport(base64Data, format);
+
+                const config = qz.configs.create(printer, {
+                    size: { width: 8.5, height: 11 },
+                    units: 'in',
+                    scaleContent: true
+                });
+
+                const isImageFormat = format === 'image' || format === 'png' || format === 'gif';
+
+                const data = [{
+                    type: 'pixel',
+                    format: isImageFormat ? 'image' : 'pdf',
+                    flavor: 'base64',
+                    data: base64Data
+                }];
+
+                await qz.print(config, data);
                 hideStatus();
 
                 return true;
             } catch (error) {
                 console.error('Report print error:', error);
-                showStatus(error.isConfiguration ? error.message : `Document print failed: ${error.message || 'Unknown error'}`, 'error');
+                showStatus(`Document print failed: ${error.message || 'Unknown error'}`, 'error');
 
                 return false;
             }
@@ -411,7 +434,7 @@
                     : `Sending ${slipCount(job.count)} to the printer...`, 'info');
 
                 try {
-                    await sendReport(job.data, 'pdf');
+                    await sendPackSlips(job.data);
                 } catch (error) {
                     console.error('Pack slip print error:', error);
                     failure = error.message || 'Unknown error';
