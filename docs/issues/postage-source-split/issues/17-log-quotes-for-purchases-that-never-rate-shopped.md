@@ -1,58 +1,63 @@
-# Log quotes for purchases that never rate-shopped
+# Record a blind purchase as the selected quote
 
-Status: needs-triage
+Status: needs-triage — blocked by `shopify-shipping-carrier/05`; nothing to build before it
 
 Repo: `polybag`
 
 ## Parent
 
 Split from [`14`](14-quote-direct-carrier-rates-behind-an-opaque-identifier.md) at triage,
-2026-09-18, where `rate_quotes`' purpose was restated.
+2026-09-18, where `rate_quotes`' purpose was restated. Narrowed 2026-10-03, below.
 
 ## Problem
 
 `rate_quotes` exists to answer "what would the other options have cost?" — so that when
 the app picks a method to meet a delivery window, or a packer picks the wrong one, the
-saving is visible afterwards. `RateComparison` reads it for exactly that.
+saving is visible afterwards. `RateComparison` reads it for exactly that, and lists only a
+package with a `selected` row.
 
-It only has an answer when the purchase rate-shopped. Three paths buy without ever
-calling `getShippingRates()` and log nothing:
+A blind purchase has none. Attended or unattended, the package is rate-shopped first —
+`soleBlindPurchaseOfferForAutomation()` refuses to run before `getShippingRates()` — so the
+alternatives are logged. But a blind offer has no `rate_quote_id`, `markSelected()` skips
+it, and nothing in the log says what was bought. Those packages never reach the report.
 
-- a shipping rule's pre-selected rate, resolved by `resolvePreSelectedRate()` and bought
-  through `autoShip()`;
-- a Shopify blind purchase, which has no rate at all until after the label exists;
-- any future blind-purchase source.
+## What is left to build
 
-Those are precisely the purchases most worth checking, because no person compared them.
+When a blind purchase completes, add the bought service as a further `rate_quotes` row,
+marked `selected`, with the cost from the Label. The alternatives are already there; this
+does not re-quote them.
 
-## Shape
+That needs two numbers to be worth having, and Shopify reports no cost today. Until
+`shopify-shipping-carrier/05` recovers one, the row would carry a null price — which also
+needs `quoted_price`, `NOT NULL` today, made nullable, and the report taught to show it —
+and would say only which service Shopify chose, which the Label already says. So this
+waits for `05` and is built with it or after it.
 
-A shadow quote, after the fact and off the packer's path: a queued job that, for a
-shipped package with **no `selected` quote row**, asks `getShippingRates()` what it would
-have offered and writes the rows with the bought service marked `selected`. Then
-`RateComparison` covers every package, and a rule buying a too-expensive service shows up
-as savings foregone.
+## Blocked by
 
-"No selected row", not "no rows": an attended Shopify blind purchase already has
-`rate_quotes` rows, because `getShippingRates()` logs whatever the other carriers
-returned while the blind offer is advertised beside them — and none of those rows is
-selected, because nothing in the list was bought. A job keyed on an empty log would skip
-exactly those packages. For one that already has rows, the job adds the bought service as
-a further row (its cost from the label where the source reports one, null where it does
-not) marked `selected`, rather than re-quoting the alternatives that are already there.
+- [`shopify-shipping-carrier/05`](../../shopify-shipping-carrier/issues/05-shipping-label-cost-reconciliation.md) —
+  a cost for a Shopify label.
+
+## Not in scope: shadow quotes
+
+The issue first proposed a queued job that, after the fact, asks `getShippingRates()` what
+it would have offered for a shipped package with no `selected` row. Nothing needs that now:
+every purchase path rate-shops before it buys. It is worth reopening only if a path appears
+that buys without quoting — and then the cost of a carrier call per package, and quoting
+for a different ship day than the label's, are the questions to answer first.
 
 ## Open questions
 
-- **Cost.** A shadow quote is a carrier call per package. USPS and UPS rating are free;
-  FedEx rating and tracking are free today, but FedEx meters other APIs and could
-  start charging for these, so a free rate call is not a promise either. On a batch of hundreds this is hundreds of rate
-  calls a day for a report. Sample rather than quote everything? Quote only
-  rule-selected purchases, where the rule is what's being audited?
-- **Timing.** The quote should be for the ship date and the package as shipped; both are
-  on the row, but a rate quoted an hour later on a different ship day is not the same
-  comparison.
-- **Which packages.** Is a shadow quote against a Shopify blind purchase meaningful when
-  Shopify's cost is null (`shopify-shipping-carrier/12`)? Savings need two numbers.
 - **The report itself.** `RateComparison` answers "did the packer pick something pricier
-  than the cheapest quoted" and nothing else. Whether it earns the calls this issue
-  would spend is the first thing to decide.
+  than the cheapest quoted" and nothing else. Whether a blind purchase belongs in it once it
+  has a cost — Shopify's rate is not one a packer could have picked from a list — is worth
+  deciding when `05` lands.
+
+## Comments
+
+- 2026-10-03 — Narrowed. Of the three paths the issue named, rule-selected purchases are
+  covered: since `c406c37` a *Use service* rule selects among rate-shopped rates, and
+  `09e239a` removed `resolvePreSelectedRate()`, so every rule purchase names an Offer that
+  points at its quote row and `markSelected()` marks it. Blind purchases are the gap that
+  remains, and the shadow-quote job moved out of scope, so its cost and timing questions
+  went with it.

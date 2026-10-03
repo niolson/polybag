@@ -56,8 +56,8 @@ class RateQuoteLogger
      * and service code — what this did before offers pointed at their quote —
      * could not tell two USPS variants of one mail class apart and marked
      * both, and would have marked a direct quote and its channel-resold twin
-     * together. An offer with no quote behind it — a rule's pre-selection,
-     * which never rate-shopped — has nothing to mark; that gap is
+     * together. An offer with no quote behind it — a blind purchase, which
+     * has no rate to log — has nothing to mark; that gap is
      * `postage-source-split/17`.
      */
     public function markSelected(ShippingOffer $offer): void

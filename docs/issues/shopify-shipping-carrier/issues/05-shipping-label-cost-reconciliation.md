@@ -99,6 +99,8 @@ needs. A test label still carries a price, so the development store exercises th
 
 **What it unblocks:** `12`'s charging half, which is the reason this is worth building
 rather than merely interesting. Report back there.
+Also `postage-source-split/17`: once a Shopify label has a cost, the bought service can be
+logged as the `selected` quote row, so *Rate Comparison* covers blind purchases.
 
 ## Comments
 
@@ -107,3 +109,5 @@ rather than merely interesting. Report back there.
   that cost is reachable only through Shopify Payments.
 - **2026-09-14** — `package-label-history/06` (a voided label with a cost is a refund to
   expect) folded in as the section above rather than kept as a second plan.
+- **2026-10-03** — `postage-source-split/17` narrowed to recording a blind purchase as the
+  selected quote, and now waits on this issue for the cost that row needs.
