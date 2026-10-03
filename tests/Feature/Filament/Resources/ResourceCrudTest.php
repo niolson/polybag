@@ -255,6 +255,33 @@ it('can create a Location with a fedex hub id when fedex is active', function ()
     ]);
 });
 
+it('creates a location in a country without states, in its own timezone', function (): void {
+    Livewire::test(CreateLocation::class)
+        ->fillForm([
+            'name' => 'London Warehouse',
+            'is_default' => false,
+            'active' => true,
+            'timezone' => 'Europe/London',
+            'company' => 'PolyBag',
+            'first_name' => 'Jane',
+            'last_name' => 'Doe',
+            'address1' => '10 Example Street',
+            'city' => 'London',
+            'country' => 'GB',
+            'postal_code' => 'E1 6AN',
+            'phone' => '+442079460000',
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $this->assertDatabaseHas(Location::class, [
+        'name' => 'London Warehouse',
+        'country' => 'GB',
+        'state_or_province' => null,
+        'timezone' => 'Europe/London',
+    ]);
+});
+
 it('rejects a location phone number that does not parse for the selected country', function (): void {
     Livewire::test(CreateLocation::class)
         ->fillForm([

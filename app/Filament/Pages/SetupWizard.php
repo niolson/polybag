@@ -9,6 +9,7 @@ use App\Enums\Role;
 use App\Filament\Resources\CarrierAccounts\CarrierAccountResource;
 use App\Filament\Resources\DataSources\DataSourceResource;
 use App\Filament\Support\AddressForm;
+use App\Filament\Support\TimezoneOptions;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
@@ -182,9 +183,7 @@ class SetupWizard extends Page
                         ),
                         Forms\Components\Select::make('location_timezone')
                             ->label('Timezone')
-                            ->options(fn () => collect(timezone_identifiers_list())
-                                ->filter(fn ($tz): bool => str_starts_with($tz, 'America/') || str_starts_with($tz, 'Pacific/') || str_starts_with($tz, 'US/'))
-                                ->mapWithKeys(fn ($tz): array => [$tz => str_replace('_', ' ', $tz)]))
+                            ->options(fn (): array => TimezoneOptions::all())
                             ->searchable()
                             ->default('America/New_York')
                             ->required(),

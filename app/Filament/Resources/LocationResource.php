@@ -4,6 +4,7 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\LocationResource\Pages;
 use App\Filament\Support\AddressForm;
+use App\Filament\Support\TimezoneOptions;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Location;
@@ -54,9 +55,7 @@ class LocationResource extends Resource
                         Forms\Components\Toggle::make('active')
                             ->default(true),
                         Forms\Components\Select::make('timezone')
-                            ->options(fn () => collect(timezone_identifiers_list())
-                                ->filter(fn ($tz): bool => str_starts_with($tz, 'America/') || str_starts_with($tz, 'Pacific/') || str_starts_with($tz, 'US/'))
-                                ->mapWithKeys(fn ($tz): array => [$tz => str_replace('_', ' ', $tz)]))
+                            ->options(fn (): array => TimezoneOptions::all())
                             ->searchable()
                             ->default('America/New_York')
                             ->required(),

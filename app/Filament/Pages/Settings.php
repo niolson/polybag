@@ -6,6 +6,7 @@ use App\Enums\LabelReferenceSource;
 use App\Enums\Role;
 use App\Filament\Resources\LocationResource;
 use App\Filament\Support\AddressForm;
+use App\Filament\Support\TimezoneOptions;
 use App\Models\Carrier;
 use App\Models\Client;
 use App\Models\DataSource;
@@ -291,9 +292,7 @@ class Settings extends Page
                                         ->maxLength(255),
                                     Select::make('location.timezone')
                                         ->label('Timezone')
-                                        ->options(fn () => collect(timezone_identifiers_list())
-                                            ->filter(fn ($tz): bool => str_starts_with($tz, 'America/') || str_starts_with($tz, 'Pacific/') || str_starts_with($tz, 'US/'))
-                                            ->mapWithKeys(fn ($tz): array => [$tz => str_replace('_', ' ', $tz)]))
+                                        ->options(fn (): array => TimezoneOptions::all())
                                         ->searchable()
                                         ->required(),
                                     Select::make('location.fedex_hub_id')
