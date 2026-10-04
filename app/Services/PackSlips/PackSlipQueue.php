@@ -4,6 +4,7 @@ namespace App\Services\PackSlips;
 
 use App\DataTransferObjects\PackSlips\PackSlipQueueFilters;
 use App\DataTransferObjects\PackSlips\PackSlipRun;
+use App\Enums\PackSlipQueueTab;
 use App\Enums\PickBatchStatus;
 use App\Enums\ShipmentStatus;
 use App\Models\PickBatch;
@@ -21,7 +22,7 @@ use Illuminate\Support\Collection;
  * Selection is by urgency alone: expedited first, then oldest. Client plays no part,
  * so one Client's backlog never holds back another's expedited orders. Once chosen, a
  * run is grouped by Client for the paper. The Print Pack Slips page, "Print next N",
- * "Print selected" and View all go through here, so they cannot disagree.
+ * "Print selected", Reprint and View all go through here, so they cannot disagree.
  */
 class PackSlipQueue
 {
@@ -45,14 +46,38 @@ class PackSlipQueue
      */
     public function notPrinted(PackSlipQueueFilters $filters = new PackSlipQueueFilters): Builder
     {
-        $query = $this->needingSlip($filters)
+        return $this->tab(PackSlipQueueTab::NotPrinted, $filters);
+    }
+
+    /**
+     * Open Shipments whose latest slip is current, outside any in-progress pick
+     * batch, most recently printed first, so a jammed run is at the top to reprint.
+     *
+     * @return Builder<Shipment>
+     */
+    public function printed(PackSlipQueueFilters $filters = new PackSlipQueueFilters): Builder
+    {
+        return $this->tab(PackSlipQueueTab::Printed, $filters);
+    }
+
+    /**
+     * The Shipments a tab of the Print Pack Slips page lists, in its order.
+     *
+     * @return Builder<Shipment>
+     */
+    public function tab(PackSlipQueueTab $tab, PackSlipQueueFilters $filters = new PackSlipQueueFilters): Builder
+    {
+        $query = $this->inStates($tab, $filters)
             ->whereDoesntHave('pickBatchShipments', $this->inActiveBatch(...));
 
         if ($this->printsFromPickBatches()) {
             $query->whereRaw('1 = 0');
         }
 
-        return $this->inUrgencyOrder($query);
+        return match ($tab) {
+            PackSlipQueueTab::NotPrinted => $this->inUrgencyOrder($query),
+            PackSlipQueueTab::Printed => $this->inPrintedOrder($query),
+        };
     }
 
     /**
@@ -70,18 +95,20 @@ class PackSlipQueue
     }
 
     /**
-     * Shipments that would be waiting but are in an in-progress pick batch, so
+     * Shipments that would be on the tab but are in an in-progress pick batch, so
      * their slips belong to the batch (with its tote codes), and those batches.
      *
      * @return array{count: int, batches: EloquentCollection<int, PickBatch>}
      */
-    public function leftOffForPickBatches(PackSlipQueueFilters $filters = new PackSlipQueueFilters): array
-    {
+    public function leftOffForPickBatches(
+        PackSlipQueueFilters $filters = new PackSlipQueueFilters,
+        PackSlipQueueTab $tab = PackSlipQueueTab::NotPrinted,
+    ): array {
         if ($this->printsFromPickBatches()) {
             return ['count' => 0, 'batches' => new EloquentCollection];
         }
 
-        $shipmentIds = $this->needingSlip($filters)
+        $shipmentIds = $this->inStates($tab, $filters)
             ->whereHas('pickBatchShipments', $this->inActiveBatch(...))
             ->pluck('shipments.id');
 
@@ -122,17 +149,15 @@ class PackSlipQueue
     }
 
     /**
-     * Open Shipments whose slip was never printed or is out of date.
+     * Open Shipments whose slip is in one of the tab's states, filtered.
      *
      * @return Builder<Shipment>
      */
-    private function needingSlip(PackSlipQueueFilters $filters): Builder
+    private function inStates(PackSlipQueueTab $tab, PackSlipQueueFilters $filters): Builder
     {
         return Shipment::query()
             ->where('shipments.status', ShipmentStatus::Open)
-            ->where(fn (Builder $query) => $query
-                ->whereNull('shipments.pack_slip_items_version')
-                ->orWhereColumn('shipments.items_version', '>', 'shipments.pack_slip_items_version'))
+            ->withPackSlipState(...$tab->states())
             ->when($filters->clientId, fn (Builder $query, int $id) => $query->where('shipments.client_id', $id))
             ->when($filters->channelId, fn (Builder $query, int $id) => $query->where('shipments.channel_id', $id))
             ->when($filters->shippingMethodId, fn (Builder $query, int $id) => $query->where('shipments.shipping_method_id', $id));
@@ -160,6 +185,22 @@ class PackSlipQueue
                 ->selectRaw('COALESCE(MAX(is_expedited), 0)')
                 ->whereColumn('shipping_methods.id', 'shipments.shipping_method_id'))
             ->orderBy('shipments.created_at')
+            ->orderBy('shipments.id');
+    }
+
+    /**
+     * Most recently printed first. One QZ job's Shipments share a printed time, so
+     * the receipt's issue time keeps a job together, and the ID gives a stable
+     * order within it.
+     *
+     * @param  Builder<Shipment>  $query
+     * @return Builder<Shipment>
+     */
+    private function inPrintedOrder(Builder $query): Builder
+    {
+        return $query
+            ->orderByDesc('shipments.pack_slip_printed_at')
+            ->orderByDesc('shipments.pack_slip_receipt_issued_at')
             ->orderBy('shipments.id');
     }
 }

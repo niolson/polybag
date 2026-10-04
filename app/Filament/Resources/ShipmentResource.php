@@ -4,6 +4,7 @@ namespace App\Filament\Resources;
 
 use App\Enums\AmazonOrderProgram;
 use App\Enums\Deliverability;
+use App\Enums\PackSlipState;
 use App\Enums\PickingStatus;
 use App\Enums\Role;
 use App\Enums\ShipmentStatus;
@@ -212,7 +213,7 @@ class ShipmentResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn ($query) => $query->with(['shippingMethod', 'channel', 'client', 'location']))
+            ->modifyQueryUsing(fn ($query) => $query->with(['shippingMethod', 'channel', 'client', 'location', 'packSlipPrintedBy']))
             ->searchable()
             ->searchUsing(function (Builder $query, string $search): void {
                 static::applyGlobalSearchAttributeConstraints($query, $search);
@@ -267,6 +268,15 @@ class ShipmentResource extends Resource
                     ->badge()
                     ->toggleable(isToggledHiddenByDefault: true)
                     ->visible(fn () => app(SettingsService::class)->get('picking_enabled', false)),
+                Tables\Columns\TextColumn::make('pack_slip')
+                    ->label('Pack Slip')
+                    ->badge()
+                    ->state(fn (Shipment $record): PackSlipState => PackSlipState::forShipment($record))
+                    ->tooltip(fn (Shipment $record): ?string => $record->hasPrintedPackSlip()
+                        ? 'Printed '.$record->pack_slip_printed_at?->timezone(Location::timezone())->format('M j, Y g:i A')
+                            .($record->packSlipPrintedBy ? ' by '.$record->packSlipPrintedBy->name : '')
+                        : null)
+                    ->toggleable(),
                 Tables\Columns\TextColumn::make('deliverability')
                     ->label('Deliverable')
                     ->badge(),
@@ -294,6 +304,12 @@ class ShipmentResource extends Resource
                     ->options(PickingStatus::class)
                     ->label('Picking Status')
                     ->visible(fn () => app(SettingsService::class)->get('picking_enabled', false)),
+                Tables\Filters\SelectFilter::make('pack_slip')
+                    ->label('Pack Slip')
+                    ->options(PackSlipState::class)
+                    ->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
+                        ? $query->scopes(['withPackSlipState' => [PackSlipState::from($data['value'])]])
+                        : $query),
                 Tables\Filters\SelectFilter::make('deliverability')
                     ->options(Deliverability::class)
                     ->label('Deliverability'),
@@ -351,6 +367,7 @@ class ShipmentResource extends Resource
                 app(SettingsService::class)->get('multi_client_enabled', false) ? $filters['client'] : null,
                 $filters['channel'],
                 $filters['shipping_method'],
+                $filters['pack_slip'],
                 $filters['needs_shipping_method'],
                 $filters['created_at'],
             ])))

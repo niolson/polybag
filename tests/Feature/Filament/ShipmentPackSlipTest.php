@@ -1,7 +1,9 @@
 <?php
 
+use App\Enums\PackSlipState;
 use App\Enums\Role;
 use App\Enums\ShipmentStatus;
+use App\Filament\Resources\ShipmentResource\Pages\ListShipments;
 use App\Filament\Resources\ShipmentResource\Pages\ViewShipment;
 use App\Models\PickBatch;
 use App\Models\PickBatchShipment;
@@ -122,3 +124,32 @@ it('requires authentication for the browser view', function (): void {
 
     $this->get(route('shipments.pack-slip', Shipment::factory()->create()))->assertRedirect('/login');
 });
+
+it('shows each pack slip state in the Shipments list, with who printed it', function (): void {
+    $printed = Shipment::factory()->create([
+        'pack_slip_items_version' => 0,
+        'pack_slip_printed_at' => now(),
+        'pack_slip_printed_by_user_id' => $this->shipper->id,
+    ]);
+    $neverPrinted = Shipment::factory()->create();
+    $changed = Shipment::factory()->create(['items_version' => 2, 'pack_slip_items_version' => 1]);
+
+    Livewire::test(ListShipments::class)
+        ->assertTableColumnStateSet('pack_slip', PackSlipState::Printed, $printed)
+        ->assertTableColumnStateSet('pack_slip', PackSlipState::NotPrinted, $neverPrinted)
+        ->assertTableColumnStateSet('pack_slip', PackSlipState::ChangedSincePrinted, $changed)
+        ->assertSee('by Pat Packer');
+});
+
+it('filters the Shipments list by each pack slip state', function (PackSlipState $state): void {
+    $shipments = [
+        PackSlipState::Printed->value => Shipment::factory()->create(['pack_slip_items_version' => 0]),
+        PackSlipState::NotPrinted->value => Shipment::factory()->create(),
+        PackSlipState::ChangedSincePrinted->value => Shipment::factory()->create(['items_version' => 2, 'pack_slip_items_version' => 1]),
+    ];
+
+    Livewire::test(ListShipments::class)
+        ->filterTable('pack_slip', $state->value)
+        ->assertCanSeeTableRecords([$shipments[$state->value]])
+        ->assertCanNotSeeTableRecords(collect($shipments)->except($state->value)->values());
+})->with(PackSlipState::cases());
