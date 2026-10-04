@@ -567,7 +567,7 @@
             {{ count($shipmentCandidates) }} shipments match “{{ $candidateScan }}”
         </x-slot>
         <x-slot name="description">
-            Choose the one you are packing. Scanning the barcode on a PolyBag pack slip opens a single shipment.
+            Choose the one you are packing. A pack slip barcode that names a single shipment opens it directly.
         </x-slot>
 
         <ul class="divide-y divide-gray-200 dark:divide-white/10">

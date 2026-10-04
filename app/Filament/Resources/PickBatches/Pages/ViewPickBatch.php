@@ -9,6 +9,7 @@ use App\Models\PickBatch;
 use App\Services\GotenbergService;
 use App\Services\PackSlips\PackSlipRenderer;
 use App\Services\PickBatchService;
+use App\Services\SettingsService;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
@@ -74,7 +75,7 @@ class ViewPickBatch extends ViewRecord
             Action::make('viewPackSlips')
                 ->label('Pack Slips')
                 ->icon('heroicon-o-document-text')
-                ->visible(fn (): bool => ! $this->printMode)
+                ->visible(fn (): bool => ! $this->printMode && self::printsPackSlips())
                 ->url(fn (): string => route('pick-batches.pack-slips', $this->record))
                 ->openUrlInNewTab(),
 
@@ -82,7 +83,7 @@ class ViewPickBatch extends ViewRecord
             Action::make('printPackSlips')
                 ->label('Pack Slips')
                 ->icon('heroicon-o-document-text')
-                ->visible(fn (): bool => $this->printMode)
+                ->visible(fn (): bool => $this->printMode && self::printsPackSlips())
                 ->action(function (): void {
                     try {
                         $jobs = $this->packSlipJobs();
@@ -102,7 +103,7 @@ class ViewPickBatch extends ViewRecord
             Action::make('printBoth')
                 ->label('Print Both')
                 ->icon('heroicon-o-printer')
-                ->visible(fn (): bool => $this->printMode)
+                ->visible(fn (): bool => $this->printMode && self::printsPackSlips())
                 ->action(function (): void {
                     try {
                         $summary = $this->summaryPdf();
@@ -173,6 +174,14 @@ class ViewPickBatch extends ViewRecord
             'pickBatch' => $this->record,
             'rows' => app(PickBatchService::class)->summaryRows($this->pickBatch()),
         ]));
+    }
+
+    /**
+     * With pack slips off, a batch offers only its Picking Summary.
+     */
+    private static function printsPackSlips(): bool
+    {
+        return app(SettingsService::class)->packSlipsEnabled();
     }
 
     /**

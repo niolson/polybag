@@ -5,6 +5,7 @@ namespace App\Filament\Resources\PickBatches\RelationManagers;
 use App\Filament\Resources\ShipmentResource;
 use App\Models\Location;
 use App\Services\PickBatchService;
+use App\Services\SettingsService;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
@@ -65,12 +66,14 @@ class PickBatchShipmentsRelationManager extends RelationManager
                     ->trueIcon('heroicon-o-printer')
                     ->trueColor('success')
                     ->falseIcon('heroicon-o-minus-circle')
-                    ->falseColor('gray'),
+                    ->falseColor('gray')
+                    ->visible(fn (): bool => app(SettingsService::class)->packSlipsEnabled()),
                 Tables\Columns\TextColumn::make('shipment.pack_slip_printed_at')
                     ->label('Slip Printed At')
                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->placeholder('—')
-                    ->toggleable(isToggledHiddenByDefault: true),
+                    ->toggleable(isToggledHiddenByDefault: true)
+                    ->visible(fn (): bool => app(SettingsService::class)->packSlipsEnabled()),
             ])
             ->recordActions([
                 Action::make('markPicked')

@@ -6,6 +6,7 @@ use App\DataTransferObjects\PackSlips\PackSlipRun;
 use App\Models\Shipment;
 use App\Services\PackSlips\PackSlipRenderer;
 use App\Services\PackSlips\PackSlipViews;
+use App\Services\SettingsService;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -25,8 +26,10 @@ class PackSlipController extends Controller
     /**
      * Pack slips chosen on Print Pack Slips, in run order, with Mark as printed.
      */
-    public function run(Request $request, string $key, PackSlipViews $views, PackSlipRenderer $renderer): View|Response
+    public function run(Request $request, string $key, PackSlipViews $views, PackSlipRenderer $renderer, SettingsService $settings): View|Response
     {
+        abort_unless($settings->packSlipsEnabled(), 403);
+
         $run = $views->get($key);
 
         if ($run === null) {

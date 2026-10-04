@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Clients\Schemas;
 
 use App\Enums\LabelReferenceSource;
+use App\Filament\Pages\Settings;
 use App\Services\AddressReferenceService;
 use App\Services\LabelReferenceResolver;
 use App\Services\SettingsService;
@@ -35,7 +36,8 @@ class ClientForm
                             ->default(false),
                         FileUpload::make('logo')
                             ->label('Pack Slip Logo')
-                            ->helperText('Logo printed on pack slips for this client. Recommended: landscape image, PNG or JPG.')
+                            ->helperText(fn (): string => 'Logo printed on pack slips for this client. Recommended: landscape image, PNG or JPG.'
+                                .(app(SettingsService::class)->packSlipsEnabled() ? '' : ' '.Settings::PACK_SLIPS_OFF_NOTE))
                             ->disk('public')
                             ->directory('logos')
                             ->visibility('public')
@@ -49,7 +51,9 @@ class ClientForm
                     ->columns(2),
 
                 Section::make('Pack Slip')
-                    ->description('Branding and messaging printed on pack slips for this client.')
+                    ->description(fn (): string => app(SettingsService::class)->packSlipsEnabled()
+                        ? 'Branding and messaging printed on pack slips for this client.'
+                        : 'Inactive. '.Settings::PACK_SLIPS_OFF_NOTE)
                     ->schema([
                         TextInput::make('company_name')
                             ->label('Company Name')

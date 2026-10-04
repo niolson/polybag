@@ -53,6 +53,16 @@ class SettingsService
         return (bool) $this->get('sandbox_mode', false);
     }
 
+    /**
+     * Whether PolyBag prints pack slips. Off for a tenant whose ERP prints its own,
+     * which hides every pack slip screen and indicator. On unless saved off, so an
+     * install that never saved it keeps its pack slips.
+     */
+    public function packSlipsEnabled(): bool
+    {
+        return (bool) $this->get('pack_slips_enabled', true);
+    }
+
     private function resolveSandboxMode(mixed $default): bool
     {
         return match (true) {

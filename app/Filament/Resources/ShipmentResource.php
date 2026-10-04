@@ -276,7 +276,8 @@ class ShipmentResource extends Resource
                         ? 'Printed '.$record->pack_slip_printed_at?->timezone(Location::timezone())->format('M j, Y g:i A')
                             .($record->packSlipPrintedBy ? ' by '.$record->packSlipPrintedBy->name : '')
                         : null)
-                    ->toggleable(),
+                    ->toggleable()
+                    ->visible(fn (): bool => app(SettingsService::class)->packSlipsEnabled()),
                 Tables\Columns\TextColumn::make('deliverability')
                     ->label('Deliverable')
                     ->badge(),
@@ -309,7 +310,8 @@ class ShipmentResource extends Resource
                     ->options(PackSlipState::class)
                     ->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
                         ? $query->scopes(['withPackSlipState' => [PackSlipState::from($data['value'])]])
-                        : $query),
+                        : $query)
+                    ->visible(fn (): bool => app(SettingsService::class)->packSlipsEnabled()),
                 Tables\Filters\SelectFilter::make('deliverability')
                     ->options(Deliverability::class)
                     ->label('Deliverability'),
@@ -367,7 +369,7 @@ class ShipmentResource extends Resource
                 app(SettingsService::class)->get('multi_client_enabled', false) ? $filters['client'] : null,
                 $filters['channel'],
                 $filters['shipping_method'],
-                $filters['pack_slip'],
+                app(SettingsService::class)->packSlipsEnabled() ? $filters['pack_slip'] : null,
                 $filters['needs_shipping_method'],
                 $filters['created_at'],
             ])))
@@ -524,7 +526,8 @@ class ShipmentResource extends Resource
                                 ! $record->hasPrintedPackSlip() => 'gray',
                                 $record->packSlipIsOutOfDate() => 'warning',
                                 default => null,
-                            }),
+                            })
+                            ->visible(fn (): bool => app(SettingsService::class)->packSlipsEnabled()),
                         TextEntry::make('active_pick_batch')
                             ->label('Pick Batch')
                             ->state(fn (Shipment $record): ?string => $record->activePickBatch() ? 'Batch #'.$record->activePickBatch()->id : null)

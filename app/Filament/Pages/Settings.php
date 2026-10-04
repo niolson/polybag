@@ -59,6 +59,11 @@ class Settings extends Page
 
     protected string $view = 'filament.pages.settings';
 
+    /**
+     * Shown beside pack slip branding while PolyBag does not print pack slips.
+     */
+    public const PACK_SLIPS_OFF_NOTE = 'PolyBag does not print pack slips (see Features), so this is not used. It is kept for when it does.';
+
     public static function canAccess(): bool
     {
         return auth()->user()->role->isAtLeast(Role::Admin);
@@ -83,6 +88,7 @@ class Settings extends Page
             'transparency_enabled' => $settings->get('transparency_enabled', true),
             'batch_shipping_enabled' => $settings->get('batch_shipping_enabled', true),
             'manual_shipping_enabled' => $settings->get('manual_shipping_enabled', true),
+            'pack_slips_enabled' => $settings->packSlipsEnabled(),
             'picking_enabled' => $settings->get('picking_enabled', false),
             'require_picking_before_shipping' => $settings->get('require_picking_before_shipping', false),
             'label_reference_source' => $settings->get('label_reference_source', LabelReferenceResolver::DEFAULT_SOURCE->value),
@@ -174,7 +180,8 @@ class Settings extends Page
                                 ->maxLength(255),
                             FileUpload::make('pack_slip_logo')
                                 ->label('Pack Slip Logo')
-                                ->helperText('Logo printed on pack slips. Recommended: landscape image, PNG or JPG.')
+                                ->helperText(fn (Get $get): string => 'Logo printed on pack slips. Recommended: landscape image, PNG or JPG.'
+                                    .($get('pack_slips_enabled') ? '' : ' '.self::PACK_SLIPS_OFF_NOTE))
                                 ->disk('public')
                                 ->directory('logos')
                                 ->visibility('public')
@@ -188,7 +195,9 @@ class Settings extends Page
                         ->columns(1),
 
                     Section::make('Pack Slip')
-                        ->description('Branding and messaging printed on pack slips.')
+                        ->description(fn (Get $get): string => $get('pack_slips_enabled')
+                            ? 'Branding and messaging printed on pack slips.'
+                            : 'Inactive. '.self::PACK_SLIPS_OFF_NOTE)
                         ->visible(fn (): bool => ! (bool) app(SettingsService::class)->get('multi_client_enabled', false))
                         ->schema([
                             FileUpload::make('client.logo')
@@ -370,14 +379,19 @@ class Settings extends Page
                                 ->label('Manual Shipping')
                                 ->helperText('When enabled, the Manual Ship page is available for creating ad-hoc shipments.')
                                 ->default(true),
+                            Toggle::make('pack_slips_enabled')
+                                ->label('PolyBag Prints Pack Slips')
+                                ->helperText('When enabled, pack slips print from the Print Pack Slips page, the Shipment page and pick batches. Turn this off if another system, such as your ERP, prints them: Scan & Pack still opens a Shipment when its barcode matches the Shipment Reference exactly.')
+                                ->default(true)
+                                ->live(),
                             Toggle::make('picking_enabled')
-                                ->label('Picking')
+                                ->label('PolyBag Prints Pick Batches')
                                 ->helperText('When enabled, pickers can create pick batches and print picking summaries before packing.')
                                 ->default(false)
                                 ->live(),
                             Toggle::make('require_picking_before_shipping')
                                 ->label('Require Picking Before Shipping')
-                                ->helperText('When enabled, shipments must be picked before they can be packed or batch shipped. Applies to all open shipments, including those created before picking was enabled.')
+                                ->helperText('When enabled, shipments must be picked before they can be packed or batch shipped. Applies to all open shipments, including those created before picking was enabled. Pack slips then print from pick batches.')
                                 ->default(false)
                                 ->visible(fn (Get $get): bool => (bool) $get('picking_enabled')),
                             Toggle::make('transparency_enabled')
@@ -620,6 +634,7 @@ class Settings extends Page
             'transparency_enabled' => $data['transparency_enabled'] ?? true,
             'batch_shipping_enabled' => $data['batch_shipping_enabled'] ?? true,
             'manual_shipping_enabled' => $data['manual_shipping_enabled'] ?? true,
+            'pack_slips_enabled' => (bool) ($data['pack_slips_enabled'] ?? true),
             'picking_enabled' => (bool) ($data['picking_enabled'] ?? false),
             'require_picking_before_shipping' => (bool) ($data['require_picking_before_shipping'] ?? false),
             'label_reference_source' => ($labelReferenceSource ?? LabelReferenceResolver::DEFAULT_SOURCE)->value,
@@ -645,6 +660,12 @@ class Settings extends Page
             'account_lockout_max_attempts' => (int) ($data['account_lockout_max_attempts'] ?? AccountLockoutService::DEFAULT_MAX_ATTEMPTS),
             'account_lockout_minutes' => (int) ($data['account_lockout_minutes'] ?? AccountLockoutService::DEFAULT_LOCKOUT_MINUTES),
         ];
+
+        // The tenant logo is shown only in multi-client mode, and a hidden field is
+        // left out of the form state, so saving without it must not clear it.
+        if (! array_key_exists('pack_slip_logo', $data)) {
+            unset($settings['pack_slip_logo']);
+        }
 
         if (! $settings['require_mfa'] && DataSource::where('source_type', AmazonSource::class)->where('active', true)->exists()) {
             $message = 'Multi-Factor Authentication cannot be disabled while an active Amazon SP-API connection exists — it gives access to customer PII. Deactivate the Amazon connection first (Integrations → Connections).';

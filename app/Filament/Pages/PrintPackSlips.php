@@ -65,7 +65,7 @@ class PrintPackSlips extends Page implements HasTable
 
     public static function canAccess(): bool
     {
-        return auth()->check();
+        return auth()->check() && app(SettingsService::class)->packSlipsEnabled();
     }
 
     /**

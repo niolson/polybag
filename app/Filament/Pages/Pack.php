@@ -180,7 +180,7 @@ class Pack extends Page
 
             // The barcode names the Shipment, not the copy, so this is about the
             // latest recorded slip, not the paper in hand. Reprinting can wait.
-            if ($this->shipment->packSlipIsOutOfDate()) {
+            if (app(SettingsService::class)->packSlipsEnabled() && $this->shipment->packSlipIsOutOfDate()) {
                 $this->notifyWarning(
                     'Pack Slip Out of Date',
                     "This Shipment's latest pack slip is out of date. Its items changed after it was printed. Reprint it from the Shipment page.",

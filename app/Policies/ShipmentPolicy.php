@@ -6,6 +6,7 @@ use App\Enums\Role;
 use App\Enums\ShipmentStatus;
 use App\Models\Shipment;
 use App\Models\User;
+use App\Services\SettingsService;
 
 class ShipmentPolicy
 {
@@ -35,11 +36,12 @@ class ShipmentPolicy
     }
 
     /**
-     * Pack slips are floor paperwork: every role that packs may print them.
+     * Pack slips are floor paperwork: every role that packs may print them, unless
+     * PolyBag does not print pack slips at all.
      */
     public function printPackSlip(User $user, Shipment $shipment): bool
     {
-        return true;
+        return app(SettingsService::class)->packSlipsEnabled();
     }
 
     /**
