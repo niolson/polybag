@@ -2,7 +2,7 @@
 
 # "PolyBag prints pack slips" setting
 
-Status: needs-triage
+Status: done
 Category: enhancement
 Created: 2026-09-30
 
@@ -29,19 +29,38 @@ pack slip screens or indicators.
   - the Scan & Pack out-of-date warning
 - **When it is off, these stay:** the pack slip branding fields in Settings and on
   Clients stay, shown as inactive with a note, so turning the setting back on loses
-  nothing.
+  nothing. Keep them editable and put the note in the section description. Do not use
+  `->disabled()`: Filament leaves disabled fields out of the form data, and
+  `Settings::save()` writes `$data['pack_slip_logo'] ?? null` and
+  `$data['client']['logo'] ?? null`, so saving Settings with slips off would null the
+  logo. (`->disabled()->dehydrated()` would also work, but the plain note is simpler.)
+- **Routes when it is off:**
+  - `PrintPackSlips::canAccess()` returns false, so the page refuses access.
+  - The `printPackSlip` policy returns false, which covers both `shipments.pack-slip`
+    and the Shipment page action.
+  - `pick-batches.pack-slips` and `pack-slips.view` refuse.
+  - `pack-slips.printed` (receipt redemption) keeps accepting receipts. A job sent just
+    before the setting was turned off should still record, and receipts are signed.
+- **One place for the default.** Read the setting through a single helper that defaults
+  to true. Do not repeat `get('pack_slips_enabled', true)` at each call site: one stray
+  `false` default would quietly hide the screens for existing installs, which have never
+  saved the setting.
+- **Scan & Pack copy.** The ambiguous-match note in `pack.blade.php` says "a PolyBag
+  pack slip". Reword it so it also reads correctly for ERP slips.
 - **Scan & Pack is unchanged.** It still opens Shipments by PolyBag scan code or by exact
   `shipment_reference`.
 
 ## Acceptance criteria
 
-- [ ] The setting defaults to on, and existing installs keep it on.
-- [ ] With it off, each hidden element listed above is absent, and the page's route
-      refuses access.
-- [ ] With it off and picking on, View Pick Batch offers only the Picking Summary, and its
+- [x] The setting defaults to on, and existing installs keep it on.
+- [x] With it off, each hidden element listed above is absent, the Print Pack Slips
+      page refuses access, and `shipments.pack-slip`, `pick-batches.pack-slips` and
+      `pack-slips.view` refuse. `pack-slips.printed` still redeems a valid receipt.
+- [x] With it off and picking on, View Pick Batch offers only the Picking Summary, and its
       Shipments table has no Slip Printed columns.
-- [ ] The branding fields keep their values across off and on.
-- [ ] With it off, scanning a value that exactly matches an imported
+- [x] The branding fields keep their values across off and on, including when Settings
+      is saved while the setting is off (tenant logo and default-client branding).
+- [x] With it off, scanning a value that exactly matches an imported
       `shipment_reference` opens that Shipment at Scan & Pack. This is the ERP
       workflow.
 
@@ -52,3 +71,12 @@ pack slip screens or indicators.
 - [05 — Printed tab and Shipments list column](05-printed-tab-and-shipments-list-column.md)
 
 ## Comments
+
+- 2026-10-04 triage: blockers 02, 04 and 05 are done. Added route behavior, the
+  branding-field save trap, a single default helper and the Scan & Pack copy. Ready for
+  an agent.
+- 2026-10-04 done. `SettingsService::packSlipsEnabled()` is the one reader. The
+  `printPackSlip` policy covers `shipments.pack-slip` and the Shipment page action. A
+  pre-existing bug was found and fixed along the way: in single-client mode the tenant
+  pack slip logo field is hidden, so every Settings save nulled `pack_slip_logo`. Save
+  now leaves it alone when the field is not in the form state.
