@@ -2,7 +2,7 @@
 
 # Printed tab, "Changed since printed" in the queue, and the Shipments list column
 
-Status: needs-triage
+Status: done
 Category: enhancement
 Created: 2026-09-30
 
@@ -15,32 +15,94 @@ Created: 2026-09-30
 This slice covers reprinting after a jam, and seeing printed state wherever Shipments are
 listed.
 
-- **Printed tab** on Print Pack Slips: open Shipments whose latest slip is current,
-  newest printed first, with a bulk Reprint (the same print path and receipts).
-- **Same rules as the Not printed tab.** Both tabs use the queue's rules from slice 04:
-  - Shipments in an in-progress pick batch are left off both tabs, with the same
-    explanatory line, because a slip printed here would lack their tote code.
-  - When "Require picking before shipping" is on, both tabs show the empty state.
-  - Both tabs use the same filters.
+- **Tabs on Print Pack Slips.** The page built in slice 04 becomes the **Not printed**
+  tab, and a **Printed** tab is added beside it.
+- **Printed tab:** open Shipments whose latest slip is current (printed, and
+  `items_version` not past `pack_slip_items_version`).
+  - **Order:** newest printed first: `pack_slip_printed_at` descending, then
+    `pack_slip_receipt_issued_at` descending, then `id`. Shipments printed by one QZ job
+    share a printed time, so the tie-breaks keep a run together and in a stable order.
+  - **Columns:** those of the Not printed tab, plus **Printed** (relative time, exact
+    time in the tooltip) and **Printed by**, so the operator can find the run that
+    jammed.
+  - **Bulk actions:** **Reprint** and **View**. Reprint goes through the same print path
+    and receipts as Print selected (`PackSlipQueue::run()` then
+    `PackSlipRenderer::printJobs()`). View works as on the Not printed tab.
+  - **Header actions:** "Print next N" and "Batch size" stay on the Not printed tab and
+    are hidden on Printed.
+  - **Empty state:** its own text, for example "No pack slips printed" / "Open
+    Shipments appear here once their slip is printed."
+- **Same rules on both tabs.** Both use the queue's rules from slice 04:
+  - Shipments in an in-progress pick batch are left off both tabs, with the explanatory
+    line, because a slip printed here would lack their tote code. The line is per tab:
+    on Printed it counts the printed, current Shipments that are left off, and links
+    their batches. `PackSlipQueue::leftOffForPickBatches()` currently counts only
+    Shipments that need a slip, so it gains a per-tab form. As in slice 04, batches are
+    links only for users who can open pick batches; a Shipper sees the batch numbers.
+  - When "Require picking before shipping" is on, the page shows its empty state on
+    both tabs.
+  - Both tabs share the same filters (Client, Channel, Shipping Method), applied by the
+    queue.
+  - The Printed tab's query belongs in `PackSlipQueue` (a `printed()` beside
+    `notPrinted()`), not in the page.
 - **Not printed tab:** rows that are out of date, not never printed, are marked
-  "Changed since printed".
-- **Shipments list:** a "Pack slip printed" column, and a filter for printed, not
-  printed or out of date.
+  "Changed since printed" (a warning badge, using `Shipment::packSlipIsOutOfDate()`).
+- **Shipments list:**
+  - A **Pack Slip** column: a badge reading **Printed**, **Not printed** (gray) or
+    **Changed since printed** (warning), with the printed time and user in the tooltip
+    when there is one. It matches the Pack Slip entry on the Shipment page.
+  - A **Pack Slip** filter with three values that do not overlap: **Printed** (latest
+    slip current), **Not printed** (never printed) and **Changed since printed** (out
+    of date). Note this "Not printed" is narrower than the Print Pack Slips tab of that
+    name, which also lists out-of-date slips.
+
+Out of this slice: hiding the tabs, column and filter when pack slips are off (slice 06).
 
 ## Acceptance criteria
 
 - [ ] After a run, its Shipments are at the top of the Printed tab and can be selected
       and reprinted. A reprint updates the printed time and user.
 - [ ] A Shipment whose items change after printing moves from Printed to Not printed,
-      marked "Changed since printed".
+      marked "Changed since printed". A never-printed Shipment carries no marker.
 - [ ] A printed Shipment in an in-progress pick batch is not on the Printed tab. The
-      explanatory line counts it and links to the batch.
+      explanatory line on that tab counts it and names the batch, as a link for users
+      who can open pick batches.
 - [ ] With "Require picking before shipping" on, the Printed tab shows the empty state.
-- [ ] The Shipments list column and each filter value are tested.
+- [ ] The filters narrow the Printed tab as they do the Not printed tab.
+- [ ] "Print next N" and "Batch size" are not offered on the Printed tab.
+- [ ] Printed tab order is newest printed first; Shipments sharing a printed time keep a
+      stable order.
+- [ ] The Shipments list column shows each of the three states, and each filter value
+      lists only its own Shipments.
 
 ## Blocked by
 
-- [03 — Item changes make the latest pack slip out of date](03-item-changes-make-the-slip-out-of-date.md)
-- [04 — Print Pack Slips page](04-print-pack-slips-page.md)
+None. Slices 03 and 04 are done.
 
 ## Comments
+
+- 2026-10-04 — Refreshed after slice 04 shipped and moved to `ready-for-agent`.
+  Decided: the Shipments list filter has three values that do not overlap (Printed, Not
+  printed meaning never printed, Changed since printed), unlike the page's Not printed
+  tab, which includes out-of-date slips. The left-off line is per tab, so
+  `leftOffForPickBatches()` needs a Printed form, and keeps slice 04's
+  links-for-managers rule. "Print next N" and "Batch size" belong to Not printed only;
+  Printed gets Reprint and View. Printed is ordered by printed time, then receipt issue
+  time, then id, and shows Printed and Printed by columns. Hiding when pack slips are
+  off stays with slice 06.
+- 2026-10-04 — Implemented on branch `pack-slips-05`; awaiting a manual look at the
+  tabs in a browser and a reprint through a real QZ Tray. Decisions made while building
+  it:
+  - A `PackSlipState` enum (Printed, Not printed, Changed since printed) and a
+    `Shipment::withPackSlipState()` scope are the one definition of the three states.
+    The queue, the Shipments list column and its filter all use them.
+    `PackSlipQueueTab` maps each tab to its states.
+  - `PackSlipQueue::tab()` builds either tab; `notPrinted()` and `printed()` wrap it, and
+    `leftOffForPickBatches()` takes the tab.
+  - Within one QZ job the Printed tab orders by ascending ID, not descending: the
+    issue said only "then id", and ascending stays close to oldest first.
+  - Reprint is its own bulk action (`reprintSelected`) shown only on Printed; Print
+    selected shows only on Not printed.
+  - The tab is kept in the URL (`?tab=printed`), and switching tabs clears the selection.
+- 2026-10-04 — Done. Checked in a browser (tabs, Shipments list column) and verified a
+  reprint from the Printed tab with a real QZ Tray.

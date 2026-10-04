@@ -14,6 +14,17 @@
             </p>
         </x-filament::section>
     @else
+        <x-filament::tabs>
+            @foreach (\App\Enums\PackSlipQueueTab::cases() as $tab)
+                <x-filament::tabs.item
+                    :active="$this->activeTab() === $tab"
+                    wire:click="$set('activeTab', '{{ $tab->value }}')"
+                >
+                    {{ $tab->getLabel() }}
+                </x-filament::tabs.item>
+            @endforeach
+        </x-filament::tabs>
+
         @php($leftOff = $this->leftOffForPickBatches())
 
         @if ($leftOff['count'] > 0)

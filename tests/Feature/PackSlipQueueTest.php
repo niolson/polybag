@@ -1,6 +1,7 @@
 <?php
 
 use App\DataTransferObjects\PackSlips\PackSlipQueueFilters;
+use App\Enums\PackSlipQueueTab;
 use App\Enums\ShipmentStatus;
 use App\Models\Channel;
 use App\Models\Client;
@@ -181,4 +182,64 @@ it('drops Shipments no longer open from a run', function (): void {
     $shipped = Shipment::factory()->create(['status' => ShipmentStatus::Shipped]);
 
     expect(app(PackSlipQueue::class)->run([$open->id, $shipped->id])->shipmentIds)->toBe([$open->id]);
+});
+
+function printedIds(?PackSlipQueueFilters $filters = null): array
+{
+    return app(PackSlipQueue::class)->printed($filters ?? new PackSlipQueueFilters)
+        ->pluck('shipments.id')
+        ->map(fn (mixed $id): int => (int) $id)
+        ->all();
+}
+
+it('lists on the Printed tab only open Shipments whose slip is current', function (): void {
+    $current = printedShipment();
+    printedShipment(['items_version' => 3]);
+    Shipment::factory()->create();
+    printedShipment(['status' => ShipmentStatus::Shipped]);
+
+    expect(printedIds())->toBe([$current->id]);
+});
+
+it('orders the Printed tab newest printed first, keeping a run together in a stable order', function (): void {
+    $older = printedShipment(['pack_slip_printed_at' => now()->subHour()]);
+    $issuedAt = now()->subMinute();
+    $runFirst = printedShipment(['pack_slip_printed_at' => now(), 'pack_slip_receipt_issued_at' => $issuedAt]);
+    $runSecond = printedShipment(['pack_slip_printed_at' => now(), 'pack_slip_receipt_issued_at' => $issuedAt]);
+    $earlierJob = printedShipment(['pack_slip_printed_at' => now(), 'pack_slip_receipt_issued_at' => $issuedAt->copy()->subSecond()]);
+
+    expect(printedIds())->toBe([$runFirst->id, $runSecond->id, $earlierJob->id, $older->id]);
+});
+
+it('leaves off the Printed tab a Shipment in an in-progress pick batch, and reports it per tab', function (): void {
+    $printed = printedShipment();
+    $waiting = Shipment::factory()->create();
+    $batch = PickBatch::factory()->create();
+    PickBatchShipment::factory()->create(['pick_batch_id' => $batch->id, 'shipment_id' => $printed->id]);
+    PickBatchShipment::factory()->create(['pick_batch_id' => $batch->id, 'shipment_id' => $waiting->id]);
+    printedShipment();
+
+    $leftOff = app(PackSlipQueue::class)->leftOffForPickBatches(tab: PackSlipQueueTab::Printed);
+
+    expect(printedIds())->not->toContain($printed->id)
+        ->and($leftOff['count'])->toBe(1)
+        ->and($leftOff['batches']->modelKeys())->toBe([$batch->id]);
+});
+
+it('lists nothing on the Printed tab when picking is required before shipping', function (): void {
+    app(SettingsService::class)->set('picking_enabled', true, 'boolean');
+    app(SettingsService::class)->set('require_picking_before_shipping', true, 'boolean');
+    printedShipment();
+
+    expect(printedIds())->toBe([]);
+});
+
+it('filters the Printed tab by Client, Channel and Shipping Method', function (): void {
+    $client = Client::factory()->create();
+    $channel = Channel::factory()->create();
+    $method = ShippingMethod::factory()->create();
+    $match = printedShipment(['client_id' => $client->id, 'channel_id' => $channel->id, 'shipping_method_id' => $method->id]);
+    printedShipment(['client_id' => $client->id, 'channel_id' => $channel->id]);
+
+    expect(printedIds(new PackSlipQueueFilters($client->id, $channel->id, $method->id)))->toBe([$match->id]);
 });

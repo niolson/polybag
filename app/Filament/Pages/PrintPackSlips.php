@@ -5,6 +5,8 @@ namespace App\Filament\Pages;
 use App\DataTransferObjects\PackSlips\PackSlipPrintJob;
 use App\DataTransferObjects\PackSlips\PackSlipQueueFilters;
 use App\DataTransferObjects\PackSlips\PackSlipRun;
+use App\Enums\PackSlipQueueTab;
+use App\Enums\PackSlipState;
 use App\Filament\Resources\PickBatches\PickBatchResource;
 use App\Models\Channel;
 use App\Models\Client;
@@ -29,14 +31,16 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Livewire\Attributes\On;
+use Livewire\Attributes\Url;
 use LogicException;
 use Throwable;
 use UnitEnum;
 
 /**
  * Prints pack slips for open Shipments without any picking: the next N most urgent,
- * or a selection. A Shipment leaves the list only once its slip is recorded printed,
- * by QZ Tray's acknowledgment or by Mark as printed on a view.
+ * or a selection. A Shipment leaves the Not printed tab only once its slip is recorded
+ * printed, by QZ Tray's acknowledgment or by Mark as printed on a view. The Printed tab
+ * lists current slips, newest first, for reprinting a run that jammed.
  */
 class PrintPackSlips extends Page implements HasTable
 {
@@ -56,6 +60,9 @@ class PrintPackSlips extends Page implements HasTable
 
     protected string $view = 'filament.pages.print-pack-slips';
 
+    #[Url(as: 'tab')]
+    public string $activeTab = PackSlipQueueTab::NotPrinted->value;
+
     public static function canAccess(): bool
     {
         return auth()->check();
@@ -70,6 +77,17 @@ class PrintPackSlips extends Page implements HasTable
         $this->deselectAllTableRecords();
     }
 
+    public function updatedActiveTab(): void
+    {
+        $this->resetPage();
+        $this->deselectAllTableRecords();
+    }
+
+    public function activeTab(): PackSlipQueueTab
+    {
+        return PackSlipQueueTab::tryFrom($this->activeTab) ?? PackSlipQueueTab::NotPrinted;
+    }
+
     public function printsFromPickBatches(): bool
     {
         return app(PackSlipQueue::class)->printsFromPickBatches();
@@ -80,7 +98,7 @@ class PrintPackSlips extends Page implements HasTable
      */
     public function leftOffForPickBatches(): array
     {
-        return app(PackSlipQueue::class)->leftOffForPickBatches($this->queueFilters());
+        return app(PackSlipQueue::class)->leftOffForPickBatches($this->queueFilters(), $this->activeTab());
     }
 
     public function pickBatchUrl(?PickBatch $batch = null): ?string
@@ -99,12 +117,17 @@ class PrintPackSlips extends Page implements HasTable
         $multiClient = (bool) app(SettingsService::class)->get('multi_client_enabled', false);
 
         return $table
-            ->query(fn (): Builder => app(PackSlipQueue::class)->notPrinted($this->queueFilters()))
+            ->query(fn (): Builder => app(PackSlipQueue::class)->tab($this->activeTab(), $this->queueFilters()))
             ->defaultKeySort(false)
             ->columns([
                 Tables\Columns\TextColumn::make('shipment_reference')
                     ->label('Reference')
                     ->searchable(),
+                Tables\Columns\TextColumn::make('pack_slip_state')
+                    ->label('Pack Slip')
+                    ->state(fn (Shipment $record): ?PackSlipState => $record->packSlipIsOutOfDate() ? PackSlipState::ChangedSincePrinted : null)
+                    ->badge()
+                    ->visible(fn (): bool => $this->activeTab() === PackSlipQueueTab::NotPrinted),
                 Tables\Columns\TextColumn::make('client.name')
                     ->label('Client')
                     ->visible($multiClient),
@@ -121,6 +144,15 @@ class PrintPackSlips extends Page implements HasTable
                     ->label('Created')
                     ->since()
                     ->dateTimeTooltip(),
+                Tables\Columns\TextColumn::make('pack_slip_printed_at')
+                    ->label('Printed')
+                    ->since()
+                    ->dateTimeTooltip()
+                    ->visible(fn (): bool => $this->activeTab() === PackSlipQueueTab::Printed),
+                Tables\Columns\TextColumn::make('packSlipPrintedBy.name')
+                    ->label('Printed by')
+                    ->placeholder('—')
+                    ->visible(fn (): bool => $this->activeTab() === PackSlipQueueTab::Printed),
             ])
             ->filters([
                 // The queue applies these, so the table and "Print next N" read the same state.
@@ -141,6 +173,15 @@ class PrintPackSlips extends Page implements HasTable
                 BulkAction::make('printSelected')
                     ->label('Print selected')
                     ->icon('heroicon-o-printer')
+                    ->visible(fn (): bool => $this->activeTab() === PackSlipQueueTab::NotPrinted)
+                    ->action(fn (EloquentCollection $records) => $this->print(
+                        app(PackSlipQueue::class)->run($records->modelKeys()),
+                    ))
+                    ->deselectRecordsAfterCompletion(),
+                BulkAction::make('reprintSelected')
+                    ->label('Reprint')
+                    ->icon('heroicon-o-printer')
+                    ->visible(fn (): bool => $this->activeTab() === PackSlipQueueTab::Printed)
                     ->action(fn (EloquentCollection $records) => $this->print(
                         app(PackSlipQueue::class)->run($records->modelKeys()),
                     ))
@@ -167,8 +208,14 @@ class PrintPackSlips extends Page implements HasTable
                             ->send();
                     }),
             ])
-            ->emptyStateHeading('No pack slips waiting')
-            ->emptyStateDescription('Every open Shipment has a current pack slip.')
+            ->emptyStateHeading(fn (): string => match ($this->activeTab()) {
+                PackSlipQueueTab::NotPrinted => 'No pack slips waiting',
+                PackSlipQueueTab::Printed => 'No pack slips printed',
+            })
+            ->emptyStateDescription(fn (): string => match ($this->activeTab()) {
+                PackSlipQueueTab::NotPrinted => 'Every open Shipment has a current pack slip.',
+                PackSlipQueueTab::Printed => 'Open Shipments appear here once their pack slip is printed.',
+            })
             ->maxSelectableRecords(1000);
     }
 
@@ -178,7 +225,7 @@ class PrintPackSlips extends Page implements HasTable
             Action::make('printNext')
                 ->label(fn (): string => 'Print next '.$this->user()->pack_slip_batch_size)
                 ->icon('heroicon-o-printer')
-                ->hidden(fn (): bool => $this->printsFromPickBatches())
+                ->hidden(fn (): bool => $this->printsFromPickBatches() || $this->activeTab() === PackSlipQueueTab::Printed)
                 ->action(fn () => $this->print(app(PackSlipQueue::class)->run(
                     app(PackSlipQueue::class)->next($this->user()->pack_slip_batch_size, $this->queueFilters()),
                 ))),
@@ -186,7 +233,7 @@ class PrintPackSlips extends Page implements HasTable
                 ->label('Batch size')
                 ->icon('heroicon-o-adjustments-horizontal')
                 ->color('gray')
-                ->hidden(fn (): bool => $this->printsFromPickBatches())
+                ->hidden(fn (): bool => $this->printsFromPickBatches() || $this->activeTab() === PackSlipQueueTab::Printed)
                 ->fillForm(fn (): array => ['pack_slip_batch_size' => $this->user()->pack_slip_batch_size])
                 ->schema([
                     TextInput::make('pack_slip_batch_size')

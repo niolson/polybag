@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\Deliverability;
 use App\Enums\PackageStatus;
+use App\Enums\PackSlipState;
 use App\Enums\PickBatchStatus;
 use App\Enums\PickingStatus;
 use App\Enums\ShipmentStatus;
@@ -214,6 +215,26 @@ class Shipment extends Model
     public function scopeNeedingShippingMethod(Builder $query): Builder
     {
         return $query->where('status', ShipmentStatus::Open)->whereNull('shipping_method_id');
+    }
+
+    /**
+     * Shipments whose latest pack slip is in any of the given states.
+     */
+    public function scopeWithPackSlipState(Builder $query, PackSlipState ...$states): Builder
+    {
+        return $query->where(function (Builder $query) use ($states): void {
+            foreach ($states as $state) {
+                $query->orWhere(fn (Builder $query): Builder => match ($state) {
+                    PackSlipState::NotPrinted => $query->whereNull('shipments.pack_slip_items_version'),
+                    PackSlipState::ChangedSincePrinted => $query
+                        ->whereNotNull('shipments.pack_slip_items_version')
+                        ->whereColumn('shipments.items_version', '>', 'shipments.pack_slip_items_version'),
+                    PackSlipState::Printed => $query
+                        ->whereNotNull('shipments.pack_slip_items_version')
+                        ->whereColumn('shipments.items_version', '<=', 'shipments.pack_slip_items_version'),
+                });
+            }
+        });
     }
 
     /**

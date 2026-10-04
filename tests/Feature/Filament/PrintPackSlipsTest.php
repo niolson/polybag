@@ -1,8 +1,10 @@
 <?php
 
 use App\DataTransferObjects\PackSlips\PackSlipRun;
+use App\Enums\PackSlipState;
 use App\Enums\Role;
 use App\Filament\Pages\PrintPackSlips;
+use App\Models\Channel;
 use App\Models\PickBatch;
 use App\Models\PickBatchShipment;
 use App\Models\Shipment;
@@ -211,4 +213,131 @@ it('says so when there is nothing to print', function (): void {
         ->callAction('printNext')
         ->assertNotDispatched('print-pack-slips')
         ->assertNotified('No pack slips to print');
+});
+
+/**
+ * Redeems every receipt a print dispatch carried, as QZ Tray's acknowledgment would.
+ */
+function acknowledgePrint(mixed $page, mixed $test): void
+{
+    $dispatch = collect($page->effects['dispatches'])->firstWhere('name', 'print-pack-slips');
+
+    foreach ($dispatch['params']['jobs'] as $job) {
+        $test->postJson(route('pack-slips.printed'), ['receipt' => $job['receipt']])->assertOk();
+    }
+}
+
+it('puts a printed run at the top of the Printed tab, and a reprint records the new time and user', function (): void {
+    fakeQueuePdfRenderer();
+    $earlier = Shipment::factory()->create([
+        'pack_slip_items_version' => 0,
+        'pack_slip_printed_at' => now()->subDay(),
+    ]);
+    $run = Shipment::factory()->count(2)->create();
+
+    acknowledgePrint(
+        Livewire::test(PrintPackSlips::class)
+            ->selectTableRecords($run)
+            ->callAction(TestAction::make('printSelected')->table()->bulk()),
+        $this,
+    );
+
+    Livewire::test(PrintPackSlips::class)
+        ->set('activeTab', 'printed')
+        ->assertCanSeeTableRecords([...$run, $earlier], inOrder: true)
+        ->assertTableColumnVisible('pack_slip_printed_at')
+        ->assertTableColumnVisible('packSlipPrintedBy.name');
+
+    $other = User::factory()->create(['role' => Role::User]);
+    $this->actingAs($other);
+    $this->travel(5)->minutes();
+
+    $page = Livewire::test(PrintPackSlips::class)
+        ->set('activeTab', 'printed')
+        ->selectTableRecords([$earlier])
+        ->callAction(TestAction::make('reprintSelected')->table()->bulk())
+        ->assertDispatched('print-pack-slips');
+
+    expect(dispatchedShipmentIds($page, $other))->toBe([$earlier->id]);
+
+    acknowledgePrint($page, $this);
+
+    $earlier->refresh();
+    expect($earlier->pack_slip_printed_by_user_id)->toBe($other->id)
+        ->and($earlier->pack_slip_printed_at->timestamp)->toBe(now()->timestamp);
+
+    Livewire::test(PrintPackSlips::class)
+        ->set('activeTab', 'printed')
+        ->assertCanSeeTableRecords([$earlier, ...$run], inOrder: true);
+});
+
+it('moves a Shipment whose items change from Printed to Not printed, marked changed since printed', function (): void {
+    $shipment = Shipment::factory()->create();
+    $item = ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'quantity' => 1]);
+    $shipment->refresh()->forceFill(['pack_slip_items_version' => $shipment->items_version])->save();
+    $neverPrinted = Shipment::factory()->create();
+
+    Livewire::test(PrintPackSlips::class)
+        ->set('activeTab', 'printed')
+        ->assertCanSeeTableRecords([$shipment]);
+
+    $item->update(['quantity' => 2]);
+
+    Livewire::test(PrintPackSlips::class)
+        ->set('activeTab', 'printed')
+        ->assertCanNotSeeTableRecords([$shipment]);
+
+    Livewire::test(PrintPackSlips::class)
+        ->assertCanSeeTableRecords([$shipment, $neverPrinted])
+        ->assertTableColumnStateSet('pack_slip_state', PackSlipState::ChangedSincePrinted, $shipment)
+        ->assertTableColumnStateNotSet('pack_slip_state', PackSlipState::ChangedSincePrinted, $neverPrinted);
+});
+
+it('offers Reprint, not Print next N, on the Printed tab', function (): void {
+    Livewire::test(PrintPackSlips::class)
+        ->set('activeTab', 'printed')
+        ->assertActionHidden('printNext')
+        ->assertActionHidden('batchSize')
+        ->assertActionVisible(TestAction::make('reprintSelected')->table()->bulk())
+        ->assertActionHidden(TestAction::make('printSelected')->table()->bulk())
+        ->assertSee('No pack slips printed');
+});
+
+it('filters the Printed tab like the Not printed tab', function (): void {
+    $channel = Channel::factory()->create();
+    $match = Shipment::factory()->create(['channel_id' => $channel->id, 'pack_slip_items_version' => 0]);
+    $other = Shipment::factory()->create(['pack_slip_items_version' => 0]);
+
+    Livewire::test(PrintPackSlips::class)
+        ->set('activeTab', 'printed')
+        ->filterTable('channel', $channel->id)
+        ->assertCanSeeTableRecords([$match])
+        ->assertCanNotSeeTableRecords([$other]);
+});
+
+it('explains printed Shipments left off the Printed tab for in-progress pick batches', function (): void {
+    app(SettingsService::class)->set('picking_enabled', true, 'boolean');
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+
+    $printed = Shipment::factory()->create(['pack_slip_items_version' => 0]);
+    $batch = PickBatch::factory()->create();
+    PickBatchShipment::factory()->create(['pick_batch_id' => $batch->id, 'shipment_id' => $printed->id]);
+    PickBatchShipment::factory()->count(2)->create(['pick_batch_id' => $batch->id]);
+
+    Livewire::test(PrintPackSlips::class)
+        ->set('activeTab', 'printed')
+        ->assertCanNotSeeTableRecords([$printed])
+        ->assertSee('1 Shipment left off')
+        ->assertSee(route('filament.app.resources.pick-batches.view', $batch), escape: false);
+});
+
+it('shows the picking-required empty state on the Printed tab', function (): void {
+    app(SettingsService::class)->set('picking_enabled', true, 'boolean');
+    app(SettingsService::class)->set('require_picking_before_shipping', true, 'boolean');
+    Shipment::factory()->create(['pack_slip_items_version' => 0]);
+
+    Livewire::test(PrintPackSlips::class)
+        ->set('activeTab', 'printed')
+        ->assertSee('Pack slips print from pick batches')
+        ->assertActionHidden('printNext');
 });
