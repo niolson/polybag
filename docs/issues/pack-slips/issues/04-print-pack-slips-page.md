@@ -2,7 +2,7 @@
 
 # Print Pack Slips page: the Not printed queue
 
-Status: needs-triage
+Status: done
 Category: enhancement
 Created: 2026-09-30
 
@@ -22,21 +22,40 @@ slips for open Shipments without any picking.
   - **Cancelled batches:** Shipments in one reappear.
   - **Picking required:** the queue reports that pack slips print from batches.
   - **Filters:** Client (when multi-client is on), Channel and Shipping Method.
+  - **Index.** Add the index the queue query needs (open status, printed version). Slice
+    01 left it to this slice, where the query is written.
 - **Selection is by urgency, not by Client.** Order is expedited first, then oldest
   first. That order decides the table and which Shipments "Print next N" takes.
+  - Expedited means the Shipment's shipping method has `is_expedited`. A Shipment with
+    no shipping method counts as standard.
+  - Oldest means earliest `created_at`, as in `PickBatchService::autoGenerate`.
 - **Printed run grouped by Client.** Once chosen, the run is grouped by Client (in name
-  order), keeping urgency order within each Client.
+  order), keeping urgency order within each Client. The queue service does this for any
+  given set of Shipment IDs, and every action below uses it, so the screen and the paper
+  always agree.
 - **Actions.**
-  - **Print next N:** the batch size is remembered per user, default 25.
-  - **Print selected:** a bulk action.
-  - **View:** the browser view with receipt-backed Mark as printed.
-  - Runs go through the shared print path from slice 01, which splits anything over the
-    job size limit into several jobs.
+  - **Print next N:** takes the top N of the queue under the active filters, and prints
+    fewer when fewer are waiting. The batch size is stored per user in a new
+    `users.pack_slip_batch_size` column (default 25), the way `auto_ship_enabled` is.
+    It is not a workstation preference in `localStorage`.
+  - **Print selected:** a bulk action that prints exactly the selected Shipments.
+  - **View:** a bulk action on the selection. It is not a filter: the selected IDs are put
+    in run order, stored in the cache under a random key with a short lifetime, and
+    opened in a new tab at a new route such as `/pack-slips/view/{key}`. The route renders
+    through `PackSlipRenderer::view()`, which carries the receipt and Mark as printed. A
+    cache key, not IDs in the query string, because a large selection would exceed the
+    web server's URL limit. An expired key shows a plain "this view has expired" page.
+  - Runs go through the shared print path from slice 01, which splits anything over
+    `PackSlipRenderer::SLIPS_PER_PRINT_JOB` into several jobs. The table refreshes on
+    `pack-slips-printed`, as the batch's Shipments table does.
 - **Explanatory line.** Shown when batched Shipments are left off, with links to their
   batches.
 - **Empty state.** When "Require picking before shipping" is on, the page shows that pack
   slips print from pick batches, with a link there.
 - **Access.** Shippers (the `User` role).
+
+Out of this slice: the Printed tab and the "Changed since printed" marker (slice 05), and
+hiding the page when pack slips are off (slice 06).
 
 ## Acceptance criteria
 
@@ -50,9 +69,15 @@ slips for open Shipments without any picking.
   - [ ] Picking required shows the empty state.
 - [ ] If Client A has more than N older standard orders and Client B has one expedited
       order, "Print next N" includes B's order.
+- [ ] A Shipment with no shipping method sorts as standard.
+- [ ] "Print next N" respects the active filters, and prints all that are waiting when
+      fewer than N are.
 - [ ] The printed run is grouped by Client, keeping urgency order within each Client.
-- [ ] The batch size persists per user.
+- [ ] The batch size persists per user, in the database: another user's size is
+      unaffected.
 - [ ] Print selected prints only the selection.
+- [ ] View shows exactly the selected Shipments, in run order, with a receipt and a
+      working Mark as printed. An expired view key is handled.
 - [ ] A Shipment whose slip was printed from a completed pick batch is not listed as
       never printed.
 - [ ] A Shipment whose items change after printing reappears on the list.
@@ -64,11 +89,26 @@ slips for open Shipments without any picking.
 
 ## Blocked by
 
-- [01 — Print a pack slip for one Shipment](01-print-one-shipments-pack-slip.md)
-- [02 — Batch pack slips record on the Shipment](02-batch-pack-slips-record-on-the-shipment.md):
-  until then, slips printed from batches are recorded on batch membership, and the queue
-  would list those Shipments as never printed.
-- [03 — Item changes make the latest pack slip out of date](03-item-changes-make-the-slip-out-of-date.md):
-  until then, an item change cannot make a slip reappear.
+None. Slices 01, 02 and 03 are done.
 
 ## Comments
+
+- 2026-10-03 — Refreshed after slices 01–03 shipped and moved to `ready-for-agent`.
+  Decided: the batch size is a `users` column, not a `localStorage` preference, since the
+  PRD's "per user" and "like the other workstation preferences" disagreed and
+  `localStorage` is per browser. View is a selection, not a filter, because a selection
+  cannot be expressed as filters and a re-run queue would show different Shipments than
+  were chosen; it travels as a short-lived cache key because a large ID list overflows
+  the URL. Also pinned the urgency definitions and took over the queue index from 01.
+- 2026-10-03 — Implemented on branch `pack-slips-04`; awaiting a manual check with a
+  real QZ Tray. Decisions made while building it:
+  - `PackSlipQueue` owns the rules, the urgency order and the Client grouping
+    (`run()`). The table's filters are applied by the queue, not by Filament, so the
+    table and "Print next N" read the same filter state.
+  - "Print next N" has no modal; a separate **Batch size** action changes N.
+  - View opens the new tab with `window.open` and also sends a notification with an
+    "Open again" link, in case the browser blocks the pop-up. A stored view lives one
+    hour (`PackSlipViews::LIFETIME_SECONDS`).
+  - Shippers cannot open pick batches, so the left-off line and the empty state link
+    the batches only for users who can (managers); a Shipper sees the batch numbers.
+- 2026-10-04 — Done. Verified with a real QZ Tray: printing from the page works.

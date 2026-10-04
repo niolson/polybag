@@ -33,8 +33,16 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         'password_changed_at',
         'role',
         'auto_ship_enabled',
+        'pack_slip_batch_size',
         'location_id',
         'active',
+    ];
+
+    /**
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'pack_slip_batch_size' => 25,
     ];
 
     protected $hidden = [
@@ -52,6 +60,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             'locked_until' => 'datetime',
             'role' => Role::class,
             'auto_ship_enabled' => 'boolean',
+            'pack_slip_batch_size' => 'integer',
             'active' => 'boolean',
         ];
     }

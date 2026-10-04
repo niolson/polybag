@@ -66,6 +66,10 @@ Route::get('/shipments/{shipment}/pack-slip', [PackSlipController::class, 'shipm
     ->name('shipments.pack-slip')
     ->middleware('auth');
 
+Route::get('/pack-slips/view/{key}', [PackSlipController::class, 'run'])
+    ->name('pack-slips.view')
+    ->middleware('auth');
+
 // Redeems a pack slip receipt: from the QZ Tray integration once a job is sent,
 // or from Mark as printed on a pack slip view. One request per print job.
 Route::post('/pack-slips/printed', [PackSlipPrintController::class, 'store'])
