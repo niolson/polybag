@@ -103,7 +103,12 @@ class SetupWizard extends Page
             'prepopulate_shipping_methods' => false,
             'shipping_methods' => [],
 
-            // Step 5: Order import (prefill from a connection that imports orders;
+            // Step 5: Workflow
+            'pack_slips_enabled' => $settings->packSlipsEnabled(),
+            'picking_enabled' => (bool) $settings->get('picking_enabled', false),
+            'require_picking_before_shipping' => (bool) $settings->get('require_picking_before_shipping', false),
+
+            // Step 6: Order import (prefill from a connection that imports orders;
             // a postage-only connection is not an import source)
             'import_source' => match (DataSource::importing()->value('source_type')) {
                 DatabaseSource::class => 'database',
@@ -127,6 +132,7 @@ class SetupWizard extends Page
                     $this->carriersStep(),
                     $this->boxSizesStep(),
                     $this->channelsAndMethodsStep(),
+                    $this->workflowStep(),
                     $this->importSourceStep(),
                     $this->summaryStep(),
                 ])
@@ -407,6 +413,36 @@ class SetupWizard extends Page
             });
     }
 
+    private function workflowStep(): Step
+    {
+        return Step::make('Workflow')
+            ->icon('heroicon-o-clipboard-document-list')
+            ->description('Choose which steps PolyBag handles')
+            ->schema([
+                Forms\Components\Radio::make('pack_slips_enabled')
+                    ->label('Who prints pack slips?')
+                    ->boolean('PolyBag', 'Another system, such as an ERP')
+                    ->default(true)
+                    ->required()
+                    ->live(),
+                Forms\Components\Radio::make('picking_enabled')
+                    ->label('Do you pick orders with PolyBag?')
+                    ->boolean('Yes', 'No')
+                    ->default(false)
+                    ->required()
+                    ->live(),
+                Forms\Components\Toggle::make('require_picking_before_shipping')
+                    ->label('Require Picking Before Shipping')
+                    ->helperText(Settings::REQUIRE_PICKING_HELP)
+                    ->default(false)
+                    ->visible(fn (Get $get): bool => (bool) $get('picking_enabled')),
+            ])
+            ->afterValidation(function (): void {
+                $this->saveWorkflow();
+                $this->advanceStep(6);
+            });
+    }
+
     private function importSourceStep(): Step
     {
         return Step::make('Order Import')
@@ -423,6 +459,11 @@ class SetupWizard extends Page
                     ])
                     ->default('none')
                     ->live(),
+
+                Forms\Components\Placeholder::make('shipment_reference_note')
+                    ->label('')
+                    ->visible(fn (Get $get): bool => ! (bool) $get('pack_slips_enabled'))
+                    ->content(fn (Get $get): string => self::shipmentReferenceNote($get('import_source'))),
 
                 // Database
                 Section::make('Database Connection')
@@ -550,7 +591,7 @@ class SetupWizard extends Page
             ])
             ->afterValidation(function (): void {
                 $this->saveImportSource();
-                $this->advanceStep(6);
+                $this->advanceStep(7);
             });
     }
 
@@ -587,6 +628,24 @@ class SetupWizard extends Page
                 Forms\Components\Placeholder::make('summary_methods')
                     ->label('Shipping Methods')
                     ->content(fn () => ShippingMethod::where('active', true)->pluck('name')->join(', ') ?: 'None'),
+                Forms\Components\Placeholder::make('summary_pack_slips')
+                    ->label('Pack Slips')
+                    ->content(fn (): string => app(SettingsService::class)->packSlipsEnabled()
+                        ? 'Printed by PolyBag'
+                        : 'Printed by another system'),
+                Forms\Components\Placeholder::make('summary_picking')
+                    ->label('Picking')
+                    ->content(function (): string {
+                        $settings = app(SettingsService::class);
+
+                        if (! $settings->get('picking_enabled', false)) {
+                            return 'Not done in PolyBag';
+                        }
+
+                        return $settings->get('require_picking_before_shipping', false)
+                            ? 'Pick batches in PolyBag, required before shipping'
+                            : 'Pick batches in PolyBag';
+                    }),
                 Forms\Components\Placeholder::make('summary_import')
                     ->label('Order Import')
                     ->content(function (): string {
@@ -805,6 +864,38 @@ class SetupWizard extends Page
                 }
             }
         }
+    }
+
+    private function saveWorkflow(): void
+    {
+        $data = $this->form->getState();
+        $settings = app(SettingsService::class);
+        $pickingEnabled = (bool) ($data['picking_enabled'] ?? false);
+
+        $settings->set('pack_slips_enabled', (bool) ($data['pack_slips_enabled'] ?? true), 'boolean', group: 'general');
+        $settings->set('picking_enabled', $pickingEnabled, 'boolean', group: 'general');
+        $settings->set(
+            'require_picking_before_shipping',
+            $pickingEnabled && (bool) ($data['require_picking_before_shipping'] ?? false),
+            'boolean',
+            group: 'general',
+        );
+    }
+
+    /**
+     * What a pack slip barcode printed by another system must encode for Scan & Pack to
+     * open the Shipment, which depends on where the Shipment Reference comes from.
+     */
+    private static function shipmentReferenceNote(?string $importSource): string
+    {
+        $match = 'Scan & Pack opens a Shipment when the scanned barcode exactly matches its Shipment Reference.';
+
+        return match ($importSource) {
+            'database' => "{$match} When you write the shipments query (Integrations → Connections, after setup), return the value your pack slip barcode encodes, for example the ERP's shipment ID, as the id column.",
+            'shopify' => "{$match} For Shopify that is the order name (for example #1001), so your pack slip barcode must encode it.",
+            'amazon' => "{$match} For Amazon that is the Amazon order ID, so your pack slip barcode must encode it.",
+            default => "{$match} Enter the value your pack slip barcode encodes as the Shipment Reference.",
+        };
     }
 
     private function saveImportSource(): void

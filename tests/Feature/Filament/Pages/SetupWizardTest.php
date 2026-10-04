@@ -303,6 +303,115 @@ it('turns import off, but leaves the connection active, when none is saved', fun
         ->and($inactiveImporter->active)->toBeFalse();
 });
 
+// ── Workflow step ─────────────────────────────────────────────────────────────
+
+it('starts the workflow answers on the Settings defaults', function (): void {
+    Livewire::test(SetupWizard::class)
+        ->assertSet('data.pack_slips_enabled', 1)
+        ->assertSet('data.picking_enabled', 0)
+        ->assertSet('data.require_picking_before_shipping', false);
+});
+
+it('prefills the workflow answers from current settings', function (): void {
+    $settings = app(SettingsService::class);
+    $settings->set('pack_slips_enabled', false, 'boolean', group: 'general');
+    $settings->set('picking_enabled', true, 'boolean', group: 'general');
+    $settings->set('require_picking_before_shipping', true, 'boolean', group: 'general');
+
+    Livewire::test(SetupWizard::class)
+        ->assertSet('data.pack_slips_enabled', 0)
+        ->assertSet('data.picking_enabled', 1)
+        ->assertSet('data.require_picking_before_shipping', true);
+});
+
+it('saves both workflow answers and require picking from the workflow step', function (): void {
+    setupWizardStep(5);
+
+    Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
+        ->assertWizardCurrentStep(5)
+        ->set('data.pack_slips_enabled', 0)
+        ->set('data.picking_enabled', 1)
+        ->set('data.require_picking_before_shipping', true)
+        ->goToNextWizardStep()
+        ->assertHasNoFormErrors()
+        ->assertWizardCurrentStep(6);
+
+    $settings = app(SettingsService::class);
+
+    expect($settings->packSlipsEnabled())->toBeFalse()
+        ->and($settings->get('picking_enabled'))->toBeTrue()
+        ->and($settings->get('require_picking_before_shipping'))->toBeTrue()
+        ->and($settings->get('setup_wizard_step'))->toBe(6);
+});
+
+it('saves require picking as off when picking is off', function (): void {
+    app(SettingsService::class)->set('require_picking_before_shipping', true, 'boolean', group: 'general');
+    setupWizardStep(5);
+
+    Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
+        ->set('data.picking_enabled', 0)
+        ->set('data.require_picking_before_shipping', true)
+        ->assertFormFieldIsHidden('require_picking_before_shipping')
+        ->goToNextWizardStep()
+        ->assertHasNoFormErrors();
+
+    expect(app(SettingsService::class)->get('require_picking_before_shipping'))->toBeFalse();
+});
+
+it('advances from Order Import to the Summary step after the new step', function (): void {
+    setupWizardStep(6);
+
+    Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
+        ->assertWizardCurrentStep(6)
+        ->set('data.import_source', 'none')
+        ->goToNextWizardStep()
+        ->assertHasNoFormErrors()
+        ->assertWizardCurrentStep(7);
+
+    expect(app(SettingsService::class)->get('setup_wizard_step'))->toBe(7);
+});
+
+it('shows the Shipment Reference note only when another system prints pack slips', function (): void {
+    $note = 'Scan & Pack opens a Shipment when the scanned barcode exactly matches its Shipment Reference.';
+
+    Livewire::test(SetupWizard::class)
+        ->set('data.pack_slips_enabled', 1)
+        ->assertDontSee($note)
+        ->set('data.pack_slips_enabled', 0)
+        ->assertSee($note);
+});
+
+it('words the Shipment Reference note for the import source', function (string $source, string $expected): void {
+    Livewire::test(SetupWizard::class)
+        ->set('data.pack_slips_enabled', 0)
+        ->set('data.import_source', $source)
+        ->assertSee($expected);
+})->with([
+    'database' => ['database', 'as the id column'],
+    'shopify' => ['shopify', 'For Shopify that is the order name'],
+    'amazon' => ['amazon', 'For Amazon that is the Amazon order ID'],
+    'none' => ['none', 'Enter the value your pack slip barcode encodes as the Shipment Reference'],
+]);
+
+it('summarizes both workflow answers', function (): void {
+    $settings = app(SettingsService::class);
+    $settings->set('pack_slips_enabled', false, 'boolean', group: 'general');
+    $settings->set('picking_enabled', true, 'boolean', group: 'general');
+    $settings->set('require_picking_before_shipping', true, 'boolean', group: 'general');
+
+    Livewire::test(SetupWizard::class)
+        ->assertSee('Printed by another system')
+        ->assertSee('Pick batches in PolyBag, required before shipping');
+});
+
+function setupWizardStep(int $step): void
+{
+    app(SettingsService::class)->set('setup_wizard_step', $step, 'integer', group: 'system');
+}
+
 function invokePrivateMethod(object $instance, string $method): void
 {
     $reflection = new ReflectionMethod($instance, $method);

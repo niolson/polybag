@@ -2,7 +2,7 @@
 
 # Setup Wizard Workflow step
 
-Status: needs-triage
+Status: done
 Category: enhancement
 Created: 2026-09-30
 
@@ -12,30 +12,76 @@ Created: 2026-09-30
 
 ## What to build
 
-A new **Workflow** step in the Setup Wizard, between Channels & Shipping and Order
-Import.
+A new **Workflow** step in the Setup Wizard
+(`app/Filament/Pages/SetupWizard.php`), between Channels & Shipping and Order Import.
 
 - **Who prints pack slips?** Choices: PolyBag (default), or another system such as an
   ERP. Saves `pack_slips_enabled`.
 - **Do you pick orders with PolyBag?** Choices: No (default) or Yes. Saves
-  `picking_enabled`. Yes reveals "Require picking before shipping", with the same
-  explanation as in Settings.
-- **Order Import note.** When the answer is "another system", the Order Import step shows
-  a note beside the reference mapping:
+  `picking_enabled`. Yes reveals "Require picking before shipping" with the same help
+  text as the Settings toggle (`app/Filament/Pages/Settings.php`, which ends "Pack slips
+  then print from pick batches."). Hidden, it saves false.
+- **Order Import note.** Shown only when the answer is "another system". See below.
+- **Summary step.** It lists both answers, plus "Require picking" when picking is on.
 
-  > Map the value your pack slip barcode encodes (for example the ERP's shipment ID) to
-  > Shipment Reference. Scan & Pack opens a Shipment by an exact match on it.
-- **Summary step.** It lists both answers.
+### Order Import note
+
+The wizard has no reference mapping to put the note beside. Field mapping has no form
+anywhere in the app. For a database source, the Shipment Reference is the column the
+shipments query returns as `id` (the default `field_mapping`; see
+`docs/data-sources/database.md`, "Field mapping"). For Shopify and Amazon it is fixed by
+the source. So the note's text depends on the import source, and the note tells the user
+what their slip barcode must match. It does not tell them to map anything in the wizard.
+
+Place it as a placeholder directly under the "Import Orders From" select. It is visible
+when `pack_slips_enabled` is false, with this text for each source:
+
+| Import source | Note |
+| --- | --- |
+| External Database | Scan & Pack opens a Shipment when the scanned barcode exactly matches its Shipment Reference. When you write the shipments query (Integrations → Connections, after setup), return the value your pack slip barcode encodes, for example the ERP's shipment ID, as the `id` column. |
+| Shopify | Scan & Pack opens a Shipment when the scanned barcode exactly matches its Shipment Reference, which for Shopify is the order name (for example `#1001`). Your pack slip barcode must encode that. |
+| Amazon | Scan & Pack opens a Shipment when the scanned barcode exactly matches its Shipment Reference, which for Amazon is the Amazon order ID. Your pack slip barcode must encode that. |
+| None | Scan & Pack opens a Shipment when the scanned barcode exactly matches its Shipment Reference. Enter the value your pack slip barcode encodes as the Shipment Reference. |
+
+### Implementation notes
+
+- **Save in the step's `afterValidation`**, as every other step does, not in
+  `completeSetup()`. Settings are then kept even if the wizard is skipped partway.
+  Skipping before this step leaves the defaults, which `SettingsService` already applies
+  (pack slips on, picking off).
+- **Renumber the steps.** `advanceStep()` takes hardcoded step numbers, and the current
+  step is saved in `setup_wizard_step`. The Workflow step advances to 6, Order Import to
+  7. No live tenants have a wizard in progress, so nothing needs migrating.
+- **Prefill on `mount()`** from current settings: `packSlipsEnabled()`, `picking_enabled`
+  and `require_picking_before_shipping`. A wizard reopened after Settings were changed
+  then shows the real values. On a fresh install these are the defaults.
+- The form state is shared across steps (`statePath('data')`), so the Order Import note
+  can read `pack_slips_enabled` with `Get`.
 
 ## Acceptance criteria
 
-- [ ] Completing the wizard saves both settings, plus "Require picking" when shown.
-- [ ] The Order Import note appears only for "another system".
-- [ ] The Summary step shows both answers.
-- [ ] The defaults match Settings: pack slips on, picking off.
+- [x] Completing the Workflow step saves `pack_slips_enabled` and `picking_enabled`, and
+      saves `require_picking_before_shipping`, which is false when picking is off.
+- [x] The Order Import note appears only when "another system" prints pack slips, and its
+      text matches the selected import source.
+- [x] The Summary step shows both answers.
+- [x] A fresh install starts with the Settings defaults (pack slips on, picking off), and
+      a reopened wizard shows the current settings.
+- [x] Order Import and Summary still advance and resume correctly after the renumbering.
+- [x] Tests in `tests/Feature/Filament/Pages/SetupWizardTest.php`.
 
 ## Blocked by
 
 - [06 — "PolyBag prints pack slips" setting](06-polybag-prints-pack-slips-setting.md)
 
 ## Comments
+
+- 2026-10-04 triage: blocker 06 is done. The original "note beside the reference mapping"
+  pointed at UI that does not exist: field mapping has no form, and Shopify and Amazon
+  references are fixed by the source. Replaced it with a note for each source under the
+  import select. Added save timing, step renumbering and prefill. Ready for an agent.
+- 2026-10-04 done. The Workflow step uses boolean radios and saves in its own
+  `afterValidation`, under the `general` group that Settings uses. Order Import now
+  advances to step 7. The "Require picking" help text is now one constant,
+  `Settings::REQUIRE_PICKING_HELP`, shared by Settings and the wizard. The Summary rows
+  read the saved settings, as the other Summary rows do.
