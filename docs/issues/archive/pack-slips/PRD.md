@@ -1,6 +1,6 @@
 # Pack slips, separated from picking
 
-Status: needs-triage
+Status: reference
 Created: 2026-09-30
 
 ## Problem Statement

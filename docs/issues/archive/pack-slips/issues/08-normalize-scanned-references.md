@@ -2,7 +2,7 @@
 
 # Normalize scanned references per connection
 
-Status: needs-info
+Status: wontfix
 Category: enhancement
 Created: 2026-09-30
 
@@ -40,3 +40,13 @@ A real tenant's ERP barcode alongside the reference its connection imports.
 None - can start immediately once the information arrives.
 
 ## Comments
+
+### 2026-10-04 — wontfix
+
+Closed without building. Scan & Pack already opens a Shipment when the scanned barcode
+equals its `shipment_reference`, and an ERP that prints its own pack slips will almost
+always encode the same value it exports as the reference. An ERP that keeps a reference
+but prints it with a prefix, padding or a check digit is expected to be rare, and the
+Setup Wizard's Shipment Reference note (`07`) already tells the tenant to import the
+value their slip's barcode carries. Reopen if a real tenant's barcode cannot be made to
+match that way.
