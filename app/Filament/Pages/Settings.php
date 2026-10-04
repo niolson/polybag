@@ -64,6 +64,11 @@ class Settings extends Page
      */
     public const PACK_SLIPS_OFF_NOTE = 'PolyBag does not print pack slips (see Features), so this is not used. It is kept for when it does.';
 
+    /**
+     * Help for "Require Picking Before Shipping", shared with the Setup Wizard.
+     */
+    public const REQUIRE_PICKING_HELP = 'When enabled, shipments must be picked before they can be packed or batch shipped. Applies to all open shipments, including those created before picking was enabled. Pack slips then print from pick batches.';
+
     public static function canAccess(): bool
     {
         return auth()->user()->role->isAtLeast(Role::Admin);
@@ -391,7 +396,7 @@ class Settings extends Page
                                 ->live(),
                             Toggle::make('require_picking_before_shipping')
                                 ->label('Require Picking Before Shipping')
-                                ->helperText('When enabled, shipments must be picked before they can be packed or batch shipped. Applies to all open shipments, including those created before picking was enabled. Pack slips then print from pick batches.')
+                                ->helperText(self::REQUIRE_PICKING_HELP)
                                 ->default(false)
                                 ->visible(fn (Get $get): bool => (bool) $get('picking_enabled')),
                             Toggle::make('transparency_enabled')
