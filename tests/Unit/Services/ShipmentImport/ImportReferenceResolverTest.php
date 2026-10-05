@@ -134,3 +134,36 @@ it('writes and then updates each mapped customs column on the product', function
     expect($updated->hs_tariff_number)->toBe('9506.11');
     expect($updated->country_of_origin)->toBe('VN');
 });
+
+it('keeps an existing value for a fill-only field and fills a blank one', function (string $field, string $existing, string $imported): void {
+    $resolver = app(ImportReferenceResolver::class);
+    $kept = Product::factory()->create(['sku' => 'HAS-VALUE', $field => $existing]);
+    $blank = Product::factory()->create(['sku' => 'NO-VALUE', $field => null]);
+
+    $resolver->productIdFor(['sku' => 'HAS-VALUE', $field => $imported, '_fill_only' => [$field]]);
+    $resolver->productIdFor(['sku' => 'NO-VALUE', $field => $imported, '_fill_only' => [$field]]);
+
+    expect($kept->refresh()->getAttribute($field))->toBe($existing)
+        ->and($blank->refresh()->getAttribute($field))->toBe($imported);
+})->with([
+    'barcode' => ['barcode', 'MANUAL-BARCODE', '012345678905'],
+    'manufacturer part number' => ['manufacturer_part_number', 'HAND-MPN', 'AMZ-MPN'],
+]);
+
+it('still overwrites fields a fill-only row does not list', function (): void {
+    $product = Product::factory()->create([
+        'sku' => 'MIXED',
+        'name' => 'Old name',
+        'manufacturer_part_number' => 'HAND-MPN',
+    ]);
+
+    app(ImportReferenceResolver::class)->productIdFor([
+        'sku' => 'MIXED',
+        'name' => 'New name',
+        'manufacturer_part_number' => 'AMZ-MPN',
+        '_fill_only' => ['manufacturer_part_number'],
+    ]);
+
+    expect($product->refresh()->name)->toBe('New name')
+        ->and($product->manufacturer_part_number)->toBe('HAND-MPN');
+});
