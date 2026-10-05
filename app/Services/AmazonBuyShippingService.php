@@ -6,6 +6,7 @@ use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\AmazonPurchasedLabel;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\ShipRequest;
+use App\Enums\AmazonChannelType;
 use App\Enums\PostageSource;
 use App\Exceptions\Carriers\AmazonLabelPurchaseException;
 use App\Exceptions\MissingAmazonOrderItemsException;
@@ -69,6 +70,13 @@ class AmazonBuyShippingService
      * codes it was quoted with under — see {@see purchasableSpecialServices()}.
      */
     public const QUOTED_SPECIAL_SERVICES_KEY = 'specialServiceCodes';
+
+    /**
+     * The `purchase_context` key an Amazon offer records the Shipping v2
+     * channel it was quoted on under, as an {@see AmazonChannelType} value —
+     * see {@see ShippingOffer::amazonChannelType()}.
+     */
+    public const CHANNEL_TYPE_KEY = 'channelType';
 
     /**
      * The formats to ask Amazon for, per workstation label format, in order.

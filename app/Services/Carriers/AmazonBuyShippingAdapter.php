@@ -17,6 +17,7 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\AmazonChannelType;
 use App\Enums\CarrierPackaging;
 use App\Enums\PostageSource;
 use App\Enums\PostageSourceKind;
@@ -702,6 +703,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
                         'requestToken' => $quote->requestToken,
                         'rateId' => (string) $rate['rateId'],
                         AmazonBuyShippingService::QUOTED_SPECIAL_SERVICES_KEY => $request->specialServiceCodes,
+                        AmazonBuyShippingService::CHANNEL_TYPE_KEY => AmazonChannelType::Amazon->value,
                     ],
                     expiresAt: $expiresAt,
                     marketplace: $marketplace,

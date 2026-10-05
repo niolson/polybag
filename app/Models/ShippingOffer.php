@@ -3,9 +3,11 @@
 namespace App\Models;
 
 use App\DataTransferObjects\Shipping\RateRequest;
+use App\Enums\AmazonChannelType;
 use App\Enums\PostageSource;
 use App\Enums\SourceEnvironment;
 use App\Exceptions\MissingDeclaredValueException;
+use App\Services\AmazonBuyShippingService;
 use App\Services\PostageSources\OfferStore;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
@@ -153,6 +155,26 @@ class ShippingOffer extends Model
             AmazonSource::class => 'Amazon',
             default => $this->carrier,
         };
+    }
+
+    /**
+     * The Shipping v2 channel an Amazon offer was quoted on, or null for any
+     * other offer.
+     *
+     * Read from what the issuing adapter recorded, never from the rate the
+     * browser sent back: Buy Shipping for an Amazon order and Amazon Shipping
+     * sold to another channel's order are bought on the same kind of
+     * connection, so the connection alone cannot tell them apart.
+     */
+    public function amazonChannelType(): ?AmazonChannelType
+    {
+        if ($this->postage_source !== PostageSource::PostageDataSource) {
+            return null;
+        }
+
+        $channelType = $this->purchase_context[AmazonBuyShippingService::CHANNEL_TYPE_KEY] ?? null;
+
+        return is_string($channelType) ? AmazonChannelType::tryFrom($channelType) : null;
     }
 
     /**
