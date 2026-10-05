@@ -18,6 +18,7 @@ use App\Services\ShipmentImport\ImportResult;
 use App\Services\ShipmentImport\PackageExportService;
 use App\Services\ShipmentImport\ShipmentImportService;
 use App\Services\ShipmentImport\Sources\ShopifySource;
+use App\Services\ShopifyFulfillmentOrderActivationService;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
@@ -147,6 +148,29 @@ it('reports an actionable error without contacting Shopify before fulfillment-or
     Saloon::assertNothingSent();
 });
 
+it('fails an import on an active connection whose token lacks read_products, writing no shipments', function (): void {
+    mapShopifyLocation($this->dataSource);
+    Saloon::fake([
+        GraphQL::class => shopifyAccessScopesResponse(array_values(array_diff(
+            ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES,
+            ['read_products'],
+        ))),
+    ]);
+
+    $result = ShipmentImportService::forSource(new ShopifySource([
+        'channel_name' => 'Shopify',
+        'shop_domain' => 'test-shop.myshopify.com',
+        'client_id' => 'test-client-id',
+        'client_secret' => 'test-client-secret',
+        'fulfillment_order_import_enabled' => true,
+    ]), $this->dataSource)->import();
+
+    expect($result->shipmentsCreated)->toBe(0)
+        ->and($result->errors)->toBe(['Reconnect Shopify with the required scopes before importing: read_products.'])
+        ->and(Shipment::count())->toBe(0);
+    Saloon::assertSentCount(1);
+});
+
 it('imports mapped fulfillment orders and skips only unmapped locations', function (): void {
     $channel = tap(Channel::factory()->create(['name' => 'Shopify']), fn ($channel) => ChannelAlias::create([
         'reference' => 'Shopify',
@@ -167,12 +191,12 @@ it('imports mapped fulfillment orders and skips only unmapped locations', functi
     ];
 
     Saloon::fake([
-        GraphQL::class => MockResponse::make([
+        GraphQL::class => answeringShopifyScopes(MockResponse::make([
             'data' => ['fulfillmentOrders' => [
                 'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
                 'nodes' => [sampleFulfillmentOrder('1001', '1'), $splitFulfillmentOrder, sampleFulfillmentOrder('1002', '2')],
             ]],
-        ]),
+        ])),
     ]);
 
     $source = new ShopifySource([
@@ -228,16 +252,16 @@ it('updates a fulfillment order reassignment before packing and reports a confli
         'fulfillment_order_import_enabled' => true,
     ];
 
-    Saloon::fake([GraphQL::class => MockResponse::make(['data' => ['fulfillmentOrders' => [
+    Saloon::fake([GraphQL::class => answeringShopifyScopes(MockResponse::make(['data' => ['fulfillmentOrders' => [
         'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
         'nodes' => [sampleFulfillmentOrder('2001', '1', 2)],
-    ]]])]);
+    ]]]))]);
     ShipmentImportService::forSource(new ShopifySource($sourceConfig), $this->dataSource)->import();
 
-    Saloon::fake([GraphQL::class => MockResponse::make(['data' => ['fulfillmentOrders' => [
+    Saloon::fake([GraphQL::class => answeringShopifyScopes(MockResponse::make(['data' => ['fulfillmentOrders' => [
         'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
         'nodes' => [sampleFulfillmentOrder('2001', '2', 1)],
-    ]]])]);
+    ]]]))]);
     ShipmentImportService::forSource(new ShopifySource($sourceConfig), $this->dataSource)->import();
 
     $shipment = Shipment::where('source_record_id', 'gid://shopify/FulfillmentOrder/2001')->firstOrFail();
@@ -245,10 +269,10 @@ it('updates a fulfillment order reassignment before packing and reports a confli
         ->and($shipment->shipmentItems->first()->quantity)->toBe(1);
 
     Package::factory()->create(['shipment_id' => $shipment, 'location_id' => $secondLocation]);
-    Saloon::fake([GraphQL::class => MockResponse::make(['data' => ['fulfillmentOrders' => [
+    Saloon::fake([GraphQL::class => answeringShopifyScopes(MockResponse::make(['data' => ['fulfillmentOrders' => [
         'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
         'nodes' => [sampleFulfillmentOrder('2001', '1', 3)],
-    ]]])]);
+    ]]]))]);
     $result = ShipmentImportService::forSource(new ShopifySource($sourceConfig), $this->dataSource)->import();
 
     expect($result->errors)->toHaveCount(1)
@@ -762,13 +786,15 @@ it('imports multiple pages of fulfillment orders', function (): void {
     }
 
     Saloon::fake([
-        shopifyFulfillmentOrdersResponse(
-            [sampleFulfillmentOrder('1001', '1')],
-            hasNextPage: true,
-            endCursor: 'cursor_page1'
-        ),
-        shopifyFulfillmentOrdersResponse(
-            [sampleFulfillmentOrder('1002', '2')],
+        GraphQL::class => answeringShopifyScopes(
+            shopifyFulfillmentOrdersResponse(
+                [sampleFulfillmentOrder('1001', '1')],
+                hasNextPage: true,
+                endCursor: 'cursor_page1'
+            ),
+            shopifyFulfillmentOrdersResponse(
+                [sampleFulfillmentOrder('1002', '2')],
+            ),
         ),
     ]);
 
@@ -805,7 +831,7 @@ it('deduplicates shopify imports by fulfillment-order id instead of displayed or
     $secondFulfillmentOrder['order']['name'] = '#1001-RENAMED';
 
     Saloon::fake([
-        GraphQL::class => shopifyFulfillmentOrdersResponse([$firstFulfillmentOrder]),
+        GraphQL::class => answeringShopifyScopes(shopifyFulfillmentOrdersResponse([$firstFulfillmentOrder])),
     ]);
 
     $source = new ShopifySource([
@@ -824,7 +850,7 @@ it('deduplicates shopify imports by fulfillment-order id instead of displayed or
     $result1 = ShipmentImportService::forSource($source, $this->dataSource)->import();
 
     Saloon::fake([
-        GraphQL::class => shopifyFulfillmentOrdersResponse([$secondFulfillmentOrder]),
+        GraphQL::class => answeringShopifyScopes(shopifyFulfillmentOrdersResponse([$secondFulfillmentOrder])),
     ]);
 
     $result2 = ShipmentImportService::forSource($source, $this->dataSource)->import();
@@ -860,10 +886,10 @@ function replacementFulfillmentOrder(string $id, string $replacing, string $loca
  */
 function importFulfillmentOrders(DataSource $dataSource, array $nodes): ImportResult
 {
-    Saloon::fake([GraphQL::class => MockResponse::make(['data' => ['fulfillmentOrders' => [
+    Saloon::fake([GraphQL::class => answeringShopifyScopes(MockResponse::make(['data' => ['fulfillmentOrders' => [
         'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
         'nodes' => $nodes,
-    ]]])]);
+    ]]]))]);
 
     return ShipmentImportService::forSource(new ShopifySource([
         'channel_name' => 'Shopify',

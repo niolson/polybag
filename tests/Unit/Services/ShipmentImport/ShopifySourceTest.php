@@ -3,6 +3,7 @@
 use App\Exceptions\PermanentExportException;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Services\ShipmentImport\Sources\ShopifySource;
+use App\Services\ShopifyFulfillmentOrderActivationService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Faking\MockResponse;
@@ -133,9 +134,25 @@ it('blocks shipment imports until fulfillment-order import is activated', functi
     Saloon::assertNothingSent();
 });
 
+it('refuses an import when the token lacks read_products, before fetching any fulfillment order', function (): void {
+    Saloon::fake([
+        GraphQL::class => shopifyAccessScopesResponse(array_values(array_diff(
+            ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES,
+            ['read_products'],
+        ))),
+    ]);
+
+    $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
+
+    expect(fn (): Collection => $source->fetchShipments())
+        ->toThrow(DomainException::class, 'Reconnect Shopify with the required scopes before importing: read_products.');
+
+    Saloon::assertSentCount(1);
+});
+
 it('maps shopify fulfillment order to shipment data', function (): void {
     Saloon::fake([
-        GraphQL::class => mockShopifyFulfillmentOrders([shopifyFulfillmentOrderNode()]),
+        GraphQL::class => answeringShopifyScopes(mockShopifyFulfillmentOrders([shopifyFulfillmentOrderNode()])),
     ]);
 
     $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
@@ -164,7 +181,7 @@ it('maps shopify fulfillment order to shipment data', function (): void {
 
 it('maps fulfillment orders as location-aware shipments', function (): void {
     Saloon::fake([
-        GraphQL::class => MockResponse::make([
+        GraphQL::class => answeringShopifyScopes(MockResponse::make([
             'data' => ['fulfillmentOrders' => [
                 'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
                 'nodes' => [[
@@ -194,7 +211,7 @@ it('maps fulfillment orders as location-aware shipments', function (): void {
                     ],
                 ]],
             ]],
-        ]),
+        ])),
     ]);
 
     $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
@@ -219,27 +236,29 @@ it('paginates fulfillment order line items and excludes non-shipping work', func
         'lineItem' => ['originalUnitPriceSet' => ['shopMoney' => ['amount' => '5.00']]],
     ];
     Saloon::fake([
-        MockResponse::make(['data' => ['fulfillmentOrders' => [
-            'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
-            'nodes' => [[
-                'id' => 'gid://shopify/FulfillmentOrder/8001', 'status' => 'IN_PROGRESS',
-                'order' => ['id' => 'gid://shopify/Order/1001', 'name' => '#1001'],
-                'destination' => ['address1' => '1 Main', 'city' => 'Seattle', 'province' => 'WA', 'countryCode' => 'US'],
-                'assignedLocation' => ['location' => ['id' => 'gid://shopify/Location/1', 'name' => 'Main', 'isActive' => true]],
-                'lineItems' => [
-                    'pageInfo' => ['hasNextPage' => true, 'endCursor' => 'items-1'],
-                    'nodes' => [$baseItem],
+        GraphQL::class => answeringShopifyScopes(
+            MockResponse::make(['data' => ['fulfillmentOrders' => [
+                'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
+                'nodes' => [[
+                    'id' => 'gid://shopify/FulfillmentOrder/8001', 'status' => 'IN_PROGRESS',
+                    'order' => ['id' => 'gid://shopify/Order/1001', 'name' => '#1001'],
+                    'destination' => ['address1' => '1 Main', 'city' => 'Seattle', 'province' => 'WA', 'countryCode' => 'US'],
+                    'assignedLocation' => ['location' => ['id' => 'gid://shopify/Location/1', 'name' => 'Main', 'isActive' => true]],
+                    'lineItems' => [
+                        'pageInfo' => ['hasNextPage' => true, 'endCursor' => 'items-1'],
+                        'nodes' => [$baseItem],
+                    ],
+                ]],
+            ]]]),
+            MockResponse::make(['data' => ['fulfillmentOrder' => ['lineItems' => [
+                'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
+                'nodes' => [
+                    array_merge($baseItem, ['id' => 'gid://shopify/FulfillmentOrderLineItem/2', 'sku' => 'SKU-2']),
+                    array_merge($baseItem, ['id' => 'gid://shopify/FulfillmentOrderLineItem/3', 'sku' => 'DIGITAL', 'requiresShipping' => false]),
+                    array_merge($baseItem, ['id' => 'gid://shopify/FulfillmentOrderLineItem/4', 'sku' => 'DONE', 'remainingQuantity' => 0]),
                 ],
-            ]],
-        ]]]),
-        MockResponse::make(['data' => ['fulfillmentOrder' => ['lineItems' => [
-            'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
-            'nodes' => [
-                array_merge($baseItem, ['id' => 'gid://shopify/FulfillmentOrderLineItem/2', 'sku' => 'SKU-2']),
-                array_merge($baseItem, ['id' => 'gid://shopify/FulfillmentOrderLineItem/3', 'sku' => 'DIGITAL', 'requiresShipping' => false]),
-                array_merge($baseItem, ['id' => 'gid://shopify/FulfillmentOrderLineItem/4', 'sku' => 'DONE', 'remainingQuantity' => 0]),
-            ],
-        ]]]]),
+            ]]]]),
+        ),
     ]);
 
     $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
@@ -247,16 +266,18 @@ it('paginates fulfillment order line items and excludes non-shipping work', func
 
     expect($source->fetchShipmentItems('gid://shopify/FulfillmentOrder/8001')->pluck('sku')->all())
         ->toBe(['SKU-1', 'SKU-2']);
-    Saloon::assertSentCount(2);
+    Saloon::assertSentCount(3);
 });
 
 it('handles fulfillment-order cursor pagination', function (): void {
     Saloon::fake([
-        mockShopifyFulfillmentOrders([shopifyFulfillmentOrderNode()], hasNextPage: true, endCursor: 'cursor_abc'),
-        mockShopifyFulfillmentOrders([shopifyFulfillmentOrderNode([
-            'id' => 'gid://shopify/FulfillmentOrder/7002',
-            'order' => ['id' => 'gid://shopify/Order/1002', 'name' => '#1002'],
-        ])]),
+        GraphQL::class => answeringShopifyScopes(
+            mockShopifyFulfillmentOrders([shopifyFulfillmentOrderNode()], hasNextPage: true, endCursor: 'cursor_abc'),
+            mockShopifyFulfillmentOrders([shopifyFulfillmentOrderNode([
+                'id' => 'gid://shopify/FulfillmentOrder/7002',
+                'order' => ['id' => 'gid://shopify/Order/1002', 'name' => '#1002'],
+            ])]),
+        ),
     ]);
 
     $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
@@ -266,7 +287,7 @@ it('handles fulfillment-order cursor pagination', function (): void {
     expect($shipments[0]['shipment_reference'])->toBe('#1001');
     expect($shipments[1]['shipment_reference'])->toBe('#1002');
 
-    Saloon::assertSentCount(2);
+    Saloon::assertSentCount(3);
 });
 
 it('maps line items using remaining quantity', function (): void {
@@ -299,7 +320,7 @@ it('maps line items using remaining quantity', function (): void {
     ]);
 
     Saloon::fake([
-        GraphQL::class => mockShopifyFulfillmentOrders([$fulfillmentOrder]),
+        GraphQL::class => answeringShopifyScopes(mockShopifyFulfillmentOrders([$fulfillmentOrder])),
     ]);
 
     $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
@@ -325,11 +346,11 @@ it('returns empty collection for unknown shipment reference', function (): void 
 
 it('filters fulfillment orders to OPEN and IN_PROGRESS only', function (): void {
     Saloon::fake([
-        GraphQL::class => mockShopifyFulfillmentOrders([
+        GraphQL::class => answeringShopifyScopes(mockShopifyFulfillmentOrders([
             shopifyFulfillmentOrderNode(['id' => 'gid://shopify/FulfillmentOrder/5001']),
             shopifyFulfillmentOrderNode(['id' => 'gid://shopify/FulfillmentOrder/5002', 'status' => 'CLOSED']),
             shopifyFulfillmentOrderNode(['id' => 'gid://shopify/FulfillmentOrder/5003', 'status' => 'IN_PROGRESS']),
-        ]),
+        ])),
     ]);
 
     $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
@@ -415,11 +436,11 @@ it('throws on shopify user errors', function (): void {
 
 it('throws on shopify graphql errors during fetch', function (): void {
     Saloon::fake([
-        GraphQL::class => MockResponse::make([
+        GraphQL::class => answeringShopifyScopes(MockResponse::make([
             'errors' => [
                 ['message' => 'Throttled'],
             ],
-        ]),
+        ])),
     ]);
 
     $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
@@ -503,7 +524,7 @@ it('prefers the order shipping address province code over the destination provin
     // rejects a label whose state is not a two-letter code, so the code is taken
     // from the order's shipping address when it describes the same destination.
     Saloon::fake([
-        GraphQL::class => mockShopifyFulfillmentOrders([shopifyFulfillmentOrderNode([
+        GraphQL::class => answeringShopifyScopes(mockShopifyFulfillmentOrders([shopifyFulfillmentOrderNode([
             'order' => [
                 'id' => 'gid://shopify/Order/1001',
                 'name' => '#1001',
@@ -519,7 +540,7 @@ it('prefers the order shipping address province code over the destination provin
                 'zip' => '09532',
                 'countryCode' => 'US',
             ],
-        ])]),
+        ])])),
     ]);
 
     $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
@@ -531,7 +552,7 @@ it('keeps the destination province when the fulfillment order ships somewhere el
     // A fulfillment order can be routed to a different address than the order's,
     // so the order-level province code must not be applied blindly.
     Saloon::fake([
-        GraphQL::class => mockShopifyFulfillmentOrders([shopifyFulfillmentOrderNode([
+        GraphQL::class => answeringShopifyScopes(mockShopifyFulfillmentOrders([shopifyFulfillmentOrderNode([
             'order' => [
                 'id' => 'gid://shopify/Order/1001',
                 'name' => '#1001',
@@ -547,7 +568,7 @@ it('keeps the destination province when the fulfillment order ships somewhere el
                 'zip' => '97201',
                 'countryCode' => 'US',
             ],
-        ])]),
+        ])])),
     ]);
 
     $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));

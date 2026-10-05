@@ -10,8 +10,16 @@ use InvalidArgumentException;
 
 class ShopifyFulfillmentOrderActivationService
 {
+    /**
+     * Scopes a fulfillment-order import needs. Checked at activation, on every
+     * location sync, and when an import starts.
+     *
+     * `read_products` is for line-item `variant`, which carries the barcode;
+     * Shopify gates `ProductVariant` behind it.
+     */
     public const REQUIRED_SCOPES = [
         'read_orders',
+        'read_products',
         'read_locations',
         'read_merchant_managed_fulfillment_orders',
         'write_merchant_managed_fulfillment_orders',

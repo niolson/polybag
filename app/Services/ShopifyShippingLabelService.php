@@ -63,14 +63,12 @@ class ShopifyShippingLabelService
      *
      * `read_products` is here for {@see DECLARED_ITEM_WEIGHT_QUERY}, which
      * traverses `lineItem.variant` to read what Shopify will declare in customs.
-     * It is deliberately *not* added to
-     * `ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES`: that list is
-     * enforced at activation and on every location sync, and promoting a
-     * label-purchase dependency into it would refuse location syncs to a source
-     * that only imports orders and never buys postage — the separation this
-     * constant exists for. Nothing enforces this list as a gate; it reaches the
-     * connect-time scope parameter, and the purchase path degrades rather than
-     * fails when the scope is absent.
+     * Imports now need it too, so it is also in
+     * `ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES`; it stays
+     * listed here because this list states what purchase needs on its own.
+     * Nothing enforces this list as a gate; it reaches the connect-time scope
+     * parameter, and the purchase path degrades rather than fails when the
+     * scope is absent.
      */
     public const REQUIRED_SCOPES = ['write_orders', 'write_merchant_managed_fulfillment_orders', 'read_products'];
 
@@ -244,11 +242,10 @@ class ShopifyShippingLabelService
      *
      * **The live value carries a scope the snapshot does not.** Reaching it
      * traverses `lineItem.variant`, which Shopify gates behind `read_products`
-     * — see {@see REQUIRED_SCOPES}. That scope is not in
-     * `ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES`, so a store
-     * activated before this shipped may not have granted it, and asking for it
-     * alone would turn a missing scope into a failed purchase on every
-     * international label. Both fields ride on one request precisely so the
+     * — see {@see REQUIRED_SCOPES}. Imports refuse to run without that scope,
+     * but a connection used only for postage may not have granted it, and
+     * asking for it alone would turn a missing scope into a failed purchase on
+     * every international label. Both fields ride on one request precisely so the
      * snapshot survives a denied traversal: the check degrades to order-time
      * weights instead of disappearing, and {@see declaredItemWeight()} treats
      * the errors as advisory rather than fatal.

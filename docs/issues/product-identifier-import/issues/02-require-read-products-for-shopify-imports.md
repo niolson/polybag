@@ -1,6 +1,6 @@
 # Require `read_products` for Shopify imports
 
-Status: ready-for-human
+Status: done
 Category: bug
 Repo: `polybag`
 
@@ -46,8 +46,28 @@ reinstalling.
 
 ## Acceptance criteria
 
-- [ ] What Shopify returns without the scope is recorded below
-- [ ] Activation refuses a token without `read_products`, naming it
-- [ ] An import on an active connection whose token lacks it fails with that message and
+- [x] ~~What Shopify returns without the scope is recorded below~~ — waived, see Comments
+- [x] Activation refuses a token without `read_products`, naming it
+- [x] An import on an active connection whose token lacks it fails with that message and
       writes no Shipments
-- [ ] `docs/self-hosting.md` updated
+- [x] `docs/self-hosting.md` updated
+
+## Comments
+
+**2026-10-05 — done.** `read_products` is in
+`ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES`, so activation and location sync
+refuse a token without it. `ShopifySource::fetchShipments()` now checks the live token's
+scopes before the first fulfillment-order request and fails the run with "Reconnect Shopify
+with the required scopes before importing: …". `docs/self-hosting.md` lists the import
+scopes by name.
+
+Step 1 was waived. Shopify's documentation is clear that `ProductVariant` needs
+`read_products`, and the PolyBag app already declares it (`read_fulfillments`,
+`write_fulfillments`, `read_locations`, `read_merchant_managed_fulfillment_orders`,
+`write_merchant_managed_fulfillment_orders`, `read_orders`, `write_orders`,
+`read_products`), so the import can query what it needs. Running the "without" case would
+take a separate development-store app, which isn't worth it. If Shopify reports a denied
+field as `ACCESS_DENIED` in `errors`, as the label-path fixture in `ShopifyAdapterTest`
+assumes, imports always failed without the scope, because
+`fetchFulfillmentOrderShipments()` throws on any `errors` entry. The new check replaces
+that raw GraphQL error with the reconnect message either way.

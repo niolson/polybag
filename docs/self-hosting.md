@@ -209,11 +209,15 @@ external vendor, this is it.
    route; a Dev Dashboard app also works. Either gives you a **Client ID** and **Client
    Secret** — note that neither hands you an access token directly.
 2. Declare the scopes on the app. The importer reads `fulfillmentOrders`, order name and
-   email, destination addresses, locations, and line item variants, and the export path
-   calls `fulfillmentCreate` — so it needs read and write access to both
-   merchant-managed and assigned fulfilment orders, plus orders, locations, and products.
-   Getting this wrong fails quietly: an app scoped only for *assigned* fulfilment orders
-   returns an empty list rather than an error.
+   email, destination addresses, locations, and line item variants (which carry the
+   barcode), and the export path calls `fulfillmentCreate`. Imports need `read_orders`,
+   `read_products`, `read_locations`, `read_merchant_managed_fulfillment_orders`, and
+   `write_merchant_managed_fulfillment_orders`. Activating fulfillment-order import,
+   synchronizing locations, and every import run check the live token for these and
+   refuse with "Reconnect Shopify with the required scopes" naming any that are missing.
+   Choose the *merchant-managed* fulfillment-order scopes: an app scoped only for
+   *assigned* fulfillment orders returns an empty list rather than an error, and no
+   check catches that.
 3. Shopify gates customer PII (the email and destination address the importer needs)
    behind protected customer data access. Request it if your app type requires it.
 4. Create a Shopify Connection with the store's `.myshopify.com` **Shop Domain**, and
