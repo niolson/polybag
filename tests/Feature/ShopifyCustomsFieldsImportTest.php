@@ -280,9 +280,10 @@ describe('HS code and origin', function (): void {
             'inventoryItem' => ['harmonizedSystemCode' => '610910', 'countryCodeOfOrigin' => 'PT'],
         ]));
 
-        expect(importedWidget())
-            ->hs_tariff_number->toBe('610910')
-            ->country_of_origin->toBe('PT')
+        $product = importedWidget();
+
+        expect($product->hs_tariff_number)->toBe('610910')
+            ->and($product->country_of_origin)->toBe('PT')
             ->and($requests[0]['query'])->toContain('inventoryItem { harmonizedSystemCode countryCodeOfOrigin }');
     });
 
@@ -298,9 +299,10 @@ describe('HS code and origin', function (): void {
             'inventoryItem' => ['harmonizedSystemCode' => '', 'countryCodeOfOrigin' => null],
         ]));
 
-        expect(importedWidget())
-            ->hs_tariff_number->toBe('620520')
-            ->country_of_origin->toBe('VN');
+        $product = importedWidget();
+
+        expect($product->hs_tariff_number)->toBe('620520')
+            ->and($product->country_of_origin)->toBe('VN');
     });
 });
 
@@ -324,10 +326,9 @@ it('updates an open shipment and its product once on re-import, keeping the good
     $product = importedWidget();
     $shipment->refresh();
 
-    expect($product)
-        ->manufacturer_part_number->toBe('MPN-123')
-        ->hs_tariff_number->toBe('610910')
-        ->country_of_origin->toBe('PT')
+    expect($product->manufacturer_part_number)->toBe('MPN-123')
+        ->and($product->hs_tariff_number)->toBe('610910')
+        ->and($product->country_of_origin)->toBe('PT')
         ->and($shipment->source_checksum)->not->toBe($checksum)
         ->and($shipment->metadata[ShopifyGoodsFingerprint::METADATA_KEY])->toBe($fingerprint);
 
