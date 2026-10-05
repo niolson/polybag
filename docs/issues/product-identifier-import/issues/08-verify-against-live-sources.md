@@ -1,6 +1,6 @@
 # Verify against a development store and a seller account
 
-Status: ready-for-human
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -41,8 +41,9 @@ OAuth connection:
 
 ## Acceptance criteria
 
-- [ ] Steps 1–5 recorded under `## Comments`, with no store names, ASINs or SKUs
-- [ ] Any mismatch with `03`–`06` fixed or opened as a new issue
+- [x] Steps 1–5 recorded under `## Comments`, with no store names, ASINs or SKUs
+      (step 1 not run; see the closing comment)
+- [x] Any mismatch with `03`–`06` fixed or opened as a new issue
 
 ## Comments
 
@@ -72,3 +73,17 @@ display groups. Raw responses stayed out of the repo.
 Still to do here: Shopify steps 1–2, and the Amazon import of `05` once built. Checking
 that import now means confirming that the stamped and filled counts match these rates,
 not measuring them.
+
+**2026-10-05 — closed.**
+
+- **Shopify step 2: done by hand.** An order was imported from the development store
+  for a variant carrying a part number, HS code and origin. All three landed on the
+  Product.
+- **Shopify step 1: not run.** Nobody installed a Google channel app to check whether
+  its metafield has a definition, so whether `03`'s variant sampling earns its place
+  is still open. It isn't worth an issue until a tenant's part numbers turn out to
+  live in an undefined metafield.
+- **Amazon: answered by the probe above.** Running `05`'s import was not repeated
+  separately. It reads the same `summaries.partNumber` / `modelNumber` the probe
+  counted, with the same exclusions.
+- **No mismatches found** with `03`–`06`.
