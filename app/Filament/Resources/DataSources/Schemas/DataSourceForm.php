@@ -2,11 +2,14 @@
 
 namespace App\Filament\Resources\DataSources\Schemas;
 
+use App\DataTransferObjects\ShipmentImport\ShopifyMetafieldReference;
 use App\Enums\AmazonMarketplace;
 use App\Enums\ImportExistingBehavior;
 use App\Enums\OffAmazonShippingStatus;
 use App\Enums\PostageSetting;
 use App\Enums\ScheduleInterval;
+use App\Enums\ShopifyMetafieldOwner;
+use App\Filament\Components\LazyOptionsSelect;
 use App\Filament\Pages\Settings as SettingsPage;
 use App\Models\Carrier;
 use App\Models\CarrierAccountScope;
@@ -37,6 +40,8 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\StateCasts\Contracts\StateCast;
+use Filament\Schemas\Components\StateCasts\OptionStateCast;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
@@ -47,6 +52,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
+use Throwable;
 
 class DataSourceForm
 {
@@ -193,6 +199,41 @@ class DataSourceForm
                         ->searchable()
                         ->helperText('Leave blank to map per-order via channel aliases.')
                         ->visible(self::importsOrders(...)),
+
+                    LazyOptionsSelect::make('settings.part_number_metafield')
+                        ->label('Manufacturer part number')
+                        ->searchable()
+                        // Choices cost a few Shopify queries, so they are fetched
+                        // when the dropdown opens rather than on every form
+                        // render, and a saved choice is labeled from the setting.
+                        ->loadOptionsUsing(fn (DataSource $record): array => self::shopifyPartNumberMetafieldOptions($record))
+                        ->getOptionLabelUsing(fn (mixed $value): ?string => ShopifyMetafieldReference::fromOptionValue($value)?->label())
+                        ->stateCast(self::shopifyMetafieldStateCast())
+                        // Null rather than left out, so clearing it replaces a
+                        // saved setting instead of EditDataSource keeping it.
+                        ->dehydrateStateUsing(fn (mixed $state): ?array => ShopifyMetafieldReference::fromOptionValue($state)?->toSetting())
+                        ->createOptionForm([
+                            TextInput::make('namespace_key')
+                                ->label('Metafield')
+                                ->placeholder('custom.mpn')
+                                ->helperText('The metafield\'s namespace and key, separated by a dot.')
+                                ->required()
+                                ->rule(ShopifyMetafieldReference::namespaceKeyRule())
+                                ->validationMessages(['regex' => 'Enter the metafield as namespace.key.']),
+                            Select::make('owner')
+                                ->label('Owner')
+                                ->options(ShopifyMetafieldOwner::class)
+                                ->default(ShopifyMetafieldOwner::Variant->value)
+                                ->selectablePlaceholder(false)
+                                ->required(),
+                        ])
+                        ->createOptionUsing(fn (array $data): ?string => ShopifyMetafieldReference::fromNamespaceKey(
+                            (string) $data['namespace_key'],
+                            $data['owner'] instanceof ShopifyMetafieldOwner ? $data['owner'] : ShopifyMetafieldOwner::from($data['owner']),
+                        )?->optionValue())
+                        ->createOptionModalHeading('Type a metafield')
+                        ->helperText('The metafield holding the EU NS-PID. When the metafield is empty for an item, the product keeps the part number it already has.')
+                        ->visible(fn (Get $get, ?DataSource $record): bool => self::importsOrders($get) && self::canListShopifyMetafields($record)),
 
                     Toggle::make('settings.notify_customer')
                         ->label('Notify Customer on Fulfillment')
@@ -511,7 +552,7 @@ class DataSourceForm
                                     ->success()
                                     ->title('Connection successful')
                                     ->send();
-                            } catch (\Throwable $e) {
+                            } catch (Throwable $e) {
                                 Notification::make()
                                     ->danger()
                                     ->title('Connection failed')
@@ -845,6 +886,71 @@ class DataSourceForm
             : []);
     }
 
+    /**
+     * A saved connection with something to authenticate with — an OAuth token
+     * or its own app credentials, as {@see ShopifySource::validateConfiguration()}
+     * accepts. A new one has nothing to list metafields with.
+     */
+    private static function canListShopifyMetafields(?DataSource $record): bool
+    {
+        if (! $record?->exists) {
+            return false;
+        }
+
+        return filled($record->secret('oauth_access_token'))
+            || (filled($record->secret('client_id')) && filled($record->secret('client_secret')));
+    }
+
+    /**
+     * Loads a stored `{owner, namespace, key}` setting as the select's one-string
+     * option value. Select's own cast would null the array before any
+     * hydration hook saw it; saving converts back in `dehydrateStateUsing()`.
+     */
+    private static function shopifyMetafieldStateCast(): StateCast
+    {
+        return new class extends OptionStateCast
+        {
+            public function set(mixed $state): ?string
+            {
+                return is_array($state)
+                    ? ShopifyMetafieldReference::fromSetting($state)?->optionValue()
+                    : parent::set($state);
+            }
+        };
+    }
+
+    /**
+     * The part-number metafield choices, cached briefly because the select
+     * asks again every time it opens. A failure is shown as a notification
+     * and offers nothing; typing a metafield still works.
+     *
+     * @return array<string, string>
+     */
+    private static function shopifyPartNumberMetafieldOptions(DataSource $record): array
+    {
+        $cacheKey = "shopify-part-number-metafields:{$record->id}";
+
+        try {
+            $choices = Cache::get($cacheKey);
+
+            if (! is_array($choices)) {
+                $source = app(DataSourceFactory::class)->make($record);
+                $choices = $source instanceof ShopifySource ? $source->fetchPartNumberMetafieldChoices() : [];
+                Cache::put($cacheKey, $choices, now()->addMinutes(5));
+            }
+        } catch (Throwable $e) {
+            Notification::make()
+                ->title('Could not list Shopify metafields')
+                ->body($e->getMessage().' You can still type a metafield with the + button.')
+                ->danger()
+                ->send();
+
+            return [];
+        }
+
+        return $choices;
+    }
+
     /** @param array<string, mixed>|null $address */
     private static function formatShopifyAddress(?array $address): string
     {
@@ -963,7 +1069,7 @@ class DataSourceForm
                 'expired' => false,
                 'previewRows' => self::QUERY_PREVIEW_ROWS,
             ];
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             return [
                 'preview' => null,
                 'writeChecks' => [],

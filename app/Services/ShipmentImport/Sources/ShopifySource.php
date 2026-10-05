@@ -6,6 +6,8 @@ use App\Contracts\DataSourceInterface;
 use App\Contracts\ExportDestinationInterface;
 use App\Contracts\ReconcilesSupersededRecords;
 use App\DataTransferObjects\ShipmentImport\ShopifyFulfillmentOrderIdentity;
+use App\DataTransferObjects\ShipmentImport\ShopifyMetafieldReference;
+use App\Enums\ShopifyMetafieldOwner;
 use App\Exceptions\PermanentExportException;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Http\Integrations\Shopify\ShopifyConnector;
@@ -44,6 +46,43 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
           }
         }
         GRAPHQL;
+
+    private const METAFIELD_DEFINITIONS_QUERY = <<<'GRAPHQL'
+        query MetafieldDefinitions($ownerType: MetafieldOwnerType!, $cursor: String) {
+          metafieldDefinitions(first: 250, after: $cursor, ownerType: $ownerType) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              name namespace key
+              type { name }
+            }
+          }
+        }
+        GRAPHQL;
+
+    private const SAMPLED_VARIANT_METAFIELDS_QUERY = <<<'GRAPHQL'
+        query SampledVariantMetafields {
+          productVariants(first: 25, sortKey: ID, reverse: true) {
+            nodes {
+              metafields(first: 50) {
+                nodes { namespace key type }
+              }
+            }
+          }
+        }
+        GRAPHQL;
+
+    /**
+     * Metafield types a part number can be read from as text. A list type
+     * yields its first entry.
+     */
+    public const TEXT_METAFIELD_TYPES = [
+        'single_line_text_field',
+        'multi_line_text_field',
+        'number_integer',
+        'list.single_line_text_field',
+        'list.multi_line_text_field',
+        'list.number_integer',
+    ];
 
     private array $config;
 
@@ -252,6 +291,96 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
             ->filter()
             ->values()
             ->all();
+    }
+
+    /**
+     * Text metafields a part number could be read from, for the connection
+     * form's picker: every definition on variants and products, plus
+     * metafields on recently created variants that have no definition — a
+     * channel app may write one without defining it.
+     *
+     * @return array<string, string> Option value ({@see ShopifyMetafieldReference::optionValue()}) => label
+     *
+     * @throws DomainException when the token lacks `read_products`
+     */
+    public function fetchPartNumberMetafieldChoices(): array
+    {
+        if (! in_array('read_products', $this->fetchAccessScopes(), true)) {
+            throw new DomainException('Reconnect Shopify with the read_products scope to list its metafields.');
+        }
+
+        $choices = [];
+
+        foreach (ShopifyMetafieldOwner::cases() as $owner) {
+            foreach ($this->fetchMetafieldDefinitions($owner) as $definition) {
+                $reference = new ShopifyMetafieldReference($owner, $definition['namespace'], $definition['key']);
+                $choices[$reference->optionValue()] = filled($definition['name'] ?? null)
+                    ? "{$definition['name']} — {$reference->label()}"
+                    : $reference->label();
+            }
+        }
+
+        $json = $this->graphql(self::SAMPLED_VARIANT_METAFIELDS_QUERY);
+
+        foreach ($json['data']['productVariants']['nodes'] ?? [] as $variant) {
+            foreach ($variant['metafields']['nodes'] ?? [] as $metafield) {
+                if (! in_array($metafield['type'] ?? null, self::TEXT_METAFIELD_TYPES, true)) {
+                    continue;
+                }
+
+                $reference = new ShopifyMetafieldReference(ShopifyMetafieldOwner::Variant, $metafield['namespace'], $metafield['key']);
+                $choices[$reference->optionValue()] ??= "{$reference->label()} — undefined";
+            }
+        }
+
+        return $choices;
+    }
+
+    /**
+     * @return list<array{name: ?string, namespace: string, key: string}>
+     */
+    private function fetchMetafieldDefinitions(ShopifyMetafieldOwner $owner): array
+    {
+        $definitions = [];
+        $cursor = null;
+
+        do {
+            $json = $this->graphql(self::METAFIELD_DEFINITIONS_QUERY, array_filter([
+                'ownerType' => $owner->ownerType(),
+                'cursor' => $cursor,
+            ]));
+            $data = $json['data']['metafieldDefinitions'] ?? [];
+
+            foreach ($data['nodes'] ?? [] as $definition) {
+                if (in_array($definition['type']['name'] ?? null, self::TEXT_METAFIELD_TYPES, true)) {
+                    $definitions[] = [
+                        'name' => $definition['name'] ?? null,
+                        'namespace' => $definition['namespace'],
+                        'key' => $definition['key'],
+                    ];
+                }
+            }
+
+            $pageInfo = $data['pageInfo'] ?? [];
+            $cursor = ($pageInfo['hasNextPage'] ?? false) ? ($pageInfo['endCursor'] ?? null) : null;
+        } while ($cursor !== null);
+
+        return $definitions;
+    }
+
+    /**
+     * @param  array<string, mixed>  $variables
+     * @return array<string, mixed>
+     */
+    private function graphql(string $query, array $variables = []): array
+    {
+        $json = $this->connector->send(new GraphQL($query, $variables))->json();
+
+        if (! empty($json['errors'])) {
+            throw new RuntimeException('Shopify GraphQL error: '.json_encode($json['errors']));
+        }
+
+        return $json;
     }
 
     public function fetchShipmentItems(string $sourceRecordId): Collection

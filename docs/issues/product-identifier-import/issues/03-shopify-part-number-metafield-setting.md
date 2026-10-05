@@ -1,6 +1,6 @@
 # Choose the part-number metafield on a Shopify connection
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -23,30 +23,78 @@ on the variant or the product, so the connection has to be told which one.
 text saying it is the EU NS-PID and that an empty metafield leaves the product's own value
 alone.
 
+The select's value is one string, `{owner}:{namespace}.{key}` (e.g. `variant:custom.mpn`),
+converted to the stored object when saving (`dehydrateStateUsing`) and back when the form
+loads (`afterStateHydrated`). The stored shape is the object above; `04` reads `owner`
+from it. A saved value is labeled from the setting itself, with no call to Shopify, so
+opening the form does not fetch anything.
+
+The field is shown only when the connection exists and has something to authenticate
+with: an OAuth token, or its own app client ID and secret (the same test as
+`ShopifySource::validateConfiguration()`). A new connection has no token to list
+metafields with.
+
 **Choices.** A searchable select, filled on demand (not on every form render) from
 `ShopifySource`:
 
 - `metafieldDefinitions(ownerType: PRODUCTVARIANT)` and `(ownerType: PRODUCT)`, paginated,
   each option labeled with the definition's name, its `namespace.key`, and its owner
 - plus metafields found on a sample of recent variants (`productVariants(first: 25)
-  { metafields(first: 50) { namespace key } }`) that have no definition, labeled as
+  { metafields(first: 50) { namespace key type } }`) that have no definition, labeled as
   *undefined*. A Google or other channel app may write the part number without a
-  definition
-- plus a free `namespace.key` entry for anything neither finds, using the select's create
-  option
+  definition. Only variants are sampled: an undefined *product* metafield is not
+  discovered and has to be typed
+- plus a free entry for anything neither finds, using the select's create option. Its
+  form has a `namespace.key` text field and an owner choice (variant or product,
+  defaulting to variant)
 
 Only text-like types are offered: `single_line_text_field`, `multi_line_text_field`,
-`number_integer`, and their `list.` forms. A definition of another type is left out.
+`number_integer`, and their `list.` forms. A definition or sampled metafield of another
+type is left out.
 
 **Failure.** If the store cannot be reached or the token lacks `read_products`, the
-select shows the reason and the setting can still be typed.
+search returns no options and sends a danger notification with the reason (naming
+`read_products` for the scope case). The create option still works, so the setting can be
+typed.
+
+**Clearing.** Saving with the select empty stores `part_number_metafield` as `null`.
+`EditDataSource::mutateFormDataBeforeSave()` keeps settings the form did not submit, so
+the field must submit `null` rather than being left out; `04` treats `null` and absent
+the same.
 
 ## Acceptance criteria
 
-- [ ] Choices come from both owner types and the variant sample, de-duplicated by
+- [x] Choices come from both owner types and the variant sample, de-duplicated by
       owner + `namespace.key`, with non-text definitions excluded
-- [ ] An undefined metafield is offered and labeled as such
-- [ ] A typed `namespace.key` saves; a value without a dot is refused
-- [ ] Saving with no choice removes the setting
-- [ ] A missing scope shows a message naming `read_products`, not an exception
-- [ ] Tests fake the GraphQL responses through the existing Shopify connector mocks
+- [x] An undefined metafield is offered and labeled as such; an undefined one of a
+      non-text type is not
+- [x] A typed `namespace.key` saves with its chosen owner; a value without a dot is refused
+- [x] A saved setting round-trips: stored as `{owner, namespace, key}`, shown with its
+      label on reload without any Shopify request
+- [x] Saving with no choice stores `null` over a previously saved setting
+- [x] The field is hidden on the create page and on a connection without OAuth
+- [x] A missing scope shows a notification naming `read_products`, not an exception
+- [x] Tests fake the GraphQL responses through the existing Shopify connector mocks
+
+## Comments
+
+**2026-10-05 — done.** `ShopifySource::fetchPartNumberMetafieldChoices()` checks the live
+token for `read_products`, then lists text definitions for both owners (paginated) and
+undefined text metafields on the 25 newest variants. The form field is
+`settings.part_number_metafield` in *Shopify Order Settings*; its value and the stored
+shape go through `ShopifyMetafieldReference` and the `ShopifyMetafieldOwner` enum.
+The choices load when the dropdown opens, through `App\Filament\Components\LazyOptionsSelect`,
+and are filtered in the browser as you type. Filament's own dynamic options would also run
+the lookup on every form render. They are cached per connection for five minutes, because
+every open asks again. Checked against `polybag-test.myshopify.com`: opening the dropdown
+listed `custom.mpn` (variant) and `test_data.binding_mount` (product) without anything
+typed.
+
+Two things differ from the text above. Visibility doesn't use
+`OAuthService::isDataSourceConnected()`: that is true only for an OAuth connection, and
+one using its own client credentials can list metafields too. And Select's built-in
+option cast nulls an array before any hydration hook sees it, so the stored object is
+converted to the option string in a state cast (`DataSourceForm::shopifyMetafieldStateCast()`),
+not in `afterStateHydrated`.
+
+Tests: `tests/Feature/ShopifyPartNumberMetafieldSettingTest.php`.
