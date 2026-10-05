@@ -10,7 +10,7 @@ Background for the issues in this directory. Not a work item.
 
 ## Where this came from
 
-[`eu-product-identifiers`](../archive/eu-product-identifiers/PRD.md) added
+[`eu-product-identifiers`](../eu-product-identifiers/PRD.md) added
 `products.manufacturer_part_number` and `products.gtin`, sends them to FedEx and UPS, and
 refuses a label into the EU to a consumer when any line lacks a SKU or a manufacturer part
 number. Its `01` left one thing out on purpose: *"Pulling a part number from the Amazon
@@ -73,21 +73,8 @@ answers.
 
 ## Amazon
 
-Orders carry no part number. Two SP-API sources do, and which one a connection can use
-depends on how it was connected.
-
-**The seller's own listing (Listings Items `2021-08-01`).** `searchListingsItems` at
-`/listings/2021-08-01/items/{sellerId}` takes up to 20 SKUs per call
-(`identifiersType=SKU`) and, with `includedData=attributes`, returns the attributes the
-seller submitted. `part_number` and `model_number` are the candidates, and
-`country_of_origin` comes back alongside them. This is the better source: it is the
-seller's data, and it is keyed by SKU, as Products are. Its rate is 5 requests per second.
-
-It needs the seller ID, and **OAuth connections already have it.**
-`OAuthService::handleCallback()` stores the broker's `selling_partner_id` as
-`settings.amazon_selling_partner_id` and refuses to finish the connection without one.
-A **manual connection**, a refresh token typed into the form on a self-hosted install
-without our broker, has no seller ID. `/sellers/v1/account` does not return one.
+Orders carry no part number. The investigation named two SP-API sources. A production
+probe on 2026-10-05 (below) showed that only the catalog delivers.
 
 **The catalog (Catalog Items `2022-04-01`).** `ItemSummaryByMarketplace` has
 `partNumber`, `modelNumber` and `manufacturer` under `includedData=summaries`. This is
@@ -95,22 +82,61 @@ Amazon's merged record for the ASIN, not the seller's. `AmazonSource` already ca
 endpoint during every import (`includedData=identifiers`, for ASINs with a SKU that has
 no barcode), so asking for `identifiers,summaries` costs no extra requests.
 
+**The seller's own listing (Listings Items `2021-08-01`).** `searchListingsItems` takes
+up to 20 SKUs per call and, with `includedData=attributes`, returns the attributes the
+seller submitted. Every OAuth connection has the seller ID it needs
+(`settings.amazon_selling_partner_id`). It looked like the better source. For a
+reseller, it holds nothing useful: see below.
+
+### What Amazon actually holds
+
+The probe was read-only, on one seller's OAuth connection. It covered 653 ASINs from that
+seller's orders (health, beauty and grocery) and 600 from a catalog keyword search across
+about 25 display groups: electronics, tools, automotive, toys, books, apparel, kitchen,
+pets, sports. Raw responses stayed out of the repo.
+
+| | Seller's ASINs | Keyword sample |
+|---|---|---|
+| Catalog records returned | 633 of 653 | 600 |
+| `summaries.partNumber` | 619 | 535 |
+| `modelNumber` only | 1 | 42 |
+| Neither | 13 | 23 |
+| Part number is the ASIN / brand / placeholder | 11 | 5 |
+| Part number is the item's own UPC/EAN/ISBN | 121 | 16 (11 of them books) |
+| Valid GTIN in the catalog identifiers | 627 | 451 |
+| No GTIN, but a part number | 4 | 130 |
+| `country_of_origin` in the catalog | 0 | 0 |
+
+- **The summary is enough.** `attributes.part_number` and `model_number` never added a
+  value the summary lacked and never disagreed with it.
+- **The seller's listings were empty of all three fields:** 617 returned, none with
+  `part_number`, `model_number` or `country_of_origin`. Each still carried about 30
+  other attributes, so this was not a request error. A reseller's listing is an offer on
+  an existing catalog page, and carries offer data, not product data. This is so even
+  though all 63 product types seen mark `country_of_origin` required.
+- **A UPC in the part number field is acceptable.** The Commission's guidance lets a
+  manufacturer use the S-PID as the NS-PID (`09` quotes it). So `05` keeps those values
+  and drops only the ASIN, brand and placeholders.
+- **Amazon gives no country of origin.** Amazon products need origin entered by hand, or
+  from another source, before `international-customs-terms/05` requires it.
+
 So:
 
 - **Every connection** gets the catalog part number from the call it already makes
   ([`05`](issues/05-amazon-catalog-part-numbers.md)).
-- **A connection with a seller ID** asks its own listings first and uses the catalog only
-  for SKUs the listing has no part number for
-  ([`06`](issues/06-amazon-listing-part-numbers.md)). A manual connection can get there
-  by entering its seller ID (the *Merchant Token* in Seller Central) in an optional
-  field.
-- **Fill only, from both.** The import looks up only Products missing a value, so an
-  Amazon value never replaces one someone typed. The barcode already works this way
-  through a one-off `_fill_missing_barcode_only` flag, which
-  [`01`](issues/01-fill-only-import-fields.md) generalizes. One consequence: a part
-  number later corrected in Seller Central does not reach a Product that already has one.
+- **Seller listings are not read** ([`06`](issues/06-amazon-listing-part-numbers.md),
+  `wontfix`). Reopen it if a brand-owner client, whose own listings define the ASIN,
+  turns up.
+- **A product with a GTIN and no part number** can ship when its client opts in to
+  declaring the GTIN as the part number
+  ([`09`](issues/09-declare-gtin-as-part-number.md)). That covers far more products than
+  any import: 627 of the seller's 633.
+- **Fill only.** The import looks up only Products missing a value, so an Amazon value
+  never replaces one someone typed ([`01`](issues/01-fill-only-import-fields.md)). One
+  consequence: a part number later corrected in Seller Central does not reach a Product
+  that already has one.
 - **No repeat lookups.** A SKU with no part number anywhere would be looked up on every
-  import. `products.identifiers_checked_at` records that Amazon was asked.
+  import. `products.identifiers_checked_at` records that the catalog was asked.
 
 ## What does not change
 
@@ -128,15 +154,17 @@ So:
 | # | Issue | Status |
 |---|---|---|
 | `01` | [Fill-only import fields](issues/01-fill-only-import-fields.md) | `done` |
-| `02` | [Require `read_products` for Shopify imports](issues/02-require-read-products-for-shopify-imports.md) | `ready-for-human` |
-| `03` | [Choose the part-number metafield on a Shopify connection](issues/03-shopify-part-number-metafield-setting.md) | `ready-for-agent` after `02` |
+| `02` | [Require `read_products` for Shopify imports](issues/02-require-read-products-for-shopify-imports.md) | `done` |
+| `03` | [Choose the part-number metafield on a Shopify connection](issues/03-shopify-part-number-metafield-setting.md) | `done` |
 | `04` | [Import part number, HS code and origin from Shopify](issues/04-import-shopify-customs-fields.md) | `done` |
-| `05` | [Import part numbers from the Amazon catalog](issues/05-amazon-catalog-part-numbers.md) | `ready-for-agent` after `01` |
-| `06` | [Import part numbers and origin from the seller's Amazon listings](issues/06-amazon-listing-part-numbers.md) | `ready-for-agent` after `05` |
+| `05` | [Import part numbers from the Amazon catalog](issues/05-amazon-catalog-part-numbers.md) | `ready-for-agent` |
+| `06` | [Import part numbers and origin from the seller's Amazon listings](issues/06-amazon-listing-part-numbers.md) | `wontfix` |
 | `07` | [Amazon Buy Shipping is refused for identifiers it never sends](issues/07-buy-shipping-identifier-refusal.md) | `needs-triage` |
 | `08` | [Verify against a development store and a seller account](issues/08-verify-against-live-sources.md) | `ready-for-human` |
+| `09` | [Declare the GTIN as the part number when a client opts in](issues/09-declare-gtin-as-part-number.md) | `ready-for-agent` |
 
-`02` is the only thing that blocks Shopify. `05` and `06` can go in parallel with it.
+`05` and `09` are independent and can go in parallel. `09` is the one that matters most
+before 1 November.
 
 ## Out of scope
 

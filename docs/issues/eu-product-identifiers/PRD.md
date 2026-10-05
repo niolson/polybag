@@ -156,6 +156,7 @@ answers "does this cross a customs border", not "into which territory".
 - `03` — UPS: `ProductIdentifier` on every EU-bound product, plus `ShipperType`/`ConsigneeType`
 - `04` — refuse an EU consumer label when a line has no M-PID or NS-PID
 - `05` — verify against the carrier sandboxes, resolve `NO`/`NA`, answer the FedEx form
+- `06` — confirm how each carrier declares that no GTIN exists (TARIC `Y081`); reopened 2026-10-05
 
 ## Effort
 

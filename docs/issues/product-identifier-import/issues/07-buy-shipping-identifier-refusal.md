@@ -14,7 +14,7 @@ Repo: `polybag`
 
 `ShipRequest::customsItemsMissingProductIdentifiers()` exempts a blind purchase (Shopify
 Shipping) because PolyBag sends none of its own declaration. The
-[`eu-product-identifiers` PRD](../../archive/eu-product-identifiers/PRD.md) says Amazon
+[`eu-product-identifiers` PRD](../../eu-product-identifiers/PRD.md) says Amazon
 Buy Shipping is the same: *"Both platforms build the customs declaration from their own
 order and catalog data … No adapter change."*
 

@@ -1,6 +1,6 @@
 # Import part numbers and origin from the seller's Amazon listings
 
-Status: ready-for-agent
+Status: wontfix
 Category: enhancement
 Repo: `polybag`
 
@@ -77,3 +77,20 @@ per chunk.
       page's listings are applied
 - [ ] A 403 on listings falls back to the catalog and logs once
 - [ ] Fixtures use synthetic seller IDs and SKUs
+
+## Comments
+
+**2026-10-05 — wontfix.** A production probe answered the question this issue assumed.
+`searchListingsItems` with `includedData=attributes` works on an OAuth connection: 33
+calls, all 200, so the app has the role. But none of the 617 listings returned had
+`part_number`, `model_number` or `country_of_origin`. The attributes did come back, 41
+names in all (`brand`, `manufacturer`, `item_weight`, `externally_assigned_product_identifier`
+and so on), so the empty result is real, not a request error. That is what offers on
+existing catalog pages look like: a reseller submits offer data, not product data, even
+though every product type's schema marks `country_of_origin` as required.
+
+The catalog had a part number for 98% of the same seller's ASINs (`05`), and the GTIN
+fallback (`09`) covers most of the rest. A new request type, a Seller ID field and a
+second rate-limited loop would add nothing for a reseller. Reopen this if a brand-owner
+client, whose own listings define the ASIN, needs origin from Amazon. The catalog
+record carried no `country_of_origin` either.
