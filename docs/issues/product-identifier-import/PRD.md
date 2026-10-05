@@ -160,7 +160,7 @@ So:
 | `05` | [Import part numbers from the Amazon catalog](issues/05-amazon-catalog-part-numbers.md) | `done` |
 | `06` | [Import part numbers and origin from the seller's Amazon listings](issues/06-amazon-listing-part-numbers.md) | `wontfix` |
 | `07` | [Amazon Buy Shipping is refused for identifiers it never sends](issues/07-buy-shipping-identifier-refusal.md) | `done` |
-| `08` | [Verify against a development store and a seller account](issues/08-verify-against-live-sources.md) | `ready-for-human` |
+| `08` | [Verify against a development store and a seller account](issues/08-verify-against-live-sources.md) | `done` |
 | `09` | [Declare the GTIN as the part number when a client opts in](issues/09-declare-gtin-as-part-number.md) | `ready-for-agent` |
 
 `05` and `09` are independent and can go in parallel. `09` is the one that matters most
