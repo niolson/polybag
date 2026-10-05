@@ -143,6 +143,41 @@ function amazonCatalogResponse(array $items = [], array $headers = []): MockResp
     ], 200, $headers);
 }
 
+/**
+ * A catalog item shaped like Catalog Items `2022-04-01` with
+ * `includedData=identifiers,summaries`.
+ *
+ * @param  array<string, mixed>  $summary  merged into an `ItemSummaryByMarketplace`
+ */
+function amazonCatalogItem(string $asin = 'B000TEST01', ?string $upc = '012345678905', array $summary = []): array
+{
+    return [
+        'asin' => $asin,
+        'identifiers' => $upc === null ? [] : [[
+            'marketplaceId' => 'ATVPDKIKX0DER',
+            'identifiers' => [['identifierType' => 'UPC', 'identifier' => $upc]],
+        ]],
+        'summaries' => [[
+            'marketplaceId' => 'ATVPDKIKX0DER',
+            'brand' => 'Acme',
+            'itemName' => 'Test Product',
+            ...$summary,
+        ]],
+    ];
+}
+
+/**
+ * An order whose first item (SKU-100) lists under B000TEST01. The second item
+ * has no ASIN, so it never asks the catalog.
+ */
+function amazonOrderWithCatalogItem(): array
+{
+    $order = sampleAmazonOrder();
+    $order['orderItems'][0]['product']['asin'] = 'B000TEST01';
+
+    return $order;
+}
+
 function sampleAmazonOrder(string $orderId = '111-2222222-3333333'): array
 {
     return [
@@ -1329,6 +1364,270 @@ it('does not replace a manually assigned product barcode during catalog enrichme
     expect(Product::where('sku', 'SKU-100')->firstOrFail()->barcode)->toBe('MANUAL-BARCODE');
 });
 
+it('fills a blank part number from the catalog summary', function (array $summary, ?string $expected): void {
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([amazonOrderWithCatalogItem()]),
+        SearchCatalogItems::class => amazonCatalogResponse([amazonCatalogItem(summary: $summary)]),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource)->import();
+
+    expect(Product::where('sku', 'SKU-100')->firstOrFail()->manufacturer_part_number)->toBe($expected);
+})->with([
+    'part number' => [['partNumber' => 'AC-1000', 'modelNumber' => 'M-1'], 'AC-1000'],
+    'model number only' => [['modelNumber' => 'M-1'], 'M-1'],
+    'neither' => [[], null],
+    'trimmed and cut to 100 characters' => [['partNumber' => '  '.str_repeat('X', 120).'  '], str_repeat('X', 100)],
+]);
+
+it('skips a catalog part number that names no part', function (array $summary, ?string $expected): void {
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([amazonOrderWithCatalogItem()]),
+        SearchCatalogItems::class => amazonCatalogResponse([amazonCatalogItem(summary: $summary)]),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource)->import();
+
+    expect(Product::where('sku', 'SKU-100')->firstOrFail()->manufacturer_part_number)->toBe($expected);
+})->with([
+    'the ASIN' => [['partNumber' => 'b000test01', 'modelNumber' => 'M-1'], 'M-1'],
+    'the brand' => [['partNumber' => 'ACME', 'modelNumber' => 'M-1'], 'M-1'],
+    'N/A' => [['partNumber' => 'N/A', 'modelNumber' => 'M-1'], 'M-1'],
+    'does not apply' => [['partNumber' => 'Does Not Apply', 'modelNumber' => 'M-1'], 'M-1'],
+    'generic' => [['partNumber' => 'Generic', 'modelNumber' => 'M-1'], 'M-1'],
+    'only dashes' => [['partNumber' => '---', 'modelNumber' => 'M-1'], 'M-1'],
+    'only zeros and dots' => [['partNumber' => '0.00', 'modelNumber' => 'M-1'], 'M-1'],
+    'no usable model number' => [['partNumber' => 'N/A', 'modelNumber' => 'unknown'], null],
+    // A manufacturer may use the S-PID as the NS-PID.
+    'the item\'s own UPC' => [['partNumber' => '012345678905', 'modelNumber' => 'M-1'], '012345678905'],
+]);
+
+it('reads the part number from another marketplace when the order\'s has none', function (): void {
+    $item = amazonCatalogItem();
+    $item['summaries'] = [['marketplaceId' => 'A2EUQ1WTGCTBG2', 'brand' => 'Acme', 'partNumber' => 'AC-CA']];
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([amazonOrderWithCatalogItem()]),
+        SearchCatalogItems::class => amazonCatalogResponse([$item]),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource)->import();
+
+    expect(Product::where('sku', 'SKU-100')->firstOrFail()->manufacturer_part_number)->toBe('AC-CA');
+});
+
+it('fills a book whose ASIN is all digits', function (): void {
+    // A book's ASIN is its ISBN-10, which PHP turns into an integer array key.
+    $order = sampleAmazonOrder();
+    $order['orderItems'][0]['product']['asin'] = '3551551677';
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([$order]),
+        SearchCatalogItems::class => amazonCatalogResponse([
+            amazonCatalogItem('3551551677', '9783551551672', ['partNumber' => 'BK-1']),
+        ]),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource)->import();
+
+    $product = Product::where('sku', 'SKU-100')->firstOrFail();
+
+    expect($product->barcode)->toBe('9783551551672')
+        ->and($product->manufacturer_part_number)->toBe('BK-1')
+        ->and($product->identifiers_checked_at?->isToday())->toBeTrue();
+});
+
+it('records only the returned ASINs as checked when Amazon pages the answer', function (): void {
+    $order = sampleAmazonOrder();
+    $order['orderItems'][0]['product']['asin'] = 'B000TEST01';
+    $order['orderItems'][1]['product']['asin'] = 'B000TEST02';
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([$order]),
+        SearchCatalogItems::class => MockResponse::make([
+            'numberOfResults' => 2,
+            'pagination' => ['nextToken' => 'page-2'],
+            'items' => [amazonCatalogItem(summary: ['partNumber' => 'AC-1000'])],
+        ]),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource)->import();
+
+    $returned = Product::where('sku', 'SKU-100')->firstOrFail();
+
+    expect($returned->manufacturer_part_number)->toBe('AC-1000')
+        ->and($returned->identifiers_checked_at?->isToday())->toBeTrue()
+        ->and(Product::where('sku', 'SKU-200')->firstOrFail()->identifiers_checked_at)->toBeNull();
+});
+
+it('keeps a part number already on the product', function (): void {
+    Product::factory()->create([
+        'client_id' => $this->dataSource->client_id,
+        'sku' => 'SKU-100',
+        'barcode' => null,
+        'manufacturer_part_number' => 'HAND-ENTERED',
+    ]);
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([amazonOrderWithCatalogItem()]),
+        SearchCatalogItems::class => amazonCatalogResponse([amazonCatalogItem(summary: ['partNumber' => 'AC-1000'])]),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource)->import();
+
+    $product = Product::where('sku', 'SKU-100')->firstOrFail();
+
+    expect($product->manufacturer_part_number)->toBe('HAND-ENTERED')
+        ->and($product->barcode)->toBe('012345678905');
+});
+
+it('looks up a product with a barcode but no part number, and not one with both', function (?string $partNumber, bool $lookedUp): void {
+    Product::factory()->create([
+        'client_id' => $this->dataSource->client_id,
+        'sku' => 'SKU-100',
+        'barcode' => '012345678905',
+        'manufacturer_part_number' => $partNumber,
+    ]);
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([amazonOrderWithCatalogItem()]),
+        SearchCatalogItems::class => amazonCatalogResponse([amazonCatalogItem(summary: ['partNumber' => 'AC-1000'])]),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource)->import();
+
+    if ($lookedUp) {
+        Saloon::assertSent(SearchCatalogItems::class);
+    } else {
+        Saloon::assertNotSent(SearchCatalogItems::class);
+    }
+
+    expect(Product::where('sku', 'SKU-100')->firstOrFail()->manufacturer_part_number)->toBe($partNumber ?? 'AC-1000');
+})->with([
+    'barcode only' => [null, true],
+    'both' => ['MPN-1', false],
+]);
+
+it('does not look a product up again within thirty days of the catalog answering', function (int $daysAgo, bool $lookedUp): void {
+    $checkedAt = now()->subDays($daysAgo)->startOfSecond();
+    Product::factory()->create([
+        'client_id' => $this->dataSource->client_id,
+        'sku' => 'SKU-100',
+        'barcode' => null,
+        'manufacturer_part_number' => null,
+        'identifiers_checked_at' => $checkedAt,
+    ]);
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([amazonOrderWithCatalogItem()]),
+        SearchCatalogItems::class => amazonCatalogResponse(),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource)->import();
+
+    $stamp = Product::where('sku', 'SKU-100')->firstOrFail()->identifiers_checked_at;
+
+    if ($lookedUp) {
+        Saloon::assertSent(SearchCatalogItems::class);
+        expect($stamp->isToday())->toBeTrue();
+    } else {
+        Saloon::assertNotSent(SearchCatalogItems::class);
+        expect($stamp->equalTo($checkedAt))->toBeTrue();
+    }
+})->with([
+    'checked 10 days ago' => [10, false],
+    'checked 40 days ago' => [40, true],
+]);
+
+it('leaves the check stamp alone when the catalog lookup fails', function (): void {
+    $checkedAt = now()->subDays(40)->startOfSecond();
+    Product::factory()->create([
+        'client_id' => $this->dataSource->client_id,
+        'sku' => 'SKU-100',
+        'barcode' => null,
+        'manufacturer_part_number' => null,
+        'identifiers_checked_at' => $checkedAt,
+    ]);
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([amazonOrderWithCatalogItem()]),
+        SearchCatalogItems::class => MockResponse::make(['errors' => [['code' => 'InternalFailure']]], 500),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource)->import();
+
+    Saloon::assertSent(SearchCatalogItems::class);
+    expect(Product::where('sku', 'SKU-100')->firstOrFail()->identifiers_checked_at->equalTo($checkedAt))->toBeTrue();
+});
+
+it('stamps a new SKU on the import that creates its product', function (): void {
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([amazonOrderWithCatalogItem()]),
+        SearchCatalogItems::class => amazonCatalogResponse(),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource)->import();
+
+    expect(Product::where('sku', 'SKU-100')->firstOrFail()->identifiers_checked_at?->isToday())->toBeTrue()
+        // SKU-200 has no ASIN, so the catalog was never asked about it.
+        ->and(Product::where('sku', 'SKU-200')->firstOrFail()->identifiers_checked_at)->toBeNull();
+});
+
+it('does not count a product as updated when only its check stamp changed', function (): void {
+    Product::factory()->create([
+        'client_id' => $this->dataSource->client_id,
+        'sku' => 'SKU-100',
+        'name' => 'Test Product',
+        'barcode' => '012345678905',
+        'manufacturer_part_number' => null,
+        'active' => true,
+    ]);
+    Product::factory()->create([
+        'client_id' => $this->dataSource->client_id,
+        'sku' => 'SKU-200',
+        'name' => 'Another Product',
+        'active' => true,
+    ]);
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([amazonOrderWithCatalogItem()]),
+        SearchCatalogItems::class => amazonCatalogResponse(),
+    ]);
+
+    $result = ShipmentImportService::forRecord($this->dataSource)->import();
+
+    expect(Product::where('sku', 'SKU-100')->firstOrFail()->identifiers_checked_at?->isToday())->toBeTrue()
+        ->and($result->productsUpdated)->toBe(0);
+});
+
+it('skips the catalog lookup when imports do not update products', function (): void {
+    config(['shipment-import.behavior.auto_update_products' => false]);
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([amazonOrderWithCatalogItem()]),
+        SearchCatalogItems::class => amazonCatalogResponse(),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource)->import();
+
+    Saloon::assertNotSent(SearchCatalogItems::class);
+});
+
+it('does not ask the catalog about an item with no SKU', function (): void {
+    $order = sampleAmazonOrder();
+    $order['orderItems'] = [$order['orderItems'][0]];
+    $order['orderItems'][0]['product'] = ['asin' => 'B000TEST01', 'title' => 'Test Product'];
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([$order]),
+        SearchCatalogItems::class => amazonCatalogResponse(),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource)->import();
+
+    Saloon::assertNotSent(SearchCatalogItems::class);
+});
+
 it('imports up to one thousand historical orders in pages of one hundred', function (): void {
     $responses = collect(range(0, 9))->map(function (int $page): MockResponse {
         $orders = collect(range(1, 100))->map(fn (int $number): array => [
@@ -1520,7 +1819,7 @@ it('does not log historical Amazon response payloads', function (): void {
     $log->shouldNotHaveReceived('info');
 });
 
-it('batches Amazon catalog barcode lookups into at most twenty ASINs', function (): void {
+it('batches Amazon catalog lookups into at most twenty ASINs', function (): void {
     Sleep::fake();
 
     $order = sampleAmazonOrder();
@@ -1563,7 +1862,8 @@ it('batches Amazon catalog barcode lookups into at most twenty ASINs', function 
         ->and($catalogRequests[0]->resolveEndpoint())->toBe('/catalog/2022-04-01/items')
         ->and($firstQuery['marketplaceIds'])->toBe('ATVPDKIKX0DER')
         ->and($firstQuery['identifiersType'])->toBe('ASIN')
-        ->and($firstQuery['includedData'])->toBe('identifiers')
+        ->and($firstQuery['includedData'])->toBe('identifiers,summaries')
+        ->and($firstQuery['pageSize'])->toBe(20)
         ->and(explode(',', $firstQuery['identifiers']))->toHaveCount(20)
         ->and(explode(',', $catalogRequests[1]->query()->all()['identifiers']))->toHaveCount(1);
 
@@ -1573,7 +1873,7 @@ it('batches Amazon catalog barcode lookups into at most twenty ASINs', function 
     );
 });
 
-it('continues an Amazon order import when catalog barcode lookup fails', function (): void {
+it('continues an Amazon order import when the catalog lookup fails', function (): void {
     tap(Channel::factory()->create(['name' => 'Amazon']), fn ($channel) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $channel->id]));
 
     $order = sampleAmazonOrder();
@@ -1604,7 +1904,7 @@ it('continues an Amazon order import when catalog barcode lookup fails', functio
         ->and(Product::where('sku', 'SKU-100')->firstOrFail()->barcode)->toBeNull();
 });
 
-it('backs off and recovers when Amazon rate limits a catalog barcode lookup', function (): void {
+it('backs off and recovers when Amazon rate limits a catalog lookup', function (): void {
     tap(Channel::factory()->create(['name' => 'Amazon']), fn ($channel) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $channel->id]));
     Sleep::fake();
 

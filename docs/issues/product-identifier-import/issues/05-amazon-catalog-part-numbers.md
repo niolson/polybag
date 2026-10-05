@@ -1,6 +1,6 @@
 # Import part numbers from the Amazon catalog
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -73,22 +73,22 @@ and `modelNumber` are optional strings beside `brand` and `marketplaceId`.
 
 ## Acceptance criteria
 
-- [ ] The catalog request sends `includedData=identifiers,summaries`
-- [ ] A summary with `partNumber` fills a blank part number; with only `modelNumber`, that;
+- [x] The catalog request sends `includedData=identifiers,summaries`
+- [x] A summary with `partNumber` fills a blank part number; with only `modelNumber`, that;
       with neither, nothing
-- [ ] A `partNumber` equal to the ASIN, the brand, or a placeholder is skipped in favor of
+- [x] A `partNumber` equal to the ASIN, the brand, or a placeholder is skipped in favor of
       `modelNumber`; with no usable `modelNumber`, nothing is filled. A `partNumber` equal
       to the item's own UPC is kept
-- [ ] A Product with a part number already keeps it
-- [ ] A Product with a barcode but no part number is looked up; one with both is not
-- [ ] A Product checked 10 days ago is not looked up again; one checked 40 days ago is;
+- [x] A Product with a part number already keeps it
+- [x] A Product with a barcode but no part number is looked up; one with both is not
+- [x] A Product checked 10 days ago is not looked up again; one checked 40 days ago is;
       a failed lookup leaves `identifiers_checked_at` unchanged
-- [ ] A brand-new SKU is stamped on the import that creates its Product, and a stamp alone
+- [x] A brand-new SKU is stamped on the import that creates its Product, and a stamp alone
       does not count the Product as updated
-- [ ] With `auto_update_products` off, no catalog request is sent
-- [ ] An order whose only item has no SKU sends no catalog request
-- [ ] Request pacing and 429 handling are unchanged, and the existing catalog tests pass
-- [ ] `ProductFactory` has no `identifiers_checked_at` by default
+- [x] With `auto_update_products` off, no catalog request is sent
+- [x] An order whose only item has no SKU sends no catalog request
+- [x] Request pacing and 429 handling are unchanged, and the existing catalog tests pass
+- [x] `ProductFactory` has no `identifiers_checked_at` by default
 
 ## Comments
 
@@ -98,3 +98,33 @@ fields but assumed clean values and left the timestamp's write path open. A prob
 display groups) set the value filtering above. Two follow-ups came out of it: the GTIN
 fallback (`09`), and closing `06`. It also settled how `identifiers_checked_at` is
 written, and that the lookup is skipped when product updates are off.
+
+**2026-10-05 — done.** `AmazonSource::fetchCatalogIdentifiers()` asks for
+`identifiers,summaries` and returns a per-ASIN `{barcode, part_number}` entry for every
+ASIN in a chunk that succeeded, empty or not, so presence in that map is what marks an
+item row with `identifiers_checked_at`. The part number comes from
+`preferredCatalogPartNumber()`: the order marketplace's summaries first, then any other,
+taking `partNumber` and then `modelNumber` from each, and dropping the ASIN, the summary's
+brand, and placeholders. `asinsNeedingCatalogLookup()` replaces `asinsNeedingBarcodes()`.
+`ImportReferenceResolver::productIdFor()` writes the stamp and reports an update only when
+something besides the stamp and `updated_at` changed.
+
+One consequence worth knowing: the stamp is part of the item row, so it is part of the
+Shipment's `source_checksum`. On a run that looks an ASIN up, an open Shipment holding it
+is rewritten once under `update_if_changed`, which is how its Product gets stamped. Under
+`on_existing: skip` an existing Shipment's items are not re-imported, so a Product seen
+only on already-imported orders is looked up again on each run until a new order for that
+SKU arrives. A catalog-found barcode already behaved this way.
+
+Two things found in review, both of which would quietly lose data:
+
+- **Paging.** Catalog Items pages at 10 by default and a chunk holds 20 ASINs, so
+  stamping every requested ASIN would have marked unread ones checked for 30 days. The
+  request sends `pageSize=20`. If Amazon still returns a `nextToken`, only the ASINs that
+  came back are stamped. Barcode-only lookups had the same paging gap before this issue.
+- **All-digit ASINs.** A book's ASIN is its ISBN-10, which PHP stores as an integer array
+  key. Chunk results are merged with `array_replace()`, because spreading would renumber
+  those keys.
+
+Tests: `tests/Feature/AmazonImportExportTest.php` (the catalog tests) and
+`tests/Unit/Factories/ProductFactoryTest.php`.
