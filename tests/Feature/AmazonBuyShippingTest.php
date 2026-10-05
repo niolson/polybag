@@ -6,6 +6,7 @@ use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\Enums\AmazonChannelType;
 use App\Enums\BoxSizeType;
 use App\Enums\CarrierPackaging;
 use App\Enums\PackageStatus;
@@ -1228,6 +1229,43 @@ it('buys the offer that was chosen and records what Amazon called the shipment',
             // unanswered purchase be asked about instead of repeated.
             && $request->headers()->get('x-amzn-IdempotencyKey') === $rate->offerId;
     });
+});
+
+it('buys for an EU consumer when a product has no part number, which Buy Shipping has nowhere to send', function (): void {
+    // `product-identifier-import/07`: the identifier guard refuses this label
+    // on a direct carrier, but a Shipping v2 item carries no identifier, so
+    // nothing on the Product could reach it. The exemption has to survive the
+    // purchase rebuilding the rate from the stored offer.
+    $this->package->shipment->update([
+        'company' => null,
+        'city' => 'Paris',
+        'state_or_province' => null,
+        'postal_code' => '75001',
+        'country' => 'FR',
+    ]);
+    $this->package->packageItems->first()->product->update([
+        'manufacturer_part_number' => null,
+        'country_of_origin' => 'US',
+    ]);
+
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse(),
+        PurchaseShipment::class => amazonPurchaseResponse(),
+    ]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package->fresh()), [])->first();
+
+    $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package->fresh(), new PackageShippingRequest(
+        selectedRate: $rate,
+        labelFormat: 'zpl',
+        labelDpi: 300,
+    ));
+
+    expect($result->success)->toBeTrue()
+        ->and($this->package->fresh()->status)->toBe(PackageStatus::Shipped)
+        ->and(ShippingOffer::where('public_id', $rate->offerId)->sole()->amazonChannelType())->toBe(AmazonChannelType::Amazon);
+
+    Saloon::assertSent(PurchaseShipment::class);
 });
 
 it('buys the label alone as a PNG for a PDF workstation, never the joined pack slip', function (): void {

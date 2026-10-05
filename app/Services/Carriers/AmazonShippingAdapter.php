@@ -15,6 +15,7 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\AmazonChannelType;
 use App\Enums\OffAmazonShippingStatus;
 use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
@@ -379,6 +380,7 @@ class AmazonShippingAdapter implements AsyncRateQuoting, CarrierPolicy, Recovers
                         // None, since {@see offerCapability()} implements none:
                         // the purchase must not add what this price left out.
                         AmazonBuyShippingService::QUOTED_SPECIAL_SERVICES_KEY => $request->specialServiceCodes,
+                        AmazonBuyShippingService::CHANNEL_TYPE_KEY => AmazonChannelType::External->value,
                     ],
                     expiresAt: $expiresAt,
                     marketplace: $marketplace,

@@ -2,6 +2,7 @@
 
 namespace App\DataTransferObjects\Shipping;
 
+use App\Enums\AmazonChannelType;
 use App\Enums\ServiceCapability;
 use App\Models\Carrier;
 use App\Models\DataSource;
@@ -135,7 +136,14 @@ readonly class ShipRequest
      *
      * The same two gates as {@see zeroValueCustomsItems()} come first: a blind
      * purchase sends none of our declaration, and a label inside one customs
-     * zone sends none at all. The rule itself covers only goods entering the
+     * zone sends none at all. An Amazon Buy Shipping offer is exempt as well,
+     * though it is quoted rather than blind and does send our item values:
+     * a Shipping v2 `Item` has no field for either identifier, so Amazon
+     * declares them, if at all, from its own catalog, and no product record
+     * of ours could change that label. The offer is what says so, as the
+     * channel its adapter quoted it on: Amazon Shipping sold to another
+     * channel's order is quoted on the same API and bought on the same kind of
+     * connection, but is a direct rate, and is not exempted here. The rule itself covers only goods entering the
      * EU, so an EU origin is exempt too: {@see AddressData::sharesCustomsZoneWith()}
      * compares countries outside the US and would call Germany to France a
      * border, refusing every intra-EU consumer label. A consignee with a
@@ -147,6 +155,10 @@ readonly class ShipRequest
     public function customsItemsMissingProductIdentifiers(): array
     {
         if ($this->blindOffer !== null || $this->fromAddress->sharesCustomsZoneWith($this->toAddress)) {
+            return [];
+        }
+
+        if ($this->offer?->amazonChannelType() === AmazonChannelType::Amazon) {
             return [];
         }
 

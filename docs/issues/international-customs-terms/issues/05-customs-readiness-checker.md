@@ -31,7 +31,10 @@ without an HS code of 6+ digits (EU, GB); customs total over $2,500 with no `exp
 `resources/data/customs/export-filing.json` — sourced from the FTR when written); recipient
 tax ID missing where `resources/data/customs/recipient-tax-id.json` requires it (BR:
 CPF or CNPJ; KR: PCCC for consumers); and the two existing guards, moved here unchanged
-including their blind-offer and same-customs-zone gates.
+including their blind-offer and same-customs-zone gates, and the identifier guard's
+Amazon Buy Shipping exemption (`product-identifier-import/07`). A Shipping v2 `Item` has
+no HS-code or origin field either, so the origin and HS-code blocks need the same
+decision for Buy Shipping offers.
 
 Warns: HS code missing outside the EU and GB; DDP with no seller registration for a regime
 that covers the destination ("VAT may be charged twice"); order value over the regime's

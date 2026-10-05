@@ -1,6 +1,6 @@
 # Amazon Buy Shipping is refused for identifiers it never sends
 
-Status: needs-triage
+Status: done
 Category: bug
 Repo: `polybag`
 
@@ -40,5 +40,38 @@ question applies to its new origin and HS-code blocks.
 
 ## Acceptance criteria
 
-- [ ] A failing test confirms or refutes the refusal for an EU-consumer Buy Shipping offer
-- [ ] The decision and its reason are recorded below, and the gate and its docblock match
+- [x] A failing test confirms or refutes the refusal for an EU-consumer Buy Shipping offer
+- [x] The decision and its reason are recorded below, and the gate and its docblock match
+
+## Decision — 2026-10-05
+
+**Exempt it.** The failing test confirmed the refusal: an EU-consumer Buy Shipping offer
+with a line missing its part number was refused.
+
+The reason is narrower than "PolyBag declares nothing". A Buy Shipping request does send
+our items, with `itemValue`, `description`, `quantity` and `weight`. But a Shipping v2
+`Item` (checked against `tests/Fixtures/Schemas/shippingV2.json`) has no field for a
+merchant or manufacturer product identifier. Its `itemIdentifier` is the Amazon order
+item ID. Amazon builds whatever it hands the carrier from its own order and catalog data,
+and asks for anything more through `getAdditionalInputs`. No product record of ours can
+change that label, so refusing over one only blocks it.
+
+So the gate keys on the stored `ShippingOffer`, not on `blindOffer` or the rate. Each
+Amazon adapter now records the Shipping v2 channel it quoted on in the Offer's
+`purchase_context` (`AmazonBuyShippingService::CHANNEL_TYPE_KEY`), and
+`ShippingOffer::amazonChannelType()` reads it back. The rate cannot be the authority. The
+purchase rebuilds it from the Offer without its observed-service identity, so a first
+cut keyed on `RateResponse::sourceKind()` passed the unit test and still refused the
+real purchase. That was caught in review, and `AmazonBuyShippingTest` now buys one end
+to end. The connection cannot be the authority either: off-Amazon Amazon Shipping is
+bought on the same kind of connection. The exemption applies to this guard only:
+
+- **The zero-value guard stays.** Amazon receives our `itemValue`, so a `$0.00` line is a
+  value it could declare. A test pins it.
+- **Off-Amazon Amazon Shipping is not exempt.** It uses the same API but is a direct
+  rate, and nothing found here shows it sells into the EU.
+
+Not changed here: USPS's International Labels API has no identifier field either
+(`eu-product-identifiers` PRD), so a USPS EU-consumer label is refused over a value it
+cannot send. Kept for now, by decision on 2026-10-05: the question is with USPS, and
+until they answer, an EU consumer label without identifiers stays refused on USPS too.

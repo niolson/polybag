@@ -1,6 +1,7 @@
 <?php
 
 use App\DataTransferObjects\Shipping\RateRequest;
+use App\Enums\AmazonChannelType;
 use App\Enums\OffAmazonShippingStatus;
 use App\Enums\PostageSource;
 use App\Enums\PostageSourceKind;
@@ -176,7 +177,9 @@ it('binds the offer to the scoped connection, never the shipment\'s import sourc
             'rateId' => 'b1a4a1f0-0c4f-4a47-9d2e-5c6f0a1e7a11',
             // Quoted with no special services, so none may be bought.
             'specialServiceCodes' => [],
+            'channelType' => 'external',
         ])
+        ->and($offer->amazonChannelType())->toBe(AmazonChannelType::External)
         ->and($offer->rate_quote_id)->not->toBeNull()
         ->and($offer->quote_fingerprint)->not->toBeNull();
 });

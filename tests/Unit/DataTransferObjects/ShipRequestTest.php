@@ -6,6 +6,10 @@ use App\DataTransferObjects\Shipping\CustomsItem;
 use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
+use App\Enums\AmazonChannelType;
+use App\Enums\PostageSource;
+use App\Models\ShippingOffer;
+use App\Services\AmazonBuyShippingService;
 
 /*
 |--------------------------------------------------------------------------
@@ -50,7 +54,7 @@ function lineIdentifiedBy(?string $sku, ?string $mpn, ?string $gtin = '012345678
 /**
  * @param  list<CustomsItem>  $customsItems
  */
-function shipRequestFor(AddressData $to, array $customsItems, string $originCountry = 'US', ?BlindPurchaseOffer $blindOffer = null): ShipRequest
+function shipRequestFor(AddressData $to, array $customsItems, string $originCountry = 'US', ?BlindPurchaseOffer $blindOffer = null, ?ShippingOffer $offer = null): ShipRequest
 {
     return new ShipRequest(
         fromAddress: warehouseIn($originCountry),
@@ -59,6 +63,7 @@ function shipRequestFor(AddressData $to, array $customsItems, string $originCoun
         selectedRate: new RateResponse('FedEx', 'INTERNATIONAL_PRIORITY', 'International Priority', 48.10),
         customsItems: $customsItems,
         blindOffer: $blindOffer,
+        offer: $offer,
     );
 }
 
@@ -110,6 +115,36 @@ it('lists nothing for a blind purchase, whose seller declares from its own catal
     ));
 
     expect($request->customsItemsMissingProductIdentifiers())->toBe([]);
+});
+
+/**
+ * An Amazon offer as its adapter stores it, quoted on the given channel.
+ */
+function amazonOfferOn(AmazonChannelType $channel): ShippingOffer
+{
+    return new ShippingOffer([
+        'postage_source' => PostageSource::PostageDataSource,
+        'purchase_context' => [AmazonBuyShippingService::CHANNEL_TYPE_KEY => $channel->value],
+    ]);
+}
+
+it('lists nothing for an Amazon Buy Shipping offer, whose request has nowhere to carry an identifier', function (): void {
+    expect(shipRequestFor(consigneeIn('FR'), [lineIdentifiedBy('SKU-1', null)], offer: amazonOfferOn(AmazonChannelType::Amazon))->customsItemsMissingProductIdentifiers())
+        ->toBe([]);
+});
+
+it('still lists a line on Amazon Shipping sold to another channel\'s order, which is a direct rate', function (): void {
+    $incomplete = lineIdentifiedBy('SKU-1', null);
+
+    expect(shipRequestFor(consigneeIn('FR'), [$incomplete], offer: amazonOfferOn(AmazonChannelType::External))->customsItemsMissingProductIdentifiers())
+        ->toBe([$incomplete]);
+});
+
+it('still refuses a zero-value line on an Amazon Buy Shipping offer, whose item values Amazon declares', function (): void {
+    $free = new CustomsItem(description: 'Sample', quantity: 1, unitValue: 0.0, weight: 0.2);
+
+    expect(shipRequestFor(consigneeIn('FR'), [$free], offer: amazonOfferOn(AmazonChannelType::Amazon))->zeroValueCustomsItems())
+        ->toBe([$free]);
 });
 
 it('lists nothing for a label inside one customs zone, which carries no declaration', function (): void {
