@@ -8,16 +8,22 @@ Repo: `polybag`
 
 ## Parent
 
-[PRD](../PRD.md), *Amazon*. Blocked by `01`. `06` builds on it.
+[PRD](../PRD.md), *Amazon*. Blocked by `01` (done). `06` was to build on it and is
+`wontfix`: the seller's listings carried no part number (see the PRD).
 
-This is the source every Amazon connection has, manual or OAuth. `06` puts the seller's
-own listings ahead of it where the connection has a seller ID.
+This is the only Amazon source, for every connection, manual or OAuth.
 
 ## Problem
 
 Amazon orders carry no part number. `AmazonSource` already calls Catalog Items
 `2022-04-01` during import (`fetchCatalogBarcodes()`), but only with
 `includedData=identifiers` and only for ASINs with a SKU that has no barcode.
+
+A probe of production catalog records on 2026-10-05 (PRD, *What Amazon actually holds*)
+found `summaries[].partNumber` on 96–98% of ASINs, with `modelNumber` adding about 7%
+outside health, beauty and grocery. `attributes.part_number` and `model_number` never
+added a value the summary lacked and never disagreed with it, so `attributes` is not
+requested: it is by far the largest part of a response.
 
 ## Desired behavior
 
@@ -26,30 +32,69 @@ Amazon orders carry no part number. `AmazonSource` already calls Catalog Items
   `preferredCatalogBarcode()` does, take `partNumber`, else `modelNumber`, trimmed and cut
   to 100 characters. The method and its cache become a per-ASIN result holding both
   barcode and part number.
+- **Values that are not part numbers are dropped**, falling through to `modelNumber` and
+  then to nothing:
+  - the ASIN itself (9 of 633 in the probe)
+  - the item's brand from the same summary, compared ignoring case
+  - a placeholder: `N/A`, `NA`, `none`, `not applicable`, `does not apply`, `unknown`,
+    `generic`, or only dashes, dots or zeros, ignoring case
+  
+  A value equal to the item's own UPC/EAN/ISBN is **kept**. That was 19% of one seller's
+  catalog, and the EU guidance allows a manufacturer to use the S-PID as the NS-PID (see
+  `09`).
 - **The lookup set.** `asinsNeedingBarcodes()` becomes the ASINs where any SKU's Product
   lacks a barcode *or* a `manufacturer_part_number`, or has no Product yet, and has not
-  been looked up recently (below).
+  been checked recently (below). An item with no SKU no longer forces a lookup. It never
+  reaches a Product (`productIdFor()` returns null without a SKU), and `shipment_items`
+  has no barcode column, so nothing could be filled or stamped and the ASIN would be
+  looked up on every import. Today's docblock says the opposite, and changes with it.
 - **Fill only.** The item row sends `manufacturer_part_number` with
   `_fill_only: ['barcode', 'manufacturer_part_number']`.
-- **No repeat lookups.** `products.identifiers_checked_at` (nullable timestamp) is set
-  whenever a lookup answered for that Product's ASIN, found or not. `06` sets it too, so
-  it names what was asked for (identifiers), not which API answered. An ASIN is skipped
-  when every Product under it was checked within 30 days. Failed lookups (HTTP error, 429
-  after retries) do not set it.
-- **Logging** keeps today's warning on a failed lookup and renames it from
-  *barcode lookup*.
+- **No repeat lookups.** `products.identifiers_checked_at` (nullable timestamp) records
+  that the catalog answered for that Product's ASIN, whether or not it held anything. An
+  ASIN is skipped when every Product under it was checked within 30 days. A failed chunk
+  (HTTP error, or 429 after retries) stamps nothing.
+  - **How it is written.** The lookup runs before any Product exists for a new SKU, so
+    the source cannot update Products itself. Each item row whose ASIN was in a chunk
+    that succeeded carries `identifiers_checked_at`. `ImportReferenceResolver::productIdFor()`
+    writes it with the other fields, and it joins `Product::$fillable`.
+  - **It is not an update.** Stamping alone must not count the Product as updated in the
+    import result. Compare `wasChanged()` without that column.
+- **`auto_update_products` off.** `productIdFor()` then writes nothing, so a lookup's
+  result would be discarded and its stamp never written, and every import would repeat
+  it. `AmazonSource` skips the catalog lookup entirely when
+  `shipment-import.behavior.auto_update_products` is false.
+- **Logging** keeps today's warning on a failed lookup, renamed from *barcode lookup* to
+  *catalog lookup*.
 
-Sandbox caveat: the SP-API sandbox catalog returns nothing, so the tests here are fixture
-tests and the real check is `08`.
+Sandbox caveat: the SP-API sandbox catalog returns nothing, so the tests here use
+fixtures. Their shape should follow the real `ItemSummaryByMarketplace`: `partNumber`
+and `modelNumber` are optional strings beside `brand` and `marketplaceId`.
 
 ## Acceptance criteria
 
 - [ ] The catalog request sends `includedData=identifiers,summaries`
 - [ ] A summary with `partNumber` fills a blank part number; with only `modelNumber`, that;
       with neither, nothing
+- [ ] A `partNumber` equal to the ASIN, the brand, or a placeholder is skipped in favor of
+      `modelNumber`; with no usable `modelNumber`, nothing is filled. A `partNumber` equal
+      to the item's own UPC is kept
 - [ ] A Product with a part number already keeps it
 - [ ] A Product with a barcode but no part number is looked up; one with both is not
 - [ ] A Product checked 10 days ago is not looked up again; one checked 40 days ago is;
       a failed lookup leaves `identifiers_checked_at` unchanged
+- [ ] A brand-new SKU is stamped on the import that creates its Product, and a stamp alone
+      does not count the Product as updated
+- [ ] With `auto_update_products` off, no catalog request is sent
+- [ ] An order whose only item has no SKU sends no catalog request
 - [ ] Request pacing and 429 handling are unchanged, and the existing catalog tests pass
 - [ ] `ProductFactory` has no `identifiers_checked_at` by default
+
+## Comments
+
+**2026-10-05 — re-triaged after a production probe.** The first draft read the right
+fields but assumed clean values and left the timestamp's write path open. A probe of
+1,233 catalog records (one seller's order ASINs plus a keyword sample from about 25
+display groups) set the value filtering above. Two follow-ups came out of it: the GTIN
+fallback (`09`), and closing `06`. It also settled how `identifiers_checked_at` is
+written, and that the lookup is skipped when product updates are off.

@@ -14,7 +14,7 @@ in [ADR-0008](../../adr/0008-customs-terms-resolution.md).
 A design session on 2026-10-01 that started as "should PolyBag support DDP?" and became a
 review of everything an international label declares. It was grilled the same day into
 the decisions below. The product-identifier half of the EU change had already shipped as
-[`eu-product-identifiers`](../archive/eu-product-identifiers/PRD.md); this is the rest.
+[`eu-product-identifiers`](../eu-product-identifiers/PRD.md); this is the rest.
 
 No tenant ships to EU consumers yet, and there are no live tenants, so nothing here has
 to preserve current behavior.

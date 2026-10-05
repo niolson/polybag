@@ -43,3 +43,32 @@ OAuth connection:
 
 - [ ] Steps 1–5 recorded under `## Comments`, with no store names, ASINs or SKUs
 - [ ] Any mismatch with `03`–`06` fixed or opened as a new issue
+
+## Comments
+
+**2026-10-05 — Amazon steps 3–5 answered early**, by a read-only production probe run
+before `05` was built. It used one seller's OAuth connection: 653 ASINs from its orders
+(health, beauty and grocery), plus 600 more from a catalog keyword search across about 25
+display groups. Raw responses stayed out of the repo.
+
+3. **Listings role:** granted. All 33 `searchListingsItems` calls returned 200.
+4. **Counts:**
+   - **Listings:** 617 returned, none with `part_number`, `model_number` or
+     `country_of_origin`, although attributes came back (41 names). So `06` is `wontfix`.
+   - **Catalog summaries, seller's ASINs:** 619 of 633 had `partNumber`, 1 only
+     `modelNumber`, and 13 had neither. 488 were usable once ASIN, brand and placeholder
+     values were dropped and the item's own barcode was not counted as a distinct part
+     number.
+   - **Catalog summaries, keyword sample:** 535 of 600 had `partNumber`, 42 only
+     `modelNumber`, and 23 neither.
+   - **Attributes vs summary:** `attributes.part_number` never added a value or disagreed
+     with the summary.
+   - **Origin:** no catalog record in either sample had `country_of_origin`.
+   - **Barcodes:** 627 of the seller's 633 had a valid GTIN in the catalog, and 451 of the
+     600 sample. 130 of the sample had a part number but no GTIN.
+5. **Attribute names:** all 63 product types seen define `part_number`, and 13, mostly
+   food, have no `model_number`. All mark `country_of_origin` required for a listing.
+
+Still to do here: Shopify steps 1–2, and the Amazon import of `05` once built. Checking
+that import now means confirming that the stamped and filled counts match these rates,
+not measuring them.
