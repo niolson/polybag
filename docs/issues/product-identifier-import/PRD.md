@@ -130,7 +130,7 @@ So:
 | `01` | [Fill-only import fields](issues/01-fill-only-import-fields.md) | `done` |
 | `02` | [Require `read_products` for Shopify imports](issues/02-require-read-products-for-shopify-imports.md) | `ready-for-human` |
 | `03` | [Choose the part-number metafield on a Shopify connection](issues/03-shopify-part-number-metafield-setting.md) | `ready-for-agent` after `02` |
-| `04` | [Import part number, HS code and origin from Shopify](issues/04-import-shopify-customs-fields.md) | `ready-for-agent` after `02`, `03` |
+| `04` | [Import part number, HS code and origin from Shopify](issues/04-import-shopify-customs-fields.md) | `done` |
 | `05` | [Import part numbers from the Amazon catalog](issues/05-amazon-catalog-part-numbers.md) | `ready-for-agent` after `01` |
 | `06` | [Import part numbers and origin from the seller's Amazon listings](issues/06-amazon-listing-part-numbers.md) | `ready-for-agent` after `05` |
 | `07` | [Amazon Buy Shipping is refused for identifiers it never sends](issues/07-buy-shipping-identifier-refusal.md) | `needs-triage` |

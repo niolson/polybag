@@ -107,7 +107,7 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
     ];
 
     private const FULFILLMENT_ORDERS_QUERY = <<<'GRAPHQL'
-        query FulfillmentOrders($cursor: String) {
+        query FulfillmentOrders($cursor: String{{partNumberVariables}}) {
           fulfillmentOrders(first: 20, after: $cursor, includeClosed: false) {
             pageInfo { hasNextPage endCursor }
             nodes {
@@ -132,7 +132,11 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
                 nodes {
                   id sku productTitle remainingQuantity requiresShipping
                   weight { unit value }
-                  variant { id barcode }
+                  variant {
+                    id barcode
+                    inventoryItem { harmonizedSystemCode countryCodeOfOrigin }
+                    {{partNumberSelection}}
+                  }
                   lineItem { originalUnitPriceSet { shopMoney { amount } } }
                 }
               }
@@ -142,14 +146,18 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
         GRAPHQL;
 
     private const FULFILLMENT_ORDER_ITEMS_QUERY = <<<'GRAPHQL'
-        query FulfillmentOrderItems($id: ID!, $cursor: String) {
+        query FulfillmentOrderItems($id: ID!, $cursor: String{{partNumberVariables}}) {
           fulfillmentOrder(id: $id) {
             lineItems(first: 250, after: $cursor) {
               pageInfo { hasNextPage endCursor }
               nodes {
                 id sku productTitle remainingQuantity requiresShipping
                 weight { unit value }
-                variant { id barcode }
+                variant {
+                  id barcode
+                  inventoryItem { harmonizedSystemCode countryCodeOfOrigin }
+                  {{partNumberSelection}}
+                }
                 lineItem { originalUnitPriceSet { shopMoney { amount } } }
               }
             }
@@ -429,7 +437,10 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
 
         do {
             $response = $this->connector->send(
-                new GraphQL(self::FULFILLMENT_ORDERS_QUERY, array_filter(['cursor' => $cursor]))
+                new GraphQL(
+                    $this->lineItemQuery(self::FULFILLMENT_ORDERS_QUERY),
+                    $this->lineItemVariables(array_filter(['cursor' => $cursor])),
+                )
             );
             $json = $response->json();
 
@@ -465,10 +476,13 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
         $cursor = ($pageInfo['hasNextPage'] ?? false) ? ($pageInfo['endCursor'] ?? null) : null;
 
         while ($cursor !== null) {
-            $response = $this->connector->send(new GraphQL(self::FULFILLMENT_ORDER_ITEMS_QUERY, [
-                'id' => $fulfillmentOrder['id'],
-                'cursor' => $cursor,
-            ]));
+            $response = $this->connector->send(new GraphQL(
+                $this->lineItemQuery(self::FULFILLMENT_ORDER_ITEMS_QUERY),
+                $this->lineItemVariables([
+                    'id' => $fulfillmentOrder['id'],
+                    'cursor' => $cursor,
+                ]),
+            ));
             $json = $response->json();
 
             if (! empty($json['errors'])) {
@@ -568,6 +582,48 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
         ];
     }
 
+    /**
+     * The metafield this connection reads a part number from, or null when
+     * it reads none.
+     */
+    private function partNumberMetafield(): ?ShopifyMetafieldReference
+    {
+        return ShopifyMetafieldReference::fromSetting($this->config['part_number_metafield'] ?? null);
+    }
+
+    /**
+     * A line-item query with the part-number metafield selected on the owner
+     * the connection names, and only there. Namespace and key travel as
+     * variables ({@see lineItemVariables()}), never in the query text.
+     */
+    private function lineItemQuery(string $query): string
+    {
+        $partNumber = $this->partNumberMetafield();
+        $metafield = 'partNumber: metafield(namespace: $pnNamespace, key: $pnKey) { jsonValue }';
+
+        return strtr($query, [
+            '{{partNumberVariables}}' => $partNumber ? ', $pnNamespace: String!, $pnKey: String!' : '',
+            '{{partNumberSelection}}' => match ($partNumber?->owner) {
+                null => '',
+                ShopifyMetafieldOwner::Variant => $metafield,
+                ShopifyMetafieldOwner::Product => "product { {$metafield} }",
+            },
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $variables
+     * @return array<string, mixed>
+     */
+    private function lineItemVariables(array $variables): array
+    {
+        $partNumber = $this->partNumberMetafield();
+
+        return $partNumber
+            ? [...$variables, 'pnNamespace' => $partNumber->namespace, 'pnKey' => $partNumber->key]
+            : $variables;
+    }
+
     /** @return array<string, mixed> */
     private function mapFulfillmentOrderLineItem(array $item): array
     {
@@ -584,7 +640,45 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
             'value' => (float) data_get($item, 'lineItem.originalUnitPriceSet.shopMoney.amount', 0),
             'barcode' => $variant['barcode'] ?? null,
             'weight' => $weightLbs,
+            'manufacturer_part_number' => $this->partNumberFrom($variant),
+            'hs_tariff_number' => self::filledText(data_get($variant, 'inventoryItem.harmonizedSystemCode')),
+            'country_of_origin' => self::filledText(data_get($variant, 'inventoryItem.countryCodeOfOrigin')),
         ];
+    }
+
+    /**
+     * The part number from the metafield the connection names: a list's
+     * first entry, cut to the column's and UPS's `ProductID` 100 characters.
+     */
+    private function partNumberFrom(array $variant): ?string
+    {
+        $value = match ($this->partNumberMetafield()?->owner) {
+            null => null,
+            ShopifyMetafieldOwner::Variant => data_get($variant, 'partNumber.jsonValue'),
+            ShopifyMetafieldOwner::Product => data_get($variant, 'product.partNumber.jsonValue'),
+        };
+
+        if (is_array($value)) {
+            $value = array_values($value)[0] ?? null;
+        }
+
+        $value = self::filledText($value);
+
+        return $value === null ? null : self::filledText(mb_substr($value, 0, 100));
+    }
+
+    /**
+     * A scalar as trimmed text, or null when it is blank or not a scalar.
+     */
+    private static function filledText(mixed $value): ?string
+    {
+        if (! is_scalar($value)) {
+            return null;
+        }
+
+        $text = trim((string) $value);
+
+        return $text === '' ? null : $text;
     }
 
     /**
