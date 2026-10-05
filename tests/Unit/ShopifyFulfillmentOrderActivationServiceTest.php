@@ -40,6 +40,16 @@ test('it reports missing shopify scopes before activation', function (): void {
         ->toThrow(DomainException::class, 'read_locations');
 });
 
+test('it refuses activation to a token without read_products, naming it', function (): void {
+    $source = createShopifyDataSource();
+    fakeShopifyAccessScopes(array_values(array_diff(ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES, ['read_products'])));
+
+    expect(fn () => app(ShopifyFulfillmentOrderActivationService::class)->activate($source))
+        ->toThrow(DomainException::class, 'Reconnect Shopify with the required scopes before activation: read_products.');
+
+    expect($source->refresh()->settings['fulfillment_order_import_enabled'] ?? false)->toBeFalse();
+});
+
 test('it activates without inspecting shipments created outside fulfillment-order import', function (): void {
     $source = createShopifyDataSource();
     DataSourceLocation::factory()->create([

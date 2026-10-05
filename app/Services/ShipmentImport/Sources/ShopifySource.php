@@ -12,6 +12,7 @@ use App\Http\Integrations\Shopify\ShopifyConnector;
 use App\Models\Carrier;
 use App\Models\DataSource;
 use App\Services\ShipmentImport\ShopifyFulfillmentOrderRepointer;
+use App\Services\ShopifyFulfillmentOrderActivationService;
 use App\Services\ShopifyGoodsFingerprint;
 use App\Services\ShopifyShippingLabelService;
 use DomainException;
@@ -169,7 +170,29 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
             );
         }
 
+        $this->assertImportScopes();
+
         return $this->fetchFulfillmentOrderShipments();
+    }
+
+    /**
+     * Refuse an import the live token cannot complete.
+     *
+     * Activation checks the same scopes, but a connection activated before a
+     * scope joined {@see ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES}
+     * — `read_products`, which line-item `variant` needs — would otherwise run
+     * on, and the store's declared scopes can also change after activation.
+     */
+    private function assertImportScopes(): void
+    {
+        $missingScopes = array_values(array_diff(
+            ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES,
+            $this->fetchAccessScopes(),
+        ));
+
+        if ($missingScopes !== []) {
+            throw new DomainException('Reconnect Shopify with the required scopes before importing: '.implode(', ', $missingScopes).'.');
+        }
     }
 
     /**

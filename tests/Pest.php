@@ -28,6 +28,7 @@ use JsonSchema\Validator;
 use PHPUnit\Framework\Assert;
 use PHPUnit\Framework\AssertionFailedError;
 use Saloon\Http\Faking\MockResponse;
+use Saloon\Http\PendingRequest;
 use Tests\TestCase;
 
 /*
@@ -439,6 +440,26 @@ function shopifyAccessScopesResponse(?array $scopes = null): MockResponse
             'accessScopes' => array_map(fn (string $handle): array => ['handle' => $handle], $scopes),
         ]],
     ]);
+}
+
+/**
+ * A Shopify GraphQL fake that answers the access-scopes query with every
+ * required scope and serves `$responses` in order to everything else,
+ * repeating the last once they run out.
+ *
+ * A Shopify import checks scopes before fetching, so a fake keyed on
+ * `GraphQL::class` would otherwise hand the fulfillment-order page to the
+ * scope check.
+ */
+function answeringShopifyScopes(MockResponse ...$responses): Closure
+{
+    return function (PendingRequest $pendingRequest) use (&$responses): MockResponse {
+        if (str_contains((string) ($pendingRequest->body()?->all()['query'] ?? ''), 'currentAppInstallation')) {
+            return shopifyAccessScopesResponse();
+        }
+
+        return count($responses) > 1 ? array_shift($responses) : $responses[0];
+    };
 }
 
 /*
