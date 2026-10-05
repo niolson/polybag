@@ -103,6 +103,7 @@ class ImportReferenceResolver
                 'country_of_origin' => $itemData['country_of_origin'] ?? null,
                 'manufacturer_part_number' => $itemData['manufacturer_part_number'] ?? null,
                 'gtin' => $itemData['gtin'] ?? null,
+                'identifiers_checked_at' => $itemData['identifiers_checked_at'] ?? null,
                 'is_media' => $this->mediaFlagFrom($itemData, $sku),
             ], fn ($value): bool => $value !== null);
 
@@ -124,7 +125,7 @@ class ImportReferenceResolver
             return [
                 'id' => $product->id,
                 'created' => $product->wasRecentlyCreated,
-                'updated' => ! $product->wasRecentlyCreated && $product->wasChanged(),
+                'updated' => ! $product->wasRecentlyCreated && $this->changedBeyondLookupStamp($product),
             ];
         }
 
@@ -135,6 +136,18 @@ class ImportReferenceResolver
             'created' => false,
             'updated' => false,
         ];
+    }
+
+    /**
+     * Whether the save changed anything but the record that a source looked the
+     * Product up. A stamp alone is bookkeeping, not an update to report.
+     */
+    private function changedBeyondLookupStamp(Product $product): bool
+    {
+        return array_diff_key($product->getChanges(), array_flip([
+            'identifiers_checked_at',
+            $product->getUpdatedAtColumn(),
+        ])) !== [];
     }
 
     /**

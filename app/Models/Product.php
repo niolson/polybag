@@ -8,11 +8,13 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 use Laravel\Scout\Attributes\SearchUsingPrefix;
 use Laravel\Scout\Searchable;
 
 /**
  * @property HazmatClass|null $hazmat_class
+ * @property Carbon|null $identifiers_checked_at
  */
 class Product extends Model
 {
@@ -30,6 +32,7 @@ class Product extends Model
         'country_of_origin',
         'manufacturer_part_number',
         'gtin',
+        'identifiers_checked_at',
         'active',
         'contains_alcohol',
         'is_media',
@@ -45,6 +48,7 @@ class Product extends Model
             'active' => 'boolean',
             'contains_alcohol' => 'boolean',
             'is_media' => 'boolean',
+            'identifiers_checked_at' => 'datetime',
             'hazmat_class' => HazmatClass::class,
         ];
     }

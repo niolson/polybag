@@ -43,8 +43,16 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
     /** @var array<string, array> Cached order data keyed by source record ID */
     private array $orderCache = [];
 
-    /** @var array<string, string> Catalog barcode keyed by ASIN */
-    private array $catalogBarcodes = [];
+    /**
+     * What the catalog answered, keyed by ASIN. An ASIN is present only when its
+     * lookup succeeded, whether or not the catalog held anything for it.
+     *
+     * @var array<string, array{barcode: string|null, part_number: string|null}>
+     */
+    private array $catalogIdentifiers = [];
+
+    /** When this import's catalog lookup ran, stamped on the Products it answered for. */
+    private ?string $catalogCheckedAt = null;
 
     private float $catalogRequestRate = 2.0;
 
@@ -53,6 +61,17 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
     private const CATALOG_IDENTIFIER_PRIORITY = ['UPC', 'EAN', 'GTIN', 'JAN', 'ISBN'];
 
     private const CATALOG_MAX_ATTEMPTS = 5;
+
+    /** ASINs per catalog request, which is also the page size: Amazon's default of 10 would page a full chunk. */
+    private const CATALOG_CHUNK_SIZE = 20;
+
+    /** A Product the catalog answered for within this many days is not looked up again. */
+    private const CATALOG_RECHECK_DAYS = 30;
+
+    private const PART_NUMBER_MAX_LENGTH = 100;
+
+    /** Values Amazon carries in `partNumber` or `modelNumber` that name no part. */
+    private const PART_NUMBER_PLACEHOLDERS = ['n/a', 'na', 'none', 'not applicable', 'does not apply', 'unknown', 'generic'];
 
     private const SEARCH_ORDERS_PAGE_SIZE = 100;
 
@@ -124,7 +143,8 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
     public function fetchShipments(): Collection
     {
         $this->orderCache = [];
-        $this->catalogBarcodes = [];
+        $this->catalogIdentifiers = [];
+        $this->catalogCheckedAt = null;
         $this->catalogRequestRate = 2.0;
         $this->hasSentCatalogRequest = false;
         $rawOrders = [];
@@ -223,16 +243,19 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
             ]);
         }
 
-        // Barcodes come from the catalog, not the order, and only for products
-        // that do not have one yet — a packer scans the product, and a product
-        // imported without a barcode cannot be scanned. Every import does this,
-        // not just the historical one: the first live Buy Shipping order arrived
-        // through the scheduled import with no barcode and had to be packed by
-        // hand. The lookup is skipped for products already carrying a barcode,
-        // so a scheduled run over open orders costs a catalog call only for
-        // what is new; the sandbox catalog has nothing to say either way.
-        if (! $sandbox) {
-            $this->catalogBarcodes = $this->fetchCatalogBarcodes($this->asinsNeedingBarcodes($rawOrders), $marketplaceId);
+        // Barcodes and part numbers come from the catalog, not the order, and
+        // only for products missing one — a packer scans the barcode, and an EU
+        // consumer label is refused without a part number. Every import does
+        // this, not just the historical one: the first live Buy Shipping order
+        // arrived through the scheduled import with no barcode and had to be
+        // packed by hand. Products already complete, or checked recently, are
+        // skipped, so a scheduled run over open orders costs a catalog call only
+        // for what is new. With product updates off nothing the lookup found
+        // could be written, so it is not made; the sandbox catalog has nothing
+        // to say either way.
+        if (! $sandbox && config('shipment-import.behavior.auto_update_products', true)) {
+            $this->catalogCheckedAt = now()->toDateTimeString();
+            $this->catalogIdentifiers = $this->fetchCatalogIdentifiers($this->asinsNeedingCatalogLookup($rawOrders), $marketplaceId);
         }
 
         return collect($rawOrders)->map(function (array $order): array {
@@ -629,6 +652,7 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
         $itemTotal = $this->sumItemProceeds($item);
         $unitPrice = $qtyOrdered > 0 ? $itemTotal / $qtyOrdered : 0;
         $asin = $item['product']['asin'] ?? null;
+        $catalog = is_string($asin) ? ($this->catalogIdentifiers[$asin] ?? null) : null;
 
         return [
             'sku' => $item['product']['sellerSku'] ?? null,
@@ -636,58 +660,68 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
             'source_item_id' => $item['orderItemId'] ?? null,
             'quantity' => $qtyRemaining,
             'value' => round($unitPrice, 2),
-            'barcode' => is_string($asin) ? ($this->catalogBarcodes[$asin] ?? null) : null,
-            '_fill_only' => ['barcode'],
+            'barcode' => $catalog['barcode'] ?? null,
+            'manufacturer_part_number' => $catalog['part_number'] ?? null,
+            'identifiers_checked_at' => $catalog === null ? null : $this->catalogCheckedAt,
+            '_fill_only' => ['barcode', 'manufacturer_part_number'],
             'weight' => null,
         ];
     }
 
     /**
-     * The ASINs in these orders for which some product has no barcode on file.
+     * The ASINs in these orders the catalog should be asked about: those where
+     * some SKU has no Product yet, or a Product missing its barcode or part
+     * number that the catalog has not answered for within the recheck window.
      *
      * Products are filed by seller SKU (`ImportReferenceResolver::productIdFor()`),
      * and several SKUs can list under one ASIN, so an ASIN is looked up when
-     * *any* of its SKUs lacks a barcode — one SKU already carrying the barcode
-     * must not hide the lookup from another. An item with no SKU can never be
-     * matched to a product, so its ASIN is looked up regardless.
+     * *any* of its SKUs needs it — one complete SKU must not hide the lookup
+     * from another. An item with no SKU never reaches a Product, so nothing the
+     * lookup found could be filled or stamped, and it does not count.
      *
      * @param  array<int, array<string, mixed>>  $orders
      * @return Collection<int, string>
      */
-    private function asinsNeedingBarcodes(array $orders): Collection
+    private function asinsNeedingCatalogLookup(array $orders): Collection
     {
-        /** @var array<string, array<int, string|null>> $skusByAsin */
+        /** @var array<string, list<string>> $skusByAsin */
         $skusByAsin = [];
 
         foreach ($orders as $order) {
             foreach ($order['orderItems'] ?? [] as $item) {
                 $asin = is_array($item) ? ($item['product']['asin'] ?? null) : null;
+                $sku = is_array($item) ? ($item['product']['sellerSku'] ?? null) : null;
 
-                if (! is_string($asin) || $asin === '') {
+                if (! is_string($asin) || $asin === '' || ! is_string($sku) || $sku === '') {
                     continue;
                 }
 
-                $sku = is_string($item['product']['sellerSku'] ?? null) ? $item['product']['sellerSku'] : null;
                 $skusByAsin[$asin] = array_values(array_unique([...($skusByAsin[$asin] ?? []), $sku]));
             }
         }
 
-        $skus = collect($skusByAsin)->flatten()->filter()->unique()->values();
+        if ($skusByAsin === []) {
+            return collect();
+        }
 
-        $skusWithBarcodes = $skus->isEmpty()
-            ? collect()
-            : Product::query()
-                ->where('client_id', $this->importClientId())
-                ->whereIn('sku', $skus)
-                ->whereNotNull('barcode')
-                ->where('barcode', '!=', '')
-                ->pluck('sku');
+        $recheckBefore = now()->subDays(self::CATALOG_RECHECK_DAYS);
+
+        $skusNotNeedingLookup = Product::query()
+            ->where('client_id', $this->importClientId())
+            ->whereIn('sku', collect($skusByAsin)->flatten()->unique()->values())
+            ->where(fn ($query) => $query
+                ->where(fn ($complete) => $complete
+                    ->whereNotNull('barcode')->where('barcode', '!=', '')
+                    ->whereNotNull('manufacturer_part_number')->where('manufacturer_part_number', '!=', ''))
+                ->orWhere('identifiers_checked_at', '>=', $recheckBefore))
+            ->pluck('sku');
 
         return collect($skusByAsin)
             ->filter(fn (array $skus): bool => collect($skus)->contains(
-                fn (?string $sku): bool => $sku === null || ! $skusWithBarcodes->contains($sku)
+                fn (string $sku): bool => ! $skusNotNeedingLookup->contains($sku)
             ))
             ->keys()
+            ->map(fn (int|string $asin): string => (string) $asin)
             ->values();
     }
 
@@ -704,20 +738,24 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
     }
 
     /**
+     * Ask the catalog for each ASIN's barcode and part number. Every ASIN in a
+     * chunk that succeeded gets an entry, empty or not; a failed chunk gets none.
+     *
      * @param  Collection<int, string>  $asins
-     * @return array<string, string>
+     * @return array<string, array{barcode: string|null, part_number: string|null}>
      */
-    private function fetchCatalogBarcodes(Collection $asins, string $marketplaceId): array
+    private function fetchCatalogIdentifiers(Collection $asins, string $marketplaceId): array
     {
-        $barcodes = [];
+        $identifiers = [];
 
-        foreach ($asins->chunk(20) as $asinChunk) {
+        foreach ($asins->chunk(self::CATALOG_CHUNK_SIZE) as $asinChunk) {
             try {
                 $response = $this->sendCatalogRequest(new SearchCatalogItems([
                     'marketplaceIds' => $marketplaceId,
                     'identifiersType' => 'ASIN',
                     'identifiers' => $asinChunk->implode(','),
-                    'includedData' => 'identifiers',
+                    'includedData' => 'identifiers,summaries',
+                    'pageSize' => self::CATALOG_CHUNK_SIZE,
                 ]));
 
                 if ($response->failed()) {
@@ -726,24 +764,38 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
                     continue;
                 }
 
+                // An ASIN absent from a complete answer is one the catalog has
+                // nothing for, and is recorded as checked. If Amazon paged the
+                // answer anyway, an absent ASIN may be on a page not read, so
+                // only the ASINs returned count.
+                $chunkIdentifiers = $response->json('pagination.nextToken') === null
+                    ? $asinChunk->mapWithKeys(fn (string $asin): array => [$asin => ['barcode' => null, 'part_number' => null]])->all()
+                    : [];
+
                 foreach ($response->json('items', []) as $catalogItem) {
                     if (! is_array($catalogItem)) {
                         continue;
                     }
 
                     $asin = $catalogItem['asin'] ?? null;
-                    $barcode = $this->preferredCatalogBarcode($catalogItem, $marketplaceId);
 
-                    if (is_string($asin) && $asin !== '' && $barcode !== null) {
-                        $barcodes[$asin] = $barcode;
+                    if (is_string($asin) && $asinChunk->contains($asin)) {
+                        $chunkIdentifiers[$asin] = [
+                            'barcode' => $this->preferredCatalogBarcode($catalogItem, $marketplaceId),
+                            'part_number' => $this->preferredCatalogPartNumber($catalogItem, $asin, $marketplaceId),
+                        ];
                     }
                 }
+
+                // Not spread: an all-digit ASIN (a book's ISBN-10) is an integer
+                // key, and unpacking would renumber it.
+                $identifiers = array_replace($identifiers, $chunkIdentifiers);
             } catch (Throwable $exception) {
                 $this->logCatalogLookupFailure($asinChunk->count(), $exception->getMessage());
             }
         }
 
-        return $barcodes;
+        return $identifiers;
     }
 
     private function sendCatalogRequest(SearchCatalogItems $request): Response
@@ -837,10 +889,61 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
         return null;
     }
 
+    /**
+     * The summary's `partNumber`, else its `modelNumber`, from the order's
+     * marketplace or failing that any other. A value that only repeats the
+     * ASIN or the brand, or is a placeholder, is no part number. One equal to
+     * the item's own GTIN is kept: a manufacturer may use the S-PID as the
+     * NS-PID.
+     *
+     * @param  array<string, mixed>  $catalogItem
+     */
+    private function preferredCatalogPartNumber(array $catalogItem, string $asin, string $marketplaceId): ?string
+    {
+        $summaries = collect($catalogItem['summaries'] ?? [])->filter(fn (mixed $summary): bool => is_array($summary));
+        $marketplaceSummaries = $summaries->where('marketplaceId', $marketplaceId);
+
+        foreach ([$marketplaceSummaries, $summaries->diffKeys($marketplaceSummaries)] as $group) {
+            foreach ($group as $summary) {
+                $brand = is_string($summary['brand'] ?? null) ? $summary['brand'] : null;
+
+                foreach (['partNumber', 'modelNumber'] as $field) {
+                    $partNumber = $this->usablePartNumber($summary[$field] ?? null, $asin, $brand);
+
+                    if ($partNumber !== null) {
+                        return $partNumber;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function usablePartNumber(mixed $value, string $asin, ?string $brand): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $value = trim(mb_substr(trim($value), 0, self::PART_NUMBER_MAX_LENGTH));
+        $normalized = mb_strtolower($value);
+
+        if ($value === ''
+            || $normalized === mb_strtolower($asin)
+            || ($brand !== null && $normalized === mb_strtolower(trim($brand)))
+            || in_array($normalized, self::PART_NUMBER_PLACEHOLDERS, true)
+            || preg_match('/^[-.0]+$/', $value) === 1) {
+            return null;
+        }
+
+        return $value;
+    }
+
     private function logCatalogLookupFailure(int $asinCount, string $error): void
     {
         Log::channel((string) config('shipment-import.logging.channel', 'shipment-import'))
-            ->warning('Amazon SP-API catalog barcode lookup failed; continuing order import without those barcodes', [
+            ->warning('Amazon SP-API catalog lookup failed; continuing order import without those barcodes and part numbers', [
                 'data_source_id' => $this->config['_data_source_id'] ?? null,
                 'asin_count' => $asinCount,
                 'error' => $error,
