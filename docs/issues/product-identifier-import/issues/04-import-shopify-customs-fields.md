@@ -1,6 +1,6 @@
 # Import part number, HS code and origin from Shopify
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -25,13 +25,21 @@ read, on `variant`:
 
 ```graphql
 inventoryItem { harmonizedSystemCode countryCodeOfOrigin }
+```
+
+plus exactly one part-number selection, chosen by the setting's owner:
+
+```graphql
+# owner: variant
 partNumber: metafield(namespace: $pnNamespace, key: $pnKey) { jsonValue }
+
+# owner: product
 product { partNumber: metafield(namespace: $pnNamespace, key: $pnKey) { jsonValue } }
 ```
 
-The metafield selections are present only when `settings.part_number_metafield` is set,
-with namespace and key passed as variables, never interpolated into the query. The
-product-level one is asked for only when the setting's owner is `product`.
+The part number is read only from the owner the setting names. There is no fallback to
+the other one. The selection is present only when `settings.part_number_metafield` is
+set, with namespace and key passed as variables, never interpolated into the query.
 
 The mapped item gains:
 
@@ -48,13 +56,33 @@ helper text from `03` is the documentation.
 
 ## Acceptance criteria
 
-- [ ] With the setting on a variant metafield, the imported Product gets its value; on a
-      product metafield, the same
-- [ ] A list metafield yields its first entry; a value over 100 characters is cut
-- [ ] With no setting, the query carries no metafield selection and no variables for it
-- [ ] HS code and origin import from the inventory item, and a blank one leaves a
+- [x] With the setting on a variant metafield, the imported Product gets its value; on a
+      product metafield, the same. Either way, the query selects the metafield only on
+      that owner, never on the other
+- [x] A list metafield yields its first entry; a value over 100 characters is cut
+- [x] With no setting, the query carries no metafield selection and no variables for it
+- [x] HS code and origin import from the inventory item, and a blank one leaves a
       hand-entered value on the Product
-- [ ] A namespace or key containing quotes or braces is sent as a variable and cannot
-      alter the query
-- [ ] An existing open Shipment re-imported under `update_if_changed` updates its Product
+- [x] A namespace or key containing quotes or braces is sent as a variable and cannot
+      alter the query (see Comments: such a stored setting is not read at all)
+- [x] An existing open Shipment re-imported under `update_if_changed` updates its Product
       once, and the goods fingerprint is unchanged
+
+## Comments
+
+**2026-10-05 — done.** Both line-item queries carry `{{partNumberVariables}}` and
+`{{partNumberSelection}}` placeholders that `ShopifySource::lineItemQuery()` fills from the
+setting: `inventoryItem` always, and the part-number metafield on the named owner only.
+Namespace and key go out through `lineItemVariables()`. The mapper reads only the owner
+the setting names, takes a list's first entry, reads an integer metafield as text, and cuts
+at 100 characters. Blank values become null, so `productIdFor()` leaves the Product's own
+value alone.
+
+One difference from the text above: the setting is read through
+`ShopifyMetafieldReference::fromSetting()`, which applies the same `namespace.key` pattern
+as the form. A stored namespace or key with quotes or braces could not have been saved
+through the form. If one reaches the database anyway, it is ignored and the import
+requests no part number, rather than being sent as a variable. A valid namespace or key
+never appears in the query text.
+
+Tests: `tests/Feature/ShopifyCustomsFieldsImportTest.php`.
