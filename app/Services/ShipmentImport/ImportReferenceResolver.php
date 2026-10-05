@@ -111,8 +111,10 @@ class ImportReferenceResolver
                 'sku' => $sku,
             ]);
 
-            if (($itemData['_fill_missing_barcode_only'] ?? false) && filled($product->barcode)) {
-                unset($updateData['barcode']);
+            foreach ($this->fillOnlyFieldsFrom($itemData) as $field) {
+                if (filled($product->getAttribute($field))) {
+                    unset($updateData[$field]);
+                }
             }
 
             $product->fill(array_merge($updateData, ['active' => true]))->save();
@@ -133,6 +135,20 @@ class ImportReferenceResolver
             'created' => false,
             'updated' => false,
         ];
+    }
+
+    /**
+     * The product fields a source asks to write only when the Product has no value yet,
+     * so its data fills gaps without replacing what someone entered by hand.
+     *
+     * @param  array<string, mixed>  $itemData
+     * @return list<string>
+     */
+    private function fillOnlyFieldsFrom(array $itemData): array
+    {
+        $fields = $itemData['_fill_only'] ?? [];
+
+        return is_array($fields) ? array_values(array_filter($fields, is_string(...))) : [];
     }
 
     /**

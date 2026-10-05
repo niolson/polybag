@@ -1,6 +1,6 @@
 # Fill-only import fields
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -28,8 +28,8 @@ behaves as today.
 
 ## Acceptance criteria
 
-- [ ] `_fill_only` naming `barcode` keeps an existing barcode and fills a blank one,
+- [x] `_fill_only` naming `barcode` keeps an existing barcode and fills a blank one,
       matching today's `_fill_missing_barcode_only` tests, which move over
-- [ ] `_fill_only` naming `manufacturer_part_number` keeps an existing part number and
+- [x] `_fill_only` naming `manufacturer_part_number` keeps an existing part number and
       fills a blank one, while an unlisted field in the same row (`name`) still overwrites
-- [ ] `_fill_missing_barcode_only` no longer appears in `app/` or `tests/`
+- [x] `_fill_missing_barcode_only` no longer appears in `app/` or `tests/`

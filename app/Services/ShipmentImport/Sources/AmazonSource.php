@@ -637,7 +637,7 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
             'quantity' => $qtyRemaining,
             'value' => round($unitPrice, 2),
             'barcode' => is_string($asin) ? ($this->catalogBarcodes[$asin] ?? null) : null,
-            '_fill_missing_barcode_only' => true,
+            '_fill_only' => ['barcode'],
             'weight' => null,
         ];
     }
