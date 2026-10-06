@@ -2,7 +2,7 @@
 
 # Look up a scan as an external identifier, even when it begins with the prefix
 
-Status: needs-triage
+Status: wontfix
 Category: enhancement
 Created: 2026-09-29
 
@@ -17,9 +17,8 @@ be scanned:
 - An order reference such as `PB1001` cannot be opened from Scan & Pack.
 - A product whose only identifier is a SKU beginning with `PB` cannot be packed by scan.
 
-ADR-0007 decision 2 records this as an interim limitation until this issue ships. The
-workaround today is the Shipments list search, which is not intercepted, and packing
-such a product some other way.
+The workaround is the Shipments list search, which is not intercepted, and packing such a
+product some other way.
 
 ## Proposed behavior
 
@@ -48,3 +47,12 @@ Global search keeps no escape of its own; the list pages' searches are the way o
 - [ ] ADR-0007's interim-limitation paragraph is removed when this ships.
 
 ## Comments
+
+### 2026-10-06 — wontfix
+
+Closed without building. `SCAN_CODE_PREFIX` is set per install, so an install whose order
+references or SKUs begin with `PB` chooses a different prefix when it is set up
+(`docs/self-hosting.md`, "Barcode prefix"; `03` checks for collisions). An existing
+install that finds one changes the prefix and reprints, which costs a few days of
+reprinting rather than a permanent mode on Scan & Pack. Reopen if an install's identifiers
+leave no prefix free, which is unlikely with four characters to choose from.

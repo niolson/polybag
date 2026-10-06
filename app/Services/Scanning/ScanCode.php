@@ -30,14 +30,12 @@ final readonly class ScanCode
      */
     public static function parse(string $scan): ?self
     {
-        $normalized = strtoupper(trim($scan));
-        $prefix = self::prefix();
-
-        if (! str_starts_with($normalized, $prefix)) {
+        if (! self::claims($scan)) {
             return null;
         }
 
-        $rest = substr($normalized, strlen($prefix));
+        $normalized = strtoupper(trim($scan));
+        $rest = substr($normalized, strlen(self::prefix()));
 
         foreach (ScanCodeType::cases() as $type) {
             if (! str_starts_with($rest, $type->value)) {
@@ -60,6 +58,16 @@ final readonly class ScanCode
         }
 
         return new self($normalized, null);
+    }
+
+    /**
+     * Whether a scan of this text would be read as a PolyBag code: it begins
+     * with the install's prefix, in any case. An operator-chosen code that does
+     * could never be scanned as itself (ADR-0007, decision 6).
+     */
+    public static function claims(string $text): bool
+    {
+        return str_starts_with(strtoupper(trim($text)), self::prefix());
     }
 
     /**

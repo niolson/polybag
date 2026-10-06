@@ -2,7 +2,7 @@
 
 # Reject box aliases that begin with the scan-code prefix
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Created: 2026-09-29
 
@@ -23,9 +23,21 @@ the box can never be scanned by that alias. Nothing stops an operator creating o
 
 ## Acceptance
 
-- [ ] Creating or editing a box with alias `PB12` (default prefix) fails validation;
+- [x] Creating or editing a box with alias `PB12` (default prefix) fails validation;
       `pb12` too.
-- [ ] Other letter-and-digit aliases (`A1`, `S12`) are still accepted.
-- [ ] A test covers a non-default prefix.
+- [x] Other letter-and-digit aliases (`A1`, `S12`) are still accepted.
+- [x] A test covers a non-default prefix.
 
 ## Comments
+
+### 2026-10-06 — done
+
+`ScanCode::claims()` says whether text begins with the prefix, in any case and ignoring
+surrounding whitespace, and `parse()` now uses it. `BoxSizeResource::codeOutsideScanPrefix()`
+is the rule on the Box Size form's `code` and on the Setup Wizard's box repeater; the
+message names the prefix. Tests: `ResourceCrudTest` (create and edit, default and
+configured prefix, near-misses such as `P1B`), `SetupWizardTest` (the box step refuses
+`PB12`/`pb12` and accepts `S12`), and `ScanCodeTest` for `claims()`.
+
+Existing aliases that already begin with the prefix are not surfaced here; `03`'s check
+command reports them, and is the place to look after changing the prefix.

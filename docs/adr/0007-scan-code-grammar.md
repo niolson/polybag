@@ -27,6 +27,9 @@ Revised again the same day after a second review:
 - The parser's boundaries are written down.
 - The restore limitation is stated without an absolute guarantee.
 
+Revised 2026-10-06: the explicit "look up as external identifier" mode on Scan & Pack
+(`scan-codes/01`) was dropped. The configurable prefix is the way out of a collision.
+
 ## Context
 
 A station has one barcode scanner. It is a USB device in keyboard mode: it types what it
@@ -121,13 +124,16 @@ added later cannot change what an existing code resolves to, since the whole pre
 namespace was reserved from the start.
 
 The price is that an external identifier which begins with the prefix cannot be scanned.
-The intended way out is an explicit "look up as external identifier" entry on Scan & Pack,
-not a change of prefix (`docs/issues/scan-codes/issues/01`). **Until it ships, this is an
-interim limitation:** an order reference beginning with the prefix cannot be opened by
-scanning or typing it into Scan & Pack; open it from the Shipments list, whose search is
-not intercepted. A product whose only identifier is a SKU beginning with the prefix cannot
-be packed by scan and must be packed some other way. Global search has the same limitation;
-the list pages' own searches are its way out.
+The way out is the prefix itself: an install chooses one that its order references, SKUs
+and box aliases do not begin with (`scan-codes/03`), and changes it if a collision turns
+up, at the cost of reprinting what was printed with the old one (`docs/self-hosting.md`).
+A collision that remains can be worked around: an order reference beginning with the
+prefix is opened from the Shipments list, whose search is not intercepted, and a product
+whose only identifier is such a SKU is packed some other way. Global search has the same
+limitation; the list pages' own searches are its way out. A one-shot "look up as external
+identifier" mode on Scan & Pack was considered and not built (`scan-codes/01`): the
+prefix already avoids the collision, so the mode would only cover an install that chose
+not to.
 
 External identifiers can be ambiguous. When an order reference matches several Shipments,
 Scan & Pack lists them with client, connection, status and recipient, and the packer
@@ -212,12 +218,12 @@ reference on a slip), so a person can type it.
 ### 6. Operator-chosen codes may not use the prefix
 
 A box alias beginning with the install's prefix would be read as a PolyBag code and could
-never be scanned as a box. Box size validation rejects it (`scan-codes/02`; until then an
-operator must avoid such an alias, and none of the seeded aliases begins with a letter).
+never be scanned as a box. Box size validation rejects it, on the Box Size form and the
+Setup Wizard's box step (`scan-codes/02`). None of the seeded aliases begins with a letter.
 Products are not validated: a SKU is imported, not chosen here, and a product without a
-UPC may have nothing else to scan. Such collisions are handled by the explicit external
-lookup (decision 2, with its interim limitation), and an install chooses its prefix after
-checking what its existing identifiers begin with (`scan-codes/03`).
+UPC may have nothing else to scan. Such collisions are avoided by the choice of prefix: an
+install checks what its existing identifiers begin with (`scan-codes/03`) and picks a
+prefix none of them do (decision 2).
 
 ## Foreseen, not decided
 
@@ -305,5 +311,6 @@ never as a different Shipment, except after a restore (decision 5).
 5. Commands renamed, and Print Command Barcodes reprinted. The last Label is remembered
    by Label ID.
 6. Box Size codes on the Pack page and the box barcode sheet.
-7. Tracked in `docs/issues/scan-codes/`: the explicit external lookup (`01`), box alias
-   validation (`02`), the prefix check (`03`), and Box Size codes in global search (`04`).
+7. Box alias validation (`scan-codes/02`).
+8. Tracked in `docs/issues/scan-codes/`: the prefix check (`03`) and Box Size codes in
+   global search (`04`). The explicit external lookup (`01`) is `wontfix`.

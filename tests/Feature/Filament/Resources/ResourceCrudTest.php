@@ -118,6 +118,60 @@ it('can create a BoxSize that is carrier-supplied packaging', function (): void 
     expect(BoxSize::where('code', 'MFRB')->sole()->carrier_packaging)->toBe(CarrierPackaging::UspsMediumFlatRateBox);
 });
 
+it('refuses a BoxSize code that begins with the scan-code prefix', function (string $prefix, string $code): void {
+    config(['app.scan_code_prefix' => $prefix]);
+
+    Livewire::test(CreateBoxSize::class)
+        ->fillForm([
+            'label' => 'Small Box',
+            'code' => $code,
+            'type' => BoxSizeType::BOX->value,
+            'height' => 6,
+            'width' => 8,
+            'length' => 10,
+            'max_weight' => 25,
+            'empty_weight' => 0.5,
+        ])
+        ->call('create')
+        ->assertHasFormErrors(['code']);
+
+    expect(BoxSize::where('code', $code)->exists())->toBeFalse();
+})->with([
+    'the default prefix' => ['PB', 'PB12'],
+    'the default prefix in lower case' => ['PB', 'pb12'],
+    'a configured prefix' => ['ZQ9', 'zq9-large'],
+]);
+
+it('accepts a BoxSize code that only resembles the scan-code prefix', function (string $code): void {
+    config(['app.scan_code_prefix' => 'PB']);
+
+    Livewire::test(CreateBoxSize::class)
+        ->fillForm([
+            'label' => 'Small Box',
+            'code' => $code,
+            'type' => BoxSizeType::BOX->value,
+            'height' => 6,
+            'width' => 8,
+            'length' => 10,
+            'max_weight' => 25,
+            'empty_weight' => 0.5,
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+})->with(['A1', 'S12', 'P1B', '01']);
+
+it('refuses renaming a BoxSize to a code that begins with the scan-code prefix', function (): void {
+    config(['app.scan_code_prefix' => 'PB']);
+    $record = BoxSize::factory()->create(['code' => 'A1']);
+
+    Livewire::test(EditBoxSize::class, ['record' => $record->id])
+        ->fillForm(['code' => 'PBX'])
+        ->call('save')
+        ->assertHasFormErrors(['code']);
+
+    expect($record->refresh()->code)->toBe('A1');
+});
+
 it('can edit a BoxSize between carrier-supplied packaging and its own', function (): void {
     $record = BoxSize::factory()->create();
 

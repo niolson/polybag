@@ -6,6 +6,7 @@ use App\Enums\AmazonMarketplace;
 use App\Enums\BoxSizeType;
 use App\Enums\CarrierPackaging;
 use App\Enums\Role;
+use App\Filament\Resources\BoxSizeResource;
 use App\Filament\Resources\CarrierAccounts\CarrierAccountResource;
 use App\Filament\Resources\DataSources\DataSourceResource;
 use App\Filament\Support\AddressForm;
@@ -247,7 +248,8 @@ class SetupWizard extends Page
                             ->maxLength(255),
                         Forms\Components\TextInput::make('code')
                             ->required()
-                            ->maxLength(255),
+                            ->maxLength(255)
+                            ->rule(BoxSizeResource::codeOutsideScanPrefix(...)),
                         Forms\Components\Select::make('type')
                             ->options(BoxSizeType::class)
                             ->required()

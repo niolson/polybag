@@ -63,6 +63,16 @@ it('uses the install\'s configured prefix', function (): void {
         ->and(ScanCode::parse('PBS216'))->toBeNull();
 });
 
+it('says whether text would be read as a PolyBag code', function (string $text, bool $claimed): void {
+    expect(ScanCode::claims($text))->toBe($claimed);
+})->with([
+    'a code' => ['PBS216', true],
+    'any case, with whitespace' => ['  pbx ', true],
+    'the prefix alone' => ['PB', true],
+    'a letter of the prefix' => ['P1', false],
+    'a box alias' => ['01', false],
+]);
+
 it('refuses a prefix that is not a letter then up to three letters or digits', function (string $prefix): void {
     config(['app.scan_code_prefix' => $prefix]);
 
