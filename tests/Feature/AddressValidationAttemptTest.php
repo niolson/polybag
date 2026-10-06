@@ -466,25 +466,25 @@ it('does not count a scheduled run in which the validators were unavailable', fu
 });
 
 it('logs a Shipment once it uses its last scheduled attempt', function (): void {
+    $shipment = Shipment::factory()->create([
+        'country' => 'US',
+        'validation_attempts' => ValidateShipmentsCommand::MAX_SCHEDULED_ATTEMPTS - 1,
+    ]);
+
     Log::spy();
     Log::shouldReceive('channel')->andReturnSelf();
+    Log::shouldReceive('warning')
+        ->withArgs(fn (string $message, array $context): bool => str_contains($message, 'scheduled address validation limit') && $context['shipment_id'] === $shipment->id)
+        ->once();
 
     Saloon::fake([
         '*oauth*' => uspsToken(),
         Address::class => uspsNotFound('There is no match for the address requested.'),
     ]);
 
-    $shipment = Shipment::factory()->create([
-        'country' => 'US',
-        'validation_attempts' => ValidateShipmentsCommand::MAX_SCHEDULED_ATTEMPTS - 1,
-    ]);
-
     $this->artisan('shipments:validate')->assertSuccessful();
 
     expect($shipment->fresh()->validation_attempts)->toBe(ValidateShipmentsCommand::MAX_SCHEDULED_ATTEMPTS);
-    Log::shouldHaveReceived('warning')
-        ->withArgs(fn (string $message, array $context): bool => str_contains($message, 'scheduled address validation limit') && $context['shipment_id'] === $shipment->id)
-        ->once();
 });
 
 it('leaves a Shipment at the limit to manual validation, even after its address changes', function (): void {
