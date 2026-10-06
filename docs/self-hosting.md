@@ -275,40 +275,26 @@ PolyBag does not implement that workflow yet. Connecting an Amazon account and c
 Amazon Shipping onboarding therefore does not currently make Amazon Shipping appear for
 Shopify, database-imported, manual, or other non-Amazon Shipments.
 
-## Barcode prefix
+## Barcode scanners
 
-Every barcode PolyBag prints for scanning begins with `SCAN_CODE_PREFIX`: pack slips
-(`PBS216` is Shipment 216), box size sheets (`PBB3`) and the command sheet (`PBCSHIP`).
-It defaults to `PB`. A prefix is a letter followed by up to three letters or digits, and
-case does not matter; anything else stops the app with an error. ADR-0007
+Every barcode PolyBag prints for scanning begins with `%`: pack slips (`%S216` is
+Shipment 216), box size sheets (`%B3`) and the command sheet (`%CSHIP`). A scan that
+begins with `%` is always read as a PolyBag code, never as an order reference, box code,
+SKU or UPC. Nothing needs configuring for this. ADR-0007
 (`docs/adr/0007-scan-code-grammar.md`) explains the format.
 
-### Choosing one
+### Set each scanner's keyboard country
 
-Set it when you set up the install, before anything is printed. A scan that begins with
-the prefix is always read as a PolyBag code, never as an order reference, box code, SKU
-or UPC, so choose a prefix that none of these begin with:
+A USB scanner in keyboard mode types what it reads by sending key positions for the
+keyboard country it is set to, usually US. If the workstation uses another layout, set
+the scanner to the same country, from the programming barcodes in its manual. Otherwise
+it types the wrong characters, and not only in PolyBag's codes: on a German layout a SKU
+with a Y or Z arrives with the two swapped, and on a French one every UPC arrives without
+its digits. Check a station by scanning a product barcode into a text editor and
+comparing it with the digits printed under it.
 
-- order references, as your connections import them
-- product SKUs, above all for products without a UPC, whose SKU is the only thing to scan
-- box size codes you have chosen
-
-Search the Shipments, Products and Box Sizes lists for the prefix you have in mind. A
-command that does this check is planned (`docs/issues/scan-codes/issues/03`).
-
-### Changing it later
-
-Every barcode printed with the old prefix stops working at once; PolyBag does not read
-both. An old code is then treated as an ordinary order reference or product and usually
-finds nothing. To switch:
-
-1. Set `SCAN_CODE_PREFIX` in `.env`, run `php artisan config:clear` in the `app`
-   container, and restart the stack.
-2. Reprint the command sheet (Print Command Barcodes) and the box sheets (Print Box Size
-   Barcodes) for every station.
-3. Reprint the pack slips of Shipments still waiting to be packed, from Print Pack Slips.
-
-A slip that is missed can still be opened from the Shipments list by its order reference.
+A SKU or order reference that begins with `%` cannot be scanned, since it is read as a
+PolyBag code. Open such an order from the Shipments list, whose search reads it as text.
 
 ## Upgrading
 

@@ -89,7 +89,6 @@ it('returns the pack slips view', function (): void {
 });
 
 it('encodes each pack slip barcode as the shipment\'s PolyBag code', function (): void {
-    config(['app.scan_code_prefix' => 'PB']);
     $this->actingAs($this->user);
 
     $shipment = Shipment::factory()->create([
@@ -101,10 +100,10 @@ it('encodes each pack slip barcode as the shipment\'s PolyBag code', function ()
 
     $this->get(route('pick-batches.pack-slips', $batch))
         ->assertOk()
-        ->assertSee($generator->getBarcode("PBS{$shipment->id}", BarcodeGeneratorSVG::TYPE_CODE_128, 2, 30), escape: false)
+        ->assertSee($generator->getBarcode("%S{$shipment->id}", BarcodeGeneratorSVG::TYPE_CODE_128, 2, 30), escape: false)
         ->assertDontSee($generator->getBarcode('#1247', BarcodeGeneratorSVG::TYPE_CODE_128, 2, 30), escape: false)
         ->assertSee('#1247')
-        ->assertSee("PBS{$shipment->id}");
+        ->assertSee("%S{$shipment->id}");
 });
 
 it('shows tote codes on pack slips', function (): void {

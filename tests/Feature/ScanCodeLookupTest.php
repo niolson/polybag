@@ -12,7 +12,6 @@ use App\Services\Scanning\ShipmentReferenceResolver;
 use Filament\GlobalSearch\GlobalSearchResult;
 
 beforeEach(function (): void {
-    config(['app.scan_code_prefix' => 'PB']);
     $this->actingAs(User::factory()->manager()->create());
 });
 
@@ -39,7 +38,7 @@ it('resolves an order reference to every shipment sharing it', function (): void
 it('finds exactly the shipment a code names in global search', function (): void {
     $shipment = Shipment::factory()->create(['shipment_reference' => '#1247']);
 
-    expect(scanSearch("PBS{$shipment->id}"))->toBe([
+    expect(scanSearch("%S{$shipment->id}"))->toBe([
         ShipmentResource::getPluralModelLabel() => [ShipmentResource::getUrl('view', ['record' => $shipment])],
     ]);
 });
@@ -47,7 +46,7 @@ it('finds exactly the shipment a code names in global search', function (): void
 it('finds exactly the package a code names in global search', function (): void {
     $package = Package::factory()->create(['status' => PackageStatus::Unshipped]);
 
-    expect(scanSearch("PBP{$package->id}"))->toBe([
+    expect(scanSearch("%P{$package->id}"))->toBe([
         PackageResource::getPluralModelLabel() => [PackageResource::getUrl('view', ['record' => $package])],
     ]);
 });
@@ -55,10 +54,10 @@ it('finds exactly the package a code names in global search', function (): void 
 it('never answers a code with a record whose text merely matches it', function (): void {
     $deletedId = Shipment::factory()->create()->id;
     Shipment::query()->whereKey($deletedId)->delete();
-    Shipment::factory()->create(['shipment_reference' => "PBS{$deletedId}"]);
+    Shipment::factory()->create(['shipment_reference' => "%S{$deletedId}"]);
 
-    expect(scanSearch("PBS{$deletedId}"))->toBe([])
-        ->and(scanSearch('PBX12'))->toBe([]);
+    expect(scanSearch("%S{$deletedId}"))->toBe([])
+        ->and(scanSearch('%X12'))->toBe([]);
 });
 
 it('leaves any other search to Filament', function (): void {

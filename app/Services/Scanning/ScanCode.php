@@ -7,16 +7,22 @@ use App\Enums\ScanCommand;
 use App\Models\BoxSize;
 use App\Models\Package;
 use App\Models\Shipment;
-use InvalidArgumentException;
 
 /**
- * A PolyBag code: the install's prefix, a type token, then a body, as in
- * `PBS216` for Shipment 216 (ADR-0007). A scan with the prefix is always one:
- * if its token or body is not understood it is unrecognized, and it is never
- * looked up as anything else.
+ * A PolyBag code: `%`, a type token, then a body, as in `%S216` for
+ * Shipment 216 (ADR-0007). A scan beginning with `%` is always one: if its
+ * token or body is not understood it is unrecognized, and it is never looked
+ * up as anything else.
  */
 final readonly class ScanCode
 {
+    /**
+     * The prefix on every PolyBag code. `%` is the one character outside
+     * letters and digits that a scanner set to the wrong keyboard country
+     * mangles only where it also mangles digits (ADR-0007, decision 1).
+     */
+    public const string PREFIX = '%';
+
     private function __construct(
         public string $scan,
         public ?ScanCodeType $type,
@@ -35,7 +41,7 @@ final readonly class ScanCode
         }
 
         $normalized = strtoupper(trim($scan));
-        $rest = substr($normalized, strlen(self::prefix()));
+        $rest = substr($normalized, strlen(self::PREFIX));
 
         foreach (ScanCodeType::cases() as $type) {
             if (! str_starts_with($rest, $type->value)) {
@@ -62,49 +68,32 @@ final readonly class ScanCode
 
     /**
      * Whether a scan of this text would be read as a PolyBag code: it begins
-     * with the install's prefix, in any case. An operator-chosen code that does
-     * could never be scanned as itself (ADR-0007, decision 6).
+     * with `%`. An operator-chosen code that does could never be scanned as
+     * itself (ADR-0007, decision 6).
      */
     public static function claims(string $text): bool
     {
-        return str_starts_with(strtoupper(trim($text)), self::prefix());
-    }
-
-    /**
-     * The install's prefix, upper-cased. It starts with a letter: a leading
-     * digit would claim a whole range of numeric UPCs.
-     *
-     * @throws InvalidArgumentException when SCAN_CODE_PREFIX is not a letter then up to three letters or digits
-     */
-    public static function prefix(): string
-    {
-        $prefix = strtoupper((string) config('app.scan_code_prefix'));
-
-        if (preg_match('/^[A-Z][A-Z0-9]{0,3}$/', $prefix) !== 1) {
-            throw new InvalidArgumentException("SCAN_CODE_PREFIX must be a letter followed by up to three letters or digits; '{$prefix}' is not.");
-        }
-
-        return $prefix;
+        return str_starts_with(trim($text), self::PREFIX);
     }
 
     public static function forShipment(Shipment $shipment): string
     {
-        return self::prefix().ScanCodeType::Shipment->value.$shipment->getKey();
+        return self::PREFIX.ScanCodeType::Shipment->value.$shipment->getKey();
     }
 
     public static function forPackage(Package $package): string
     {
-        return self::prefix().ScanCodeType::Package->value.$package->getKey();
+        return self::PREFIX.ScanCodeType::Package->value.$package->getKey();
     }
 
     public static function forBoxSize(BoxSize $boxSize): string
     {
-        return self::prefix().ScanCodeType::BoxSize->value.$boxSize->getKey();
+        return self::PREFIX.ScanCodeType::BoxSize->value.$boxSize->getKey();
     }
 
     public static function forCommand(ScanCommand $command): string
     {
-        return self::prefix().ScanCodeType::Command->value.$command->value;
+        return self::PREFIX.ScanCodeType::Command->value.$command->value;
     }
 
     public function isRecognized(): bool

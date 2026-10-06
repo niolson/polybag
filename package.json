@@ -24,5 +24,10 @@
   "dependencies": {
     "jsbarcode": "^3.12.3",
     "qz-tray": "^2.3.0"
+  },
+  "overrides": {
+    "concurrently": {
+      "shell-quote": "^1.12.0"
+    }
   }
 }

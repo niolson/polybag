@@ -118,8 +118,7 @@ it('can create a BoxSize that is carrier-supplied packaging', function (): void 
     expect(BoxSize::where('code', 'MFRB')->sole()->carrier_packaging)->toBe(CarrierPackaging::UspsMediumFlatRateBox);
 });
 
-it('refuses a BoxSize code that begins with the scan-code prefix', function (string $prefix, string $code): void {
-    config(['app.scan_code_prefix' => $prefix]);
+it('refuses a BoxSize code that begins with the scan-code prefix', function (string $code): void {
 
     Livewire::test(CreateBoxSize::class)
         ->fillForm([
@@ -137,13 +136,12 @@ it('refuses a BoxSize code that begins with the scan-code prefix', function (str
 
     expect(BoxSize::where('code', $code)->exists())->toBeFalse();
 })->with([
-    'the default prefix' => ['PB', 'PB12'],
-    'the default prefix in lower case' => ['PB', 'pb12'],
-    'a configured prefix' => ['ZQ9', 'zq9-large'],
+    'a code' => ['%12'],
+    'a code in lower case' => ['%b12'],
+    'surrounding whitespace' => [' %12'],
 ]);
 
 it('accepts a BoxSize code that only resembles the scan-code prefix', function (string $code): void {
-    config(['app.scan_code_prefix' => 'PB']);
 
     Livewire::test(CreateBoxSize::class)
         ->fillForm([
@@ -158,14 +156,13 @@ it('accepts a BoxSize code that only resembles the scan-code prefix', function (
         ])
         ->call('create')
         ->assertHasNoFormErrors();
-})->with(['A1', 'S12', 'P1B', '01']);
+})->with(['A1', 'S12', 'PB12', 'A%', '01']);
 
 it('refuses renaming a BoxSize to a code that begins with the scan-code prefix', function (): void {
-    config(['app.scan_code_prefix' => 'PB']);
     $record = BoxSize::factory()->create(['code' => 'A1']);
 
     Livewire::test(EditBoxSize::class, ['record' => $record->id])
-        ->fillForm(['code' => 'PBX'])
+        ->fillForm(['code' => '%X'])
         ->call('save')
         ->assertHasFormErrors(['code']);
 

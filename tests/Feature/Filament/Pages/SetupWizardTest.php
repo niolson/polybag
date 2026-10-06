@@ -82,7 +82,6 @@ it('creates box sizes with and without carrier packaging', function (): void {
 });
 
 it('refuses a box code that begins with the scan-code prefix', function (string $code): void {
-    config(['app.scan_code_prefix' => 'PB']);
     setupWizardStep(3);
 
     Livewire::test(SetupWizard::class)
@@ -92,10 +91,9 @@ it('refuses a box code that begins with the scan-code prefix', function (string 
         ->assertHasFormErrors(['box_sizes.0.code']);
 
     expect(BoxSize::where('code', $code)->exists())->toBeFalse();
-})->with(['PB12', 'pb12']);
+})->with(['%12', '%b12']);
 
 it('accepts a box code that does not begin with the scan-code prefix', function (): void {
-    config(['app.scan_code_prefix' => 'PB']);
     setupWizardStep(3);
 
     Livewire::test(SetupWizard::class)

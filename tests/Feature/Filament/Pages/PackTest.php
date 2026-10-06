@@ -112,15 +112,19 @@ it('navigates to shipment by reference', function (): void {
 });
 
 describe('PolyBag codes', function (): void {
-    beforeEach(function (): void {
-        config(['app.scan_code_prefix' => 'PB']);
+    it('looks up a reference that begins with letters like a code as a reference', function (): void {
+        $shipment = Shipment::factory()->create(['shipment_reference' => 'PBS1001']);
+
+        Livewire::test(Pack::class)
+            ->call('navigateToShipment', 'PBS1001')
+            ->assertRedirect("/pack/{$shipment->id}");
     });
 
     it('opens the shipment on its pack slip', function (): void {
         $shipment = Shipment::factory()->create();
 
         Livewire::test(Pack::class)
-            ->call('navigateToShipment', "PBS{$shipment->id}")
+            ->call('navigateToShipment', "%S{$shipment->id}")
             ->assertRedirect("/pack/{$shipment->id}");
     });
 
@@ -129,11 +133,11 @@ describe('PolyBag codes', function (): void {
         $shipped = Package::factory()->shipped()->create();
 
         Livewire::test(Pack::class)
-            ->call('openScanCode', "PBP{$draft->id}")
+            ->call('openScanCode', "%P{$draft->id}")
             ->assertRedirect("/pack/{$draft->shipment_id}");
 
         Livewire::test(Pack::class)
-            ->call('openScanCode', "pbp{$shipped->id}")
+            ->call('openScanCode', "%p{$shipped->id}")
             ->assertRedirect(PackageResource::getUrl('view', ['record' => $shipped]));
     });
 
@@ -143,14 +147,14 @@ describe('PolyBag codes', function (): void {
         $second = Package::factory()->for($shipment)->create(['status' => PackageStatus::Unshipped]);
 
         Livewire::test(Pack::class)
-            ->call('openScanCode', "PBP{$second->id}")
+            ->call('openScanCode', "%P{$second->id}")
             ->assertNotified('Opened on Its Own Page')
             ->assertRedirect(PackageResource::getUrl('view', ['record' => $second]));
 
         Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
-            ->call('openScanCode', "PBP{$resumed->id}")
+            ->call('openScanCode', "%P{$resumed->id}")
             ->assertNotified('Already Open')
-            ->call('openScanCode', "PBP{$second->id}")
+            ->call('openScanCode', "%P{$second->id}")
             ->assertNotified('Another Package')
             ->assertNoRedirect();
     });
@@ -159,27 +163,27 @@ describe('PolyBag codes', function (): void {
         $box = BoxSize::factory()->create(['code' => 'A1']);
 
         Livewire::test(Pack::class)
-            ->call('openScanCode', "PBB0{$box->id}")
+            ->call('openScanCode', "%B0{$box->id}")
             ->assertNotified('No Shipment Loaded');
     });
 
     it('says not found for a deleted shipment, even when another has its code as a reference', function (): void {
         $deletedId = Shipment::factory()->create()->id;
         Shipment::query()->whereKey($deletedId)->delete();
-        Shipment::factory()->create(['shipment_reference' => "PBS{$deletedId}"]);
+        Shipment::factory()->create(['shipment_reference' => "%S{$deletedId}"]);
 
         Livewire::test(Pack::class)
-            ->call('navigateToShipment', "PBS{$deletedId}")
+            ->call('navigateToShipment', "%S{$deletedId}")
             ->assertNotified('Shipment Not Found')
             ->assertNoRedirect()
             ->assertSet('shipmentCandidates', []);
     });
 
     it('never looks up an unrecognized code as anything else', function (): void {
-        Shipment::factory()->create(['shipment_reference' => 'PBX12']);
+        Shipment::factory()->create(['shipment_reference' => '%X12']);
 
         Livewire::test(Pack::class)
-            ->call('navigateToShipment', 'PBX12')
+            ->call('navigateToShipment', '%X12')
             ->assertNotified('Unrecognized Code')
             ->assertNoRedirect();
     });
@@ -189,33 +193,33 @@ describe('PolyBag codes', function (): void {
         $other = Shipment::factory()->create(['shipment_reference' => '#2002']);
 
         Livewire::test(Pack::class, ['shipment_id' => $packing->id])
-            ->call('openScanCode', "PBS{$other->id}")
+            ->call('openScanCode', "%S{$other->id}")
             ->assertNotified('Another Shipment')
             ->assertNoRedirect()
-            ->call('openScanCode', "PBS{$packing->id}")
+            ->call('openScanCode', "%S{$packing->id}")
             ->assertNotified('Already Open')
             ->assertNoRedirect();
     });
 
     it('rejects an unknown command and a reserved action', function (): void {
         Livewire::test(Pack::class)
-            ->call('openScanCode', 'PBCSELFDESTRUCT')
+            ->call('openScanCode', '%CSELFDESTRUCT')
             ->assertNotified('Unknown Command')
-            ->call('openScanCode', 'PBM12')
+            ->call('openScanCode', '%M12')
             ->assertNotified('Not Available');
     });
 
     it('gives the browser every command\'s barcode', function (): void {
         Livewire::test(Pack::class)
-            ->assertSeeHtml('PBCSHIP')
-            ->assertSeeHtml('PBCZEROSCALE');
+            ->assertSeeHtml('%CSHIP')
+            ->assertSeeHtml('%CZEROSCALE');
 
         expect((new Pack)->scanCommandCodes())->toMatchArray([
-            'PBCSHIP' => 'SHIP',
-            'PBCREPRINTLAST' => 'REPRINTLAST',
-            'PBCVOIDLAST' => 'VOIDLAST',
-            'PBCZEROSCALE' => 'ZEROSCALE',
-            'PBCCLEARSHIPMENT' => 'CLEARSHIPMENT',
+            '%CSHIP' => 'SHIP',
+            '%CREPRINTLAST' => 'REPRINTLAST',
+            '%CVOIDLAST' => 'VOIDLAST',
+            '%CZEROSCALE' => 'ZEROSCALE',
+            '%CCLEARSHIPMENT' => 'CLEARSHIPMENT',
         ]);
     });
 });

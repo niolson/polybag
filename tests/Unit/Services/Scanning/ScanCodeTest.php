@@ -7,10 +7,6 @@ use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\Scanning\ScanCode;
 
-beforeEach(function (): void {
-    config(['app.scan_code_prefix' => 'PB']);
-});
-
 it('reads a PolyBag code as a type and a body', function (string $scan, ScanCodeType $type, ?int $id, ?string $name): void {
     $code = ScanCode::parse($scan);
 
@@ -18,14 +14,14 @@ it('reads a PolyBag code as a type and a body', function (string $scan, ScanCode
         ->and($code?->id)->toBe($id)
         ->and($code?->name)->toBe($name);
 })->with([
-    'shipment' => ['PBS216', ScanCodeType::Shipment, 216, null],
-    'package' => ['PBP229', ScanCodeType::Package, 229, null],
-    'box size' => ['PBB17', ScanCodeType::BoxSize, 17, null],
-    'command' => ['PBCSHIP', ScanCodeType::Command, null, 'SHIP'],
-    'operator action' => ['PBM12', ScanCodeType::Action, 12, null],
-    'lower case, as Caps Lock sends it' => ['pbs216', ScanCodeType::Shipment, 216, null],
-    'leading zeros' => ['PBS000216', ScanCodeType::Shipment, 216, null],
-    'surrounding whitespace' => ["  PBS216\n", ScanCodeType::Shipment, 216, null],
+    'shipment' => ['%S216', ScanCodeType::Shipment, 216, null],
+    'package' => ['%P229', ScanCodeType::Package, 229, null],
+    'box size' => ['%B17', ScanCodeType::BoxSize, 17, null],
+    'command' => ['%CSHIP', ScanCodeType::Command, null, 'SHIP'],
+    'operator action' => ['%M12', ScanCodeType::Action, 12, null],
+    'lower case, as Caps Lock sends it' => ['%s216', ScanCodeType::Shipment, 216, null],
+    'leading zeros' => ['%S000216', ScanCodeType::Shipment, 216, null],
+    'surrounding whitespace' => ["  %S216\n", ScanCodeType::Shipment, 216, null],
 ]);
 
 it('reads a scan without the prefix as an external identifier', function (string $scan): void {
@@ -36,6 +32,8 @@ it('reads a scan without the prefix as an external identifier', function (string
     'a bare letter code' => ['S216'],
     'an old command barcode' => ['*1'],
     'a box code' => ['01'],
+    'a code under the old letter prefix' => ['PBS216'],
+    'a SKU that begins with the old letter prefix' => ['PBJ100'],
 ]);
 
 it('reads the prefix with anything it does not understand as unrecognized, never as external', function (string $scan): void {
@@ -44,46 +42,24 @@ it('reads the prefix with anything it does not understand as unrecognized, never
     expect($code)->not->toBeNull()
         ->and($code?->isRecognized())->toBeFalse();
 })->with([
-    'an unknown type token' => ['PBX12'],
-    'a record with a word body' => ['PBSABC'],
-    'a command with digits' => ['PBC123'],
-    'a zero ID' => ['PBS0'],
-    'more digits than an ID holds' => ['PBS1234567890123456789'],
-    'the prefix alone' => ['PB'],
+    'an unknown type token' => ['%X12'],
+    'a record with a word body' => ['%SABC'],
+    'a command with digits' => ['%C123'],
+    'a zero ID' => ['%S0'],
+    'more digits than an ID holds' => ['%S1234567890123456789'],
+    'the prefix alone' => ['%'],
 ]);
-
-it('uses the install\'s configured prefix', function (): void {
-    config(['app.scan_code_prefix' => 'zq9']);
-
-    $shipment = new Shipment;
-    $shipment->id = 216;
-
-    expect(ScanCode::forShipment($shipment))->toBe('ZQ9S216')
-        ->and(ScanCode::parse('ZQ9S216')?->id)->toBe(216)
-        ->and(ScanCode::parse('PBS216'))->toBeNull();
-});
 
 it('says whether text would be read as a PolyBag code', function (string $text, bool $claimed): void {
     expect(ScanCode::claims($text))->toBe($claimed);
 })->with([
-    'a code' => ['PBS216', true],
-    'any case, with whitespace' => ['  pbx ', true],
-    'the prefix alone' => ['PB', true],
-    'a letter of the prefix' => ['P1', false],
+    'a code' => ['%S216', true],
+    'any case, with whitespace' => ['  %x ', true],
+    'the prefix alone' => ['%', true],
+    'the prefix inside the text' => ['A%1', false],
+    'the old letter prefix' => ['PBS216', false],
     'a box alias' => ['01', false],
 ]);
-
-it('refuses a prefix that is not a letter then up to three letters or digits', function (string $prefix): void {
-    config(['app.scan_code_prefix' => $prefix]);
-
-    ScanCode::prefix();
-})->with([
-    'empty' => [''],
-    'punctuation' => ['PB-'],
-    'too long' => ['TOOLONG'],
-    'a symbol' => ['*'],
-    'a leading digit, which would claim numeric UPCs' => ['1PB'],
-])->throws(InvalidArgumentException::class);
 
 it('spells codes that parse back to their records and commands', function (): void {
     $shipment = new Shipment;
@@ -93,9 +69,9 @@ it('spells codes that parse back to their records and commands', function (): vo
     $boxSize = new BoxSize;
     $boxSize->id = 17;
 
-    expect(ScanCode::forShipment($shipment))->toBe('PBS216')
-        ->and(ScanCode::forPackage($package))->toBe('PBP229')
-        ->and(ScanCode::forBoxSize($boxSize))->toBe('PBB17')
+    expect(ScanCode::forShipment($shipment))->toBe('%S216')
+        ->and(ScanCode::forPackage($package))->toBe('%P229')
+        ->and(ScanCode::forBoxSize($boxSize))->toBe('%B17')
         ->and(ScanCode::parse(ScanCode::forPackage($package))?->type)->toBe(ScanCodeType::Package);
 
     foreach (ScanCommand::cases() as $command) {

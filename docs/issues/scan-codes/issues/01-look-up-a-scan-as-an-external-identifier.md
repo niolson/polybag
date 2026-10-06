@@ -52,7 +52,14 @@ Global search keeps no escape of its own; the list pages' searches are the way o
 
 Closed without building. `SCAN_CODE_PREFIX` is set per install, so an install whose order
 references or SKUs begin with `PB` chooses a different prefix when it is set up
-(`docs/self-hosting.md`, "Barcode prefix"; `03` checks for collisions). An existing
+(`docs/self-hosting.md`, "Barcode prefix"; `03` reports a collision when it is scanned). An existing
 install that finds one changes the prefix and reprints, which costs a few days of
 reprinting rather than a permanent mode on Scan & Pack. Reopen if an install's identifiers
 leave no prefix free, which is unlikely with four characters to choose from.
+
+### 2026-10-06 — superseded by the fixed `%` prefix
+
+ADR-0007 now uses `%` on every install instead of a configurable letter prefix, so a
+`PB…` reference or SKU scans as itself. Only an identifier beginning with `%` is
+affected, and that is rare enough that the mode is still not worth building. The
+comment above describes the configurable prefix, which no longer exists.
