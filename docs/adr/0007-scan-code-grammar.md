@@ -370,6 +370,6 @@ different Shipment, except after a restore (decision 5).
    by Label ID.
 6. Box Size codes on the Pack page and the box barcode sheet.
 7. Box alias validation (`scan-codes/02`).
-8. Tracked in `docs/issues/scan-codes/`: Box Size codes in global search (`04`). The
-   explicit external lookup (`01`) is `wontfix`; the collision message on failed scans
-   (`03`) is superseded by the fixed prefix.
+8. Tracked in `docs/issues/archive/scan-codes/`: Box Size codes in global search (`04`)
+   and the explicit external lookup (`01`) are `wontfix`; the collision message on failed
+   scans (`03`) is superseded by the fixed prefix.
