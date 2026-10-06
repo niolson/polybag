@@ -103,7 +103,7 @@ class BoxSizeResource extends Resource
     }
 
     /**
-     * Rejects a box code beginning with the install's scan-code prefix: a scan
+     * Rejects a box code beginning with `%`, the scan-code prefix: a scan
      * of it would be read as a PolyBag code, never as this box (ADR-0007,
      * decision 6). Shared with the Setup Wizard's box step.
      */
@@ -111,7 +111,7 @@ class BoxSizeResource extends Resource
     {
         return function (string $attribute, mixed $value, Closure $fail): void {
             if (is_string($value) && ScanCode::claims($value)) {
-                $fail('A box code cannot begin with "'.ScanCode::prefix().'", the prefix of PolyBag\'s own barcodes.');
+                $fail('A box code cannot begin with "'.ScanCode::PREFIX.'", the prefix of PolyBag\'s own barcodes.');
             }
         };
     }

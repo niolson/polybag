@@ -31,7 +31,7 @@
             lastScaleWeight: null,
             input: '',
             hasShipment: {{ $shipment ? 'true' : 'false' }},
-            scanCodePrefix: @js(\App\Services\Scanning\ScanCode::prefix()),
+            scanCodePrefix: @js(\App\Services\Scanning\ScanCode::PREFIX),
             commandCodes: @js($this->scanCommandCodes()),
             pendingTransparencyKey: null,
             transparencyInput: '',

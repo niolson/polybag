@@ -203,7 +203,7 @@ it('runs the hardware zero command when its barcode is scanned on the pack page'
             ScaleUtils.zero = () => Promise.resolve(window.scaleZeroed = true);
 
             // As a scanner sends it: the command sheet's code, lower-cased as with Caps Lock.
-            pack.input = 'pbczeroscale';
+            pack.input = '%czeroscale';
             pack.handleScan();
             await new Promise((resolve) => setTimeout(resolve, 0));
 

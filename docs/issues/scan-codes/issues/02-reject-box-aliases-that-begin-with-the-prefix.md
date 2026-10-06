@@ -39,5 +39,11 @@ message names the prefix. Tests: `ResourceCrudTest` (create and edit, default an
 configured prefix, near-misses such as `P1B`), `SetupWizardTest` (the box step refuses
 `PB12`/`pb12` and accepts `S12`), and `ScanCodeTest` for `claims()`.
 
-Existing aliases that already begin with the prefix are not surfaced here; `03`'s check
-command reports them, and is the place to look after changing the prefix.
+Existing aliases that already begin with the prefix are not surfaced here.
+
+### 2026-10-06 — prefix fixed as `%`
+
+ADR-0007 replaced the configurable prefix with `%`. The rule is unchanged except that it
+now refuses a leading `%`, and `ScanCode::PREFIX` replaces `ScanCode::prefix()`. With
+the prefix fixed, no existing alias can start conflicting later, so nothing needs
+surfacing. The text above describes the configurable prefix.

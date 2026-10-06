@@ -72,7 +72,6 @@ it('prints the tote row only for a Shipment given a tote code', function (): voi
 });
 
 it('puts the scan code, reference and items on every slip', function (): void {
-    config(['app.scan_code_prefix' => 'PB']);
 
     $shipment = Shipment::factory()->create(['shipment_reference' => '#1247']);
     $product = Product::factory()->create(['sku' => 'SKU-RED', 'name' => 'Red Widget']);
@@ -80,7 +79,7 @@ it('puts the scan code, reference and items on every slip', function (): void {
 
     expect(renderPackSlips(PackSlipRun::forShipment($shipment->id)))
         ->toContain('#1247')
-        ->toContain("PBS{$shipment->id}")
+        ->toContain("%S{$shipment->id}")
         ->toContain('SKU-RED')
         ->toContain('Red Widget');
 });

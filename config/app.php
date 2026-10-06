@@ -121,14 +121,6 @@ return [
     'fake_carriers' => (bool) env('FAKE_CARRIERS', false),
 
     /*
-    | The prefix on every barcode PolyBag prints for scanning: pack slips,
-    | command sheets, box sizes (ADR-0007). A letter, then up to three letters
-    | or digits. Changing it invalidates every code already printed.
-    */
-
-    'scan_code_prefix' => env('SCAN_CODE_PREFIX', 'PB'),
-
-    /*
     |--------------------------------------------------------------------------
     | Instance Directory Cookie Domain
     |--------------------------------------------------------------------------

@@ -8,7 +8,7 @@ Created: 2026-09-29
 
 ## Problem
 
-The Box Size barcode sheet now prints `PBB<id>` codes (ADR-0007). Scanning one into
+The Box Size barcode sheet now prints `%B<id>` codes (ADR-0007). Scanning one into
 global search finds nothing, because `ScanCodeGlobalSearchProvider` resolves only
 Shipment and Package codes, and `BoxSizeResource` is not globally searchable. Shipment and
 Package codes open their record; a box code should too, for anyone who can view Box Sizes.
