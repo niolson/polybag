@@ -81,6 +81,33 @@ it('creates box sizes with and without carrier packaging', function (): void {
         ->and(BoxSize::where('code', 'CUBE')->sole()->carrier_packaging)->toBeNull();
 });
 
+it('refuses a box code that begins with the scan-code prefix', function (string $code): void {
+    config(['app.scan_code_prefix' => 'PB']);
+    setupWizardStep(3);
+
+    Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
+        ->set('data.box_sizes', [setupWizardBoxSize($code)])
+        ->goToNextWizardStep()
+        ->assertHasFormErrors(['box_sizes.0.code']);
+
+    expect(BoxSize::where('code', $code)->exists())->toBeFalse();
+})->with(['PB12', 'pb12']);
+
+it('accepts a box code that does not begin with the scan-code prefix', function (): void {
+    config(['app.scan_code_prefix' => 'PB']);
+    setupWizardStep(3);
+
+    Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
+        ->set('data.box_sizes', [setupWizardBoxSize('S12')])
+        ->goToNextWizardStep()
+        ->assertHasNoFormErrors()
+        ->assertWizardCurrentStep(4);
+
+    expect(BoxSize::where('code', 'S12')->exists())->toBeTrue();
+});
+
 it('prepopulates starter shipping methods when selected', function (): void {
     $this->seed(ReferenceDataSeeder::class);
 
@@ -410,6 +437,24 @@ it('summarizes both workflow answers', function (): void {
 function setupWizardStep(int $step): void
 {
     app(SettingsService::class)->set('setup_wizard_step', $step, 'integer', group: 'system');
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function setupWizardBoxSize(string $code): array
+{
+    return [
+        'label' => 'Small',
+        'code' => $code,
+        'type' => 'BOX',
+        'height' => 4,
+        'width' => 6,
+        'length' => 8,
+        'max_weight' => 20,
+        'empty_weight' => 0.2,
+        'carrier_packaging' => null,
+    ];
 }
 
 function invokePrivateMethod(object $instance, string $method): void

@@ -6,8 +6,10 @@ use App\Enums\BoxSizeType;
 use App\Enums\CarrierPackaging;
 use App\Filament\Resources\BoxSizeResource\Pages;
 use App\Models\BoxSize;
+use App\Services\Scanning\ScanCode;
 use App\Services\SettingsService;
 use BackedEnum;
+use Closure;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Resources\Resource;
@@ -36,7 +38,8 @@ class BoxSizeResource extends Resource
                         Forms\Components\TextInput::make('code')
                             ->required()
                             ->maxLength(255)
-                            ->unique(ignoreRecord: true),
+                            ->unique(ignoreRecord: true)
+                            ->rule(static::codeOutsideScanPrefix(...)),
                         Forms\Components\Select::make('type')
                             ->options(BoxSizeType::class)
                             ->required(),
@@ -97,6 +100,20 @@ class BoxSizeResource extends Resource
                             ->helperText('Packaging material cost charged per shipment using this box.'),
                     ]),
             ]);
+    }
+
+    /**
+     * Rejects a box code beginning with the install's scan-code prefix: a scan
+     * of it would be read as a PolyBag code, never as this box (ADR-0007,
+     * decision 6). Shared with the Setup Wizard's box step.
+     */
+    public static function codeOutsideScanPrefix(): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail): void {
+            if (is_string($value) && ScanCode::claims($value)) {
+                $fail('A box code cannot begin with "'.ScanCode::prefix().'", the prefix of PolyBag\'s own barcodes.');
+            }
+        };
     }
 
     public static function table(Table $table): Table
