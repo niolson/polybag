@@ -2,6 +2,7 @@
 
 use App\Contracts\DataSourceInterface;
 use App\DataTransferObjects\Shipping\RateRequest;
+use App\Enums\Deliverability;
 use App\Enums\Role;
 use App\Enums\ShipmentStatus;
 use App\Models\Channel;
@@ -1150,6 +1151,131 @@ it('updates an existing shipment when the source data changed', function (): voi
         ->and($result->shipmentsSkipped)->toBe(0);
 
     expect(Shipment::where('shipment_reference', 'ORD-EXIST-001')->value('address1'))->toBe('99 Changed Ave');
+});
+
+/**
+ * Mark the imported ORD-EXIST-001 as settled by a validator, as if the
+ * schedule had already checked it.
+ */
+function settleExistingShipment(): void
+{
+    Shipment::where('shipment_reference', 'ORD-EXIST-001')->update([
+        'checked' => true,
+        'deliverability' => Deliverability::Yes,
+        'validated_address1' => '12 ORIGINAL ST',
+        'validated_city' => 'AUSTIN',
+        'validated_postal_code' => '78701-1234',
+        'validation_attempted_at' => now()->subHour(),
+        'validation_attempts' => 1,
+    ]);
+}
+
+it('discards the validation result when a re-import changes the address', function (): void {
+    ShipmentImportService::forSource(fakeSource(collect([onExistingRow()])), $this->dataSource)->import();
+    settleExistingShipment();
+
+    ShipmentImportService::forSource(
+        fakeSource(collect([onExistingRow(['address1' => '99 Changed Ave'])])),
+        $this->dataSource,
+    )->import();
+
+    $shipment = Shipment::where('shipment_reference', 'ORD-EXIST-001')->first();
+    expect($shipment->address1)->toBe('99 Changed Ave')
+        ->and($shipment->checked)->toBeFalse()
+        ->and($shipment->deliverability)->toBe(Deliverability::NotChecked)
+        ->and($shipment->validated_address1)->toBeNull()
+        ->and($shipment->validated_postal_code)->toBeNull()
+        ->and($shipment->validation_attempted_at)->toBeNull()
+        ->and($shipment->validation_attempts)->toBe(1);
+});
+
+it('keeps the validation result when a re-import changes only the case or spacing of the address', function (): void {
+    ShipmentImportService::forSource(fakeSource(collect([onExistingRow()])), $this->dataSource)->import();
+    settleExistingShipment();
+
+    ShipmentImportService::forSource(
+        fakeSource(collect([onExistingRow(['address1' => '12  ORIGINAL st'])])),
+        $this->dataSource,
+    )->import();
+
+    $shipment = Shipment::where('shipment_reference', 'ORD-EXIST-001')->first();
+    expect($shipment->address1)->toBe('12  ORIGINAL st')
+        ->and($shipment->checked)->toBeTrue()
+        ->and($shipment->validated_address1)->toBe('12 ORIGINAL ST')
+        ->and($shipment->validation_attempted_at)->not->toBeNull();
+});
+
+it('keeps the validation result but clears the attempt when a re-import changes only the shipping method', function (): void {
+    $method = ShippingMethod::factory()->create();
+    ShippingMethodAlias::factory()->create(['reference' => 'ground', 'shipping_method_id' => $method->id]);
+
+    ShipmentImportService::forSource(fakeSource(collect([onExistingRow()])), $this->dataSource)->import();
+    settleExistingShipment();
+
+    ShipmentImportService::forSource(
+        fakeSource(collect([onExistingRow(['shipping_method_id' => 'ground'])])),
+        $this->dataSource,
+    )->import();
+
+    $shipment = Shipment::where('shipment_reference', 'ORD-EXIST-001')->first();
+    expect($shipment->shipping_method_id)->toBe($method->id)
+        ->and($shipment->checked)->toBeTrue()
+        ->and($shipment->validated_address1)->toBe('12 ORIGINAL ST')
+        ->and($shipment->validation_attempted_at)->toBeNull();
+});
+
+it('keeps the validation result when a re-import leaves the address and method alone', function (): void {
+    $this->dataSource->update(['settings' => ['on_existing' => 'update']]);
+
+    ShipmentImportService::forSource(fakeSource(collect([onExistingRow()])), $this->dataSource)->import();
+    settleExistingShipment();
+
+    $result = ShipmentImportService::forSource(
+        fakeSource(collect([onExistingRow(['first_name' => 'Morgan'])])),
+        $this->dataSource,
+    )->import();
+
+    $shipment = Shipment::where('shipment_reference', 'ORD-EXIST-001')->first();
+    expect($result->shipmentsUpdated)->toBe(1)
+        ->and($shipment->first_name)->toBe('Morgan')
+        ->and($shipment->checked)->toBeTrue()
+        ->and($shipment->validated_address1)->toBe('12 ORIGINAL ST')
+        ->and($shipment->validation_attempted_at)->not->toBeNull();
+});
+
+it('keeps the validator\'s reason when a re-import leaves the address alone', function (): void {
+    $this->dataSource->update(['settings' => ['on_existing' => 'update']]);
+
+    ShipmentImportService::forSource(fakeSource(collect([onExistingRow()])), $this->dataSource)->import();
+    Shipment::where('shipment_reference', 'ORD-EXIST-001')->update([
+        'deliverability' => Deliverability::No,
+        'validation_message' => 'The city in the request is missing or invalid.',
+        'validation_attempted_at' => now()->subHour(),
+    ]);
+
+    ShipmentImportService::forSource(
+        fakeSource(collect([onExistingRow(['first_name' => 'Morgan'])])),
+        $this->dataSource,
+    )->import();
+
+    $shipment = Shipment::where('shipment_reference', 'ORD-EXIST-001')->first();
+    expect($shipment->first_name)->toBe('Morgan')
+        ->and($shipment->validation_message)->toBe('The city in the request is missing or invalid.')
+        ->and($shipment->validation_attempted_at)->not->toBeNull();
+});
+
+it('refreshes import warnings on a re-import of a Shipment no validator has answered for', function (): void {
+    $this->dataSource->update(['settings' => ['on_existing' => 'update']]);
+
+    ShipmentImportService::forSource(fakeSource(collect([onExistingRow(['email' => 'not-an-email'])])), $this->dataSource)->import();
+    expect(Shipment::where('shipment_reference', 'ORD-EXIST-001')->value('validation_message'))->not->toBeNull();
+
+    ShipmentImportService::forSource(
+        fakeSource(collect([onExistingRow(['email' => 'casey@example.com'])])),
+        $this->dataSource,
+    )->import();
+
+    expect(Shipment::where('shipment_reference', 'ORD-EXIST-001')->value('validation_message'))->toBeNull();
 });
 
 it('never updates existing shipments in skip mode', function (): void {

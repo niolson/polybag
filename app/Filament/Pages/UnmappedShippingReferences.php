@@ -96,7 +96,10 @@ class UnmappedShippingReferences extends Page implements HasTable
                         $updated = Shipment::where('shipping_method_reference', $reference)
                             ->where('client_id', $record->client_id)
                             ->whereNull('shipping_method_id')
-                            ->update(['shipping_method_id' => $shippingMethodId]);
+                            // A query-builder update skips the model's saving hook, so clear
+                            // the validation attempt here: a carrier validator the new
+                            // method allows should get its turn on the schedule.
+                            ->update(['shipping_method_id' => $shippingMethodId, 'validation_attempted_at' => null]);
 
                         Notification::make()
                             ->success()

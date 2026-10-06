@@ -878,42 +878,6 @@ parameters:
 			path: app/Filament/Resources/ShipmentResource.php
 
 		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$address1\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Filament/Resources/ShipmentResource/Pages/EditShipment.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$address2\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Filament/Resources/ShipmentResource/Pages/EditShipment.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$city\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Filament/Resources/ShipmentResource/Pages/EditShipment.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$country\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Filament/Resources/ShipmentResource/Pages/EditShipment.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$postal_code\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Filament/Resources/ShipmentResource/Pages/EditShipment.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$state_or_province\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Filament/Resources/ShipmentResource/Pages/EditShipment.php
-
-		-
 			message: '#^Cannot call method packages\(\) on Illuminate\\Database\\Eloquent\\Model\|int\|string\.$#'
 			identifier: method.nonObject
 			count: 1

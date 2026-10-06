@@ -2,7 +2,7 @@
 
 # Stop re-validating Shipments that every validator has already tried
 
-Status: needs-triage
+Status: done — 2026-10-06
 Category: bug
 Created: 2026-10-01
 
@@ -25,6 +25,31 @@ rest of this PRD), it doesn't.
   records no attempt, so the schedule retries it. Validators therefore need to report
   whether they ran — `AddressValidationInterface::validate()` returns `void` today and
   "not attempted" is indistinguishable from "inconclusive".
+- **`validate()` returns an outcome enum**: settled, inconclusive, or unavailable. Not a
+  bool: slice [04](04-record-every-validator-answer.md) records each validator's outcome
+  and reason from this same call, and should extend this return value instead of
+  changing the interface a second time.
+- **What counts as an answer.** Most of this is already in the validators' early returns;
+  these cases are decided explicitly:
+
+  | Response | Outcome |
+  |---|---|
+  | USPS 404 | **Answered.** USPS judged the address (see below) |
+  | USPS 400 | Answered, inconclusive. A malformed request fails identically on every run, so retrying it only repeats the request (confirmed with the maintainer 2026-10-06) |
+  | USPS 401 / 403 | Unavailable, as today |
+  | USPS 429 | **Unavailable.** Today it falls into the generic client-error branch and is recorded as `No` with the rate-limit message; fix that |
+  | USPS 5xx, transport error, no credentials, config error | Unavailable, as today |
+  | Google non-2xx, transport error, not configured | Unavailable, as today |
+  | Google 200 with no `result` | **Unavailable.** An API error, not a verdict |
+
+- **A USPS 404 says what is wrong with the address.** USPS returns 404 for every
+  can't-match outcome, and `error.message` names the problem: no match, invalid state
+  code, invalid city, city and state unverifiable, insufficient address data, invalid
+  delivery address, multiple matches (examples in USPS Addresses v3 spec,
+  `components/examples`). That message must reach `validation_message`, so the shipper
+  sees "The city in the request is missing or invalid", not a generic failure. Use
+  `error.errors[].detail` when present and more specific. The validator already reads
+  `error.message`, but nothing tests a 404, and 429 shares that branch.
 - **The scheduled run** selects Shipments that are not `checked` **and** have no recorded
   attempt. It keeps its US-only filter for now (slice
   [09](09-validate-international-on-the-schedule.md) drops it).
@@ -32,22 +57,97 @@ rest of this PRD), it doesn't.
   validation in Manual Ship ignore the attempt, and record a new one.
 - **Changing a Shipment's shipping method clears the attempt.** A Shipment imported with
   no method gets only USPS and Google; once a FedEx or UPS method is assigned, the free
-  carrier validator should get its turn on the next run. Clear it on address edits too, so
-  a corrected address is re-validated on the schedule.
-- The command's summary distinguishes "attempted, still unsettled" from "skipped,
-  validators unavailable".
+  carrier validator should get its turn on the next run. The validation result stays:
+  the address hasn't changed.
+- **Changing the address discards the validation result**: `checked`, deliverability,
+  message, attempt, and every `validated_*` column. This is a correctness fix, not just
+  scheduling. `AddressData::fromShipment()` prefers each `validated_*` field over the
+  address whether or not the Shipment is `checked`. So rating and labels went to the
+  old validated address after a correction, on Edit Shipment and on re-import alike.
+  Differences only in case or whitespace don't count as a change, so a source that
+  reformats an address on every import doesn't discard its validation each time.
+- **Every write path applies these rules:**
+  - a `saving` hook on `Shipment` covers Eloquent saves, including Ship's method
+    selection and Edit Shipment. Edit Shipment's own `checked` handling is removed: it
+    reset `checked` on any recipient field, phone and email included, and left
+    `validated_*` in place;
+  - `ShipmentBatchWriter` imports with `upsert()`, which skips the hook, so it applies
+    the same rules to the rows it updated with a follow-up `update()`;
+  - **Unmapped Shipping References** assigns `shipping_method_id` with a query-builder
+    `update()`, so it clears `validation_attempted_at` in the same update.
+- **At most 5 scheduled attempts per Shipment** (`validation_attempts`,
+  `ValidateShipmentsCommand::MAX_SCHEDULED_ATTEMPTS`). An address or method change earns
+  another attempt, so a source that changes an address on every import (two orders
+  sharing a `source_record_id`, say) would otherwise re-validate it on every import run.
+  Only answered scheduled runs count. A Shipment that reaches the limit is logged, the
+  command warns how many due Shipments are capped, and validating by hand ignores the
+  limit and doesn't count against it.
+- **The command's summary and exit code.** The summary distinguishes "attempted, still
+  unsettled" from "skipped, validators unavailable". Today both are reported as
+  "Skipped (API errors)" and both fail the command. An unsettled address is not a
+  command failure: the run exits `FAILURE` only for unavailable validators or
+  exceptions.
 
 ## Acceptance criteria
 
-- [ ] A Shipment whose validators all answered inconclusively has
+- [x] A Shipment whose validators all answered inconclusively has
       `validation_attempted_at` set and is not selected by the next scheduled run
-- [ ] A Shipment whose validators were all unavailable has no attempt recorded and is
+- [x] A Shipment whose validators were all unavailable has no attempt recorded and is
       selected again
-- [ ] The Validate action on View Shipment re-runs validation on an attempted Shipment
-- [ ] Changing the shipping method, or the address, clears the attempt
-- [ ] Tests drive the command and the service with faked HTTP responses and assert on
+- [x] A USPS 404 records an attempt and puts USPS's message in `validation_message`,
+      tested with several of the spec's 404 examples
+- [x] A USPS 429 and a Google 200 with no `result` record no attempt and leave the
+      Shipment's deliverability and message unchanged
+- [x] The Validate action on View Shipment re-runs validation on an attempted Shipment
+- [x] Changing the shipping method, or the address, clears the attempt, including the
+      bulk assignment on Unmapped Shipping References
+- [x] Changing the address, on Edit Shipment or by re-import, discards the validation
+      result including the validated address; a change of case or spacing doesn't
+- [x] A Shipment at 5 scheduled attempts is not selected again, is logged when it gets
+      there, and can still be validated by hand
+- [x] An unsettled Shipment does not make `shipments:validate` exit with failure; an
+      unavailable validator still does
+- [x] Tests drive the command and the service with faked HTTP responses and assert on
       which requests went out on the second run
 
 ## Blocked by
 
 None - can start immediately
+
+## Comments
+
+**2026-10-06 — implemented.** `AddressValidationOutcome` (`Settled`, `Inconclusive`,
+`Unavailable`) is what every validator's `validate()` now returns, and
+`AddressValidationService::validate()` returns the outcome for the whole chain. The service
+records `validation_attempted_at` when any validator answered. The `Shipment` saving hook
+clears the attempt when a column in `Shipment::VALIDATION_INPUTS` changes; Unmapped
+Shipping References clears it in its bulk update. USPS 429 moved to unavailable, and a USPS
+error message now prefers `errors[].detail` over `error.message`. Tests:
+`tests/Feature/AddressValidationAttemptTest.php`.
+
+Also fixed: the chain stopped on `$shipment->checked`, which a previously settled Shipment
+already had. So re-validating from View Shipment never reached Google, and an inconclusive
+USPS answer left the Shipment reading as checked. The chain now stops on a `Settled`
+outcome, and a re-validation that ends inconclusive clears `checked`. Don't go back to
+testing `checked` in the loop.
+
+**2026-10-06 — review fixes.**
+- `ShipmentBatchWriter` writes imports with `upsert()`, which skips the saving hook, so
+  re-imports never cleared the attempt. It now applies the hook's rules to the Shipments
+  it updated with follow-up `update()` calls.
+- The USPS token is fetched while the connector is built. A token endpoint 400 (bad client
+  credentials) used to reach the address client-error branch and be recorded as an
+  answer. Building the connector now has its own `try`, and a failed token request counts
+  as unavailable.
+- `validation_message` holds both the import's phone and email warnings and the
+  validator's reason. A re-import that kept the validation result still overwrote the
+  reason with the import's value, usually null, leaving an exhausted Shipment with no
+  explanation. When the address is unchanged and a validator has answered, the batch
+  writer now keeps the existing message.
+
+**2026-10-06 — address changes and the attempt limit.** With the maintainer: a changed
+address discards the whole validation result, not just the attempt, because labels were
+going to the stale validated address. The concern was a misconfigured source changing an
+address on every import, resetting and re-validating it forever. Comparing addresses while
+ignoring case and whitespace removes the cosmetic version of that, and the cap of 5 bounds
+it whatever the cause.

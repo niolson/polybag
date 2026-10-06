@@ -2,8 +2,10 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\AddressValidationOutcome;
 use App\Models\Shipment;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 
 class ValidateShipmentsCommand extends Command
 {
@@ -11,12 +13,26 @@ class ValidateShipmentsCommand extends Command
                             {--limit= : Maximum number of shipments to validate}
                             {--dry-run : Preview what would be validated without making changes}';
 
-    protected $description = 'Validate addresses for pending shipments via USPS API';
+    protected $description = 'Validate addresses for pending shipments no validator has answered for yet';
+
+    /**
+     * Scheduled attempts allowed per Shipment. An address change or a new
+     * shipping method earns another attempt, so a source that keeps changing
+     * an address (a duplicated record ID, say) would otherwise re-validate it
+     * on every import. Validating by hand ignores this.
+     */
+    public const MAX_SCHEDULED_ATTEMPTS = 5;
 
     public function handle(): int
     {
+        // A Shipment every validator has already answered for is left alone
+        // until someone validates it by hand or changes its address or method.
         $query = Shipment::where('checked', false)
+            ->whereNull('validation_attempted_at')
+            ->where('validation_attempts', '<', self::MAX_SCHEDULED_ATTEMPTS)
             ->where('country', 'US');
+
+        $this->warnAboutCappedShipments();
 
         if ($limit = $this->option('limit')) {
             $query->limit((int) $limit);
@@ -41,6 +57,7 @@ class ValidateShipmentsCommand extends Command
 
         $results = [
             'success' => 0,
+            'unsettled' => 0,
             'errors' => 0,
             'skipped' => 0,
             'statuses' => [],
@@ -48,17 +65,30 @@ class ValidateShipmentsCommand extends Command
 
         foreach ($shipments as $shipment) {
             try {
-                $shipment->validateAddress();
+                $outcome = $shipment->validateAddress();
+
+                if ($outcome->answered()) {
+                    $this->countScheduledAttempt($shipment);
+                }
+
                 $shipment->refresh();
 
-                if (! $shipment->checked) {
-                    $results['skipped']++;
-                    $this->newLine();
-                    $this->warn("  Skipped {$shipment->shipment_reference}: API unavailable");
-                } else {
-                    $results['success']++;
-                    $status = $shipment->deliverability->value;
-                    $results['statuses'][$status] = ($results['statuses'][$status] ?? 0) + 1;
+                switch ($outcome) {
+                    case AddressValidationOutcome::Settled:
+                        $results['success']++;
+                        $status = $shipment->deliverability->value;
+                        $results['statuses'][$status] = ($results['statuses'][$status] ?? 0) + 1;
+                        break;
+
+                    case AddressValidationOutcome::Inconclusive:
+                        $results['unsettled']++;
+                        break;
+
+                    case AddressValidationOutcome::Unavailable:
+                        $results['skipped']++;
+                        $this->newLine();
+                        $this->warn("  Skipped {$shipment->shipment_reference}: validators unavailable");
+                        break;
                 }
             } catch (\Exception $e) {
                 $results['errors']++;
@@ -78,7 +108,8 @@ class ValidateShipmentsCommand extends Command
         // Results summary
         $tableData = [
             ['Validated', $results['success']],
-            ['Skipped (API errors)', $results['skipped']],
+            ['Attempted, still unsettled', $results['unsettled']],
+            ['Skipped (validators unavailable)', $results['skipped']],
             ['Errors', $results['errors']],
         ];
 
@@ -88,7 +119,38 @@ class ValidateShipmentsCommand extends Command
 
         $this->table(['Metric', 'Count'], $tableData);
 
+        // An address no validator could settle is an answer, not a failure;
+        // only validators that couldn't run, or exceptions, fail the command.
         return ($results['errors'] > 0 || $results['skipped'] > 0) ? Command::FAILURE : Command::SUCCESS;
+    }
+
+    private function countScheduledAttempt(Shipment $shipment): void
+    {
+        $shipment->increment('validation_attempts');
+
+        if ($shipment->validation_attempts === self::MAX_SCHEDULED_ATTEMPTS) {
+            Log::warning('Shipment reached the scheduled address validation limit; it will only be validated by hand from now on', [
+                'shipment_id' => $shipment->id,
+                'attempts' => $shipment->validation_attempts,
+            ]);
+        }
+    }
+
+    /**
+     * Shipments that would be due but have used up their scheduled attempts:
+     * usually a source changing their address on every import.
+     */
+    private function warnAboutCappedShipments(): void
+    {
+        $capped = Shipment::where('checked', false)
+            ->whereNull('validation_attempted_at')
+            ->where('validation_attempts', '>=', self::MAX_SCHEDULED_ATTEMPTS)
+            ->where('country', 'US')
+            ->count();
+
+        if ($capped > 0) {
+            $this->warn("{$capped} shipment(s) reached the limit of ".self::MAX_SCHEDULED_ATTEMPTS.' scheduled validations and must be validated by hand.');
+        }
     }
 
     private function dryRun($shipments): int

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\AddressValidationOutcome;
 use App\Enums\Deliverability;
 use App\Enums\PackageStatus;
 use App\Enums\PackSlipState;
@@ -28,6 +29,44 @@ class Shipment extends Model
 {
     use HasDefaultClient, HasFactory, Searchable;
 
+    /**
+     * The address a validator checks. A change to it discards the validation
+     * result, since rating and labels prefer the validated address over it.
+     *
+     * @var list<string>
+     */
+    public const ADDRESS_FIELDS = [
+        'address1',
+        'address2',
+        'city',
+        'state_or_province',
+        'postal_code',
+        'country',
+    ];
+
+    /**
+     * Everything a validation result consists of, as a fresh Shipment has it.
+     * `validation_attempts` is deliberately absent: it bounds scheduled
+     * validation across address changes.
+     *
+     * @var array<string, mixed>
+     */
+    public const UNVALIDATED = [
+        'checked' => false,
+        'deliverability' => Deliverability::NotChecked,
+        'validation_message' => null,
+        'validation_attempted_at' => null,
+        'validated_company' => null,
+        'validated_address1' => null,
+        'validated_address2' => null,
+        'validated_city' => null,
+        'validated_state_or_province' => null,
+        'validated_postal_code' => null,
+        'validated_country' => null,
+        'validated_residential' => null,
+        'validated_carrier_route' => null,
+    ];
+
     protected $fillable = [
         'client_id',
         'location_id',
@@ -52,6 +91,8 @@ class Shipment extends Model
         'checked',
         'deliverability',
         'validation_message',
+        'validation_attempted_at',
+        'validation_attempts',
         'validated_company',
         'validated_address1',
         'validated_address2',
@@ -74,6 +115,8 @@ class Shipment extends Model
 
     protected $casts = [
         'checked' => 'boolean',
+        'validation_attempted_at' => 'datetime',
+        'validation_attempts' => 'integer',
         'residential' => 'boolean',
         'validated_residential' => 'boolean',
         'value' => 'decimal:2',
@@ -111,6 +154,19 @@ class Shipment extends Model
             } else {
                 $shipment->phone_e164 = null;
                 $shipment->phone_extension = null;
+            }
+
+            if (! $shipment->exists || $shipment->isDirty('validation_attempted_at')) {
+                return;
+            }
+
+            if (self::addressChanged($shipment->getOriginal(), $shipment->getAttributes())) {
+                // The old result describes an address the Shipment no longer has.
+                $shipment->forceFill(self::UNVALIDATED);
+            } elseif ($shipment->isDirty('shipping_method_id')) {
+                // The method decides which carrier validators may run, so one
+                // the old method ruled out deserves its turn on the schedule.
+                $shipment->validation_attempted_at = null;
             }
         });
     }
@@ -253,9 +309,31 @@ class Shipment extends Model
     /**
      * Validate the shipment's address using USPS API.
      */
-    public function validateAddress(): void
+    /**
+     * Whether the address in `$after` differs from `$before`, ignoring case
+     * and whitespace: a source that reformats an address on every import must
+     * not discard its validation each time. Only fields present in `$after`
+     * are compared.
+     *
+     * @param  array<string, mixed>  $before
+     * @param  array<string, mixed>  $after
+     */
+    public static function addressChanged(array $before, array $after): bool
     {
-        app(AddressValidationService::class)->validate($this);
+        $normalize = fn (mixed $value): string => mb_strtolower(preg_replace('/\s+/u', ' ', trim((string) $value)) ?? '');
+
+        foreach (self::ADDRESS_FIELDS as $field) {
+            if (array_key_exists($field, $after) && $normalize($after[$field]) !== $normalize($before[$field] ?? null)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public function validateAddress(): AddressValidationOutcome
+    {
+        return app(AddressValidationService::class)->validate($this);
     }
 
     /**

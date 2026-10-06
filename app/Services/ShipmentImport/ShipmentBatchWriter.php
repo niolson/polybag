@@ -2,10 +2,12 @@
 
 namespace App\Services\ShipmentImport;
 
+use App\Enums\Deliverability;
 use App\Enums\ImportExistingBehavior;
 use App\Enums\ShipmentStatus;
 use App\Models\DataSource;
 use App\Models\Shipment;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 
 class ShipmentBatchWriter
@@ -51,6 +53,8 @@ class ShipmentBatchWriter
         $existingShipments ??= $this->existingFor($importSource, $sourceRecordIds);
 
         $rowsToWrite = [];
+        $readdressedIds = [];
+        $remethodedIds = [];
         $updatedSourceRecordIds = [];
         $skippedSourceRecordIds = [];
 
@@ -69,6 +73,22 @@ class ShipmentBatchWriter
                 foreach ($preserveExistingFields as $field) {
                     if (is_string($field) && in_array($field, self::PRESERVABLE_FIELDS, true)) {
                         $row[$field] = $existing->getAttribute($field);
+                    }
+                }
+
+                if (Shipment::addressChanged($existing->getAttributes(), $row)) {
+                    $readdressedIds[] = $existing->id;
+                } else {
+                    // The validation result stays, so its message must too:
+                    // `validation_message` also carries the import's phone and
+                    // email warnings, and a re-import would otherwise replace
+                    // a validator's reason with them (usually with null).
+                    if ($existing->deliverability !== Deliverability::NotChecked) {
+                        $row['validation_message'] = $existing->validation_message;
+                    }
+
+                    if (array_key_exists('shipping_method_id', $row) && (string) $row['shipping_method_id'] !== (string) $existing->shipping_method_id) {
+                        $remethodedIds[] = $existing->id;
                     }
                 }
 
@@ -94,6 +114,20 @@ class ShipmentBatchWriter
 
         if ($rowsToWrite !== []) {
             Shipment::upsert($rowsToWrite, ['data_source_id', 'source_record_id'], $updateColumns);
+        }
+
+        // `upsert()` skips the Shipment saving hook, so apply what it would:
+        // a changed address discards the old validation result (rating and
+        // labels prefer the validated address), and a changed method gives
+        // the validators it allows a turn on the schedule. The import's own
+        // `validation_message` was just written, so it is kept.
+        if ($readdressedIds !== []) {
+            Shipment::whereIn('id', $readdressedIds)
+                ->update(Arr::except(Shipment::UNVALIDATED, 'validation_message'));
+        }
+
+        if ($remethodedIds !== []) {
+            Shipment::whereIn('id', $remethodedIds)->update(['validation_attempted_at' => null]);
         }
 
         $shipmentsBySourceRecord = Shipment::where('data_source_id', $importSource->id)

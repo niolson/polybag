@@ -3,16 +3,19 @@
 namespace App\Services\Validation;
 
 use App\Contracts\AddressValidationInterface;
+use App\Enums\AddressValidationOutcome;
 use App\Enums\Deliverability;
 use App\Http\Integrations\USPS\Requests\Address;
 use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Shipment;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Saloon\Exceptions\OAuthConfigValidationException;
 use Saloon\Exceptions\Request\ClientException;
+use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Exceptions\Request\RequestException;
 
 class UspsAddressValidator implements AddressValidationInterface
@@ -22,26 +25,38 @@ class UspsAddressValidator implements AddressValidationInterface
         return $country === 'US';
     }
 
-    public function validate(Shipment $shipment): void
+    public function validate(Shipment $shipment): AddressValidationOutcome
     {
         $response = $this->fetchValidation($shipment);
 
         if ($response === null) {
-            return;
+            return AddressValidationOutcome::Unavailable;
         }
 
-        $this->processResponse($shipment, $response);
+        return $this->processResponse($shipment, $response);
     }
 
     /**
      * Fetch address validation from USPS API.
      *
-     * @return array<string, mixed>|null Null when the API returns a server error.
+     * @return array<string, mixed>|null Null when USPS never judged the address.
      */
     protected function fetchValidation(Shipment $shipment): ?array
     {
         try {
-            $connector = USPSConnector::getAuthenticatedConnector($this->resolveAccount($shipment));
+            try {
+                $connector = USPSConnector::getAuthenticatedConnector($this->resolveAccount($shipment));
+            } catch (RequestException|FatalRequestException|LockTimeoutException $e) {
+                // The token request failed (the token endpoint can answer 400
+                // for bad client credentials) — USPS never saw the address, so
+                // this must not reach the client-error branch below as an answer.
+                Log::channel('usps-validation')->warning('USPS Address Validation token request failed', [
+                    'error' => $e->getMessage(),
+                    'shipment_id' => $shipment->id,
+                ]);
+
+                return null;
+            }
 
             $request = new Address;
             $query = [
@@ -72,14 +87,13 @@ class UspsAddressValidator implements AddressValidationInterface
             return json_decode($response->body(), true) ?? [];
         } catch (ClientException $e) {
             $status = $e->getResponse()->status();
-            $body = json_decode($e->getResponse()->body(), true);
-            $message = $body['error']['message'] ?? $e->getMessage();
+            $message = $this->errorMessage($e->getResponse()->body()) ?? $e->getMessage();
 
-            if (in_array($status, [401, 403])) {
-                // Access/authorization failure (e.g. missing Addresses API license) —
-                // USPS was never actually asked about this address, so leave it
-                // unattempted rather than recording a false "not deliverable".
-                Log::channel('usps-validation')->warning('USPS Address Validation access denied', [
+            if (in_array($status, [401, 403, 429])) {
+                // Access/authorization failure (e.g. missing Addresses API license)
+                // or rate limit — USPS was never actually asked about this address,
+                // so leave it unattempted rather than recording a false "not deliverable".
+                Log::channel('usps-validation')->warning('USPS Address Validation unavailable', [
                     'status' => $status,
                     'message' => $message,
                     'shipment_id' => $shipment->id,
@@ -88,6 +102,10 @@ class UspsAddressValidator implements AddressValidationInterface
                 return null;
             }
 
+            // A 404 is USPS's answer for an address it can't match, and its
+            // message says why (invalid city, no match, multiple matches...).
+            // A 400 is a request USPS rejected; it fails the same way on every
+            // run, so it counts as an answer too rather than being retried.
             Log::channel('usps-validation')->debug('USPS Address Validation client error', [
                 'status' => $status,
                 'message' => $message,
@@ -141,27 +159,25 @@ class UspsAddressValidator implements AddressValidationInterface
      *
      * @param  array<string, mixed>  $response
      */
-    protected function processResponse(Shipment $shipment, array $response): void
+    protected function processResponse(Shipment $shipment, array $response): AddressValidationOutcome
     {
         Log::channel('usps-validation')->debug('USPS Address Validation Response', ['response' => $response]);
 
         if (isset($response['error'])) {
             $this->handleError($shipment, $response['error']['message'] ?? 'Unknown error');
 
-            return;
+            return AddressValidationOutcome::Inconclusive;
         }
 
         if ($this->hasCorrections($response)) {
-            $this->handleCorrection($shipment, $response);
-
-            return;
+            return $this->handleCorrection($shipment, $response);
         }
 
         if ($this->isExactMatch($response)) {
             $shipment->checked = true;
             $this->handleExactMatch($shipment, $response);
 
-            return;
+            return AddressValidationOutcome::Settled;
         }
 
         // Unexpected response format — USPS never reached a delivery-point
@@ -170,6 +186,27 @@ class UspsAddressValidator implements AddressValidationInterface
         $shipment->deliverability = Deliverability::No;
         $shipment->validation_message = 'Unexpected USPS response format';
         $shipment->save();
+
+        return AddressValidationOutcome::Inconclusive;
+    }
+
+    /**
+     * The most specific message in a USPS error body: an `errors[].detail`
+     * when USPS sends one, else the top-level `error.message`.
+     */
+    protected function errorMessage(string $body): ?string
+    {
+        $error = json_decode($body, true)['error'] ?? null;
+
+        if (! is_array($error)) {
+            return null;
+        }
+
+        $detail = collect($error['errors'] ?? [])
+            ->map(fn (mixed $item): mixed => is_array($item) ? ($item['detail'] ?? null) : null)
+            ->first(fn (mixed $detail): bool => is_string($detail) && filled($detail));
+
+        return $detail ?? (filled($error['message'] ?? null) ? $error['message'] : null);
     }
 
     protected function handleError(Shipment $shipment, string $message): void
@@ -194,7 +231,7 @@ class UspsAddressValidator implements AddressValidationInterface
     /**
      * @param  array<string, mixed>  $response
      */
-    protected function handleCorrection(Shipment $shipment, array $response): void
+    protected function handleCorrection(Shipment $shipment, array $response): AddressValidationOutcome
     {
         $code = $response['corrections'][0]['code'];
         $text = $response['corrections'][0]['text'] ?? '';
@@ -227,6 +264,8 @@ class UspsAddressValidator implements AddressValidationInterface
         }
 
         $shipment->save();
+
+        return $code === '32' ? AddressValidationOutcome::Settled : AddressValidationOutcome::Inconclusive;
     }
 
     /**

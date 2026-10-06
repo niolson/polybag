@@ -207,3 +207,26 @@ it('assigns a shipping method via the assign action (single client)', function (
         expect($shipment->fresh()->shipping_method_id)->toBe($method->id);
     }
 });
+
+it('clears the validation attempt on Shipments it assigns a method to', function (): void {
+    $method = ShippingMethod::factory()->create();
+
+    $shipment = Shipment::factory()->validationExhausted()->create([
+        'shipping_method_reference' => 'Standard',
+        'shipping_method_id' => null,
+    ]);
+
+    $record = Shipment::query()
+        ->selectRaw('MIN(id) as id, shipping_method_reference, client_id')
+        ->where('shipping_method_reference', 'Standard')
+        ->whereNull('shipping_method_id')
+        ->groupBy('shipping_method_reference', 'client_id')
+        ->first();
+
+    Livewire::test(UnmappedShippingReferences::class)
+        ->callTableAction('assign', $record, [
+            'shipping_method_id' => $method->id,
+        ]);
+
+    expect($shipment->fresh()->validation_attempted_at)->toBeNull();
+});
