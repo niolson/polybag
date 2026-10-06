@@ -8,6 +8,7 @@ use App\Http\Integrations\Google\GoogleAddressValidationConnector;
 use App\Http\Integrations\Google\GoogleAddressValidationProxyConnector;
 use App\Http\Integrations\Google\Requests\ValidateAddress;
 use App\Models\Shipment;
+use App\Services\AddressReferenceService;
 use Illuminate\Support\Facades\Log;
 use Saloon\Exceptions\Request\RequestException;
 use Saloon\Http\Connector;
@@ -20,6 +21,13 @@ use Saloon\Http\Connector;
  */
 class GoogleAddressValidator implements AddressValidationInterface
 {
+    private readonly AddressReferenceService $addressReference;
+
+    public function __construct(?AddressReferenceService $addressReference = null)
+    {
+        $this->addressReference = $addressReference ?? app(AddressReferenceService::class);
+    }
+
     public function supports(string $country): bool
     {
         return true;
@@ -62,16 +70,22 @@ class GoogleAddressValidator implements AddressValidationInterface
     protected function fetchValidation(Connector $connector, Shipment $shipment): ?array
     {
         try {
+            $country = $shipment->country ?? 'US';
+
+            $address = [
+                'regionCode' => $country,
+                'addressLines' => array_values(array_filter([$shipment->address1, $shipment->address2])),
+                'locality' => $shipment->city,
+                'postalCode' => $shipment->postal_code,
+            ];
+
+            // Google reports an address incomplete when sent a state its country doesn't use.
+            if ($this->addressReference->usesAdministrativeArea($country)) {
+                $address['administrativeArea'] = $shipment->state_or_province;
+            }
+
             $request = new ValidateAddress;
-            $request->body()->set([
-                'address' => [
-                    'regionCode' => $shipment->country ?? 'US',
-                    'addressLines' => array_values(array_filter([$shipment->address1, $shipment->address2])),
-                    'locality' => $shipment->city,
-                    'administrativeArea' => $shipment->state_or_province,
-                    'postalCode' => $shipment->postal_code,
-                ],
-            ]);
+            $request->body()->set(['address' => $address]);
 
             Log::channel('google-validation')->debug('VALIDATION REQUEST', [
                 'shipment_id' => $shipment->id,

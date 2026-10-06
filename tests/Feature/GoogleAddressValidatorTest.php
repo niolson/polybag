@@ -294,3 +294,73 @@ it('leaves the shipment unchecked on a transport failure', function (): void {
     expect($shipment->checked)->toBeFalse()
         ->and($shipment->deliverability)->toBe(Deliverability::NotChecked);
 });
+
+it('sends no administrative area for a country whose addresses do not use one', function (): void {
+    Saloon::fake([
+        ValidateAddress::class => MockResponse::make(['result' => [
+            'verdict' => ['addressComplete' => true, 'hasUnconfirmedComponents' => false],
+            'address' => ['postalAddress' => [], 'addressComponents' => []],
+            'metadata' => [],
+        ]]),
+    ]);
+
+    $shipment = Shipment::factory()->create(['country' => 'DE', 'state_or_province' => 'BY']);
+    $this->validator->validate($shipment);
+
+    Saloon::assertSent(fn (ValidateAddress $request): bool => $request->body()->all()['address']['regionCode'] === 'DE'
+        && ! array_key_exists('administrativeArea', $request->body()->all()['address']));
+});
+
+it('sends the administrative area for a country whose addresses use one', function (string $country, string $state): void {
+    Saloon::fake([
+        ValidateAddress::class => MockResponse::make(['result' => [
+            'verdict' => ['addressComplete' => true, 'hasUnconfirmedComponents' => false],
+            'address' => ['postalAddress' => [], 'addressComponents' => []],
+            'metadata' => [],
+        ]]),
+    ]);
+
+    $shipment = Shipment::factory()->create(['country' => $country, 'state_or_province' => $state]);
+    $this->validator->validate($shipment);
+
+    Saloon::assertSent(fn (ValidateAddress $request): bool => ($request->body()->all()['address']['administrativeArea'] ?? null) === $state);
+})->with([
+    'US' => ['US', 'CA'],
+    'CA' => ['CA', 'ON'],
+    'AU' => ['AU', 'NSW'],
+]);
+
+it('settles a German address with a stray stored state once the state is left out', function (): void {
+    Saloon::fake([
+        ValidateAddress::class => function ($pendingRequest): MockResponse {
+            $sentState = array_key_exists('administrativeArea', $pendingRequest->body()->all()['address']);
+
+            return MockResponse::make(['result' => [
+                'verdict' => ['addressComplete' => ! $sentState, 'hasUnconfirmedComponents' => $sentState],
+                'address' => [
+                    'postalAddress' => [
+                        'addressLines' => ['Marienplatz 8'],
+                        'locality' => 'München',
+                        'postalCode' => '80331',
+                    ],
+                    'addressComponents' => [],
+                ],
+                'metadata' => ['residential' => false],
+            ]]);
+        },
+    ]);
+
+    $shipment = Shipment::factory()->create([
+        'country' => 'DE',
+        'state_or_province' => 'Bayern',
+        'address1' => 'Marienplatz 8',
+        'city' => 'München',
+        'postal_code' => '80331',
+    ]);
+    $this->validator->validate($shipment);
+
+    $shipment->refresh();
+    expect($shipment->checked)->toBeTrue()
+        ->and($shipment->deliverability)->toBe(Deliverability::Yes)
+        ->and($shipment->validated_address1)->toBe('Marienplatz 8');
+});
