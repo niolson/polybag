@@ -173,14 +173,11 @@ class ShipmentResource extends Resource
                                 includeCompany: true,
                                 includePhone: true,
                                 includeEmail: true,
-                                afterStateUpdated: fn (Components\Utilities\Set $set): mixed => $set('checked', false),
                             ))
                             ->columns(2),
                         // Forms\Components\TextInput::make('phone_extension')
                         //     ->label('Phone Ext.')
                         //     ->maxLength(6),
-
-                        Forms\Components\Hidden::make('checked'),
 
                         // Validated address section (edit only, when validated)
                         Section::make('Validated Address')

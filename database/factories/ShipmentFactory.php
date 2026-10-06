@@ -77,6 +77,19 @@ class ShipmentFactory extends Factory
         ]);
     }
 
+    /**
+     * Every validator answered and none could settle the address.
+     */
+    public function validationExhausted(): static
+    {
+        return $this->state(fn () => [
+            'checked' => false,
+            'deliverability' => Deliverability::No,
+            'validation_message' => 'Multiple addresses were found for the information you entered.',
+            'validation_attempted_at' => now()->subHour(),
+        ]);
+    }
+
     public function shipped(): static
     {
         return $this->state(fn () => [

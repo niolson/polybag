@@ -3,6 +3,7 @@
 namespace App\Services\Validation;
 
 use App\Contracts\AddressValidationInterface;
+use App\Enums\AddressValidationOutcome;
 use App\Enums\Deliverability;
 use App\Http\Integrations\Google\GoogleAddressValidationConnector;
 use App\Http\Integrations\Google\GoogleAddressValidationProxyConnector;
@@ -33,22 +34,22 @@ class GoogleAddressValidator implements AddressValidationInterface
         return true;
     }
 
-    public function validate(Shipment $shipment): void
+    public function validate(Shipment $shipment): AddressValidationOutcome
     {
         $connector = $this->resolveConnector();
 
         if ($connector === null) {
             // Not configured (no broker, no local API key) — not attempted.
-            return;
+            return AddressValidationOutcome::Unavailable;
         }
 
         $response = $this->fetchValidation($connector, $shipment);
 
         if ($response === null) {
-            return;
+            return AddressValidationOutcome::Unavailable;
         }
 
-        $this->processResponse($shipment, $response);
+        return $this->processResponse($shipment, $response);
     }
 
     protected function resolveConnector(): ?Connector
@@ -116,12 +117,18 @@ class GoogleAddressValidator implements AddressValidationInterface
     /**
      * @param  array<string, mixed>  $response
      */
-    protected function processResponse(Shipment $shipment, array $response): void
+    protected function processResponse(Shipment $shipment, array $response): AddressValidationOutcome
     {
         $result = $response['result'] ?? null;
 
         if ($result === null) {
-            return;
+            // A successful response with no verdict is an API error, not an
+            // answer about the address — not attempted.
+            Log::channel('google-validation')->warning('Google Address Validation returned no result', [
+                'shipment_id' => $shipment->id,
+            ]);
+
+            return AddressValidationOutcome::Unavailable;
         }
 
         Log::channel('google-validation')->debug('Google Address Validation Response', ['response' => $response]);
@@ -147,6 +154,8 @@ class GoogleAddressValidator implements AddressValidationInterface
         $shipment->validated_residential = $result['metadata']['residential'] ?? null;
 
         $shipment->save();
+
+        return AddressValidationOutcome::Settled;
     }
 
     /**
