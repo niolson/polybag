@@ -2,7 +2,7 @@
 
 # Google is sent a state only for countries whose addresses use one
 
-Status: needs-triage
+Status: done — 2026-10-06
 Category: bug
 Created: 2026-10-01
 
@@ -26,14 +26,28 @@ This fixes a live problem on its own and does not depend on the rest of the PRD.
 
 ## Acceptance criteria
 
-- [ ] A Google request for a country that doesn't use an administrative area (e.g. DE)
+- [x] A Google request for a country that doesn't use an administrative area (e.g. DE)
       carries no `administrativeArea`, even when the Shipment has a stored state
-- [ ] A Google request for a country that does (e.g. US, CA, AU) carries it as today
-- [ ] A German Shipment with a stray stored state, given a Google response that is
+- [x] A Google request for a country that does (e.g. US, CA, AU) carries it as today
+- [x] A German Shipment with a stray stored state, given a Google response that is
       complete when no state is sent, is recorded as settled, not as not deliverable
-- [ ] Tests fake the Google HTTP response and assert on the request body and on the
+- [x] Tests fake the Google HTTP response and assert on the request body and on the
       Shipment, following `GoogleAddressValidatorTest`
 
 ## Blocked by
 
 None - can start immediately
+
+## Outcome
+
+`GoogleAddressValidator` builds the request address first and adds `administrativeArea`
+only when `AddressReferenceService::usesAdministrativeArea()` says the request's
+`regionCode` country uses one. Beyond the four countries tested in production, this also
+drops the state for GB, CZ, SK, BE and PR, none of which use one in the address-format
+data. The service is an optional constructor argument resolved from the container, so the
+existing `new GoogleAddressValidator` call sites are unchanged.
+
+Four tests in `GoogleAddressValidatorTest`: no state sent for DE; the state sent for US,
+CA and AU; and a German Shipment with a stray stored state, against a fake that reports
+the address incomplete only when a state is sent, recorded as `checked` and deliverable.
+The DE and German-Shipment tests fail with the fix reverted.
