@@ -2,7 +2,7 @@
 
 # Open a Box Size from global search by its code
 
-Status: needs-triage
+Status: wontfix
 Category: enhancement
 Created: 2026-09-29
 
@@ -21,3 +21,12 @@ Package codes open their record; a box code should too, for anyone who can view 
 - Update ADR-0007 decision 3's global-search rows.
 
 ## Comments
+
+### 2026-10-06 — wontfix
+
+Closed without building. Box codes are scanned on the Pack page, where `%B<id>` already
+applies the box; nobody needs to open a Box Size's record by scanning it. Global search
+keeps returning nothing for `%B` codes, as ADR-0007 decision 3 already says for every
+PolyBag code other than a Shipment or Package. If this is reopened, the scan path should
+gate on `canAccess()` rather than `canGloballySearch()`, so a Box Size opens by its code
+without becoming searchable by its label or alias.
