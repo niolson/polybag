@@ -5,11 +5,14 @@ namespace App\Models;
 use App\Enums\AddressValidationOutcome;
 use App\Enums\AddressValidator;
 use App\Enums\Deliverability;
+use App\Enums\DutiesTerms;
 use App\Enums\PackageStatus;
 use App\Enums\PackSlipState;
 use App\Enums\PickBatchStatus;
 use App\Enums\PickingStatus;
+use App\Enums\RecipientTaxIdType;
 use App\Enums\ShipmentStatus;
+use App\Enums\TaxRegistrationRegime;
 use App\Enums\ValidationTrigger;
 use App\Models\Concerns\HasDefaultClient;
 use App\Services\AddressReferenceService;
@@ -78,6 +81,21 @@ class Shipment extends Model
         'validated_carrier_route' => null,
     ];
 
+    /**
+     * The order's own customs terms (ADR-0008 decisions 2, 3 and 10), each
+     * filled by an import or a manager's edit and each null until then.
+     *
+     * @var list<string>
+     */
+    public const CUSTOMS_FIELDS = [
+        'duties_terms',
+        'seller_tax_regime',
+        'seller_tax_number',
+        'recipient_tax_id_type',
+        'recipient_tax_id',
+        'export_itn',
+    ];
+
     protected $fillable = [
         'client_id',
         'location_id',
@@ -122,6 +140,12 @@ class Shipment extends Model
         'status',
         'picking_status',
         'deliver_by',
+        'duties_terms',
+        'seller_tax_regime',
+        'seller_tax_number',
+        'recipient_tax_id_type',
+        'recipient_tax_id',
+        'export_itn',
         'metadata',
     ];
 
@@ -137,6 +161,9 @@ class Shipment extends Model
         'status' => ShipmentStatus::class,
         'picking_status' => PickingStatus::class,
         'deliver_by' => 'date',
+        'duties_terms' => DutiesTerms::class,
+        'seller_tax_regime' => TaxRegistrationRegime::class,
+        'recipient_tax_id_type' => RecipientTaxIdType::class,
         'metadata' => 'array',
         'items_version' => 'integer',
         'pack_slip_items_version' => 'integer',

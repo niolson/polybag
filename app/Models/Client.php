@@ -34,7 +34,14 @@ class Client extends Model
         'pick_fee_additional_item',
         'label_fee_per_package',
         'label_reference_source',
+        'duties_policy',
     ];
+
+    /**
+     * The `duties_policy` key for every EU member state at once. Any other key
+     * is an ISO 3166 alpha-2 country code, and the more specific entry wins.
+     */
+    public const DUTIES_POLICY_EU = 'EU';
 
     /**
      * The client an import row names in a source's `client_column`, matched by
@@ -57,6 +64,7 @@ class Client extends Model
         'pick_fee_additional_item' => 'decimal:2',
         'label_fee_per_package' => 'decimal:2',
         'label_reference_source' => LabelReferenceSource::class,
+        'duties_policy' => 'array',
     ];
 
     protected static function booted(): void
@@ -116,5 +124,13 @@ class Client extends Model
     public function shippingRules(): HasMany
     {
         return $this->hasMany(ShippingRule::class);
+    }
+
+    /**
+     * @return HasMany<ClientTaxRegistration, $this>
+     */
+    public function taxRegistrations(): HasMany
+    {
+        return $this->hasMany(ClientTaxRegistration::class);
     }
 }

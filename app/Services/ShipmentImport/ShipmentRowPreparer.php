@@ -2,11 +2,17 @@
 
 namespace App\Services\ShipmentImport;
 
+use App\Enums\DutiesTerms;
+use App\Enums\RecipientTaxIdType;
 use App\Enums\ShipmentStatus;
+use App\Enums\TaxRegistrationRegime;
 use App\Models\Client;
 use App\Models\DataSource;
+use App\Models\Shipment;
 use App\Services\AddressReferenceService;
 use App\Services\PhoneParserService;
+use App\Support\ExportItn;
+use BackedEnum;
 
 class ShipmentRowPreparer
 {
@@ -20,6 +26,8 @@ class ShipmentRowPreparer
         $data = $this->addressReference->normalizeAddressFields($data);
 
         ['errors' => $validationErrors, 'warnings' => $validationWarnings] = $this->validateShipmentData($data);
+        ['attributes' => $customsAttributes, 'errors' => $customsErrors] = $this->prepareCustomsFields($data);
+        $validationErrors = [...$validationErrors, ...$customsErrors];
 
         if ($validationErrors !== []) {
             return new PreparedShipmentRow(errors: $validationErrors, warnings: $validationWarnings);
@@ -54,6 +62,14 @@ class ShipmentRowPreparer
 
         if (! array_key_exists('residential', $data) || $data['residential'] === null) {
             $preserveExistingFields[] = 'residential';
+        }
+
+        // A source that does not supply a customs field leaves the value a
+        // manager entered, such as an ITN recorded after filing.
+        foreach ($customsAttributes as $field => $value) {
+            if ($value === null) {
+                $preserveExistingFields[] = $field;
+            }
         }
 
         // Sources that read a per-order shipping reference (e.g. Amazon's
@@ -96,12 +112,89 @@ class ShipmentRowPreparer
                 'channel_reference' => $data['channel_id'] ?? null,
                 'channel_id' => $this->references->channelIdFor($data, $client),
                 'deliver_by' => $data['deliver_by'] ?? null,
+                ...$customsAttributes,
                 'metadata' => isset($data['metadata']) ? json_encode($data['metadata']) : null,
                 'status' => $status->value,
                 '_preserve_existing_fields' => array_values(array_unique($preserveExistingFields)),
             ],
             warnings: $validationWarnings,
         );
+    }
+
+    /**
+     * Check and normalize the order's customs terms (ADR-0008). A value that
+     * names no term, regime or type, or whose number fails its format, rejects
+     * the row with a reason rather than being dropped: an order that collected
+     * duties at checkout and ships DDU charges the recipient twice. A regime
+     * and its number, and a tax ID type and its ID, come in pairs.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array{attributes: array<string, ?string>, errors: list<string>}
+     */
+    private function prepareCustomsFields(array $data): array
+    {
+        $input = fn (string $field): ?string => filled($data[$field] ?? null) ? trim((string) $data[$field]) : null;
+        $errors = [];
+        $attributes = array_fill_keys(Shipment::CUSTOMS_FIELDS, null);
+
+        if (($terms = $input('duties_terms')) !== null) {
+            $attributes['duties_terms'] = DutiesTerms::fromInput($terms)?->value;
+            $errors[] = $attributes['duties_terms'] === null ? "Invalid duties terms '{$terms}' (expected ddp or ddu)" : null;
+        }
+
+        $regimeInput = $input('seller_tax_regime');
+        $number = $input('seller_tax_number');
+
+        if (($regimeInput === null) !== ($number === null)) {
+            $errors[] = 'Seller tax regime and seller tax number must be given together';
+        } elseif ($regimeInput !== null && $number !== null) {
+            $regime = TaxRegistrationRegime::fromInput($regimeInput);
+            $error = $regime === null
+                ? "Invalid seller tax regime '{$regimeInput}' (expected one of ".self::caseList(TaxRegistrationRegime::cases()).')'
+                : $regime->numberError($number);
+
+            if ($regime !== null && $error === null) {
+                $attributes['seller_tax_regime'] = $regime->value;
+                $attributes['seller_tax_number'] = $regime->normalizeNumber($number);
+            }
+
+            $errors[] = $error;
+        }
+
+        $typeInput = $input('recipient_tax_id_type');
+        $taxId = $input('recipient_tax_id');
+
+        if (($typeInput === null) !== ($taxId === null)) {
+            $errors[] = 'Recipient tax ID type and recipient tax ID must be given together';
+        } elseif ($typeInput !== null && $taxId !== null) {
+            $type = RecipientTaxIdType::fromInput($typeInput);
+            $error = $type === null
+                ? "Invalid recipient tax ID type '{$typeInput}' (expected one of ".self::caseList(RecipientTaxIdType::cases()).')'
+                : $type->error($taxId);
+
+            if ($type !== null && $error === null) {
+                $attributes['recipient_tax_id_type'] = $type->value;
+                $attributes['recipient_tax_id'] = $type->normalize($taxId);
+            }
+
+            $errors[] = $error;
+        }
+
+        if (($itn = $input('export_itn')) !== null) {
+            $error = ExportItn::error($itn);
+            $attributes['export_itn'] = $error === null ? ExportItn::normalize($itn) : null;
+            $errors[] = $error;
+        }
+
+        return ['attributes' => $attributes, 'errors' => array_values(array_filter($errors))];
+    }
+
+    /**
+     * @param  array<int, BackedEnum>  $cases
+     */
+    private static function caseList(array $cases): string
+    {
+        return implode(', ', array_map(fn (BackedEnum $case): string => (string) $case->value, $cases));
     }
 
     /**

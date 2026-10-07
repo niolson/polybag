@@ -388,6 +388,18 @@ The left column is what your query must name the column — with `AS` aliases, u
 | `value` | `value` | rejects the row if non-numeric or negative |
 | `shipping_method` | `shipping_method_id` | a *reference*, resolved — see below |
 | `channel` | `channel_id` | a *reference*, resolved — see below |
+| `duties_terms` | `duties_terms` | `ddp` or `ddu`, any case. Overrides the client's duties policy for this order |
+| `seller_tax_regime` | `seller_tax_regime` | `ioss`, `uk_vat`, `voec` or `arn`, any case. Given with `seller_tax_number` or not at all |
+| `seller_tax_number` | `seller_tax_number` | checked against the regime: IOSS `IM` + 10 digits, UK VAT `GB` + 9 or 12 digits, VOEC 7 digits, ARN 12 digits. Spaces removed. Replaces the client's registration for that regime |
+| `recipient_tax_id_type` | `recipient_tax_id_type` | `cpf`, `cnpj`, `pccc`, `vat` or `other`, any case. Given with `recipient_tax_id` or not at all |
+| `recipient_tax_id` | `recipient_tax_id` | checked against the type: CPF and CNPJ check digits (punctuation removed; alphanumeric CNPJs accepted), PCCC `P` + 12 digits; a VAT or other ID up to 50 characters. Purged with the address by PII retention |
+| `export_itn` | `export_itn` | the AESDirect ITN, `X` + 14 digits |
+
+The six customs fields reject the row when a value names no term, regime or type, when
+its number fails the format, or when one of a pair comes without the other; the import
+log names the field and the reason against the row's shipment reference. Each is
+optional: leave the column out of the query, or return NULL, and a re-import keeps
+whatever a manager entered on the Shipment, such as an ITN recorded after filing.
 
 **Items** (`field_mapping.shipment_item`)
 

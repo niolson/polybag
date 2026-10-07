@@ -1,6 +1,6 @@
 # Customs terms data model and forms
 
-Status: ready-for-agent
+Status: done — 2026-10-07
 Category: enhancement
 Repo: `polybag`
 
@@ -47,12 +47,66 @@ as above; a value that fails is reported per row, not silently dropped. Update
 
 ## Acceptance criteria
 
-- [ ] Migrations, models, casts, factories (with states for a DDP-EU client and a client
+- [x] Migrations, models, casts, factories (with states for a DDP-EU client and a client
       with an IOSS registration)
-- [ ] Format checks reject a malformed IOSS, UK VAT, VOEC, ARN, CPF, CNPJ, PCCC and ITN at
+- [x] Format checks reject a malformed IOSS, UK VAT, VOEC, ARN, CPF, CNPJ, PCCC and ITN at
       entry and at import, and accept a valid one of each
-- [ ] A registration whose regime does not exist for the client is creatable; a second for
+- [x] A registration whose regime does not exist for the client is creatable; a second for
       the same regime is not
-- [ ] A user below manager cannot edit the Shipment customs fields
-- [ ] A Database import maps each field, and a malformed value is reported against its row
-- [ ] The recipient tax ID is covered by PII retention
+- [x] A user below manager cannot edit the Shipment customs fields
+- [x] A Database import maps each field, and a malformed value is reported against its row
+- [x] The recipient tax ID is covered by PII retention
+
+## Comments
+
+- 2026-10-07 — Built as specified. **Enums:** `DutiesTerms`, `TaxRegistrationRegime`
+  (`covers(AddressData)`, `numberPattern()`, `numberFormat()`, `normalizeNumber()`,
+  `isValidNumber()`, `lowValueThreshold()`, `thresholdCurrency()`) and
+  `RecipientTaxIdType` (`normalize()`, `isValid()`, `error()`), each with a
+  case-insensitive `fromInput()`; the ITN check is `App\Support\ExportItn`, beside
+  `Gtin`. Numbers are stored normalized: upper case, spaces removed, and CPF/CNPJ
+  punctuation stripped. CPF and CNPJ check digits are mod 11, and a run of one repeated
+  digit is refused; the CNPJ check also accepts the alphanumeric CNPJs Brazil has issued
+  since July 2026 (characters valued at ASCII less 48), which the issue predates. VAT and
+  *other* IDs take any value up to 50 characters. **Client:** `clients.duties_policy`
+  (JSON, null until chosen) is edited as a *Customs* section on the client form: an
+  *EU duties terms* select, marked required but not enforced (the policy starts unset)
+  with DDP recommended in its helper, and a *Country terms* repeater below it, distinct
+  countries. The two are form-only fields that `ClientForm::fillDutiesPolicy()` /
+  `saveDutiesPolicy()` fold to and from the map on the create and edit pages; emptying
+  every row stores null again. `client_tax_registrations` (unique on `client_id`,
+  `regime`, cascade on client delete) has a relationship repeater with distinct regimes
+  and the number checked against the selected regime. Factory states:
+  `ClientFactory::ddpToEu()`, `withDutiesPolicy()`, `withIossRegistration()`;
+  `ClientTaxRegistrationFactory::ioss()`, `ukVat()`, `voec()`, `arn()`;
+  `ShipmentFactory::withCustomsTerms()`. All fixture numbers are synthetic
+  (`IM0000000001`, CPF `12345678909`, `X00000000000001`). The seeder,
+  `ClientTaxRegistrationSeeder`, makes an *EU Demo Client* (DDP to the EU, synthetic IOSS)
+  and is deliberately opt-in, not called by `DatabaseSeeder`: a registration is declared
+  on every label its regime covers once `06`–`08` land, and a development instance can
+  buy real labels. **Shipment:** the six nullable columns, cast to their enums and listed
+  in `Shipment::CUSTOMS_FIELDS`. The Shipment form gains a *Customs* section (collapsed
+  when empty) that is disabled for anyone `ShipmentPolicy::update()` refuses, on top of
+  the edit page itself being forbidden below Manager; a regime and its number, and an ID
+  type and its ID, are required together. The view shows a *Customs* section for any
+  non-US Shipment or any Shipment with a customs value. **Import:** the six fields are in
+  `DataSourceFactory::databaseConfigFor()`'s default mapping under their own names, and
+  `ShipmentRowPreparer` checks them for every source: a value that names no term, regime
+  or type, fails its format, or comes without its pair rejects the row with the reason in
+  the import log and the run's errors, like an invalid `value`. A NULL or absent column
+  is preserved on re-import (added to `ShipmentBatchWriter::PRESERVABLE_FIELDS`), so an
+  ITN a manager records after filing survives the next import; a supplied value replaces
+  it. `docs/data-sources/database.md` lists the six with their formats. **PII:**
+  `recipient_tax_id` is in `PurgePiiCommand::PII_FIELDS`; its type, the terms and the
+  seller registration are kept, since they say what was declared, not who. The
+  "`customsFormData` purge list" was read as the existing `customs_form_data` purge on
+  Packages, which already runs with the address purge, so it needed no change beyond the
+  comment; the issue's wording is ambiguous there. `PiiRedactor` also now redacts any
+  `tax_id`/`taxId`/`TaxIdentificationNumber` key and FedEx's `tins`, so the ID stays out
+  of carrier logs once the adapters send it. Nothing resolves or sends any of it yet:
+  that is `04`–`08`. One pre-existing gap noticed and left alone: the purge selects
+  Shipments by `whereNotNull('first_name')`, so a company-only Shipment with no first
+  name is never purged, recipient tax ID included. Tests: `TaxRegistrationRegimeTest`,
+  `RecipientTaxIdTypeTest`, `ExportItnTest` (unit); `ClientCustomsTermsTest`,
+  `ShipmentCustomsFieldsTest`, `DatabaseImportCustomsFieldsTest` (feature, the last
+  importing through a real `DatabaseSource` with the default mapping).
