@@ -110,3 +110,29 @@ as above; a value that fails is reported per row, not silently dropped. Update
   `RecipientTaxIdTypeTest`, `ExportItnTest` (unit); `ClientCustomsTermsTest`,
   `ShipmentCustomsFieldsTest`, `DatabaseImportCustomsFieldsTest` (feature, the last
   importing through a real `DatabaseSource` with the default mapping).
+- 2026-10-07 — Review fixes, same day. **Single-client installs:** the Clients page is
+  only in navigation in multi-client mode, so Settings now has a *Customs* section for
+  the default client, built from the same `ClientForm::customsComponents()` as the client
+  form and checked the same way. Its registrations are a plain repeater under
+  `client.tax_registrations`, loaded with `ClientForm::taxRegistrationRows()` and saved
+  with `ClientForm::syncTaxRegistrations()`. **Swapped regimes:** the client form's
+  relationship repeater now saves through that same sync, which matches rows by regime
+  rather than by record, so swapping two saved rows' regimes in one save no longer hits
+  the unique (`client_id`, `regime`) index. **Clearing on import:** a source now clears a
+  stored value by supplying the key as null, and keeps it by leaving the key out.
+  Shopify, Amazon and a Database query that does not select the column leave the key out,
+  so a manager's values survive their re-imports. A column selected and NULL clears the
+  duties terms, the seller registration and the recipient tax ID, so an ERP that
+  withdraws DDP, or a marketplace registration that is gone, stops being declared
+  (ADR-0008 decision 3). `export_itn` is the exception: a NULL keeps it, because a
+  manager records it after filing. **Narrower rejection:** a bad duties term or seller
+  registration still rejects the row. A bad recipient tax ID, its type, or an ITN now
+  imports the order without that value (the pair or field is stored null) and adds a
+  warning to `validation_message`, as bad phone and email values do. The warning never
+  repeats the ID. When a re-import keeps a validator's message, the warning is appended
+  to it, once; `05`'s label check will stop the label. **DAP:** `DutiesTerms::fromInput()`
+  reads `dap`, in any case, as DDU, since Incoterms 2010 replaced DDU with DAP;
+  `docs/data-sources/database.md` says so and adds a table of absent, NULL and supplied
+  columns. Tests: `SettingsCustomsTermsTest` (new), plus additions to
+  `ClientCustomsTermsTest` (the swap test fails with the default relationship save),
+  `DatabaseImportCustomsFieldsTest` and `ExportItnTest`.

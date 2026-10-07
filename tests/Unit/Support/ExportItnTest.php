@@ -30,6 +30,8 @@ it('stores an ITN in upper case without spaces', function (): void {
 it('reads duties terms from import input in any case', function (): void {
     expect(DutiesTerms::fromInput('DDP'))->toBe(DutiesTerms::Ddp)
         ->and(DutiesTerms::fromInput(' ddu '))->toBe(DutiesTerms::Ddu)
-        ->and(DutiesTerms::fromInput('dap'))->toBeNull()
+        ->and(DutiesTerms::fromInput('dap'))->toBe(DutiesTerms::Ddu)
+        ->and(DutiesTerms::fromInput(' DAP '))->toBe(DutiesTerms::Ddu)
+        ->and(DutiesTerms::fromInput('dat'))->toBeNull()
         ->and(DutiesTerms::fromInput(null))->toBeNull();
 });

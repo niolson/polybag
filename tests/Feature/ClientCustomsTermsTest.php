@@ -154,6 +154,41 @@ it('refuses a second registration for the same regime in the form', function ():
     expect($client->taxRegistrations()->exists())->toBeFalse();
 });
 
+it('saves two registrations whose regimes were swapped in one save', function (): void {
+    // The real repeater keys, so each row stays bound to its saved record.
+    ($this->undoRepeaterFake)();
+    $this->undoRepeaterFake = fn (): null => null;
+
+    $client = Client::factory()->create();
+    $ioss = ClientTaxRegistration::factory()->for($client)->ioss()->create();
+    $ukVat = ClientTaxRegistration::factory()->for($client)->ukVat()->create();
+
+    // Each saved row takes the other's regime. Saved record by record, the
+    // first update would collide with the second row's regime.
+    Livewire::test(EditClient::class, ['record' => $client->id])
+        ->fillForm(['taxRegistrations' => [
+            "record-{$ioss->id}" => ['regime' => TaxRegistrationRegime::UkVat->value, 'number' => 'GB000000002'],
+            "record-{$ukVat->id}" => ['regime' => TaxRegistrationRegime::Ioss->value, 'number' => 'IM0000000002'],
+        ]])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($client->taxRegistrations()->orderBy('regime')->pluck('number', 'regime')->all())
+        ->toBe(['ioss' => 'IM0000000002', 'uk_vat' => 'GB000000002']);
+});
+
+it('removes a registration whose row is deleted on the client form', function (): void {
+    $client = Client::factory()->withIossRegistration()->create();
+    ClientTaxRegistration::factory()->for($client)->arn()->create();
+
+    Livewire::test(EditClient::class, ['record' => $client->id])
+        ->fillForm(['taxRegistrations' => [['regime' => 'arn', 'number' => '000000000001']]])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($client->taxRegistrations()->pluck('regime')->map->value->all())->toBe(['arn']);
+});
+
 it('refuses a second registration for the same regime in the database', function (): void {
     $client = Client::factory()->withIossRegistration()->create();
 

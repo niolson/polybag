@@ -7,6 +7,7 @@ use App\Enums\LabelReferenceSource;
 use App\Enums\TaxRegistrationRegime;
 use App\Filament\Pages\Settings;
 use App\Models\Client;
+use App\Models\ClientTaxRegistration;
 use App\Services\AddressReferenceService;
 use App\Services\LabelReferenceResolver;
 use App\Services\SettingsService;
@@ -18,10 +19,12 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\DB;
 
 class ClientForm
 {
@@ -34,6 +37,11 @@ class ClientForm
     public const DUTIES_POLICY_EU_FIELD = 'duties_policy_eu';
 
     public const DUTIES_POLICY_COUNTRIES_FIELD = 'duties_policy_countries';
+
+    /**
+     * The Settings page's registrations repeater, which is not a relationship.
+     */
+    public const TAX_REGISTRATIONS_FIELD = 'tax_registrations';
 
     /**
      * Spread a record's `duties_policy` map into the form's EU field and
@@ -87,6 +95,143 @@ class ClientForm
         $data['duties_policy'] = $policy === [] ? null : $policy;
 
         return $data;
+    }
+
+    /**
+     * The duties policy and tax registration fields, shared by the client form
+     * and, for the default client in single-client mode, the Settings page.
+     *
+     * The client form binds the registrations to the `taxRegistrations`
+     * relationship; Settings, which has no record to bind, names a state path
+     * under `$statePrefix` and saves it with {@see self::syncTaxRegistrations()}.
+     * Either way rows are synced by regime, so swapping two saved rows' regimes
+     * in one save does not trip the unique (client, regime) index.
+     *
+     * @return array<int, Component>
+     */
+    public static function customsComponents(?string $statePrefix = null): array
+    {
+        $prefix = $statePrefix === null ? '' : $statePrefix.'.';
+
+        $taxRegistrations = $statePrefix === null
+            ? Repeater::make('taxRegistrations')
+                ->relationship()
+                ->saveRelationshipsUsing(fn (Repeater $component, Client $record): null => self::syncTaxRegistrations($record, $component->getState() ?? []))
+            : Repeater::make($prefix.self::TAX_REGISTRATIONS_FIELD);
+
+        return [
+            Select::make($prefix.self::DUTIES_POLICY_EU_FIELD)
+                ->label('EU duties terms')
+                ->options(DutiesTerms::class)
+                ->placeholder('Not set — EU labels are refused')
+                ->markAsRequired()
+                ->native(false)
+                ->helperText('Must be set before a label to an EU country can be bought for this client, unless the order carries its own terms. DDP is recommended: a DDU parcel into the EU collects duties, handling fees and the carrier\'s own fee at the door, and postal networks are starting to refuse them. DDP bills those charges to the carrier account that buys the label.')
+                ->columnSpanFull(),
+            Repeater::make($prefix.self::DUTIES_POLICY_COUNTRIES_FIELD)
+                ->label('Country terms')
+                ->helperText('A country row overrides the EU row for that country. A country outside the EU with no row ships DDU.')
+                ->schema([
+                    Select::make('country')
+                        ->label('Country')
+                        ->options(fn (): array => app(AddressReferenceService::class)->getCountryOptions())
+                        ->searchable()
+                        ->required()
+                        ->distinct()
+                        ->disableOptionsWhenSelectedInSiblingRepeaterItems(),
+                    Select::make('terms')
+                        ->label('Duties terms')
+                        ->options(DutiesTerms::class)
+                        ->required()
+                        ->native(false),
+                ])
+                ->columns(2)
+                ->defaultItems(0)
+                ->addActionLabel('Add country')
+                ->columnSpanFull(),
+            $taxRegistrations
+                ->label('Seller tax registrations')
+                ->helperText('One number per regime. Each is declared only to the destinations its regime covers, and only below its low-value threshold.')
+                ->schema([
+                    Select::make('regime')
+                        ->label('Regime')
+                        ->options(TaxRegistrationRegime::class)
+                        ->required()
+                        ->distinct()
+                        ->disableOptionsWhenSelectedInSiblingRepeaterItems()
+                        ->live()
+                        ->native(false),
+                    TextInput::make('number')
+                        ->label('Number')
+                        ->required()
+                        ->helperText(fn (Get $get): ?string => TaxRegistrationRegime::fromInput($get('regime'))?->numberFormat())
+                        ->rule(fn (Get $get): Closure => function (string $attribute, mixed $value, Closure $fail) use ($get): void {
+                            $error = TaxRegistrationRegime::fromInput($get('regime'))?->numberError(is_string($value) ? $value : null);
+
+                            if ($error !== null) {
+                                $fail($error);
+                            }
+                        })
+                        ->dehydrateStateUsing(fn (?string $state, Get $get): ?string => $state !== null && ($regime = TaxRegistrationRegime::fromInput($get('regime'))) !== null
+                            ? $regime->normalizeNumber($state)
+                            : $state),
+                ])
+                ->columns(2)
+                ->defaultItems(0)
+                ->addActionLabel('Add registration')
+                ->columnSpanFull(),
+        ];
+    }
+
+    /**
+     * The form rows for a client's registrations, one per regime.
+     *
+     * @return list<array{regime: string, number: string}>
+     */
+    public static function taxRegistrationRows(Client $client): array
+    {
+        return $client->taxRegistrations()
+            ->orderBy('id')
+            ->get()
+            ->map(fn (ClientTaxRegistration $registration): array => [
+                'regime' => $registration->regime->value,
+                'number' => $registration->number,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Make the client's registrations exactly the submitted rows, matched by
+     * regime rather than by row, so a number moves between regimes without a
+     * moment where two rows hold the same regime.
+     *
+     * @param  array<array-key, mixed>  $rows
+     */
+    public static function syncTaxRegistrations(Client $client, array $rows): null
+    {
+        $numbers = [];
+
+        foreach ($rows as $row) {
+            $regime = TaxRegistrationRegime::fromInput(is_array($row) ? ($row['regime'] ?? null) : null);
+            $number = is_array($row) ? ($row['number'] ?? null) : null;
+
+            if ($regime !== null && is_string($number) && filled($number)) {
+                $numbers[$regime->value] = $regime->normalizeNumber($number);
+            }
+        }
+
+        DB::transaction(function () use ($client, $numbers): void {
+            $client->taxRegistrations()->whereNotIn('regime', array_keys($numbers))->delete();
+
+            foreach ($numbers as $regime => $number) {
+                $client->taxRegistrations()->updateOrCreate(['regime' => $regime], ['number' => $number]);
+            }
+        });
+
+        $client->unsetRelation('taxRegistrations');
+
+        return null;
     }
 
     public static function configure(Schema $schema): Schema
@@ -163,67 +308,7 @@ class ClientForm
                 Section::make('Customs')
                     ->description('Who pays duties on this client\'s international shipments, and the tax registrations that show import VAT was collected at checkout. An order that carries its own terms or registration uses those instead.')
                     ->schema([
-                        Select::make(self::DUTIES_POLICY_EU_FIELD)
-                            ->label('EU duties terms')
-                            ->options(DutiesTerms::class)
-                            ->placeholder('Not set — EU labels are refused')
-                            ->markAsRequired()
-                            ->native(false)
-                            ->helperText('Must be set before a label to an EU country can be bought for this client, unless the order carries its own terms. DDP is recommended: a DDU parcel into the EU collects duties, handling fees and the carrier\'s own fee at the door, and postal networks are starting to refuse them. DDP bills those charges to the carrier account that buys the label.')
-                            ->columnSpanFull(),
-                        Repeater::make(self::DUTIES_POLICY_COUNTRIES_FIELD)
-                            ->label('Country terms')
-                            ->helperText('A country row overrides the EU row for that country. A country outside the EU with no row ships DDU.')
-                            ->schema([
-                                Select::make('country')
-                                    ->label('Country')
-                                    ->options(fn (): array => app(AddressReferenceService::class)->getCountryOptions())
-                                    ->searchable()
-                                    ->required()
-                                    ->distinct()
-                                    ->disableOptionsWhenSelectedInSiblingRepeaterItems(),
-                                Select::make('terms')
-                                    ->label('Duties terms')
-                                    ->options(DutiesTerms::class)
-                                    ->required()
-                                    ->native(false),
-                            ])
-                            ->columns(2)
-                            ->defaultItems(0)
-                            ->addActionLabel('Add country')
-                            ->columnSpanFull(),
-                        Repeater::make('taxRegistrations')
-                            ->label('Seller tax registrations')
-                            ->helperText('One number per regime. Each is declared only to the destinations its regime covers, and only below its low-value threshold.')
-                            ->relationship()
-                            ->schema([
-                                Select::make('regime')
-                                    ->label('Regime')
-                                    ->options(TaxRegistrationRegime::class)
-                                    ->required()
-                                    ->distinct()
-                                    ->disableOptionsWhenSelectedInSiblingRepeaterItems()
-                                    ->live()
-                                    ->native(false),
-                                TextInput::make('number')
-                                    ->label('Number')
-                                    ->required()
-                                    ->helperText(fn (Get $get): ?string => TaxRegistrationRegime::fromInput($get('regime'))?->numberFormat())
-                                    ->rule(fn (Get $get): Closure => function (string $attribute, mixed $value, Closure $fail) use ($get): void {
-                                        $error = TaxRegistrationRegime::fromInput($get('regime'))?->numberError(is_string($value) ? $value : null);
-
-                                        if ($error !== null) {
-                                            $fail($error);
-                                        }
-                                    })
-                                    ->dehydrateStateUsing(fn (?string $state, Get $get): ?string => $state !== null && ($regime = TaxRegistrationRegime::fromInput($get('regime'))) !== null
-                                        ? $regime->normalizeNumber($state)
-                                        : $state),
-                            ])
-                            ->columns(2)
-                            ->defaultItems(0)
-                            ->addActionLabel('Add registration')
-                            ->columnSpanFull(),
+                        ...self::customsComponents(),
                     ])
                     ->collapsible(),
 

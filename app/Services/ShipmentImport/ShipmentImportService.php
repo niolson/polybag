@@ -281,7 +281,7 @@ class ShipmentImportService
      */
     private function sourceChecksum(array $attributes, Collection $items): string
     {
-        unset($attributes['source_checksum'], $attributes['_preserve_existing_fields']);
+        unset($attributes['source_checksum'], $attributes['_preserve_existing_fields'], $attributes['_customs_warnings']);
 
         return hash('sha256', json_encode([$attributes, $items->values()->all()]));
     }

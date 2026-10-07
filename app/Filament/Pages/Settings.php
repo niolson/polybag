@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Enums\LabelReferenceSource;
 use App\Enums\Role;
+use App\Filament\Resources\Clients\Schemas\ClientForm;
 use App\Filament\Resources\LocationResource;
 use App\Filament\Support\AddressForm;
 use App\Filament\Support\TimezoneOptions;
@@ -138,6 +139,9 @@ class Settings extends Page
                     'return_postal_code' => $client->return_postal_code,
                     'return_country' => $client->return_country,
                     'return_phone' => $client->return_phone,
+                    // The client form's customs fields, for the one client there is.
+                    ...ClientForm::fillDutiesPolicy(['duties_policy' => $client->duties_policy]),
+                    ClientForm::TAX_REGISTRATIONS_FIELD => ClientForm::taxRegistrationRows($client),
                 ];
             }
         }
@@ -283,6 +287,13 @@ class Settings extends Page
                                 ->maxLength(50)
                                 ->columnSpanFull(),
                         ])
+                        ->columns(1),
+
+                    Section::make('Customs')
+                        ->description('Who pays duties on international shipments, and the tax registrations that show import VAT was collected at checkout. An order that carries its own terms or registration uses those instead.')
+                        ->visible(fn (): bool => ! (bool) app(SettingsService::class)->get('multi_client_enabled', false))
+                        ->collapsible()
+                        ->schema(ClientForm::customsComponents('client'))
                         ->columns(1),
 
                     Section::make('Ship-From Address')
@@ -741,7 +752,10 @@ class Settings extends Page
                     'return_postal_code' => $data['client']['return_postal_code'] ?? null,
                     'return_country' => $data['client']['return_country'] ?? null,
                     'return_phone' => $data['client']['return_phone'] ?? null,
+                    'duties_policy' => ClientForm::saveDutiesPolicy($data['client'])['duties_policy'],
                 ]);
+
+                ClientForm::syncTaxRegistrations($client, $data['client'][ClientForm::TAX_REGISTRATIONS_FIELD] ?? []);
             }
         }
 

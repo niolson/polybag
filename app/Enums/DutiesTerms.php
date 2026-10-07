@@ -18,7 +18,8 @@ enum DutiesTerms: string implements HasLabel
 
     /**
      * The term an import or form value names, ignoring case and surrounding
-     * space, or null when it names none.
+     * space, or null when it names none. `dap` reads as DDU: Incoterms 2010
+     * replaced DDU with DAP, so an ERP may send either for the recipient paying.
      */
     public static function fromInput(mixed $value): ?self
     {
@@ -26,7 +27,13 @@ enum DutiesTerms: string implements HasLabel
             return $value;
         }
 
-        return is_string($value) ? self::tryFrom(strtolower(trim($value))) : null;
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $value = strtolower(trim($value));
+
+        return $value === 'dap' ? self::Ddu : self::tryFrom($value);
     }
 
     public function getLabel(): string
