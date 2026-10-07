@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\AddressValidationOutcome;
 use App\Enums\Deliverability;
 use App\Events\AddressValidationFailed;
 use App\Http\Integrations\Google\Requests\ValidateAddress as GoogleValidateAddress;
@@ -33,7 +34,7 @@ it('skips non-US addresses', function (): void {
 });
 
 // Scenario 2: API error (address not found)
-it('sets deliverability to No on API error', function (): void {
+it('leaves the Shipment unverified when USPS errors and nothing else can answer', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         Address::class => MockResponse::make([
@@ -48,13 +49,13 @@ it('sets deliverability to No on API error', function (): void {
     $this->service->validate($shipment);
 
     $shipment->refresh();
-    expect($shipment->deliverability)->toBe(Deliverability::No)
+    expect($shipment->deliverability)->toBe(Deliverability::Unverified)
         ->and($shipment->validation_message)->toBe('Address Not Found.')
         ->and($shipment->checked)->toBeFalse();
 });
 
 // Scenario 3: Multiple addresses (correction code 22)
-it('sets deliverability to No for multiple addresses found', function (): void {
+it('leaves the Shipment unverified when USPS finds multiple addresses', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         Address::class => MockResponse::make([
@@ -69,13 +70,13 @@ it('sets deliverability to No for multiple addresses found', function (): void {
     $this->service->validate($shipment);
 
     $shipment->refresh();
-    expect($shipment->deliverability)->toBe(Deliverability::No)
+    expect($shipment->deliverability)->toBe(Deliverability::Unverified)
         ->and($shipment->validation_message)->toBe('Multiple addresses were found for the information you entered.')
         ->and($shipment->checked)->toBeFalse();
 });
 
 // Scenario 4: Default address (correction code 32)
-it('sets deliverability to Maybe for default address correction', function (): void {
+it('sets deliverability to Partial for default address correction', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         Address::class => MockResponse::make([
@@ -102,7 +103,7 @@ it('sets deliverability to Maybe for default address correction', function (): v
 
     $shipment->refresh();
     // Code 32 overrides DPV-derived deliverability
-    expect($shipment->deliverability)->toBe(Deliverability::Maybe)
+    expect($shipment->deliverability)->toBe(Deliverability::Partial)
         ->and($shipment->validation_message)->toBe('More information is needed to deliver to this address.')
         ->and($shipment->validated_address1)->toBe('123 MAIN ST')
         ->and($shipment->validated_city)->toBe('ANYTOWN')
@@ -146,7 +147,7 @@ it('sets deliverability to No for exact match with DPV N', function (): void {
 });
 
 // Scenario 6: Exact match, DPV D (primary confirmed, secondary missing)
-it('sets deliverability to Maybe for exact match with DPV D', function (): void {
+it('sets deliverability to Partial for exact match with DPV D', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         Address::class => MockResponse::make([
@@ -172,14 +173,14 @@ it('sets deliverability to Maybe for exact match with DPV D', function (): void 
     $this->service->validate($shipment);
 
     $shipment->refresh();
-    expect($shipment->deliverability)->toBe(Deliverability::Maybe)
+    expect($shipment->deliverability)->toBe(Deliverability::Partial)
         ->and($shipment->validation_message)->toBe('Primary address confirmed, secondary number missing')
         ->and($shipment->validated_address1)->toBe('789 PINE RD')
         ->and($shipment->checked)->toBeTrue();
 });
 
 // Scenario 7: Exact match, DPV S (primary confirmed, secondary not confirmed)
-it('sets deliverability to Maybe for exact match with DPV S', function (): void {
+it('sets deliverability to Partial for exact match with DPV S', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         Address::class => MockResponse::make([
@@ -205,7 +206,7 @@ it('sets deliverability to Maybe for exact match with DPV S', function (): void 
     $this->service->validate($shipment);
 
     $shipment->refresh();
-    expect($shipment->deliverability)->toBe(Deliverability::Maybe)
+    expect($shipment->deliverability)->toBe(Deliverability::Partial)
         ->and($shipment->validation_message)->toBe('Primary address confirmed, secondary number not confirmed')
         ->and($shipment->validated_address1)->toBe('321 ELM BLVD')
         ->and($shipment->validated_address2)->toBe('APT 4B')
@@ -328,7 +329,7 @@ it('leaves shipment unchecked when sandbox mode is enabled for an OAuth-connecte
 });
 
 // Unexpected response format
-it('sets deliverability to No for unexpected response format', function (): void {
+it('leaves the Shipment unverified on an unexpected USPS response', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         Address::class => MockResponse::make([
@@ -341,7 +342,7 @@ it('sets deliverability to No for unexpected response format', function (): void
     $this->service->validate($shipment);
 
     $shipment->refresh();
-    expect($shipment->deliverability)->toBe(Deliverability::No)
+    expect($shipment->deliverability)->toBe(Deliverability::Unverified)
         ->and($shipment->validation_message)->toBe('Unexpected USPS response format')
         ->and($shipment->checked)->toBeFalse();
 });
@@ -394,7 +395,7 @@ it('falls through to Google when no USPS carrier account is configured', functio
 
     $shipment->refresh();
     expect($shipment->checked)->toBeTrue()
-        ->and($shipment->deliverability)->toBe(Deliverability::Yes)
+        ->and($shipment->deliverability)->toBe(Deliverability::Verified)
         ->and($shipment->validated_city)->toBe('Mountain View')
         ->and($shipment->validated_residential)->toBeFalse();
 });
@@ -413,7 +414,7 @@ it('falls through to Google when USPS denies access (missing license)', function
 
     $shipment->refresh();
     expect($shipment->checked)->toBeTrue()
-        ->and($shipment->deliverability)->toBe(Deliverability::Yes);
+        ->and($shipment->deliverability)->toBe(Deliverability::Verified);
 });
 
 // Regression: USPS couldn't match the input to a specific address at all (as
@@ -437,7 +438,7 @@ it('falls through to Google when USPS cannot match the input address', function 
 
     $shipment->refresh();
     expect($shipment->checked)->toBeTrue()
-        ->and($shipment->deliverability)->toBe(Deliverability::Yes)
+        ->and($shipment->deliverability)->toBe(Deliverability::Verified)
         ->and($shipment->validated_city)->toBe('Mountain View');
 });
 
@@ -477,7 +478,7 @@ it('routes non-US addresses straight to Google, skipping USPS', function (): voi
 
     $shipment->refresh();
     expect($shipment->checked)->toBeTrue()
-        ->and($shipment->deliverability)->toBe(Deliverability::Yes);
+        ->and($shipment->deliverability)->toBe(Deliverability::Verified);
 
     Saloon::assertNotSent(Address::class);
 });
@@ -511,7 +512,7 @@ it('includes Google once the setting is enabled, resolved through the container'
 
     $shipment->refresh();
     expect($shipment->checked)->toBeTrue()
-        ->and($shipment->deliverability)->toBe(Deliverability::Yes);
+        ->and($shipment->deliverability)->toBe(Deliverability::Verified);
 });
 
 // Regression: sandbox mode is no longer "free" (USPS's TEM environment now
@@ -579,4 +580,58 @@ it('always uses the fake validator in demo mode, even if real validation is enab
     expect($shipment->checked)->toBeTrue()
         ->and($shipment->deliverability)->toBe(Deliverability::Yes)
         ->and($shipment->validation_message)->toBe('Address confirmed deliverable (fake)');
+});
+
+// --- A chain that ends inconclusive -------------------------------------------
+
+it('leaves the Shipment unverified and dispatches one failure when no validator settles it', function (): void {
+    Event::fake([AddressValidationFailed::class]);
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Address::class => MockResponse::make([
+            'corrections' => [
+                ['code' => '22', 'text' => 'Multiple addresses were found for the information you entered.'],
+            ],
+        ]),
+        GoogleValidateAddress::class => MockResponse::make(['result' => [
+            'verdict' => ['addressComplete' => false],
+            'address' => ['postalAddress' => [], 'addressComponents' => []],
+        ]]),
+    ]);
+
+    $service = new AddressValidationService([new UspsAddressValidator, new GoogleAddressValidator]);
+    $shipment = Shipment::factory()->create(['country' => 'US']);
+
+    expect($service->validate($shipment))->toBe(AddressValidationOutcome::Inconclusive);
+
+    $shipment->refresh();
+    expect($shipment->deliverability)->toBe(Deliverability::Unverified)
+        ->and($shipment->checked)->toBeFalse();
+
+    Event::assertDispatchedTimes(AddressValidationFailed::class, 1);
+    Event::assertDispatched(
+        AddressValidationFailed::class,
+        fn (AddressValidationFailed $event): bool => str_starts_with($event->reason, 'No validator could confirm or reject the address'),
+    );
+});
+
+// Regression: a valid German or Polish address Google reads as incomplete was
+// recorded as not deliverable and counted as an exception.
+it('records an incomplete Google verdict on an international address as unverified, not No', function (): void {
+    Saloon::fake([
+        GoogleValidateAddress::class => MockResponse::make(['result' => [
+            'verdict' => ['addressComplete' => false, 'hasUnconfirmedComponents' => true],
+            'address' => ['postalAddress' => [], 'addressComponents' => [
+                ['componentType' => 'route', 'confirmationLevel' => 'UNCONFIRMED_BUT_PLAUSIBLE'],
+            ]],
+        ]]),
+    ]);
+
+    $service = new AddressValidationService([new UspsAddressValidator, new GoogleAddressValidator]);
+    $shipment = Shipment::factory()->create(['country' => 'PL']);
+
+    $service->validate($shipment);
+
+    expect($shipment->fresh()->deliverability)->toBe(Deliverability::Unverified);
 });

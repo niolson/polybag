@@ -16,6 +16,8 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
 
+use function Livewire\invade;
+
 uses(RefreshDatabase::class);
 
 it('shows undeliverable shipments count', function (): void {
@@ -23,17 +25,23 @@ it('shows undeliverable shipments count', function (): void {
         'status' => ShipmentStatus::Open,
         'deliverability' => Deliverability::No,
     ]);
-    Shipment::factory()->create([
-        'status' => ShipmentStatus::Open,
-        'deliverability' => Deliverability::Yes,
-    ]);
+
+    // Only positive evidence an address is wrong is an exception.
+    foreach ([Deliverability::Yes, Deliverability::Verified, Deliverability::Partial, Deliverability::Unverified] as $deliverability) {
+        Shipment::factory()->create([
+            'status' => ShipmentStatus::Open,
+            'deliverability' => $deliverability,
+        ]);
+    }
 
     $user = User::factory()->create();
 
-    Livewire::actingAs($user)
+    $component = Livewire::actingAs($user)
         ->test(ExceptionsWidget::class)
         ->assertSee('Undeliverable Shipments')
         ->assertSee('2');
+
+    expect(invade($component->instance())->queryCounts()['undeliverable'])->toBe(2);
 });
 
 it('shows failed batch items count', function (): void {

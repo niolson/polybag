@@ -168,10 +168,10 @@ class FedexAddressValidator implements AddressValidationInterface
 
         [$shipment->deliverability, $shipment->validation_message] = match (true) {
             $this->flag($attributes, 'InvalidSuiteNumber') => [
-                Deliverability::Maybe, 'Primary address confirmed, secondary number not confirmed',
+                Deliverability::Partial, 'Primary address confirmed, secondary number not confirmed',
             ],
             $this->flag($attributes, 'SuiteRequiredButMissing') => [
-                Deliverability::Maybe, 'Primary address confirmed, secondary number missing',
+                Deliverability::Partial, 'Primary address confirmed, secondary number missing',
             ],
             default => [Deliverability::Yes, 'Address confirmed deliverable'],
         };

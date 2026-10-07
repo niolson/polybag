@@ -317,7 +317,7 @@ class ManualShip extends Page implements HasForms
                 app(AddressValidationService::class)->validate($shipment);
                 $shipment->refresh();
 
-                if (! in_array($shipment->deliverability, [Deliverability::Yes, Deliverability::NotChecked], true)) {
+                if (! in_array($shipment->deliverability, [...Deliverability::confirmed(), Deliverability::NotChecked], true)) {
                     $this->notifyWarning('Address Warning', $shipment->validation_message ?? 'Address may not be deliverable.');
                 }
             } catch (\Exception $e) {

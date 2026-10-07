@@ -86,7 +86,7 @@ it('records an attempt and USPS\'s reason when USPS cannot match the address', f
     expect($outcome)->toBe(AddressValidationOutcome::Inconclusive)
         ->and($shipment->validation_attempted_at)->not->toBeNull()
         ->and($shipment->checked)->toBeFalse()
-        ->and($shipment->deliverability)->toBe(Deliverability::No)
+        ->and($shipment->deliverability)->toBe(Deliverability::Unverified)
         ->and($shipment->validation_message)->toBe($message);
 })->with([
     'no match' => 'There is no match for the address requested.',
@@ -214,7 +214,7 @@ it('re-validates a settled Shipment through the whole chain', function (): void 
         '*oauth*' => uspsToken(),
         Address::class => uspsNotFound('There is no match for the address requested.'),
         GoogleValidateAddress::class => MockResponse::make(['result' => [
-            'verdict' => ['addressComplete' => false],
+            'verdict' => ['addressComplete' => true],
             'address' => ['postalAddress' => []],
         ]]),
     ]);
@@ -224,7 +224,9 @@ it('re-validates a settled Shipment through the whole chain', function (): void 
     uspsAndGoogle()->validate($shipment);
 
     Saloon::assertSent(GoogleValidateAddress::class);
-    expect($shipment->fresh()->checked)->toBeTrue();
+    $shipment->refresh();
+    expect($shipment->checked)->toBeTrue()
+        ->and($shipment->deliverability)->toBe(Deliverability::Verified);
 });
 
 it('marks a re-validated Shipment unchecked when every validator is inconclusive', function (): void {
@@ -239,9 +241,49 @@ it('marks a re-validated Shipment unchecked when every validator is inconclusive
 
     $shipment->refresh();
     expect($shipment->checked)->toBeFalse()
-        ->and($shipment->deliverability)->toBe(Deliverability::No)
+        ->and($shipment->deliverability)->toBe(Deliverability::Unverified)
         ->and($shipment->validation_attempted_at)->not->toBeNull();
 });
+
+// Regression: an inconclusive re-validation left the earlier correction in
+// place, so rates and Labels kept using an address nothing now vouched for.
+it('drops an earlier correction when a re-validation ends inconclusive', function (string $country, array $fakes): void {
+    Saloon::fake($fakes);
+
+    $shipment = Shipment::factory()->create([
+        'country' => $country,
+        'address1' => '8 Entered St',
+        'checked' => true,
+        'deliverability' => Deliverability::Verified,
+        'validated_address1' => '9 Corrected St',
+        'validated_city' => 'Corrected City',
+        'validated_postal_code' => '99999',
+        'validated_residential' => true,
+        'validated_carrier_route' => 'C001',
+    ]);
+
+    expect(uspsAndGoogle()->validate($shipment))->toBe(AddressValidationOutcome::Inconclusive);
+
+    $shipment->refresh();
+    expect($shipment->deliverability)->toBe(Deliverability::Unverified)
+        ->and($shipment->only(array_keys(Shipment::NO_VALIDATED_ADDRESS)))->each->toBeNull()
+        ->and(AddressData::fromShipment($shipment)->streetAddress)->toBe('8 Entered St');
+})->with([
+    'Google incomplete' => fn (): array => ['DE', [
+        GoogleValidateAddress::class => MockResponse::make(['result' => [
+            'verdict' => ['addressComplete' => false],
+            'address' => ['postalAddress' => ['addressLines' => ['9 Corrected St']], 'addressComponents' => []],
+        ]]),
+    ]],
+    'USPS no match, then Google incomplete' => fn (): array => ['US', [
+        '*oauth*' => uspsToken(),
+        Address::class => uspsNotFound('There is no match for the address requested.'),
+        GoogleValidateAddress::class => MockResponse::make(['result' => [
+            'verdict' => ['addressComplete' => false],
+            'address' => ['postalAddress' => [], 'addressComponents' => []],
+        ]]),
+    ]],
+]);
 
 // The scheduled run
 

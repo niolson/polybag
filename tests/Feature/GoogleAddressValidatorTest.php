@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\AddressValidationOutcome;
 use App\Enums\Deliverability;
 use App\Http\Integrations\Google\Requests\ValidateAddress;
 use App\Models\Shipment;
@@ -18,7 +19,7 @@ it('supports every country', function (): void {
         ->and($this->validator->supports('XX'))->toBeTrue();
 });
 
-it('marks the address deliverable when fully confirmed', function (): void {
+it('marks a reference-data match Verified, not deliverable', function (): void {
     Saloon::fake([
         ValidateAddress::class => MockResponse::make([
             'result' => [
@@ -44,7 +45,8 @@ it('marks the address deliverable when fully confirmed', function (): void {
 
     $shipment->refresh();
     expect($shipment->checked)->toBeTrue()
-        ->and($shipment->deliverability)->toBe(Deliverability::Yes)
+        ->and($shipment->deliverability)->toBe(Deliverability::Verified)
+        ->and($shipment->validation_message)->toBe('Address matched reference data')
         ->and($shipment->validated_address1)->toBe('1600 Amphitheatre Pkwy')
         ->and($shipment->validated_city)->toBe('Mountain View')
         ->and($shipment->validated_state_or_province)->toBe('CA')
@@ -52,7 +54,7 @@ it('marks the address deliverable when fully confirmed', function (): void {
         ->and($shipment->validated_residential)->toBeFalse();
 });
 
-it('marks the address Maybe when components are unconfirmed but plausible', function (): void {
+it('marks the address Partial when components are unconfirmed but plausible', function (): void {
     Saloon::fake([
         ValidateAddress::class => MockResponse::make([
             'result' => [
@@ -78,7 +80,7 @@ it('marks the address Maybe when components are unconfirmed but plausible', func
 
     $shipment->refresh();
     expect($shipment->checked)->toBeTrue()
-        ->and($shipment->deliverability)->toBe(Deliverability::Maybe)
+        ->and($shipment->deliverability)->toBe(Deliverability::Partial)
         ->and($shipment->validated_residential)->toBeTrue();
 });
 
@@ -111,7 +113,7 @@ it('marks the address No when a component is unconfirmed and suspicious', functi
         ->and($shipment->deliverability)->toBe(Deliverability::No);
 });
 
-it('marks the address No when incomplete', function (): void {
+it('reads an incomplete address as inconclusive, not No', function (): void {
     Saloon::fake([
         ValidateAddress::class => MockResponse::make([
             'result' => [
@@ -123,11 +125,13 @@ it('marks the address No when incomplete', function (): void {
     ]);
 
     $shipment = Shipment::factory()->create(['country' => 'US']);
-    $this->validator->validate($shipment);
+
+    expect($this->validator->validate($shipment))->toBe(AddressValidationOutcome::Inconclusive);
 
     $shipment->refresh();
-    expect($shipment->checked)->toBeTrue()
-        ->and($shipment->deliverability)->toBe(Deliverability::No);
+    expect($shipment->checked)->toBeFalse()
+        ->and($shipment->deliverability)->toBe(Deliverability::Unverified)
+        ->and($shipment->validated_address1)->toBeNull();
 });
 
 it('prefers USPS DPV data over the geocoding verdict when Google returns it', function (): void {
@@ -183,7 +187,7 @@ it('marks the address Maybe when USPS DPV data shows a missing secondary number'
 
     $shipment->refresh();
     expect($shipment->checked)->toBeTrue()
-        ->and($shipment->deliverability)->toBe(Deliverability::Maybe)
+        ->and($shipment->deliverability)->toBe(Deliverability::Partial)
         ->and($shipment->validation_message)->toBe('Primary address confirmed, secondary number missing');
 });
 
@@ -236,8 +240,8 @@ it('falls back to the geocoding verdict when uspsData is present but has no usab
 
     $shipment->refresh();
     expect($shipment->checked)->toBeTrue()
-        ->and($shipment->deliverability)->toBe(Deliverability::Yes)
-        ->and($shipment->validation_message)->toBe('Address confirmed deliverable');
+        ->and($shipment->deliverability)->toBe(Deliverability::Verified)
+        ->and($shipment->validation_message)->toBe('Address matched reference data');
 });
 
 it('falls back to the geocoding verdict for non-US addresses with no USPS DPV data', function (): void {
@@ -262,8 +266,8 @@ it('falls back to the geocoding verdict for non-US addresses with no USPS DPV da
 
     $shipment->refresh();
     expect($shipment->checked)->toBeTrue()
-        ->and($shipment->deliverability)->toBe(Deliverability::Yes)
-        ->and($shipment->validation_message)->toBe('Address confirmed deliverable');
+        ->and($shipment->deliverability)->toBe(Deliverability::Verified)
+        ->and($shipment->validation_message)->toBe('Address matched reference data');
 });
 
 it('leaves the shipment unchecked when neither the broker nor a local API key is configured', function (): void {
@@ -361,6 +365,6 @@ it('settles a German address with a stray stored state once the state is left ou
 
     $shipment->refresh();
     expect($shipment->checked)->toBeTrue()
-        ->and($shipment->deliverability)->toBe(Deliverability::Yes)
+        ->and($shipment->deliverability)->toBe(Deliverability::Verified)
         ->and($shipment->validated_address1)->toBe('Marienplatz 8');
 });

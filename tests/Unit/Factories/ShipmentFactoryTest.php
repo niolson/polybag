@@ -34,11 +34,11 @@ it('creates an undeliverable shipment', function (): void {
         ->and($shipment->validation_message)->toBe('Address found but not confirmed as deliverable');
 });
 
-it('creates a maybe deliverable shipment', function (): void {
-    $shipment = Shipment::factory()->maybeDeliverable()->create();
+it('creates a partly verified shipment', function (): void {
+    $shipment = Shipment::factory()->partlyVerified()->create();
 
     expect($shipment->checked)->toBeTrue()
-        ->and($shipment->deliverability)->toBe(Deliverability::Maybe)
+        ->and($shipment->deliverability)->toBe(Deliverability::Partial)
         ->and($shipment->validation_message)->toBe('Primary address confirmed, secondary number missing');
 });
 

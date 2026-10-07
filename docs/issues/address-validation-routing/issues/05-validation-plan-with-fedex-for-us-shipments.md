@@ -38,7 +38,7 @@ which exists and is tested — can't be used without breaking the FedEx agreemen
   (ADR 0006, amended by `carrier-catalog-reset/16`), but it can be packed, so its address
   is still checked. Slice [02](02-stop-retrying-exhausted-shipments.md) clears the attempt
   when a method is assigned, so FedEx gets its turn then.
-- **FedEx US reading:** a single-organization ZIP precision maps to `maybe`, matching how
+- **FedEx US reading:** a single-organization ZIP precision maps to `partial`, matching how
   USPS treats the same address. A DPV-confirmed match is `yes` (see
   [03](03-deliverability-says-what-the-evidence-supports.md)).
 - A self-hosted install without FedEx accounts behaves exactly as today.
@@ -53,7 +53,7 @@ which exists and is tested — can't be used without breaking the FedEx agreemen
       records FedEx as its source
 - [ ] A FedEx inconclusive falls through to USPS, then Google
 - [ ] A Shipment with no method never sends a FedEx request
-- [ ] A single-organization ZIP result is recorded as `maybe`
+- [ ] A single-organization ZIP result is recorded as `partial`
 
 ## Blocked by
 

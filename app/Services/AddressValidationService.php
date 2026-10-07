@@ -49,10 +49,17 @@ class AddressValidationService
         }
 
         if ($outcome->answered()) {
-            // A re-validation that ends inconclusive replaces an earlier
-            // settled result, so the Shipment must not still read as checked.
+            // Every validator that could answer did, and none settled it. A
+            // validator's own inconclusive reading is provisional; the chain's
+            // is that no one could confirm or reject the address. It also
+            // replaces an earlier settled result, so neither that result's
+            // checked flag nor its correction may survive to rate or label.
             if ($outcome === AddressValidationOutcome::Inconclusive) {
-                $shipment->checked = false;
+                $shipment->forceFill([
+                    'checked' => false,
+                    'deliverability' => Deliverability::Unverified,
+                    ...Shipment::NO_VALIDATED_ADDRESS,
+                ]);
             }
 
             $shipment->validation_attempted_at = now();
@@ -64,8 +71,19 @@ class AddressValidationService
         // produce a failure log a later validator then contradicts.
         if ($shipment->deliverability === Deliverability::No) {
             AddressValidationFailed::dispatch($shipment, $shipment->validation_message ?? 'Address validation failed');
+        } elseif ($shipment->deliverability === Deliverability::Unverified) {
+            AddressValidationFailed::dispatch($shipment, $this->unverifiedReason($shipment));
         }
 
         return $outcome;
+    }
+
+    private function unverifiedReason(Shipment $shipment): string
+    {
+        $reason = 'No validator could confirm or reject the address';
+
+        return filled($shipment->validation_message)
+            ? "{$reason}: {$shipment->validation_message}"
+            : $reason;
     }
 }

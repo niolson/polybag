@@ -79,3 +79,22 @@ it('restricts access to managers and above', function (): void {
 
     expect(PackingValidationReport::canAccess())->toBeTrue();
 });
+
+it('lists only shipped packages whose address was not confirmed', function (): void {
+    $user = User::factory()->create(['role' => Role::Manager]);
+
+    $packages = collect(Deliverability::cases())->mapWithKeys(fn (Deliverability $deliverability): array => [
+        $deliverability->value => Package::factory()->shipped()->create([
+            'shipment_id' => Shipment::factory()->create(['deliverability' => $deliverability])->id,
+            'shipped_at' => now(),
+        ]),
+    ]);
+
+    Livewire::actingAs($user)
+        ->test(PackingValidationReport::class)
+        ->set('section', 'validation_issues')
+        ->assertCanNotSeeTableRecords([$packages['yes'], $packages['verified']])
+        ->assertCanSeeTableRecords([$packages['partial'], $packages['unverified'], $packages['no'], $packages['not_checked']]);
+
+    expect((new PackingValidationReport)->getValidationIssueCount())->toBe(4);
+});

@@ -108,7 +108,7 @@ terms.
     `482/22` compared correctly, so that a FedEx match that keeps only the street number
     is not treated as a substitution.
 20. As an operator, I want a US address that FedEx can only place at a single-organization
-    ZIP code treated as "maybe", so that it matches how USPS treats the same address.
+    ZIP code treated as "Partly verified", so that it matches how USPS treats the same address.
 21. As an operator shipping internationally, I want international Shipments validated on
     the schedule once validation is cheap, so that address problems surface before
     packing, not at label purchase.
@@ -160,10 +160,14 @@ terms.
   - **`unverified`** ("Couldn't verify"): every validator in the chain was tried and
     none could confirm or reject the address.
 
+  `maybe` is renamed **`partial`** ("Partly verified"): the primary address matched but
+  part of it did not, such as a missing or unconfirmed unit number.
+
   `yes` ("Deliverable") is kept for a confirmed delivery point: USPS DPV, Google's USPS
   data, FedEx US DPV. `no` ("Not deliverable") is kept for positive evidence the address
-  is wrong. An incomplete Google verdict is inconclusive, not `no`. Existing non-US `yes`
-  rows are backfilled to `verified`.
+  is wrong. An incomplete Google verdict is inconclusive, not `no`. Existing `yes`
+  rows outside the USPS service area (US and its territories) are backfilled to
+  `verified`, and `maybe` rows to `partial`.
 - **A validation plan module** takes a Shipment and returns the ordered validators for
   it. It is the only place the routing rules live, and it depends on:
   - the Shipment's country and shipping method;
@@ -200,7 +204,7 @@ terms.
 
   Anything else is inconclusive. A settled international result is `verified`. The US
   reading (resolved, delivery point confirmed, suite flags) stays, with
-  single-organization ZIP precision mapped to "maybe".
+  single-organization ZIP precision mapped to `partial`.
 - **Google request:** send the administrative area only when the address reference
   service says the country uses one.
 - **UPS** ships together with its notice, which is shown with the validation result on
@@ -245,7 +249,8 @@ terms.
   a country that does.
 - **UPS notice:** present on a UPS result, absent on others.
 - **Deliverability:** each validator's results map to the agreed values; a chain that
-  ends inconclusive is `unverified`; the backfill moves non-US `yes` only.
+  ends inconclusive is `unverified`; the backfill moves `yes` outside the USPS service area and every `maybe`, nothing
+  else.
 - **Answer log and shadow check:** one row per validator that answered, none for one
   that was unavailable; a shadow answer never changes the Shipment's result.
 - **Prior art:** the existing tests for the FedEx, UPS, Google and USPS validators and for
@@ -301,7 +306,7 @@ those results become `verified`, not `yes`.
   FedEx can then be the carrier of record without being the postage source.
 - A Shipment with no shipping method gets no carrier validator. It is not an error, since
   it can be packed, but nothing can be bought for it.
-- Deliverability gains `verified` and `unverified`, as above.
+- Deliverability gains `verified` and `unverified`, and `maybe` becomes `partial`, as above.
 - UPS is measured against the other validators before it is trusted.
 - The FedEx shadow check runs in excluded countries too.
 

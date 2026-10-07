@@ -242,7 +242,7 @@ class UspsAddressValidator implements AddressValidationInterface
                 // USPS matched a specific base address, so this is a confident partial result.
                 $shipment->checked = true;
                 $this->applyValidatedAddress($shipment, $response);
-                $shipment->deliverability = Deliverability::Maybe;
+                $shipment->deliverability = Deliverability::Partial;
                 $shipment->validation_message = $text;
                 break;
 
@@ -303,8 +303,8 @@ class UspsAddressValidator implements AddressValidationInterface
         } else {
             [$deliverability, $message] = match ($dpv) {
                 'Y' => [Deliverability::Yes, 'Address confirmed deliverable'],
-                'D' => [Deliverability::Maybe, 'Primary address confirmed, secondary number missing'],
-                'S' => [Deliverability::Maybe, 'Primary address confirmed, secondary number not confirmed'],
+                'D' => [Deliverability::Partial, 'Primary address confirmed, secondary number missing'],
+                'S' => [Deliverability::Partial, 'Primary address confirmed, secondary number not confirmed'],
                 'N' => [Deliverability::No, 'Address found but not confirmed as deliverable'],
                 default => [Deliverability::No, 'DPV confirmation not available'],
             };

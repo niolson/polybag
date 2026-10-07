@@ -30,7 +30,7 @@ it('dispatches AddressValidationFailed on API error', function (): void {
 
     Event::assertDispatched(AddressValidationFailed::class, function (AddressValidationFailed $event) use ($shipment): bool {
         return $event->shipment->id === $shipment->id
-            && $event->reason === 'Address Not Found.';
+            && $event->reason === 'No validator could confirm or reject the address: Address Not Found.';
     });
 });
 
@@ -51,7 +51,7 @@ it('dispatches AddressValidationFailed for correction code 22', function (): voi
     app(AddressValidationService::class)->validate($shipment);
 
     Event::assertDispatched(AddressValidationFailed::class, function (AddressValidationFailed $event): bool {
-        return $event->reason === 'Multiple addresses were found.';
+        return $event->reason === 'No validator could confirm or reject the address: Multiple addresses were found.';
     });
 });
 
@@ -70,7 +70,7 @@ it('dispatches AddressValidationFailed for unexpected response format', function
     app(AddressValidationService::class)->validate($shipment);
 
     Event::assertDispatched(AddressValidationFailed::class, function (AddressValidationFailed $event): bool {
-        return $event->reason === 'Unexpected USPS response format';
+        return $event->reason === 'No validator could confirm or reject the address: Unexpected USPS response format';
     });
 });
 

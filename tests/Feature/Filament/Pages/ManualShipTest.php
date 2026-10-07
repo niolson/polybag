@@ -1,7 +1,10 @@
 <?php
 
+use App\Contracts\AddressValidationInterface;
 use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\PackageShipping\PackageShippingResult;
+use App\Enums\AddressValidationOutcome;
+use App\Enums\Deliverability;
 use App\Filament\Pages\ManualShip;
 use App\Models\BoxSize;
 use App\Models\Channel;
@@ -11,6 +14,7 @@ use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\ShippingOffer;
 use App\Models\User;
+use App\Services\AddressValidationService;
 use App\Services\SettingsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -241,3 +245,60 @@ it('redirects to pack page without overriding the account auto-ship policy when 
 
     $component->assertRedirect('/pack/'.$shipment->id);
 });
+
+it('warns about the address only when validation did not confirm it', function (Deliverability $deliverability, bool $warns): void {
+    Channel::factory()->create(['name' => 'Manual']);
+    $box = BoxSize::factory()->create();
+    $shippingMethod = ShippingMethod::factory()->create();
+
+    app()->instance(AddressValidationService::class, new AddressValidationService([
+        new class($deliverability) implements AddressValidationInterface
+        {
+            public function __construct(private readonly Deliverability $deliverability) {}
+
+            public function supports(string $country): bool
+            {
+                return true;
+            }
+
+            public function validate(Shipment $shipment): AddressValidationOutcome
+            {
+                $shipment->forceFill([
+                    'deliverability' => $this->deliverability,
+                    'validation_message' => 'Stub validation result',
+                ])->save();
+
+                return AddressValidationOutcome::Settled;
+            }
+        },
+    ]));
+
+    $component = Livewire::test(ManualShip::class)
+        ->fillForm([
+            'shipment_reference' => 'MAN-2001',
+            'first_name' => 'Taylor',
+            'last_name' => 'Jones',
+            'address1' => '123 Main St',
+            'city' => 'Seattle',
+            'country' => 'US',
+            'state_or_province' => 'WA',
+            'postal_code' => '98101',
+            'shipping_method_id' => $shippingMethod->id,
+            'box_size_id' => $box->id,
+            'weight' => 2.5,
+            'height' => 10,
+            'width' => 8,
+            'length' => 6,
+        ])
+        ->call('ship');
+
+    $warns
+        ? $component->assertNotified('Address Warning')
+        : $component->assertNotNotified('Address Warning');
+})->with([
+    'deliverable' => [Deliverability::Yes, false],
+    'verified' => [Deliverability::Verified, false],
+    'partly verified' => [Deliverability::Partial, true],
+    "couldn't verify" => [Deliverability::Unverified, true],
+    'not deliverable' => [Deliverability::No, true],
+]);

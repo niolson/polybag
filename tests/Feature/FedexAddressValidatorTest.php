@@ -133,7 +133,7 @@ it('marks the address Maybe when the suite is missing or invalid', function (str
 
     $shipment->refresh();
     expect($shipment->checked)->toBeTrue()
-        ->and($shipment->deliverability)->toBe(Deliverability::Maybe)
+        ->and($shipment->deliverability)->toBe(Deliverability::Partial)
         ->and($shipment->validation_message)->toBe($message);
 })->with([
     'missing' => ['SuiteRequiredButMissing', 'Primary address confirmed, secondary number missing'],

@@ -161,7 +161,9 @@ class UpsAddressValidator implements AddressValidationInterface
 
         if (array_key_exists('ValidAddressIndicator', $xav) && $candidates !== []) {
             $shipment->checked = true;
-            $shipment->deliverability = Deliverability::Yes;
+            // A valid-address indicator is a reference-data match, not a
+            // delivery point, until issue 06 measures how far it can be trusted.
+            $shipment->deliverability = Deliverability::Verified;
             $shipment->validation_message = 'Address confirmed valid';
             $this->applyValidatedAddress($shipment, $candidates[0], $xav);
             $shipment->save();
