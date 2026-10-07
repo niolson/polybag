@@ -119,19 +119,23 @@ it('does not count an inactive FedEx service', function (): void {
     expect(plannedValidators($shipment))->toBe([AddressValidator::Usps]);
 });
 
-it('does not count a listed FedEx service the method cannot buy directly', function (string $case): void {
+it('does not count a listed FedEx service the method cannot buy directly', function (bool $directAllowed, bool $fedexActive): void {
     planScope(planFedexAccount(), ['client' => $this->client]);
     $method = planMethod([Carrier::FEDEX]);
 
-    match ($case) {
-        'direct postage off' => $method->postageSources()->where('source_kind', PostageSourceKind::Direct)->delete(),
-        'FedEx carrier inactive' => Carrier::where('name', Carrier::FEDEX)->update(['active' => false]),
-    };
+    if (! $directAllowed) {
+        $method->postageSources()->where('source_kind', PostageSourceKind::Direct)->delete();
+    }
+
+    Carrier::where('name', Carrier::FEDEX)->update(['active' => $fedexActive]);
 
     $shipment = Shipment::factory()->create(['client_id' => $this->client->id, 'shipping_method_id' => $method->id]);
 
     expect(plannedValidators($shipment))->toBe([AddressValidator::Usps]);
-})->with(['direct postage off', 'FedEx carrier inactive']);
+})->with([
+    'direct postage off' => [false, true],
+    'FedEx carrier inactive' => [true, false],
+]);
 
 it('still counts Amazon Buy Shipping with direct postage off', function (): void {
     planScope(planFedexAccount(), ['client' => $this->client]);
@@ -193,20 +197,16 @@ it('follows the fake-carrier, demo, sandbox and Google settings', function (
 // --- Which FedEx account counts -------------------------------------------------------
 
 it('counts a FedEx account for a located Shipment only where label purchase would find one', function (
-    string $slot,
+    ?bool $atItsLocation,
+    bool $forItsClient,
     bool $eligible,
 ): void {
     $location = Location::factory()->create();
-    $other = Location::factory()->create();
 
-    planScope(planFedexAccount(), match ($slot) {
-        'its location' => ['location' => $location],
-        'its location, for its Client' => ['location' => $location, 'client' => $this->client],
-        'another location' => ['location' => $other],
-        'another location, for its Client' => ['location' => $other, 'client' => $this->client],
-        'client-wide' => ['client' => $this->client],
-        'global' => [],
-    });
+    planScope(planFedexAccount(), [
+        'location' => $atItsLocation === null ? null : ($atItsLocation ? $location : Location::factory()->create()),
+        'client' => $forItsClient ? $this->client : null,
+    ]);
 
     $shipment = Shipment::factory()->create([
         'client_id' => $this->client->id,
@@ -216,25 +216,23 @@ it('counts a FedEx account for a located Shipment only where label purchase woul
 
     expect(app(ShipmentValidationPlan::class)->fedexMayValidate($shipment))->toBe($eligible);
 })->with([
-    ['its location', true],
-    ['its location, for its Client', true],
-    ['another location', false],
-    ['another location, for its Client', false],
-    ['client-wide', true],
-    ['global', true],
+    'its location' => [true, false, true],
+    'its location, for its Client' => [true, true, true],
+    'another location' => [false, false, false],
+    'another location, for its Client' => [false, true, false],
+    'client-wide' => [null, true, true],
+    'global' => [null, false, true],
 ]);
 
 it('counts any of its Client\'s FedEx accounts for an unlocated Shipment', function (
-    string $slot,
+    bool $locationScoped,
+    ?bool $forItsClient,
     bool $eligible,
 ): void {
-    planScope(planFedexAccount(), match ($slot) {
-        'location-scoped, for its Client' => ['location' => Location::factory()->create(), 'client' => $this->client],
-        'location default' => ['location' => Location::factory()->create()],
-        'location-scoped, for another Client' => ['location' => Location::factory()->create(), 'client' => Client::factory()->create()],
-        'client-wide' => ['client' => $this->client],
-        'global' => [],
-    });
+    planScope(planFedexAccount(), [
+        'location' => $locationScoped ? Location::factory()->create() : null,
+        'client' => $forItsClient === null ? null : ($forItsClient ? $this->client : Client::factory()->create()),
+    ]);
 
     $shipment = Shipment::factory()->create([
         'client_id' => $this->client->id,
@@ -244,11 +242,11 @@ it('counts any of its Client\'s FedEx accounts for an unlocated Shipment', funct
 
     expect(app(ShipmentValidationPlan::class)->fedexMayValidate($shipment))->toBe($eligible);
 })->with([
-    ['location-scoped, for its Client', true],
-    ['location default', true],
-    ['location-scoped, for another Client', false],
-    ['client-wide', true],
-    ['global', true],
+    'location-scoped, for its Client' => [true, true, true],
+    'location default' => [true, null, true],
+    'location-scoped, for another Client' => [true, false, false],
+    'client-wide' => [false, true, true],
+    'global' => [false, null, true],
 ]);
 
 it('picks an unlocated Shipment\'s FedEx account deterministically', function (): void {
