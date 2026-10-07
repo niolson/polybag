@@ -1723,7 +1723,15 @@ it('sends an international ZPL label its address text as ASCII, which its font c
 it('sends a PDF label Latin address text as entered, accents included', function (string $country, array $to): void {
     fakeUspsLabelsBothWays();
 
-    $response = $this->adapter->createShipment(uspsAddressTextShipRequest(new AddressData(...$to, country: $country)));
+    $response = $this->adapter->createShipment(uspsAddressTextShipRequest(new AddressData(
+        firstName: $to['firstName'],
+        lastName: $to['lastName'],
+        streetAddress: $to['streetAddress'],
+        city: $to['city'],
+        stateOrProvince: $to['stateOrProvince'],
+        postalCode: $to['postalCode'],
+        country: $country,
+    )));
 
     expect($response->success)->toBeTrue()
         ->and(sentUspsLabelAddresses()['toAddress'])->toMatchArray([
