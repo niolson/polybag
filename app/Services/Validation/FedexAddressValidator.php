@@ -59,14 +59,14 @@ class FedexAddressValidator implements AddressValidationInterface
 
     /**
      * Resolve the FedEx carrier account whose credentials should authenticate
-     * this shipment's validation request.
+     * this shipment's validation request — the one the validation plan found.
      */
     protected function resolveAccount(Shipment $shipment): ?CarrierAccount
     {
         $carrierId = Carrier::where('name', Carrier::FEDEX)->value('id');
 
         return $carrierId
-            ? CarrierAccount::resolveForShipment($carrierId, null, $shipment->client_id)->first()
+            ? CarrierAccount::resolveForAddressValidation($carrierId, $shipment)
             : null;
     }
 
@@ -174,6 +174,12 @@ class FedexAddressValidator implements AddressValidationInterface
         $shipment->checked = true;
 
         [$shipment->deliverability, $shipment->validation_message] = match (true) {
+            // FedEx confirms a delivery point for a ZIP assigned to one
+            // organization even when it can't place the address within it,
+            // which USPS reads as a default address needing more information.
+            ($attributes['AddressPrecision'] ?? null) === 'UNIQUE_ZIP' => [
+                Deliverability::Partial, 'ZIP code belongs to a single organization, address within it not confirmed',
+            ],
             $this->flag($attributes, 'InvalidSuiteNumber') => [
                 Deliverability::Partial, 'Primary address confirmed, secondary number not confirmed',
             ],

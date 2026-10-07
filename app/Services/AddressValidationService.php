@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Contracts\AddressValidationInterface;
+use App\Contracts\AddressValidationPlan;
 use App\DataTransferObjects\AddressValidationResult;
 use App\Enums\AddressValidationOutcome;
 use App\Enums\Deliverability;
@@ -13,17 +14,13 @@ use App\Models\Shipment;
 
 class AddressValidationService
 {
-    /**
-     * @param  array<AddressValidationInterface>  $validators
-     */
     public function __construct(
-        private readonly array $validators = [],
+        private readonly AddressValidationPlan $plan,
     ) {}
 
     /**
-     * Validate the shipment's address by dispatching to the appropriate
-     * country-specific validator. Skips gracefully if no validator supports
-     * the shipment's country.
+     * Validate the shipment's address with the validators its plan names, in
+     * order, skipping any that don't support the shipment's country.
      *
      * Returns Settled when a validator settled the address, Inconclusive when
      * validators answered but none settled it, and Unavailable when none ran.
@@ -38,7 +35,7 @@ class AddressValidationService
         $country = $shipment->country ?? 'US';
         $outcome = AddressValidationOutcome::Unavailable;
 
-        foreach ($this->validators as $validator) {
+        foreach ($this->plan->validatorsFor($shipment) as $validator) {
             if (! $validator->supports($country)) {
                 continue;
             }

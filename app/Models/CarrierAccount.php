@@ -340,6 +340,36 @@ class CarrierAccount extends Model
     }
 
     /**
+     * The account whose credentials validate this Shipment's address with a
+     * carrier, or null when the Shipment has none — `address-validation-routing/05`.
+     *
+     * A located Shipment resolves as label purchase would, so a carrier
+     * validates only where its Label could be bought there. An unlocated
+     * Shipment may use any active account that applies to its Client,
+     * location-scoped ones included; its own Client's before a shared one,
+     * then one scoped to no location, then the lowest account ID.
+     */
+    public static function resolveForAddressValidation(int $carrierId, Shipment $shipment): ?self
+    {
+        if ($shipment->location_id !== null) {
+            return self::resolveForShipment($carrierId, $shipment->location_id, $shipment->client_id)->first();
+        }
+
+        return CarrierAccountScope::with('carrierAccount')
+            ->whereHas('carrierAccount', fn (Builder $q) => $q->where('active', true))
+            ->where('carrier_id', $carrierId)
+            ->where(fn (Builder $q) => $q->whereNull('client_id')->orWhere('client_id', $shipment->client_id))
+            ->get()
+            ->sortBy(fn (CarrierAccountScope $scope): array => [
+                $scope->client_id === null,
+                $scope->location_id !== null,
+                $scope->carrier_account_id,
+            ])
+            ->first()
+            ?->carrierAccount;
+    }
+
+    /**
      * Move this account's scopes to the carrier it now belongs to.
      *
      * `carrier_id` is denormalized onto `carrier_account_scopes` so the unique

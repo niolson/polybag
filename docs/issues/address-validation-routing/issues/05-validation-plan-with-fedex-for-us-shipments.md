@@ -2,7 +2,7 @@
 
 # Validation plan, with FedEx first for eligible US Shipments
 
-Status: needs-triage
+Status: done — 2026-10-07
 Category: enhancement
 Created: 2026-10-01
 
@@ -34,26 +34,63 @@ which exists and is tested — can't be used without breaking the FedEx agreemen
   of record). The Client must have an active FedEx account. These rules encode our
   reading of the agreement and sit in one method, so a written clarification from FedEx
   changes one rule.
+- **Which FedEx account counts** (decided 2026-10-07). A Shipment's `location_id` is
+  nullable, and the rule depends on it:
+  - **Located Shipment:** `CarrierAccount::resolveForShipment($fedexId,
+    $shipment->location_id, $shipment->client_id)`, the lookup label purchase uses. FedEx
+    validates only where a FedEx Label could be bought: an account scoped to another
+    location does not count, while a client-wide or global default does, since it applies
+    at every location.
+  - **Unlocated Shipment:** any active FedEx scope that applies to the Client counts,
+    including one scoped to a single location — (any location, client), (any location,
+    no client), (no location, client), (no location, no client). A location-scoped
+    account for a different Client does not. When several match, choose deterministically:
+    the Client's own before a shared one, then one scoped to no location, then the lowest
+    account ID.
+  - The plan and `FedexAddressValidator::resolveAccount()` (which today passes a `null`
+    location) share one lookup, so the plan never chooses FedEx for a Shipment the
+    validator then finds no account for.
 - **No shipping method:** USPS then Google only. Nothing can be bought for such a Shipment
   (ADR 0006, amended by `carrier-catalog-reset/16`), but it can be packed, so its address
   is still checked. Slice [02](02-stop-retrying-exhausted-shipments.md) clears the attempt
   when a method is assigned, so FedEx gets its turn then.
 - **FedEx US reading:** a single-organization ZIP precision maps to `partial`, matching how
-  USPS treats the same address. A DPV-confirmed match is `yes` (see
+  USPS treats the same address. FedEx reports it as `attributes.AddressPrecision ===
+  "UNIQUE_ZIP"`, and with `DPV` true, so today's validator records it as `yes` (seen in
+  the 2026-09-30 production run). A DPV-confirmed match is `yes` (see
   [03](03-deliverability-says-what-the-evidence-supports.md)).
 - A self-hosted install without FedEx accounts behaves exactly as today.
 
 ## Acceptance criteria
 
-- [ ] Table-driven plan tests, Shipment in, ordered validators out, covering:
+- [x] Table-driven plan tests, Shipment in, ordered validators out, covering:
   - FedEx-only, UPS-only, mixed and Amazon-Buy-Shipping methods, and no method
   - Clients with and without an active FedEx account
+  - located Shipments with a FedEx account at their location, at another location only,
+    and as a client-wide or global default
+  - unlocated Shipments whose Client's only FedEx account is location-scoped, and whose
+    only location-scoped account belongs to another Client
   - fake carriers, demo, sandbox with and without real validation, Google on and off
-- [ ] A FedEx-eligible US Shipment settled by FedEx sends no USPS or Google request, and
+- [x] A FedEx-eligible US Shipment settled by FedEx sends no USPS or Google request, and
       records FedEx as its source
-- [ ] A FedEx inconclusive falls through to USPS, then Google
-- [ ] A Shipment with no method never sends a FedEx request
-- [ ] A single-organization ZIP result is recorded as `partial`
+- [x] A FedEx inconclusive falls through to USPS, then Google
+- [x] A Shipment with no method never sends a FedEx request
+- [x] A single-organization ZIP (`AddressPrecision` `UNIQUE_ZIP`) result is recorded as
+      `partial`
+- [x] `FedexAddressValidator` authenticates with the account the plan's lookup found
+
+## As built
+
+- `App\Contracts\AddressValidationPlan`, implemented by
+  `App\Services\Validation\ShipmentValidationPlan`; `fedexMayValidate()` is the one
+  method holding the FedEx rule. `AddressValidationService` takes the plan; tests of the
+  fallback chain itself use `Tests\Support\FixedValidationPlan`.
+- The shared account lookup is `CarrierAccount::resolveForAddressValidation()`.
+- A listed FedEx service counts only where the postage resolver would sell it: direct
+  postage allowed on the method, the service active, and the FedEx carrier active. The
+  Amazon Buy Shipping rule is separate and holds with direct postage off.
+- The settings are now read on every validation rather than once when the service was
+  built, so changing sandbox mode or Google takes effect without a restart.
 
 ## Blocked by
 
