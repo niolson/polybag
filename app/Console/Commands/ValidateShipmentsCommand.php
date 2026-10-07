@@ -2,11 +2,13 @@
 
 namespace App\Console\Commands;
 
+use App\Contracts\AddressValidationPlan;
 use App\Enums\AddressValidationOutcome;
 use App\Enums\ValidationTrigger;
 use App\Models\AddressValidationAnswer;
 use App\Models\Shipment;
 use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Facades\Log;
 
 class ValidateShipmentsCommand extends Command
@@ -25,22 +27,43 @@ class ValidateShipmentsCommand extends Command
      */
     public const MAX_SCHEDULED_ATTEMPTS = 5;
 
-    public function handle(): int
+    public function handle(AddressValidationPlan $plan): int
     {
         // A Shipment every validator has already answered for is left alone
         // until someone validates it by hand or changes its address or method.
-        $query = Shipment::where('checked', false)
+        $due = Shipment::where('checked', false)
             ->whereNull('validation_attempted_at')
             ->where('validation_attempts', '<', self::MAX_SCHEDULED_ATTEMPTS)
-            ->where('country', 'US');
+            ->with('shippingMethod');
 
         $this->warnAboutCappedShipments();
 
+        // Outside the US a plan can name no validator: Google off and the
+        // Shipment not tendered to FedEx, or a country neither supports. Such
+        // a Shipment would never record an attempt, so it would be picked up
+        // and reported as an outage on every run. It is left out before the
+        // limit, so it can't crowd out Shipments that can be validated, and
+        // candidates are read in chunks so a limit stops reading once filled.
+        $unvalidatable = 0;
+        $shipments = $due->lazyById(200)->filter(function (Shipment $shipment) use ($plan, &$unvalidatable): bool {
+            if ($plan->validatorsFor($shipment) !== []) {
+                return true;
+            }
+
+            $unvalidatable++;
+
+            return false;
+        });
+
         if ($limit = $this->option('limit')) {
-            $query->limit((int) $limit);
+            $shipments = $shipments->take((int) $limit);
         }
 
-        $shipments = $query->get();
+        $shipments = new EloquentCollection($shipments->values()->all());
+
+        if ($unvalidatable > 0) {
+            $this->line("Left out {$unvalidatable} shipment(s) with no address validator for their country and shipping method.");
+        }
 
         if ($shipments->isEmpty()) {
             $this->info('No pending shipments to validate.');
@@ -174,7 +197,6 @@ class ValidateShipmentsCommand extends Command
         $capped = Shipment::where('checked', false)
             ->whereNull('validation_attempted_at')
             ->where('validation_attempts', '>=', self::MAX_SCHEDULED_ATTEMPTS)
-            ->where('country', 'US')
             ->count();
 
         if ($capped > 0) {
@@ -182,12 +204,15 @@ class ValidateShipmentsCommand extends Command
         }
     }
 
-    private function dryRun($shipments): int
+    /**
+     * @param  EloquentCollection<int, Shipment>  $shipments
+     */
+    private function dryRun(EloquentCollection $shipments): int
     {
         $this->info('Dry-run mode - no changes will be made.');
         $this->newLine();
 
-        $sample = $shipments->take(10)->map(function ($s): array {
+        $sample = $shipments->take(10)->map(function (Shipment $s): array {
             return [
                 $s->shipment_reference,
                 trim("{$s->first_name} {$s->last_name}"),

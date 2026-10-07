@@ -2,7 +2,7 @@
 
 # Validate international Shipments on the schedule
 
-Status: needs-triage
+Status: done — 2026-10-07
 Category: enhancement
 Created: 2026-10-01
 
@@ -20,14 +20,28 @@ Drop the US-only filter. This is last on purpose: with the Google state fix, att
 tracking and FedEx first in trusted countries, each international Shipment costs at most
 one pass through its plan, and Google is reached only when FedEx can't settle it.
 
-Update the command's description, which still says "via USPS API".
+Select only Shipments whose validation plan names at least one validator. In the US,
+USPS always applies, but elsewhere the plan can be empty: Google disabled and the Shipment
+not tendered to FedEx, or a country neither supports. Such a Shipment returns
+`Unavailable`, never gets `validation_attempted_at`, and isn't counted against the
+scheduled-attempt cap, so without this filter it would be selected on every run and fail
+the command each time as if validators were down. The plan depends on the shipping
+method, the Client's FedEx account and settings, so it is checked per Shipment, and
+`--limit` applies after that check so these Shipments can't fill the limit ahead of ones
+that can be validated. `warnAboutCappedShipments()` drops the US filter too.
+
+The command's description no longer says "via USPS API" (already done).
 
 ## Acceptance criteria
 
-- [ ] A non-US Shipment that is not `checked` and has no attempt is selected by the
+- [x] A non-US Shipment that is not `checked` and has no attempt is selected by the
       scheduled run
-- [ ] An attempted international Shipment is not selected again
-- [ ] The command's description reflects what it now does
+- [x] An attempted international Shipment is not selected again
+- [x] An international Shipment whose plan names no validator is neither selected nor
+      counted as skipped, so it doesn't fail the command
+- [x] `--limit` counts only Shipments that have a validator
+- [x] The capped-Shipments warning counts non-US Shipments too
+- [x] The command's description reflects what it now does
 
 ## Blocked by
 
