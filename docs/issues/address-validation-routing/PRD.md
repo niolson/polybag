@@ -219,12 +219,16 @@ terms.
 - **FedEx shadow check.** When a FedEx-eligible Shipment is settled by another validator,
   FedEx is asked as well and its answer is logged without changing the result. It is
   free and builds a side-by-side comparison on real orders. It runs in every country,
-  including the excluded BE, BR and PT, to show whether FedEx improves there. It sits
-  behind a setting, on by default.
+  including the excluded BE, BR and PT, to show whether FedEx improves there. It runs
+  as a queued job behind an `.env` switch, off by default and turned on for our hosted
+  deployment, and records whether FedEx returned the same address as well as the same
+  verdict. It collects data for us; tenants don't see or configure it.
 - **Quality against outcomes.** Validator answers are later joined to evidence of whether
   they were right: address edits after validation, label purchase failures, carrier
   tracking exceptions, undeliverable returns, deliveries. Choosing those signals is a
-  design decision of its own.
+  design decision of its own. Evidence that would go with the address is recorded when
+  it happens, and the result is an aggregate report with counts only, collected across
+  tenants.
 
 ## Testing Decisions
 

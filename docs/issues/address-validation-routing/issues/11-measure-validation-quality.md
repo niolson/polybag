@@ -2,9 +2,11 @@
 
 # Measure validation quality against what actually happened
 
-Status: needs-triage
+Status: ready-for-human
 Category: enhancement
 Created: 2026-10-01
+Revised: 2026-10-07 — an aggregate report command rather than an in-app view; the
+evidence that disappears with the address is captured by [10](10-fedex-shadow-check.md)
 
 ## Parent
 
@@ -13,35 +15,64 @@ Created: 2026-10-01
 ## What to build
 
 Validator answers (slice [04](04-record-every-validator-answer.md)) say what each API
-thought. To improve the routing and the deliverability mapping we also need to know
-whether it was right. Google is expensive in aggregate and FedEx is free only for now, so
-which validator to trust where is worth getting right from real orders.
+thought, and FedEx shadow answers ([10](10-fedex-shadow-check.md)) say what FedEx would
+have thought. To improve the routing and the deliverability mapping we also need to know
+whether they were right. Google is expensive in aggregate and FedEx is free only for now,
+so which validator to trust where is worth getting right from real orders.
 
-Join each validator's answer to later evidence that the address was right or wrong, and
-report it per validator and per country:
+The audience is us, deciding future releases, not tenants. Each hosted tenant has its own
+database, so the answer has to be collected across tenants, and a screen inside one
+tenant's app wouldn't help.
 
-- an operator edited the address after it was validated
-- label purchase failed on the address
-- a carrier tracking exception for a bad address
-- a return marked undeliverable
-- the plain good outcome: delivered
+### Report command
 
-This is HITL. Choosing the signals and how much each counts is a design decision, and some
-of the data needs research first — which tracking exception codes mean "bad address" for
-each carrier, and whether returns are recorded at all today. Expect to start with the
-cheapest signals (address edits, purchase failures, delivered) and add the others later.
+`address-validation:report --since= --until= --json` outputs **counts only**, grouped by:
 
-Whatever is built must respect [pii-retention](../../archive/pii-retention/): report on verdicts
-and outcomes, not on copies of addresses.
+- validator, and live or shadow
+- country
+- outcome, deliverability and reason
+- for shadow rows: the paired live answer's deliverability, and the comparison flags
+  from [10](10-fedex-shadow-check.md)
+- the later signal (below)
+
+The output carries no Shipment IDs, references, addresses or client names. Our hosted
+deployment's operations tooling, which lives outside this repository, runs the command per
+tenant and aggregates the results. An on-prem operator can run it too and will see only
+their own data.
+
+### Signals
+
+The signals and how much each counts are the HITL decision in this issue. Some need
+research first. Start with the cheap ones:
+
+| Signal | Source | Survives the PII purge | State |
+|---|---|---|---|
+| Address edited after validation | `address_changed_at` on the answer, from [10](10-fedex-shadow-check.md) | yes | captured by 10 |
+| Delivered | `packages.delivered_at` | yes | exists |
+| Label purchase failed on the address | unknown | — | **research:** is a failed purchase recorded anywhere that lasts, and can an address failure be told apart from other failures? |
+| Carrier tracking exception for a bad address | `packages.tracking_status` plus event codes | yes, if the code is stored | **research:** which exception codes mean "bad address" for USPS, UPS and FedEx, and whether we keep them |
+| Return marked undeliverable | unknown | — | **research:** whether returns are recorded at all today |
+
+An edit is weak evidence by itself, since operators also edit to add a unit or fix a
+name. Look at whether it should count only when the validated deliverability was `yes`
+or `verified`, or when an edited Shipment was then re-validated to a different result.
+
+Whatever is added must follow [pii-retention](../../archive/pii-retention/): record
+verdicts and outcomes as facts on the answer or the Package when they happen, and never
+make copies of addresses. A signal that can be read only from the address or from the
+audit log has to be captured when it happens, as `address_changed_at` is, or not used.
 
 ## Acceptance criteria
 
-- [ ] The signals and their weighting decided and recorded here
-- [ ] A per-validator, per-country view of agreement with later outcomes, including FedEx
-      shadow answers from [10](10-fedex-shadow-check.md)
-- [ ] Enough to answer: in which countries is FedEx as good as Google, and which `verified`
-      or `unverified` results later turned out wrong
+- [ ] The signals and their weighting decided and recorded here, with the research
+      questions in the table answered
+- [ ] `address-validation:report` emits per-validator, per-country counts of agreement
+      with later outcomes, live and shadow answers included, and no identifiers
+- [ ] Enough to answer: in which countries is FedEx as good as Google, measured on both
+      verdict and returned address, and which `verified` or `unverified` results later
+      turned out wrong
 
 ## Blocked by
 
-- [04](04-record-every-validator-answer.md)
+- [04](04-record-every-validator-answer.md) — done
+- [10](10-fedex-shadow-check.md) — for shadow answers and `address_changed_at`
