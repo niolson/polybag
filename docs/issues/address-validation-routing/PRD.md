@@ -105,8 +105,8 @@ terms.
     the same house number I sent, so that FedEx quietly substituting a different real
     address is not taken as confirmation.
 19. As an operator shipping to Slovakia or Czechia, I want two-part house numbers such as
-    `482/22` compared correctly, so that a FedEx match that keeps only the street number
-    is not treated as a substitution.
+    `482/22` compared correctly, so that a FedEx match that keeps only the second part
+    (`22`) is not treated as a substitution.
 20. As an operator, I want a US address that FedEx can only place at a single-organization
     ZIP code treated as "Partly verified", so that it matches how USPS treats the same address.
 21. As an operator shipping internationally, I want international Shipments validated on
@@ -197,10 +197,12 @@ terms.
   - **Google unsupported:** HK, LI, UY, where it rejects the region.
 - **FedEx result reading, international.** A match settles the address only when all of
   these hold:
-  - FedEx reports it matched.
-  - The precision is house-level.
-  - The returned house number equals the input number, where the comparison understands
-    two-part numbers.
+  - FedEx reports it matched (`Matched` is `"true"`).
+  - FedEx matched the house, not only the street: the `StreetAddress` attribute is
+    `"true"`. `AddressPrecision` can't decide this, because FedEx reports
+    `STREET_ADDRESS` for street-only matches that echo the input number back.
+  - The returned house number equals the input number. For a two-part input such as
+    `482/22`, the second part or the whole number counts as equal.
 
   Anything else is inconclusive. A settled international result is `verified`. The US
   reading (resolved, delivery point confirmed, suite flags) stays, with
@@ -242,9 +244,9 @@ terms.
   when every validator was unavailable.
 - **Scheduled run:** an attempted Shipment is not picked up again, an unavailable run is,
   and manual validation re-runs regardless.
-- **FedEx international reading:** accept, house-number substitution, street-only
-  precision, and two-part numbers, using response shapes taken from the recorded
-  production responses.
+- **FedEx international reading:** accept, house-number substitution, a street-only
+  match that echoes the input number, and a two-part number reduced to its second part,
+  using response shapes taken from the recorded production responses.
 - **Google request:** no administrative area for a country that doesn't use one; one for
   a country that does.
 - **UPS notice:** present on a UPS result, absent on others.
@@ -285,6 +287,13 @@ this is a summary:
   - FedEx accepted 192 of 269 real addresses; Google 211.
   - FedEx accepted 23 of 260 inflated numbers; Google 11.
   - FedEx accepted inflated numbers in Belgium (7 of 10), Portugal (4) and Brazil (3).
+  - Read with `StreetAddress`: of FedEx's matches, 176 real and 5 inflated had it
+    `"true"`, 71 real and 32 inflated had it `"false"`. Every Belgian, Portuguese and
+    Brazilian inflated match was `"false"`. The 5 were small numbers (`17`, `27`, `37`,
+    `107`) that may exist.
+  - Two-part numbers appear only in the Slovak captures (19 of them). Each FedEx match
+    kept the second part alone (`Záhradná 482/22` → `ZÁHRADNÁ 22`); none kept the first.
+    No Czech capture had a two-part number.
   - Google accepted only 2 of 10 real Czech addresses; FedEx accepted all 10.
   - FedEx rarely matched Canadian or Australian addresses at house level, so those gain
     little from FedEx first.

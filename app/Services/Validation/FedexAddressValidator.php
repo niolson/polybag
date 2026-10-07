@@ -36,7 +36,7 @@ class FedexAddressValidator implements AddressValidationInterface
 
     public function supports(string $country): bool
     {
-        return in_array($country, ['US', 'PR'], true);
+        return AddressValidationCountries::fedexSupports($country);
     }
 
     public function validate(Shipment $shipment): AddressValidationResult
@@ -158,6 +158,10 @@ class FedexAddressValidator implements AddressValidationInterface
             return $this->markInconclusive($shipment, 'Unexpected FedEx response format', ValidationReason::UnexpectedResponse);
         }
 
+        if (! AddressValidationCountries::fedexReadsDeliveryPoint($shipment->country ?? 'US')) {
+            return $this->processInternational($shipment, $resolved);
+        }
+
         $attributes = $resolved['attributes'] ?? [];
 
         if (! $this->flag($attributes, 'Resolved')) {
@@ -193,6 +197,106 @@ class FedexAddressValidator implements AddressValidationInterface
         $shipment->save();
 
         return AddressValidationResult::settled();
+    }
+
+    /**
+     * Outside the US FedEx matches reference data, with no delivery point.
+     * `Matched` alone is not enough: FedEx matches the street and echoes a
+     * house number that doesn't exist, or swaps in a different one that
+     * does. A match settles the address only when `StreetAddress` says the
+     * house matched and the house number came back unchanged — and then as
+     * Verified, never Yes.
+     *
+     * @param  array<string, mixed>  $resolved
+     */
+    protected function processInternational(Shipment $shipment, array $resolved): AddressValidationResult
+    {
+        $attributes = $resolved['attributes'] ?? [];
+        $returnedStreet = $resolved['streetLinesToken'][0] ?? '';
+
+        if (! $this->flag($attributes, 'Matched')) {
+            return $this->markInconclusive($shipment, 'Address could not be matched', ValidationReason::NoMatch);
+        }
+
+        if (! $this->flag($attributes, 'StreetAddress')) {
+            return $this->markInconclusive($shipment, 'Street found, house number not confirmed', ValidationReason::StreetOnly);
+        }
+
+        if (! $this->sameHouseNumber((string) $shipment->address1, (string) $returnedStreet, $shipment->country ?? '')) {
+            return $this->markInconclusive($shipment, "Matched with a different house number: {$returnedStreet}", ValidationReason::HouseNumberChanged);
+        }
+
+        $shipment->checked = true;
+        $shipment->deliverability = Deliverability::Verified;
+        $shipment->validation_message = 'Address matched reference data';
+
+        // FedEx's later street lines are a locality or postcode, and it drops
+        // the unit line sent with the address, so address2 and the state —
+        // which FedEx gives in its own codes — fall back to what was sent.
+        $shipment->validated_address1 = $returnedStreet;
+        $shipment->validated_address2 = null;
+        $shipment->validated_city = $resolved['city'] ?? null;
+        $shipment->validated_state_or_province = null;
+        $shipment->validated_postal_code = $this->postalCode($resolved);
+        $shipment->validated_carrier_route = null;
+        $shipment->validated_residential = null;
+        $shipment->save();
+
+        return AddressValidationResult::settled();
+    }
+
+    /**
+     * Whether the returned street line carries the numbers sent, in order.
+     * Every number counts, since a street name can hold one (`12 de Octubre`).
+     * A two-part Czech or Slovak number such as `482/22` is the same when
+     * FedEx returns its second part, as it did for all 19 Slovak captures;
+     * no capture showed it keeping the first, so that reads as a change.
+     * Elsewhere the second part may be the flat (Polish `12/3`), so a slash
+     * number must come back whole.
+     */
+    protected function sameHouseNumber(string $sent, string $returned, string $country): bool
+    {
+        $sentNumbers = $this->houseNumbers($sent);
+        $returnedNumbers = $this->houseNumbers($returned);
+
+        if ($sentNumbers === [] || count($sentNumbers) !== count($returnedNumbers)) {
+            return false;
+        }
+
+        foreach ($sentNumbers as $i => $number) {
+            $accepted = [$number];
+
+            if (str_contains($number, '/') && AddressValidationCountries::twoPartHouseNumbers($country)) {
+                $accepted[] = explode('/', $number, 2)[1];
+            }
+
+            if (! in_array($returnedNumbers[$i], $accepted, true)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * The numbers in a street line, uppercased, with any suffix (`48A`,
+     * `12 BIS`) or second part (`482/22`) attached and leading zeros dropped
+     * (Chile's `0605` comes back `605`). A suffix is one letter or one of the
+     * French and Italian repetition words, so `12 BIS` coming back as `12`
+     * or `12B` reads as a change.
+     *
+     * @return list<string>
+     */
+    protected function houseNumbers(string $street): array
+    {
+        $part = '\d+(?:\s*(?:BIS|TER|QUATER|QUINQUIES|\p{L})(?!\p{L}))?';
+
+        preg_match_all("~{$part}(?:\s*/\s*{$part})?~u", mb_strtoupper($street), $matches);
+
+        return array_map(
+            fn (string $number): string => (string) preg_replace(['~\s+~u', '~(?<!\d)0+(?=\d)~'], '', $number),
+            $matches[0],
+        );
     }
 
     /**

@@ -16,10 +16,13 @@ use Illuminate\Database\Eloquent\Builder;
  * place the routing rules live (`address-validation-routing/05`).
  *
  * A carrier's free validator may be used only for a Shipment tendered to that
- * carrier, so it is tried first where the Shipment's shipping method could buy
- * its Label and the Client has an account with it. USPS and then Google follow
- * as the fallback for every Shipment. Each validator still declares the
- * countries it supports; the service skips the rest.
+ * carrier, so FedEx is tried only where the Shipment's shipping method could
+ * buy its Label and the Client has an account with it. Where it is, the
+ * country decides its place (`address-validation-routing/08`): first in the
+ * US, Puerto Rico and the countries it is trusted in, last where Google can't
+ * answer, and never where it accepts wrong house numbers. USPS and then
+ * Google are the fallback. A validator that doesn't support the country is
+ * left out; AddressValidationCountries holds the lists.
  */
 class ShipmentValidationPlan implements AddressValidationPlan
 {
@@ -40,9 +43,12 @@ class ShipmentValidationPlan implements AddressValidationPlan
             return [new FakeAddressValidator];
         }
 
+        $country = $shipment->country ?? 'US';
+        $fedex = AddressValidationCountries::fedexSupports($country) && $this->fedexMayValidate($shipment);
+
         $validators = [];
 
-        if ($this->fedexMayValidate($shipment)) {
+        if ($fedex && AddressValidationCountries::fedexFirst($country)) {
             $validators[] = new FedexAddressValidator;
         }
 
@@ -52,7 +58,14 @@ class ShipmentValidationPlan implements AddressValidationPlan
             $validators[] = new GoogleAddressValidator;
         }
 
-        return $validators;
+        if ($fedex && AddressValidationCountries::fedexLastResort($country)) {
+            $validators[] = new FedexAddressValidator;
+        }
+
+        return array_values(array_filter(
+            $validators,
+            fn (AddressValidationInterface $validator): bool => $validator->supports($country),
+        ));
     }
 
     /**
