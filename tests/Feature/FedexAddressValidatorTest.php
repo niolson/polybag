@@ -140,6 +140,20 @@ it('marks the address Maybe when the suite is missing or invalid', function (str
     'invalid' => ['InvalidSuiteNumber', 'Primary address confirmed, secondary number not confirmed'],
 ]);
 
+it('marks a single-organization ZIP partly verified though FedEx reports a delivery point', function (): void {
+    fakeFedexValidation(MockResponse::make(['output' => ['resolvedAddresses' => [
+        fedexResolvedAddress(['attributes' => ['AddressPrecision' => 'UNIQUE_ZIP']]),
+    ]]]));
+
+    $shipment = Shipment::factory()->create(['country' => 'US']);
+    $this->validator->validate($shipment);
+
+    $shipment->refresh();
+    expect($shipment->checked)->toBeTrue()
+        ->and($shipment->deliverability)->toBe(Deliverability::Partial)
+        ->and($shipment->validation_message)->toBe('ZIP code belongs to a single organization, address within it not confirmed');
+});
+
 it('leaves the shipment unchecked when FedEx cannot confirm a delivery point', function (array $attributes, string $message): void {
     fakeFedexValidation(MockResponse::make(['output' => ['resolvedAddresses' => [
         fedexResolvedAddress(['attributes' => $attributes]),

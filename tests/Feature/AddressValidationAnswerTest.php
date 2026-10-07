@@ -23,6 +23,7 @@ use App\Services\Validation\UspsAddressValidator;
 use Livewire\Livewire;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
+use Tests\Support\FixedValidationPlan;
 
 beforeEach(function (): void {
     createUspsAccount();
@@ -70,7 +71,7 @@ function answerTestGoogle(array $result = []): MockResponse
 
 function answerTestUspsAndGoogle(): AddressValidationService
 {
-    return new AddressValidationService([new UspsAddressValidator, new GoogleAddressValidator]);
+    return new AddressValidationService(new FixedValidationPlan([new UspsAddressValidator, new GoogleAddressValidator]));
 }
 
 // The log

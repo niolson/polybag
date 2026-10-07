@@ -20,6 +20,7 @@ use App\Services\AddressValidationService;
 use App\Services\SettingsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
+use Tests\Support\FixedValidationPlan;
 
 uses(RefreshDatabase::class);
 
@@ -253,7 +254,7 @@ it('warns about the address only when validation did not confirm it', function (
     $box = BoxSize::factory()->create();
     $shippingMethod = ShippingMethod::factory()->create();
 
-    app()->instance(AddressValidationService::class, new AddressValidationService([
+    app()->instance(AddressValidationService::class, new AddressValidationService(new FixedValidationPlan([
         new class($deliverability) implements AddressValidationInterface
         {
             public function __construct(private readonly Deliverability $deliverability) {}
@@ -278,7 +279,7 @@ it('warns about the address only when validation did not confirm it', function (
                 return AddressValidationResult::settled();
             }
         },
-    ]));
+    ])));
 
     $component = Livewire::test(ManualShip::class)
         ->fillForm([

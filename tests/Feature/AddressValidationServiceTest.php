@@ -15,6 +15,7 @@ use App\Services\Validation\UspsAddressValidator;
 use Illuminate\Support\Facades\Event;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
+use Tests\Support\FixedValidationPlan;
 
 beforeEach(function (): void {
     $this->service = app(AddressValidationService::class);
@@ -321,7 +322,9 @@ it('leaves shipment unchecked when sandbox mode is enabled for an OAuth-connecte
 
     $shipment = Shipment::factory()->create(['country' => 'US']);
 
-    $this->service->validate($shipment);
+    // The plan would hand a sandbox install the fake validator; this is about
+    // USPS's own handling of the account.
+    (new AddressValidationService(new FixedValidationPlan([new UspsAddressValidator])))->validate($shipment);
 
     $shipment->refresh();
     expect($shipment->deliverability)->toBe(Deliverability::NotChecked)
@@ -388,7 +391,7 @@ it('falls through to Google when no USPS carrier account is configured', functio
         GoogleValidateAddress::class => MockResponse::make(googleValidResponse()),
     ]);
 
-    $service = new AddressValidationService([new UspsAddressValidator, new GoogleAddressValidator]);
+    $service = new AddressValidationService(new FixedValidationPlan([new UspsAddressValidator, new GoogleAddressValidator]));
     $shipment = Shipment::factory()->create(['country' => 'US']);
 
     $service->validate($shipment);
@@ -407,7 +410,7 @@ it('falls through to Google when USPS denies access (missing license)', function
         GoogleValidateAddress::class => MockResponse::make(googleValidResponse()),
     ]);
 
-    $service = new AddressValidationService([new UspsAddressValidator, new GoogleAddressValidator]);
+    $service = new AddressValidationService(new FixedValidationPlan([new UspsAddressValidator, new GoogleAddressValidator]));
     $shipment = Shipment::factory()->create(['country' => 'US']);
 
     $service->validate($shipment);
@@ -431,7 +434,7 @@ it('falls through to Google when USPS cannot match the input address', function 
         GoogleValidateAddress::class => MockResponse::make(googleValidResponse()),
     ]);
 
-    $service = new AddressValidationService([new UspsAddressValidator, new GoogleAddressValidator]);
+    $service = new AddressValidationService(new FixedValidationPlan([new UspsAddressValidator, new GoogleAddressValidator]));
     $shipment = Shipment::factory()->create(['country' => 'US']);
 
     $service->validate($shipment);
@@ -458,7 +461,7 @@ it('does not dispatch AddressValidationFailed when USPS is inconclusive but Goog
         GoogleValidateAddress::class => MockResponse::make(googleValidResponse()),
     ]);
 
-    $service = new AddressValidationService([new UspsAddressValidator, new GoogleAddressValidator]);
+    $service = new AddressValidationService(new FixedValidationPlan([new UspsAddressValidator, new GoogleAddressValidator]));
     $shipment = Shipment::factory()->create(['country' => 'US']);
 
     $service->validate($shipment);
@@ -471,7 +474,7 @@ it('routes non-US addresses straight to Google, skipping USPS', function (): voi
         GoogleValidateAddress::class => MockResponse::make(googleValidResponse()),
     ]);
 
-    $service = new AddressValidationService([new UspsAddressValidator, new GoogleAddressValidator]);
+    $service = new AddressValidationService(new FixedValidationPlan([new UspsAddressValidator, new GoogleAddressValidator]));
     $shipment = Shipment::factory()->create(['country' => 'CA']);
 
     $service->validate($shipment);
@@ -600,7 +603,7 @@ it('leaves the Shipment unverified and dispatches one failure when no validator 
         ]]),
     ]);
 
-    $service = new AddressValidationService([new UspsAddressValidator, new GoogleAddressValidator]);
+    $service = new AddressValidationService(new FixedValidationPlan([new UspsAddressValidator, new GoogleAddressValidator]));
     $shipment = Shipment::factory()->create(['country' => 'US']);
 
     expect($service->validate($shipment))->toBe(AddressValidationOutcome::Inconclusive);
@@ -628,7 +631,7 @@ it('records an incomplete Google verdict on an international address as unverifi
         ]]),
     ]);
 
-    $service = new AddressValidationService([new UspsAddressValidator, new GoogleAddressValidator]);
+    $service = new AddressValidationService(new FixedValidationPlan([new UspsAddressValidator, new GoogleAddressValidator]));
     $shipment = Shipment::factory()->create(['country' => 'PL']);
 
     $service->validate($shipment);

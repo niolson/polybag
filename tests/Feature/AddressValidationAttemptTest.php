@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\Log;
 use Livewire\Livewire;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
+use Tests\Support\FixedValidationPlan;
 
 beforeEach(function (): void {
     createUspsAccount();
@@ -67,7 +68,7 @@ function googleSettledResponse(): array
 
 function uspsAndGoogle(): AddressValidationService
 {
-    return new AddressValidationService([new UspsAddressValidator, new GoogleAddressValidator]);
+    return new AddressValidationService(new FixedValidationPlan([new UspsAddressValidator, new GoogleAddressValidator]));
 }
 
 // What counts as an answer

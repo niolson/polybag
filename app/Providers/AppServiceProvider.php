@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Contracts\AddressValidationPlan;
 use App\Contracts\PackageDraftWorkflow;
 use App\Contracts\PackageLabelWorkflow;
 use App\Contracts\PackageShippingWorkflow;
@@ -37,9 +38,7 @@ use App\Services\RateQuoteLogger;
 use App\Services\RuleEvaluator;
 use App\Services\SettingsService;
 use App\Services\ShippingRateService;
-use App\Services\Validation\FakeAddressValidator;
-use App\Services\Validation\GoogleAddressValidator;
-use App\Services\Validation\UspsAddressValidator;
+use App\Services\Validation\ShipmentValidationPlan;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
@@ -68,25 +67,8 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(PackageLabelWorkflow::class, EloquentPackageLabelWorkflow::class);
         $this->app->singleton(PackageShippingWorkflow::class, EloquentPackageShippingWorkflow::class);
 
-        $this->app->singleton(AddressValidationService::class, function (): AddressValidationService {
-            $settings = $this->app->make(SettingsService::class);
-
-            if (config('app.fake_carriers') || SettingsService::isDemoMode()) {
-                return new AddressValidationService([new FakeAddressValidator]);
-            }
-
-            if ($settings->get('sandbox_mode', false) && ! $settings->get('address_validation_use_real_in_sandbox', false)) {
-                return new AddressValidationService([new FakeAddressValidator]);
-            }
-
-            $validators = [new UspsAddressValidator];
-
-            if ($settings->get('address_validation_google_enabled', false)) {
-                $validators[] = new GoogleAddressValidator;
-            }
-
-            return new AddressValidationService($validators);
-        });
+        $this->app->singleton(AddressValidationPlan::class, ShipmentValidationPlan::class);
+        $this->app->singleton(AddressValidationService::class);
     }
 
     /**
