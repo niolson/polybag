@@ -52,12 +52,14 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use IntlChar;
 use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Exceptions\Request\RequestException;
 use Saloon\Exceptions\Request\ServerException;
 use Saloon\Exceptions\Request\Statuses\ForbiddenException;
 use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
+use voku\helper\ASCII;
 
 class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, RecoversUnresolvedPurchase, UsesCarrierAccount
 {
@@ -531,6 +533,13 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
     public function createShipment(ShipRequest $request): ShipResponse
     {
         $isInternational = $request->toAddress->country !== 'US';
+
+        // Before the key is issued and before anything is sent: nothing was
+        // asked of USPS, so nothing can have been bought.
+        if ($isInternational && ($unromanizable = $this->unromanizableAddressField($request)) !== null) {
+            return ShipResponse::failure("USPS needs an international address written in roman letters, and the {$unromanizable} has characters that cannot be romanized automatically. Enter a romanized address on the shipment and buy the label again.");
+        }
+
         $idempotencyKey = $this->issueIdempotencyKey($request);
 
         return $isInternational
@@ -865,8 +874,8 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
                 'X-Idempotency-Key' => $idempotencyKey,
             ]);
 
-            $toAddress = $this->buildDomesticAddress($request->toAddress);
-            $fromAddress = $this->buildDomesticAddress($request->fromAddress);
+            $toAddress = $this->buildDomesticAddress($request->toAddress, $request);
+            $fromAddress = $this->buildDomesticAddress($request->fromAddress, $request);
 
             $metadata = $request->selectedRate->metadata;
 
@@ -1005,8 +1014,8 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
                 'X-Idempotency-Key' => $idempotencyKey,
             ]);
 
-            $toAddress = $this->buildInternationalAddress($request->toAddress);
-            $fromAddress = $this->buildDomesticAddress($request->fromAddress);
+            $toAddress = $this->buildInternationalAddress($request->toAddress, $request);
+            $fromAddress = $this->buildDomesticAddress($request->fromAddress, $request);
 
             $metadata = $request->selectedRate->metadata;
 
@@ -1829,19 +1838,19 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
      *
      * @return array<string, string>
      */
-    private function buildDomesticAddress(AddressData $address): array
+    private function buildDomesticAddress(AddressData $address, ShipRequest $request): array
     {
         $result = [
-            'streetAddress' => mb_substr($address->streetAddress, 0, 50),
-            'city' => mb_substr($address->city, 0, 28),
+            'streetAddress' => mb_substr($this->labelText($address->streetAddress, $request), 0, 50),
+            'city' => mb_substr($this->labelText($address->city, $request), 0, 28),
             'state' => $address->stateOrProvince,
             'ZIPCode' => substr($address->postalCode, 0, 5),
         ];
 
-        $this->addNameFields($result, $address);
+        $this->addNameFields($result, $address, $request);
 
         if ($address->streetAddress2) {
-            $result['secondaryAddress'] = mb_substr($address->streetAddress2, 0, 50);
+            $result['secondaryAddress'] = mb_substr($this->labelText($address->streetAddress2, $request), 0, 50);
         }
 
         return $result;
@@ -1852,19 +1861,19 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
      *
      * @return array<string, string>
      */
-    private function buildInternationalAddress(AddressData $address): array
+    private function buildInternationalAddress(AddressData $address, ShipRequest $request): array
     {
         $result = [
-            'streetAddress' => mb_substr($address->streetAddress, 0, 50),
-            'city' => mb_substr($address->city, 0, 30),
+            'streetAddress' => mb_substr($this->labelText($address->streetAddress, $request), 0, 50),
+            'city' => mb_substr($this->labelText($address->city, $request), 0, 30),
             'country' => $address->country,
             'countryISOAlpha2Code' => $address->country,
         ];
 
-        $this->addNameFields($result, $address);
+        $this->addNameFields($result, $address, $request);
 
         if ($address->stateOrProvince) {
-            $result['province'] = mb_substr($address->stateOrProvince, 0, 30);
+            $result['province'] = mb_substr($this->labelText($address->stateOrProvince, $request), 0, 30);
         }
 
         if ($address->postalCode) {
@@ -1872,10 +1881,105 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         }
 
         if ($address->streetAddress2) {
-            $result['secondaryAddress'] = mb_substr($address->streetAddress2, 0, 50);
+            $result['secondaryAddress'] = mb_substr($this->labelText($address->streetAddress2, $request), 0, 50);
         }
 
         return $result;
+    }
+
+    /**
+     * Address text as USPS can print it on this label
+     * (`label-address-characters/03`).
+     *
+     * A ZPL label gets ASCII, transliterated with `Str::ascii()`. Printed on a
+     * Zebra, the domestic template stays in a single-byte code page (`^CI27`
+     * or `^CI13`) while the address arrives as UTF-8, so `ë` prints as `Ã?`;
+     * the international template switches to UTF-8, but its font has no glyph
+     * for `ę` or even `ó`, so each prints as `?`. Domestic text with no ASCII
+     * form at all — a name wholly in CJK — is sent as entered rather than
+     * blank; an international one never gets here.
+     *
+     * A PDF prints every character, so a domestic PDF is sent as entered.
+     * An international PDF keeps its Latin letters, accents included, but
+     * other scripts are romanized: the International Mail Manual (IMM 122)
+     * requires the address "with roman letters and arabic numerals".
+     *
+     * Wherever text is romanized, digits are made ASCII first. `Str::ascii()`
+     * maps Arabic-Indic `٢٧` but drops Persian `۲۷` and Devanagari `२७`
+     * outright, which would lose a house number.
+     */
+    private function labelText(string $text, ShipRequest $request): string
+    {
+        if ($request->labelFormat === 'zpl') {
+            $ascii = Str::ascii($this->asciiDigits($text));
+
+            return trim($ascii) === '' ? $text : $ascii;
+        }
+
+        if ($request->toAddress->country === 'US') {
+            return $text;
+        }
+
+        return (string) preg_replace_callback(
+            self::NON_LATIN_SCRIPT,
+            fn (array $match): string => Str::ascii($this->asciiDigits($match[0])),
+            $text,
+        );
+    }
+
+    /**
+     * Letters and digits in a script other than Latin. ASCII digits,
+     * punctuation and spaces are Common, and combining accents Inherited, so
+     * neither matches.
+     */
+    private const NON_LATIN_SCRIPT = '/[^\p{Latin}\p{Common}\p{Inherited}]+/u';
+
+    /**
+     * Every Unicode decimal digit as its ASCII digit.
+     */
+    private function asciiDigits(string $text): string
+    {
+        return (string) preg_replace_callback(
+            '/\p{Nd}/u',
+            fn (array $match): string => (string) IntlChar::charDigitValue($match[0]),
+            $text,
+        );
+    }
+
+    /**
+     * The first address field on an international label that holds a letter
+     * or digit with no romanization, named for the operator, or null.
+     *
+     * `Str::ascii()` drops what its tables do not cover — CJK, Hebrew,
+     * Hangul — without a trace (`山田 Taro` becomes ` Taro`). It also drops
+     * some letters on purpose: the Cyrillic soft sign has no Latin form, so
+     * `Ольга` is `Olga`. Asked to keep what it does not support, the same
+     * tables leave only the first kind behind. Modifier letters, such as the
+     * Arabic tatweel, are decoration and not counted.
+     */
+    private function unromanizableAddressField(ShipRequest $request): ?string
+    {
+        $fields = [
+            'firstName' => 'first name',
+            'lastName' => 'last name',
+            'company' => 'company',
+            'streetAddress' => 'street address',
+            'streetAddress2' => 'second address line',
+            'city' => 'city',
+            'stateOrProvince' => 'state or province',
+        ];
+
+        foreach (['recipient' => $request->toAddress, 'sender' => $request->fromAddress] as $party => $address) {
+            foreach ($fields as $property => $label) {
+                $unsupported = ASCII::to_ascii($this->asciiDigits((string) $address->{$property}), remove_unsupported_chars: false);
+
+                if (preg_match('/(?![\x00-\x7F])[\p{Lu}\p{Ll}\p{Lt}\p{Lo}\p{Nd}]/u', $unsupported)) {
+                    return "{$party}'s {$label}";
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -1890,22 +1994,22 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
      *
      * @param  array<string, string>  $result
      */
-    private function addNameFields(array &$result, AddressData $address): void
+    private function addNameFields(array &$result, AddressData $address, ShipRequest $request): void
     {
         $hasFirst = (bool) $address->firstName;
         $hasLast = (bool) $address->lastName;
 
         if ($hasFirst && $hasLast) {
-            $result['firstName'] = mb_substr($address->firstName, 0, 30);
-            $result['lastName'] = mb_substr($address->lastName, 0, 30);
+            $result['firstName'] = mb_substr($this->labelText($address->firstName, $request), 0, 30);
+            $result['lastName'] = mb_substr($this->labelText($address->lastName, $request), 0, 30);
         } elseif ($hasFirst || $hasLast) {
             // Only one name — use firm field so USPS doesn't reject it
             $name = $hasFirst ? $address->firstName : $address->lastName;
-            $result['firm'] = mb_substr($name, 0, 38);
+            $result['firm'] = mb_substr($this->labelText($name, $request), 0, 38);
         }
 
         if ($address->company) {
-            $result['firm'] = mb_substr($address->company, 0, 38);
+            $result['firm'] = mb_substr($this->labelText($address->company, $request), 0, 38);
         }
     }
 }
