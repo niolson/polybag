@@ -173,10 +173,12 @@ class Shipment extends Model
                 return;
             }
 
-            if (self::addressChanged($shipment->getOriginal(), $shipment->getAttributes())) {
+            $changes = self::addressChanges($shipment->getOriginal(), $shipment->getAttributes());
+
+            if ($changes !== null) {
                 // The old result describes an address the Shipment no longer has.
                 $shipment->forceFill(self::UNVALIDATED);
-                self::stampAddressChanged([$shipment->id]);
+                self::stampAddressChanged($shipment->id, $changes);
             } elseif ($shipment->isDirty('shipping_method_id')) {
                 // The method decides which carrier validators may run, so one
                 // the old method ruled out deserves its turn on the schedule.
@@ -334,29 +336,48 @@ class Shipment extends Model
      */
     public static function addressChanged(array $before, array $after): bool
     {
-        $normalize = fn (mixed $value): string => mb_strtolower(preg_replace('/\s+/u', ' ', trim((string) $value)) ?? '');
-
-        foreach (self::ADDRESS_FIELDS as $field) {
-            if (array_key_exists($field, $after) && $normalize($after[$field]) !== $normalize($before[$field] ?? null)) {
-                return true;
-            }
-        }
-
-        return false;
+        return self::addressChanges($before, $after) !== null;
     }
 
     /**
-     * Record on the Shipments' validator answers that their address changed
-     * after validation — evidence that an answer was wrong, which outlives the
-     * address once PII is purged. An answer keeps its first stamp.
+     * Which parts of the address differ, ignoring case and spacing, or null
+     * when none does. Only fields present in `$after` count, so a partial
+     * update compares what it sets. A new country changes every part.
      *
-     * @param  list<int>  $shipmentIds
+     * @param  array<string, mixed>  $before
+     * @param  array<string, mixed>  $after
+     * @return array{street_changed: bool, unit_changed: bool, locality_changed: bool, postcode_changed: bool}|null
      */
-    public static function stampAddressChanged(array $shipmentIds): void
+    public static function addressChanges(array $before, array $after): ?array
     {
-        AddressValidationAnswer::whereIn('shipment_id', $shipmentIds)
+        $normalize = fn (mixed $value): string => mb_strtolower(preg_replace('/\s+/u', ' ', trim((string) $value)) ?? '');
+        $changed = fn (string $field): bool => array_key_exists($field, $after)
+            && $normalize($after[$field]) !== $normalize($before[$field] ?? null);
+
+        $country = $changed('country');
+        $changes = [
+            'street_changed' => $country || $changed('address1'),
+            'unit_changed' => $country || $changed('address2'),
+            'locality_changed' => $country || $changed('city') || $changed('state_or_province'),
+            'postcode_changed' => $country || $changed('postal_code'),
+        ];
+
+        return in_array(true, $changes, true) ? $changes : null;
+    }
+
+    /**
+     * Record on the Shipment's validator answers that its address changed
+     * after validation, and which parts — evidence that an answer was wrong,
+     * which outlives the address once PII is purged. An answer keeps its
+     * first stamp.
+     *
+     * @param  array{street_changed: bool, unit_changed: bool, locality_changed: bool, postcode_changed: bool}  $changes
+     */
+    public static function stampAddressChanged(int $shipmentId, array $changes): void
+    {
+        AddressValidationAnswer::where('shipment_id', $shipmentId)
             ->whereNull('address_changed_at')
-            ->update(['address_changed_at' => now()]);
+            ->update(['address_changed_at' => now(), ...$changes]);
     }
 
     public function validateAddress(ValidationTrigger $trigger = ValidationTrigger::Manual): AddressValidationOutcome

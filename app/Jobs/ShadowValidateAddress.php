@@ -106,18 +106,18 @@ class ShadowValidateAddress implements ShouldQueue
     /**
      * An address edit during the FedEx request stamped the answers that
      * existed then, which this one didn't. It shadows the same address, so it
-     * takes the same stamp. The locking read waits for an edit still in its
+     * takes the same stamp and the same part flags. The locking read waits for an edit still in its
      * transaction; an edit after it finds this row and stamps it itself.
      */
     private function carryAddressChange(AddressValidationAnswer $settled, AddressValidationAnswer $shadow): void
     {
         DB::transaction(function () use ($settled, $shadow): void {
-            $changedAt = AddressValidationAnswer::whereKey($settled->id)
+            $stamp = AddressValidationAnswer::whereKey($settled->id)
                 ->lockForUpdate()
-                ->value('address_changed_at');
+                ->first(['address_changed_at', ...AddressValidationAnswer::CHANGED_PARTS]);
 
-            if ($changedAt !== null) {
-                $shadow->update(['address_changed_at' => $changedAt]);
+            if ($stamp?->address_changed_at !== null) {
+                $shadow->update($stamp->only(['address_changed_at', ...AddressValidationAnswer::CHANGED_PARTS]));
             }
         });
     }

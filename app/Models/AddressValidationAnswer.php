@@ -16,17 +16,27 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * One validator's answer for a Shipment: a verdict, never a copy of the
  * address. A validator that couldn't run writes no row, so every row is a
  * data point. Rows outlive address changes, since an edit after validation is
- * itself evidence about the answer, stamped as `address_changed_at`.
+ * itself evidence about the answer, stamped as `address_changed_at` with
+ * flags for which parts changed.
  *
  * A shadow answer is FedEx asked after another validator settled the
  * address (`address-validation-routing/10`): data for us, never part of the
  * Shipment's result, and never shown to tenants.
+ *
+ * @property Deliverability|null $deliverability Set only on a settled answer.
+ * @property ValidationReason|null $reason Set on an inconclusive or `no` answer.
  */
 class AddressValidationAnswer extends Model
 {
     use HasFactory;
 
     public const UPDATED_AT = null;
+
+    /**
+     * The flags an address edit sets beside `address_changed_at`, saying which
+     * part of the address it changed.
+     */
+    public const CHANGED_PARTS = ['street_changed', 'unit_changed', 'locality_changed', 'postcode_changed'];
 
     protected $fillable = [
         'shipment_id',
@@ -44,6 +54,10 @@ class AddressValidationAnswer extends Model
         'city_differs',
         'postcode_differs',
         'address_changed_at',
+        'street_changed',
+        'unit_changed',
+        'locality_changed',
+        'postcode_changed',
     ];
 
     protected $casts = [
@@ -59,6 +73,10 @@ class AddressValidationAnswer extends Model
         'city_differs' => 'boolean',
         'postcode_differs' => 'boolean',
         'address_changed_at' => 'datetime',
+        'street_changed' => 'boolean',
+        'unit_changed' => 'boolean',
+        'locality_changed' => 'boolean',
+        'postcode_changed' => 'boolean',
     ];
 
     /**

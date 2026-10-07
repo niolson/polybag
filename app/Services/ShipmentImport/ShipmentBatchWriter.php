@@ -53,7 +53,7 @@ class ShipmentBatchWriter
         $existingShipments ??= $this->existingFor($importSource, $sourceRecordIds);
 
         $rowsToWrite = [];
-        $readdressedIds = [];
+        $readdressed = [];
         $remethodedIds = [];
         $updatedSourceRecordIds = [];
         $skippedSourceRecordIds = [];
@@ -76,8 +76,10 @@ class ShipmentBatchWriter
                     }
                 }
 
-                if (Shipment::addressChanged($existing->getAttributes(), $row)) {
-                    $readdressedIds[] = $existing->id;
+                $changes = Shipment::addressChanges($existing->getAttributes(), $row);
+
+                if ($changes !== null) {
+                    $readdressed[$existing->id] = $changes;
                 } else {
                     // The validation result stays, so its message must too:
                     // `validation_message` also carries the import's phone and
@@ -121,10 +123,13 @@ class ShipmentBatchWriter
         // labels prefer the validated address), and a changed method gives
         // the validators it allows a turn on the schedule. The import's own
         // `validation_message` was just written, so it is kept.
-        if ($readdressedIds !== []) {
-            Shipment::whereIn('id', $readdressedIds)
+        if ($readdressed !== []) {
+            Shipment::whereIn('id', array_keys($readdressed))
                 ->update(Arr::except(Shipment::UNVALIDATED, 'validation_message'));
-            Shipment::stampAddressChanged($readdressedIds);
+
+            foreach ($readdressed as $shipmentId => $changes) {
+                Shipment::stampAddressChanged($shipmentId, $changes);
+            }
         }
 
         if ($remethodedIds !== []) {
