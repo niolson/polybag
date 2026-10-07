@@ -47,12 +47,12 @@ use App\Services\Carriers\Concerns\IdentifiesCatalogServices;
 use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
 use App\Services\Shipping\ContentsFilter;
+use App\Support\LabelText;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use IntlChar;
 use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Exceptions\Request\RequestException;
 use Saloon\Exceptions\Request\ServerException;
@@ -1904,14 +1904,13 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
      * other scripts are romanized: the International Mail Manual (IMM 122)
      * requires the address "with roman letters and arabic numerals".
      *
-     * Wherever text is romanized, digits are made ASCII first. `Str::ascii()`
-     * maps Arabic-Indic `٢٧` but drops Persian `۲۷` and Devanagari `२७`
-     * outright, which would lose a house number.
+     * Wherever text is romanized it goes through {@see LabelText::ascii()},
+     * which makes digits ASCII first so a house number is not lost.
      */
     private function labelText(string $text, ShipRequest $request): string
     {
         if ($request->labelFormat === 'zpl') {
-            $ascii = Str::ascii($this->asciiDigits($text));
+            $ascii = LabelText::ascii($text);
 
             return trim($ascii) === '' ? $text : $ascii;
         }
@@ -1922,7 +1921,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
 
         return (string) preg_replace_callback(
             self::NON_LATIN_SCRIPT,
-            fn (array $match): string => Str::ascii($this->asciiDigits($match[0])),
+            fn (array $match): string => LabelText::ascii($match[0]),
             $text,
         );
     }
@@ -1933,18 +1932,6 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
      * neither matches.
      */
     private const NON_LATIN_SCRIPT = '/[^\p{Latin}\p{Common}\p{Inherited}]+/u';
-
-    /**
-     * Every Unicode decimal digit as its ASCII digit.
-     */
-    private function asciiDigits(string $text): string
-    {
-        return (string) preg_replace_callback(
-            '/\p{Nd}/u',
-            fn (array $match): string => (string) IntlChar::charDigitValue($match[0]),
-            $text,
-        );
-    }
 
     /**
      * The first address field on an international label that holds a letter
@@ -1971,7 +1958,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
 
         foreach (['recipient' => $request->toAddress, 'sender' => $request->fromAddress] as $party => $address) {
             foreach ($fields as $property => $label) {
-                $unsupported = ASCII::to_ascii($this->asciiDigits((string) $address->{$property}), remove_unsupported_chars: false);
+                $unsupported = ASCII::to_ascii(LabelText::asciiDigits((string) $address->{$property}), remove_unsupported_chars: false);
 
                 if (preg_match('/(?![\x00-\x7F])[\p{Lu}\p{Ll}\p{Lt}\p{Lo}\p{Nd}]/u', $unsupported)) {
                     return "{$party}'s {$label}";

@@ -2765,6 +2765,16 @@ it('cuts a FedEx street line to 35 characters after transliterating it', functio
         ->toBe('ul. Ksiecia Jozefa Poniatowskiego 1');
 });
 
+it('keeps a FedEx house number written in non-ASCII digits', function (): void {
+    fakeFedexShipEndpoints();
+
+    // Str::ascii() alone drops Persian digits outright.
+    $this->adapter->createShipment(fedexShipRequestToPoland(recipientStreet: 'خیابان آزادی ۲۷'));
+
+    expect(sentFedexRequestedShipment()['recipients'][0]['address']['streetLines'][0])
+        ->toBe('khyaban azady 27');
+});
+
 it('sends the original text when transliterating would leave a FedEx field blank, and logs it', function (): void {
     $handler = new TestHandler;
     Log::extend('fedex-validation-capture', fn (): MonologLogger => new MonologLogger('fedex-validation', [$handler]));
