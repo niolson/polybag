@@ -1614,6 +1614,219 @@ it('builds a ZPL label request for a business address that conforms to our USPS 
     });
 });
 
+function uspsAddressTextShipRequest(AddressData $to, string $labelFormat = 'pdf', ?AddressData $from = null): ShipRequest
+{
+    $international = $to->country !== 'US';
+
+    return new ShipRequest(
+        fromAddress: $from ?? new AddressData(firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle', stateOrProvince: 'WA', postalCode: '98072'),
+        toAddress: $to,
+        packageData: new PackageData(weight: 2.0, length: 10, width: 8, height: 4),
+        selectedRate: new RateResponse(
+            carrier: 'USPS',
+            serviceCode: $international ? 'PRIORITY_MAIL_INTERNATIONAL' : 'USPS_GROUND_ADVANTAGE',
+            serviceName: $international ? 'Priority Mail International' : 'USPS Ground Advantage',
+            price: 12.75,
+            metadata: [
+                'mailClass' => $international ? 'PRIORITY_MAIL_INTERNATIONAL' : 'USPS_GROUND_ADVANTAGE',
+                'processingCategory' => 'MACHINABLE',
+                'rateIndicator' => 'SP',
+                'destinationEntryFacilityType' => $international ? 'INTERNATIONAL_SERVICE_CENTER' : 'NONE',
+            ],
+        ),
+        customsItems: $international ? [new CustomsItem(description: 'Blue Widget', quantity: 1, unitValue: 19.99, weight: 0.5)] : [],
+        labelFormat: $labelFormat,
+        labelDpi: $labelFormat === 'zpl' ? 203 : null,
+    );
+}
+
+/**
+ * The address blocks of the one label request sent.
+ *
+ * @return array{toAddress: array<string, string>, fromAddress: array<string, string>}
+ */
+function sentUspsLabelAddresses(): array
+{
+    $sent = null;
+
+    Saloon::assertSent(function (Request $request) use (&$sent): bool {
+        if (! $request instanceof Label && ! $request instanceof InternationalLabel) {
+            return false;
+        }
+
+        $body = $request->body()->all();
+        assertMatchesApiSchema($body, $request instanceof Label ? 'LabelRequest' : 'InternationalLabelRequest', 'uspsLabel');
+        $sent = ['toAddress' => $body['toAddress'], 'fromAddress' => $body['fromAddress']];
+
+        return true;
+    });
+
+    return $sent;
+}
+
+function fakeUspsLabelsBothWays(): void
+{
+    Saloon::fake([
+        ...fakeUspsAuth(),
+        Label::class => uspsLabelMultipart('9200190414219000000011'),
+        InternationalLabel::class => uspsLabelMultipart('CA005154701US'),
+    ]);
+}
+
+it('sends a domestic ZPL label its address text as ASCII, which the single-byte template can print', function (): void {
+    fakeUspsLabelsBothWays();
+
+    $response = $this->adapter->createShipment(uspsAddressTextShipRequest(
+        to: new AddressData(firstName: 'Zoë', lastName: 'Łukasiewicz-Groß', streetAddress: 'Calle Muñoz Rivera 12', city: 'Mayagüez', stateOrProvince: 'PR', postalCode: '00680', company: 'Café Niño', streetAddress2: 'Apt Ñ'),
+        labelFormat: 'zpl',
+        from: new AddressData(firstName: 'Renée', lastName: 'Søndergård', streetAddress: '1 Façade Way', city: 'Coeur d’Alène', stateOrProvince: 'ID', postalCode: '83814'),
+    ));
+
+    expect($response->success)->toBeTrue();
+
+    $sent = sentUspsLabelAddresses();
+
+    // The company wins the firm field, as it always has.
+    expect($sent['toAddress'])->toMatchArray([
+        'firstName' => 'Zoe',
+        'lastName' => 'Lukasiewicz-Gross',
+        'firm' => 'Cafe Nino',
+        'streetAddress' => 'Calle Munoz Rivera 12',
+        'secondaryAddress' => 'Apt N',
+        'city' => 'Mayaguez',
+    ])->and($sent['fromAddress'])->toMatchArray([
+        'firstName' => 'Renee',
+        'lastName' => 'Sondergard',
+        'streetAddress' => '1 Facade Way',
+        'city' => "Coeur d'Alene",
+    ]);
+});
+
+it('sends an international ZPL label its address text as ASCII, which its font can print', function (): void {
+    fakeUspsLabelsBothWays();
+
+    $response = $this->adapter->createShipment(uspsAddressTextShipRequest(
+        to: new AddressData(firstName: 'Łukasz', lastName: 'Wójcik', streetAddress: 'ul. Zwycięstwa 27B', city: 'Wodzisław Śląski', stateOrProvince: 'Śląskie', postalCode: '44-300', country: 'PL'),
+        labelFormat: 'zpl',
+    ));
+
+    expect($response->success)->toBeTrue()
+        ->and(sentUspsLabelAddresses()['toAddress'])->toMatchArray([
+            'firstName' => 'Lukasz',
+            'lastName' => 'Wojcik',
+            'streetAddress' => 'ul. Zwyciestwa 27B',
+            'city' => 'Wodzislaw Slaski',
+            'province' => 'Slaskie',
+        ]);
+});
+
+it('sends a PDF label Latin address text as entered, accents included', function (string $country, array $to): void {
+    fakeUspsLabelsBothWays();
+
+    $response = $this->adapter->createShipment(uspsAddressTextShipRequest(new AddressData(...$to, country: $country)));
+
+    expect($response->success)->toBeTrue()
+        ->and(sentUspsLabelAddresses()['toAddress'])->toMatchArray([
+            'firstName' => $to['firstName'],
+            'lastName' => $to['lastName'],
+            'streetAddress' => $to['streetAddress'],
+            'city' => $to['city'],
+        ]);
+})->with([
+    'domestic' => ['US', ['firstName' => 'Zoë', 'lastName' => 'Łukasiewicz-Groß', 'streetAddress' => 'Calle Muñoz Rivera 12', 'city' => 'Mayagüez', 'stateOrProvince' => 'PR', 'postalCode' => '00680']],
+    'international' => ['PL', ['firstName' => 'Łukasz', 'lastName' => 'Wójcik', 'streetAddress' => 'ul. Zwycięstwa 27B', 'city' => 'Wodzisław Śląski', 'stateOrProvince' => null, 'postalCode' => '44-300']],
+]);
+
+it('romanizes a non-Latin international address on a PDF label, as USPS requires', function (): void {
+    fakeUspsLabelsBothWays();
+
+    $response = $this->adapter->createShipment(uspsAddressTextShipRequest(
+        new AddressData(firstName: 'Иван', lastName: 'Петров', streetAddress: 'ул. Тверская 7', city: 'Αθήνα', stateOrProvince: null, postalCode: '105 57', country: 'GR'),
+    ));
+
+    expect($response->success)->toBeTrue()
+        ->and(sentUspsLabelAddresses()['toAddress'])->toMatchArray([
+            'firstName' => 'Ivan',
+            'lastName' => 'Petrov',
+            'streetAddress' => 'ul. Tverskaia 7',
+            'city' => 'Athina',
+        ]);
+});
+
+it('accepts a Cyrillic name whose soft sign has no Latin form', function (string $labelFormat): void {
+    fakeUspsLabelsBothWays();
+
+    // The soft sign alone transliterates to nothing, on purpose; the name
+    // still romanizes, so it is not refused.
+    $response = $this->adapter->createShipment(uspsAddressTextShipRequest(
+        new AddressData(firstName: 'Ольга', lastName: 'Соколова', streetAddress: 'ул. Тверская 7', city: 'Москва', stateOrProvince: null, postalCode: '125009', country: 'RU'),
+        labelFormat: $labelFormat,
+    ));
+
+    expect($response->success)->toBeTrue()
+        ->and(sentUspsLabelAddresses()['toAddress'])->toMatchArray([
+            'firstName' => 'Olga',
+            'lastName' => 'Sokolova',
+            'city' => 'Moskva',
+        ]);
+})->with(['pdf', 'zpl']);
+
+it('keeps a house number written in non-ASCII digits', function (string $labelFormat, string $street, string $expected): void {
+    fakeUspsLabelsBothWays();
+
+    $response = $this->adapter->createShipment(uspsAddressTextShipRequest(
+        new AddressData(firstName: 'Sara', lastName: 'Ahmadi', streetAddress: $street, city: 'Tehran', stateOrProvince: null, postalCode: '1511', country: 'IR'),
+        labelFormat: $labelFormat,
+    ));
+
+    expect($response->success)->toBeTrue()
+        ->and(sentUspsLabelAddresses()['toAddress']['streetAddress'])->toBe($expected);
+})->with([
+    // Str::ascii() alone drops Persian and Devanagari digits outright.
+    'Persian, PDF' => ['pdf', 'خیابان آزادی ۲۷', 'khyaban azady 27'],
+    'Persian, ZPL' => ['zpl', 'خیابان آزادی ۲۷', 'khyaban azady 27'],
+    'Devanagari, ZPL' => ['zpl', 'Main Road २७', 'Main Road 27'],
+    'Arabic-Indic, PDF' => ['pdf', 'شارع ٢٧', 'sharaa 27'],
+]);
+
+it('sends domestic ZPL text with no ASCII form as entered rather than blank', function (): void {
+    fakeUspsLabelsBothWays();
+
+    $response = $this->adapter->createShipment(uspsAddressTextShipRequest(
+        new AddressData(firstName: 'Taro', lastName: '山田', streetAddress: '456 Main St', city: 'Los Angeles', stateOrProvince: 'CA', postalCode: '90210'),
+        labelFormat: 'zpl',
+    ));
+
+    expect($response->success)->toBeTrue()
+        ->and(sentUspsLabelAddresses()['toAddress']['lastName'])->toBe('山田');
+});
+
+it('refuses an international label whose address cannot be romanized, before asking USPS anything', function (string $labelFormat, string $lastName, string $field): void {
+    fakeUspsLabelsBothWays();
+    $offer = ShippingOffer::factory()->direct()->create();
+
+    $request = uspsAddressTextShipRequest(
+        new AddressData(firstName: 'Taro', lastName: $lastName, streetAddress: '1-1 Chiyoda', city: 'Tokyo', stateOrProvince: null, postalCode: '100-0001', country: 'JP'),
+        labelFormat: $labelFormat,
+    );
+    $request = new ShipRequest(...[...get_object_vars($request), 'offer' => $offer]);
+
+    $response = $this->adapter->createShipment($request);
+
+    expect($response->success)->toBeFalse()
+        ->and($response->errorMessage)->toContain('roman letters')
+        ->and($response->errorMessage)->toContain($field)
+        // No key was issued, because no purchase was attempted.
+        ->and($offer->fresh()->purchase_context)->toBeNull();
+
+    Saloon::assertNotSent(InternationalLabel::class);
+})->with([
+    'wholly CJK, PDF' => ['pdf', '山田', "recipient's last name"],
+    'wholly CJK, ZPL' => ['zpl', '山田', "recipient's last name"],
+    // Str::ascii() would drop the CJK silently and leave " Taro".
+    'partly CJK' => ['pdf', '山田 Yamada', "recipient's last name"],
+]);
+
 it('maps signature and declared value into the domestic label request', function (): void {
     fakeUspsLabelEndpoints();
 
