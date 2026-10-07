@@ -2,7 +2,7 @@
 
 # Measure UPS address validation against USPS, FedEx and Google
 
-Status: needs-triage
+Status: done
 Category: research
 Created: 2026-10-01
 
@@ -35,12 +35,68 @@ result.
 
 ## Acceptance criteria
 
-- [ ] UPS results recorded alongside USPS, FedEx and Google for the same address set
-- [ ] A decision on where UPS sits in the US chain, and whether any UPS result maps to
+- [x] UPS results recorded alongside USPS, FedEx and Google for the same address set
+- [x] A decision on where UPS sits in the US chain, and whether any UPS result maps to
       `yes`, recorded here
-- [ ] Any change to the plan or the UPS mapping noted on
+- [x] Any change to the plan or the UPS mapping noted on
       [07](07-ups-validation-and-notice.md) before it starts
 
 ## Blocked by
 
 None - can start immediately
+
+## Comments
+
+- **2026-10-07** — Production run: UPS XAV (`/addressvalidation/v2/3`), FedEx and Google
+  on 319 US/PR addresses from the CASS pool, so each one's USPS answer is known. Request
+  bodies match the app's validators. The raw capture and scripts are in
+  `.scratch/ups-validation-comparison/`. UPS `valid` means `ValidAddressIndicator`. FedEx
+  DPV is the `DPV` attribute, and Google DPV is `uspsData.dpvConfirmation`.
+
+  | Group (n) | UPS valid | FedEx DPV | Google DPV `Y` |
+  |---|---|---|---|
+  | USPS deliverable (50, the 2026-09-30 US set) | 50 | 50 | 48 |
+  | Same pool, house number → n×10+7 (50) | 6 | 6 | 6 |
+  | USPS "Address Not Found" (25) | 8 | 0 | 0 |
+  | USPS found, not deliverable (25) | 23 | 1 | 0 |
+  | USPS default address, unit missing (25) | 25 | 6 | 5 |
+  | USPS primary confirmed, unit not confirmed (25) | 25 | 0 | 0 |
+  | USPS-deliverable apartments, unit as given (25) | 25 | 25 | 25 |
+  | Same, unit dropped (25) | 25 | 6 | 8 |
+  | Same, unit replaced with 9873 (25) | 25 | 2 | 2 |
+  | PR deliverable (20) | 20 | 16 | 19 |
+  | PR, house number inflated (20) | 4 | 4 | 3 |
+  | PR "Address Not Found" (4) | 1 | 1 | 0 |
+
+  Findings:
+
+  - **UPS `valid` is a street-range match, not a delivery point.** It accepts a missing
+    unit and a wrong unit every time (50 of 50), and 23 of 25 addresses USPS found but
+    could not confirm as deliverable. On inflated numbers it is no worse than FedEx or
+    Google (6 of 50, the same 6 that FedEx and Google confirmed, so those numbers probably
+    exist). The response carries no DPV, CMRA, vacancy or secondary-confirmation field:
+    only the indicator, classification, candidate lines, ZIP+4 and PR urbanization.
+    **Nothing in it supports `yes`.**
+  - **A `valid` candidate often differs from the input, and the difference would print
+    on the label.** `AddressData` prefers `validated_address1`/`2`. 68 of the 237 `valid`
+    results (29%) have a candidate whose numbers differ from the input:
+    - Every PMB or trailing `#` box in the input was dropped from the candidate (24 of
+      24), including 5 of the 50 USPS-deliverable addresses. A CMRA box lost from the
+      label means the parcel can't be delivered to the right customer.
+    - A wrong unit is dropped silently, not flagged. It survives only when it was sent in
+      `address2`, through the `?? $shipment->address2` fallback.
+    - Substitutions came back with the valid indicator: a different house number on the
+      same street, a suite number replaced with another, a street name or suffix changed,
+      and a house number moved onto a different street.
+  - **FedEx DPV and Google DPV agree closely.** Outside the deliverable groups they
+    disagree on 8 of 269: FedEx alone confirms 5, and Google alone confirms 3, all 3
+    from the dropped-unit group. This is further support for 05's FedEx-first US order.
+
+  Options considered: drop UPS from the US chain, or keep it only for when USPS is
+  unavailable, as `partial`, and never apply its candidate lines over the input.
+
+- **2026-10-07** — **Decision: UPS is left out of the validation plan.** For a UPS-only
+  method FedEx isn't eligible, so UPS would stand in for USPS while confirming addresses
+  USPS rejects, and its candidates would put wrong addresses on labels. No UPS result
+  maps to `yes`. [07](07-ups-validation-and-notice.md) is `wontfix`. The US order is FedEx
+  when eligible, then USPS, then Google. Re-run this comparison before reconsidering UPS.

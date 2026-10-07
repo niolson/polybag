@@ -40,8 +40,8 @@ using them is not as simple as putting them first in the chain:
 Choose the validators for each Shipment from what its shipping method allows and what
 each validator is known to be good at, and try the free ones first:
 
-- **US and Puerto Rico:** FedEx when allowed, then UPS when allowed, then USPS, then
-  Google.
+- **US and Puerto Rico:** FedEx when allowed, then USPS, then Google. UPS was measured
+  and left out (see Decisions, 2026-10-07).
 - **Other countries:** FedEx when allowed and the country is on FedEx's trusted list, then
   Google when Google supports the country, then FedEx as a last resort for countries
   Google rejects.
@@ -309,6 +309,14 @@ those results become `verified`, not `yes`.
 - Deliverability gains `verified` and `unverified`, and `maybe` becomes `partial`, as above.
 - UPS is measured against the other validators before it is trusted.
 - The FedEx shadow check runs in excluded countries too.
+
+**Decisions, 2026-10-07:**
+
+- UPS is left out of the validation plan. The production comparison in
+  [06](issues/06-ups-reliability-comparison.md) found that its valid-address indicator is
+  a street-range match. It accepts missing and wrong units and addresses USPS rejects, and
+  its candidates drop PMBs and substitute house numbers. `07` is `wontfix`. The
+  user stories and design notes about UPS above are superseded by this decision.
 
 **Issues:** [`issues/`](issues/), `01`–`11`. `01`–`04` and `06` can start immediately;
 `05` is the tracer for the plan.
