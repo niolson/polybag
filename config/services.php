@@ -48,6 +48,11 @@ return [
         'sandbox_url' => 'https://apis-sandbox.fedex.com',
         'document_base_url' => 'https://documentapi.prod.fedex.com',
         'document_sandbox_url' => 'https://documentapitest.prod.fedex.com/sandbox',
+        // Ask FedEx as well when another validator settles an address it may
+        // validate, and log the answer without using it
+        // (`address-validation-routing/10`). Data collection for our hosted
+        // deployment; off for everyone else.
+        'shadow_address_validation' => (bool) env('ADDRESS_VALIDATION_FEDEX_SHADOW', false),
     ],
 
     'ups' => [

@@ -5,6 +5,7 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\Enums\Deliverability;
 use App\Enums\Role;
 use App\Enums\ShipmentStatus;
+use App\Models\AddressValidationAnswer;
 use App\Models\Channel;
 use App\Models\ChannelAlias;
 use App\Models\Client;
@@ -1173,6 +1174,9 @@ function settleExistingShipment(): void
 it('discards the validation result when a re-import changes the address', function (): void {
     ShipmentImportService::forSource(fakeSource(collect([onExistingRow()])), $this->dataSource)->import();
     settleExistingShipment();
+    $answer = AddressValidationAnswer::factory()->create([
+        'shipment_id' => Shipment::where('shipment_reference', 'ORD-EXIST-001')->value('id'),
+    ]);
 
     ShipmentImportService::forSource(
         fakeSource(collect([onExistingRow(['address1' => '99 Changed Ave'])])),
@@ -1186,12 +1190,16 @@ it('discards the validation result when a re-import changes the address', functi
         ->and($shipment->validated_address1)->toBeNull()
         ->and($shipment->validated_postal_code)->toBeNull()
         ->and($shipment->validation_attempted_at)->toBeNull()
-        ->and($shipment->validation_attempts)->toBe(1);
+        ->and($shipment->validation_attempts)->toBe(1)
+        ->and($answer->refresh()->address_changed_at)->not->toBeNull();
 });
 
 it('keeps the validation result when a re-import changes only the case or spacing of the address', function (): void {
     ShipmentImportService::forSource(fakeSource(collect([onExistingRow()])), $this->dataSource)->import();
     settleExistingShipment();
+    $answer = AddressValidationAnswer::factory()->create([
+        'shipment_id' => Shipment::where('shipment_reference', 'ORD-EXIST-001')->value('id'),
+    ]);
 
     ShipmentImportService::forSource(
         fakeSource(collect([onExistingRow(['address1' => '12  ORIGINAL st'])])),
@@ -1202,7 +1210,8 @@ it('keeps the validation result when a re-import changes only the case or spacin
     expect($shipment->address1)->toBe('12  ORIGINAL st')
         ->and($shipment->checked)->toBeTrue()
         ->and($shipment->validated_address1)->toBe('12 ORIGINAL ST')
-        ->and($shipment->validation_attempted_at)->not->toBeNull();
+        ->and($shipment->validation_attempted_at)->not->toBeNull()
+        ->and($answer->refresh()->address_changed_at)->toBeNull();
 });
 
 it('keeps the validation result but clears the attempt when a re-import changes only the shipping method', function (): void {
