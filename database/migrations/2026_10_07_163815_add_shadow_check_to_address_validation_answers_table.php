@@ -15,7 +15,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('address_validation_answers', function (Blueprint $table) {
+        Schema::table('address_validation_answers', function (Blueprint $table): void {
             $table->boolean('shadow')->default(false)->after('trigger');
             $table->foreignId('shadows_answer_id')->nullable()->unique()->after('shadow')
                 ->constrained('address_validation_answers')->cascadeOnDelete();
@@ -29,7 +29,7 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::table('address_validation_answers', function (Blueprint $table) {
+        Schema::table('address_validation_answers', function (Blueprint $table): void {
             $table->dropConstrainedForeignId('shadows_answer_id');
             $table->dropColumn([
                 'shadow',

@@ -260,15 +260,15 @@ it('dispatches no shadow check', function (Closure $arrange, Closure $validators
         fn (): array => [new UspsAddressValidator],
     ],
     'when FedEx answered in the run' => [
-        fn () => null,
+        fn (): null => null,
         fn (): array => [new FedexAddressValidator, new UspsAddressValidator],
     ],
     'when the fake validator settled it' => [
-        fn () => null,
+        fn (): null => null,
         fn (): array => [new FakeAddressValidator],
     ],
     'when no validator settled it' => [
-        fn () => null,
+        fn (): null => null,
         fn (): array => [new class implements AddressValidationInterface
         {
             public function validator(): AddressValidator
@@ -312,7 +312,7 @@ it('does nothing once the result it shadows is no longer current', function (Clo
     Saloon::assertNotSent(FedexValidateAddress::class);
 })->with([
     'readdressed' => [fn (Shipment $shipment) => $shipment->update(['address1' => '1 Infinite Loop'])],
-    're-validated' => [fn (Shipment $shipment) => shadowService()->validate($shipment)],
+    're-validated' => [fn (Shipment $shipment): AddressValidationOutcome => shadowService()->validate($shipment)],
     'deleted' => [fn (Shipment $shipment) => $shipment->delete()],
 ]);
 
