@@ -120,7 +120,7 @@ the first eligible shipment and **never reached the packages at all**. The comma
 scheduled daily, so this had been failing quietly for as long as retention has existed, and a
 purge that cannot run is not a retention policy. Fixed here, because constraint 2 is
 otherwise notional, and recorded separately as
-[`pii-retention/01`](../../archive/pii-retention/issues/01-purge-pii-has-always-failed-on-a-not-null-city.md)
+[`pii-retention/01`](../../pii-retention/issues/01-purge-pii-has-always-failed-on-a-not-null-city.md)
 — it is not a Shopify issue and it has an operational tail: the first run after it deploys
 purges a backlog.
 

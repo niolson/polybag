@@ -43,3 +43,12 @@ the column and a nullable `duties_cost` (`08` fills it).
       a client-sourced term
 - [ ] One CIE sandbox DDP label with an IOSS number is bought and recorded in the
       issue's comments
+
+## Comments
+
+- 2026-10-07 — From the review of `03`: the `package_labels.customs_terms` snapshot must
+  not hold the recipient tax ID. Record its type and whether one was sent, never the
+  number, or `PurgePiiCommand` would have to clear it from every Label too. Add a test
+  that the snapshot of a label to Brazil holds no CPF. `PiiRedactor` already covers UPS's
+  `TaxIdentificationNumber`; check that it covers whichever field `02` finds UPS wants for
+  the ship-to tax ID.

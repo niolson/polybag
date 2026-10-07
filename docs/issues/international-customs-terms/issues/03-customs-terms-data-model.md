@@ -42,7 +42,7 @@ as above; a value that fails is reported per row, not silently dropped. Update
 `docs/data-sources/database.md`.
 
 **PII.** `recipient_tax_id` is a national ID number. Add it to whatever
-[pii-retention](../../archive/pii-retention/) purges for Shipment addresses, and to the
+[pii-retention](../../pii-retention/) purges for Shipment addresses, and to the
 `customsFormData` purge list.
 
 ## Acceptance criteria
