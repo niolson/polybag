@@ -83,6 +83,9 @@ The JSON Ship API uses the former; the latter is the legacy XML shape and is not
 
 ### USPS — no support as of 2026-09-17
 
+*Superseded 2026-10-07: USPS announced `customsForm.incoterm` and
+`contents[].europeanUnionProductID` for the 2026-10-14 spec. See `07`.*
+
 Checked against the International Labels OpenAPI spec the developer portal serves
 (declared version 3.3.10, copy in `.scratch/eu-product-identifiers/`). A customs
 content item is `itemDescription`, `itemQuantity`, `itemValue`, `itemTotalValue`,

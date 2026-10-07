@@ -212,7 +212,9 @@ accepted the DDP terms.
   UPS Landed Cost
 - Shipper EORI for EU business-to-business shipments — one optional column on the client
 - Importer of record (FedEx `importerOfRecord`)
-- USPS product identifiers, once USPS publishes a field
+- USPS product identifiers: now `eu-product-identifiers/07`. That work adds a USPS field
+  named `customsForm.incoterm` that holds the **commerce type** (B2C, B2B, …), not DDP/DDU.
+  It must never be derived from or mapped to `duties_terms`
 - An admin override for `duties-support.json`, if waiting for a release ever hurts
 - Six-digit HS grouping for the ITN rule, if a tenant ships high-value mixed parcels
 - The readiness preview on the Pack page
