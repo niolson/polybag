@@ -203,11 +203,12 @@ it('logs an inconclusive FedEx answer with its reason and no comparison', functi
 });
 
 it('writes no row and leaves the Shipment alone when FedEx is unavailable or throws', function (string $failure): void {
-    fakeShadowApis(match ($failure) {
+    $responses = [
         'server error' => MockResponse::make(['errors' => [['message' => 'down']]], 503),
         'connection failure' => fn (): MockResponse => throw new RuntimeException('connection reset'),
         'unexpected exception' => fn (): MockResponse => throw new LogicException('bug'),
-    });
+    ];
+    fakeShadowApis($responses[$failure]);
     $shipment = shadowShipment();
 
     shadowService()->validate($shipment);
