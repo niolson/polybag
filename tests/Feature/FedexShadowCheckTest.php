@@ -343,7 +343,7 @@ it('rechecks eligibility when the job runs', function (Closure $change): void {
     'switch turned off' => [fn () => config(['services.fedex.shadow_address_validation' => false])],
 ]);
 
-it('carries an address edit made during the FedEx request onto the shadow answer', function (): void {
+it('carries an address edit made during the FedEx request, and its part flags, onto the shadow answer', function (): void {
     Queue::fake();
     $shipment = shadowShipment();
     fakeShadowApis(function () use ($shipment): MockResponse {
@@ -356,9 +356,14 @@ it('carries an address edit made during the FedEx request onto the shadow answer
 
     (new ShadowValidateAddress($settled->id))->handle();
 
+    $parts = AddressValidationAnswer::CHANGED_PARTS;
+
     expect($settled->refresh()->address_changed_at)->not->toBeNull()
         ->and(shadowAnswer($shipment)->address_changed_at?->toDateTimeString())
-        ->toBe($settled->address_changed_at->toDateTimeString());
+        ->toBe($settled->address_changed_at->toDateTimeString())
+        ->and(shadowAnswer($shipment)->only($parts))
+        ->toBe(['street_changed' => true, 'unit_changed' => false, 'locality_changed' => false, 'postcode_changed' => false])
+        ->and(shadowAnswer($shipment)->only($parts))->toBe($settled->only($parts));
 });
 
 it('writes one row when the job runs twice', function (): void {

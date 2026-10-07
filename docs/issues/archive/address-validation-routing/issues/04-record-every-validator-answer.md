@@ -47,7 +47,7 @@ representative; every validator answer on a real Shipment is better evidence.
     pass manual
   - the time
 - **Rows hold verdicts, not addresses.** The address is already on the Shipment; a second
-  copy here would widen what [pii-retention](../../archive/pii-retention/) has to purge. A row
+  copy here would widen what [pii-retention](../../pii-retention/) has to purge. A row
   is deleted with its Shipment (a cascading foreign key). Rows are kept when the address
   changes: an edit after validation is evidence [11](11-measure-validation-quality.md)
   uses, and the row's time orders it against the edit.

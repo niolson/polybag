@@ -1191,7 +1191,9 @@ it('discards the validation result when a re-import changes the address', functi
         ->and($shipment->validated_postal_code)->toBeNull()
         ->and($shipment->validation_attempted_at)->toBeNull()
         ->and($shipment->validation_attempts)->toBe(1)
-        ->and($answer->refresh()->address_changed_at)->not->toBeNull();
+        ->and($answer->refresh()->address_changed_at)->not->toBeNull()
+        ->and($answer->only(['street_changed', 'unit_changed', 'locality_changed', 'postcode_changed']))
+        ->toBe(['street_changed' => true, 'unit_changed' => false, 'locality_changed' => false, 'postcode_changed' => false]);
 });
 
 it('keeps the validation result when a re-import changes only the case or spacing of the address', function (): void {

@@ -23,7 +23,7 @@ a side-by-side comparison on real data.
 This is data collection for us to use when deciding future releases, not a feature for
 tenants. They should not see it, configure it, or wait for it.
 
-Some evidence exists only while the address does. [pii-retention](../../archive/pii-retention/)
+Some evidence exists only while the address does. [pii-retention](../../pii-retention/)
 clears the street, city and state from a shipped Shipment, but it keeps the Shipment row,
 `country`, `postal_code`, the Packages' tracking state and every answer row. Verdicts and
 outcomes can therefore be joined after the purge. Two things cannot, so this slice
