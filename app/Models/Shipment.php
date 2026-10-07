@@ -3,12 +3,14 @@
 namespace App\Models;
 
 use App\Enums\AddressValidationOutcome;
+use App\Enums\AddressValidator;
 use App\Enums\Deliverability;
 use App\Enums\PackageStatus;
 use App\Enums\PackSlipState;
 use App\Enums\PickBatchStatus;
 use App\Enums\PickingStatus;
 use App\Enums\ShipmentStatus;
+use App\Enums\ValidationTrigger;
 use App\Models\Concerns\HasDefaultClient;
 use App\Services\AddressReferenceService;
 use App\Services\AddressValidationService;
@@ -55,6 +57,7 @@ class Shipment extends Model
         'checked' => false,
         'deliverability' => Deliverability::NotChecked,
         'validation_message' => null,
+        'validation_source' => null,
         'validation_attempted_at' => null,
         ...self::NO_VALIDATED_ADDRESS,
     ];
@@ -99,6 +102,7 @@ class Shipment extends Model
         'checked',
         'deliverability',
         'validation_message',
+        'validation_source',
         'validation_attempted_at',
         'validation_attempts',
         'validated_company',
@@ -129,6 +133,7 @@ class Shipment extends Model
         'validated_residential' => 'boolean',
         'value' => 'decimal:2',
         'deliverability' => Deliverability::class,
+        'validation_source' => AddressValidator::class,
         'status' => ShipmentStatus::class,
         'picking_status' => PickingStatus::class,
         'deliver_by' => 'date',
@@ -339,9 +344,17 @@ class Shipment extends Model
         return false;
     }
 
-    public function validateAddress(): AddressValidationOutcome
+    public function validateAddress(ValidationTrigger $trigger = ValidationTrigger::Manual): AddressValidationOutcome
     {
-        return app(AddressValidationService::class)->validate($this);
+        return app(AddressValidationService::class)->validate($this, $trigger);
+    }
+
+    /**
+     * @return HasMany<AddressValidationAnswer, $this>
+     */
+    public function validationAnswers(): HasMany
+    {
+        return $this->hasMany(AddressValidationAnswer::class);
     }
 
     /**

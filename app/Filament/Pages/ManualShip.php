@@ -12,6 +12,7 @@ use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PrintRequest;
 use App\Enums\Deliverability;
 use App\Enums\Role;
+use App\Enums\ValidationTrigger;
 use App\Exceptions\PackageDraftIncompleteException;
 use App\Exceptions\PackageDraftInvalidException;
 use App\Filament\Concerns\NotifiesUser;
@@ -314,11 +315,18 @@ class ManualShip extends Page implements HasForms
             $shipment = app(PackagingService::class)->createShipment($data, $channelId);
 
             try {
-                app(AddressValidationService::class)->validate($shipment);
+                app(AddressValidationService::class)->validate($shipment, ValidationTrigger::Manual);
                 $shipment->refresh();
+                $source = $shipment->validation_source?->getLabel();
 
-                if (! in_array($shipment->deliverability, [...Deliverability::confirmed(), Deliverability::NotChecked], true)) {
-                    $this->notifyWarning('Address Warning', $shipment->validation_message ?? 'Address may not be deliverable.');
+                if (in_array($shipment->deliverability, Deliverability::confirmed(), true)) {
+                    $this->notifyInfo(
+                        'Address '.mb_strtolower($shipment->deliverability->getLabel()),
+                        $source !== null ? "Checked by {$source}." : null,
+                    );
+                } elseif ($shipment->deliverability !== Deliverability::NotChecked) {
+                    $message = $shipment->validation_message ?? 'Address may not be deliverable.';
+                    $this->notifyWarning('Address Warning', $source !== null ? "{$source}: {$message}" : $message);
                 }
             } catch (\Exception $e) {
                 logger()->warning('ManualShip address validation failed', ['error' => $e->getMessage()]);

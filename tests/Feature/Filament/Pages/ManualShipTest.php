@@ -2,9 +2,11 @@
 
 use App\Contracts\AddressValidationInterface;
 use App\Contracts\PackageShippingWorkflow;
+use App\DataTransferObjects\AddressValidationResult;
 use App\DataTransferObjects\PackageShipping\PackageShippingResult;
-use App\Enums\AddressValidationOutcome;
+use App\Enums\AddressValidator;
 use App\Enums\Deliverability;
+use App\Enums\ValidationTrigger;
 use App\Filament\Pages\ManualShip;
 use App\Models\BoxSize;
 use App\Models\Channel;
@@ -261,14 +263,19 @@ it('warns about the address only when validation did not confirm it', function (
                 return true;
             }
 
-            public function validate(Shipment $shipment): AddressValidationOutcome
+            public function validator(): AddressValidator
+            {
+                return AddressValidator::Usps;
+            }
+
+            public function validate(Shipment $shipment): AddressValidationResult
             {
                 $shipment->forceFill([
                     'deliverability' => $this->deliverability,
                     'validation_message' => 'Stub validation result',
                 ])->save();
 
-                return AddressValidationOutcome::Settled;
+                return AddressValidationResult::settled();
             }
         },
     ]));
@@ -292,9 +299,16 @@ it('warns about the address only when validation did not confirm it', function (
         ])
         ->call('ship');
 
-    $warns
-        ? $component->assertNotified('Address Warning')
-        : $component->assertNotNotified('Address Warning');
+    // The notices name the validator that settled the address.
+    expect(collect(session('filament.notifications'))->map(fn (array $notification): array => [$notification['title'], $notification['body']])->all())
+        ->toBe([$warns
+            ? ['Address Warning', 'USPS: Stub validation result']
+            : ['Address '.mb_strtolower($deliverability->getLabel()), 'Checked by USPS.']]);
+
+    $component->assertNotified($warns ? 'Address Warning' : 'Address '.mb_strtolower($deliverability->getLabel()));
+
+    expect(Shipment::where('shipment_reference', 'MAN-2001')->sole()->validationAnswers()->sole()->trigger)
+        ->toBe(ValidationTrigger::Manual);
 })->with([
     'deliverable' => [Deliverability::Yes, false],
     'verified' => [Deliverability::Verified, false],

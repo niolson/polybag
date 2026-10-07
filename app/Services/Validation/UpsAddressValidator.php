@@ -3,8 +3,10 @@
 namespace App\Services\Validation;
 
 use App\Contracts\AddressValidationInterface;
-use App\Enums\AddressValidationOutcome;
+use App\DataTransferObjects\AddressValidationResult;
+use App\Enums\AddressValidator;
 use App\Enums\Deliverability;
+use App\Enums\ValidationReason;
 use App\Http\Integrations\Ups\Requests\ValidateAddress;
 use App\Http\Integrations\Ups\UpsConnector;
 use App\Models\Carrier;
@@ -28,24 +30,29 @@ use Saloon\Exceptions\Request\RequestException;
  */
 class UpsAddressValidator implements AddressValidationInterface
 {
+    public function validator(): AddressValidator
+    {
+        return AddressValidator::Ups;
+    }
+
     public function supports(string $country): bool
     {
         return in_array($country, ['US', 'PR'], true);
     }
 
-    public function validate(Shipment $shipment): AddressValidationOutcome
+    public function validate(Shipment $shipment): AddressValidationResult
     {
         $account = $this->resolveAccount($shipment);
 
         if ($account === null) {
             // No UPS account for this shipment's client — not attempted.
-            return AddressValidationOutcome::Unavailable;
+            return AddressValidationResult::unavailable();
         }
 
         $response = $this->fetchValidation($account, $shipment);
 
         if ($response === null) {
-            return AddressValidationOutcome::Unavailable;
+            return AddressValidationResult::unavailable();
         }
 
         return $this->processResponse($shipment, $response);
@@ -143,18 +150,18 @@ class UpsAddressValidator implements AddressValidationInterface
     /**
      * @param  array<string, mixed>  $response
      */
-    protected function processResponse(Shipment $shipment, array $response): AddressValidationOutcome
+    protected function processResponse(Shipment $shipment, array $response): AddressValidationResult
     {
         Log::channel('ups-validation')->debug('UPS Address Validation Response', ['response' => $response]);
 
         if (isset($response['errors'])) {
-            return $this->markInconclusive($shipment, $response['errors'][0]['message'] ?? 'Unknown error');
+            return $this->markInconclusive($shipment, $response['errors'][0]['message'] ?? 'Unknown error', ValidationReason::RequestRejected);
         }
 
         $xav = $response['XAVResponse'] ?? null;
 
         if (! is_array($xav)) {
-            return $this->markInconclusive($shipment, 'Unexpected UPS response format');
+            return $this->markInconclusive($shipment, 'Unexpected UPS response format', ValidationReason::UnexpectedResponse);
         }
 
         $candidates = $this->candidates($xav);
@@ -168,16 +175,22 @@ class UpsAddressValidator implements AddressValidationInterface
             $this->applyValidatedAddress($shipment, $candidates[0], $xav);
             $shipment->save();
 
-            return AddressValidationOutcome::Settled;
+            return AddressValidationResult::settled();
         }
 
         // Ambiguous results are candidate corrections, not a match — UPS
         // hasn't said which one is right, so leave it to the fallback chain.
-        return $this->markInconclusive($shipment, match (true) {
-            array_key_exists('AmbiguousAddressIndicator', $xav) => 'Multiple addresses were found for the information you entered.',
-            array_key_exists('NoCandidatesIndicator', $xav) => 'Address not found',
-            default => 'Unexpected UPS response format',
-        });
+        return match (true) {
+            array_key_exists('AmbiguousAddressIndicator', $xav) => $this->markInconclusive(
+                $shipment, 'Multiple addresses were found for the information you entered.', ValidationReason::MultipleCandidates,
+            ),
+            array_key_exists('NoCandidatesIndicator', $xav) => $this->markInconclusive(
+                $shipment, 'Address not found', ValidationReason::NoMatch,
+            ),
+            default => $this->markInconclusive(
+                $shipment, 'Unexpected UPS response format', ValidationReason::UnexpectedResponse,
+            ),
+        };
     }
 
     /**
@@ -201,13 +214,13 @@ class UpsAddressValidator implements AddressValidationInterface
      * UPS has no deliverability determination for this address — leave the
      * shipment unchecked so the fallback chain can attempt it.
      */
-    protected function markInconclusive(Shipment $shipment, string $message): AddressValidationOutcome
+    protected function markInconclusive(Shipment $shipment, string $message, ValidationReason $reason): AddressValidationResult
     {
         $shipment->deliverability = Deliverability::No;
         $shipment->validation_message = $message;
         $shipment->save();
 
-        return AddressValidationOutcome::Inconclusive;
+        return AddressValidationResult::inconclusive($reason);
     }
 
     /**

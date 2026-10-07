@@ -6,6 +6,7 @@ use App\DataTransferObjects\PackSlips\PackSlipPrintJob;
 use App\DataTransferObjects\PackSlips\PackSlipRun;
 use App\Enums\Deliverability;
 use App\Enums\ShipmentStatus;
+use App\Enums\ValidationTrigger;
 use App\Filament\Resources\ShipmentResource;
 use App\Models\Shipment;
 use App\Services\PackSlips\PackSlipRenderer;
@@ -39,7 +40,7 @@ class ViewShipment extends ViewRecord
                 ->icon('heroicon-o-shield-check')
                 ->color('success')
                 ->action(function (): void {
-                    $this->record->validateAddress();
+                    $this->record->validateAddress(ValidationTrigger::Manual);
                     $this->record->refresh();
 
                     if ($this->record->deliverability === Deliverability::NotChecked) {

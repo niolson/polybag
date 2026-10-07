@@ -629,6 +629,9 @@ class ShipmentResource extends Resource
                             ->label('Deliverability')
                             ->badge()
                             ->placeholder('Not checked'),
+                        TextEntry::make('validation_source')
+                            ->label('Validated by')
+                            ->placeholder('—'),
                         TextEntry::make('validation_message')
                             ->placeholder('N/A')
                             ->columnSpanFull(),

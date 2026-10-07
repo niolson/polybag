@@ -3,8 +3,10 @@
 namespace App\Services\Validation;
 
 use App\Contracts\AddressValidationInterface;
-use App\Enums\AddressValidationOutcome;
+use App\DataTransferObjects\AddressValidationResult;
+use App\Enums\AddressValidator;
 use App\Enums\Deliverability;
+use App\Enums\ValidationReason;
 use App\Http\Integrations\Fedex\FedexConnector;
 use App\Http\Integrations\Fedex\Requests\ValidateAddress;
 use App\Models\Carrier;
@@ -27,24 +29,29 @@ use Saloon\Exceptions\Request\RequestException;
  */
 class FedexAddressValidator implements AddressValidationInterface
 {
+    public function validator(): AddressValidator
+    {
+        return AddressValidator::Fedex;
+    }
+
     public function supports(string $country): bool
     {
         return in_array($country, ['US', 'PR'], true);
     }
 
-    public function validate(Shipment $shipment): AddressValidationOutcome
+    public function validate(Shipment $shipment): AddressValidationResult
     {
         $account = $this->resolveAccount($shipment);
 
         if ($account === null) {
             // No FedEx account for this shipment's client — not attempted.
-            return AddressValidationOutcome::Unavailable;
+            return AddressValidationResult::unavailable();
         }
 
         $response = $this->fetchValidation($account, $shipment);
 
         if ($response === null) {
-            return AddressValidationOutcome::Unavailable;
+            return AddressValidationResult::unavailable();
         }
 
         return $this->processResponse($shipment, $response);
@@ -137,31 +144,31 @@ class FedexAddressValidator implements AddressValidationInterface
     /**
      * @param  array<string, mixed>  $response
      */
-    protected function processResponse(Shipment $shipment, array $response): AddressValidationOutcome
+    protected function processResponse(Shipment $shipment, array $response): AddressValidationResult
     {
         Log::channel('fedex-validation')->debug('FedEx Address Validation Response', ['response' => $response]);
 
         if (isset($response['errors'])) {
-            return $this->markInconclusive($shipment, $response['errors'][0]['message'] ?? 'Unknown error');
+            return $this->markInconclusive($shipment, $response['errors'][0]['message'] ?? 'Unknown error', ValidationReason::RequestRejected);
         }
 
         $resolved = $response['output']['resolvedAddresses'][0] ?? null;
 
         if (! is_array($resolved)) {
-            return $this->markInconclusive($shipment, 'Unexpected FedEx response format');
+            return $this->markInconclusive($shipment, 'Unexpected FedEx response format', ValidationReason::UnexpectedResponse);
         }
 
         $attributes = $resolved['attributes'] ?? [];
 
         if (! $this->flag($attributes, 'Resolved')) {
-            return $this->markInconclusive($shipment, 'Address could not be resolved');
+            return $this->markInconclusive($shipment, 'Address could not be resolved', ValidationReason::NoMatch);
         }
 
         if (! $this->flag($attributes, 'DPV')) {
             // Resolved without a postal delivery point (e.g. matched against
             // map data only) — not a deliverability determination, so leave
             // it open to the fallback chain.
-            return $this->markInconclusive($shipment, 'Address found but not confirmed as a delivery point');
+            return $this->markInconclusive($shipment, 'Address found but not confirmed as a delivery point', ValidationReason::NotDeliveryPoint);
         }
 
         $shipment->checked = true;
@@ -179,20 +186,20 @@ class FedexAddressValidator implements AddressValidationInterface
         $this->applyValidatedAddress($shipment, $resolved);
         $shipment->save();
 
-        return AddressValidationOutcome::Settled;
+        return AddressValidationResult::settled();
     }
 
     /**
      * FedEx has no delivery-point determination for this address — leave the
      * shipment unchecked so the fallback chain can attempt it.
      */
-    protected function markInconclusive(Shipment $shipment, string $message): AddressValidationOutcome
+    protected function markInconclusive(Shipment $shipment, string $message, ValidationReason $reason): AddressValidationResult
     {
         $shipment->deliverability = Deliverability::No;
         $shipment->validation_message = $message;
         $shipment->save();
 
-        return AddressValidationOutcome::Inconclusive;
+        return AddressValidationResult::inconclusive($reason);
     }
 
     /**

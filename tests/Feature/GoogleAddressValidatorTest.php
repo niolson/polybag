@@ -126,7 +126,7 @@ it('reads an incomplete address as inconclusive, not No', function (): void {
 
     $shipment = Shipment::factory()->create(['country' => 'US']);
 
-    expect($this->validator->validate($shipment))->toBe(AddressValidationOutcome::Inconclusive);
+    expect($this->validator->validate($shipment)->outcome)->toBe(AddressValidationOutcome::Inconclusive);
 
     $shipment->refresh();
     expect($shipment->checked)->toBeFalse()
