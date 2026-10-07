@@ -42,6 +42,7 @@ use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
 use App\Services\Carriers\Concerns\IdentifiesCatalogServices;
 use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
+use App\Support\LabelText;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
@@ -1329,7 +1330,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
 
         return array_filter([
             'AddressLine' => $addressLines === [] ? null : $addressLines,
-            'City' => $request->destinationCity,
+            'City' => $request->destinationCity === null ? null : LabelText::asciiDigits($request->destinationCity),
             'StateProvinceCode' => $request->destinationStateOrProvince,
             'PostalCode' => $request->destinationPostalCode,
             'CountryCode' => $request->destinationCountry,
@@ -1447,7 +1448,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
         return [
             ...array_filter([
                 'AddressLine' => $addressLines,
-                'City' => $address->city,
+                'City' => LabelText::asciiDigits($address->city),
                 'StateProvinceCode' => $address->stateOrProvince,
                 'PostalCode' => $address->postalCode,
                 'CountryCode' => $address->country,
@@ -1459,13 +1460,22 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
     }
 
     /**
+     * Street lines with their digits made ASCII. UPS transliterates letters
+     * itself — `ę` printed as `E` in ZPL, and as `Ę` on a GIF — but not
+     * Persian or Devanagari digits, which printed as empty boxes on the label
+     * and `*` on the commercial invoice (`label-address-characters`): a lost
+     * house number. Shared by the label and the rate request.
+     *
      * @return list<string>
      */
     private function buildAddressLines(?string $streetAddress, ?string $streetAddress2): array
     {
-        return array_values(array_filter(
-            [$streetAddress, $streetAddress2],
-            fn (?string $value): bool => filled($value),
+        return array_values(array_map(
+            LabelText::asciiDigits(...),
+            array_filter(
+                [$streetAddress, $streetAddress2],
+                fn (?string $value): bool => filled($value),
+            ),
         ));
     }
 

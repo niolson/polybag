@@ -2439,3 +2439,54 @@ it('logs the EU product identifiers in the label request', function (): void {
     expect($product['productIdentifierExemptIndicator'])->toBe('false')
         ->and($product['ProductIdentifier'])->toHaveCount(3);
 });
+
+/*
+|--------------------------------------------------------------------------
+| House numbers in non-ASCII digits
+|--------------------------------------------------------------------------
+|
+| UPS transliterates letters itself, but printed Persian and Devanagari
+| digits as empty boxes on a CIE label and `*` on the commercial invoice
+| (`label-address-characters`). Digits go out as ASCII; letters as entered.
+|
+*/
+
+it('sends a UPS house number written in non-ASCII digits as ASCII digits, and its letters as entered', function (): void {
+    fakeUpsShipEndpoints();
+
+    $this->adapter->createShipment(upsShipRequestTo(new AddressData(
+        firstName: 'Ольга',
+        lastName: 'Wójcik',
+        streetAddress: 'ul. Zwycięstwa ۲۷B',
+        streetAddress2: 'Lokal २',
+        city: 'Wodzisław Śląski',
+        stateOrProvince: null,
+        postalCode: '44-300',
+        country: 'PL',
+        phone: '48221234567',
+    ), customsItems: upsCustomsItems()));
+
+    $shipment = sentUpsShipment();
+    $expected = ['ul. Zwycięstwa 27B', 'Lokal 2'];
+
+    expect($shipment['ShipTo']['Address']['AddressLine'])->toBe($expected)
+        ->and($shipment['ShipTo']['Address']['City'])->toBe('Wodzisław Śląski')
+        ->and($shipment['ShipTo']['Name'])->toBe('Ольга Wójcik')
+        ->and($shipment['ShipmentServiceOptions']['InternationalForms']['Contacts']['SoldTo']['Address']['AddressLine'])->toBe($expected);
+});
+
+it('sends a UPS rate request house number written in non-ASCII digits as ASCII digits', function (): void {
+    fakeUpsRateEndpoints();
+
+    $this->adapter->getRates(new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '44-300',
+        destinationCountry: 'PL',
+        destinationCity: 'Wodzisław Śląski',
+        packages: [new PackageData(weight: 2.0, length: 10, width: 8, height: 4)],
+        destinationStreetAddress: 'ul. Zwycięstwa ۲۷B',
+    ), ['08']);
+
+    Saloon::assertSent(fn ($request): bool => $request instanceof Rate
+        && $request->body()->all()['RateRequest']['Shipment']['ShipTo']['Address']['AddressLine'] === ['ul. Zwycięstwa 27B']);
+});

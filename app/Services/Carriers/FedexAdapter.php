@@ -41,10 +41,10 @@ use App\Services\Carriers\Concerns\IdentifiesCatalogServices;
 use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
 use App\Services\SettingsService;
+use App\Support\LabelText;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Exceptions\Request\RequestException;
 use Saloon\Exceptions\Request\Statuses\GatewayTimeoutException;
@@ -1568,7 +1568,8 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
     }
 
     /**
-     * Free text as FedEx should print it: transliterated to ASCII.
+     * Free text as FedEx should print it: transliterated to ASCII, digits
+     * included, so a house number written `۲۷` is sent as `27`.
      *
      * FedEx prints a character outside its label code page as `?` on both the
      * label and the waybill copy, and drops it from the 2D barcode
@@ -1584,7 +1585,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
             return $text;
         }
 
-        $ascii = Str::ascii($text);
+        $ascii = LabelText::ascii($text);
 
         if (blank($ascii)) {
             Log::channel('fedex-validation')->warning('FedEx label text has no ASCII form; sending it as entered', [
