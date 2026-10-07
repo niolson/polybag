@@ -2,7 +2,7 @@
 
 # UPS validation for UPS-only methods, with its liability notice
 
-Status: needs-triage
+Status: wontfix
 Category: enhancement
 Created: 2026-10-01
 
@@ -42,3 +42,11 @@ so there is never a window in which UPS results appear without the notice.
 - [04](04-record-every-validator-answer.md)
 - [05](05-validation-plan-with-fedex-for-us-shipments.md)
 - [06](06-ups-reliability-comparison.md)
+
+## Comments
+
+- **2026-10-07** — `wontfix`. [06](06-ups-reliability-comparison.md) found that UPS's
+  valid-address indicator accepts missing and wrong units and addresses USPS rejects. It
+  also returns candidates that drop PMBs and substitute house numbers, so UPS stays out of
+  the plan. Without UPS results there is nothing to attach the liability notice to.
+  `UpsAddressValidator` remains in the code but no plan calls it.
