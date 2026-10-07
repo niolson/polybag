@@ -183,7 +183,7 @@ class PackingValidationReport extends Page implements HasTable
         $query = Package::query()
             ->where('packages.status', PackageStatus::Shipped->value)
             ->join('shipments', 'packages.shipment_id', '=', 'shipments.id')
-            ->where('shipments.deliverability', '!=', Deliverability::Yes)
+            ->whereNotIn('shipments.deliverability', Deliverability::confirmed())
             ->select([
                 'packages.id',
                 'packages.shipment_id',
@@ -283,7 +283,7 @@ class PackingValidationReport extends Page implements HasTable
             ->where('packages.status', PackageStatus::Shipped->value)
             ->where('packages.shipped_at', '>=', now()->subDays(7))
             ->join('shipments', 'packages.shipment_id', '=', 'shipments.id')
-            ->where('shipments.deliverability', '!=', Deliverability::Yes)
+            ->whereNotIn('shipments.deliverability', Deliverability::confirmed())
             ->count();
     }
 }

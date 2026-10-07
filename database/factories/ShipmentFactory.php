@@ -68,11 +68,11 @@ class ShipmentFactory extends Factory
         ]);
     }
 
-    public function maybeDeliverable(): static
+    public function partlyVerified(): static
     {
         return $this->state(fn () => [
             'checked' => true,
-            'deliverability' => Deliverability::Maybe,
+            'deliverability' => Deliverability::Partial,
             'validation_message' => 'Primary address confirmed, secondary number missing',
         ]);
     }

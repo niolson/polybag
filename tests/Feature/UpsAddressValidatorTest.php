@@ -117,7 +117,7 @@ it('marks a valid address deliverable and applies the candidate', function (): v
 
     $shipment->refresh();
     expect($shipment->checked)->toBeTrue()
-        ->and($shipment->deliverability)->toBe(Deliverability::Yes)
+        ->and($shipment->deliverability)->toBe(Deliverability::Verified)
         ->and($shipment->validation_message)->toBe('Address confirmed valid')
         ->and($shipment->validated_address1)->toBe('26601 ALISO CREEK RD')
         ->and($shipment->validated_address2)->toBe('STE D')
@@ -137,7 +137,7 @@ it('accepts a single candidate returned as an object with a string address line'
     $this->validator->validate($shipment);
 
     $shipment->refresh();
-    expect($shipment->deliverability)->toBe(Deliverability::Yes)
+    expect($shipment->deliverability)->toBe(Deliverability::Verified)
         ->and($shipment->validated_address1)->toBe('1 MAIN ST')
         ->and($shipment->validated_address2)->toBeNull();
 });

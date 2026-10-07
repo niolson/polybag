@@ -56,6 +56,14 @@ class Shipment extends Model
         'deliverability' => Deliverability::NotChecked,
         'validation_message' => null,
         'validation_attempted_at' => null,
+        ...self::NO_VALIDATED_ADDRESS,
+    ];
+
+    /**
+     * A validator's correction, which `AddressData::fromShipment()` prefers
+     * over the entered address for rates and Labels.
+     */
+    public const NO_VALIDATED_ADDRESS = [
         'validated_company' => null,
         'validated_address1' => null,
         'validated_address2' => null,

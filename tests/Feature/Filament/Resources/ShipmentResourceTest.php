@@ -149,3 +149,16 @@ it('offers no bulk address validation, since every check is a billed API request
     Livewire::test(ListShipments::class)
         ->assertTableBulkActionDoesNotExist('validate-addresses');
 });
+
+it('offers a deliverability tab for every value, labelled as the enum labels it', function (Deliverability $deliverability): void {
+    $matching = Shipment::factory()->create(['deliverability' => $deliverability]);
+    $other = Shipment::factory()->create([
+        'deliverability' => $deliverability === Deliverability::No ? Deliverability::Yes : Deliverability::No,
+    ]);
+
+    Livewire::test(ListShipments::class)
+        ->assertSee($deliverability->getLabel())
+        ->set('activeDeliverabilityTab', $deliverability->value)
+        ->assertCanSeeTableRecords([$matching])
+        ->assertCanNotSeeTableRecords([$other]);
+})->with(Deliverability::cases());

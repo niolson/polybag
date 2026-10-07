@@ -91,10 +91,9 @@ class ListShipments extends ListRecords
                 'property' => 'activeDeliverabilityTab',
                 'tabs' => [
                     'all' => 'All',
-                    Deliverability::Yes->value => 'Yes',
-                    Deliverability::Maybe->value => 'Maybe',
-                    Deliverability::No->value => 'No',
-                    Deliverability::NotChecked->value => 'Not Checked',
+                    ...collect(Deliverability::cases())
+                        ->mapWithKeys(fn (Deliverability $deliverability): array => [$deliverability->value => $deliverability->getLabel()])
+                        ->all(),
                 ],
             ],
         ];
@@ -116,12 +115,10 @@ class ListShipments extends ListRecords
 
     protected function modifyQueryWithDeliverabilityTab(Builder $query): Builder
     {
-        return match ($this->activeDeliverabilityTab) {
-            Deliverability::NotChecked->value => $query->where('deliverability', Deliverability::NotChecked),
-            Deliverability::Yes->value => $query->where('deliverability', Deliverability::Yes),
-            Deliverability::Maybe->value => $query->where('deliverability', Deliverability::Maybe),
-            Deliverability::No->value => $query->where('deliverability', Deliverability::No),
-            default => $query,
-        };
+        $deliverability = Deliverability::tryFrom((string) $this->activeDeliverabilityTab);
+
+        return $deliverability === null
+            ? $query
+            : $query->where('deliverability', $deliverability);
     }
 }

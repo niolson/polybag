@@ -2,7 +2,7 @@
 
 # Deliverability says what the evidence supports
 
-Status: needs-triage
+Status: done
 Category: enhancement
 Created: 2026-10-01
 
@@ -22,13 +22,14 @@ international and UPS results are the same kind of match. `No` is mixed in the s
 Polish addresses were flagged.
 
 Split the values so each says what the evidence supports. The values were agreed with
-the maintainer on 2026-10-01:
+the maintainer on 2026-10-01, and `maybe` was renamed `partial` ("Partly verified") on
+2026-10-06 so every label says what was checked rather than how sure we are:
 
 | Value | Label | Meaning |
 |---|---|---|
 | `yes` | **Deliverable** | Delivery point confirmed: USPS DPV `Y`, Google USPS data `Y`, FedEx US DPV |
 | `verified` *(new)* | **Verified** | Matched the reference data at house level, with no delivery-point data: Google international, FedEx international, UPS |
-| `maybe` | **Maybe** | Partly confirmed: secondary missing or unconfirmed, unconfirmed components, single-organization ZIP |
+| `partial` *(was `maybe`)* | **Partly verified** | The primary address matched but part of it did not: secondary missing or unconfirmed, unconfirmed components, single-organization ZIP |
 | `unverified` *(new)* | **Couldn't verify** | Every validator in the chain was tried and none could confirm or reject the address |
 | `no` | **Not deliverable** | Positive evidence it is wrong: DPV `N`, phantom route, a suspicious component, no candidates |
 | `not_checked` | Not Checked | unchanged |
@@ -37,33 +38,76 @@ the maintainer on 2026-10-01:
   chain ended inconclusive. Individual validators keep reporting "inconclusive" as today.
 - **Google's verdict path** (`classifyFromVerdict`) returns `verified` where it returned
   `yes`, and an incomplete address without a suspicious component is inconclusive, not
-  `no`. Its USPS-data path is unchanged.
+  `no`. Its USPS-data path is unchanged. Today `processResponse` returns `Settled` for
+  every verdict, `no` included, so it must return `AddressValidationOutcome::Inconclusive`
+  for that case. Google is last in the chain, so this is what produces `unverified`.
 - **UPS maps to `verified`** for a valid-address indicator, pending the reliability
   comparison in [06](06-ups-reliability-comparison.md).
+- **`partial` replaces `maybe`.** "Partly verified" shares its verb with "Verified" and
+  "Couldn't verify", so the three read as one scale; the validation message still says
+  which part failed ("secondary number missing"). It sits below `verified` because a
+  missing unit is something to fix, while a plain match needs no action. The enum case,
+  `ListShipments` and the USPS, FedEx and Google validators move to the new case.
 - **No schema change** — `deliverability` is a string column.
-- **Backfill:** existing non-US `yes` rows can only have come from Google's verdict path
-  and become `verified`. US `yes` rows stay `yes`. Existing `no` rows cannot be split
+- **Labels, colors and icons:**
+
+  | Value | Color | Icon |
+  |---|---|---|
+  | `verified` | success | `Heroicon::ShieldCheck` |
+  | `partial` | warning | `Heroicon::ExclamationTriangle` |
+  | `unverified` | gray | `Heroicon::QuestionMarkCircle` |
+
+  Enum cases are ordered from strongest to weakest evidence (`yes`, `verified`,
+  `partial`, `unverified`, `no`, `not_checked`), so the filter lists them in that order.
+- **Backfill:** every `maybe` row becomes `partial`. A `yes` outside the USPS service area
+  can only have come from Google's verdict path and becomes `verified`. The USPS service
+  area is `US`, `PR`, `VI`, `GU`, `AS`, `MP`, `MH`, `FM` and `PW`: `UspsAddressValidator`
+  only accepts `US`, so a territory stored under its own code goes to Google, which
+  returns USPS delivery-point data for it, and nothing on the row tells the two Google
+  paths apart. `yes` rows in that area stay `yes`. Existing `no` rows cannot be split
   reliably and are left alone.
 - **Consumers:**
   - Manual Ship's address warning accepts `verified`.
-  - The Packing Validation report treats `verified` like `yes`.
-  - The Shipments list tabs and filter gain both values.
+  - The Packing Validation report treats `verified` like `yes`, in both its table query
+    and `getValidationIssueCount()`, which today exclude only `yes`.
+  - The Shipments list tabs and filter gain both values. The tab labels are hard-coded
+    strings in `ListShipments::getTabs()` today ('Yes', 'Maybe', …); take them from the
+    enum's `getLabel()` so they cannot drift from it again.
   - The Exceptions widget keeps counting `no` only; `unverified` gets its own tab.
   - `AddressValidationFailed` also fires for `unverified`, with a message that says no
     validator could confirm it.
 
 ## Acceptance criteria
 
-- [ ] `Deliverability` has `verified` and `unverified` cases with labels, colors and
-      icons
-- [ ] A Google international match is recorded as `verified`; a Google USPS-data match
+- [x] `Deliverability` has `verified` and `unverified` cases with labels, colors and
+      icons, and `Maybe` is replaced by `Partial` ("Partly verified")
+- [x] A Google international match is recorded as `verified`; a Google USPS-data match
       as `yes`
-- [ ] A chain that ends inconclusive leaves the Shipment `unverified`, and
+- [x] A chain that ends inconclusive leaves the Shipment `unverified`, and
       `AddressValidationFailed` is dispatched once
-- [ ] The backfill migration moves non-US `yes` to `verified` and touches nothing else
-- [ ] Manual Ship does not warn on `verified`; the list tabs, filter and Packing
-      Validation report handle both new values
-- [ ] Tests cover each consumer and the backfill
+- [x] The backfill migration moves `yes` outside the USPS service area to `verified` and
+      `maybe` to `partial`, and touches nothing else; a `PR` `yes` stays `yes`
+- [x] An incomplete Google verdict returns `Inconclusive`, and as the last validator
+      leaves the Shipment `unverified`
+- [x] Manual Ship does not warn on `verified`; the list tabs, filter and Packing
+      Validation report handle the new values, and the tabs show the enum's labels
+- [x] Tests cover each consumer and the backfill
+
+## Outcome
+
+Done 2026-10-07. A USPS no-match in a chain with Google switched off used to read "Not
+deliverable" and count on the Exceptions widget. It now reads "Couldn't verify" and
+appears on its own tab, which is the intent: USPS not finding an address is not
+evidence that it is wrong. The `yes` and `no` labels also changed, to "Deliverable" and
+"Not deliverable". The `AddressValidationFailed` reason for an unverified Shipment is
+"No validator could confirm or reject the address: " followed by the last validator's
+message.
+
+A chain that ends inconclusive also clears the validated address. Before, a re-validation
+that ended inconclusive left the earlier correction in place, and
+`AddressData::fromShipment()` kept rating and labelling with it. This had been true for
+USPS's inconclusive answers since `02`; Google's new inconclusive path made it reachable
+for international Shipments too.
 
 ## Blocked by
 

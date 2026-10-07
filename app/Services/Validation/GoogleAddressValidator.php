@@ -133,10 +133,17 @@ class GoogleAddressValidator implements AddressValidationInterface
 
         Log::channel('google-validation')->debug('Google Address Validation Response', ['response' => $response]);
 
-        $shipment->checked = true;
-
         [$deliverability, $message] = $this->classifyResult($result);
 
+        if ($deliverability === null) {
+            $shipment->deliverability = Deliverability::Unverified;
+            $shipment->validation_message = $message;
+            $shipment->save();
+
+            return AddressValidationOutcome::Inconclusive;
+        }
+
+        $shipment->checked = true;
         $shipment->deliverability = $deliverability;
         $shipment->validation_message = $message;
 
@@ -160,7 +167,7 @@ class GoogleAddressValidator implements AddressValidationInterface
 
     /**
      * @param  array<string, mixed>  $result
-     * @return array{0: Deliverability, 1: string}
+     * @return array{0: ?Deliverability, 1: string}
      */
     protected function classifyResult(array $result): array
     {
@@ -191,8 +198,8 @@ class GoogleAddressValidator implements AddressValidationInterface
 
         return match ($uspsData['dpvConfirmation'] ?? '') {
             'Y' => [Deliverability::Yes, 'Address confirmed deliverable'],
-            'D' => [Deliverability::Maybe, 'Primary address confirmed, secondary number missing'],
-            'S' => [Deliverability::Maybe, 'Primary address confirmed, secondary number not confirmed'],
+            'D' => [Deliverability::Partial, 'Primary address confirmed, secondary number missing'],
+            'S' => [Deliverability::Partial, 'Primary address confirmed, secondary number not confirmed'],
             'N' => [Deliverability::No, 'Address found but not confirmed as deliverable'],
             default => [Deliverability::No, 'DPV confirmation not available'],
         };
@@ -202,9 +209,13 @@ class GoogleAddressValidator implements AddressValidationInterface
      * Fallback for addresses Google has no USPS DPV data for (non-US
      * addresses, or US addresses it couldn't standardize to a specific
      * delivery point) — Google's own geocoding-based confidence signal.
+     * A reference-data match is not a delivery point, so the best this
+     * reaches is Verified. An incomplete address is not evidence it is
+     * wrong (valid German and Polish addresses read as incomplete), so it
+     * is inconclusive: a null deliverability.
      *
      * @param  array<string, mixed>  $result
-     * @return array{0: Deliverability, 1: string}
+     * @return array{0: ?Deliverability, 1: string}
      */
     protected function classifyFromVerdict(array $result): array
     {
@@ -215,13 +226,16 @@ class GoogleAddressValidator implements AddressValidationInterface
             ->contains(fn (array $component): bool => ($component['confirmationLevel'] ?? null) === 'UNCONFIRMED_AND_SUSPICIOUS');
 
         return match (true) {
-            $hasSuspiciousComponent || ! ($verdict['addressComplete'] ?? false) => [
-                Deliverability::No, 'Address not confirmed deliverable',
+            $hasSuspiciousComponent => [
+                Deliverability::No, 'Address has a suspicious component',
+            ],
+            ! ($verdict['addressComplete'] ?? false) => [
+                null, 'Google could not confirm the address is complete',
             ],
             $verdict['hasUnconfirmedComponents'] ?? false => [
-                Deliverability::Maybe, 'Address confirmed with unconfirmed components',
+                Deliverability::Partial, 'Address matched with unconfirmed components',
             ],
-            default => [Deliverability::Yes, 'Address confirmed deliverable'],
+            default => [Deliverability::Verified, 'Address matched reference data'],
         };
     }
 }
