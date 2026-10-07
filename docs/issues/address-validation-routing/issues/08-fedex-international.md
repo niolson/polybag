@@ -2,7 +2,7 @@
 
 # FedEx international: country lists and house-number reading
 
-Status: needs-triage
+Status: done — 2026-10-07
 Category: enhancement
 Created: 2026-10-01
 
@@ -28,25 +28,62 @@ substituted address is never taken as confirmation.
   when Google supports the country; then FedEx as a last resort for Google-unsupported
   countries. An excluded country never uses FedEx. Eligibility is the rule from
   [05](05-validation-plan-with-fedex-for-us-shipments.md).
-- **International reading.** A FedEx result settles the address only when it reports a
-  match, the precision is house-level, and the returned house number equals the input
-  number. The comparison understands two-part numbers such as `482/22` in CZ and SK, so a
-  match keeping only one part is not treated as a substitution. Anything else is
-  inconclusive, logged with its reason (precision, substitution) per
-  [04](04-record-every-validator-answer.md). A settled international result is
-  `verified`, never `yes`.
+- **International reading.** A FedEx result settles the address only when all three
+  hold:
+  - `Matched` is `"true"`;
+  - `StreetAddress` is `"true"`, meaning FedEx matched the house and not only the street;
+  - the returned house number equals the input number.
+
+  Do not use `AddressPrecision` for the house-level check. GAM_VALIDATE reports
+  `STREET_ADDRESS` for street-only matches that echo the input number back: every
+  inflated BE, PT and BR match in the captures did this, with `StreetAddress` `"false"`.
+  GENERIC_VALIDATE's `Street` and `StreetName` precisions always carry `StreetAddress`
+  `"false"`, so they are inconclusive too.
+
+  For a two-part input such as `482/22` (CZ, SK), the returned number is equal when it
+  is the second part (`22`) or the whole number. All 19 Slovak captures returned the
+  second part alone. None kept the first part, and no Czech capture had a two-part
+  number. A returned first part (`482`) is therefore treated as a substitution until a
+  capture shows otherwise.
+
+  Anything else is inconclusive and is logged with its reason (street-only,
+  substitution) per [04](04-record-every-validator-answer.md). A settled international
+  result is `verified`, never `yes`.
 - The US reading is unchanged.
 
 ## Acceptance criteria
 
-- [ ] Plan tests for a trusted, an excluded, a Google-unsupported and an unlisted country,
+- [x] Plan tests for a trusted, an excluded, a Google-unsupported and an unlisted country,
       with and without FedEx eligibility
-- [ ] FedEx reading tests, using response shapes from the recorded production captures
-      with synthetic addresses: accept, house-number substitution, street-only precision,
-      and two-part numbers both ways
-- [ ] A DE Shipment FedEx can't settle falls through to Google; an HK Shipment reaches
+- [x] FedEx reading tests, using response shapes from the recorded production captures
+      with synthetic addresses: accept; house-number substitution (`StreetAddress`
+      `"true"`, different number); street-only match echoing the input number
+      (`STREET_ADDRESS` precision, `StreetAddress` `"false"`); `482/22` returned as `22`
+      (settles) and as `482` (inconclusive)
+- [x] A DE Shipment FedEx can't settle falls through to Google; an HK Shipment reaches
       FedEx after Google is skipped; a BE Shipment never sends a FedEx request
-- [ ] The country lists live in one class with a citation per entry
+- [x] The country lists live in one class with a citation per entry
+
+## Notes from the build
+
+- The lists are `App\Services\Validation\AddressValidationCountries`, each entry citing
+  its numbers from the 2026-09-30 comparison as re-read with `StreetAddress`. Under that
+  reading NO settles only 1 of 10 real addresses; it stays trusted, since a miss falls
+  through to Google.
+- The house-number comparison takes every number in the first street line, in order, so a
+  number in a street name (`12 de Octubre`) must survive too. Leading zeros are dropped
+  (CL `0605` → `605`). A dropped suffix is a change, whether a letter (`55d` → `55`) or a
+  repetition word (`12 bis` → `12` or `12B`).
+- The second-part exception for slash numbers applies in CZ and SK only. Elsewhere the
+  second part can be the flat (Polish `Lipowa 12/3`), so a slash number must come back
+  whole.
+- A settled FedEx international result writes FedEx's first street line, city and postal
+  code, but not `address2` or the state. FedEx's later lines are a locality or postcode, it
+  drops the unit line sent (PT `R GAMAS 10` / `RC B` came back
+  `RUA DOS GAMAS 10` / `7520-206 SINES`), and its state codes are its own (MX `NLE`). The
+  label falls back to what was sent for both.
+- Google's `supports()` now refuses HK, LI and UY, so no doomed request is sent.
+- New answer reasons: `street_only`, `house_number_changed`.
 
 ## Blocked by
 

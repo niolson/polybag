@@ -18,6 +18,12 @@ enum ValidationReason: string
     /** Inconclusive: the address matched, but not to a delivery point. */
     case NotDeliveryPoint = 'not_delivery_point';
 
+    /** Inconclusive: the street matched, but not the house on it. */
+    case StreetOnly = 'street_only';
+
+    /** Inconclusive: the match carries a different house number from the one sent. */
+    case HouseNumberChanged = 'house_number_changed';
+
     /** Inconclusive: the validator couldn't confirm the address is complete. */
     case Incomplete = 'incomplete';
 

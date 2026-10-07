@@ -17,7 +17,8 @@ use Saloon\Exceptions\Request\RequestException;
 use Saloon\Http\Connector;
 
 /**
- * Universal fallback validator — supports every country. Placed after
+ * Fallback validator for every country Google covers (not HK, LI or UY; see
+ * AddressValidationCountries). Placed after
  * UspsAddressValidator in the dispatch chain so USPS gets first crack at
  * US shipments; this catches non-US shipments and any US shipment USPS
  * couldn't attempt (no account, no license, etc).
@@ -38,7 +39,7 @@ class GoogleAddressValidator implements AddressValidationInterface
 
     public function supports(string $country): bool
     {
-        return true;
+        return AddressValidationCountries::googleSupports($country);
     }
 
     public function validate(Shipment $shipment): AddressValidationResult

@@ -3,6 +3,7 @@
 use App\Enums\AddressValidator;
 use App\Enums\Deliverability;
 use App\Enums\PostageSourceKind;
+use App\Enums\ValidationReason;
 use App\Http\Integrations\Fedex\Requests\ValidateAddress as FedexValidateAddress;
 use App\Http\Integrations\Google\Requests\ValidateAddress as GoogleValidateAddress;
 use App\Http\Integrations\USPS\Requests\Address as UspsAddress;
@@ -18,6 +19,7 @@ use App\Models\ShippingMethod;
 use App\Models\ShippingMethodPostageSource;
 use App\Services\AddressValidationService;
 use App\Services\SettingsService;
+use App\Services\Validation\AddressValidationCountries;
 use App\Services\Validation\FedexAddressValidator;
 use App\Services\Validation\ShipmentValidationPlan;
 use Saloon\Http\Faking\MockResponse;
@@ -386,4 +388,162 @@ it('authenticates FedEx with the account the plan found', function (): void {
     };
 
     expect($validator->accountFor($shipment)?->is($here))->toBeTrue();
+});
+
+// --- International ------------------------------------------------------------------
+
+it('places FedEx by the Shipment\'s country', function (string $country, bool $eligible, bool $google, array $expected): void {
+    if ($google) {
+        app(SettingsService::class)->set('address_validation_google_enabled', true);
+    }
+
+    if ($eligible) {
+        planScope(planFedexAccount(), ['client' => $this->client]);
+    }
+
+    $shipment = Shipment::factory()->create([
+        'client_id' => $this->client->id,
+        'country' => $country,
+        'shipping_method_id' => planMethod([Carrier::FEDEX])->id,
+    ]);
+
+    expect(plannedValidators($shipment))->toBe($expected);
+})->with([
+    'trusted, eligible' => ['DE', true, true, [AddressValidator::Fedex, AddressValidator::Google]],
+    'trusted, not eligible' => ['DE', false, true, [AddressValidator::Google]],
+    'trusted, eligible, Google off' => ['DE', true, false, [AddressValidator::Fedex]],
+    'excluded, eligible' => ['BE', true, true, [AddressValidator::Google]],
+    'excluded, not eligible' => ['BE', false, true, [AddressValidator::Google]],
+    'Google unsupported, eligible' => ['HK', true, true, [AddressValidator::Fedex]],
+    'Google unsupported, not eligible' => ['HK', false, true, []],
+    'unlisted, eligible' => ['JP', true, true, [AddressValidator::Google]],
+    'unlisted, not eligible' => ['JP', false, true, [AddressValidator::Google]],
+    'Puerto Rico, eligible' => ['PR', true, true, [AddressValidator::Fedex, AddressValidator::Google]],
+]);
+
+it('keeps every country list entry cited and the lists apart', function (): void {
+    $lists = [
+        AddressValidationCountries::FEDEX_TRUSTED,
+        AddressValidationCountries::FEDEX_EXCLUDED,
+        AddressValidationCountries::GOOGLE_UNSUPPORTED,
+    ];
+
+    foreach ($lists as $list) {
+        foreach ($list as $country => $citation) {
+            expect($country)->toMatch('/^[A-Z]{2}$/')
+                ->and($citation)->not->toBeEmpty();
+        }
+    }
+
+    expect(array_intersect_key(AddressValidationCountries::FEDEX_TRUSTED, AddressValidationCountries::FEDEX_EXCLUDED))->toBe([])
+        ->and(array_intersect_key(AddressValidationCountries::FEDEX_TRUSTED, AddressValidationCountries::GOOGLE_UNSUPPORTED))->toBe([])
+        ->and(array_intersect_key(AddressValidationCountries::FEDEX_EXCLUDED, AddressValidationCountries::GOOGLE_UNSUPPORTED))->toBe([]);
+});
+
+/**
+ * @param  array<string, mixed>  $attributes
+ */
+function planInternationalFedexResponse(string $street, array $attributes = []): MockResponse
+{
+    return MockResponse::make(['output' => ['resolvedAddresses' => [[
+        'streetLinesToken' => [$street],
+        'city' => 'BEISPIELHAUSEN',
+        'postalCode' => '12345',
+        'parsedPostalCode' => ['base' => '12345'],
+        'classification' => 'UNKNOWN',
+        'resolutionMethodName' => 'GAM_VALIDATE',
+        'attributes' => ['Matched' => 'true', 'StreetAddress' => 'true', 'AddressPrecision' => 'STREET_ADDRESS', ...$attributes],
+    ]]]]);
+}
+
+function planGoogleVerifiedResponse(): MockResponse
+{
+    return MockResponse::make([
+        'result' => [
+            'verdict' => ['addressComplete' => true, 'hasUnconfirmedComponents' => false],
+            'address' => [
+                'postalAddress' => ['addressLines' => ['Musterweg 12'], 'locality' => 'Beispielhausen', 'postalCode' => '12345'],
+                'addressComponents' => [['componentType' => 'street_number', 'confirmationLevel' => 'CONFIRMED']],
+            ],
+            'metadata' => ['business' => false, 'poBox' => false, 'residential' => true],
+        ],
+    ]);
+}
+
+function planInternationalShipment(Client $client, string $country): Shipment
+{
+    planEnableFallbacks();
+    planScope(createFedexAccount(), ['client' => $client]);
+
+    return Shipment::factory()->create([
+        'client_id' => $client->id,
+        'address1' => 'Musterweg 12',
+        'country' => $country,
+        'state_or_province' => null,
+        'shipping_method_id' => planMethod([Carrier::FEDEX])->id,
+    ]);
+}
+
+it('falls through to Google when FedEx can\'t settle a trusted country\'s address', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        FedexValidateAddress::class => planInternationalFedexResponse('MUSTERWEG 829'),
+        UspsAddress::class => MockResponse::make([], 500),
+        GoogleValidateAddress::class => planGoogleVerifiedResponse(),
+    ]);
+
+    $shipment = planInternationalShipment($this->client, 'DE');
+    app(AddressValidationService::class)->validate($shipment);
+
+    $answers = AddressValidationAnswer::where('shipment_id', $shipment->id)->orderBy('id')->get();
+
+    Saloon::assertNotSent(UspsAddress::class);
+    expect($answers->pluck('validator')->all())->toBe([AddressValidator::Fedex, AddressValidator::Google])
+        ->and($answers->first()->reason)->toBe(ValidationReason::HouseNumberChanged)
+        ->and($shipment->refresh()->validation_source)->toBe(AddressValidator::Google);
+});
+
+it('settles a trusted country\'s address with FedEx alone', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        FedexValidateAddress::class => planInternationalFedexResponse('MUSTERWEG 12'),
+        GoogleValidateAddress::class => MockResponse::make([], 500),
+    ]);
+
+    $shipment = planInternationalShipment($this->client, 'DE');
+    app(AddressValidationService::class)->validate($shipment);
+
+    Saloon::assertNotSent(GoogleValidateAddress::class);
+    $shipment->refresh();
+    expect($shipment->validation_source)->toBe(AddressValidator::Fedex)
+        ->and($shipment->deliverability)->toBe(Deliverability::Verified);
+});
+
+it('reaches FedEx where Google doesn\'t support the country', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        FedexValidateAddress::class => planInternationalFedexResponse('MUSTERWEG 12'),
+        GoogleValidateAddress::class => MockResponse::make([], 500),
+    ]);
+
+    $shipment = planInternationalShipment($this->client, 'HK');
+    app(AddressValidationService::class)->validate($shipment);
+
+    Saloon::assertNotSent(GoogleValidateAddress::class);
+    Saloon::assertSent(FedexValidateAddress::class);
+    expect($shipment->refresh()->validation_source)->toBe(AddressValidator::Fedex);
+});
+
+it('never sends a FedEx request for an excluded country', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        FedexValidateAddress::class => planInternationalFedexResponse('MUSTERWEG 12'),
+        GoogleValidateAddress::class => planGoogleVerifiedResponse(),
+    ]);
+
+    $shipment = planInternationalShipment($this->client, 'BE');
+    app(AddressValidationService::class)->validate($shipment);
+
+    Saloon::assertNotSent(FedexValidateAddress::class);
+    expect($shipment->refresh()->validation_source)->toBe(AddressValidator::Google);
 });
