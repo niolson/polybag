@@ -3,8 +3,10 @@
 namespace App\Services\Validation;
 
 use App\Contracts\AddressValidationInterface;
-use App\Enums\AddressValidationOutcome;
+use App\DataTransferObjects\AddressValidationResult;
+use App\Enums\AddressValidator;
 use App\Enums\Deliverability;
+use App\Enums\ValidationReason;
 use App\Http\Integrations\Google\GoogleAddressValidationConnector;
 use App\Http\Integrations\Google\GoogleAddressValidationProxyConnector;
 use App\Http\Integrations\Google\Requests\ValidateAddress;
@@ -29,24 +31,29 @@ class GoogleAddressValidator implements AddressValidationInterface
         $this->addressReference = $addressReference ?? app(AddressReferenceService::class);
     }
 
+    public function validator(): AddressValidator
+    {
+        return AddressValidator::Google;
+    }
+
     public function supports(string $country): bool
     {
         return true;
     }
 
-    public function validate(Shipment $shipment): AddressValidationOutcome
+    public function validate(Shipment $shipment): AddressValidationResult
     {
         $connector = $this->resolveConnector();
 
         if ($connector === null) {
             // Not configured (no broker, no local API key) — not attempted.
-            return AddressValidationOutcome::Unavailable;
+            return AddressValidationResult::unavailable();
         }
 
         $response = $this->fetchValidation($connector, $shipment);
 
         if ($response === null) {
-            return AddressValidationOutcome::Unavailable;
+            return AddressValidationResult::unavailable();
         }
 
         return $this->processResponse($shipment, $response);
@@ -117,7 +124,7 @@ class GoogleAddressValidator implements AddressValidationInterface
     /**
      * @param  array<string, mixed>  $response
      */
-    protected function processResponse(Shipment $shipment, array $response): AddressValidationOutcome
+    protected function processResponse(Shipment $shipment, array $response): AddressValidationResult
     {
         $result = $response['result'] ?? null;
 
@@ -128,19 +135,19 @@ class GoogleAddressValidator implements AddressValidationInterface
                 'shipment_id' => $shipment->id,
             ]);
 
-            return AddressValidationOutcome::Unavailable;
+            return AddressValidationResult::unavailable();
         }
 
         Log::channel('google-validation')->debug('Google Address Validation Response', ['response' => $response]);
 
-        [$deliverability, $message] = $this->classifyResult($result);
+        [$deliverability, $message, $reason] = $this->classifyResult($result);
 
         if ($deliverability === null) {
             $shipment->deliverability = Deliverability::Unverified;
             $shipment->validation_message = $message;
             $shipment->save();
 
-            return AddressValidationOutcome::Inconclusive;
+            return AddressValidationResult::inconclusive($reason ?? ValidationReason::Incomplete);
         }
 
         $shipment->checked = true;
@@ -162,12 +169,15 @@ class GoogleAddressValidator implements AddressValidationInterface
 
         $shipment->save();
 
-        return AddressValidationOutcome::Settled;
+        return AddressValidationResult::settled($reason);
     }
 
     /**
+     * The deliverability (null when inconclusive), the message, and the reason
+     * when inconclusive or `no`.
+     *
      * @param  array<string, mixed>  $result
-     * @return array{0: ?Deliverability, 1: string}
+     * @return array{0: ?Deliverability, 1: string, 2: ?ValidationReason}
      */
     protected function classifyResult(array $result): array
     {
@@ -186,22 +196,22 @@ class GoogleAddressValidator implements AddressValidationInterface
      * it's the same authoritative deliverability signal USPS's own API uses.
      *
      * @param  array<string, mixed>  $uspsData
-     * @return array{0: Deliverability, 1: string}
+     * @return array{0: Deliverability, 1: string, 2: ?ValidationReason}
      */
     protected function classifyFromUspsData(array $uspsData): array
     {
         $carrierRoute = $uspsData['carrierRoute'] ?? '';
 
         if (in_array($carrierRoute, ['R777', 'R778', 'R779'], true)) {
-            return [Deliverability::No, 'Address exists but is not deliverable (phantom route)'];
+            return [Deliverability::No, 'Address exists but is not deliverable (phantom route)', ValidationReason::PhantomRoute];
         }
 
         return match ($uspsData['dpvConfirmation'] ?? '') {
-            'Y' => [Deliverability::Yes, 'Address confirmed deliverable'],
-            'D' => [Deliverability::Partial, 'Primary address confirmed, secondary number missing'],
-            'S' => [Deliverability::Partial, 'Primary address confirmed, secondary number not confirmed'],
-            'N' => [Deliverability::No, 'Address found but not confirmed as deliverable'],
-            default => [Deliverability::No, 'DPV confirmation not available'],
+            'Y' => [Deliverability::Yes, 'Address confirmed deliverable', null],
+            'D' => [Deliverability::Partial, 'Primary address confirmed, secondary number missing', null],
+            'S' => [Deliverability::Partial, 'Primary address confirmed, secondary number not confirmed', null],
+            'N' => [Deliverability::No, 'Address found but not confirmed as deliverable', ValidationReason::DpvNotConfirmed],
+            default => [Deliverability::No, 'DPV confirmation not available', ValidationReason::DpvNotConfirmed],
         };
     }
 
@@ -215,7 +225,7 @@ class GoogleAddressValidator implements AddressValidationInterface
      * is inconclusive: a null deliverability.
      *
      * @param  array<string, mixed>  $result
-     * @return array{0: ?Deliverability, 1: string}
+     * @return array{0: ?Deliverability, 1: string, 2: ?ValidationReason}
      */
     protected function classifyFromVerdict(array $result): array
     {
@@ -227,15 +237,15 @@ class GoogleAddressValidator implements AddressValidationInterface
 
         return match (true) {
             $hasSuspiciousComponent => [
-                Deliverability::No, 'Address has a suspicious component',
+                Deliverability::No, 'Address has a suspicious component', ValidationReason::SuspiciousComponent,
             ],
             ! ($verdict['addressComplete'] ?? false) => [
-                null, 'Google could not confirm the address is complete',
+                null, 'Google could not confirm the address is complete', ValidationReason::Incomplete,
             ],
             $verdict['hasUnconfirmedComponents'] ?? false => [
-                Deliverability::Partial, 'Address matched with unconfirmed components',
+                Deliverability::Partial, 'Address matched with unconfirmed components', null,
             ],
-            default => [Deliverability::Verified, 'Address matched reference data'],
+            default => [Deliverability::Verified, 'Address matched reference data', null],
         };
     }
 }

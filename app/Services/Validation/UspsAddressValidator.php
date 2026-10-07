@@ -3,8 +3,10 @@
 namespace App\Services\Validation;
 
 use App\Contracts\AddressValidationInterface;
-use App\Enums\AddressValidationOutcome;
+use App\DataTransferObjects\AddressValidationResult;
+use App\Enums\AddressValidator;
 use App\Enums\Deliverability;
+use App\Enums\ValidationReason;
 use App\Http\Integrations\USPS\Requests\Address;
 use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Carrier;
@@ -20,17 +22,22 @@ use Saloon\Exceptions\Request\RequestException;
 
 class UspsAddressValidator implements AddressValidationInterface
 {
+    public function validator(): AddressValidator
+    {
+        return AddressValidator::Usps;
+    }
+
     public function supports(string $country): bool
     {
         return $country === 'US';
     }
 
-    public function validate(Shipment $shipment): AddressValidationOutcome
+    public function validate(Shipment $shipment): AddressValidationResult
     {
         $response = $this->fetchValidation($shipment);
 
         if ($response === null) {
-            return AddressValidationOutcome::Unavailable;
+            return AddressValidationResult::unavailable();
         }
 
         return $this->processResponse($shipment, $response);
@@ -112,7 +119,7 @@ class UspsAddressValidator implements AddressValidationInterface
                 'shipment_id' => $shipment->id,
             ]);
 
-            return ['error' => ['message' => $message]];
+            return ['error' => ['message' => $message, 'status' => $status]];
         } catch (RequestException $e) {
             Log::channel('usps-validation')->warning('USPS Address Validation request failed', [
                 'error' => $e->getMessage(),
@@ -159,14 +166,18 @@ class UspsAddressValidator implements AddressValidationInterface
      *
      * @param  array<string, mixed>  $response
      */
-    protected function processResponse(Shipment $shipment, array $response): AddressValidationOutcome
+    protected function processResponse(Shipment $shipment, array $response): AddressValidationResult
     {
         Log::channel('usps-validation')->debug('USPS Address Validation Response', ['response' => $response]);
 
         if (isset($response['error'])) {
             $this->handleError($shipment, $response['error']['message'] ?? 'Unknown error');
 
-            return AddressValidationOutcome::Inconclusive;
+            // A 404 is USPS saying it found no such address; anything else is
+            // the request itself being refused.
+            return AddressValidationResult::inconclusive(
+                ($response['error']['status'] ?? null) === 404 ? ValidationReason::NoMatch : ValidationReason::RequestRejected,
+            );
         }
 
         if ($this->hasCorrections($response)) {
@@ -175,9 +186,8 @@ class UspsAddressValidator implements AddressValidationInterface
 
         if ($this->isExactMatch($response)) {
             $shipment->checked = true;
-            $this->handleExactMatch($shipment, $response);
 
-            return AddressValidationOutcome::Settled;
+            return AddressValidationResult::settled($this->handleExactMatch($shipment, $response));
         }
 
         // Unexpected response format — USPS never reached a delivery-point
@@ -187,7 +197,7 @@ class UspsAddressValidator implements AddressValidationInterface
         $shipment->validation_message = 'Unexpected USPS response format';
         $shipment->save();
 
-        return AddressValidationOutcome::Inconclusive;
+        return AddressValidationResult::inconclusive(ValidationReason::UnexpectedResponse);
     }
 
     /**
@@ -231,7 +241,7 @@ class UspsAddressValidator implements AddressValidationInterface
     /**
      * @param  array<string, mixed>  $response
      */
-    protected function handleCorrection(Shipment $shipment, array $response): AddressValidationOutcome
+    protected function handleCorrection(Shipment $shipment, array $response): AddressValidationResult
     {
         $code = $response['corrections'][0]['code'];
         $text = $response['corrections'][0]['text'] ?? '';
@@ -265,7 +275,11 @@ class UspsAddressValidator implements AddressValidationInterface
 
         $shipment->save();
 
-        return $code === '32' ? AddressValidationOutcome::Settled : AddressValidationOutcome::Inconclusive;
+        return match ($code) {
+            '32' => AddressValidationResult::settled(),
+            '22' => AddressValidationResult::inconclusive(ValidationReason::MultipleCandidates),
+            default => AddressValidationResult::inconclusive(ValidationReason::NoMatch),
+        };
     }
 
     /**
@@ -280,18 +294,21 @@ class UspsAddressValidator implements AddressValidationInterface
     /**
      * @param  array<string, mixed>  $response
      */
-    protected function handleExactMatch(Shipment $shipment, array $response): void
+    protected function handleExactMatch(Shipment $shipment, array $response): ?ValidationReason
     {
-        $this->applyValidatedAddress($shipment, $response);
+        $reason = $this->applyValidatedAddress($shipment, $response);
         $shipment->save();
+
+        return $reason;
     }
 
     /**
-     * Apply the validated address fields and DPV-derived deliverability to the shipment.
+     * Apply the validated address fields and DPV-derived deliverability to the
+     * shipment, returning the reason when the deliverability is `no`.
      *
      * @param  array<string, mixed>  $response
      */
-    protected function applyValidatedAddress(Shipment $shipment, array $response): void
+    protected function applyValidatedAddress(Shipment $shipment, array $response): ?ValidationReason
     {
         $dpv = $response['additionalInfo']['DPVConfirmation'] ?? '';
         $carrierRoute = $response['additionalInfo']['carrierRoute'] ?? '';
@@ -322,5 +339,11 @@ class UspsAddressValidator implements AddressValidationInterface
         $shipment->validated_postal_code = $address['ZIPCode'] ?? null;
         $businessFlag = $response['additionalInfo']['business'] ?? null;
         $shipment->validated_residential = $businessFlag !== null ? $businessFlag !== 'Y' : null;
+
+        return match (true) {
+            $deliverability !== Deliverability::No => null,
+            in_array($carrierRoute, ['R777', 'R778', 'R779']) => ValidationReason::PhantomRoute,
+            default => ValidationReason::DpvNotConfirmed,
+        };
     }
 }

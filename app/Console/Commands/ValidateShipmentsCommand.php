@@ -3,6 +3,8 @@
 namespace App\Console\Commands;
 
 use App\Enums\AddressValidationOutcome;
+use App\Enums\ValidationTrigger;
+use App\Models\AddressValidationAnswer;
 use App\Models\Shipment;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -52,6 +54,8 @@ class ValidateShipmentsCommand extends Command
             return $this->dryRun($shipments);
         }
 
+        // Answer timestamps are stored to the second.
+        $startedAt = now()->startOfSecond();
         $bar = $this->output->createProgressBar($shipments->count());
         $bar->start();
 
@@ -61,11 +65,12 @@ class ValidateShipmentsCommand extends Command
             'errors' => 0,
             'skipped' => 0,
             'statuses' => [],
+            'sources' => [],
         ];
 
         foreach ($shipments as $shipment) {
             try {
-                $outcome = $shipment->validateAddress();
+                $outcome = $shipment->validateAddress(ValidationTrigger::Scheduled);
 
                 if ($outcome->answered()) {
                     $this->countScheduledAttempt($shipment);
@@ -78,6 +83,8 @@ class ValidateShipmentsCommand extends Command
                         $results['success']++;
                         $status = $shipment->deliverability->value;
                         $results['statuses'][$status] = ($results['statuses'][$status] ?? 0) + 1;
+                        $source = $shipment->validation_source?->getLabel() ?? 'Unknown';
+                        $results['sources'][$source] = ($results['sources'][$source] ?? 0) + 1;
                         break;
 
                     case AddressValidationOutcome::Inconclusive:
@@ -117,11 +124,33 @@ class ValidateShipmentsCommand extends Command
             $tableData[] = ["  - {$status}", $count];
         }
 
+        foreach ($results['sources'] as $source => $count) {
+            $tableData[] = ["  - settled by {$source}", $count];
+        }
+
+        $tableData[] = ['Paid validator requests', $this->paidRequests($shipments->modelKeys(), $startedAt)];
+
         $this->table(['Metric', 'Count'], $tableData);
 
         // An address no validator could settle is an answer, not a failure;
         // only validators that couldn't run, or exceptions, fail the command.
         return ($results['errors'] > 0 || $results['skipped'] > 0) ? Command::FAILURE : Command::SUCCESS;
+    }
+
+    /**
+     * Answers from paid validators in this run. A validator that couldn't run
+     * writes no answer, so an outage or rate limit isn't counted.
+     *
+     * @param  list<int>  $shipmentIds
+     */
+    private function paidRequests(array $shipmentIds, \DateTimeInterface $startedAt): int
+    {
+        return AddressValidationAnswer::query()
+            ->whereIn('shipment_id', $shipmentIds)
+            ->where('trigger', ValidationTrigger::Scheduled)
+            ->where('paid', true)
+            ->where('created_at', '>=', $startedAt)
+            ->count();
     }
 
     private function countScheduledAttempt(Shipment $shipment): void

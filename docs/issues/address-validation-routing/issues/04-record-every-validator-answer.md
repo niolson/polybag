@@ -2,7 +2,7 @@
 
 # Record every validator's answer for each Shipment
 
-Status: needs-triage
+Status: done — 2026-10-07
 Category: enhancement
 Created: 2026-10-01
 
@@ -18,34 +18,89 @@ need — the routing rules and country lists can't be improved from real orders.
 country lists in this PRD come from a few hundred API test addresses that may not be
 representative; every validator answer on a real Shipment is better evidence.
 
-- **A validation result log.** Every validator that runs for a Shipment writes one row:
-  - the validator (USPS, Google, FedEx, UPS, fake), and whether it is free or paid
-  - the outcome: the `Deliverability` it would set, or inconclusive
-  - the reason when inconclusive or `no`, as a small fixed vocabulary: precision too low,
-    house number substituted, incomplete, country unsupported, no candidates, and so on
-  - the country, and whether the run was scheduled or manual
+- **Validators report a result, not just an outcome.** `AddressValidationInterface::validate()`
+  returns a small result object from `app/DataTransferObjects/`: the
+  `AddressValidationOutcome` plus a reason from the vocabulary below. Validators still
+  write the Shipment as they do today; the service reads the result to log the row.
+  Changing all five validators (USPS, Google, FedEx, UPS, fake) is part of this issue.
+- **A validation result log.** Every validator that answers for a Shipment writes one row:
+  - the validator (USPS, Google, FedEx, UPS, fake), and whether it is free or paid. USPS
+    and Google are paid, Google's monthly free allowance notwithstanding; FedEx, UPS and
+    fake are free
+  - the outcome: the `Deliverability` it set when it settled the address, or
+    inconclusive. A validator's provisional `no` on the Shipment before falling through
+    (USPS, FedEx and UPS write one today) is logged as inconclusive, not `no`
+  - the reason when inconclusive or `no`, as a reason enum. Today's validators need:
+    - inconclusive: `no_match` (USPS not found, UPS no candidates, FedEx unresolved),
+      `multiple_candidates` (USPS code 22, UPS ambiguous), `not_delivery_point` (FedEx
+      resolved without DPV), `incomplete` (Google), `request_rejected` (the API returned an
+      error about the address request), `unexpected_response`
+    - `no`: `dpv_not_confirmed` (DPV `N` or missing), `phantom_route` (Google),
+      `suspicious_component` (Google)
+
+    Later slices add their own, such as `precision_too_low` and `house_number_substituted`
+    in [08](08-fedex-international.md). A settled `yes`, `verified` or `partial` has no
+    reason.
+  - the country, and whether the run was scheduled or manual. The service can't tell,
+    so `validate()` and `Shipment::validateAddress()` take the trigger:
+    `shipments:validate` passes scheduled; View Shipment's Validate action and Manual Ship
+    pass manual
   - the time
 - **Rows hold verdicts, not addresses.** The address is already on the Shipment; a second
   copy here would widen what [pii-retention](../../archive/pii-retention/) has to purge. A row
-  is deleted with its Shipment.
-- **Unavailable is not logged as an answer.** A validator that couldn't run is either not
-  logged or logged as unavailable, so it never counts as a data point.
+  is deleted with its Shipment (a cascading foreign key). Rows are kept when the address
+  changes: an edit after validation is evidence [11](11-measure-validation-quality.md)
+  uses, and the row's time orders it against the edit.
+- **Unavailable writes no row.** A validator that couldn't run is not logged, so it never
+  counts as a data point.
 - **`validation_source` on Shipments** names the validator that settled the current
-  result, set only when one did. It shows next to the deliverability on View Shipment and
-  in Manual Ship's result.
+  result, set only when one did. It belongs in `Shipment::UNVALIDATED`, so an address
+  change clears it through the saving hook and `ShipmentBatchWriter`, as it does the rest
+  of the result. A re-validation that ends inconclusive clears it too, alongside the
+  validated address the service already clears.
+- **Where the source shows.**
+  - View Shipment: next to the deliverability.
+  - Manual Ship: in the existing address warning toast, and in a new notice when a
+    validator settled the address as confirmed, which today shows nothing. No notice when
+    no validator ran.
 - **`shipments:validate`'s summary** counts settled results per source and paid requests
-  made.
+  made: answer rows from paid validators in this run. Unavailable calls don't count.
 
 ## Acceptance criteria
 
-- [ ] A chain of USPS inconclusive then Google settled writes two rows and sets
-      `validation_source` to Google
-- [ ] An unavailable validator writes no answer row
-- [ ] Re-validating writes new rows and replaces `validation_source`
-- [ ] View Shipment and Manual Ship show the source with the result
-- [ ] The command summary shows per-source and paid-request counts
-- [ ] The log has a factory, and rows are removed with their Shipment
+- [x] A chain of USPS inconclusive then Google settled writes two rows (USPS inconclusive
+      with its reason, Google with the deliverability it set) and sets `validation_source`
+      to Google
+- [x] An unavailable validator writes no row
+- [x] Re-validating writes new rows and replaces `validation_source`; a re-validation that
+      ends inconclusive leaves it null
+- [x] Changing the address clears `validation_source` and keeps the existing rows
+- [x] Scheduled and manual runs are recorded as such
+- [x] Each validator's inconclusive and `no` branches log the reason listed above
+- [x] View Shipment and Manual Ship show the source with the result, as described above
+- [x] The command summary shows per-source and paid-request counts
+- [x] The log has a factory, and rows are removed with their Shipment
 
 ## Blocked by
 
-None - can start immediately
+None — [02](02-stop-retrying-exhausted-shipments.md) and
+[03](03-deliverability-says-what-the-evidence-supports.md), which this builds on, are done.
+
+## Comments
+
+**2026-10-07 — triage.** Ready once the reason vocabulary, the validator result object,
+where Manual Ship shows the source, and when `validation_source` clears were written in.
+The reason list was taken from each validator's current inconclusive and `no` branches.
+
+**2026-10-07 — implemented.** `AddressValidationInterface::validate()` returns an
+`AddressValidationResult` (outcome plus `ValidationReason`), and each validator names itself
+through `validator()`, an `AddressValidator` enum that also says which ones are paid.
+`AddressValidationService` writes an `AddressValidationAnswer` for every validator that
+answered, sets `validation_source` on a settled result, and clears it when the chain ends
+inconclusive. `validate()` and `Shipment::validateAddress()` take a `ValidationTrigger`,
+defaulting to manual; `shipments:validate` passes scheduled. The source shows as
+"Validated by" on View Shipment and in Manual Ship's notices. The command counts paid
+requests from the answer rows it wrote. Tests: `tests/Feature/AddressValidationAnswerTest.php`.
+
+USPS's not-found and rejected requests both arrive as an error body, so the validator now
+passes the HTTP status along to tell `no_match` (404) from `request_rejected`.
