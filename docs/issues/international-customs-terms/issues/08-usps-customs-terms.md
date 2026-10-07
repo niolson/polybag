@@ -37,3 +37,12 @@ enrolment instead, this shrinks to a confirmation checkbox with no terms text.
 - [ ] Only an Admin can record acceptance; a manager cannot
 - [ ] An account without acceptance gets no USPS DDP rates, and the reason is shown
 - [ ] The USPS label request schema test accepts the new fields
+
+## Comments
+
+- 2026-10-07 — From the review of `03`: `PiiRedactor` redacts `tax_id`/`taxId`,
+  `TaxIdentificationNumber`, FedEx `tins` and `recipient*` keys, but not USPS's
+  `importersReference` or `exportersReference`. Those hold the IOSS number and possibly
+  the recipient tax ID. Extend the redactor so the USPS validation log never holds the
+  recipient's number (the seller's registration may stay), with a test. Also keep the
+  recipient tax ID out of the snapshot, as `06` does.

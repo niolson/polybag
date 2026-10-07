@@ -4,10 +4,13 @@ namespace App\Filament\Resources;
 
 use App\Enums\AmazonOrderProgram;
 use App\Enums\Deliverability;
+use App\Enums\DutiesTerms;
 use App\Enums\PackSlipState;
 use App\Enums\PickingStatus;
+use App\Enums\RecipientTaxIdType;
 use App\Enums\Role;
 use App\Enums\ShipmentStatus;
+use App\Enums\TaxRegistrationRegime;
 use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Pages\UnmappedChannelReferences;
 use App\Filament\Pages\UnmappedShippingReferences;
@@ -22,7 +25,9 @@ use App\Models\Shipment;
 use App\Services\BatchLabelService;
 use App\Services\PickBatchService;
 use App\Services\SettingsService;
+use App\Support\ExportItn;
 use BackedEnum;
+use Closure;
 use DomainException;
 use Filament\Actions;
 use Filament\Forms;
@@ -32,6 +37,7 @@ use Filament\Resources\RelationManagers\RelationGroup;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\FontWeight;
 use Filament\Support\Enums\IconPosition;
@@ -204,7 +210,90 @@ class ShipmentResource extends Resource
                             ->collapsed()
                             ->visible(fn (?Shipment $record): bool => $record !== null && $record->checked && filled($record->validated_address1)),
                     ]),
+
+                self::customsFormSection(),
             ]);
+    }
+
+    /**
+     * The order's own customs terms (ADR-0008 decisions 2, 3 and 10). Each
+     * overrides what the client would otherwise supply, and is a billing
+     * decision, so only someone who may update the Shipment — a manager —
+     * edits it, exactly as with its shipping method.
+     */
+    private static function customsFormSection(): Section
+    {
+        return Section::make('Customs')
+            ->description('This order\'s own terms for international labels. Leave a field blank to use the client\'s.')
+            ->disabled(fn (?Shipment $record): bool => $record !== null && ! (auth()->user()?->can('update', $record) ?? false))
+            ->schema([
+                Forms\Components\Select::make('duties_terms')
+                    ->label('Duties Terms')
+                    ->options(DutiesTerms::class)
+                    ->placeholder('Client\'s duties policy')
+                    ->native(false)
+                    ->helperText('Overrides the client\'s duties policy, in either direction.')
+                    ->columnSpanFull(),
+                Forms\Components\Select::make('seller_tax_regime')
+                    ->label('Seller Tax Regime')
+                    ->options(TaxRegistrationRegime::class)
+                    ->placeholder('Client\'s registration')
+                    ->native(false)
+                    ->live()
+                    ->requiredWith('seller_tax_number'),
+                Forms\Components\TextInput::make('seller_tax_number')
+                    ->label('Seller Tax Number')
+                    ->maxLength(20)
+                    ->helperText(fn (Get $get): string => TaxRegistrationRegime::fromInput($get('seller_tax_regime'))?->numberFormat()
+                        ?? 'A registration the channel collected VAT under. It replaces the client\'s, never joins it.')
+                    ->requiredWith('seller_tax_regime')
+                    ->rule(fn (Get $get): Closure => function (string $attribute, mixed $value, Closure $fail) use ($get): void {
+                        $error = TaxRegistrationRegime::fromInput($get('seller_tax_regime'))?->numberError(is_string($value) ? $value : null);
+
+                        if (filled($value) && $error !== null) {
+                            $fail($error);
+                        }
+                    })
+                    ->dehydrateStateUsing(fn (?string $state, Get $get): ?string => filled($state) && ($regime = TaxRegistrationRegime::fromInput($get('seller_tax_regime'))) !== null
+                        ? $regime->normalizeNumber($state)
+                        : (filled($state) ? $state : null)),
+                Forms\Components\Select::make('recipient_tax_id_type')
+                    ->label('Recipient Tax ID Type')
+                    ->options(RecipientTaxIdType::class)
+                    ->native(false)
+                    ->live()
+                    ->requiredWith('recipient_tax_id'),
+                Forms\Components\TextInput::make('recipient_tax_id')
+                    ->label('Recipient Tax ID')
+                    ->maxLength(RecipientTaxIdType::MAX_LENGTH)
+                    ->helperText(fn (Get $get): ?string => RecipientTaxIdType::fromInput($get('recipient_tax_id_type'))?->format())
+                    ->requiredWith('recipient_tax_id_type')
+                    ->rule(fn (Get $get): Closure => function (string $attribute, mixed $value, Closure $fail) use ($get): void {
+                        $error = RecipientTaxIdType::fromInput($get('recipient_tax_id_type'))?->error(is_string($value) ? $value : null);
+
+                        if (filled($value) && $error !== null) {
+                            $fail($error);
+                        }
+                    })
+                    ->dehydrateStateUsing(fn (?string $state, Get $get): ?string => filled($state) && ($type = RecipientTaxIdType::fromInput($get('recipient_tax_id_type'))) !== null
+                        ? $type->normalize($state)
+                        : (filled($state) ? $state : null)),
+                Forms\Components\TextInput::make('export_itn')
+                    ->label('Export ITN')
+                    ->maxLength(20)
+                    ->helperText('The Internal Transaction Number AESDirect returned for this order\'s EEI filing, '.ExportItn::FORMAT.'.')
+                    ->rule(fn (): Closure => function (string $attribute, mixed $value, Closure $fail): void {
+                        if (filled($value) && ($error = ExportItn::error(is_string($value) ? $value : null)) !== null) {
+                            $fail($error);
+                        }
+                    })
+                    ->dehydrateStateUsing(fn (?string $state): ?string => filled($state) ? ExportItn::normalize($state) : null)
+                    ->columnSpanFull(),
+            ])
+            ->columns(2)
+            ->collapsible()
+            ->collapsed(fn (?Shipment $record): bool => $record === null || collect(Shipment::CUSTOMS_FIELDS)->every(fn (string $field): bool => blank($record->getAttribute($field))))
+            ->columnSpanFull();
     }
 
     public static function table(Table $table): Table
@@ -636,6 +725,35 @@ class ShipmentResource extends Resource
                             ->placeholder('N/A')
                             ->columnSpanFull(),
                     ]),
+
+                Section::make('Customs')
+                    ->description('This order\'s own terms. A blank field uses the client\'s.')
+                    ->inlineLabel()
+                    ->schema([
+                        TextEntry::make('duties_terms')
+                            ->label('Duties Terms')
+                            ->placeholder('Client\'s duties policy'),
+                        TextEntry::make('seller_tax_registration')
+                            ->label('Seller Tax Registration')
+                            ->state(fn (Shipment $record): ?string => $record->seller_tax_regime !== null
+                                ? $record->seller_tax_regime->getLabel().' '.$record->seller_tax_number
+                                : null)
+                            ->placeholder('Client\'s registration'),
+                        TextEntry::make('recipient_tax_id')
+                            ->label('Recipient Tax ID')
+                            ->state(fn (Shipment $record): ?string => filled($record->recipient_tax_id)
+                                ? trim(($record->recipient_tax_id_type?->getLabel() ?? '').' '.$record->recipient_tax_id)
+                                : null)
+                            ->placeholder('—'),
+                        TextEntry::make('export_itn')
+                            ->label('Export ITN')
+                            ->copyable()
+                            ->placeholder('—'),
+                    ])
+                    ->columns(2)
+                    ->columnSpanFull()
+                    ->visible(fn (Shipment $record): bool => $record->country !== 'US'
+                        || collect(Shipment::CUSTOMS_FIELDS)->contains(fn (string $field): bool => filled($record->getAttribute($field)))),
             ]);
     }
 

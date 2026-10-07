@@ -16,6 +16,7 @@ class ShipmentBatchWriter
         'first_name', 'last_name', 'company', 'address1', 'address2', 'city',
         'state_or_province', 'postal_code', 'country', 'phone', 'phone_e164',
         'phone_extension', 'email', 'residential',
+        ...Shipment::CUSTOMS_FIELDS,
     ];
 
     /**
@@ -61,7 +62,8 @@ class ShipmentBatchWriter
         foreach ($preparedRows as $row) {
             $existing = $existingShipments->get($row['source_record_id']);
             $preserveExistingFields = $row['_preserve_existing_fields'] ?? [];
-            unset($row['_preserve_existing_fields']);
+            $customsWarnings = $row['_customs_warnings'] ?? [];
+            unset($row['_preserve_existing_fields'], $row['_customs_warnings']);
 
             if (! $existing) {
                 $rowsToWrite[] = $row;
@@ -86,7 +88,7 @@ class ShipmentBatchWriter
                     // email warnings, and a re-import would otherwise replace
                     // a validator's reason with them (usually with null).
                     if ($existing->deliverability !== Deliverability::NotChecked) {
-                        $row['validation_message'] = $existing->validation_message;
+                        $row['validation_message'] = self::withWarnings($existing->validation_message, $customsWarnings);
                     }
 
                     if (array_key_exists('shipping_method_id', $row) && (string) $row['shipping_method_id'] !== (string) $existing->shipping_method_id) {
@@ -112,6 +114,7 @@ class ShipmentBatchWriter
             'validation_message', 'shipping_method_reference', 'shipping_method_id',
             'channel_reference', 'deliver_by', 'metadata', 'updated_at',
             'channel_id', 'status',
+            ...Shipment::CUSTOMS_FIELDS,
         ];
 
         if ($rowsToWrite !== []) {
@@ -150,6 +153,20 @@ class ShipmentBatchWriter
             shipmentsUpdated: count($updatedSourceRecordIds),
             shipmentsSkipped: count($skippedSourceRecordIds),
         );
+    }
+
+    /**
+     * A kept validator message with this import's customs warnings added, so
+     * a re-import that drops a malformed recipient tax ID or ITN still says
+     * so on the Shipment. A warning already there is not repeated.
+     *
+     * @param  array<int, string>  $warnings
+     */
+    private static function withWarnings(?string $message, array $warnings): ?string
+    {
+        $missing = array_filter($warnings, fn (string $warning): bool => ! str_contains((string) $message, $warning));
+
+        return $missing === [] ? $message : implode('; ', array_filter([$message, ...$missing]));
     }
 
     /**

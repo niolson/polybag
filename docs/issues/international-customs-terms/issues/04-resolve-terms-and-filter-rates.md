@@ -56,3 +56,18 @@ fingerprint, so editing the Shipment's `duties_terms` invalidates its Offers.
       gets no USPS rates; a DDP Shipment to NL keeps them
 - [ ] An `effective_from` entry in the future does not apply; one in the past does
 - [ ] Changing `duties_terms` after quoting makes the old Offer unredeemable
+
+## Comments
+
+- 2026-10-07 — From the review of `03`. Two things this issue must cover that its body
+  does not say:
+  - **Threshold currency.** `TaxRegistrationRegime::lowValueThreshold()` is in EUR, GBP,
+    NOK or AUD, but a Shipment has no currency column and the app has no exchange-rate
+    source. The "over threshold, registration not sent" rule needs one of these: a stored
+    rate table with a source and a date, like the other `resources/data/customs/` files;
+    or a decision to compare the USD customs total against a fixed, conservative USD
+    figure per regime. Decide before building the rule, and record the decision here.
+  - **The refusal's fix must be reachable in single-client mode.** The unresolved-EU
+    refusal names the client's duties policy as the fix. Settings gains the Customs fields
+    on the `03` branch; link the message to Settings in single-client mode and to the
+    client form otherwise. Add a test for each mode.

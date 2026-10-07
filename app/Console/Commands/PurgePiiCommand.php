@@ -33,6 +33,8 @@ class PurgePiiCommand extends Command
         'validated_address2',
         'validated_city',
         'validated_state_or_province',
+        // A national ID number: a CPF, a PCCC, a VAT number.
+        'recipient_tax_id',
     ];
 
     public function handle(SettingsService $settings): int
@@ -119,8 +121,9 @@ class PurgePiiCommand extends Command
 
         // Null out the documents on associated packages (they carry embedded PII).
         // The customs form goes with the label: a commercial invoice names both
-        // parties, their addresses, and their tax and EORI numbers, so keeping it
-        // after the label is gone would leave the purge half-done.
+        // parties, their addresses, and their tax and EORI numbers, the
+        // recipient tax ID among them, so keeping it after the label is gone
+        // would leave the purge half-done.
         DB::table('packages')
             ->whereIn('shipment_id', $shipmentIds)
             ->where(fn ($q) => $q->whereNotNull('label_data')->orWhereNotNull('customs_form_data'))

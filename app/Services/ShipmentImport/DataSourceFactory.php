@@ -138,6 +138,12 @@ class DataSourceFactory
                     'value' => 'value',
                     'shipping_method' => 'shipping_method_id',
                     'channel' => 'channel_id',
+                    'duties_terms' => 'duties_terms',
+                    'seller_tax_regime' => 'seller_tax_regime',
+                    'seller_tax_number' => 'seller_tax_number',
+                    'recipient_tax_id_type' => 'recipient_tax_id_type',
+                    'recipient_tax_id' => 'recipient_tax_id',
+                    'export_itn' => 'export_itn',
                 ],
                 'shipment_item' => [
                     'sku' => 'sku',

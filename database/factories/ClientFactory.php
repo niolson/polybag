@@ -2,7 +2,9 @@
 
 namespace Database\Factories;
 
+use App\Enums\DutiesTerms;
 use App\Models\Client;
+use App\Models\ClientTaxRegistration;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -22,6 +24,30 @@ class ClientFactory extends Factory
             'is_default' => false,
             'active' => true,
         ];
+    }
+
+    /**
+     * A client that has chosen DDP for every EU destination, and nothing else.
+     */
+    public function ddpToEu(): static
+    {
+        return $this->withDutiesPolicy([Client::DUTIES_POLICY_EU => DutiesTerms::Ddp->value]);
+    }
+
+    /**
+     * @param  array<string, string>  $policy  destination (`EU` or a country code) to `ddp`/`ddu`
+     */
+    public function withDutiesPolicy(array $policy): static
+    {
+        return $this->state(fn (): array => ['duties_policy' => $policy]);
+    }
+
+    /**
+     * A client holding a synthetic IOSS registration.
+     */
+    public function withIossRegistration(): static
+    {
+        return $this->has(ClientTaxRegistration::factory()->ioss(), 'taxRegistrations');
     }
 
     public function default(): static

@@ -25,7 +25,7 @@ The audience is us, deciding future releases, not tenants. Each hosted tenant ha
 database, so the answer has to be collected across tenants, and a screen inside one
 tenant's app wouldn't help.
 
-Everything here must follow [pii-retention](../../pii-retention/): record verdicts
+Everything here must follow [pii-retention](../../../pii-retention/): record verdicts
 and outcomes as facts on the answer or the Package when they happen, and never make
 copies of addresses. A signal that can be read only from the address or from the audit
 log has to be captured when it happens, or not used.

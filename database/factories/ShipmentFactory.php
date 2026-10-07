@@ -3,7 +3,10 @@
 namespace Database\Factories;
 
 use App\Enums\Deliverability;
+use App\Enums\DutiesTerms;
 use App\Enums\PickingStatus;
+use App\Enums\RecipientTaxIdType;
+use App\Enums\TaxRegistrationRegime;
 use App\Models\Channel;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
@@ -139,6 +142,25 @@ class ShipmentFactory extends Factory
     {
         return $this->state(fn () => [
             'shipping_method_id' => null,
+        ]);
+    }
+
+    /**
+     * A Brazilian order carrying every customs field, each a synthetic value of
+     * the right format: DDP, a seller IOSS registration, a CPF and an ITN.
+     */
+    public function withCustomsTerms(): static
+    {
+        return $this->state(fn () => [
+            'country' => 'BR',
+            'state_or_province' => 'SP',
+            'postal_code' => '01000-000',
+            'duties_terms' => DutiesTerms::Ddp,
+            'seller_tax_regime' => TaxRegistrationRegime::Ioss,
+            'seller_tax_number' => 'IM0000000001',
+            'recipient_tax_id_type' => RecipientTaxIdType::Cpf,
+            'recipient_tax_id' => '12345678909',
+            'export_itn' => 'X00000000000001',
         ]);
     }
 }

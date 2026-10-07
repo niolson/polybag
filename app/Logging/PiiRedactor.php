@@ -11,7 +11,7 @@ class PiiRedactor
 {
     private const REDACTED = '[REDACTED]';
 
-    private const PII_KEY_PATTERN = '/first_?name|last_?name|person_?name|full_?name|^name$|company|email|phone|street|address|city|postal|zip_?code|recipient|contact|^encodedLabel$|^graphicImage$/i';
+    private const PII_KEY_PATTERN = '/first_?name|last_?name|person_?name|full_?name|^name$|company|email|phone|street|address|city|postal|zip_?code|recipient|contact|tax_?id|^tins$|^encodedLabel$|^graphicImage$/i';
 
     /**
      * @param  array<array-key, mixed>  $data

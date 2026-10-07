@@ -62,3 +62,18 @@ international Package that lack an origin or an HS code.
 - [ ] USPS never declares an origin the product does not have, and sends the ITN or the
       correct exemption
 - [ ] The *Missing customs data* filter finds a product with no origin
+
+## Comments
+
+- 2026-10-07 — From the review of `03`:
+  - **Manual Ship has no customs fields.** `ManualShip` creates the Shipment through
+    `PackagingService::createShipment()`, and a user below Manager cannot edit it
+    afterwards. So the recipient-tax-ID block (BR, KR) and the ITN block (over $2,500)
+    leave a floor user with no fix. Either add the recipient tax ID and ITN to Manual
+    Ship's form, or make the finding say a manager must add them, with a link to the
+    Shipment form. Choose and test it.
+  - **Bad imported IDs now reach this check.** On the `03` branch, an invalid recipient
+    tax ID or ITN from an import is dropped with a warning instead of rejecting the order.
+    This check is therefore the only place such an order is stopped. Its message should
+    say the imported value was invalid, not just that it is missing, when the import
+    recorded that warning.

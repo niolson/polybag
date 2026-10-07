@@ -388,6 +388,31 @@ The left column is what your query must name the column — with `AS` aliases, u
 | `value` | `value` | rejects the row if non-numeric or negative |
 | `shipping_method` | `shipping_method_id` | a *reference*, resolved — see below |
 | `channel` | `channel_id` | a *reference*, resolved — see below |
+| `duties_terms` | `duties_terms` | `ddp` or `ddu`, any case; `dap` is read as `ddu`, since Incoterms 2010 replaced DDU with DAP. Overrides the client's duties policy for this order |
+| `seller_tax_regime` | `seller_tax_regime` | `ioss`, `uk_vat`, `voec` or `arn`, any case. Given with `seller_tax_number` or not at all |
+| `seller_tax_number` | `seller_tax_number` | checked against the regime: IOSS `IM` + 10 digits, UK VAT `GB` + 9 or 12 digits, VOEC 7 digits, ARN 12 digits. Spaces removed. Replaces the client's registration for that regime |
+| `recipient_tax_id_type` | `recipient_tax_id_type` | `cpf`, `cnpj`, `pccc`, `vat` or `other`, any case. Given with `recipient_tax_id` or not at all |
+| `recipient_tax_id` | `recipient_tax_id` | checked against the type: CPF and CNPJ check digits (punctuation removed; alphanumeric CNPJs accepted), PCCC `P` + 12 digits; a VAT or other ID up to 50 characters. Purged with the address by PII retention |
+| `export_itn` | `export_itn` | the AESDirect ITN, `X` + 14 digits |
+
+A malformed `duties_terms` or seller registration (a value that names no term or regime,
+a number that fails its format, or one of the pair without the other) rejects the row;
+the import log names the field and the reason against the row's shipment reference. A
+malformed recipient tax ID or ITN does not: the order imports without it, and a warning
+on the Shipment says which field was dropped and why, without repeating the value. The
+label check stops the label until someone fixes it.
+
+What a NULL means depends on whether the query returns the column at all:
+
+| The query | Duties terms, seller registration, recipient tax ID | `export_itn` |
+| --- | --- | --- |
+| does not select the column | a re-import keeps the stored value | keeps |
+| selects it, and it is NULL or blank | a re-import **clears** the stored value | keeps — a manager records the ITN after filing |
+| selects it with a value | a re-import replaces the stored value | replaces |
+
+So an ERP that withdraws DDP, or a registration that no longer applies, stops being
+declared on the next import. A column you do not want PolyBag to manage is one to leave
+out of the query, not to return as NULL.
 
 **Items** (`field_mapping.shipment_item`)
 
