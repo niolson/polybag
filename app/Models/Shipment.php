@@ -176,6 +176,7 @@ class Shipment extends Model
             if (self::addressChanged($shipment->getOriginal(), $shipment->getAttributes())) {
                 // The old result describes an address the Shipment no longer has.
                 $shipment->forceFill(self::UNVALIDATED);
+                self::stampAddressChanged([$shipment->id]);
             } elseif ($shipment->isDirty('shipping_method_id')) {
                 // The method decides which carrier validators may run, so one
                 // the old method ruled out deserves its turn on the schedule.
@@ -342,6 +343,20 @@ class Shipment extends Model
         }
 
         return false;
+    }
+
+    /**
+     * Record on the Shipments' validator answers that their address changed
+     * after validation — evidence that an answer was wrong, which outlives the
+     * address once PII is purged. An answer keeps its first stamp.
+     *
+     * @param  list<int>  $shipmentIds
+     */
+    public static function stampAddressChanged(array $shipmentIds): void
+    {
+        AddressValidationAnswer::whereIn('shipment_id', $shipmentIds)
+            ->whereNull('address_changed_at')
+            ->update(['address_changed_at' => now()]);
     }
 
     public function validateAddress(ValidationTrigger $trigger = ValidationTrigger::Manual): AddressValidationOutcome

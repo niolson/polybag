@@ -6,9 +6,11 @@ use App\Contracts\AddressValidationInterface;
 use App\Contracts\AddressValidationPlan;
 use App\DataTransferObjects\AddressValidationResult;
 use App\Enums\AddressValidationOutcome;
+use App\Enums\AddressValidator;
 use App\Enums\Deliverability;
 use App\Enums\ValidationTrigger;
 use App\Events\AddressValidationFailed;
+use App\Jobs\ShadowValidateAddress;
 use App\Models\AddressValidationAnswer;
 use App\Models\Shipment;
 
@@ -28,12 +30,15 @@ class AddressValidationService
      * re-sending an address no validator can settle.
      *
      * Every validator that answers is logged as an AddressValidationAnswer,
-     * and the one that settles the address becomes `validation_source`.
+     * and the one that settles the address becomes `validation_source`. When
+     * that isn't FedEx, FedEx may be asked afterwards as a shadow check.
      */
     public function validate(Shipment $shipment, ValidationTrigger $trigger = ValidationTrigger::Manual): AddressValidationOutcome
     {
         $country = $shipment->country ?? 'US';
         $outcome = AddressValidationOutcome::Unavailable;
+        $settledAnswer = null;
+        $fedexAnswered = false;
 
         foreach ($this->plan->validatorsFor($shipment) as $validator) {
             if (! $validator->supports($country)) {
@@ -47,10 +52,12 @@ class AddressValidationService
             }
 
             $outcome = $result->outcome;
-            $this->recordAnswer($shipment, $validator, $result, $trigger);
+            $answer = $this->recordAnswer($shipment, $validator, $result, $trigger);
+            $fedexAnswered = $fedexAnswered || $validator->validator() === AddressValidator::Fedex;
 
             if ($outcome === AddressValidationOutcome::Settled) {
                 $shipment->validation_source = $validator->validator();
+                $settledAnswer = $answer;
                 break;
             }
         }
@@ -72,6 +79,14 @@ class AddressValidationService
 
             $shipment->validation_attempted_at = now();
             $shipment->save();
+        }
+
+        // FedEx is asked afterwards only when it had no say in this run: one
+        // that answered inconclusively already left its answer. Manual Ship
+        // validates inside a transaction, so the job waits for the answer it
+        // shadows to be committed.
+        if ($settledAnswer !== null && ! $fedexAnswered && ShadowValidateAddress::shouldRun($shipment, $settledAnswer->validator)) {
+            ShadowValidateAddress::dispatch($settledAnswer->id)->afterCommit();
         }
 
         // Dispatched once the whole fallback chain has had its turn, so an
@@ -96,8 +111,8 @@ class AddressValidationService
         AddressValidationInterface $validator,
         AddressValidationResult $result,
         ValidationTrigger $trigger,
-    ): void {
-        AddressValidationAnswer::create([
+    ): AddressValidationAnswer {
+        return AddressValidationAnswer::create([
             'shipment_id' => $shipment->id,
             'validator' => $validator->validator(),
             'paid' => $validator->validator()->isPaid(),

@@ -2,9 +2,12 @@
 
 # FedEx shadow check on FedEx-eligible Shipments
 
-Status: needs-triage
+Status: done — 2026-10-07
 Category: enhancement
 Created: 2026-10-01
+Revised: 2026-10-07 — an `.env` switch, off by default, not an App Setting; a queued job;
+field-by-field comparison flags; edit stamping moved here from
+[11](11-measure-validation-quality.md)
 
 ## Parent
 
@@ -17,28 +20,138 @@ addresses. When USPS or Google settles an address, we learn nothing about what F
 would have said. FedEx validation is free, so asking it as well costs nothing and builds
 a side-by-side comparison on real data.
 
-- When a Shipment is FedEx-eligible (the rule from
-  [05](05-validation-plan-with-fedex-for-us-shipments.md), so it stays within the FedEx
-  agreement) and the address was settled by a validator other than FedEx, call FedEx as
-  well and log its answer per [04](04-record-every-validator-answer.md), marked as a
-  shadow answer.
-- A shadow answer never changes the Shipment's deliverability, message, address or
-  source, and its failure never fails validation.
-- This includes every country, the trusted list and the excluded BE, BR, PT alike
-  (decided 2026-10-01): an excluded country's FedEx answers are what would show whether
-  FedEx has improved there, since its reference data is updated monthly.
-- Behind a setting, on by default, so it can be turned off if FedEx starts charging or
-  rate-limiting.
+This is data collection for us to use when deciding future releases, not a feature for
+tenants. They should not see it, configure it, or wait for it.
+
+Some evidence exists only while the address does. [pii-retention](../../archive/pii-retention/)
+clears the street, city and state from a shipped Shipment, but it keeps the Shipment row,
+`country`, `postal_code`, the Packages' tracking state and every answer row. Verdicts and
+outcomes can therefore be joined after the purge. Two things cannot, so this slice
+captures them when they happen:
+
+- whether two validators returned the **same address**, and not only the same verdict
+- whether an operator **edited the address** after it was validated. Today the only
+  trace is the audit log, which holds the address values and is purged on its own
+  schedule
+
+### Switch
+
+- A config key read from `ADDRESS_VALIDATION_FEDEX_SHADOW`, `false` in `.env.example`.
+  It is not an App Setting and has no UI.
+- Our hosted deployment turns it on through its shared environment. On-prem installs leave
+  it off: the data never reaches us from there, and it would spend the operator's FedEx
+  account for our benefit.
+
+### When it runs
+
+`AddressValidationService::validate()` dispatches a `ShadowValidateAddress` job on the
+`low` queue after a run that meets all of these:
+
+- the switch is on
+- a validator other than FedEx settled the address
+- FedEx recorded no answer in this run (a FedEx-first country where FedEx was
+  inconclusive already has a live FedEx answer)
+- the validator that settled it was not the fake one, which settles only where no real
+  validator may run
+- `ShipmentValidationPlan::fedexMayValidate()` passes, so the request stays within the
+  FedEx agreement
+
+No country list applies, not even `AddressValidationCountries::fedexSupports()`. BE, BR
+and PT are included (decided 2026-10-01): their FedEx answers are what would show whether
+FedEx has improved there, since its reference data is updated monthly. So are countries
+on no list, which is the evidence for adding one.
+
+Running it on the queue keeps FedEx latency out of Manual Ship and View Shipment's
+Validate action, and keeps a FedEx timeout away from anything an operator is waiting on.
+
+### The job
+
+- Reload the answer and its Shipment, and stop if the answer no longer describes the
+  result: the Shipment is gone, the answer has `address_changed_at`, the Shipment's
+  `validation_source` differs, a later live answer exists, or it was already shadowed.
+- Run `ShadowFedexAddressValidator` against a `clone` of the Shipment. `FedexAddressValidator`
+  saves the Shipment itself, so its saves go through a `persist()` method that the
+  shadow subclass makes a no-op; the clone keeps its writes away from the instance the
+  comparison reads.
+- Write one `AddressValidationAnswer` with:
+  - `shadow = true`
+  - `shadows_answer_id`: the answer that settled the address. This pairs the two answers
+    for [11](11-measure-validation-quality.md) and is unique, so a retried job writes no
+    second row
+  - the usual verdict, reason, country and trigger
+  - comparison flags against the settled validated address, nullable where FedEx
+    returned no address: `street_differs`, `house_number_differs`, `city_differs`,
+    `postcode_differs`. Case, accents, punctuation and spacing are ignored, and a US or
+    Puerto Rico ZIP+4 is compared as its ZIP. Abbreviations are not expanded, so `AVE`
+    and `AVENUE` count as a different street; `house_number_differs` is the stronger
+    signal. Only the first street line is compared, since FedEx drops the unit line
+    outside the US. Store booleans, never the strings
+- A FedEx error, timeout, unavailable result or unexpected exception is logged and
+  writes no row, matching
+  [04](04-record-every-validator-answer.md)'s "unavailable writes no row". The job does
+  not retry.
+
+### Address edits after validation
+
+When the `Shipment` saving hook detects an address change (the branch that applies
+`UNVALIDATED`), it also stamps `address_changed_at` on that Shipment's answer rows that
+don't have one yet. Shadow rows are stamped the same way. This is a PII-free fact that
+survives both purges, and the row's `created_at` orders it against the edit.
+`ShipmentBatchWriter`'s address-change path needs the same stamping.
+
+### Kept out of tenant view
+
+Nothing in the UI lists answer rows today: View Shipment and Manual Ship show only
+`validation_source`, which a shadow answer never sets. Add a `live()` scope on
+`AddressValidationAnswer` anyway, so that a later screen or a count of paid validator
+calls can't include shadow rows by mistake.
 
 ## Acceptance criteria
 
-- [ ] A FedEx-eligible Shipment settled by Google also sends one FedEx request, and the
-      answer is logged as a shadow answer
-- [ ] The Shipment's result is identical to a run without the shadow check
-- [ ] A FedEx error or timeout during the shadow check is logged and otherwise ignored
-- [ ] A non-eligible Shipment, or the setting off, sends no FedEx request
+- [x] With the switch on, a FedEx-eligible Shipment settled by Google dispatches one job,
+      and the job writes one shadow answer linked to Google's answer
+- [x] The Shipment's attributes after the job are identical to a run without it
+- [x] Comparison flags are set correctly when FedEx returns a different house number,
+      street, city or postcode, and are null when FedEx returns no address
+- [x] A FedEx error or timeout is logged, writes no row, and leaves the Shipment untouched
+- [x] No job is dispatched when the switch is off, the Shipment is not FedEx-eligible,
+      FedEx settled the address, or FedEx already answered in the run
+- [x] A job whose Shipment was re-validated or edited after dispatch does nothing
+- [x] A Shipment in BE, BR or PT that is otherwise eligible is shadow-checked
+- [x] Running the job twice writes one row
+- [x] Editing a validated address stamps `address_changed_at` on its existing answer
+      rows, through both the model hook and `ShipmentBatchWriter`; rows already stamped
+      keep their first stamp
+- [x] `AddressValidationAnswer::live()` excludes shadow rows
 
 ## Blocked by
 
-- [04](04-record-every-validator-answer.md)
-- [08](08-fedex-international.md)
+- [04](04-record-every-validator-answer.md) — done
+- [08](08-fedex-international.md) — done
+
+## Comments
+
+**2026-10-07 — implemented.** `config('services.fedex.shadow_address_validation')` reads
+`ADDRESS_VALIDATION_FEDEX_SHADOW`. `AddressValidationService` dispatches
+`ShadowValidateAddress` (one try, `low` queue) with the settling answer's id when
+`ShadowValidateAddress::shouldRun()` allows it and FedEx had no answer in the run.
+`ShadowFedexAddressValidator` extends `FedexAddressValidator`, whose three saves now go
+through `persist()`, and holds the address comparison. The answers table gained `shadow`,
+`shadows_answer_id` (unique, cascading), the four difference flags and
+`address_changed_at`; `Shipment::stampAddressChanged()` is called from the saving hook
+and `ShipmentBatchWriter`. `ValidateShipmentsCommand`'s paid-request count now uses
+`live()`. Tests: `tests/Feature/FedexShadowCheckTest.php`, plus stamping assertions in
+`tests/Feature/ShipmentImportServiceTest.php`.
+
+The spec assumed the service saved validator results; `FedexAddressValidator` saves the
+Shipment itself, hence `persist()`. Staleness is checked against the answer rows rather
+than `validation_attempted_at`, since a re-validation always writes a newer live answer
+and an edit stamps `address_changed_at`.
+
+**2026-10-07 — review fixes.** The job is dispatched `afterCommit()`, since Manual Ship
+validates inside a transaction and the Redis queue doesn't wait for commits by default.
+The job re-applies `shouldRun()` before asking FedEx, so a Shipment moved to a method that
+can't buy FedEx, or the switch turned off, sends nothing. An address edit during the FedEx
+request stamps only the rows that existed then, so after inserting the shadow answer the
+job copies the settled answer's `address_changed_at` onto it, reading it with a lock so
+that an edit still in its transaction is waited for.

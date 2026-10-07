@@ -50,6 +50,23 @@ class AddressValidationAnswerFactory extends Factory
         ]);
     }
 
+    /**
+     * A FedEx shadow answer to the given answer.
+     */
+    public function shadowOf(AddressValidationAnswer $answer): static
+    {
+        return $this->by(AddressValidator::Fedex)->state(fn (): array => [
+            'shipment_id' => $answer->shipment_id,
+            'shadow' => true,
+            'shadows_answer_id' => $answer->id,
+            'country' => $answer->country,
+            'street_differs' => false,
+            'house_number_differs' => false,
+            'city_differs' => false,
+            'postcode_differs' => false,
+        ]);
+    }
+
     public function manual(): static
     {
         return $this->state(fn (): array => [

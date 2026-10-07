@@ -168,7 +168,7 @@ class ValidateShipmentsCommand extends Command
      */
     private function paidRequests(array $shipmentIds, \DateTimeInterface $startedAt): int
     {
-        return AddressValidationAnswer::query()
+        return AddressValidationAnswer::live()
             ->whereIn('shipment_id', $shipmentIds)
             ->where('trigger', ValidationTrigger::Scheduled)
             ->where('paid', true)

@@ -194,7 +194,7 @@ class FedexAddressValidator implements AddressValidationInterface
         };
 
         $this->applyValidatedAddress($shipment, $resolved);
-        $shipment->save();
+        $this->persist($shipment);
 
         return AddressValidationResult::settled();
     }
@@ -240,7 +240,7 @@ class FedexAddressValidator implements AddressValidationInterface
         $shipment->validated_postal_code = $this->postalCode($resolved);
         $shipment->validated_carrier_route = null;
         $shipment->validated_residential = null;
-        $shipment->save();
+        $this->persist($shipment);
 
         return AddressValidationResult::settled();
     }
@@ -307,9 +307,18 @@ class FedexAddressValidator implements AddressValidationInterface
     {
         $shipment->deliverability = Deliverability::No;
         $shipment->validation_message = $message;
-        $shipment->save();
+        $this->persist($shipment);
 
         return AddressValidationResult::inconclusive($reason);
+    }
+
+    /**
+     * Save the result written to the Shipment. A shadow check overrides this
+     * to keep its answer off the Shipment.
+     */
+    protected function persist(Shipment $shipment): void
+    {
+        $shipment->save();
     }
 
     /**

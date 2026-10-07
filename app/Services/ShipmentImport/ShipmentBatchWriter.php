@@ -124,6 +124,7 @@ class ShipmentBatchWriter
         if ($readdressedIds !== []) {
             Shipment::whereIn('id', $readdressedIds)
                 ->update(Arr::except(Shipment::UNVALIDATED, 'validation_message'));
+            Shipment::stampAddressChanged($readdressedIds);
         }
 
         if ($remethodedIds !== []) {
