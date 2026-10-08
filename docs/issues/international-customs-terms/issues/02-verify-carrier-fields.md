@@ -39,6 +39,16 @@ Per carrier, record the request sent and the answer received in `.scratch/intern
 - `exportDetail` for an ITN and for an exemption
 - Does a rate request with `dutiesPayment: SENDER` price differently from `RECIPIENT`?
 
+**All three, from the threshold research (PRD, *Tax registration regimes*)**
+
+- Australia: can the request mark individual items GST-paid (Australian customs' `PAID`
+  exemption code, with the ARN as Vendor ID), or only send one ARN for the shipment?
+  If there is no per-item mark, `05` keeps blocking AU parcels that mix an item over
+  AUD 1,000 with an ARN
+- Norway: confirm the VOEC number reaches the destination electronically (for USPS, in
+  the ITMATT pre-advice), as Skatteetaten requires
+- UK: where the seller's UK VAT number goes; no HMRC source names a customs data element
+
 **USPS**
 
 - IOSS: `exportersReference` or `importersReference`, and which reference type

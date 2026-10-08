@@ -117,14 +117,51 @@ Settled in the grilling session; the reasoning and the rejected options are in A
 
 ### Tax registration regimes
 
-| Regime | Destinations | Format | Low-value threshold |
-|---|---|---|---|
-| `ioss` | EU-27 | `IM` + 10 digits | €150 |
-| `uk_vat` | GB, including Northern Ireland | `GB` + 9 or 12 digits | £135 |
-| `voec` | NO | 7 digits | NOK 3,000 |
-| `arn` | AU | 12 digits | AUD 1,000 |
+| Regime | Destinations | Format | Low-value threshold | Measured on |
+|---|---|---|---|---|
+| `ioss` | EU-27; also Northern Ireland, at £135 | `IM` + 10 digits | €150 | The whole consignment: intrinsic value, goods only |
+| `uk_vat` | GB, including Northern Ireland | `GB` + 9 or 12 digits | £135 | The whole consignment: intrinsic value, goods only |
+| `voec` | NO | 7 digits | under NOK 3,000 (2,999 or less) | **Each item**, shipping excluded |
+| `arn` | AU | 12 digits | AUD 1,000 | **Each item**, customs value |
 
-Above the threshold the registration does not apply and is not sent; the checker warns.
+*Intrinsic value* is the price of the goods, without transport and insurance shown
+separately on the invoice, and without other taxes and charges.
+
+**Sending a registration over its threshold is not harmless.** For IOSS, customs ignores
+the number and charges VAT on the whole consignment, and the seller must refund the VAT
+it collected at sale (Commission explanatory notes, Q24). Over the threshold, the
+registration is not sent and the checker warns.
+
+The per-item regimes need a rule of their own:
+
+- **VOEC:** items under NOK 3,000 may share a parcel even when the total is over it, but
+  an item at NOK 3,000 or more "cannot" ship in the same parcel (Skatteetaten). The
+  checker blocks: split that item into its own Shipment.
+- **ARN:** each item at AUD 1,000 or less keeps its GST-paid status inside a consignment
+  that totals more. Australian customs marks each item as paid or not (Home Affairs
+  Notice 2018/14, scenario 2). Whether UPS, FedEx or USPS can carry that per-item mark is
+  `02`'s question. Until it is answered, the checker blocks a parcel to AU that holds both
+  an item over AUD 1,000 and a registration to declare.
+
+**Northern Ireland** may use an EU IOSS registration instead of UK VAT, for consignments
+of £135 or less of goods located outside GB at sale (HMRC). When a client has both, IOSS
+is sent for NI and UK VAT for the rest of GB.
+
+**Exchange rate.** Customs values are in USD. The EU tests IOSS eligibility at the ECB
+rate on the day payment was accepted. Norway accepts any central bank's rate, used
+consistently. The UK and Australian rules are unconfirmed. The ECB publishes daily
+reference rates for USD, GBP, NOK and AUD, so one cached daily ECB rate covers all four.
+The rate is taken on the order date, or the Shipment's import date when the order date
+is not known.
+
+**Changes ahead.** The EU's removal of the €150 IOSS cap is at the earliest 1 July 2028,
+and sources disagree on whether it has been adopted. The UK ends its low-value duty
+relief by October 2028 at the latest and has not decided how VAT will be collected after
+that. Neither changes anything now. The thresholds live with the regime, so either change
+is one edit.
+
+Research of 2026-10-07; quotes and links are in *Sources*. Some quotes came from page
+summaries, so check the source before citing it.
 
 ### Recipient tax ID types
 
@@ -142,7 +179,8 @@ duties term   = shipment.duties_terms
 
 registration  = shipment's registration, when its regime covers the destination
               ?? the client's registration for the regime that covers the destination
-              — omitted when the order value is over that regime's threshold
+              — omitted when the consignment (IOSS, UK VAT) is over that regime's
+                threshold; per item for VOEC and ARN, see *Tax registration regimes*
 ```
 
 Rate filtering then applies `duties-support.json` to the resolved term. Offers from a
@@ -191,7 +229,9 @@ Run by `CustomsReadiness` (`05`), at purchase and as a Ship-page preview.
 | Line value is not zero | All international | Block (existing guard, moved) |
 | EU consumer line has M-PID and NS-PID | EU consumer | Block (existing guard, moved) |
 | DDP with no seller registration for a regime that has one | EU, GB, NO, AU | Warn: VAT may be charged twice |
-| Order value over the regime's low-value threshold | EU, GB, NO, AU | Warn: registration not sent |
+| Consignment over the IOSS or UK VAT threshold | EU, GB | Warn: registration not sent |
+| An item at NOK 3,000 or more in a parcel declared under VOEC | NO | Block: ship that item separately |
+| An item over AUD 1,000 in a parcel with an ARN to declare | AU | Block until `02` finds a per-item GST-paid mark |
 | USPS description cut at 30 characters | USPS | Warn |
 
 Rate-dependent rules stay in the rate filter: a USPS DDP-required country for a DDU
@@ -232,6 +272,13 @@ All but the last two are `02`'s.
 - What happens after 31 October to a USPS DDP parcel into Germany that carries no IOSS
   number? Deutsche Post's transition period for non-IOSS postal parcels is reported to
   end then; no German official source confirms the date.
+  Research on 2026-10-07 found no Deutsche Post or DHL source either. Swiss Post says
+  prepaid duties become mandatory from 1 November 2026 for all business-to-consumer
+  parcels up to €150 into Germany. Until USPS or Deutsche Post confirms otherwise,
+  assume a USPS parcel into Germany without both DDP and an IOSS number is at risk.
+- The UK: which exchange rate tests the £135 limit, and where the seller's UK VAT number
+  goes in the UK customs data. Australia: the exchange-rate source, and whether customs
+  value excludes freight. None of these is confirmed by an official source.
 - Which Shopify order field reliably says duties were charged at checkout (`10`).
 - What Amazon Buy Shipping and Shopify Shipping declare for duties terms (`09`).
 
@@ -260,3 +307,15 @@ All but the last two are `02`'s.
 - [UPU FAQ on the EU de minimis change](https://www.upu.int/getmedia/63afc7bf-13d2-4e88-8d41-d37ce661483e/FAQsEUelimitationDeMinisExemptionEN.pdf)
 - [UPS Vendor Collect ID](https://www.ups.com/worldshiphelp/WSA/ENU/AppHelp/mergedProjects/CORE/SHIPMENT/Vendor_Collect_ID.htm)
 - [EasyPost – Tax identifiers by carrier](https://support.easypost.com/hc/en-us/articles/4412101923213-Tax-Identifiers)
+- [Commission – EU customs reform](https://taxation-customs.ec.europa.eu/customs/eu-customs-reform_en)
+- [Commission – VAT treatment of the EUR 3 duty and the handling fee](https://vat-one-stop-shop.ec.europa.eu/document/download/4ba8dc4c-2600-43ee-9010-2101cd05210c_en?filename=VAT+treatment+of+the+EUR+3+customs+duty+and+of+the+announced+Union+handling+fee.pdf)
+- [Commission – VAT e-commerce explanatory notes (2020)](https://taxation-customs.ec.europa.eu/system/files/2020-12/vatecommerceexplanatory_28102020_en.pdf): intrinsic value; Q23 (marketplaces); Q24 (over €150)
+- [Commission – IOSS guidance, exchange rate (s.3.1.5)](https://taxation-customs.ec.europa.eu/document/download/7bfb45b8-1f40-48b5-88e0-07960bf7ff9e_en)
+- [HMRC – VAT and overseas goods sold directly to customers in the UK](https://www.gov.uk/guidance/vat-and-overseas-goods-sold-directly-to-customers-in-the-uk)
+- [HMRC – overseas goods sold through online marketplaces](https://www.gov.uk/guidance/vat-and-overseas-goods-sold-to-customers-in-the-uk-using-online-marketplaces)
+- [HMRC – tell HMRC you're registered for IOSS (Northern Ireland)](https://www.gov.uk/guidance/tell-hmrc-youre-registered-for-the-vat-import-one-stop-shop-in-the-eu)
+- [HM Treasury – low-value imports consultation response (July 2026)](https://assets.publishing.service.gov.uk/media/6a511a7b1228eb26a4cab7c6/LVI_Consultation_Response.pdf)
+- [Skatteetaten – sending goods under VOEC](https://www.skatteetaten.no/en/business-and-organisation/vat-and-duties/vat/foreign/e-commerce-voec/sending-goods-under-the-voec-scheme/)
+- [Tolletaten – om VOEC-ordningen](https://www.toll.no/no/bedrift/import/voec/om-voec-ordningen)
+- [Home Affairs – Customs Notice 2018/13](https://www.abf.gov.au/help-and-support-subsite/customsnotices/2018-13.pdf) and [2018/14](https://www.abf.gov.au/help-and-support-subsite/CustomsNotices/2018-14.pdf)
+- [Swiss Post – EU customs reform 2026](https://www.post.ch/en/pages/eu-customs-reform-2026)

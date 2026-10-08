@@ -21,7 +21,12 @@ with it.
 **Resolver.** A `CustomsTermsResolver` returns a `ResolvedCustomsTerms` DTO for a
 Shipment and destination: the duties term (or *unresolved*), where it came from (`order`,
 `client`), the seller registration and where it came from, or none, and whether the
-order value is over that regime's threshold (in which case no registration is sent).
+consignment is over that regime's threshold (in which case no registration is sent).
+The threshold's basis differs by regime: the whole consignment's goods value for IOSS
+and UK VAT, each item for VOEC and ARN (PRD, *Tax registration regimes*). For the
+per-item regimes, the DTO reports the lines over the limit; `05` decides what they
+block. Northern Ireland resolves to the client's IOSS registration when it has one, at
+£135, else UK VAT.
 Precedence as the PRD's *Resolution* block. An order registration whose regime does not
 cover the destination is ignored. Domestic and same-customs-zone labels resolve to
 nothing.
@@ -49,7 +54,9 @@ fingerprint, so editing the Shipment's `duties_terms` invalidates its Offers.
 
 - [ ] Resolver: order term beats client; most specific client entry beats `EU`; non-EU
       unset is DDU; EU unset is unresolved; order registration replaces client
-      registration; a registration over its threshold is not sent; a mismatched order
+      registration; an IOSS or UK VAT consignment over its threshold sends no registration;
+      a VOEC or ARN line over the limit is reported; Northern Ireland prefers IOSS at
+      £135; values are converted at the ECB rate for the order date; a mismatched order
       regime is ignored
 - [ ] `duties-support.json` exists with sources for every USPS entry, and its test passes
 - [ ] A DDU Shipment to DE gets no USPS rates, with the reason shown; a DDP Shipment to PL
@@ -71,3 +78,16 @@ fingerprint, so editing the Shipment's `duties_terms` invalidates its Offers.
     refusal names the client's duties policy as the fix. Settings gains the Customs fields
     on the `03` branch; link the message to Settings in single-client mode and to the
     client form otherwise. Add a test for each mode.
+- 2026-10-08 — **Threshold currency decided:** convert with the ECB's daily euro
+  reference rates, which cover USD, GBP, NOK and AUD. Fetch the daily file
+  (`https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml`) on a schedule, store
+  each day's rates, and use the rate for the order date. The EU requires the ECB rate on
+  the day payment was accepted, and Norway accepts any central bank's rate. Shipments
+  have no order-date column, so use the Shipment's `created_at` until an importer
+  supplies one, and say so in the code. When no rate is stored for the date, use the
+  latest earlier one. When there is none at all, treat the consignment as over the
+  threshold (send no registration) and log a warning: sending a registration over its
+  threshold is the costlier mistake. Fixed USD figures were rejected, because a figure set low
+  enough to be safe drops IOSS from parcels that qualify, and their VAT is then charged
+  twice. The per-item rules for VOEC and ARN and the Northern Ireland rule come from
+  the research recorded in the PRD the same day.
