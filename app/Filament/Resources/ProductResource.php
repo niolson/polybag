@@ -227,7 +227,7 @@ class ProductResource extends Resource
                     ->query(fn ($query) => $query->whereNull('weight')->orWhere('weight', '<=', 0)),
                 Tables\Filters\Filter::make('missing_customs_data')
                     ->label('Missing customs data')
-                    ->query(fn (Builder $query) => $query->missingCustomsData()),
+                    ->query(fn (Builder $query) => $query->scopes('missingCustomsData')),
                 Tables\Filters\TernaryFilter::make('contains_alcohol')
                     ->label('Contains Alcohol'),
                 Tables\Filters\TernaryFilter::make('is_media')

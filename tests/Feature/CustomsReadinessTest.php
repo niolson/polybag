@@ -73,14 +73,14 @@ afterEach(function (): void {
 function readinessPackage(string $country, array $lines, array $shipment = [], ?Client $client = null, ?Location $from = null, ?ShippingMethod $method = null): Package
 {
     $shipment = Shipment::factory()->create($shipment + [
-        'client_id' => $client?->id ?? Client::factory()->create()->id,
+        'client_id' => $client->id ?? Client::factory()->create()->id,
         'company' => null,
         'email' => 'recipient@example.test',
         'city' => 'Example City',
         'state_or_province' => null,
         'postal_code' => '10115',
         'country' => $country,
-        'shipping_method_id' => $method?->id ?? ShippingMethod::factory()->create()->id,
+        'shipping_method_id' => $method->id ?? ShippingMethod::factory()->create()->id,
         // Every EU case here has been given its terms unless it says otherwise.
         'duties_terms' => in_array($country, ['DE', 'FR'], true) ? DutiesTerms::Ddp : null,
     ]);

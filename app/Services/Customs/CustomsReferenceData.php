@@ -31,7 +31,7 @@ class CustomsReferenceData
     {
         $destinations = $this->read('export-filing.json')['destinations'] ?? [];
 
-        return array_values(array_map(strtoupper(...), array_keys(is_array($destinations) ? $destinations : [])));
+        return array_map(strtoupper(...), array_keys(is_array($destinations) ? $destinations : []));
     }
 
     /**

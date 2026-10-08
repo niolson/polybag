@@ -67,7 +67,10 @@ class Client extends Model
      */
     protected function exporterEin(): Attribute
     {
-        return Attribute::set(fn (?string $value): ?string => ExporterEin::normalize($value));
+        return Attribute::make(
+            get: fn (?string $value): ?string => $value,
+            set: fn (?string $value): ?string => ExporterEin::normalize($value),
+        );
     }
 
     protected $casts = [
