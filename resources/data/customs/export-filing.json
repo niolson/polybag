@@ -1,6 +1,53 @@
 {
   "version": "2026-10-08",
-  "status": "unsourced",
-  "notes": "Destinations for which EEI must be filed whatever the value, so the $2,500 exemption (15 CFR 30.37(a)) never applies and an ITN is always required. The issue says this list is sourced from the Foreign Trade Regulations when written; it has NOT been sourced yet, so it is deliberately empty and CustomsReadiness applies only the $2,500 rule. Do not fill it from memory: each entry needs the FTR section in `source` and the date it was read in `checked`.",
-  "destinations": {}
+  "status": "sourced",
+  "notes": "Destinations for which EEI must be filed whatever the value, so the $2,500 exemption (15 CFR 30.37(a)) never applies and an ITN is always required. Derived from 15 CFR 758.1(b)(1) (EEI regardless of value for Country Group E:1 and E:2) and Supplement No. 1 to 15 CFR part 740 (the Country Group E table). 15 CFR Part 30 itself names no country: 30.2(a)(1)(iv) lists license-required shipments, not destinations. To re-check, read both eCFR sections and compare the Country Group E table with `destinations`; the list changes when BIS amends that table (for example when a country is removed from E:1). Deliberately NOT listed: PRC/Hong Kong, Russia and Venezuela (758.1(b)(10) covers Commerce Control List items only, so it depends on the product, not the destination); Canada (30.36 exempts it, the opposite direction); license-required and other item-based rules in 30.2(a)(1)(iv) and 758.1(b)(2)-(9) and (11), which depend on the goods and cannot be decided from the destination. Read via https://www.ecfr.gov/api/versioner/v1/full/2026-10-06/title-15.xml?part=30 (also part=758 and part=740).",
+  "derived_from": [
+    "15 CFR 758.1(b)(1)",
+    "15 CFR Supplement No. 1 to Part 740 (Country Group E)",
+    "15 CFR 30.2(a)(1)(iv)",
+    "15 CFR 30.37"
+  ],
+  "destinations": {
+    "CU": {
+      "name": "Cuba",
+      "country_group": "E:2",
+      "source": "15 CFR 758.1(b)(1): \"For all exports of items subject to the EAR that are destined to a country in Country Group E:1 or E:2 of supplement no. 1 to part 740 of the EAR regardless of value\". Supplement No. 1 to Part 740 lists Cuba in Country Group E:2 (Unilateral embargo). 15 CFR 30.37 opens \"Except as noted in § 30.2(a)(1)(iv)\", so the 30.37(a) $2,500 exemption does not rescue it. Read from the eCFR API, title 15 as of 2026-10-06.",
+      "source_urls": [
+        "https://www.ecfr.gov/current/title-15/subtitle-B/chapter-VII/subchapter-C/part-758/section-758.1",
+        "https://www.ecfr.gov/current/title-15/subtitle-B/chapter-VII/subchapter-C/part-740/appendix-Supplement%20No.%201%20to%20Part%20740"
+      ],
+      "checked": "2026-10-08"
+    },
+    "IR": {
+      "name": "Iran",
+      "country_group": "E:1",
+      "source": "15 CFR 758.1(b)(1): \"For all exports of items subject to the EAR that are destined to a country in Country Group E:1 or E:2 of supplement no. 1 to part 740 of the EAR regardless of value\". Supplement No. 1 to Part 740 lists Iran in Country Group E:1 (Terrorist supporting countries). 15 CFR 30.37 opens \"Except as noted in § 30.2(a)(1)(iv)\", so the 30.37(a) $2,500 exemption does not rescue it. Read from the eCFR API, title 15 as of 2026-10-06.",
+      "source_urls": [
+        "https://www.ecfr.gov/current/title-15/subtitle-B/chapter-VII/subchapter-C/part-758/section-758.1",
+        "https://www.ecfr.gov/current/title-15/subtitle-B/chapter-VII/subchapter-C/part-740/appendix-Supplement%20No.%201%20to%20Part%20740"
+      ],
+      "checked": "2026-10-08"
+    },
+    "KP": {
+      "name": "Korea, North",
+      "country_group": "E:1",
+      "source": "15 CFR 758.1(b)(1): \"For all exports of items subject to the EAR that are destined to a country in Country Group E:1 or E:2 of supplement no. 1 to part 740 of the EAR regardless of value\". Supplement No. 1 to Part 740 lists Korea, North in Country Group E:1 (Terrorist supporting countries). 15 CFR 30.37 opens \"Except as noted in § 30.2(a)(1)(iv)\", so the 30.37(a) $2,500 exemption does not rescue it. Read from the eCFR API, title 15 as of 2026-10-06.",
+      "source_urls": [
+        "https://www.ecfr.gov/current/title-15/subtitle-B/chapter-VII/subchapter-C/part-758/section-758.1",
+        "https://www.ecfr.gov/current/title-15/subtitle-B/chapter-VII/subchapter-C/part-740/appendix-Supplement%20No.%201%20to%20Part%20740"
+      ],
+      "checked": "2026-10-08"
+    },
+    "SY": {
+      "name": "Syria",
+      "country_group": "E:1",
+      "source": "15 CFR 758.1(b)(1): \"For all exports of items subject to the EAR that are destined to a country in Country Group E:1 or E:2 of supplement no. 1 to part 740 of the EAR regardless of value\". Supplement No. 1 to Part 740 lists Syria in Country Group E:1 (Terrorist supporting countries). 15 CFR 30.37 opens \"Except as noted in § 30.2(a)(1)(iv)\", so the 30.37(a) $2,500 exemption does not rescue it. Read from the eCFR API, title 15 as of 2026-10-06.",
+      "source_urls": [
+        "https://www.ecfr.gov/current/title-15/subtitle-B/chapter-VII/subchapter-C/part-758/section-758.1",
+        "https://www.ecfr.gov/current/title-15/subtitle-B/chapter-VII/subchapter-C/part-740/appendix-Supplement%20No.%201%20to%20Part%20740"
+      ],
+      "checked": "2026-10-08"
+    }
+  }
 }

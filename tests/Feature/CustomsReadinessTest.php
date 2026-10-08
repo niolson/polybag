@@ -334,12 +334,24 @@ describe('export ITN', function (): void {
             ->and(findingCodes(readinessFor($elsewhere)))->not->toContain('export_itn_required');
     });
 
-    it('ships the committed list empty rather than invented', function (): void {
+    it('ships the sourced Country Group E destinations', function (): void {
         $data = json_decode((string) file_get_contents(resource_path('data/customs/export-filing.json')), true);
 
-        expect($data['status'])->toBe('unsourced')
-            ->and($data['destinations'])->toBe([])
-            ->and((new CustomsReferenceData)->alwaysFileDestinations())->toBe([]);
+        expect($data['status'])->toBe('sourced')
+            ->and($data['derived_from'])->toContain('15 CFR 758.1(b)(1)')
+            ->and((new CustomsReferenceData)->alwaysFileDestinations())->toBe(['CU', 'IR', 'KP', 'SY']);
+
+        foreach ($data['destinations'] as $entry) {
+            expect($entry['source'])->toContain('758.1(b)(1)')
+                ->and($entry['source_urls'])->not->toBeEmpty()
+                ->and($entry['checked'])->toBe('2026-10-08');
+        }
+    });
+
+    it('requires the ITN for a cheap parcel to a committed destination', function (): void {
+        $cheap = readinessPackage('IR', [['value' => 10.0]]);
+
+        expect(findingCodes(readinessFor($cheap)))->toContain('export_itn_required');
     });
 
     it('says the imported ITN was invalid when the import recorded that', function (): void {
