@@ -188,16 +188,20 @@ source that cannot take terms skip the filter and are recorded as `source_decide
 
 ## Carrier field mapping
 
-Cells marked *verify* are inferred and are `02`'s job.
+Checked against the sandboxes on 2026-10-08 (`02`, which has the evidence). A *qualified*
+cell is the best field available, with the doubt named in `02`.
 
 | Value | USPS (International Labels 3.3.11) | UPS (Shipping API) | FedEx (Ship API) |
 |---|---|---|---|
-| DDP | `prepayDutiesTaxesFees: true`; cost returned in `prepaidDutiesTaxesFees` | Second `ShipmentCharge`, Type `02`, `BillShipper` | `dutiesPayment.paymentType: SENDER` + payor account |
-| DDU | Omit the flag | Only Type `01` | `paymentType: RECIPIENT` |
+| DDP | `packageDescription.prepayDutiesTaxesFees: true`; cost returned in `prepaidDutiesTaxesFees`; `030031` where unavailable | Second `ShipmentCharge`, Type `02`, `BillShipper`, **and** `TermsOfShipment: DDP` | `dutiesPayment.paymentType: SENDER` + payor account, and `termsOfSale: DDP` |
+| DDP surcharge in a rate | Not quoted; landed cost comes back on the label | Rating with the Type `02` charge returns itemized charge `378` | Not quoted: Rate API takes only `SENDER`; duty estimates (`edtRequestType`) are barred for FedEx Compatible solutions |
+| DDU | Omit the flag | Only Type `01` | `paymentType: RECIPIENT`, `termsOfSale: DDU` |
 | Terms on the invoice | — | `InternationalForms.TermsOfShipment` | `commercialInvoice.termsOfSale` |
-| IOSS / UK VAT / VOEC / ARN | `exportersReference` or `importersReference`, type `VAT_NUMBER` (*verify*) | Vendor Collect ID (`VendorInfo`) | Shipper `tins` (*verify* the `tinType`) |
-| Recipient tax ID | `importersReference` (*verify*) | Ship-to tax ID (*verify*) | Recipient `tins` |
-| Export ITN or exemption | `customsForm.AESITN` | `InternationalForms` export filing fields (*verify*) | `customsClearanceDetail.exportDetail` (*verify*) |
+| IOSS / VOEC / ARN | `customsForm.exportersReference`, `VAT_NUMBER` (with prepay it suppresses the landed cost: *qualified*) | `ShipFrom.VendorInfo`, `0356` / `0357` / `1052` | Shipper `tins`; no IOSS type, `BUSINESS_UNION` prints as EORI (*qualified*) |
+| UK VAT | `exportersReference` (*qualified*) | No current code: `0358` deprecated and dropped, `0000` unlabelled (*qualified*) | Shipper `tins`, `BUSINESS_NATIONAL` (*qualified*) |
+| Recipient tax ID | `customsForm.importersReference` (`TAX_CODE`) | `GlobalTaxInformation.AgentTaxIdentificationNumber`, role `30`, type `0005` / `1002` | Recipient `tins`, `PERSONAL_NATIONAL` (prints); `recipientCustomsId` does not |
+| Export ITN or exemption | `customsForm.AESITN` | EEI form (`FormType` `11`), `EEIFilingOption` `1`, `ShipperFiled` `A` + ITN or `B` + legend | `exportDetail.exportComplianceStatement`: `AESX…` or `NO_EEI_30_37_A`; FedEx prints 30.37(a) itself if omitted |
+| Per-item tax paid (AU) | None | `Product.TaxesPaid`, Singapore only | None |
 
 ### USPS DDP coverage, from the International Mail Manual
 
@@ -206,10 +210,9 @@ First-Class Package International.
 
 | Support | Countries |
 |---|---|
-| **Required** for dutiable items | DE, BE, DK, FI, FR, PT (gifts up to €45 excepted) |
+| **Required** for dutiable items | DE, BE, DK, FI, FR, PT, LU, MC (gifts up to €45 excepted) |
 | Optional | AT, EE, IT, MT, NL, SK, ES, SE; also CA, GB |
 | Not available | BG, HR, CY, CZ, GR, HU, IE, LV, LT, PL, RO, SI |
-| Not found | LU |
 
 UPS and FedEx express accept DDU throughout the EU as of 2026-10-01; the refusals are a
 postal-network problem. UPS Worldwide Economy DDU to Germany is reported suspended.
@@ -261,14 +264,14 @@ accepted the DDP terms.
 
 ## Open questions
 
-All but the last two are `02`'s.
+All but the last two are `02`'s. On 2026-10-08 `02` answered the USPS IOSS field, prepay
+to an optional country (it works), the UPS DDP surcharge in rates, and where each
+carrier takes the ITN; the spec text says the USPS DDP terms are accepted by sending
+the flag. Still open:
 
-- The exact USPS field and reference type for IOSS; the FedEx `tinType` for IOSS.
-- Does USPS prepay correctly when the flag is sent to an "optional" country?
-- Do UPS and FedEx return the DDP surcharge in a rate response that carries the terms?
-- Where each carrier wants the ITN or exemption.
-- Does USPS require the platform to present its DDP provider's terms and record
-  acceptance, or does enrolment on the USPS side cover it?
+- The FedEx `tinType` customs reads as IOSS; what USPS does with IOSS + prepay; a UK
+  VAT code on UPS. Who to ask is in `02`.
+- Does USPS production refuse a DDP-required country without the flag? TEM does not.
 - What happens after 31 October to a USPS DDP parcel into Germany that carries no IOSS
   number? Deutsche Post's transition period for non-IOSS postal parcels is reported to
   end then; no German official source confirms the date.

@@ -90,3 +90,21 @@ international Package that lack an origin or an HS code.
   check's purchase-time block owns that message: batch ship must record "no duties terms
   are set for <country>" and its fix, not "no rates". The same goes for rates dropped by
   `duties-support.json`: surface their reasons on the batch row. Add a test for each.
+- 2026-10-08 — From `02`:
+  - **Decide the KR block before building it.** FedEx's Global Trade advisory `KRA0011`
+    says the foreign shipper is not responsible for the PCCC and need not put it on the
+    air waybill or invoice; the Korean recipient supplies it at import. Blocking a KR
+    consumer label for a missing PCCC may therefore refuse parcels FedEx would carry.
+    That advisory may be stale (others in the same feed are), and UPS and USPS have not
+    been asked. Choose one: keep KR as a block, make it a warning, or drop KR from
+    `recipient-tax-id.json`. Record the choice and its source in the file. BR stays a
+    block: FedEx's `BRA0100` says a parcel without CPF or CNPJ is caged.
+  - **Warn on a FedEx DDU label with no recipient email.** The FedEx Ship API guide says
+    that without `recipients.contact.emailAddress` FedEx cannot collect duties from the
+    recipient and *"charges fall back to the shipper"*. `07` sends the email when the
+    Shipment has one; this check should warn when an international FedEx DDU Shipment
+    has none.
+  - **Warn on IOSS with a company name in the recipient address.** FedEx's IOSS guide:
+    customs is *"likely to treat your package as a B2B shipment and ignore your IOSS
+    number"*. This is customs behavior, so it applies to every carrier. Same signal as
+    `ConsigneeType`: a non-blank company name.
