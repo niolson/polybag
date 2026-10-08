@@ -49,11 +49,13 @@ it('sources every USPS entry from the International Mail Manual', function (): v
     }
 });
 
-it('records the IMM table: six countries require DDP, twelve cannot take it, LU and the rest are DDU only', function (): void {
+it('records the IMM table: eight countries require DDP, twelve cannot take it, the rest are DDU only', function (): void {
     $table = new DutiesSupportTable;
     $today = CarbonImmutable::parse('2026-10-08');
 
-    foreach (['DE', 'BE', 'DK', 'FI', 'FR', 'PT'] as $country) {
+    // LU is missing from IMM 360's own table but its country page requires DDP;
+    // the IMM lists Monaco under France.
+    foreach (['DE', 'BE', 'DK', 'FI', 'FR', 'PT', 'LU', 'MC'] as $country) {
         expect($table->supportFor('USPS', $country, $today)?->support)->toBe(DutiesSupport::DdpRequired);
     }
 
@@ -65,8 +67,8 @@ it('records the IMM table: six countries require DDP, twelve cannot take it, LU 
         expect($table->supportFor('USPS', $country, $today)?->support)->toBe(DutiesSupport::Either);
     }
 
-    expect($table->supportFor('USPS', 'LU', $today)?->support)->toBe(DutiesSupport::DduOnly)
-        ->and($table->supportFor('USPS', 'LU', $today)?->isDefault)->toBeTrue()
+    expect($table->supportFor('USPS', 'JP', $today)?->support)->toBe(DutiesSupport::DduOnly)
+        ->and($table->supportFor('USPS', 'JP', $today)?->isDefault)->toBeTrue()
         ->and($table->supportFor('UPS', 'DE', $today)?->support)->toBe(DutiesSupport::Either)
         ->and($table->supportFor('FedEx', 'PL', $today)?->support)->toBe(DutiesSupport::Either)
         ->and($table->supportFor('DHL Express', 'DE', $today))->toBeNull();
