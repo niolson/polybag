@@ -33,6 +33,7 @@ use App\Services\PostageSources\OfferStore;
 use App\Services\Shipping\DutiesTermsFilter;
 use App\Services\ShippingRateService;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Collection;
 use Livewire\Livewire;
 
 /**
@@ -82,7 +83,7 @@ function dutiesFilterMethod(array $carriers = [Carrier::USPS, Carrier::UPS], ?Cl
         $adapter->shouldReceive('getCarrierName')->andReturn($name);
         $adapter->shouldReceive('isConfigured')->andReturnTrue();
         $adapter->shouldReceive('prepareRateRequest')->andReturnNull();
-        $adapter->shouldReceive('getRates')->andReturnUsing(fn () => collect([
+        $adapter->shouldReceive('getRates')->andReturnUsing(fn (): Collection => collect([
             new RateResponse($name, $code, "{$name} International", 30.00, offerId: $offerIdFor($name), carrierServiceId: $service->id, carrierId: $carrier->id),
         ]));
         $adapter->shouldNotReceive('createShipment');
