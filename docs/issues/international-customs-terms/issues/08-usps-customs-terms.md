@@ -8,7 +8,7 @@ Repo: `polybag`
 
 ## Parent
 
-[PRD](../PRD.md); ADR-0008 decision 4. Needs `02`'s USPS answers, `04` and `06`.
+[PRD](../PRD.md); ADR-0008 decision 4. Needs `02`'s USPS answers, `04`, `06` and `12` (IOSS parcels to AT and SE must be DDP).
 
 ## Problem
 
