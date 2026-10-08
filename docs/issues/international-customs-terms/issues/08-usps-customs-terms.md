@@ -1,6 +1,6 @@
 # USPS prepays duties when the terms say DDP, gated by account terms acceptance
 
-Status: ready-for-agent
+Status: needs-info
 Category: enhancement
 Repo: `polybag`
 
@@ -46,3 +46,27 @@ enrolment instead, this shrinks to a confirmation checkbox with no terms text.
   the recipient tax ID. Extend the redactor so the USPS validation log never holds the
   recipient's number (the seller's registration may stay), with a test. Also keep the
   recipient tax ID out of the snapshot, as `06` does.
+- 2026-10-08 — `02`'s USPS answers, from TEM and the IMM:
+  - **Blocked until USPS answers (`needs-info`).** With `prepayDutiesTaxesFees: true` and
+    an IOSS number in `exportersReference`, TEM returns no `prepaidDutiesTaxesFees` at
+    all, not even the duty. Nine EU destinations take IOSS parcels only with duties
+    prepaid (`12`), so if IOSS and prepay do not combine, USPS cannot carry an IOSS
+    client's EU parcels at all. That is question 1 in the USPS email. Return this to
+    `ready-for-agent` when USPS answers. If they do not combine, `duties-support.json`
+    needs a way to drop USPS for IOSS parcels, and that becomes part of `12`.
+  - **Registration:** `customsForm.exportersReference`, `referenceType: VAT_NUMBER`. It
+    prints as the label's *Exporter's reference*, and the IMM France page names that box
+    for an IOSS-style payer number. **Recipient tax ID:** `importersReference`
+    (`TAX_CODE` for a CPF), printed as *Importer's Reference*.
+  - **Response:** `prepaidDutiesTaxesFees.packageFee` plus `itemCosts[]` (`dutyPrice`,
+    `taxPrice`, `itemDescription`). `duties_cost` is their sum. Postage is unchanged:
+    the landed cost is billed separately.
+  - **Refusal:** a DDP label where USPS cannot prepay returns `400`, code `030031`,
+    *"DDP is not available for the provided country and product options."* That means
+    `duties-support.json` disagrees with USPS. Report it naming the destination, as a
+    decline, not an unexpected error.
+  - **Terms acceptance is needed.** The flag's own description says sending it is
+    agreement to the provider's (Zonos) terms, and usps.com says shippers *"accept the
+    USPS DDP service provider's terms of service"*. No enrolment alternative was found,
+    so build the full acceptance step, not the checkbox fallback.
+  - **ITN:** `AESITN` takes the ITN, else the exemption; no EIN (`11` is not needed here).
