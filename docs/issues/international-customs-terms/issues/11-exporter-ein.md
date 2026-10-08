@@ -63,7 +63,7 @@ say that such a client needs its filer to supply the ITN, not offer a field for 
 
 ## Acceptance criteria
 
-- [ ] `clients.exporter_ein` (nullable, nine digits), with factory state and form field;
+- [x] `clients.exporter_ein` (nullable, nine digits), with factory state and form field;
       a malformed value is rejected on save
 - [ ] `05` blocks a Shipment with an ITN whose client has no EIN, and lets it through
       once the EIN is set
@@ -71,3 +71,11 @@ say that such a client needs its filer to supply the ITN, not offer a field for 
       request schema tests accept the fields
 - [ ] One CIE label and one FedEx sandbox label with an ITN and an EIN are recorded in
       this issue's comments
+
+## Comments
+
+- **2026-10-08, data and form done.** `clients.exporter_ein` (nine digits, no hyphen),
+  `ExporterEin` for format checks, the `withExporterEin()` factory state, and the field in
+  the client form's Customs section and on Settings for a single-client install. A
+  malformed value is refused on save. Still open: the readiness finding waits on `05`,
+  and sending the EIN waits on `06` and `07`; neither exists yet.

@@ -110,3 +110,22 @@ it('leaves the customs fields off Settings in multi-client mode', function (): v
 
     expect($client->refresh()->duties_policy)->toBe(['EU' => 'ddp']);
 });
+
+it('loads, saves and checks the default client\'s exporter EIN on Settings', function (): void {
+    $client = Client::factory()->withExporterEin()->create(['is_default' => true]);
+
+    Livewire::test(Settings::class)
+        ->assertSet('data.client.exporter_ein', '12-3456789')
+        ->fillForm(['client.exporter_ein' => '98-7654321'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($client->refresh()->exporter_ein)->toBe('987654321');
+
+    Livewire::test(Settings::class)
+        ->fillForm(['client.exporter_ein' => '98-765'])
+        ->call('save')
+        ->assertHasFormErrors(['client.exporter_ein']);
+
+    expect($client->refresh()->exporter_ein)->toBe('987654321');
+});

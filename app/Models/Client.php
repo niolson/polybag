@@ -3,7 +3,9 @@
 namespace App\Models;
 
 use App\Enums\LabelReferenceSource;
+use App\Support\ExporterEin;
 use Database\Factories\ClientFactory;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -35,6 +37,7 @@ class Client extends Model
         'label_fee_per_package',
         'label_reference_source',
         'duties_policy',
+        'exporter_ein',
     ];
 
     /**
@@ -55,6 +58,16 @@ class Client extends Model
     public function hasReturnAddress(): bool
     {
         return filled($this->return_address1) && filled($this->return_city) && filled($this->return_postal_code);
+    }
+
+    /**
+     * The exporter EIN, stored as nine digits without the hyphen.
+     *
+     * @return Attribute<string|null, string|null>
+     */
+    protected function exporterEin(): Attribute
+    {
+        return Attribute::set(fn (?string $value): ?string => ExporterEin::normalize($value));
     }
 
     protected $casts = [

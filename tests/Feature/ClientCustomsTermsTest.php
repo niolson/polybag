@@ -229,3 +229,55 @@ it('seeds an opt-in EU demo client, idempotently', function (): void {
         ->and($client->taxRegistrations()->sole()->number)->toBe('IM0000000001')
         ->and(TaxRegistrationRegime::Ioss->isValidNumber($client->taxRegistrations()->sole()->number))->toBeTrue();
 });
+
+/**
+ * `international-customs-terms/11`: the client's own EIN, sent with an export ITN.
+ */
+it('starts a client with no exporter EIN', function (): void {
+    expect(Client::factory()->create()->exporter_ein)->toBeNull();
+});
+
+it('stores an exporter EIN as nine digits and shows it as XX-XXXXXXX', function (): void {
+    $client = Client::factory()->create();
+
+    Livewire::test(EditClient::class, ['record' => $client->id])
+        ->fillForm(['exporter_ein' => '12-3456789'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($client->fresh()->exporter_ein)->toBe('123456789');
+
+    Livewire::test(EditClient::class, ['record' => $client->id])
+        ->assertFormSet(['exporter_ein' => '12-3456789']);
+});
+
+it('rejects a malformed exporter EIN on save', function (string $value): void {
+    $client = Client::factory()->withExporterEin()->create();
+
+    Livewire::test(EditClient::class, ['record' => $client->id])
+        ->fillForm(['exporter_ein' => $value])
+        ->call('save')
+        ->assertHasFormErrors(['exporter_ein']);
+
+    expect($client->fresh()->exporter_ein)->toBe('123456789');
+})->with([
+    'too short' => ['12-345678'],
+    'too long' => ['12-34567890'],
+    'letters' => ['12-345678A'],
+]);
+
+it('clears the exporter EIN when the field is emptied', function (): void {
+    $client = Client::factory()->withExporterEin()->create();
+
+    Livewire::test(EditClient::class, ['record' => $client->id])
+        ->fillForm(['exporter_ein' => ''])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($client->fresh()->exporter_ein)->toBeNull();
+});
+
+it('normalizes a hyphenated exporter EIN set on the model', function (): void {
+    expect(Client::factory()->create(['exporter_ein' => '12-3456789'])->exporter_ein)->toBe('123456789')
+        ->and(Client::factory()->withExporterEin()->create()->exporter_ein)->toBe('123456789');
+});

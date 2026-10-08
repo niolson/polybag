@@ -142,6 +142,7 @@ class Settings extends Page
                     // The client form's customs fields, for the one client there is.
                     ...ClientForm::fillDutiesPolicy(['duties_policy' => $client->duties_policy]),
                     ClientForm::TAX_REGISTRATIONS_FIELD => ClientForm::taxRegistrationRows($client),
+                    'exporter_ein' => $client->exporter_ein,
                 ];
             }
         }
@@ -753,6 +754,7 @@ class Settings extends Page
                     'return_country' => $data['client']['return_country'] ?? null,
                     'return_phone' => $data['client']['return_phone'] ?? null,
                     'duties_policy' => ClientForm::saveDutiesPolicy($data['client'])['duties_policy'],
+                    'exporter_ein' => $data['client']['exporter_ein'] ?? null,
                 ]);
 
                 ClientForm::syncTaxRegistrations($client, $data['client'][ClientForm::TAX_REGISTRATIONS_FIELD] ?? []);
