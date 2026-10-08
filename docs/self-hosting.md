@@ -131,6 +131,17 @@ the direct key is your production path.** Set it and treat it as production conf
 Google bills per request. Leaving the key unset is also fine — the validator simply does
 not attempt validation, and shipments stay in the "Not Checked" state.
 
+## Exchange rates
+
+A seller tax registration (IOSS, UK VAT, VOEC, ARN) applies only below a low-value
+threshold set in EUR, GBP, NOK or AUD, so the scheduler fetches the European Central
+Bank's daily euro reference rates (`exchange-rates:fetch`, twice a day; the first run
+backfills 90 days). The install therefore needs outbound HTTPS to `www.ecb.europa.eu`;
+no key or account is involved. Without it no rates are stored, every fetch logs a
+warning, and a Shipment that would declare a registration is treated as over its
+threshold: **no registration is sent** and the parcel may be charged VAT at the border.
+Run `php artisan exchange-rates:fetch --history` once the host can reach the ECB.
+
 ## Mail
 
 MFA login codes are delivered by email. If you turn on **Require MFA** in App Settings,

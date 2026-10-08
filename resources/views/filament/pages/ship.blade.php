@@ -184,7 +184,33 @@
                 <x-filament::section>
                     <x-slot name="heading">Select Shipping Rate</x-slot>
 
-                    @if(empty($rateOptions))
+                    {{-- Rates the carriers quoted but the Shipment's customs terms
+                         rule out, named so an empty or short list is never a
+                         mystery (ADR-0008 decision 4). --}}
+                    @if(!empty($droppedRates))
+                        <div class="rounded-lg bg-warning-50 dark:bg-warning-950 p-3 mb-4 border border-warning-300 dark:border-warning-700" data-testid="dropped-rates">
+                            <div class="flex items-start gap-2">
+                                <x-filament::icon icon="heroicon-o-globe-europe-africa" class="w-5 h-5 flex-shrink-0 text-warning-600 dark:text-warning-400" />
+                                <div class="text-sm text-warning-800 dark:text-warning-200 space-y-1">
+                                    @if(empty($rateOptions))
+                                        <p class="font-medium">No rate fits the customs terms of this shipment</p>
+                                    @endif
+                                    <ul class="space-y-1">
+                                        @foreach($droppedRates as $dropped)
+                                            <li>
+                                                {{ $dropped['reason'] }}
+                                                @if(!empty($dropped['fixUrl']))
+                                                    <x-filament::link :href="$dropped['fixUrl']" size="sm" color="warning">{{ $dropped['fixLabel'] ?? 'Fix this' }}</x-filament::link>
+                                                @endif
+                                            </li>
+                                        @endforeach
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    @endif
+
+                    @if(empty($rateOptions) && empty($droppedRates))
                         <div class="text-center py-8">
                             <x-filament::icon
                                 icon="heroicon-o-exclamation-triangle"

@@ -65,6 +65,14 @@ class Ship extends Page
 
     public bool $allRatesLate = false;
 
+    /**
+     * Why quoted rates were dropped for the Shipment's customs terms, each
+     * with the fix when there is one place to make it (ADR-0008 decision 4).
+     *
+     * @var list<array{carrier: string|null, reason: string, fixUrl: string|null, fixLabel: string|null}>
+     */
+    public array $droppedRates = [];
+
     public string $labelFormat = 'pdf';
 
     public ?int $labelDpi = null;
@@ -386,6 +394,7 @@ class Ship extends Page
         $this->allRatesLate = $options->allRatesLate;
         $this->selectedRateIndex = $options->selectedRateIndex;
         $this->blindPurchaseOffers = $options->blindPurchaseOffers;
+        $this->droppedRates = $options->droppedRates;
         $this->selectedBlindOfferId = null;
         $this->confirmedBlindPurchase = false;
     }

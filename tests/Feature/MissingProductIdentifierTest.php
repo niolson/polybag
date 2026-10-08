@@ -83,6 +83,9 @@ function packageToFranceHolding(array $products, ShippingMethod $method): Packag
         'postal_code' => '75001',
         'country' => 'FR',
         'shipping_method_id' => $method->id,
+        // An EU label is refused until its duties terms are chosen
+        // (`international-customs-terms/04`); the order carries its own here.
+        'duties_terms' => 'ddp',
     ]);
 
     $package = Package::factory()->for($shipment)->create([

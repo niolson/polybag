@@ -15,6 +15,7 @@ use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\BuyShippingBenefits;
 use App\DataTransferObjects\Shipping\ClassifiedRate;
+use App\DataTransferObjects\Shipping\DroppedRate;
 use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
@@ -158,6 +159,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 ->map(fn (BlindPurchaseOffer $offer): array => $offer->toArray())
                 ->values()
                 ->all(),
+            droppedRates: array_map(
+                fn (DroppedRate $dropped): array => $dropped->toArray(),
+                $this->shippingRateService->getDroppedRates(),
+            ),
         );
     }
 

@@ -1,6 +1,6 @@
 # Resolve customs terms per Shipment and filter rates by carrier duties support
 
-Status: ready-for-agent
+Status: done — 2026-10-08
 Category: enhancement
 Repo: `polybag`
 
@@ -52,17 +52,17 @@ fingerprint, so editing the Shipment's `duties_terms` invalidates its Offers.
 
 ## Acceptance criteria
 
-- [ ] Resolver: order term beats client; most specific client entry beats `EU`; non-EU
+- [x] Resolver: order term beats client; most specific client entry beats `EU`; non-EU
       unset is DDU; EU unset is unresolved; order registration replaces client
       registration; an IOSS or UK VAT consignment over its threshold sends no registration;
       a VOEC or ARN line over the limit is reported; Northern Ireland prefers IOSS at
       £135; values are converted at the ECB rate for the order date; a mismatched order
       regime is ignored
-- [ ] `duties-support.json` exists with sources for every USPS entry, and its test passes
-- [ ] A DDU Shipment to DE gets no USPS rates, with the reason shown; a DDP Shipment to PL
+- [x] `duties-support.json` exists with sources for every USPS entry, and its test passes
+- [x] A DDU Shipment to DE gets no USPS rates, with the reason shown; a DDP Shipment to PL
       gets no USPS rates; a DDP Shipment to NL keeps them
-- [ ] An `effective_from` entry in the future does not apply; one in the past does
-- [ ] Changing `duties_terms` after quoting makes the old Offer unredeemable
+- [x] An `effective_from` entry in the future does not apply; one in the past does
+- [x] Changing `duties_terms` after quoting makes the old Offer unredeemable
 
 ## Comments
 
@@ -91,3 +91,87 @@ fingerprint, so editing the Shipment's `duties_terms` invalidates its Offers.
   enough to be safe drops IOSS from parcels that qualify, and their VAT is then charged
   twice. The per-item rules for VOEC and ARN and the Northern Ireland rule come from
   the research recorded in the PRD the same day.
+- 2026-10-08 — Built. **Resolver:** `App\Services\Customs\CustomsTermsResolver`
+  (`forPackage()`, `resolve()`) returns `App\DataTransferObjects\Customs\ResolvedCustomsTerms`:
+  `applies` (false for a domestic or same-customs-zone label, which resolves to nothing),
+  the duties term and its `CustomsTermsOrigin` (`order`, `client`, `default` for the non-EU
+  DDU fallback, `source_decided`), the registration declared and the
+  `applicableRegistration` before the threshold (`SellerTaxRegistration`: regime, number,
+  origin), `overThreshold`, `exchangeRateMissing`, the USD consignment value and its
+  `ConvertedAmount` (amount, currency, the ECB day used), the threshold and currency, and
+  `linesOverLimit` (`CustomsLineOverLimit` per VOEC/ARN line with an item over the limit;
+  the registration is still declared, and `05` decides what such a line blocks). Values
+  come from the Package's own customs lines (`CustomsItem::fromPackageItem()`, so the
+  same unit values a label declares). An order registration whose regime does not cover
+  the destination is ignored and the client's used instead. `TaxRegistrationRegime` gains
+  `lowValueThresholdFor()`, `thresholdCurrencyFor()`, `measuresEachItem()` and
+  `exceedsThreshold()` (VOEC is over *at* NOK 3,000; the others only above their figure),
+  and `covers()` now includes Northern Ireland for IOSS; `AddressData::isNorthernIreland()`
+  is `GB` with a `BT` postcode. NI with both registrations sends IOSS, tested at £135, and
+  UK VAT serves the rest of GB. `asSourceDecided()` records an Amazon Buy Shipping or
+  Shopify purchase as `source_decided` with nothing declared; nothing calls it yet (`06`'s
+  Label snapshot and `09` will). **Exchange rates**, as the Comment above decides: an
+  `exchange_rates` table (`rate_date`, `currency`, rate per euro, unique per day and
+  currency), `ExchangeRate` model and factory; the `App\Http\Integrations\Ecb` Saloon
+  connector and `GetEuroReferenceRates` request (daily file, or the 90-day file);
+  `EcbReferenceRateFetcher`, which upserts every currency of the file and refuses one with
+  no rates; `ExchangeRateConverter`, which converts through the euro at the day asked or
+  the latest earlier day quoting both currencies, never a later one; and
+  `exchange-rates:fetch [--history]`, scheduled at 15:30 and 21:30 UTC (the ECB publishes
+  at about 16:00 CET, so the two runs cover CET, CEST and a failed first try). An empty
+  table is backfilled from the 90-day file on the first run. With no stored day on or
+  before the order date the registration is withheld and a warning logged; a failed fetch
+  logs a warning and exits non-zero. The order date is the Shipment's `created_at`, said
+  so in the resolver, until an importer supplies one. Installs need outbound HTTPS to
+  `www.ecb.europa.eu`; `docs/self-hosting.md` has a paragraph under *Exchange rates*.
+  No seeder: a synthetic rate in a development database would decide real thresholds, and
+  the first scheduled run fills the table. **Carrier support data:**
+  `resources/data/customs/duties-support.json`: `version`, `notes`, and per carrier
+  (`usps`, `ups`, `fedex`, by `CarrierAlias::lookupKey`) an `authority` (what a reason
+  cites, `IMM` for USPS), a `default` entry and `countries`, each entry
+  `{support, source, checked, effective_from?, note?}`. USPS is the PRD's IMM table with
+  the country page as source where the PRD names one, else IMM 360; LU and every unlisted
+  country take the `ddu_only` default. UPS and FedEx default to `either`, sourced to the
+  PRD, since the "DDU throughout the EU" finding has no carrier URL yet; `02` should
+  replace those. A future `effective_from` falls back to the carrier's default until that
+  day. `DutiesSupportTable` reads it (`supportFor()`, `version()`), and its static
+  `errors()` is what the test runs against the committed file and against broken copies:
+  an unknown carrier, a non-ISO country, a bad `support`, an entry (or default) with no
+  source or one that is neither an https URL nor a file in the repo, a bad `checked` or
+  `effective_from`. `DutiesSupport` enum (`DdpRequired`, `Either`, `DduOnly`, `allows()`).
+  **Rate filter:** `App\Services\Shipping\DutiesTermsFilter`, run in
+  `ShippingRateService::getShippingRates()` after the packaging and contents filters and
+  before the quote log, so a dropped rate is never logged or given an Offer, on every
+  path. It drops `ddp_required` with DDU and `ddu_only` with DDP, one `DroppedRate` per
+  carrier and reason ("USPS dropped: Germany requires prepaid duties (IMM)"; "… Poland
+  cannot take prepaid duties (IMM)"). A rate whose `sourceKind()` is not direct (Amazon
+  Buy Shipping) passes untouched, and so does a carrier the file does not list (Amazon
+  Shipping, DHL); blind offers are not rates and are never filtered. `08` adds its USPS
+  account reason to the same `apply()`. `getDroppedRates()` reaches the Ship page through
+  `PackageShippingOptions::$droppedRates`; the page lists them above the rates, and when
+  every rate is dropped says "No rate fits the customs terms of this shipment" with the
+  reasons instead of the old "Check the shipping method configuration". **Offer
+  fingerprint and rate request:** `RateRequest` carries `?ResolvedCustomsTerms
+  $customsTerms`, filled by `fromPackage()` and kept by every `with…()`;
+  `fingerprint()` binds `fingerprintInputs()` (applies, term, regime:number), not the
+  values or rate dates. Editing `duties_terms`, or a client gaining a registration, makes
+  the old Offer `PackageChanged` at redemption, unconsumed. **Decisions and the boundary
+  with `05`:** the unresolved-EU refusal is drawn here, in the filter, because without it
+  `04` would sell direct EU labels on terms nobody chose: an unresolved EU Shipment gets
+  no rate PolyBag would set terms on (source-decided ones stay, ADR-0008 decision 5) and
+  one carrier-less `DroppedRate` naming the fix, linked to Settings (*Customs*) in
+  single-client mode and to the client's edit page otherwise, with a test for each. `05`
+  keeps the authoritative purchase-time block for every path, the readiness preview
+  before rating, and every rule that needs no rate (the over-threshold and "VAT may be
+  charged twice" warnings, the VOEC and ARN per-item blocks from `linesOverLimit`).
+  Nothing is sent to a carrier (`06`–`08`). **Deviations:** an `IOSS` registration
+  number to NI is accepted from the order too, since `covers()` now includes NI.
+  `MissingProductIdentifierTest`'s French shipments now carry `duties_terms: ddp`; what
+  it asserts is unchanged, but its batch case quoted through rate shopping and an
+  unresolved EU term now drops that rate. The Ship page's 60-second rate cache is keyed on
+  the Package and Shipment `updated_at`, so a client-policy edit can show stale rates for
+  up to a minute; the fingerprint still refuses their Offers. Tests:
+  `CustomsTermsResolverTest`, `DutiesSupportTableTest`, `ExchangeRateTest` (Saloon faked,
+  no network), `DutiesTermsRateFilterTest` (USPS DE/PL/NL, the all-dropped page, both
+  refusal links, source-decided and unlisted carriers, `effective_from`, the request's
+  terms, Offer invalidation), and two additions to `TaxRegistrationRegimeTest`.
