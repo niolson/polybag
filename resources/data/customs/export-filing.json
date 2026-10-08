@@ -1,0 +1,6 @@
+{
+  "version": "2026-10-08",
+  "status": "unsourced",
+  "notes": "Destinations for which EEI must be filed whatever the value, so the $2,500 exemption (15 CFR 30.37(a)) never applies and an ITN is always required. The issue says this list is sourced from the Foreign Trade Regulations when written; it has NOT been sourced yet, so it is deliberately empty and CustomsReadiness applies only the $2,500 rule. Do not fill it from memory: each entry needs the FTR section in `source` and the date it was read in `checked`.",
+  "destinations": {}
+}

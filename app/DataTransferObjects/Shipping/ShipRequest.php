@@ -2,12 +2,12 @@
 
 namespace App\DataTransferObjects\Shipping;
 
-use App\Enums\AmazonChannelType;
 use App\Enums\ServiceCapability;
 use App\Models\Carrier;
 use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\ShippingOffer;
+use App\Services\Customs\CustomsReadiness;
 use App\Services\LabelReferenceResolver;
 use App\Services\ShipDateService;
 use App\Services\SpecialServiceResolver;
@@ -30,6 +30,7 @@ readonly class ShipRequest
      * @param  array<string, array<string, mixed>>  $specialServiceConfig  Per-code config values (e.g. declared_value amount)
      * @param  array<int, string>  $references  Identifiers to print on the label, longest-lived first; carriers truncate to their own limits
      * @param  ShippingOffer|null  $offer  The purchase authority behind $selectedRate, when the source issued one. Server-side only and never serialized: it holds the opaque tokens that actually buy the label, which is why an adapter reads them from here rather than from the rate. ADR-0002 decision 4.
+     * @param  string|null  $exportItn  The Shipment's export ITN, when EEI was filed; the label declares it instead of an exemption
      * @param  bool  $overrideDeclaredWeight  The operator has been shown that the seller declares more weight for the goods than the box was weighed at, and has asked for the purchase to be attempted anyway — at the scale weight, unchanged. Nothing is over-declared by it; it exists so a catalog corrected between the refusal and the retry, or a reading of ours that was wrong, is not a dead end.
      */
     public function __construct(
@@ -50,6 +51,7 @@ readonly class ShipRequest
         public ?BlindPurchaseOffer $blindOffer = null,
         public ?ShippingOffer $offer = null,
         public bool $overrideDeclaredWeight = false,
+        public ?string $exportItn = null,
     ) {}
 
     public function hasSpecialService(string $code): bool
@@ -95,81 +97,37 @@ readonly class ShipRequest
             blindOffer: $this->blindOffer,
             offer: $this->offer,
             overrideDeclaredWeight: $this->overrideDeclaredWeight,
+            exportItn: $this->exportItn,
         );
     }
 
     /**
-     * The customs items this request would declare at no value.
-     *
-     * Only asked where a declaration is actually sent: a label that stays
-     * inside one customs zone carries no form — asked of the pair of
-     * addresses, since a Canadian location shipping into Canada declares
-     * nothing and one shipping into Pennsylvania declares everything — and a
-     * blind purchase sends none of ours, the seller building its own from its
-     * own catalog, so a zero here would be refused on an array nobody reads.
-     * Everywhere else, a line at `$0.00` is either refused by the carrier after
-     * the box is closed or printed as an understated declaration, so the answer
-     * is checked before the purchase.
+     * The customs items this request would declare at no value. The rule
+     * lives in {@see CustomsReadiness::zeroValueLines()}.
      *
      * @return list<CustomsItem>
      */
     public function zeroValueCustomsItems(): array
     {
-        if ($this->blindOffer !== null || $this->fromAddress->sharesCustomsZoneWith($this->toAddress)) {
-            return [];
-        }
-
-        return array_values(array_filter(
-            $this->customsItems,
-            fn (CustomsItem $item): bool => $item->unitValue <= 0,
-        ));
+        return CustomsReadiness::zeroValueLines($this->fromAddress, $this->toAddress, $this->customsItems, $this->blindOffer !== null);
     }
 
     /**
      * The customs items an EU consumer label would declare without the
-     * merchant or manufacturer product identifier.
-     *
-     * EU customs holds a B2C parcel from 1 November 2026 when any line lacks
-     * either, and the carriers' APIs accept the label regardless, so the
-     * operator would hear of it from the customer. The standard identifier (a
-     * GTIN) is never required: both carriers accept its absence.
-     *
-     * The same two gates as {@see zeroValueCustomsItems()} come first: a blind
-     * purchase sends none of our declaration, and a label inside one customs
-     * zone sends none at all. An Amazon Buy Shipping offer is exempt as well,
-     * though it is quoted rather than blind and does send our item values:
-     * a Shipping v2 `Item` has no field for either identifier, so Amazon
-     * declares them, if at all, from its own catalog, and no product record
-     * of ours could change that label. The offer is what says so, as the
-     * channel its adapter quoted it on: Amazon Shipping sold to another
-     * channel's order is quoted on the same API and bought on the same kind of
-     * connection, but is a direct rate, and is not exempted here. The rule itself covers only goods entering the
-     * EU, so an EU origin is exempt too: {@see AddressData::sharesCustomsZoneWith()}
-     * compares countries outside the US and would call Germany to France a
-     * border, refusing every intra-EU consumer label. A consignee with a
-     * company name is a business, the only signal the app has
-     * (`eu-product-identifiers` PRD), and is never refused here.
+     * merchant or manufacturer product identifier. The rule lives in
+     * {@see CustomsReadiness::linesMissingProductIdentifiers()}.
      *
      * @return list<CustomsItem>
      */
     public function customsItemsMissingProductIdentifiers(): array
     {
-        if ($this->blindOffer !== null || $this->fromAddress->sharesCustomsZoneWith($this->toAddress)) {
-            return [];
-        }
-
-        if ($this->offer?->amazonChannelType() === AmazonChannelType::Amazon) {
-            return [];
-        }
-
-        if ($this->fromAddress->isInEuropeanUnion() || ! $this->toAddress->isInEuropeanUnion() || filled($this->toAddress->company)) {
-            return [];
-        }
-
-        return array_values(array_filter(
+        return CustomsReadiness::linesMissingProductIdentifiers(
+            $this->fromAddress,
+            $this->toAddress,
             $this->customsItems,
-            fn (CustomsItem $item): bool => $item->merchantProductId === null || $item->manufacturerProductId === null,
-        ));
+            $this->blindOffer !== null,
+            $this->offer?->amazonChannelType(),
+        );
     }
 
     /**
@@ -237,6 +195,7 @@ readonly class ShipRequest
             blindOffer: $this->blindOffer,
             offer: $this->offer,
             overrideDeclaredWeight: $this->overrideDeclaredWeight,
+            exportItn: $this->exportItn,
         );
     }
 
@@ -267,6 +226,7 @@ readonly class ShipRequest
             blindOffer: $this->blindOffer,
             offer: $this->offer,
             overrideDeclaredWeight: true,
+            exportItn: $this->exportItn,
         );
     }
 
@@ -335,6 +295,7 @@ readonly class ShipRequest
             references: app(LabelReferenceResolver::class)->forPackage($package),
             packageId: $package->id,
             offer: $offer,
+            exportItn: $package->shipment->export_itn,
         );
     }
 
@@ -390,6 +351,7 @@ readonly class ShipRequest
             references: app(LabelReferenceResolver::class)->forPackage($package),
             packageId: $package->id,
             blindOffer: $offer,
+            exportItn: $package->shipment->export_itn,
         );
     }
 

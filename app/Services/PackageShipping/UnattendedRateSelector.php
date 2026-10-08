@@ -4,6 +4,7 @@ namespace App\Services\PackageShipping;
 
 use App\DataTransferObjects\PackageShipping\PackageShippingResult;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
+use App\DataTransferObjects\Shipping\DroppedRate;
 use App\DataTransferObjects\Shipping\OfferRequirements;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\UnattendedRateSelection;
@@ -202,6 +203,19 @@ class UnattendedRateSelector
      */
     public function refusal(Package $package, UnattendedRateSelection $selection): PackageShippingResult
     {
+        // Rates the Shipment's customs terms ruled out are the reason, not a
+        // carrier that quoted nothing: no duties terms for an EU destination,
+        // or a carrier that cannot ship on the term the order resolved to
+        // (ADR-0008 decisions 1 and 4). Only the Ship page reads the dropped
+        // rates itself, so a batch row would otherwise say "no rates".
+        if (! $selection->attendedAlternativeAvailable
+            && ($dropped = $this->shippingRateService->droppedRatesFor($package->id)) !== []) {
+            return PackageShippingResult::failed(
+                'Customs Terms',
+                implode(' ', array_map(fn (DroppedRate $notice): string => rtrim($notice->reason, '.').'.', $dropped)),
+            );
+        }
+
         if (! $selection->attendedAlternativeAvailable) {
             return $selection->deactivatedAnything()
                 ? $this->onlyInactiveServices($package, $selection)

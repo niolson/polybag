@@ -7,6 +7,7 @@ use App\Contracts\PackageDraftWorkflow;
 use App\Contracts\PackageShippingWorkflow;
 use App\Contracts\PostageOfferSource;
 use App\Contracts\RecoversUnresolvedPurchase;
+use App\DataTransferObjects\Customs\CustomsFinding;
 use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingOptions;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
@@ -29,10 +30,8 @@ use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
 use App\Exceptions\LabelNotRecoverableException;
 use App\Exceptions\MissingDeclaredValueException;
-use App\Exceptions\MissingProductIdentifierException;
 use App\Exceptions\PackageDraftIncompleteException;
 use App\Exceptions\ShopifyDeclaredWeightException;
-use App\Exceptions\ZeroValueCustomsItemException;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\DataSource;
@@ -43,6 +42,7 @@ use App\Models\SpecialService;
 use App\Models\User;
 use App\Notifications\LabelNotRecorded;
 use App\Services\Carriers\CarrierRegistry;
+use App\Services\Customs\CustomsReadiness;
 use App\Services\InactiveCatalog;
 use App\Services\PostageSources\OfferStore;
 use App\Services\PostageSources\PostageSourceDispatcher;
@@ -74,6 +74,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         private readonly PostageSourceResolver $postageSourceResolver,
         private readonly PackageDraftWorkflow $packageDrafts,
         private readonly UnattendedRateSelector $unattendedRates,
+        private readonly CustomsReadiness $customsReadiness,
     ) {}
 
     public function prepareRates(Package $package): PackageShippingOptions
@@ -514,17 +515,27 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 return $refused;
             }
 
-            // A zero-value customs line is refused next, and outright: there
-            // is no override for it, so asking the operator to confirm a weight
-            // and then refusing anyway would be the worse order.
-            if (($zeroValued = $shipRequest->zeroValueCustomsItems()) !== []) {
-                throw new ZeroValueCustomsItemException($zeroValued);
-            }
+            // The customs readiness check, for every path alike: the Ship
+            // page, batch ship and automation. A block is refused outright —
+            // the zero-value and product-identifier guards among them, which
+            // have no override, since the fix is made once on the product or
+            // the shipment, not per label — and before the Offer is claimed,
+            // so nothing is bought and the Offer stays spendable.
+            $blocks = CustomsReadiness::blocks($this->customsReadiness->check(
+                $package,
+                $offer,
+                $selectedRate,
+                $blindOffer,
+                $shipRequest->fromAddress,
+                $shipRequest->toAddress,
+                $shipRequest->customsItems,
+            ));
 
-            // Refused just as outright, and for the same reason: a fix made
-            // once on the product, not per label, so there is no override.
-            if (($unidentified = $shipRequest->customsItemsMissingProductIdentifiers()) !== []) {
-                throw new MissingProductIdentifierException($unidentified);
+            if ($blocks !== []) {
+                return PackageShippingResult::failed(
+                    $blocks[0]->title,
+                    implode(' ', array_map(fn (CustomsFinding $finding): string => $finding->message, $blocks)),
+                );
             }
 
             if ($request->requireCustomsWeightOverride && $this->requiresCustomsWeightOverride($shipRequest, $request->overrideCustomsWeights)) {
@@ -581,10 +592,6 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             return $unrecorded ?? PackageShippingResult::shipped($response, $selectedRate, $package);
         } catch (MissingDeclaredValueException $e) {
             return PackageShippingResult::failed('Declared Value Required', $e->getMessage());
-        } catch (ZeroValueCustomsItemException $e) {
-            return PackageShippingResult::failed('Customs Value Required', $e->getMessage());
-        } catch (MissingProductIdentifierException $e) {
-            return PackageShippingResult::failed('Product Identifier Required', $e->getMessage());
         } catch (ShopifyDeclaredWeightException $e) {
             // Nothing was bought and nothing was claimed — the seller's own
             // declaration would have made the purchase fail, and it was

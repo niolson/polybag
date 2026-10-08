@@ -1634,7 +1634,7 @@ function uspsAddressTextShipRequest(AddressData $to, string $labelFormat = 'pdf'
                 'destinationEntryFacilityType' => $international ? 'INTERNATIONAL_SERVICE_CENTER' : 'NONE',
             ],
         ),
-        customsItems: $international ? [new CustomsItem(description: 'Blue Widget', quantity: 1, unitValue: 19.99, weight: 0.5)] : [],
+        customsItems: $international ? [new CustomsItem(description: 'Blue Widget', quantity: 1, unitValue: 19.99, weight: 0.5, countryOfOrigin: 'US')] : [],
         labelFormat: $labelFormat,
         labelDpi: $labelFormat === 'zpl' ? 203 : null,
     );
@@ -2050,6 +2050,7 @@ it('attaches a customs form to domestic military destinations', function (): voi
             quantity: 2,
             unitValue: 19.99,
             weight: 0.5,
+            countryOfOrigin: 'US',
         )],
     );
 
@@ -2115,6 +2116,7 @@ it('repeats the label reference as the customs form invoice number, which is wha
             quantity: 2,
             unitValue: 19.99,
             weight: 0.5,
+            countryOfOrigin: 'US',
         )],
         references: ['ORD-10042'],
     );
@@ -2182,6 +2184,7 @@ it('leaves the invoice number off the customs form when no reference is printed'
             quantity: 2,
             unitValue: 19.99,
             weight: 0.5,
+            countryOfOrigin: 'US',
         )],
     );
 
@@ -2243,6 +2246,7 @@ it('omits the customs form for ordinary domestic destinations', function (): voi
             quantity: 2,
             unitValue: 19.99,
             weight: 0.5,
+            countryOfOrigin: 'US',
         )],
     );
 
@@ -2291,7 +2295,7 @@ it('translates USPS label error codes into actionable messages', function (array
                 'destinationEntryFacilityType' => 'NONE',
             ],
         ),
-        customsItems: [new CustomsItem(description: 'Blue Widget', quantity: 2, unitValue: 19.99, weight: 0.5)],
+        customsItems: [new CustomsItem(description: 'Blue Widget', quantity: 2, unitValue: 19.99, weight: 0.5, countryOfOrigin: 'US')],
     );
 
     $response = $this->adapter->createShipment($request);
@@ -2462,7 +2466,7 @@ function uspsOfferShipRequest(?ShippingOffer $offer, string $country = 'US', str
                 'destinationEntryFacilityType' => $international ? 'INTERNATIONAL_SERVICE_CENTER' : 'NONE',
             ],
         ),
-        customsItems: $international ? [new CustomsItem(description: 'Blue Widget', quantity: 1, unitValue: 19.99, weight: 0.5)] : [],
+        customsItems: $international ? [new CustomsItem(description: 'Blue Widget', quantity: 1, unitValue: 19.99, weight: 0.5, countryOfOrigin: 'US')] : [],
         labelFormat: $labelFormat,
         labelDpi: $labelDpi,
         offer: $offer,

@@ -1274,8 +1274,13 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
                 'itemTotalValue' => round($item->unitValue * $item->quantity, 2),
                 'weightUOM' => 'lb',
                 'itemTotalWeight' => round($item->weight * $item->quantity, 4),
-                'countryofOrigin' => $item->countryOfOrigin ?? 'US',
             ];
+
+            // Never an origin the product does not have: a missing one is
+            // refused by CustomsReadiness before the label is bought.
+            if (filled($item->countryOfOrigin)) {
+                $contentItem['countryofOrigin'] = $item->countryOfOrigin;
+            }
 
             if ($item->hsTariffNumber) {
                 $contentItem['HSTariffNumber'] = $item->hsTariffNumber;
@@ -1292,11 +1297,26 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         $reference = $this->labelReferences($request, maxLength: 30, maxCount: 1)[0] ?? null;
 
         return [
-            'AESITN' => 'NO EEI 30.37(a)',
+            'AESITN' => $this->exportFilingReference($request),
             'customsContentType' => 'MERCHANDISE',
             ...($reference !== null ? ['invoiceNumber' => $reference] : []),
             'contents' => $contents,
         ];
+    }
+
+    /**
+     * What `AESITN` declares: the Shipment's ITN when EEI was filed, else the
+     * Canada exemption (15 CFR 30.36), else the $2,500 exemption (30.37(a)).
+     * `CustomsReadiness` has already refused a parcel that needs an ITN and
+     * has none, so the exemption named here is one the parcel qualifies for.
+     */
+    private function exportFilingReference(ShipRequest $request): string
+    {
+        if (filled($request->exportItn)) {
+            return (string) $request->exportItn;
+        }
+
+        return strtoupper(trim($request->toAddress->country)) === 'CA' ? 'NO EEI 30.36' : 'NO EEI 30.37(a)';
     }
 
     public function cancelShipment(string $trackingNumber, Package $package): CancelResponse
