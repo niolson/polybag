@@ -1,6 +1,6 @@
 # The PII purge never reaches company-only, void or partly shipped Shipments
 
-Status: needs-triage
+Status: ready-for-agent
 Category: bug
 Repo: `polybag`
 
@@ -38,22 +38,42 @@ Three kinds of Shipment never match, so their recipient data is kept forever, wh
    blocks the whole Shipment, because the `status != 'shipped'` clause matches the second
    one.
 
-## Proposed decisions
+## Decisions
 
-Each one needs a maintainer to confirm it:
+Confirmed by the maintainer 2026-10-08.
 
 - **Mark a purge explicitly.** Add a nullable `shipments.pii_purged_at` and select on it,
   not on `first_name`. This fixes case 1 and makes the purge idempotent whatever fields a
   Shipment happens to have.
 - **Start the clock at a Shipment's last activity, not only at `shipped_at`:**
   - A `shipped` Shipment counts from its latest `shipped_at`, as today.
-  - A `void` Shipment counts from when it became void, or its `updated_at` if nothing
-    records that.
-  - An `open` Shipment is never purged automatically. It is still work, and purging it
-    would break packing. A Shipment left open past retention would be an operations
-    report, not a purge.
+  - A `void` Shipment counts from when it became void. Nothing records that today, so use
+    its `updated_at`; an edit to a void Shipment restarts the clock, which errs toward
+    keeping data a little longer, not purging early.
+  - An `open` Shipment is never purged automatically, on any channel. It is still work,
+    and purging it would break packing. Tenants get a way to find old open Shipments and
+    decide what to do with them ([`04`](04-find-old-open-shipments.md)).
 - **Partly shipped:** a Package with no active Label, such as a draft or a voided label,
   stops counting toward eligibility once the Shipment itself is `shipped` or `void`.
+  A Shipment whose items are not all shipped stays `open` under packing validation
+  (`Shipment::updateShippedStatus()`), so it falls under the open rule above. No
+  documentation was found on how Amazon treats a partly shipped order it later
+  auto-cancels; nothing here depends on it.
+
+### Amazon cancellations do not reach PolyBag
+
+The void clock assumed an Amazon order Amazon auto-cancels (seven days past its ship-by
+date) becomes a `void` Shipment. It does not. `AmazonSource` imports only
+`fulfillmentStatuses: UNSHIPPED,PARTIALLY_SHIPPED`, so a cancelled order is never fetched
+again, and no import path sets `ShipmentStatus::Void`; only a person does. A cancelled
+Amazon order therefore stays `open` here, with its recipient data, indefinitely. The same
+holds for a Shopify order cancelled in the admin.
+
+The maintainer confirmed cancelled and voided Amazon orders should be purged: the policy
+allows PII only as long as needed to fulfill the order, and a cancelled order has nothing
+left to fulfill. Importing the cancellations is
+[`03`](03-import-marketplace-cancellations.md), which also adds `shipments.voided_at`; if
+it lands first, count the void clock from that instead of `updated_at`.
 
 ## Acceptance criteria
 
@@ -70,5 +90,9 @@ Each one needs a maintainer to confirm it:
 
 ## Out of scope
 
+- Importing marketplace cancellations as `void` Shipments:
+  [`03`](03-import-marketplace-cancellations.md)
+- Finding open Shipments older than the retention period:
+  [`04`](04-find-old-open-shipments.md)
 - PII outside `shipments` and `packages`: logs (`PiiRedactor`), the Label snapshot
   (`international-customs-terms/06`), and carrier validation logs
