@@ -40,6 +40,12 @@ Warns: HS code missing outside the EU and GB; DDP with no seller registration fo
 that covers the destination ("VAT may be charged twice"); order value over the regime's
 threshold ("registration not sent"); a USPS description longer than 30 characters.
 
+Two more blocks, from the per-item thresholds (PRD, *Tax registration regimes*): a parcel
+to NO declared under VOEC with an item at NOK 3,000 or more ("ship this item
+separately"); and a parcel to AU with an ARN to declare and an item over AUD 1,000, until
+`02` shows a carrier can mark items GST-paid one by one. Both use `04`'s per-item
+report.
+
 **At purchase** the workflow throws on any block, for the Ship page, batch ship and
 automation alike: nothing bought, the Offer not consumed, batch ship records the reason
 against the package and continues — as the existing guards do.
@@ -54,7 +60,8 @@ international Package that lack an origin or an HS code.
 
 ## Acceptance criteria
 
-- [ ] Each block and warning has a test for when it fires and when it does not
+- [ ] Each block and warning has a test for when it fires and when it does not, including
+      the VOEC and ARN per-item blocks
 - [ ] The existing `ZeroValueCustomsItemTest` and `MissingProductIdentifierTest` pass
       against the moved guards without changing what they assert
 - [ ] A blocked purchase leaves the Offer unclaimed; batch ship records and continues
