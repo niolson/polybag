@@ -139,7 +139,7 @@ it('leaves the Customs section off the view of a domestic Shipment with none', f
 });
 
 it('purges the recipient tax ID with the address once the retention period passes', function (): void {
-    $shipment = Shipment::factory()->withCustomsTerms()->create(['channel_id' => null]);
+    $shipment = Shipment::factory()->withCustomsTerms()->shipped()->create(['channel_id' => null]);
     Package::factory()->withCustomsForm()->create([
         'shipment_id' => $shipment->id,
         'shipped_at' => now()->subDays(120),

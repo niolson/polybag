@@ -1154,6 +1154,23 @@ it('updates an existing shipment when the source data changed', function (): voi
     expect(Shipment::where('shipment_reference', 'ORD-EXIST-001')->value('address1'))->toBe('99 Changed Ave');
 });
 
+it('restarts retention when a re-import writes recipient data back to a purged shipment', function (): void {
+    ShipmentImportService::forSource(fakeSource(collect([onExistingRow()])), $this->dataSource)->import();
+    Shipment::where('shipment_reference', 'ORD-EXIST-001')->update([
+        ...array_fill_keys(Shipment::PII_FIELDS, null),
+        'pii_purged_at' => now(),
+    ]);
+
+    ShipmentImportService::forSource(
+        fakeSource(collect([onExistingRow(['address1' => '99 Changed Ave'])])),
+        $this->dataSource,
+    )->import();
+
+    $shipment = Shipment::where('shipment_reference', 'ORD-EXIST-001')->first();
+    expect($shipment->first_name)->toBe('Casey')
+        ->and($shipment->pii_purged_at)->toBeNull();
+});
+
 /**
  * Mark the imported ORD-EXIST-001 as settled by a validator, as if the
  * schedule had already checked it.

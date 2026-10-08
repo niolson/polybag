@@ -51,7 +51,7 @@ class ChannelResource extends Resource
                     ->default(true),
                 Forms\Components\TextInput::make('pii_retention_days')
                     ->label('PII Retention (days)')
-                    ->helperText('Days to keep recipient PII after shipping. Leave empty to use the global default.')
+                    ->helperText('Days to keep recipient PII after a shipment ships or is voided. Leave empty to use the global default.')
                     ->numeric()
                     ->minValue(1)
                     ->maxValue(3650)

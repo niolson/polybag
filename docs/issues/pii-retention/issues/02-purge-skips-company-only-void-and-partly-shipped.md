@@ -1,6 +1,6 @@
 # The PII purge never reaches company-only, void or partly shipped Shipments
 
-Status: ready-for-agent
+Status: done — 2026-10-08
 Category: bug
 Repo: `polybag`
 
@@ -77,16 +77,16 @@ it lands first, count the void clock from that instead of `updated_at`.
 
 ## Acceptance criteria
 
-- [ ] A company-only shipped Shipment past retention is purged, including
+- [x] A company-only shipped Shipment past retention is purged, including
       `recipient_tax_id`, and is not selected again on the next run
-- [ ] A `void` Shipment past retention is purged; an `open` one never is
-- [ ] A `shipped` Shipment with one shipped Package and one Package with no active Label
+- [x] A `void` Shipment past retention is purged; an `open` one never is
+- [x] A `shipped` Shipment with one shipped Package and one Package with no active Label
       is purged once past retention
-- [ ] The Package documents (`label_data`, `customs_form_data`) are cleared for every
+- [x] The Package documents (`label_data`, `customs_form_data`) are cleared for every
       Shipment purged under the new rules
-- [ ] `--dry-run` counts every new case; the backlog note in `docs/issues/README.md` says
+- [x] `--dry-run` counts every new case; the backlog note in `docs/issues/README.md` says
       the first run after deploy purges a backlog
-- [ ] Existing `PurgePiiCommand` tests still pass
+- [x] Existing `PurgePiiCommand` tests still pass
 
 ## Out of scope
 
@@ -96,3 +96,23 @@ it lands first, count the void clock from that instead of `updated_at`.
   [`04`](04-find-old-open-shipments.md)
 - PII outside `shipments` and `packages`: logs (`PiiRedactor`), the Label snapshot
   (`international-customs-terms/06`), and carrier validation logs
+
+## Comments
+
+**2026-10-08 — implemented.** `shipments.pii_purged_at` marks a purge; the migration
+backfills it for Shipments an earlier purge already cleared (no `address1`, no `city`) so
+they are not counted again. `PurgePiiCommand` now selects only `shipped` and `void`
+Shipments with no `pii_purged_at`. A shipped Package (its status projects the active
+Label) shipped inside retention holds any Shipment back; otherwise a `shipped` Shipment
+with a shipped Package is eligible, and a `void` one, or a `shipped` one with no shipped
+Package (a historical import), is eligible once its `updated_at` is past retention.
+Purging runs in chunks of 500, each in a transaction, and `--dry-run` reports the count by
+status. Two existing tests that purged an `open` Shipment with a shipped Package now use a
+`shipped` one, since `open` is never purged. Settings and Channel helper text say the clock
+runs from shipping or voiding.
+
+**2026-10-08 — review fix.** A manager's edit or a re-import could write recipient data
+back to a purged Shipment and leave `pii_purged_at` set, so the purge would skip it for
+good. The Shipment `saving` hook now clears the marker when any `Shipment::PII_FIELDS`
+field (moved there from the command) is set to a non-empty value. `ShipmentBatchWriter`
+clears it on every row it writes, because its upsert bypasses that hook.

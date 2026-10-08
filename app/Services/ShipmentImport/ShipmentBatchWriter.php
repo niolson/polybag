@@ -113,9 +113,13 @@ class ShipmentBatchWriter
             'residential',
             'validation_message', 'shipping_method_reference', 'shipping_method_id',
             'channel_reference', 'deliver_by', 'metadata', 'updated_at',
-            'channel_id', 'status',
+            'channel_id', 'status', 'pii_purged_at',
             ...Shipment::CUSTOMS_FIELDS,
         ];
+
+        // A written row carries the recipient's data again, so a Shipment an
+        // earlier purge cleared needs its retention clock back.
+        $rowsToWrite = array_map(fn (array $row): array => [...$row, 'pii_purged_at' => null], $rowsToWrite);
 
         if ($rowsToWrite !== []) {
             Shipment::upsert($rowsToWrite, ['data_source_id', 'source_record_id'], $updateColumns);
