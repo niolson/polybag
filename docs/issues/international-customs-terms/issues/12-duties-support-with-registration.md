@@ -105,3 +105,9 @@ carrier's IMM authority, while the source is not USPS.
   be combined with USPS DDP is probably out of date, per the maintainer; the design is
   unchanged for it. The other seven countries are already `ddp_required` for USPS, so need no
   override.
+- 2026-10-08 — Review fixes. `errors()` now rejects unknown keys in a default, a country entry
+  and an override, each naming the path and key (`note` stays allowed on defaults and country
+  entries, as the committed file uses it), rejects `with_registration` on a default (never
+  read), and rejects an override whose regime does not cover the entry's country, asked of
+  `TaxRegistrationRegime::covers()`. Reasons name the registration through an explicit
+  per-regime match ("an IOSS number", "a UK VAT number", "a VOEC number", "an ARN").

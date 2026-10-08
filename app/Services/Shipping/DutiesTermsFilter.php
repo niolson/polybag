@@ -156,14 +156,16 @@ class DutiesTermsFilter
     }
 
     /**
-     * How a reason names the registration, such as "an IOSS number": the
-     * regime's label without its region.
+     * How a reason names the registration, such as "an IOSS number".
      */
     private function registrationName(TaxRegistrationRegime $regime): string
     {
-        $name = strtok($regime->getLabel(), ' ');
-
-        return (in_array($name[0], ['A', 'E', 'I', 'O', 'U'], true) ? 'an ' : 'a ').$name.' number';
+        return match ($regime) {
+            TaxRegistrationRegime::Ioss => 'an IOSS number',
+            TaxRegistrationRegime::UkVat => 'a UK VAT number',
+            TaxRegistrationRegime::Voec => 'a VOEC number',
+            TaxRegistrationRegime::Arn => 'an ARN',
+        };
     }
 
     private function countryName(string $country): string
