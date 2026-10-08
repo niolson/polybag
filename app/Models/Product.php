@@ -3,7 +3,9 @@
 namespace App\Models;
 
 use App\Enums\HazmatClass;
+use App\Enums\PackageStatus;
 use App\Models\Concerns\HasDefaultClient;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -85,6 +87,25 @@ class Product extends Model
     /**
      * @return HasMany<PackageItem, $this>
      */
+    /**
+     * Products on an unshipped international Package that lack a country of
+     * origin or an HS code, which `CustomsReadiness` blocks or warns on.
+     * Domestic and shipped Packages are left out: nothing is declared for
+     * them, or nothing can be fixed.
+     *
+     * @param  Builder<Product>  $query
+     */
+    public function scopeMissingCustomsData(Builder $query): void
+    {
+        $query
+            ->where(fn (Builder $missing) => $missing
+                ->whereNull('country_of_origin')->orWhere('country_of_origin', '')
+                ->orWhereNull('hs_tariff_number')->orWhere('hs_tariff_number', ''))
+            ->whereHas('packageItems.package', fn (Builder $package) => $package
+                ->where('status', '!=', PackageStatus::Shipped->value)
+                ->whereHas('shipment', fn (Builder $shipment) => $shipment->where('country', '!=', 'US')));
+    }
+
     public function packageItems(): HasMany
     {
         return $this->hasMany(PackageItem::class);

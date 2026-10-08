@@ -17,6 +17,7 @@ use App\Models\Client;
 use App\Models\ClientTaxRegistration;
 use App\Models\Package;
 use App\Models\ShippingMethod;
+use App\Services\Customs\CustomsReadiness;
 use App\Services\ShipmentLocationGuard;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -74,6 +75,15 @@ class Ship extends Page
      * @var list<array{carrier: string|null, reason: string, fixUrl: string|null, fixLabel: string|null}>
      */
     public array $droppedRates = [];
+
+    /**
+     * The customs readiness findings, previewed before any rate is fetched
+     * (ADR-0008 decision 7). The purchase runs the same check and refuses on
+     * its blocks; these are what the packer sees first.
+     *
+     * @var list<array{severity: string, code: string, title: string, message: string, lines: list<string>, fixUrl: string|null, fixLabel: string|null}>
+     */
+    public array $customsFindings = [];
 
     /** Rates were quoted and the customs terms dropped every one. */
     public bool $allRatesDroppedForCustomsTerms = false;
@@ -198,6 +208,8 @@ class Ship extends Page
      */
     private function rate(): void
     {
+        $this->previewCustomsReadiness();
+
         try {
             $options = $this->prepareCachedRates();
         } catch (LockTimeoutException) {
@@ -215,6 +227,19 @@ class Ship extends Page
         }
 
         $this->applyRateOptions($options);
+    }
+
+    /**
+     * Run the customs readiness check and keep its findings for the page, ahead
+     * of the rates. Read fresh each time: it costs no carrier call, and a fix
+     * made on the product or the Shipment shows on the next refresh.
+     */
+    private function previewCustomsReadiness(): void
+    {
+        $this->customsFindings = array_map(
+            fn ($finding): array => $finding->toArray(),
+            app(CustomsReadiness::class)->check($this->package),
+        );
     }
 
     protected function getHeaderActions(): array
@@ -322,6 +347,8 @@ class Ship extends Page
         }
 
         RateLimiter::hit($throttleKey, decaySeconds: 60);
+
+        $this->previewCustomsReadiness();
 
         // Invalidate before acquiring the per-package lock. The request that
         // acquires it obtains fresh rates; concurrent refreshes wait and reuse

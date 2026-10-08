@@ -25,6 +25,8 @@ class ProductFactory extends Factory
             'weight' => fake()->randomFloat(2, 0.1, 10),
             'manufacturer_part_number' => fake()->bothify('MPN-####-??'),
             'gtin' => self::syntheticGtin(),
+            'country_of_origin' => 'US',
+            'hs_tariff_number' => '610910',
         ];
     }
 

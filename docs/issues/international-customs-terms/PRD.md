@@ -229,7 +229,7 @@ Run by `CustomsReadiness` (`05`), at purchase and as a Ship-page preview.
 | HS code present | Other international | Warn |
 | Any one classification over $2,500 has an ITN (15 CFR 30.37(a) sums lines per Schedule B/HTSUSA code, not per parcel; lines grouped by full HS code, and a parcel over $2,500 with an unclassified line needs one too: `05`) | All international except CA, and the always-file destinations | Block |
 | A Shipment with an ITN has the client's EIN (`11`) | All international | Block |
-| Recipient tax ID present | Per `recipient-tax-id.json` (BR, KR to start) | Block |
+| Recipient tax ID present | Per `recipient-tax-id.json` (BR, KR to start) | Block for BR; warn for KR (`05`: FedEx says the recipient supplies the PCCC) |
 | Line value is not zero | All international | Block (existing guard, moved) |
 | EU consumer line has M-PID and NS-PID | EU consumer | Block (existing guard, moved) |
 | DDP with no seller registration for a regime that has one | EU, GB, NO, AU | Warn: VAT may be charged twice |

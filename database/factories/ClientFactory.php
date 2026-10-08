@@ -50,6 +50,14 @@ class ClientFactory extends Factory
         return $this->has(ClientTaxRegistration::factory()->ioss(), 'taxRegistrations');
     }
 
+    /**
+     * A client with an exporter EIN, for parcels that carry an export ITN.
+     */
+    public function withExporterEin(string $ein = '123456789'): static
+    {
+        return $this->state(fn (): array => ['exporter_ein' => $ein]);
+    }
+
     public function default(): static
     {
         return $this->state(fn () => [

@@ -35,7 +35,7 @@ readonly class CustomsItem
             unitValue: (float) ($shipmentItem?->value ?? 1),
             weight: (float) ($product->weight ?? 0.1),
             hsTariffNumber: $product->hs_tariff_number,
-            countryOfOrigin: $product->country_of_origin ?? 'US',
+            countryOfOrigin: self::blankToNull($product->country_of_origin),
             merchantProductId: self::blankToNull($product->sku),
             manufacturerProductId: self::blankToNull($product->manufacturer_part_number),
             standardProductId: self::standardProductIdFor($product->gtin, $product->barcode),

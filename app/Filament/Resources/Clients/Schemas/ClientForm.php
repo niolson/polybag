@@ -11,6 +11,7 @@ use App\Models\ClientTaxRegistration;
 use App\Services\AddressReferenceService;
 use App\Services\LabelReferenceResolver;
 use App\Services\SettingsService;
+use App\Support\ExporterEin;
 use App\Support\SvgUploadSanitizer;
 use Closure;
 use Filament\Forms\Components\FileUpload;
@@ -179,6 +180,21 @@ class ClientForm
                 ->columns(2)
                 ->defaultItems(0)
                 ->addActionLabel('Add registration')
+                ->columnSpanFull(),
+            TextInput::make($prefix.'exporter_ein')
+                ->label('Exporter EIN')
+                ->placeholder('XX-XXXXXXX')
+                ->maxLength(11)
+                ->helperText('This client\'s own US Employer Identification Number, sent with an export ITN (EEI filed in AES). Never use another company\'s EIN, a 3PL\'s included. Leave blank unless parcels carry an ITN; an exemption such as NO EEI 30.37(a) needs none.')
+                ->formatStateUsing(fn (?string $state): ?string => ExporterEin::format($state))
+                ->rule(fn (): Closure => function (string $attribute, mixed $value, Closure $fail): void {
+                    $error = ExporterEin::error(is_string($value) ? $value : null);
+
+                    if ($error !== null) {
+                        $fail($error);
+                    }
+                })
+                ->dehydrateStateUsing(fn (?string $state): ?string => ExporterEin::normalize($state))
                 ->columnSpanFull(),
         ];
     }

@@ -162,6 +162,17 @@ class ShippingRateService
     }
 
     /**
+     * The same, but only when the last call rated this Package, so a batch
+     * that rates many Packages in turn cannot report another's reasons.
+     *
+     * @return list<DroppedRate>
+     */
+    public function droppedRatesFor(int $packageId): array
+    {
+        return $this->ratedPackageId === $packageId ? $this->droppedRates : [];
+    }
+
+    /**
      * The customs terms the last getShippingRates() call quoted on.
      */
     public function getCustomsTerms(): ?ResolvedCustomsTerms

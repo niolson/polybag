@@ -127,17 +127,19 @@ class DutiesTermsFilter
      * in their navigation.
      *
      * @param  bool  $otherOffersRemain  Whether source-decided rates or blind offers are still offered, so the notice says only the direct rates are gone
+     * @param  bool  $withoutLead  Leave out the "No rates:" lead, for the readiness finding that states the same fact on its own
      */
-    public function unresolvedNotice(ResolvedCustomsTerms $terms, bool $otherOffersRemain = false): DroppedRate
+    public function unresolvedNotice(ResolvedCustomsTerms $terms, bool $otherOffersRemain = false, bool $withoutLead = false): DroppedRate
     {
         $country = $this->countryName($terms->destinationCountry);
         $lead = $otherOffersRemain ? 'No direct rates' : 'No rates';
+        $prefix = $withoutLead ? '' : "{$lead}: ";
         $client = $terms->clientId !== null ? Client::query()->find($terms->clientId) : null;
 
         if (! (bool) $this->settings->get('multi_client_enabled', false) || $client === null) {
             return new DroppedRate(
                 carrier: null,
-                reason: "{$lead}: no duties terms are set for {$country} or the EU. Choose EU duties terms under Customs in Settings, or give the order its own terms.",
+                reason: $prefix.($withoutLead ? 'No' : 'no')." duties terms are set for {$country} or the EU. Choose EU duties terms under Customs in Settings, or give the order its own terms.",
                 fixUrl: Settings::getUrl(),
                 fixLabel: 'Set duties terms in Settings',
             );
@@ -145,7 +147,7 @@ class DutiesTermsFilter
 
         return new DroppedRate(
             carrier: null,
-            reason: "{$lead}: {$client->name} has no duties terms for {$country} or the EU. Choose EU duties terms on the client, or give the order its own terms.",
+            reason: "{$prefix}{$client->name} has no duties terms for {$country} or the EU. Choose EU duties terms on the client, or give the order its own terms.",
             fixUrl: ClientResource::getUrl('edit', ['record' => $client]),
             fixLabel: "Set duties terms for {$client->name}",
         );

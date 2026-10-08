@@ -184,6 +184,33 @@
                 <x-filament::section>
                     <x-slot name="heading">Select Shipping Rate</x-slot>
 
+                    {{-- What customs will hold or refuse, shown before the rates
+                         because the purchase runs the same check and refuses
+                         on its blocks (ADR-0008 decision 7). --}}
+                    @if(!empty($customsFindings))
+                        <div class="space-y-2 mb-4" data-testid="customs-findings">
+                            @foreach($customsFindings as $finding)
+                                @php
+                                    $isBlock = $finding['severity'] === 'block';
+                                @endphp
+                                <div class="rounded-lg p-3 border {{ $isBlock ? 'bg-danger-50 dark:bg-danger-950 border-danger-300 dark:border-danger-700' : 'bg-warning-50 dark:bg-warning-950 border-warning-300 dark:border-warning-700' }}" data-testid="customs-finding-{{ $finding['code'] }}">
+                                    <div class="flex items-start gap-2">
+                                        <x-filament::icon icon="{{ $isBlock ? 'heroicon-o-x-circle' : 'heroicon-o-exclamation-triangle' }}" class="w-5 h-5 flex-shrink-0 {{ $isBlock ? 'text-danger-600 dark:text-danger-400' : 'text-warning-600 dark:text-warning-400' }}" />
+                                        <div class="text-sm {{ $isBlock ? 'text-danger-800 dark:text-danger-200' : 'text-warning-800 dark:text-warning-200' }}">
+                                            <p class="font-medium">{{ $finding['title'] }}{{ $isBlock ? ' (blocks the label)' : '' }}</p>
+                                            <p>
+                                                {{ $finding['message'] }}
+                                                @if(!empty($finding['fixUrl']))
+                                                    <x-filament::link :href="$finding['fixUrl']" size="sm" :color="$isBlock ? 'danger' : 'warning'">{{ $finding['fixLabel'] ?? 'Fix this' }}</x-filament::link>
+                                                @endif
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+                    @endif
+
                     {{-- Rates the carriers quoted but the Shipment's customs terms
                          rule out, named so an empty or short list is never a
                          mystery (ADR-0008 decision 4). --}}

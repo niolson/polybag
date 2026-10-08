@@ -1,6 +1,6 @@
 # One customs readiness check, authoritative at purchase and previewed on the Ship page
 
-Status: ready-for-agent
+Status: done — 2026-10-08
 Category: enhancement
 Repo: `polybag`
 
@@ -60,15 +60,15 @@ international Package that lack an origin or an HS code.
 
 ## Acceptance criteria
 
-- [ ] Each block and warning has a test for when it fires and when it does not, including
+- [x] Each block and warning has a test for when it fires and when it does not, including
       the VOEC and ARN per-item blocks
-- [ ] The existing `ZeroValueCustomsItemTest` and `MissingProductIdentifierTest` pass
+- [x] The existing `ZeroValueCustomsItemTest` and `MissingProductIdentifierTest` pass
       against the moved guards without changing what they assert
-- [ ] A blocked purchase leaves the Offer unclaimed; batch ship records and continues
-- [ ] The Ship page lists findings before rates are fetched
-- [ ] USPS never declares an origin the product does not have, and sends the ITN or the
+- [x] A blocked purchase leaves the Offer unclaimed; batch ship records and continues
+- [x] The Ship page lists findings before rates are fetched
+- [x] USPS never declares an origin the product does not have, and sends the ITN or the
       correct exemption
-- [ ] The *Missing customs data* filter finds a product with no origin
+- [x] The *Missing customs data* filter finds a product with no origin
 
 ## Comments
 
@@ -129,3 +129,81 @@ international Package that lack an origin or an HS code.
     FedEx also applies the rule per classification.
   - **Add the `11` rule:** a Shipment with an ITN whose client has no `exporter_ein` is
     blocked, with the client form as the fix.
+- 2026-10-08 — Built. **Service:** `App\Services\Customs\CustomsReadiness::check()` takes
+  a Package (plus the Offer, rate or blind offer being bought, when there is one) and
+  returns `CustomsFinding`s, each a block or a warn with a code, title, message, the
+  offending lines and a fix link. `CustomsReadiness::blocks()` filters. The two old guards
+  are now `CustomsReadiness::zeroValueLines()` and `::linesMissingProductIdentifiers()`,
+  moved with their gates and docblocks unchanged; `ShipRequest::zeroValueCustomsItems()` and
+  `::customsItemsMissingProductIdentifiers()` stay as one-line delegates so
+  `ShipRequestTest`, `ZeroValueCustomsItemTest` and `MissingProductIdentifierTest` pass
+  without touching an assertion. The two exceptions are gone: a finding carries the same
+  title and message, and they come first in the list. **Purchase:**
+  `EloquentPackageShippingWorkflow` runs the check after the printer gate and before the
+  Offer is claimed, and returns a failed result titled by the first block, with every
+  block's message joined. The Ship page, batch ship and automation all arrive there.
+  **Ship page:** `Ship::$customsFindings` is filled in `rate()` and `refreshRates()` before
+  `prepareRates()` and shown above the rates with fix links; the test proves the order by
+  making rating fail. **Products:** a *Missing customs data* filter
+  (`Product::scopeMissingCustomsData()`): a missing origin or HS code on a product in an
+  unshipped Package whose Shipment is outside the US (a US territory with country `US`
+  is not counted). **USPS:** the `?? 'US'` fallback is gone, here and in
+  `CustomsItem::fromPackageItem()`, which was the real source of the invented origin (the
+  FedEx and UPS adapters keep their own `?? 'US'`, now unreachable for a direct
+  international label, since the check blocks first). `AESITN` sends the Shipment's ITN
+  (new `ShipRequest::$exportItn`, also what `06` and `07` will read), else `NO EEI 30.36`
+  to Canada, else `NO EEI 30.37(a)`. `ProductFactory` now defaults an origin of `US` and
+  an HS code of `610910`, so fixtures that were not about customs data stay valid.
+  **Deliberate choices:**
+  - *Buy Shipping and blind offers.* A Shipping v2 `Item` has no HS-code, origin, ITN or
+    tax-ID field, so no data of ours could change that label. For an Amazon Buy Shipping
+    offer, and for a Shopify blind purchase, every new rule is skipped; only the two old
+    guards run, with their original gates. Amazon Shipping sold to another channel is a
+    direct rate and is held to everything.
+  - *Source-decided terms.* The unresolved-EU block uses the offer's source: it is waived
+    for a rate `DutiesTermsFilter::isSourceDecided()` calls source-decided. On the Ship page
+    before a rate is chosen the block shows, worded as a refusal of direct rates.
+  - *Manual Ship.* Not adding fields to the form: the ITN and recipient-tax-ID findings
+    link to the Shipment form for a user who may edit it, and for a user below Manager they
+    drop the link and end "A manager must add it." The EIN finding does the same for the
+    client form (or Settings in a single-client install). Tested for the ITN.
+  - *Bad imported values.* When `validation_message` carries the import's "Export ITN not
+    imported" or "Recipient tax ID not imported" warning, the finding says the imported
+    value was invalid.
+  - *ITN rule.* Per classification as the `02`/`11` comment specifies: lines grouped by the
+    full HS code (digits only), a shorter code that prefixes a longer one merged into its
+    group, and a parcel over $2,500 with an unclassified line blocked. It applies only to
+    a US origin and never to Canada. **FedEx sandbox check, run 2026-10-08:** ten $300
+    lines with ten different HS codes and no ITN bought a label (FedEx printed `NO EEI
+    30.37(a)` itself); the same $3,000 with one shared code, one $3,000 line and one $9,000
+    line were each refused with `SHIPMENTVALIDATION.EEIEDIT.ERROR`, and one $2,400 line
+    bought. So FedEx applies the exemption per classification, as the rule here does. Not
+    tested: GB was the only destination, codes were all six digits (so whether FedEx
+    merges a shorter code that prefixes a longer one is unconfirmed), and it is the
+    sandbox, not production.
+  - *Batch rate reasons.* `UnattendedRateSelector::refusal()` now names the rates the
+    customs terms dropped ("no duties terms are set for Italy or the EU", "USPS dropped:
+    Germany requires prepaid duties (IMM)") when nothing was buyable, titled *Customs
+    Terms*, instead of "No shipping rates available". It reads them through
+    `ShippingRateService::droppedRatesFor($packageId)`, which answers only for the Package
+    last rated. A test for each case.
+  - *KR.* Decided: a **warning**, not a block. FedEx's `KRA0011` says the recipient supplies
+    the PCCC at import, and a block could refuse parcels FedEx would carry; the advisory
+    may be stale and UPS and USPS have not been asked. The choice, its source and the
+    condition for raising it are in `recipient-tax-id.json`. BR stays a block (`BRA0100`).
+    The PRD's validation table says so too.
+  - *Warnings that need a carrier.* The USPS 30-character description and the FedEx DDU
+    no-email warnings use the rate's carrier at purchase; before a rate is chosen (the Ship
+    page preview) they show for any line or Shipment they might concern.
+  - *IOSS with a company name*, *FedEx DDU without a recipient email*, and the *11* EIN
+    block are built as the `02` and `11` comments ask.
+  **Not done, and why:**
+  - `resources/data/customs/export-filing.json` is **empty and marked `"status":
+    "unsourced"`**. The destinations that need EEI whatever the value must come from the
+    Foreign Trade Regulations, which I did not have a source for in this session, and I
+    did not fill them from memory. Until someone adds sourced entries (the loader and a
+    test with an injected list already work), only the $2,500 rule applies.
+  Tests: `CustomsReadinessTest` (every block and warn firing and not, the purchase refusal
+  leaving the Offer unclaimed, batch recording and continuing, the Ship page, the Products
+  filter), `UspsExportFilingTest`; `UspsAdapterTest`'s fixtures now give their items an
+  origin.

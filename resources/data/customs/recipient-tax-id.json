@@ -1,0 +1,21 @@
+{
+  "version": "2026-10-08",
+  "notes": "Where the recipient's own tax ID must be on the label. `severity` is what CustomsReadiness does when it is missing: `block` refuses the purchase, `warn` shows the finding and lets it go. `types` are RecipientTaxIdType values, any one of which satisfies the rule. `consumers_only` skips a recipient whose address has a company name.",
+  "destinations": {
+    "BR": {
+      "severity": "block",
+      "types": ["cpf", "cnpj"],
+      "consumers_only": false,
+      "source": "FedEx Global Trade advisory BRA0100, queried on the sandbox 2026-10-08 (international-customs-terms/02): the recipient's CPF or CNPJ is mandatory, or a passport for a non-resident; without it the parcel 'will not be cleared by Customs and will be caged'.",
+      "checked": "2026-10-08"
+    },
+    "KR": {
+      "severity": "warn",
+      "types": ["pccc"],
+      "consumers_only": true,
+      "source": "FedEx Global Trade advisory KRA0011, queried on the sandbox 2026-10-08 (international-customs-terms/02): the foreign shipper is NOT responsible for obtaining the PCCC and need not put it on the air waybill or commercial invoice; the Korean recipient supplies it at import.",
+      "note": "A warning, not a block, because a block may refuse parcels FedEx would carry. That advisory may be stale (others in the same feed are), and UPS and USPS have not been asked. Raise to `block` if a carrier confirms it holds a consumer parcel without a PCCC.",
+      "checked": "2026-10-08"
+    }
+  }
+}
