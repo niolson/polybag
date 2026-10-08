@@ -9,6 +9,8 @@ use App\Enums\DutiesSupport;
 use App\Enums\PostageSourceKind;
 use App\Filament\Pages\Settings;
 use App\Filament\Resources\Clients\ClientResource;
+use App\Models\Carrier;
+use App\Models\CarrierAlias;
 use App\Models\Client;
 use App\Services\AddressReferenceService;
 use App\Services\Customs\DutiesSupportTable;
@@ -34,13 +36,14 @@ use Illuminate\Support\Collection;
  *   `international-customs-terms/08` adds a second reason here: a USPS
  *   account that has not accepted the DDP terms.
  * - **The term is unresolved**: an EU destination with no term from the order
- *   or the client. Every rate PolyBag would set terms on is dropped, and the
- *   reason names the fix — Settings in single-client mode, the client form
- *   otherwise.
+ *   or the client. Every rate PolyBag would set terms on is dropped, and
+ *   {@see self::unresolvedNotice()} names the fix — Settings in single-client
+ *   mode, the client form otherwise.
  *
- * A rate from a source that takes no terms — Amazon Buy Shipping, resold
- * through a channel — is source-decided and passes untouched (ADR-0008
- * decision 5). A carrier `duties-support.json` does not list is not judged.
+ * A rate from a source that takes no terms — Amazon Buy Shipping, or Amazon
+ * Shipping sold on a connection — is source-decided and passes untouched,
+ * through the unresolved-EU refusal too (ADR-0008 decision 5). A carrier
+ * `duties-support.json` does not list is not judged.
  */
 class DutiesTermsFilter
 {
@@ -53,30 +56,30 @@ class DutiesTermsFilter
     /**
      * @param  Collection<int, RateResponse>  $rates
      * @param  CarbonInterface|null  $on  The day an entry's `effective_from` is judged against; today when null
-     * @return array{kept: Collection<int, RateResponse>, dropped: list<DroppedRate>}
+     * @return array{kept: Collection<int, RateResponse>, dropped: list<DroppedRate>, droppedRates: list<RateResponse>}
      */
     public function apply(Collection $rates, ?ResolvedCustomsTerms $terms, ?CarbonInterface $on = null): array
     {
         if ($terms === null || ! $terms->applies) {
-            return ['kept' => $rates->values(), 'dropped' => []];
+            return ['kept' => $rates->values(), 'dropped' => [], 'droppedRates' => []];
         }
 
         $on ??= now();
         $kept = collect();
         $dropped = [];
-
-        if ($terms->isUnresolved()) {
-            $dropped[] = $this->unresolved($terms);
-        }
+        $droppedRates = [];
 
         foreach ($rates as $rate) {
-            if ($rate->sourceKind() !== PostageSourceKind::Direct) {
+            if ($this->isSourceDecided($rate)) {
                 $kept->push($rate);
 
                 continue;
             }
 
+            // Unresolved: the caller adds {@see self::unresolvedNotice()} once.
             if ($terms->dutiesTerms === null) {
+                $droppedRates[] = $rate;
+
                 continue;
             }
 
@@ -88,18 +91,33 @@ class DutiesTermsFilter
                 continue;
             }
 
+            $carrier = Carrier::labelForName($rate->carrier);
             $reason = sprintf(
                 '%s dropped: %s %s (%s)',
-                $rate->carrier,
+                $carrier,
                 $this->countryName($terms->destinationCountry),
                 $entry->support === DutiesSupport::DdpRequired ? 'requires prepaid duties' : 'cannot take prepaid duties',
                 $entry->authority,
             );
 
-            $dropped[$rate->carrier.'|'.$reason] = new DroppedRate($rate->carrier, $reason);
+            $droppedRates[] = $rate;
+            $dropped[$carrier.'|'.$reason] = new DroppedRate($carrier, $reason);
         }
 
-        return ['kept' => $kept, 'dropped' => array_values($dropped)];
+        return ['kept' => $kept, 'dropped' => array_values($dropped), 'droppedRates' => $droppedRates];
+    }
+
+    /**
+     * Whether PolyBag cannot set the terms of this rate, so the source
+     * decides them (ADR-0008 decision 5): Amazon Buy Shipping, resold through
+     * a channel, and Amazon Shipping sold on a connection, whose purchase
+     * takes no duties terms either. Such a rate skips the support check and
+     * the unresolved-EU refusal alike.
+     */
+    public function isSourceDecided(RateResponse $rate): bool
+    {
+        return $rate->sourceKind() !== PostageSourceKind::Direct
+            || CarrierAlias::lookupKey($rate->carrier) === CarrierAlias::lookupKey(Carrier::AMAZON_SHIPPING);
     }
 
     /**
@@ -107,16 +125,19 @@ class DutiesTermsFilter
      * the fix and linking to where it is made. Single-client installs keep
      * the default client's policy in Settings, since the Clients page is not
      * in their navigation.
+     *
+     * @param  bool  $otherOffersRemain  Whether source-decided rates or blind offers are still offered, so the notice says only the direct rates are gone
      */
-    private function unresolved(ResolvedCustomsTerms $terms): DroppedRate
+    public function unresolvedNotice(ResolvedCustomsTerms $terms, bool $otherOffersRemain = false): DroppedRate
     {
         $country = $this->countryName($terms->destinationCountry);
+        $lead = $otherOffersRemain ? 'No direct rates' : 'No rates';
         $client = $terms->clientId !== null ? Client::query()->find($terms->clientId) : null;
 
         if (! (bool) $this->settings->get('multi_client_enabled', false) || $client === null) {
             return new DroppedRate(
                 carrier: null,
-                reason: "No rates: no duties terms are set for {$country} or the EU. Choose EU duties terms under Customs in Settings, or give the order its own terms.",
+                reason: "{$lead}: no duties terms are set for {$country} or the EU. Choose EU duties terms under Customs in Settings, or give the order its own terms.",
                 fixUrl: Settings::getUrl(),
                 fixLabel: 'Set duties terms in Settings',
             );
@@ -124,7 +145,7 @@ class DutiesTermsFilter
 
         return new DroppedRate(
             carrier: null,
-            reason: "No rates: {$client->name} has no duties terms for {$country} or the EU. Choose EU duties terms on the client, or give the order its own terms.",
+            reason: "{$lead}: {$client->name} has no duties terms for {$country} or the EU. Choose EU duties terms on the client, or give the order its own terms.",
             fixUrl: ClientResource::getUrl('edit', ['record' => $client]),
             fixLabel: "Set duties terms for {$client->name}",
         );

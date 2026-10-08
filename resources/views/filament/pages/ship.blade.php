@@ -192,7 +192,7 @@
                             <div class="flex items-start gap-2">
                                 <x-filament::icon icon="heroicon-o-globe-europe-africa" class="w-5 h-5 flex-shrink-0 text-warning-600 dark:text-warning-400" />
                                 <div class="text-sm text-warning-800 dark:text-warning-200 space-y-1">
-                                    @if(empty($rateOptions))
+                                    @if($allRatesDroppedForCustomsTerms)
                                         <p class="font-medium">No rate fits the customs terms of this shipment</p>
                                     @endif
                                     <ul class="space-y-1">
@@ -210,7 +210,7 @@
                         </div>
                     @endif
 
-                    @if(empty($rateOptions) && empty($droppedRates))
+                    @if(empty($rateOptions) && ! $allRatesDroppedForCustomsTerms)
                         <div class="text-center py-8">
                             <x-filament::icon
                                 icon="heroicon-o-exclamation-triangle"

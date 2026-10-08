@@ -23,7 +23,7 @@ use Illuminate\Support\Facades\Log;
  * round: one euro is 1.25 USD, 0.80 GBP, 12.50 NOK and 1.60 AUD, so $1 is
  * €0.80, £0.64, NOK 10 and AUD 1.28.
  */
-const RESOLVER_ORDER_DATE = '2026-10-07 10:00:00';
+const RESOLVER_ORDER_DATE = '2026-10-07 18:00:00';
 
 beforeEach(function (): void {
     foreach (['USD' => 1.25, 'GBP' => 0.80, 'NOK' => 12.50, 'AUD' => 1.60] as $currency => $rate) {
@@ -77,9 +77,29 @@ function resolverLines(array $lines): array
 /**
  * @param  list<array{0: float, 1?: int}>  $lines
  */
-function resolveFor(Shipment $shipment, AddressData $destination, array $lines = [[20.0]]): ResolvedCustomsTerms
+function resolveFor(Shipment $shipment, AddressData $destination, array $lines = [[20.0]], ?AddressData $origin = null): ResolvedCustomsTerms
 {
-    return app(CustomsTermsResolver::class)->resolve($shipment, AddressData::fromConfig(), $destination, resolverLines($lines));
+    return app(CustomsTermsResolver::class)->resolve($shipment, $origin ?? AddressData::fromConfig(), $destination, resolverLines($lines));
+}
+
+/**
+ * Collects warnings logged from here on; call the result to read them.
+ *
+ * @return Closure(): list<string>
+ */
+function captureWarnings(): Closure
+{
+    $warnings = [];
+
+    Log::listen(function (MessageLogged $event) use (&$warnings): void {
+        if ($event->level === 'warning') {
+            $warnings[] = $event->message;
+        }
+    });
+
+    return function () use (&$warnings): array {
+        return $warnings;
+    };
 }
 
 describe('the duties term', function (): void {
@@ -333,6 +353,80 @@ describe('the exchange rate', function (): void {
             ->and($terms->applicableRegistration)->not->toBeNull()
             ->and($warnings)->toHaveCount(1)
             ->and($warnings[0])->toContain('No ECB exchange rate');
+    });
+});
+
+describe('the customs border', function (): void {
+    it('resolves a parcel inside the EU to nothing, as it crosses no customs border', function (): void {
+        $shipment = resolverShipment(Client::factory()->ddpToEu()->withIossRegistration()->create());
+
+        $terms = resolveFor($shipment, resolverDestination('FR', '75001'), origin: resolverDestination('DE'));
+
+        expect($terms->applies)->toBeFalse()
+            ->and($terms->dutiesTerms)->toBeNull()
+            ->and($terms->registration)->toBeNull()
+            ->and($terms->isUnresolved())->toBeFalse();
+
+        $unset = resolverShipment(Client::factory()->create(['duties_policy' => null]));
+
+        expect(resolveFor($unset, resolverDestination('FR', '75001'), origin: resolverDestination('DE'))->isUnresolved())->toBeFalse();
+    });
+
+    it('resolves a parcel leaving the EU by its destination', function (): void {
+        $shipment = resolverShipment(Client::factory()->ddpToEu()->create(), ['country' => 'US']);
+
+        $terms = resolveFor($shipment, new AddressData('A', 'B', '1 Main St', 'Seattle', 'WA', '98101', 'US'), origin: resolverDestination('DE'));
+
+        expect($terms->applies)->toBeTrue()
+            ->and($terms->dutiesTerms)->toBe(DutiesTerms::Ddu)
+            ->and($terms->dutiesTermsOrigin)->toBe(CustomsTermsOrigin::Default);
+    });
+
+    it('still resolves a parcel into the EU from outside it', function (): void {
+        $shipment = resolverShipment(Client::factory()->ddpToEu()->create());
+
+        expect(resolveFor($shipment, resolverDestination('DE'))->dutiesTerms)->toBe(DutiesTerms::Ddp)
+            ->and(resolveFor($shipment, resolverDestination('DE'), origin: resolverDestination('GB', 'SW1A 1AA'))->dutiesTerms)->toBe(DutiesTerms::Ddp);
+    });
+});
+
+describe('rate warnings', function (): void {
+    it('warns once when the rate used is more than five days older than the order', function (): void {
+        $warnings = captureWarnings();
+        $client = Client::factory()->ddpToEu()->withIossRegistration()->create();
+        $shipment = resolverShipment($client);
+        // Ten days after the only stored rates: a fetch that stopped.
+        $shipment->forceFill(['created_at' => '2026-10-17 18:00:00'])->save();
+
+        $first = resolveFor($shipment->fresh(), resolverDestination('DE'));
+        resolveFor($shipment->fresh(), resolverDestination('DE'));
+
+        expect($first->convertedValue?->rateDate->toDateString())->toBe('2026-10-07')
+            ->and($first->registration)->not->toBeNull()
+            ->and($warnings())->toHaveCount(1)
+            ->and($warnings()[0])->toContain('more than 5 days older');
+    });
+
+    it('does not warn for a rate a weekend old', function (): void {
+        $warnings = captureWarnings();
+        $shipment = resolverShipment(Client::factory()->ddpToEu()->withIossRegistration()->create());
+        $shipment->forceFill(['created_at' => '2026-10-11 12:00:00'])->save();
+
+        resolveFor($shipment->fresh(), resolverDestination('DE'));
+
+        expect($warnings())->toBe([]);
+    });
+
+    it('logs a missing rate once however often the terms are resolved', function (): void {
+        $warnings = captureWarnings();
+        $shipment = resolverShipment(Client::factory()->ddpToEu()->withIossRegistration()->create());
+        $shipment->forceFill(['created_at' => '2026-09-01 12:00:00'])->save();
+
+        foreach (range(1, 3) as $ignored) {
+            resolveFor($shipment->fresh(), resolverDestination('DE'));
+        }
+
+        expect($warnings())->toHaveCount(1);
     });
 });
 

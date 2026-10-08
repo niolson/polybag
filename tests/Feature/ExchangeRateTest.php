@@ -48,7 +48,7 @@ describe('the converter', function (): void {
         }
 
         $converter = app(ExchangeRateConverter::class);
-        $day = CarbonImmutable::parse('2026-10-07');
+        $day = CarbonImmutable::parse('2026-10-07 17:00', 'Europe/Berlin');
 
         expect($converter->convert(100.0, 'USD', 'EUR', $day)?->amount)->toEqualWithDelta(80.0, 0.0001)
             ->and($converter->convert(100.0, 'USD', 'GBP', $day)?->amount)->toEqualWithDelta(64.0, 0.0001)
@@ -70,6 +70,31 @@ describe('the converter', function (): void {
 
         expect($converted?->amount)->toEqualWithDelta(50.0, 0.0001)
             ->and($converted?->rateDate->toDateString())->toBe('2026-10-01');
+    });
+
+    it('uses the rate published before the order, whenever rating runs', function (): void {
+        ExchangeRate::factory()->quoting('USD', 1.00, '2026-10-06')->create();
+        $converter = app(ExchangeRateConverter::class);
+        // 03:00 UTC is 05:00 in Frankfurt, before that day's 16:00 publication.
+        $earlyOrder = CarbonImmutable::parse('2026-10-07 03:00', 'UTC');
+
+        $beforeFetch = $converter->convert(100.0, 'USD', 'EUR', $earlyOrder);
+
+        // That day's rate is fetched later; the early order still uses the
+        // previous day's, so its answer does not move.
+        ExchangeRate::factory()->quoting('USD', 1.25, '2026-10-07')->create();
+        $afterFetch = $converter->convert(100.0, 'USD', 'EUR', $earlyOrder);
+
+        // From 16:00 Europe/Berlin the day's own rate has been published.
+        $lateOrder = $converter->convert(100.0, 'USD', 'EUR', CarbonImmutable::parse('2026-10-07 17:00', 'Europe/Berlin'));
+        $atCutoff = $converter->convert(100.0, 'USD', 'EUR', CarbonImmutable::parse('2026-10-07 15:59', 'Europe/Berlin'));
+
+        expect($beforeFetch?->rateDate->toDateString())->toBe('2026-10-06')
+            ->and($afterFetch?->rateDate->toDateString())->toBe('2026-10-06')
+            ->and($afterFetch?->amount)->toEqualWithDelta(100.0, 0.0001)
+            ->and($lateOrder?->rateDate->toDateString())->toBe('2026-10-07')
+            ->and($lateOrder?->amount)->toEqualWithDelta(80.0, 0.0001)
+            ->and($atCutoff?->rateDate->toDateString())->toBe('2026-10-06');
     });
 
     it('answers nothing when no day on or before the date is stored', function (): void {
@@ -106,7 +131,7 @@ describe('the ECB fetch', function (): void {
         expect(fn () => app(EcbReferenceRateFetcher::class)->fetch())->toThrow(RuntimeException::class);
     });
 
-    it('backfills ninety days on the first run, then fetches the daily file', function (): void {
+    it('reads the ninety-day file on every run, so a gap heals on the next one', function (): void {
         $endpoints = [];
 
         Saloon::fake([
@@ -115,19 +140,22 @@ describe('the ECB fetch', function (): void {
 
                 return MockResponse::make(ecbRateFile(count($endpoints) === 1
                     ? ['2026-10-06' => ['USD' => '1.20'], '2026-10-07' => ['USD' => '1.25']]
-                    : ['2026-10-08' => ['USD' => '1.30']]), 200);
+                    : ['2026-10-06' => ['USD' => '1.20'], '2026-10-07' => ['USD' => '1.25'], '2026-10-08' => ['USD' => '1.30']]), 200);
             },
         ]);
+
+        // A table already holding rates is no reason to read only the latest day.
+        ExchangeRate::factory()->quoting('USD', 1.10, '2026-09-01')->create();
 
         $this->artisan('exchange-rates:fetch')
             ->expectsOutputToContain('2 days, 2026-10-06 to 2026-10-07')
             ->assertSuccessful();
         $this->artisan('exchange-rates:fetch')
-            ->expectsOutputToContain('2026-10-08')
+            ->expectsOutputToContain('3 days, 2026-10-06 to 2026-10-08')
             ->assertSuccessful();
 
-        expect($endpoints)->toBe(['/stats/eurofxref/eurofxref-hist-90d.xml', '/stats/eurofxref/eurofxref-daily.xml'])
-            ->and(ExchangeRate::query()->count())->toBe(3);
+        expect($endpoints)->toBe(['/stats/eurofxref/eurofxref-hist-90d.xml', '/stats/eurofxref/eurofxref-hist-90d.xml'])
+            ->and(ExchangeRate::query()->count())->toBe(4);
     });
 
     it('logs a warning and fails when the ECB cannot be reached', function (): void {

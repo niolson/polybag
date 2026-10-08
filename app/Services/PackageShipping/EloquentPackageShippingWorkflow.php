@@ -163,6 +163,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 fn (DroppedRate $dropped): array => $dropped->toArray(),
                 $this->shippingRateService->getDroppedRates(),
             ),
+            allRatesDroppedForCustomsTerms: $this->shippingRateService->allRatesDroppedForCustomsTerms(),
         );
     }
 

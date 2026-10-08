@@ -17,6 +17,7 @@ use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\ExchangeRates\ExchangeRateConverter;
 use Carbon\CarbonInterface;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * Turns a Shipment, its client and the destination into the customs terms it
@@ -33,8 +34,8 @@ use Carbon\CarbonInterface;
  *                  — withheld when the consignment is over an IOSS or UK VAT
  *                    threshold; reported per item for VOEC and ARN
  *
- * Customs values are USD; thresholds are converted at the ECB reference rate
- * for the order date. A Shipment has no order-date column yet, so its
+ * Customs values are USD; thresholds are converted at the latest ECB
+ * reference rate published before the order ({@see ExchangeRateConverter}). A Shipment has no order-date column yet, so its
  * `created_at` — when it was imported — stands in until an importer supplies
  * one. With no stored rate on or before that day, the registration is
  * withheld and a warning logged: declaring a registration over its threshold
@@ -43,6 +44,13 @@ use Carbon\CarbonInterface;
  */
 class CustomsTermsResolver
 {
+    /**
+     * How much older than the order's expected rate day a rate may be before
+     * the conversion warns: the ECB never leaves more than a long holiday
+     * weekend between publications, so more than this is a fetch that stopped.
+     */
+    private const STALE_RATE_DAYS = 5;
+
     public function __construct(private readonly ExchangeRateConverter $exchangeRates) {}
 
     /**
@@ -60,7 +68,7 @@ class CustomsTermsResolver
                 : AddressData::fromConfig();
         }
 
-        if ($origin->sharesCustomsZoneWith($destination)) {
+        if ($this->crossesNoCustomsBorder($origin, $destination)) {
             return ResolvedCustomsTerms::notApplicable($destination->country, $shipment->client_id);
         }
 
@@ -82,7 +90,7 @@ class CustomsTermsResolver
     {
         $country = strtoupper(trim($destination->country));
 
-        if ($origin->sharesCustomsZoneWith($destination)) {
+        if ($this->crossesNoCustomsBorder($origin, $destination)) {
             return ResolvedCustomsTerms::notApplicable($country, $shipment->client_id);
         }
 
@@ -235,19 +243,68 @@ class CustomsTermsResolver
         return $shipment->created_at ?? now();
     }
 
+    /**
+     * Whether the parcel stays inside one customs territory, and so has no
+     * import to declare terms for.
+     *
+     * {@see AddressData::sharesCustomsZoneWith()} treats every non-US country
+     * as its own zone, which is right for the declarations it gates but would
+     * make a parcel from Germany to France an import. The EU is one customs
+     * union, so an origin and destination both inside it cross nothing.
+     * GB to Northern Ireland is left as `GB` to `GB`: the Windsor Framework
+     * makes some such movements declarable, which nothing here models yet.
+     */
+    private function crossesNoCustomsBorder(AddressData $origin, AddressData $destination): bool
+    {
+        return $origin->sharesCustomsZoneWith($destination)
+            || ($origin->isInEuropeanUnion() && $destination->isInEuropeanUnion());
+    }
+
+    /**
+     * Convert at the latest ECB rate published before the order, warning
+     * when there is none or it is stale.
+     *
+     * Each warning is logged once per Shipment, regime and day: the same
+     * resolution runs at every quote, inspection and redemption, since the
+     * Offer fingerprint is recomputed each time.
+     */
     private function convert(float $usd, string $currency, CarbonInterface $on, Shipment $shipment, TaxRegistrationRegime $regime): ?ConvertedAmount
     {
         $converted = $this->exchangeRates->convert($usd, 'USD', $currency, $on);
 
+        $context = [
+            'shipment_id' => $shipment->id,
+            'regime' => $regime->value,
+            'currency' => $currency,
+            'order_date' => $on->toDateString(),
+        ];
+
         if ($converted === null) {
-            logger()->warning('No ECB exchange rate stored on or before the order date; the seller tax registration is not declared', [
-                'shipment_id' => $shipment->id,
-                'regime' => $regime->value,
-                'currency' => $currency,
-                'order_date' => $on->toDateString(),
+            $this->warnOnce('missing', $shipment, $regime, 'No ECB exchange rate stored on or before the order date; the seller tax registration is not declared', $context);
+
+            return null;
+        }
+
+        $expected = ExchangeRateConverter::latestPublishedDayBefore($on);
+
+        if ($converted->rateDate->diffInDays($expected) > self::STALE_RATE_DAYS) {
+            $this->warnOnce('stale', $shipment, $regime, 'The ECB exchange rate used for a seller tax registration threshold is more than '.self::STALE_RATE_DAYS.' days older than the order', $context + [
+                'rate_date' => $converted->rateDate->toDateString(),
             ]);
         }
 
         return $converted;
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    private function warnOnce(string $kind, Shipment $shipment, TaxRegistrationRegime $regime, string $message, array $context): void
+    {
+        $key = "customs-terms:{$kind}-rate:{$shipment->id}:{$regime->value}:".now()->toDateString();
+
+        if (Cache::add($key, true, now()->endOfDay())) {
+            logger()->warning($message, $context);
+        }
     }
 }

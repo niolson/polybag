@@ -18,6 +18,7 @@ use App\Models\CarrierService;
 use App\Models\Client;
 use App\Models\ClientTaxRegistration;
 use App\Models\ExchangeRate;
+use App\Models\Location;
 use App\Models\Package;
 use App\Models\Product;
 use App\Models\Setting;
@@ -56,9 +57,12 @@ afterEach(function (): void {
  * quoting it through a fake direct adapter.
  *
  * @param  list<string>  $carriers
+ * @param  (Closure(string): ?string)|null  $offerIdFor  The Offer a carrier's adapter issued itself, as Amazon's do, by carrier name; asked when it quotes
  */
-function dutiesFilterMethod(array $carriers = [Carrier::USPS, Carrier::UPS]): ShippingMethod
+function dutiesFilterMethod(array $carriers = [Carrier::USPS, Carrier::UPS], ?Closure $offerIdFor = null): ShippingMethod
 {
+    $offerIdFor ??= fn (string $carrier): ?string => null;
+
     $method = ShippingMethod::factory()->create();
 
     foreach ($carriers as $name) {
@@ -78,8 +82,8 @@ function dutiesFilterMethod(array $carriers = [Carrier::USPS, Carrier::UPS]): Sh
         $adapter->shouldReceive('getCarrierName')->andReturn($name);
         $adapter->shouldReceive('isConfigured')->andReturnTrue();
         $adapter->shouldReceive('prepareRateRequest')->andReturnNull();
-        $adapter->shouldReceive('getRates')->andReturn(collect([
-            new RateResponse($name, $code, "{$name} International", 30.00, carrierServiceId: $service->id, carrierId: $carrier->id),
+        $adapter->shouldReceive('getRates')->andReturnUsing(fn () => collect([
+            new RateResponse($name, $code, "{$name} International", 30.00, offerId: $offerIdFor($name), carrierServiceId: $service->id, carrierId: $carrier->id),
         ]));
         $adapter->shouldNotReceive('createShipment');
 
@@ -300,4 +304,89 @@ it('retires an Offer when the registration it would declare changes', function (
     ClientTaxRegistration::factory()->ioss()->for($client)->create();
 
     expect($offer->quoteInputsChangedSince($package))->toBeTrue();
+});
+
+it('drops nothing for a parcel that stays inside the EU', function (): void {
+    $berlin = Location::factory()->create(['country' => 'DE', 'city' => 'Berlin', 'postal_code' => '10115', 'state_or_province' => null]);
+    $package = dutiesFilterPackage('FR', dutiesFilterMethod());
+    $package->update(['location_id' => $berlin->id]);
+
+    expect(quotedCarriers($package->fresh()))->toEqualCanonicalizing([Carrier::USPS, Carrier::UPS])
+        ->and(app(ShippingRateService::class)->getDroppedRates())->toBe([])
+        ->and(app(ShippingRateService::class)->getCustomsTerms()?->applies)->toBeFalse();
+});
+
+it('treats Amazon Shipping as source-decided, through the unresolved refusal too', function (): void {
+    $amazonShipping = new RateResponse(Carrier::AMAZON_SHIPPING, 'GROUND', 'Amazon Shipping Ground', 8.0);
+    $filter = app(DutiesTermsFilter::class);
+
+    $ddu = $filter->apply(collect([$amazonShipping]), new ResolvedCustomsTerms(applies: true, destinationCountry: 'DE', dutiesTerms: DutiesTerms::Ddu));
+    $unresolved = $filter->apply(collect([$amazonShipping]), new ResolvedCustomsTerms(applies: true, destinationCountry: 'DE'));
+
+    expect($filter->isSourceDecided($amazonShipping))->toBeTrue()
+        ->and($ddu['kept']->all())->toBe([$amazonShipping])
+        ->and($unresolved['kept']->all())->toBe([$amazonShipping])
+        ->and($unresolved['droppedRates'])->toBe([]);
+});
+
+it('makes an Offer a source issued for a dropped rate unredeemable', function (): void {
+    $issuedId = null;
+    $method = dutiesFilterMethod(offerIdFor: function (string $carrier) use (&$issuedId): ?string {
+        return $carrier === Carrier::USPS ? $issuedId : null;
+    });
+    $package = dutiesFilterPackage('DE', $method, ['duties_terms' => DutiesTerms::Ddu]);
+    $issued = ShippingOffer::factory()->direct()->create(['package_id' => $package->id, 'carrier' => Carrier::USPS]);
+    $issuedId = $issued->public_id;
+
+    expect(quotedCarriers($package))->toBe([Carrier::UPS]);
+
+    $redemption = app(OfferStore::class)->redeem($package->fresh(), $issued->public_id);
+
+    expect($redemption->rejection)->toBe(OfferRejection::Expired)
+        ->and($issued->fresh()->isConsumed())->toBeFalse();
+});
+
+it('names the carrier by its operator label', function (): void {
+    $method = dutiesFilterMethod();
+    Carrier::query()->where('name', Carrier::USPS)->update(['display_name' => 'Postal Service']);
+    $package = dutiesFilterPackage('DE', $method, ['duties_terms' => DutiesTerms::Ddu]);
+
+    quotedCarriers($package);
+
+    expect(app(ShippingRateService::class)->getDroppedRates()[0]->carrier)->toBe('Postal Service')
+        ->and(droppedReasons())->toBe(['Postal Service dropped: Germany requires prepaid duties (IMM)']);
+});
+
+it('says only direct rates are gone when a source-decided rate remains', function (): void {
+    $package = dutiesFilterPackage('FR', dutiesFilterMethod([Carrier::USPS, Carrier::AMAZON_SHIPPING]));
+
+    expect(quotedCarriers($package))->toBe([Carrier::AMAZON_SHIPPING])
+        ->and(droppedReasons()[0])->toStartWith('No direct rates: no duties terms are set for France')
+        ->and(app(ShippingRateService::class)->allRatesDroppedForCustomsTerms())->toBeFalse();
+});
+
+it('keeps the shipping-method hint when no source answered at all', function (): void {
+    $package = dutiesFilterPackage('FR', dutiesFilterMethod());
+    app(CarrierRegistry::class)->reset();
+
+    Livewire::test(Ship::class, ['package_id' => $package->id])
+        ->assertSet('rateOptions', [])
+        ->assertSet('allRatesDroppedForCustomsTerms', false)
+        ->assertSee('No rates: no duties terms are set for France')
+        ->assertDontSee('No rate fits the customs terms of this shipment')
+        ->assertSee('Check the shipping method configuration');
+});
+
+it('does not serve stale rates on the Ship page after a client policy edit', function (): void {
+    $client = Client::factory()->withDutiesPolicy(['EU' => 'ddu'])->create();
+    $package = dutiesFilterPackage('DE', dutiesFilterMethod(), ['client_id' => $client->id]);
+
+    Livewire::test(Ship::class, ['package_id' => $package->id])
+        ->assertSee('USPS dropped: Germany requires prepaid duties (IMM)');
+
+    $client->update(['duties_policy' => ['EU' => 'ddp']]);
+
+    Livewire::test(Ship::class, ['package_id' => $package->id])
+        ->assertDontSee('USPS dropped')
+        ->assertSee('USPS International');
 });

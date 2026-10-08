@@ -175,3 +175,43 @@ fingerprint, so editing the Shipment's `duties_terms` invalidates its Offers.
   no network), `DutiesTermsRateFilterTest` (USPS DE/PL/NL, the all-dropped page, both
   refusal links, source-decided and unlisted carriers, `effective_from`, the request's
   terms, Offer invalidation), and two additions to `TaxRegistrationRegimeTest`.
+- 2026-10-08 — Review fixes, same day. **Intra-EU:** `AddressData::sharesCustomsZoneWith()`
+  treats every non-US country as its own zone, so DE→FR counted as an import: an unset
+  EU policy dropped every direct rate, and `EU → ddp` attached DDP and the client's IOSS
+  to a parcel with no import. The resolver now returns *not applicable* when origin and
+  destination are both in the EU (`CustomsTermsResolver::crossesNoCustomsBorder()`).
+  `sharesCustomsZoneWith()` is unchanged, because the customs-declaration guards and the
+  adapters use it; whether *they* should also treat intra-EU parcels as needing no
+  declaration is an open question, not answered here. GB→Northern Ireland stays `GB` to
+  `GB` (no customs terms): the Windsor Framework makes some such movements declarable,
+  which nothing models yet. **Rate date:** the converter now uses the latest rate
+  **published before** the order: a rate dated before the order's day, or that day's
+  only when the order is at or after 16:00 Europe/Berlin, when the ECB publishes
+  (`ExchangeRateConverter::latestPublishedDayBefore()`, `PUBLICATION_HOUR`). The answer
+  is fixed once the order exists, whenever rating runs or the day's file is fetched, so
+  the same Shipment can no longer be under €150 in the morning and over it in the
+  afternoon. **Gaps:** `exchange-rates:fetch` always reads the 90-day file (the
+  `--history` option is gone); the upsert is idempotent, so an outage of up to 90 days
+  fills itself on the next run. The resolver warns when the rate used is more than 5 days
+  older than the order's expected rate day. It logs that warning and the no-rate warning
+  once per Shipment, regime and day (`Cache::add`), not every time the fingerprint is
+  recomputed at quote, inspect and redeem. **Smaller:** Amazon Shipping on a connection is
+  source-decided like Amazon Buy Shipping (`DutiesTermsFilter::isSourceDecided()`):
+  PolyBag sends it no terms, so its rates pass the support check and, following ADR-0008
+  decision 5, the unresolved-EU refusal too. When the filter drops a rate whose source
+  issued its own Offer inside `getRates()` (Amazon), that Offer is expired
+  (`ShippingRateService::retireOffersOf()`), because `offer()` stamps a quote fingerprint
+  only on kept rates. The unresolved notice is built once per rating by
+  `unresolvedNotice()` rather than looked up per task. It reads "No direct rates: …"
+  when source-decided rates or blind offers remain, else "No rates: …". Drop reasons
+  name the carrier by `Carrier::labelForName()`, so an operator relabel shows. The Ship
+  page's "No rate fits the customs terms of this shipment" heading shows only when
+  rates were quoted and the filter dropped them all
+  (`PackageShippingOptions::$allRatesDroppedForCustomsTerms`). Otherwise the old "Check the
+  shipping method configuration" hint stays, beside any notice. The page's 60-second rate
+  cache key now includes a digest of the client's duties policy and registrations.
+  Tests: additions to `CustomsTermsResolverTest` (EU→EU, EU→US, GB→EU, stale-rate and
+  deduped warnings), `ExchangeRateTest` (03:00 UTC order before and after that day's rate
+  is stored, a 17:00 Berlin order, the 15:59 cutoff, 90 days on every run) and
+  `DutiesTermsRateFilterTest` (intra-EU rating, Amazon Shipping, an expired pre-issued
+  Offer, relabel, the two notice wordings, the unrelated-failure hint, cache freshness).

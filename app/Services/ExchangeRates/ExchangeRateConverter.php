@@ -12,13 +12,27 @@ use Carbon\CarbonInterface;
  * (`international-customs-terms/04`).
  *
  * Every ECB rate is quoted against the euro, so USD to NOK is USD to EUR and
- * EUR to NOK on the same day. The day used is the one asked for when the ECB
- * published that day, else the latest earlier day it published both
- * currencies. A later day is never used: a rate published after the order
- * was not the rate on the day payment was accepted.
+ * EUR to NOK on the same day.
+ *
+ * The rate used is the latest one **published before** the moment asked
+ * about. The ECB publishes each working day's rates at about 16:00 Central
+ * European time, so a moment before 16:00 Europe/Berlin on a day uses the
+ * previous published day, and one from 16:00 uses that day's. The answer is
+ * therefore fixed once the moment has passed: it does not depend on whether
+ * PolyBag had fetched that day's file when it asked, which would otherwise let
+ * the same order be under a threshold in the morning and over it in the
+ * afternoon. A day with no rate (weekends, TARGET holidays) falls back to the
+ * latest earlier day that quotes both currencies.
  */
 class ExchangeRateConverter
 {
+    /**
+     * When the ECB's daily reference rates are published, in its own time.
+     */
+    public const PUBLICATION_TIMEZONE = 'Europe/Berlin';
+
+    public const PUBLICATION_HOUR = 16;
+
     /**
      * How many earlier published days to look through for one that quotes
      * both currencies. The ECB never skips more than a long holiday weekend;
@@ -27,14 +41,25 @@ class ExchangeRateConverter
     private const LOOKBACK_ROWS_PER_CURRENCY = 31;
 
     /**
-     * The amount in `$to`, or null when no stored day on or before `$on`
-     * quotes both currencies.
+     * The latest ECB reference date published before `$at`.
      */
-    public function convert(float $amount, string $from, string $to, CarbonInterface $on): ?ConvertedAmount
+    public static function latestPublishedDayBefore(CarbonInterface $at): CarbonImmutable
+    {
+        $local = CarbonImmutable::instance($at)->setTimezone(self::PUBLICATION_TIMEZONE);
+        $day = CarbonImmutable::parse($local->toDateString());
+
+        return $local->hour >= self::PUBLICATION_HOUR ? $day : $day->subDay();
+    }
+
+    /**
+     * The amount in `$to` at the latest rate published before `$at`, or null
+     * when no stored day on or before that one quotes both currencies.
+     */
+    public function convert(float $amount, string $from, string $to, CarbonInterface $at): ?ConvertedAmount
     {
         $from = strtoupper($from);
         $to = strtoupper($to);
-        $day = CarbonImmutable::parse($on->toDateString());
+        $day = self::latestPublishedDayBefore($at);
 
         if ($from === $to) {
             return new ConvertedAmount($amount, $to, $day);
