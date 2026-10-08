@@ -17,12 +17,16 @@ use Carbon\CarbonInterface;
  * The rate used is the latest one **published before** the moment asked
  * about. The ECB publishes each working day's rates at about 16:00 Central
  * European time, so a moment before 16:00 Europe/Berlin on a day uses the
- * previous published day, and one from 16:00 uses that day's. The answer is
- * therefore fixed once the moment has passed: it does not depend on whether
- * PolyBag had fetched that day's file when it asked, which would otherwise let
- * the same order be under a threshold in the morning and over it in the
- * afternoon. A day with no rate (weekends, TARGET holidays) falls back to the
- * latest earlier day that quotes both currencies.
+ * previous published day, and one from 16:00 uses that day's. A day with no
+ * stored rate (weekends, TARGET holidays, or a day not fetched yet) falls back
+ * to the latest earlier day that quotes both currencies.
+ *
+ * That choice alone can still move: an order placed after 16:00 Berlin but
+ * rated before PolyBag has fetched that day's file gets yesterday's rate,
+ * then today's once it arrives. So the choice is made once per Shipment:
+ * `CustomsTermsResolver` pins the day {@see self::convert()} picked on the
+ * Shipment's `customs_rate_date`, and converts at exactly that day with
+ * {@see self::convertOn()} ever after.
  */
 class ExchangeRateConverter
 {
@@ -65,11 +69,35 @@ class ExchangeRateConverter
             return new ConvertedAmount($amount, $to, $day);
         }
 
+        return $this->convertAtOrBefore($amount, $from, $to, $day, exact: false);
+    }
+
+    /**
+     * The amount in `$to` at exactly the given ECB reference day, or null when
+     * that day's stored rates do not quote both currencies. Never falls back
+     * to another day: a pinned day is the Shipment's answer, and re-picking
+     * would change it.
+     */
+    public function convertOn(float $amount, string $from, string $to, CarbonInterface $rateDate): ?ConvertedAmount
+    {
+        $from = strtoupper($from);
+        $to = strtoupper($to);
+        $day = CarbonImmutable::parse($rateDate->toDateString());
+
+        if ($from === $to) {
+            return new ConvertedAmount($amount, $to, $day);
+        }
+
+        return $this->convertAtOrBefore($amount, $from, $to, $day, exact: true);
+    }
+
+    private function convertAtOrBefore(float $amount, string $from, string $to, CarbonImmutable $day, bool $exact): ?ConvertedAmount
+    {
         $quoted = array_values(array_diff([$from, $to], [ExchangeRate::BASE_CURRENCY]));
 
         $rates = ExchangeRate::query()
             ->whereIn('currency', $quoted)
-            ->whereDate('rate_date', '<=', $day->toDateString())
+            ->whereDate('rate_date', $exact ? '=' : '<=', $day->toDateString())
             ->orderByDesc('rate_date')
             ->limit(self::LOOKBACK_ROWS_PER_CURRENCY * count($quoted))
             ->get(['rate_date', 'currency', 'rate'])

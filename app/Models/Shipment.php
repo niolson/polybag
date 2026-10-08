@@ -164,6 +164,7 @@ class Shipment extends Model
         'duties_terms' => DutiesTerms::class,
         'seller_tax_regime' => TaxRegistrationRegime::class,
         'recipient_tax_id_type' => RecipientTaxIdType::class,
+        'customs_rate_date' => 'immutable_date',
         'metadata' => 'array',
         'items_version' => 'integer',
         'pack_slip_items_version' => 'integer',

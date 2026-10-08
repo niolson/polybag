@@ -215,3 +215,31 @@ fingerprint, so editing the Shipment's `duties_terms` invalidates its Offers.
   is stored, a 17:00 Berlin order, the 15:59 cutoff, 90 days on every run) and
   `DutiesTermsRateFilterTest` (intra-EU rating, Amazon Shipping, an expired pre-issued
   Offer, relabel, the two notice wordings, the unrelated-failure hint, cache freshness).
+- 2026-10-08 — **The rate date is pinned on the Shipment.** From the review of PR #375.
+  An order placed at or after 16:00 Europe/Berlin (14:00 UTC in summer, 15:00 in
+  winter) could be rated before the 15:30 UTC fetch stored that day's rates. It then
+  converted at the previous day's rate, and at that day's once fetched: $160 was €160
+  before and €128 after. That flipped IOSS eligibility and retired the Offers with no
+  Shipment edit, and a failed fetch did the same later, when it recovered. A new
+  nullable `shipments.customs_rate_date` now holds the ECB day the first converting
+  resolution used, whatever the publication rule and its fallback picked, and every
+  later resolution converts at exactly that day (`ExchangeRateConverter::convertOn()`).
+  - **Writing the pin.** It is written during quoting with an UPDATE … WHERE
+    `customs_rate_date` IS NULL. That UPDATE does not touch `updated_at`, so the Ship
+    page's cache key does not move. The column is then re-read, so two first resolutions
+    at once agree on the pin that landed.
+  - **When nothing is pinned.** A Shipment that resolves to not applicable, or has no
+    registration to convert for, pins nothing.
+  - **A pinned day with no row for the currency.** That is treated as no rate: the
+    registration is withheld and a warning logged, and no other day is picked.
+  - **No rate at all.** Nothing is pinned and the registration is withheld, as before.
+    The next resolution after rates arrive pins. That one transition, withheld to
+    decided, can still retire an Offer, and only during an ECB outage.
+  - **Edits and PII.** A manager's edit to `duties_terms` or the registration does not
+    clear the pin, since the order date has not changed. The column is not personal
+    data, so the PII purge leaves it alone.
+  - **Tests.** In `CustomsTermsResolverTest`: the pin survives a later fetch; outage then
+    recovery; a pinned day missing GBP; a concurrent pin wins; no pin without a
+    conversion; the pin kept through a duties-terms edit. In `DutiesTermsRateFilterTest`:
+    the reviewer's 16:30 Berlin scenario, with the same converted value and fingerprint
+    and the Offer still redeemable.

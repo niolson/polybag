@@ -16,6 +16,7 @@ use App\Models\ClientTaxRegistration;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Services\ExchangeRates\ExchangeRateConverter;
+use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\Cache;
 
@@ -261,23 +262,47 @@ class CustomsTermsResolver
     }
 
     /**
-     * Convert at the latest ECB rate published before the order, warning
-     * when there is none or it is stale.
+     * Convert at the Shipment's pinned ECB day, or at the latest rate
+     * published before the order, pinning the day that picked.
      *
-     * Each warning is logged once per Shipment, regime and day: the same
+     * The day is pinned on the Shipment (`customs_rate_date`) by the first
+     * resolution that converts a value and reused ever after, so the answer
+     * cannot move because a later day's rates were fetched between two
+     * quotes, or after an outage ends. A pinned day whose row for this
+     * currency is missing is no rate, never a reason to pick another day.
+     * Nothing is pinned while no rate exists at all: the registration is
+     * withheld, and the first resolution once rates arrive pins.
+     *
+     * A manager's edit to `duties_terms` or the seller registration does not
+     * clear the pin: the order date, which is all the pin depends on, has not
+     * changed.
+     *
+     * Warnings are logged once per Shipment, regime and day: the same
      * resolution runs at every quote, inspection and redemption, since the
      * Offer fingerprint is recomputed each time.
      */
     private function convert(float $usd, string $currency, CarbonInterface $on, Shipment $shipment, TaxRegistrationRegime $regime): ?ConvertedAmount
     {
-        $converted = $this->exchangeRates->convert($usd, 'USD', $currency, $on);
-
         $context = [
             'shipment_id' => $shipment->id,
             'regime' => $regime->value,
             'currency' => $currency,
             'order_date' => $on->toDateString(),
         ];
+
+        if ($shipment->customs_rate_date !== null) {
+            $converted = $this->exchangeRates->convertOn($usd, 'USD', $currency, $shipment->customs_rate_date);
+
+            if ($converted === null) {
+                $this->warnOnce('pinned', $shipment, $regime, 'The ECB exchange rate pinned for this Shipment is not stored for this currency; the seller tax registration is not declared', $context + [
+                    'rate_date' => $shipment->customs_rate_date->toDateString(),
+                ]);
+            }
+
+            return $converted;
+        }
+
+        $converted = $this->exchangeRates->convert($usd, 'USD', $currency, $on);
 
         if ($converted === null) {
             $this->warnOnce('missing', $shipment, $regime, 'No ECB exchange rate stored on or before the order date; the seller tax registration is not declared', $context);
@@ -293,7 +318,39 @@ class CustomsTermsResolver
             ]);
         }
 
+        $pinned = $this->pinRateDate($shipment, $converted->rateDate);
+
+        // Another resolution pinned first, on another day: its pin is the answer.
+        if (! $pinned->equalTo($converted->rateDate)) {
+            return $this->convert($usd, $currency, $on, $shipment, $regime);
+        }
+
         return $converted;
+    }
+
+    /**
+     * Pin the day if none is pinned yet, and return whichever day is pinned.
+     *
+     * Written during quoting, so race-safe: only a null column is set, and the
+     * value is read back, so two first resolutions at once agree on the one
+     * that landed. Written without touching `updated_at`, which keys the Ship
+     * page's rate cache: pinning changes nothing a quote depends on.
+     */
+    private function pinRateDate(Shipment $shipment, CarbonImmutable $rateDate): CarbonImmutable
+    {
+        Shipment::query()
+            ->whereKey($shipment->id)
+            ->whereNull('customs_rate_date')
+            ->toBase()
+            ->update(['customs_rate_date' => $rateDate->toDateString()]);
+
+        $stored = Shipment::query()->whereKey($shipment->id)->first(['id', 'customs_rate_date'])?->customs_rate_date;
+        $pinned = $stored === null ? $rateDate : CarbonImmutable::parse($stored->toDateString());
+
+        $shipment->setAttribute('customs_rate_date', $pinned->toDateString());
+        $shipment->syncOriginalAttribute('customs_rate_date');
+
+        return $pinned;
     }
 
     /**

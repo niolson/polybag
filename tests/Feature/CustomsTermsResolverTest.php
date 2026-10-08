@@ -14,6 +14,7 @@ use App\Models\Product;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Services\Customs\CustomsTermsResolver;
+use Carbon\CarbonImmutable;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Log;
 
@@ -387,6 +388,95 @@ describe('the customs border', function (): void {
 
         expect(resolveFor($shipment, resolverDestination('DE'))->dutiesTerms)->toBe(DutiesTerms::Ddp)
             ->and(resolveFor($shipment, resolverDestination('DE'), origin: resolverDestination('GB', 'SW1A 1AA'))->dutiesTerms)->toBe(DutiesTerms::Ddp);
+    });
+});
+
+describe('the pinned rate date', function (): void {
+    it('pins the day it converted at, and keeps it when a later day is fetched', function (): void {
+        $shipment = resolverShipment(Client::factory()->ddpToEu()->withIossRegistration()->create());
+        // 16:30 in Frankfurt: the day's rates are published but not yet fetched.
+        $shipment->forceFill(['created_at' => CarbonImmutable::parse('2026-10-08 16:30', 'Europe/Berlin')->utc()])->save();
+        $shipment = $shipment->fresh();
+
+        $before = resolveFor($shipment, resolverDestination('DE'), [[160.0]]);
+        ExchangeRate::factory()->quoting('USD', 1.00, '2026-10-08')->create();
+        $after = resolveFor($shipment->fresh(), resolverDestination('DE'), [[160.0]]);
+
+        // $160 at 1.25 is €128; at the 8th's 1.00 it would be €160, over €150.
+        expect($before->convertedValue?->amount)->toBe(128.0)
+            ->and($after->convertedValue?->amount)->toBe(128.0)
+            ->and($after->convertedValue?->rateDate->toDateString())->toBe('2026-10-07')
+            ->and($after->registration)->not->toBeNull()
+            ->and($shipment->fresh()->customs_rate_date?->toDateString())->toBe('2026-10-07');
+    });
+
+    it('pins nothing while no rate exists, and pins once rates arrive', function (): void {
+        ExchangeRate::query()->delete();
+        $shipment = resolverShipment(Client::factory()->ddpToEu()->withIossRegistration()->create());
+
+        $outage = resolveFor($shipment, resolverDestination('DE'));
+
+        expect($outage->exchangeRateMissing)->toBeTrue()
+            ->and($outage->registration)->toBeNull()
+            ->and($shipment->fresh()->customs_rate_date)->toBeNull();
+
+        ExchangeRate::factory()->quoting('USD', 1.25, '2026-10-07')->create();
+        $recovered = resolveFor($shipment->fresh(), resolverDestination('DE'));
+
+        expect($recovered->registration)->not->toBeNull()
+            ->and($shipment->fresh()->customs_rate_date?->toDateString())->toBe('2026-10-07');
+    });
+
+    it('withholds the registration when the pinned day has no rate for the currency, never re-picking', function (): void {
+        $warnings = captureWarnings();
+        $client = Client::factory()->create();
+        ClientTaxRegistration::factory()->ukVat()->for($client)->create();
+        ExchangeRate::factory()->quoting('USD', 1.25, '2026-10-08')->create();
+        $shipment = resolverShipment($client);
+        $shipment->forceFill(['customs_rate_date' => '2026-10-08'])->save();
+
+        // The 8th has USD but no GBP; the 7th has both and is not used.
+        $terms = resolveFor($shipment->fresh(), resolverDestination('GB', 'SW1A 1AA'));
+
+        expect($terms->exchangeRateMissing)->toBeTrue()
+            ->and($terms->registration)->toBeNull()
+            ->and($shipment->fresh()->customs_rate_date?->toDateString())->toBe('2026-10-08')
+            ->and($warnings())->toHaveCount(1)
+            ->and($warnings()[0])->toContain('pinned');
+    });
+
+    it('takes the pin another resolution wrote first, rather than overwriting it', function (): void {
+        ExchangeRate::factory()->quoting('USD', 1.00, '2026-10-06')->create();
+        $shipment = resolverShipment(Client::factory()->ddpToEu()->withIossRegistration()->create());
+
+        // Loaded before a concurrent first resolution pinned the 6th.
+        Shipment::query()->whereKey($shipment->id)->toBase()->update(['customs_rate_date' => '2026-10-06']);
+
+        $terms = resolveFor($shipment, resolverDestination('DE'), [[100.0]]);
+
+        expect($terms->convertedValue?->rateDate->toDateString())->toBe('2026-10-06')
+            ->and($terms->convertedValue?->amount)->toBe(100.0)
+            ->and($shipment->fresh()->customs_rate_date?->toDateString())->toBe('2026-10-06');
+    });
+
+    it('pins nothing for a Shipment that needs no conversion', function (): void {
+        $noRegistration = resolverShipment(Client::factory()->ddpToEu()->create());
+        $domestic = resolverShipment(Client::factory()->withIossRegistration()->create(), ['country' => 'US']);
+
+        resolveFor($noRegistration, resolverDestination('DE'));
+        resolveFor($domestic, new AddressData('A', 'B', '1 Main St', 'Seattle', 'WA', '98101', 'US'));
+
+        expect($noRegistration->fresh()->customs_rate_date)->toBeNull()
+            ->and($domestic->fresh()->customs_rate_date)->toBeNull();
+    });
+
+    it('keeps the pin through a manager edit to the duties terms', function (): void {
+        $shipment = resolverShipment(Client::factory()->ddpToEu()->withIossRegistration()->create());
+        resolveFor($shipment, resolverDestination('DE'));
+
+        $shipment->fresh()->update(['duties_terms' => DutiesTerms::Ddu]);
+
+        expect($shipment->fresh()->customs_rate_date?->toDateString())->toBe('2026-10-07');
     });
 });
 

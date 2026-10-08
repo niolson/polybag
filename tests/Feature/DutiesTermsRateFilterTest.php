@@ -391,3 +391,29 @@ it('does not serve stale rates on the Ship page after a client policy edit', fun
         ->assertDontSee('USPS dropped')
         ->assertSee('USPS International');
 });
+
+it('keeps an Offer redeemable when the order day\'s rate is fetched after it was quoted', function (): void {
+    ExchangeRate::query()->delete();
+    ExchangeRate::factory()->quoting('USD', 1.25, '2026-10-07')->create();
+    $client = Client::factory()->ddpToEu()->withIossRegistration()->create();
+    $package = dutiesFilterPackage('NL', dutiesFilterMethod(), ['client_id' => $client->id]);
+    // $160 of goods, ordered at 16:30 in Frankfurt: after the ECB published
+    // the 8th's rates, before PolyBag fetched them.
+    $package->packageItems()->first()->shipmentItem->update(['value' => 160.0]);
+    $package->shipment->forceFill(['created_at' => CarbonImmutable::parse('2026-10-08 16:30', 'Europe/Berlin')->utc()])->save();
+    $package = $package->fresh();
+
+    app(ShippingRateService::class)->getShippingRates($package->id);
+    $quoted = RateRequest::fromPackage($package->fresh());
+    $offer = ShippingOffer::query()->where('package_id', $package->id)->where('carrier', Carrier::USPS)->firstOrFail();
+
+    // At the 8th's 1.00 the parcel would be €160, over IOSS's €150.
+    ExchangeRate::factory()->quoting('USD', 1.00, '2026-10-08')->create();
+    $later = RateRequest::fromPackage($package->fresh());
+
+    expect($quoted->customsTerms?->convertedValue?->amount)->toBe(128.0)
+        ->and($later->customsTerms?->convertedValue?->amount)->toBe(128.0)
+        ->and($later->customsTerms?->registration)->not->toBeNull()
+        ->and($later->fingerprint())->toBe($quoted->fingerprint())
+        ->and(app(OfferStore::class)->inspect($package->fresh(), $offer->public_id)->rejection)->toBeNull();
+});
