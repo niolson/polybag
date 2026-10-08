@@ -10,6 +10,8 @@ Repo: `polybag`
 
 [PRD](../PRD.md). Needs `01`, `02`'s FedEx answers and `06` (the snapshot and the shape).
 
+Sending an ITN also needs the client's EIN from `11`.
+
 ## Problem
 
 After `01` FedEx ships everything DDU. It has to follow the resolved terms instead, and

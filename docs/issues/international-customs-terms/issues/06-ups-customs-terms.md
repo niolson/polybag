@@ -12,6 +12,8 @@ Repo: `polybag`
 answers. The first complete path: client policy → resolved terms → rate → label →
 snapshot. `07` and `08` follow its shape.
 
+Sending an ITN also needs the client's EIN from `11`.
+
 ## Problem
 
 `UpsAdapter` sends only the transportation charge, so every UPS international parcel is

@@ -227,7 +227,8 @@ Run by `CustomsReadiness` (`05`), at purchase and as a Ship-page preview.
 | Every line has a country of origin | All international | Block |
 | Every line has an HS code of 6+ digits | EU, GB | Block |
 | HS code present | Other international | Warn |
-| Customs total over $2,500 has an ITN | All international except CA, and the always-file destinations | Block |
+| Any one tariff line over $2,500 has an ITN (15 CFR 30.37(a) is per Schedule B number, not per parcel; lines grouped by 6-digit HS code) | All international except CA, and the always-file destinations | Block |
+| A Shipment with an ITN has the client's EIN (`11`) | All international | Block |
 | Recipient tax ID present | Per `recipient-tax-id.json` (BR, KR to start) | Block |
 | Line value is not zero | All international | Block (existing guard, moved) |
 | EU consumer line has M-PID and NS-PID | EU consumer | Block (existing guard, moved) |

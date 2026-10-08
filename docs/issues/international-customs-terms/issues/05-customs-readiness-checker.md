@@ -108,3 +108,14 @@ international Package that lack an origin or an HS code.
     customs is *"likely to treat your package as a B2B shipment and ignore your IOSS
     number"*. This is customs behavior, so it applies to every carrier. Same signal as
     `ConsigneeType`: a non-blank company name.
+- 2026-10-08 — From `02` and `11`:
+  - **The ITN rule is per tariff line, not per parcel.** 15 CFR 30.37(a) exempts
+    commodities *"classified under an individual Schedule B number… $2,500 or less…
+    regardless of the total shipment value"*. A $3,000 parcel of ten $300 lines needs
+    no EEI. Block only when one classification is over $2,500. Group lines by the first
+    six digits of the HS code, since PolyBag stores HS codes, not Schedule B numbers.
+    Treat a line with no HS code as its own group. The FedEx sandbox refused a single
+    $3,000 line claiming 30.37(a); before building, check with one sandbox label of ten
+    $300 lines that FedEx applies the rule per line too.
+  - **Add the `11` rule:** a Shipment with an ITN whose client has no `exporter_ein` is
+    blocked, with the client form as the fix.
