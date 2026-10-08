@@ -438,7 +438,7 @@ class CustomsReadiness
                     .($client === null ? 'it has no client' : "{$client->name} has no EIN")
                     .'. Enter the client\'s own EIN on the client form. A client without a US EIN needs its filer to supply the ITN; PolyBag has no field for another party ID.'
                     .($client === null ? '' : $this->managerNote(ClientResource::class, $client)),
-                ), $client === null ? null : fn () => $this->clientFix($client));
+                ), $client === null ? null : fn (): ?array => $this->clientFix($client));
             }
         }
 
@@ -493,7 +493,7 @@ class CustomsReadiness
             'export_itn_required',
             'Export ITN Required',
             "{$reason}{$invalidImport} File EEI in AESDirect and enter the ITN on the shipment.".$this->managerNote(ShipmentResource::class, $shipment),
-        ), fn () => $this->shipmentFix($shipment, 'Enter the export ITN'))];
+        ), fn (): ?array => $this->shipmentFix($shipment, 'Enter the export ITN'))];
     }
 
     /**
@@ -579,7 +579,7 @@ class CustomsReadiness
                 ? "{$destination->country} customs holds a parcel without the recipient's {$wanted}."
                 : "{$destination->country} customs may ask for the recipient's {$wanted}; the label goes through without it.")
             ."{$invalidImport} Enter it on the shipment.".$this->managerNote(ShipmentResource::class, $shipment),
-        ), fn () => $this->shipmentFix($shipment, 'Enter the recipient tax ID'))];
+        ), fn (): ?array => $this->shipmentFix($shipment, 'Enter the recipient tax ID'))];
     }
 
     /**
