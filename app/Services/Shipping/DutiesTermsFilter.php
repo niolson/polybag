@@ -7,6 +7,7 @@ use App\DataTransferObjects\Shipping\DroppedRate;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\DutiesSupport;
 use App\Enums\PostageSourceKind;
+use App\Enums\TaxRegistrationRegime;
 use App\Filament\Pages\Settings;
 use App\Filament\Resources\Clients\ClientResource;
 use App\Models\Carrier;
@@ -83,7 +84,7 @@ class DutiesTermsFilter
                 continue;
             }
 
-            $entry = $this->dutiesSupport->supportFor($rate->carrier, $terms->destinationCountry, $on);
+            $entry = $this->dutiesSupport->supportFor($rate->carrier, $terms->destinationCountry, $on, $terms->registration?->regime);
 
             if ($entry === null || $entry->support->allows($terms->dutiesTerms)) {
                 $kept->push($rate);
@@ -96,7 +97,8 @@ class DutiesTermsFilter
                 '%s dropped: %s %s (%s)',
                 $carrier,
                 $this->countryName($terms->destinationCountry),
-                $entry->support === DutiesSupport::DdpRequired ? 'requires prepaid duties' : 'cannot take prepaid duties',
+                ($entry->support === DutiesSupport::DdpRequired ? 'requires prepaid duties' : 'cannot take prepaid duties')
+                    .($entry->registration !== null ? ' with '.$this->registrationName($entry->registration) : ''),
                 $entry->authority,
             );
 
@@ -151,6 +153,17 @@ class DutiesTermsFilter
             fixUrl: ClientResource::getUrl('edit', ['record' => $client]),
             fixLabel: "Set duties terms for {$client->name}",
         );
+    }
+
+    /**
+     * How a reason names the registration, such as "an IOSS number": the
+     * regime's label without its region.
+     */
+    private function registrationName(TaxRegistrationRegime $regime): string
+    {
+        $name = strtok($regime->getLabel(), ' ');
+
+        return (in_array($name[0], ['A', 'E', 'I', 'O', 'U'], true) ? 'an ' : 'a ').$name.' number';
     }
 
     private function countryName(string $country): string

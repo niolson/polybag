@@ -1,6 +1,6 @@
 # Duties support can depend on the seller registration
 
-Status: ready-for-agent
+Status: done — 2026-10-08
 Category: enhancement
 Repo: `polybag`
 
@@ -69,10 +69,39 @@ carrier's IMM authority, while the source is not USPS.
 
 ## Acceptance criteria
 
-- [ ] USPS to AT and SE: a DDU rate is kept with no registration and dropped with an
+- [x] USPS to AT and SE: a DDU rate is kept with no registration and dropped with an
       applicable IOSS registration, with the reason above; a DDP rate is kept either way
-- [ ] A withheld registration (consignment over €150) does not trigger the override
-- [ ] UPS and FedEx rates to AT and SE are unaffected
-- [ ] `DutiesSupportTable::errors()` names a malformed override: unknown regime, bad
+- [x] A withheld registration (consignment over €150) does not trigger the override
+- [x] UPS and FedEx rates to AT and SE are unaffected
+- [x] `DutiesSupportTable::errors()` names a malformed override: unknown regime, bad
       support value, missing source or checked date
-- [ ] `version` is bumped, and the file's notes describe `with_registration`
+- [x] `version` is bumped, and the file's notes describe `with_registration`
+
+## Comments
+
+- 2026-10-08 — Built. `duties-support.json` (version `2026-10-08.1`) gives USPS AT and SE a
+  `with_registration.ioss` of `ddp_required`, sourced to Swiss Post's EU customs reform page
+  (read 2026-10-08, page dated 30.09.2026: B2C consignments with IOSS registration to AT, BE,
+  DK, FI, LU, FR, DE, PT and SE carry the PDDP obligation). The file's version still has to be
+  an ISO date, but the table was already at `2026-10-08`, so `errors()` now also accepts a
+  `.N` suffix for a second change the same day. `DutiesSupportTable::supportFor()` takes an
+  optional fourth argument, the regime of `ResolvedCustomsTerms::$registration` (the declared
+  one, so a registration withheld over the threshold never triggers it), and applies an
+  override only for that regime, never for the carrier default, and only while the entry's
+  own `effective_from` is in force (an override takes no `effective_from` of its own; `errors()`
+  says so). `DutiesSupportEntry` gains `registration`, set when an override answered.
+  **Deviation:** an override may carry an optional `authority` (here `Swiss Post`), because the
+  reason must name the override's source and the table's `authority` is the carrier's (`IMM`);
+  without it the reason would cite IMM. `DutiesTermsFilter` appends " with an IOSS number" to
+  the reason: "USPS dropped: Austria requires prepaid duties with an IOSS number (Swiss Post)".
+  `errors()` names an unknown regime, an empty list, a bad support value, and a missing source
+  or checked date. Tests: `DutiesSupportTableTest` (override lookup, effective date gate, five
+  malformed overrides) and `DutiesTermsRateFilterTest` (AT and SE dropped with a client IOSS
+  registration and with an order's, DDP kept, kept with no registration, kept when the
+  registration is withheld over €150, UPS and FedEx untouched).
+- Unverified: the sources are still the two secondary ones; USPS has not confirmed the rule
+  (question in the USPS email from `02`), so the override cites Swiss Post, not USPS. Only
+  Swiss Post's page was re-read; Pirate Ship's was not. The USPS FAQ that says IOSS should not
+  be combined with USPS DDP is probably out of date, per the maintainer; the design is
+  unchanged for it. The other seven countries are already `ddp_required` for USPS, so need no
+  override.

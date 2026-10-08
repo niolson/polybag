@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\DutiesSupport;
+use App\Enums\TaxRegistrationRegime;
 use App\Services\Customs\DutiesSupportTable;
 use Carbon\CarbonImmutable;
 
@@ -33,7 +34,7 @@ function temporaryDutiesSupport(array $table): string
 
 it('is valid as committed', function (): void {
     expect(DutiesSupportTable::errors(committedDutiesSupport()))->toBe([])
-        ->and((new DutiesSupportTable)->version())->toMatch('/^\d{4}-\d{2}-\d{2}$/');
+        ->and((new DutiesSupportTable)->version())->toMatch('/^\d{4}-\d{2}-\d{2}(\.\d+)?$/');
 });
 
 it('sources every USPS entry from the International Mail Manual', function (): void {
@@ -104,7 +105,52 @@ it('names what is wrong with a malformed table', function (string $problem, Clos
     'a malformed effective date' => ['effective_from', function (array &$table): void {
         $table['carriers']['usps']['countries']['NL']['effective_from'] = '2026-02-30';
     }, 'carriers.usps.countries.NL.effective_from must be an ISO date.'],
+    'an override for an unknown regime' => ['regime', function (array &$table): void {
+        $table['carriers']['usps']['countries']['AT']['with_registration']['vat'] = $table['carriers']['usps']['countries']['AT']['with_registration']['ioss'];
+    }, 'carriers.usps.countries.AT.with_registration.vat is not a known registration regime (ioss, uk_vat, voec, arn).'],
+    'an override with a bad support value' => ['override support', function (array &$table): void {
+        $table['carriers']['usps']['countries']['AT']['with_registration']['ioss']['support'] = 'ddp';
+    }, 'carriers.usps.countries.AT.with_registration.ioss.support must be one of ddp_required, either, ddu_only.'],
+    'an override with no source' => ['override source', function (array &$table): void {
+        unset($table['carriers']['usps']['countries']['SE']['with_registration']['ioss']['source']);
+    }, 'carriers.usps.countries.SE.with_registration.ioss.source must name where the entry comes from.'],
+    'an override with no checked date' => ['override checked', function (array &$table): void {
+        unset($table['carriers']['usps']['countries']['SE']['with_registration']['ioss']['checked']);
+    }, 'carriers.usps.countries.SE.with_registration.ioss.checked must be the ISO date the source was read.'],
+    'an empty override list' => ['override list', function (array &$table): void {
+        $table['carriers']['usps']['countries']['AT']['with_registration'] = [];
+    }, 'carriers.usps.countries.AT.with_registration must be an object keyed by registration regime.'],
 ]);
+
+it('answers AT and SE with the IOSS override only for a declared IOSS registration', function (): void {
+    $table = new DutiesSupportTable;
+    $today = CarbonImmutable::parse('2026-10-08');
+
+    foreach (['AT', 'SE'] as $country) {
+        $without = $table->supportFor('USPS', $country, $today);
+        $with = $table->supportFor('USPS', $country, $today, TaxRegistrationRegime::Ioss);
+
+        expect($without?->support)->toBe(DutiesSupport::Either)
+            ->and($without?->registration)->toBeNull()
+            ->and($table->supportFor('USPS', $country, $today, TaxRegistrationRegime::UkVat)?->support)->toBe(DutiesSupport::Either)
+            ->and($with?->support)->toBe(DutiesSupport::DdpRequired)
+            ->and($with?->registration)->toBe(TaxRegistrationRegime::Ioss)
+            ->and($with?->authority)->toBe('Swiss Post')
+            ->and($with?->source)->toBe('https://www.post.ch/en/pages/eu-customs-reform-2026')
+            ->and($with?->checked->toDateString())->toBe('2026-10-08')
+            ->and($table->supportFor('UPS', $country, $today, TaxRegistrationRegime::Ioss)?->support)->toBe(DutiesSupport::Either);
+    }
+});
+
+it('gates an override with the entry\'s effective date', function (): void {
+    $table = committedDutiesSupport();
+    $table['carriers']['usps']['countries']['AT']['effective_from'] = '2026-11-01';
+
+    $support = new DutiesSupportTable(temporaryDutiesSupport($table));
+
+    expect($support->supportFor('USPS', 'AT', CarbonImmutable::parse('2026-10-31'), TaxRegistrationRegime::Ioss)?->support)->toBe(DutiesSupport::DduOnly)
+        ->and($support->supportFor('USPS', 'AT', CarbonImmutable::parse('2026-11-01'), TaxRegistrationRegime::Ioss)?->support)->toBe(DutiesSupport::DdpRequired);
+});
 
 it('ignores an entry until its effective date, and applies it from then on', function (): void {
     $table = committedDutiesSupport();

@@ -1,5 +1,5 @@
 {
-    "version": "2026-10-08",
+    "version": "2026-10-08.1",
     "notes": [
         "What each carrier can do with duties terms to each destination (ADR-0008 decision 4).",
         "support is ddp_required (ships there only with duties prepaid), either, or ddu_only",
@@ -13,7 +13,17 @@
         "repository) and the date it was checked.",
         "",
         "An entry with effective_from later than the day of the quote is ignored until that day,",
-        "and the carrier's default applies meanwhile. Bump version whenever an entry changes.",
+        "and the carrier's default applies meanwhile. Bump version whenever an entry changes:",
+        "an ISO date, with a .N suffix for a later change the same day.",
+        "",
+        "A country entry may carry with_registration, keyed by TaxRegistrationRegime value (ioss,",
+        "uk_vat, voec, arn): the support that applies instead of the entry's own when the",
+        "registration actually declared on the Shipment is that regime (a registration withheld",
+        "over its threshold does not count). It has its own source and checked date, since its",
+        "evidence differs from the entry's, and an optional authority naming who the rule comes",
+        "from in a dropped rate's reason (default: the carrier's authority). The entry's",
+        "effective_from gates the whole entry, overrides included. Only postal rules need it:",
+        "UPS and FedEx clear as their own declarants.",
         "",
         "USPS is the International Mail Manual's DDP table (IMM 360) for Priority Mail Express",
         "International, Priority Mail International and First-Class Package International, read",
@@ -35,7 +45,15 @@
                 "AT": {
                     "support": "either",
                     "source": "https://pe.usps.com/text/imm/ab_013.htm",
-                    "checked": "2026-10-01"
+                    "checked": "2026-10-01",
+                    "with_registration": {
+                        "ioss": {
+                            "support": "ddp_required",
+                            "source": "https://www.post.ch/en/pages/eu-customs-reform-2026",
+                            "checked": "2026-10-08",
+                            "authority": "Swiss Post"
+                        }
+                    }
                 },
                 "BE": {
                     "support": "ddp_required",
@@ -172,7 +190,15 @@
                 "SE": {
                     "support": "either",
                     "source": "https://pe.usps.com/text/imm/immc3_017.htm",
-                    "checked": "2026-10-01"
+                    "checked": "2026-10-01",
+                    "with_registration": {
+                        "ioss": {
+                            "support": "ddp_required",
+                            "source": "https://www.post.ch/en/pages/eu-customs-reform-2026",
+                            "checked": "2026-10-08",
+                            "authority": "Swiss Post"
+                        }
+                    }
                 },
                 "SI": {
                     "support": "ddu_only",
