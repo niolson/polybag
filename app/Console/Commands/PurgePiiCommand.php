@@ -2,10 +2,15 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\PackageStatus;
+use App\Enums\ShipmentStatus;
 use App\Models\Channel;
 use App\Models\Shipment;
 use App\Services\SettingsService;
 use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class PurgePiiCommand extends Command
@@ -14,28 +19,7 @@ class PurgePiiCommand extends Command
                             {--dry-run : Show what would be purged without making changes}
                             {--channel= : Only purge shipments for a specific channel ID}';
 
-    protected $description = 'Purge recipient PII from shipped shipments after their retention period';
-
-    private const PII_FIELDS = [
-        'first_name',
-        'last_name',
-        'company',
-        'address1',
-        'address2',
-        'city',
-        'state_or_province',
-        'phone',
-        'phone_e164',
-        'phone_extension',
-        'email',
-        'validated_company',
-        'validated_address1',
-        'validated_address2',
-        'validated_city',
-        'validated_state_or_province',
-        // A national ID number: a CPF, a PCCC, a VAT number.
-        'recipient_tax_id',
-    ];
+    protected $description = 'Purge recipient PII from shipped and void shipments after their retention period';
 
     public function handle(SettingsService $settings): int
     {
@@ -86,49 +70,95 @@ class PurgePiiCommand extends Command
 
     private function purgeForChannel(?int $channelId, string $channelName, int $retentionDays): int
     {
-        $cutoff = now()->subDays($retentionDays);
+        $query = $this->eligibleShipments($channelId, now()->subDays($retentionDays));
 
-        // Find shipments where all packages are shipped and the most recent
-        // shipped_at is older than the cutoff, and PII hasn't been purged yet
-        $query = Shipment::query()
-            ->when($channelId !== null, fn ($q) => $q->where('channel_id', $channelId))
-            ->when($channelId === null, fn ($q) => $q->whereNull('channel_id'))
-            ->whereNotNull('first_name') // Already purged if null
-            ->whereHas('packages')
-            ->whereDoesntHave('packages', fn ($q) => $q->where('status', '!=', 'shipped'))
-            ->whereDoesntHave('packages', fn ($q) => $q->where('shipped_at', '>', $cutoff)->orWhereNull('shipped_at'));
+        /** @var array<string, int> $byStatus */
+        $byStatus = (clone $query)->toBase()
+            ->selectRaw('status, count(*) as aggregate')
+            ->groupBy('status')
+            ->pluck('aggregate', 'status')
+            ->map(fn (mixed $count): int => (int) $count)
+            ->all();
 
-        $count = $query->count();
+        $count = array_sum($byStatus);
 
         if ($count === 0) {
             return 0;
         }
 
-        $this->line("  {$channelName}: {$count} shipment(s) eligible ({$retentionDays}-day retention)");
+        $breakdown = collect($byStatus)
+            ->map(fn (int $statusCount, string $status): string => "{$statusCount} {$status}")
+            ->implode(', ');
+
+        $this->line("  {$channelName}: {$count} shipment(s) eligible ({$breakdown}; {$retentionDays}-day retention)");
 
         if ($this->option('dry-run')) {
             return $count;
         }
 
-        // Null out PII fields on shipments
-        $shipmentIds = $query->pluck('id');
+        $query->select('id')->chunkById(500, function (Collection $shipments): void {
+            $this->purge($shipments->pluck('id'));
+        });
 
-        $nullFields = collect(self::PII_FIELDS)
+        return $count;
+    }
+
+    /**
+     * Shipments past retention whose recipient data has not been purged yet.
+     *
+     * The clock starts at a Shipment's last activity (`pii-retention/02`):
+     *
+     *  - A `shipped` Shipment counts from its latest shipped Package's
+     *    `shipped_at`, or from its `updated_at` when it has no shipped Package
+     *    (a historical import, or one marked shipped by hand).
+     *  - A `void` Shipment counts from its `updated_at`, the nearest record of
+     *    when it became void, and from any Package it shipped before that.
+     *  - An `open` Shipment is never purged: it is still work.
+     *
+     * Only a shipped Package counts, because a Package's status projects its
+     * active Label. A draft, or a Package whose Label was voided, holds no
+     * Label to wait for, so it does not keep a shipped or void Shipment's PII.
+     *
+     * @return Builder<Shipment>
+     */
+    private function eligibleShipments(?int $channelId, Carbon $cutoff): Builder
+    {
+        return Shipment::query()
+            ->when($channelId !== null, fn (Builder $q) => $q->where('channel_id', $channelId))
+            ->when($channelId === null, fn (Builder $q) => $q->whereNull('channel_id'))
+            ->whereNull('pii_purged_at')
+            ->whereIn('status', [ShipmentStatus::Shipped, ShipmentStatus::Void])
+            ->whereDoesntHave('packages', fn (Builder $q) => $q
+                ->where('status', PackageStatus::Shipped)
+                ->where(fn (Builder $q) => $q->whereNull('shipped_at')->orWhere('shipped_at', '>', $cutoff)))
+            ->where(fn (Builder $q) => $q
+                ->where(fn (Builder $q) => $q
+                    ->where('status', ShipmentStatus::Shipped)
+                    ->whereHas('packages', fn (Builder $q) => $q->where('status', PackageStatus::Shipped)))
+                ->orWhere('updated_at', '<=', $cutoff));
+    }
+
+    /**
+     * @param  Collection<int, int>  $shipmentIds
+     */
+    private function purge(Collection $shipmentIds): void
+    {
+        $nullFields = collect(Shipment::PII_FIELDS)
             ->mapWithKeys(fn ($field): array => [$field => null])
             ->all();
 
-        Shipment::whereIn('id', $shipmentIds)->update($nullFields);
+        DB::transaction(function () use ($shipmentIds, $nullFields): void {
+            Shipment::whereIn('id', $shipmentIds)->update([...$nullFields, 'pii_purged_at' => now()]);
 
-        // Null out the documents on associated packages (they carry embedded PII).
-        // The customs form goes with the label: a commercial invoice names both
-        // parties, their addresses, and their tax and EORI numbers, the
-        // recipient tax ID among them, so keeping it after the label is gone
-        // would leave the purge half-done.
-        DB::table('packages')
-            ->whereIn('shipment_id', $shipmentIds)
-            ->where(fn ($q) => $q->whereNotNull('label_data')->orWhereNotNull('customs_form_data'))
-            ->update(['label_data' => null, 'customs_form_data' => null]);
-
-        return $count;
+            // Null out the documents on associated packages (they carry embedded PII).
+            // The customs form goes with the label: a commercial invoice names both
+            // parties, their addresses, and their tax and EORI numbers, the
+            // recipient tax ID among them, so keeping it after the label is gone
+            // would leave the purge half-done.
+            DB::table('packages')
+                ->whereIn('shipment_id', $shipmentIds)
+                ->where(fn ($q) => $q->whereNotNull('label_data')->orWhereNotNull('customs_form_data'))
+                ->update(['label_data' => null, 'customs_form_data' => null]);
+        });
     }
 }

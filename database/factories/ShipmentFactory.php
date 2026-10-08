@@ -50,7 +50,7 @@ class ShipmentFactory extends Factory
 
     public function validated(): static
     {
-        return $this->state(fn (array $attributes) => [
+        return $this->state(fn (array $attributes): array => [
             'checked' => true,
             'deliverability' => Deliverability::Yes,
             'validation_message' => 'Address confirmed deliverable',
@@ -64,7 +64,7 @@ class ShipmentFactory extends Factory
 
     public function undeliverable(): static
     {
-        return $this->state(fn () => [
+        return $this->state(fn (): array => [
             'checked' => true,
             'deliverability' => Deliverability::No,
             'validation_message' => 'Address found but not confirmed as deliverable',
@@ -73,7 +73,7 @@ class ShipmentFactory extends Factory
 
     public function partlyVerified(): static
     {
-        return $this->state(fn () => [
+        return $this->state(fn (): array => [
             'checked' => true,
             'deliverability' => Deliverability::Partial,
             'validation_message' => 'Primary address confirmed, secondary number missing',
@@ -85,7 +85,7 @@ class ShipmentFactory extends Factory
      */
     public function validationExhausted(): static
     {
-        return $this->state(fn () => [
+        return $this->state(fn (): array => [
             'checked' => false,
             'deliverability' => Deliverability::No,
             'validation_message' => 'Multiple addresses were found for the information you entered.',
@@ -95,8 +95,15 @@ class ShipmentFactory extends Factory
 
     public function shipped(): static
     {
-        return $this->state(fn () => [
+        return $this->state(fn (): array => [
             'status' => 'shipped',
+        ]);
+    }
+
+    public function void(): static
+    {
+        return $this->state(fn (): array => [
+            'status' => 'void',
         ]);
     }
 
@@ -105,7 +112,7 @@ class ShipmentFactory extends Factory
      */
     public function international(): static
     {
-        return $this->state(fn () => [
+        return $this->state(fn (): array => [
             'country' => fake()->randomElement(['CA', 'MX', 'GB', 'DE', 'FR', 'AU', 'JP']),
             'state_or_province' => fake()->stateAbbr(),
             'postal_code' => fake()->postcode(),
@@ -117,7 +124,7 @@ class ShipmentFactory extends Factory
      */
     public function residential(): static
     {
-        return $this->state(fn () => [
+        return $this->state(fn (): array => [
             'residential' => true,
             'validated_residential' => true,
         ]);
@@ -128,7 +135,7 @@ class ShipmentFactory extends Factory
      */
     public function commercial(): static
     {
-        return $this->state(fn () => [
+        return $this->state(fn (): array => [
             'residential' => false,
             'validated_residential' => false,
             'company' => fake()->company(),
@@ -140,7 +147,7 @@ class ShipmentFactory extends Factory
      */
     public function withoutShippingMethod(): static
     {
-        return $this->state(fn () => [
+        return $this->state(fn (): array => [
             'shipping_method_id' => null,
         ]);
     }
@@ -151,7 +158,7 @@ class ShipmentFactory extends Factory
      */
     public function withCustomsTerms(): static
     {
-        return $this->state(fn () => [
+        return $this->state(fn (): array => [
             'country' => 'BR',
             'state_or_province' => 'SP',
             'postal_code' => '01000-000',

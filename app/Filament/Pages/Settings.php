@@ -578,7 +578,7 @@ class Settings extends Page
                                 ->suffix('days'),
                             TextInput::make('pii_retention_days')
                                 ->label('PII Retention (default)')
-                                ->helperText('Days to keep recipient PII (name, address, phone, email) after shipping. Per-channel overrides can be set on each channel. Set to 0 to disable.')
+                                ->helperText('Days to keep recipient PII (name, address, phone, email, tax ID) after a shipment ships or is voided. Open shipments are never purged. Per-channel overrides can be set on each channel. Set to 0 to disable.')
                                 ->numeric()
                                 ->minValue(0)
                                 ->maxValue(3650)

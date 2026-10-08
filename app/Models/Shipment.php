@@ -82,6 +82,33 @@ class Shipment extends Model
     ];
 
     /**
+     * Recipient data `PurgePiiCommand` clears once retention passes
+     * (`pii-retention/02`).
+     *
+     * @var list<string>
+     */
+    public const PII_FIELDS = [
+        'first_name',
+        'last_name',
+        'company',
+        'address1',
+        'address2',
+        'city',
+        'state_or_province',
+        'phone',
+        'phone_e164',
+        'phone_extension',
+        'email',
+        'validated_company',
+        'validated_address1',
+        'validated_address2',
+        'validated_city',
+        'validated_state_or_province',
+        // A national ID number: a CPF, a PCCC, a VAT number.
+        'recipient_tax_id',
+    ];
+
+    /**
      * The order's own customs terms (ADR-0008 decisions 2, 3 and 10), each
      * filled by an import or a manager's edit and each null until then.
      *
@@ -165,6 +192,7 @@ class Shipment extends Model
         'seller_tax_regime' => TaxRegistrationRegime::class,
         'recipient_tax_id_type' => RecipientTaxIdType::class,
         'customs_rate_date' => 'immutable_date',
+        'pii_purged_at' => 'datetime',
         'metadata' => 'array',
         'items_version' => 'integer',
         'pack_slip_items_version' => 'integer',
@@ -174,6 +202,14 @@ class Shipment extends Model
     protected static function booted(): void
     {
         static::saving(function (Shipment $shipment): void {
+            // Recipient data written back after a purge, by a manager's edit,
+            // is held again and needs its own retention clock.
+            if ($shipment->pii_purged_at !== null && collect(self::PII_FIELDS)->contains(
+                fn (string $field): bool => $shipment->isDirty($field) && filled($shipment->getAttribute($field))
+            )) {
+                $shipment->pii_purged_at = null;
+            }
+
             $addressReference = app(AddressReferenceService::class);
 
             $shipment->country = $addressReference->normalizeCountry($shipment->country) ?? ($shipment->country ? strtoupper(trim($shipment->country)) : null);
