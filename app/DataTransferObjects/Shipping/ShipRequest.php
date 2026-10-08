@@ -2,14 +2,18 @@
 
 namespace App\DataTransferObjects\Shipping;
 
+use App\DataTransferObjects\Customs\RecipientTaxId;
+use App\DataTransferObjects\Customs\ResolvedCustomsTerms;
 use App\Enums\ServiceCapability;
 use App\Models\Carrier;
 use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\ShippingOffer;
 use App\Services\Customs\CustomsReadiness;
+use App\Services\Customs\CustomsTermsResolver;
 use App\Services\LabelReferenceResolver;
 use App\Services\ShipDateService;
+use App\Services\Shipping\DutiesTermsFilter;
 use App\Services\SpecialServiceResolver;
 use Carbon\CarbonImmutable;
 
@@ -31,6 +35,9 @@ readonly class ShipRequest
      * @param  array<int, string>  $references  Identifiers to print on the label, longest-lived first; carriers truncate to their own limits
      * @param  ShippingOffer|null  $offer  The purchase authority behind $selectedRate, when the source issued one. Server-side only and never serialized: it holds the opaque tokens that actually buy the label, which is why an adapter reads them from here rather than from the rate. ADR-0002 decision 4.
      * @param  string|null  $exportItn  The Shipment's export ITN, when EEI was filed; the label declares it instead of an exemption
+     * @param  ResolvedCustomsTerms|null  $customsTerms  The duties term and seller registration the label declares, resolved from the Shipment when the request is built, or recorded as source-decided when the seller takes no terms. Null on a hand-built request, which declares nothing.
+     * @param  RecipientTaxId|null  $recipientTaxId  The recipient's own tax ID, when the Shipment has one. Personal data: an adapter sends it and never logs it.
+     * @param  string|null  $exporterEin  The client's own EIN, which a carrier wants beside an export ITN
      * @param  bool  $overrideDeclaredWeight  The operator has been shown that the seller declares more weight for the goods than the box was weighed at, and has asked for the purchase to be attempted anyway — at the scale weight, unchanged. Nothing is over-declared by it; it exists so a catalog corrected between the refusal and the retry, or a reading of ours that was wrong, is not a dead end.
      */
     public function __construct(
@@ -52,6 +59,9 @@ readonly class ShipRequest
         public ?ShippingOffer $offer = null,
         public bool $overrideDeclaredWeight = false,
         public ?string $exportItn = null,
+        public ?ResolvedCustomsTerms $customsTerms = null,
+        public ?RecipientTaxId $recipientTaxId = null,
+        public ?string $exporterEin = null,
     ) {}
 
     public function hasSpecialService(string $code): bool
@@ -98,6 +108,9 @@ readonly class ShipRequest
             offer: $this->offer,
             overrideDeclaredWeight: $this->overrideDeclaredWeight,
             exportItn: $this->exportItn,
+            customsTerms: $this->customsTerms,
+            recipientTaxId: $this->recipientTaxId,
+            exporterEin: $this->exporterEin,
         );
     }
 
@@ -196,6 +209,9 @@ readonly class ShipRequest
             offer: $this->offer,
             overrideDeclaredWeight: $this->overrideDeclaredWeight,
             exportItn: $this->exportItn,
+            customsTerms: $this->customsTerms,
+            recipientTaxId: $this->recipientTaxId,
+            exporterEin: $this->exporterEin,
         );
     }
 
@@ -227,6 +243,9 @@ readonly class ShipRequest
             offer: $this->offer,
             overrideDeclaredWeight: true,
             exportItn: $this->exportItn,
+            customsTerms: $this->customsTerms,
+            recipientTaxId: $this->recipientTaxId,
+            exporterEin: $this->exporterEin,
         );
     }
 
@@ -279,9 +298,11 @@ readonly class ShipRequest
         $resolver = app(SpecialServiceResolver::class);
         $specialServiceCodes = $resolver->resolveForPackageAndRate($package, $rate, $offer);
 
+        $toAddress = AddressData::fromShipment($package->shipment);
+
         return new self(
             fromAddress: $fromAddress,
-            toAddress: AddressData::fromShipment($package->shipment),
+            toAddress: $toAddress,
             packageData: PackageData::fromPackage($package),
             selectedRate: $rate,
             customsItems: $customsItems,
@@ -296,6 +317,9 @@ readonly class ShipRequest
             packageId: $package->id,
             offer: $offer,
             exportItn: $package->shipment->export_itn,
+            customsTerms: self::customsTermsFor($package, $fromAddress, $toAddress, app(DutiesTermsFilter::class)->isSourceDecided($rate)),
+            recipientTaxId: RecipientTaxId::fromShipment($package->shipment),
+            exporterEin: $package->shipment->client?->exporter_ein,
         );
     }
 
@@ -335,9 +359,11 @@ readonly class ShipRequest
             ? AddressData::fromLocation($package->location)
             : AddressData::fromConfig();
 
+        $toAddress = AddressData::fromShipment($package->shipment);
+
         return new self(
             fromAddress: $fromAddress,
-            toAddress: AddressData::fromShipment($package->shipment),
+            toAddress: $toAddress,
             packageData: PackageData::fromPackage($package),
             customsItems: $customsItems,
             labelFormat: $labelFormat,
@@ -352,7 +378,21 @@ readonly class ShipRequest
             packageId: $package->id,
             blindOffer: $offer,
             exportItn: $package->shipment->export_itn,
+            customsTerms: self::customsTermsFor($package, $fromAddress, $toAddress, sourceDecided: true),
+            recipientTaxId: RecipientTaxId::fromShipment($package->shipment),
+            exporterEin: $package->shipment->client?->exporter_ein,
         );
+    }
+
+    /**
+     * The customs terms a label bought now declares: the Shipment's own, or
+     * none of PolyBag's when the seller decides them (ADR-0008 decision 5).
+     */
+    private static function customsTermsFor(Package $package, AddressData $from, AddressData $to, bool $sourceDecided): ResolvedCustomsTerms
+    {
+        $terms = app(CustomsTermsResolver::class)->forPackage($package, $from, $to);
+
+        return $sourceDecided ? $terms->asSourceDecided() : $terms;
     }
 
     /**

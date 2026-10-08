@@ -745,17 +745,18 @@ class Package extends Model
      *
      * @param  int|null  $carrierServiceId  The catalog service the Label was bought as, from the server's copy of the rate. Recorded on the Label only. Null for a blind purchase: what Shopify was asked for stays the requested preference (ADR-0003 decision 7), and an inferred service resolves through the ruleset here instead.
      * @param  bool  $announce  Whether to dispatch {@see PackageShipped}, which queues the channel export. False only for a label recorded to be voided at once: the package is then also held from every other export path until {@see releaseForExport()}.
+     * @param  array<string, mixed>|null  $customsTerms  What the Label declared (`CustomsTermsSnapshot`), recorded on the Label only; null when nothing was declared or the adapter does not send customs terms
      *
      * @throws \InvalidArgumentException If the postage source and the response's pointers disagree, or the service evidence contradicts the service value
      * @throws \RuntimeException If the package state changed (optimistic locking)
      */
-    public function markShipped(ShipResponse $response, PostageSource $postageSource, ?int $shippedByUserId = null, ?int $carrierServiceId = null, bool $announce = true): void
+    public function markShipped(ShipResponse $response, PostageSource $postageSource, ?int $shippedByUserId = null, ?int $carrierServiceId = null, bool $announce = true, ?array $customsTerms = null): void
     {
         // Before the transaction, so a rejected provenance writes nothing at all.
         $this->assertProvenanceIsConsistent($postageSource, $response);
         $this->assertServiceEvidenceIsConsistent($response);
 
-        DB::transaction(function () use ($response, $postageSource, $shippedByUserId, $carrierServiceId, $announce): void {
+        DB::transaction(function () use ($response, $postageSource, $shippedByUserId, $carrierServiceId, $announce, $customsTerms): void {
             $normalizedCarrierId = app(CarrierNormalizer::class)->resolve($response->carrier)?->id;
 
             // A blind purchase names no catalog service, but the service the
@@ -848,6 +849,8 @@ class Package extends Model
                 'carrier_account_fingerprint' => PackageLabel::fingerprintOfAccount($response->carrierAccountId),
                 'carrier_service_id' => $carrierServiceId,
                 'source_label_reference' => $response->sourceLabelReference,
+                'customs_terms' => $customsTerms === null ? null : json_encode($customsTerms, JSON_THROW_ON_ERROR),
+                'duties_cost' => $response->dutiesCost,
                 'created_at' => $now,
                 'updated_at' => $now,
             ]);

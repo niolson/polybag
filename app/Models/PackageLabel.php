@@ -85,10 +85,14 @@ class PackageLabel extends Model
         'voided_by_user_id',
         'void_reason',
         'last_printed_at',
+        'customs_terms',
+        'duties_cost',
     ];
 
     protected $casts = [
         'cost' => 'decimal:2',
+        'duties_cost' => 'decimal:2',
+        'customs_terms' => 'array',
         'postage_source' => PostageSource::class,
         'service_evidence' => ServiceEvidence::class,
         'ship_date' => 'date',

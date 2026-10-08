@@ -1,6 +1,6 @@
 # UPS sends the resolved customs terms, and the Label records them
 
-Status: ready-for-agent
+Status: done — 2026-10-08
 Category: enhancement
 Repo: `polybag`
 
@@ -40,16 +40,16 @@ the column and a nullable `duties_cost` (`08` fills it).
 
 ## Acceptance criteria
 
-- [ ] A DDP UPS rate request and ship request carry the Type `02` charge and
+- [x] A DDP UPS rate request and ship request carry the Type `02` charge and
       `TermsOfShipment: DDP`; DDU carries only Type `01` and `DDU`
-- [ ] IOSS, recipient tax ID and ITN appear in the fields above, and are absent when not
+- [x] IOSS, recipient tax ID and ITN appear in the fields above, and are absent when not
       resolved; an ITN carries the client's EIN (`11`)
-- [ ] The UPS validation log of a label to Brazil holds no CPF (`PiiRedactor` over
+- [x] The UPS validation log of a label to Brazil holds no CPF (`PiiRedactor` over
       `GlobalTaxInformation`)
-- [ ] The UPS request schema test accepts every new field
-- [ ] A purchased label's `customs_terms` matches what was sent, for an order-sourced and
+- [x] The UPS request schema test accepts every new field
+- [x] A purchased label's `customs_terms` matches what was sent, for an order-sourced and
       a client-sourced term
-- [ ] One CIE sandbox DDP label with an IOSS number is bought and recorded in the
+- [x] One CIE sandbox DDP label with an IOSS number is bought and recorded in the
       issue's comments
 
 ## Comments
@@ -90,3 +90,53 @@ the column and a nullable `duties_cost` (`08` fills it).
     not explained (UPS email).
   - **Australia:** `Product.TaxesPaid` is Singapore-only; CIE accepts it and prints
     nothing. Send the ARN only.
+- 2026-10-08 — Built. **Wire format.** `UpsAdapter` reads the terms off `ShipRequest::$customsTerms`
+  (and `RateRequest::$customsTerms`), the new `$recipientTaxId` and `$exporterEin`, and
+  `$exportItn`. DDP adds a Type `02` `BillShipper` charge on the same account and
+  `TermsOfShipment: DDP`; DDU sends Type `01` and `DDU`; a request with no terms, or a
+  source-decided one, sends neither. Rate requests with a duties term carry
+  `PaymentDetails.ShipmentCharge` (`01`, plus `02` for DDP) and `Shipper.ShipperNumber`; one with
+  none is unchanged. The registration goes in `ShipFrom.VendorInfo` (`ioss` `0356`, `voec`
+  `0357`, `arn` `1052`, `uk_vat` `0000`) with `ConsigneeType` from the company name. The
+  recipient tax ID goes in `GlobalTaxInformation.AgentTaxIdentificationNumber` as the single
+  item of an array, `AgentRole` `30`, type `0005` for a CPF or PCCC and `1002` for a CNPJ (a
+  VAT or other ID follows whether the consignee has a company name). An ITN files the EEI:
+  `FormType` `01` and `11`, `EEIFilingOption` `1` / `ShipperFiled` `A` with
+  `PreDepartureITNNumber`, the rest of `02`'s list, the ship-to as `UltimateConsignee`
+  (`D`, or `R` with a company name) and the client's EIN with `TaxIDType` `EIN` on `ShipFrom`.
+  An ITN with no EIN files no EEI (the readiness check refuses that before the adapter is
+  reached), and an exemption is never sent.
+  **Snapshot.** `ShipRequest` now carries the resolved terms (source-decided for a blind
+  purchase or a non-direct or Amazon Shipping rate, via `asSourceDecided()`).
+  `CustomsTermsSnapshot` builds the record in `EloquentPackageShippingWorkflow` and
+  `Package::markShipped()` writes `package_labels.customs_terms` (json) and `duties_cost`
+  (decimal, nullable, from `ShipResponse::$dutiesCost`, which nothing sets yet; `08` fills it).
+  The snapshot holds the term and its source, the registration (regime, number, source), the
+  recipient tax ID's *type* only, the ITN and the `duties-support.json` version; null for a
+  label that crosses no customs border. **It is written only for an adapter that implements
+  the new `App\Contracts\SendsCustomsTerms` marker, or for a source-decided purchase.** FedEx
+  and USPS do not send terms yet, so a snapshot for them would record terms the carrier never
+  saw; `07` and `08` add the marker when they do. Recovery of an unresolved purchase snapshots
+  from the request rebuilt at recovery time.
+  **Deviations and surprises.** (1) `PiiRedactor` needed no change: `AgentTaxIdentificationNumber`
+  matches `tax_?id`, so the whole `GlobalTaxInformation` subtree is redacted (tested through
+  `PiiRedactionProcessor`, the ship-to `Contacts` and the EIN likewise). (2) The vendored
+  Shipping schema requires `IDNumberEncryptionIndicator` (sent as `0`, not in `02`'s probe)
+  and wants `TaxIdentificationNumber` as an array (the probe sent an object, which CIE also
+  took). It also gives `PreDepartureITNNumber` a 17-character minimum, but CIE accepted the
+  15-character AES ITN (`X` and 14 digits); the schema tests relax that one bound. (3) A
+  Type `01` charge is sent on DDU rate requests only when an account number resolves.
+  Tests: 17 additions to `UpsAdapterTest` (charges, terms, registrations, tax IDs, the
+  redacted log, EEI, the schema) and `LabelCustomsTermsSnapshotTest` (order-sourced,
+  client-sourced, the CPF, DDU default, domestic, a non-sending adapter, source-decided).
+- 2026-10-08 — **CIE check**, `sandbox_mode` already on, nothing flipped, through the real
+  adapter with the new fields (not the probe's hand-edited bodies). A DDP rate to Germany
+  came back $286.12 against $271.12 for DDU: the $15.00 Duty and Tax Forwarding charge. A DDP
+  label with IOSS `IM2760000742` bought, and its invoice prints *IOSS: IM2760000742* and
+  *Terms of Sale (Incoterm): DDP*. A DDU label to Brazil with a CPF bought and prints the CPF
+  as *Tax ID/VAT No.* (the array form of `TaxIdentificationNumber` and
+  `IDNumberEncryptionIndicator` are accepted). A DDU label to Germany with ITN
+  `X20261008123456` and an EIN bought and returned the *UPS EEI DATA* page with
+  *AESCitation: X20261008123456* and the EIN. The script is in the session scratchpad, not
+  the repo. **Not verified:** that UPS transmits the Vendor Collect ID electronically (still
+  with the UPS email), and the UK VAT number on `0000` beyond `02`'s probe.
