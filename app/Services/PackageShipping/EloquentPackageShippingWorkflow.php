@@ -554,6 +554,12 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 $shipRequest = $shipRequest->withDeclaredWeightOverride();
             }
 
+            // What this purchase declares, decided from the request that is
+            // sent. Kept on the offer at the claim below: a purchase whose
+            // reply never arrives is recorded later, by recovery or by hand,
+            // and must record what was sent, not the Shipment as it is then.
+            $declaredTerms = $this->declaredCustomsTerms($adapter, $shipRequest);
+
             // The one-way door, immediately before the money is spent. The
             // inspection above was advisory; this is the claim that a
             // concurrent attempt loses.
@@ -569,6 +575,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 }
 
                 $offer = $claim->offer;
+                $offer->forceFill(['declared_customs_terms' => $declaredTerms])->save();
             }
 
             $response = $adapter->createShipment($shipRequest);
@@ -591,7 +598,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 $response,
                 $request,
                 $blindOffer === null ? $selectedRate?->carrierServiceId : null,
-                $this->declaredCustomsTerms($adapter, $shipRequest),
+                $declaredTerms,
             );
 
             return $unrecorded ?? PackageShippingResult::shipped($response, $selectedRate, $package);
@@ -1072,14 +1079,13 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         }
 
         try {
-            $recoveryRequest = ShipRequest::fromPackageAndRate(
+            $response = $seller->recoverPurchase(ShipRequest::fromPackageAndRate(
                 $package,
                 $this->rateFromOffer($offer),
                 $request->labelFormat,
                 $request->labelDpi,
                 $offer,
-            );
-            $response = $seller->recoverPurchase($recoveryRequest);
+            ));
         } catch (LabelNotRecoverableException $e) {
             $this->offerStore->recordUnrecoverableLabel($offer, $e->sourceReason);
 
@@ -1118,7 +1124,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             'offer' => $offer->public_id,
         ]);
 
-        return $this->recordBoughtLabel($package, $offer, $response, $request, $offer->carrier_service_id, $this->declaredCustomsTerms($seller, $recoveryRequest))
+        return $this->recordBoughtLabel($package, $offer, $response, $request, $offer->carrier_service_id, $offer->declared_customs_terms)
             ?? PackageShippingResult::shipped($response, null, $package);
     }
 
@@ -1216,7 +1222,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             return null;
         }
 
-        return $this->customsTermsSnapshot->forRequest($shipRequest);
+        return $this->customsTermsSnapshot->forRequest($shipRequest, $seller);
     }
 
     /**

@@ -2,6 +2,8 @@
 
 namespace App\Services\Customs;
 
+use App\Contracts\SendsCustomsTerms;
+use App\DataTransferObjects\Customs\DeclaredCustomsTerms;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\CustomsTermsOrigin;
 
@@ -12,7 +14,9 @@ use App\Enums\CustomsTermsOrigin;
  * `duties-support.json` that judged the rate.
  *
  * Built by the shipping workflow, not an adapter, so every carrier gets the
- * same record. It never holds the recipient's tax ID: only its type, and that
+ * same record; but the facts come from the adapter
+ * ({@see SendsCustomsTerms::declaredCustomsTerms()}), which says what it put
+ * on the wire. It never holds the recipient's tax ID: only its type, and that
  * one was sent, because the number is personal data the PII purge would
  * otherwise have to clear from every Label as well.
  */
@@ -21,33 +25,34 @@ class CustomsTermsSnapshot
     public function __construct(private readonly DutiesSupportTable $dutiesSupport) {}
 
     /**
-     * The snapshot for a request, or null when the label crosses no customs
-     * border and so declares nothing.
+     * The snapshot for a request bought through $seller, or null when nothing
+     * was declared and the label crosses no customs border.
      *
      * @return array{duties_terms: string|null, duties_terms_source: string|null, registration: array{regime: string, number: string, source: string}|null, recipient_tax_id: array{type: string}|null, export_itn: string|null, duties_support_version: string}|null
      */
-    public function forRequest(ShipRequest $request): ?array
+    public function forRequest(ShipRequest $request, ?object $seller): ?array
     {
         $terms = $request->customsTerms;
+        $sourceDecided = $terms?->dutiesTermsOrigin === CustomsTermsOrigin::SourceDecided;
 
-        if ($terms === null || ! $terms->applies) {
+        $declared = $seller instanceof SendsCustomsTerms && ! $sourceDecided
+            ? $seller->declaredCustomsTerms($request)
+            : DeclaredCustomsTerms::none();
+
+        if (($terms === null || ! $terms->applies) && $declared->isEmpty()) {
             return null;
         }
 
-        $sourceDecided = $terms->dutiesTermsOrigin === CustomsTermsOrigin::SourceDecided;
-
         return [
-            'duties_terms' => $terms->dutiesTerms?->value,
-            'duties_terms_source' => $terms->dutiesTermsOrigin?->value,
-            'registration' => $terms->registration === null ? null : [
-                'regime' => $terms->registration->regime->value,
-                'number' => $terms->registration->number,
-                'source' => $terms->registration->origin->value,
+            'duties_terms' => $declared->dutiesTerms?->value,
+            'duties_terms_source' => $declared->dutiesTerms === null && ! $sourceDecided ? null : $terms?->dutiesTermsOrigin?->value,
+            'registration' => $declared->registration === null ? null : [
+                'regime' => $declared->registration->regime->value,
+                'number' => $declared->registration->number,
+                'source' => $declared->registration->origin->value,
             ],
-            'recipient_tax_id' => $sourceDecided || $request->recipientTaxId === null
-                ? null
-                : ['type' => $request->recipientTaxId->type->value],
-            'export_itn' => $sourceDecided || blank($request->exportItn) ? null : $request->exportItn,
+            'recipient_tax_id' => $declared->recipientTaxIdType === null ? null : ['type' => $declared->recipientTaxIdType->value],
+            'export_itn' => $declared->exportItn,
             'duties_support_version' => $this->dutiesSupport->version(),
         ];
     }

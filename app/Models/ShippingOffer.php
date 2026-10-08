@@ -51,6 +51,7 @@ use Illuminate\Support\Str;
  * @property Carbon|null $consumed_at
  * @property Carbon|null $purchase_failed_at
  * @property Carbon|null $recovery_unanswered_at
+ * @property array<string, mixed>|null $declared_customs_terms
  */
 class ShippingOffer extends Model
 {
@@ -98,6 +99,7 @@ class ShippingOffer extends Model
             'price' => 'decimal:2',
             'rate_metadata' => 'array',
             'purchase_context' => 'encrypted:array',
+            'declared_customs_terms' => 'array',
             'expires_at' => 'datetime',
             'consumed_at' => 'datetime',
             'purchase_failed_at' => 'datetime',

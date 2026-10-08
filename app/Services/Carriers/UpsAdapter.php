@@ -6,6 +6,7 @@ use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\RecoversUnresolvedPurchase;
 use App\Contracts\SendsCustomsTerms;
 use App\Contracts\UsesCarrierAccount;
+use App\DataTransferObjects\Customs\DeclaredCustomsTerms;
 use App\DataTransferObjects\Customs\RecipientTaxId;
 use App\DataTransferObjects\Customs\ResolvedCustomsTerms;
 use App\DataTransferObjects\Shipping\AddressData;
@@ -759,7 +760,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
             // InternationalForms on ShipmentServiceOptions, not on Shipment —
             // sent a level higher it validates against the schema and is then
             // silently ignored, so no customs invoice is ever generated.
-            if (! $request->fromAddress->sharesCustomsZoneWith($request->toAddress) && ! empty($request->customsItems)) {
+            if ($this->sendsInternationalForms($request)) {
                 $shipment['ShipmentServiceOptions']['InternationalForms'] = $this->buildCustomsDetail($request);
                 $shipment['InvoiceLineTotal'] = $this->buildShipInvoiceLineTotal($request);
             }
@@ -854,18 +855,19 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
             // Accepted and charged — see unreadablePurchase().
             throw $e;
         } catch (RequestException $e) {
-            $rawResponse = $this->decodeJsonSafely($e->getResponse());
+            $rawResponse = $this->scrubCustomsIds($this->decodeJsonSafely($e->getResponse()), $request);
 
             Log::channel('ups-validation')->error('UPS createShipment API error', [
                 'status' => $e->getResponse()->status(),
                 'body' => $rawResponse,
             ]);
 
-            return ShipResponse::failure(
+            return ShipResponse::failure($this->scrubCustomsIds(
                 data_get($rawResponse, 'response.errors.0.message')
                     ?? data_get($rawResponse, 'errors.0.message')
-                    ?? $e->getMessage()
-            );
+                    ?? $e->getMessage(),
+                $request,
+            ));
         } catch (\Throwable $e) {
             if ($response !== null) {
                 // Anything that breaks after the 2xx is still an accepted
@@ -880,11 +882,11 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
 
             Log::channel('ups-validation')->error('UPS createShipment error', [
                 'exception' => $e::class,
-                'error' => $e->getMessage(),
+                'error' => $this->scrubCustomsIds($e->getMessage(), $request),
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return ShipResponse::failure($e->getMessage());
+            return ShipResponse::failure($this->scrubCustomsIds($e->getMessage(), $request));
         }
     }
 
@@ -1175,7 +1177,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
         // or the adapter's own classification, rather than fail in a log line.
         Log::channel('ups-validation')->debug('LABEL RESPONSE', [
             'status' => $response->status(),
-            'body' => $this->decodeJsonSafely($response),
+            'body' => $this->scrubCustomsIds($this->decodeJsonSafely($response), $request),
         ]);
 
         // The request is sent once (see CreateShipment::$tries), which also
@@ -1754,7 +1756,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
     {
         $taxId = $request->recipientTaxId;
 
-        if (! $taxId instanceof RecipientTaxId || $request->fromAddress->sharesCustomsZoneWith($request->toAddress)) {
+        if (! $taxId instanceof RecipientTaxId || ! $this->sendsGlobalTaxInformation($request)) {
             return null;
         }
 
@@ -1796,7 +1798,87 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
      */
     private function filesEei(ShipRequest $request): bool
     {
-        return filled($request->exportItn) && filled($request->exporterEin);
+        return $this->sendsInternationalForms($request)
+            && filled($request->exportItn)
+            && filled($request->exporterEin);
+    }
+
+    /**
+     * Whether the request carries `InternationalForms`: the lane crosses a
+     * customs zone and there are lines to declare. The duties term, the ITN and
+     * the EIN all ride on it.
+     */
+    private function sendsInternationalForms(ShipRequest $request): bool
+    {
+        return ! $request->fromAddress->sharesCustomsZoneWith($request->toAddress) && $request->customsItems !== [];
+    }
+
+    /**
+     * Whether the consignee's tax ID is sent: one is held and the lane crosses
+     * a customs zone, whether or not there are lines to declare.
+     */
+    private function sendsGlobalTaxInformation(ShipRequest $request): bool
+    {
+        return $request->recipientTaxId instanceof RecipientTaxId
+            && ! $request->fromAddress->sharesCustomsZoneWith($request->toAddress);
+    }
+
+    /**
+     * What {@see CreateShipment()} puts on the wire, answered with the
+     * predicates that build the body. DDP is declared by the Type 02 charge
+     * whatever the lines; DDU only by the invoice's `TermsOfShipment`, so a
+     * request with no invoice declares none.
+     */
+    public function declaredCustomsTerms(ShipRequest $request): DeclaredCustomsTerms
+    {
+        $terms = $request->customsTerms;
+
+        $dutiesTerms = match (true) {
+            $terms?->dutiesTerms === DutiesTerms::Ddp => DutiesTerms::Ddp,
+            $terms?->dutiesTerms !== null && $this->sendsInternationalForms($request) => $terms->dutiesTerms,
+            default => null,
+        };
+
+        return new DeclaredCustomsTerms(
+            dutiesTerms: $dutiesTerms,
+            registration: $terms?->registration,
+            recipientTaxIdType: $this->sendsGlobalTaxInformation($request) ? $request->recipientTaxId?->type : null,
+            exportItn: $this->filesEei($request) ? $request->exportItn : null,
+        );
+    }
+
+    /**
+     * Take the recipient's tax ID and the client's EIN out of text bound for a
+     * log or a screen. UPS can echo a rejected number back in its message, and
+     * a key-based redaction cannot see it there.
+     *
+     * @template T of string|array<array-key, mixed>|null
+     *
+     * @param  T  $value
+     * @return T
+     */
+    private function scrubCustomsIds(string|array|null $value, ShipRequest $request): string|array|null
+    {
+        $secrets = array_values(array_filter(
+            [$request->recipientTaxId?->number, $request->exporterEin],
+            fn (?string $secret): bool => filled($secret),
+        ));
+
+        if ($secrets === [] || $value === null) {
+            return $value;
+        }
+
+        if (is_string($value)) {
+            return str_replace($secrets, '[REDACTED]', $value);
+        }
+
+        array_walk_recursive($value, function (mixed &$leaf) use ($secrets): void {
+            if (is_string($leaf)) {
+                $leaf = str_replace($secrets, '[REDACTED]', $leaf);
+            }
+        });
+
+        return $value;
     }
 
     /**

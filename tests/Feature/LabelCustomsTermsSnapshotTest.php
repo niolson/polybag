@@ -2,18 +2,15 @@
 
 use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\PackageShippingWorkflow;
+use App\Contracts\RecoversUnresolvedPurchase;
 use App\Contracts\SendsCustomsTerms;
-use App\DataTransferObjects\Customs\RecipientTaxId;
-use App\DataTransferObjects\Customs\ResolvedCustomsTerms;
+use App\DataTransferObjects\Customs\DeclaredCustomsTerms;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
-use App\DataTransferObjects\Shipping\AddressData;
-use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CustomsDocumentDelivery;
-use App\Enums\CustomsTermsOrigin;
 use App\Enums\DutiesTerms;
 use App\Enums\PackageStatus;
 use App\Enums\RecipientTaxIdType;
@@ -29,12 +26,16 @@ use App\Models\Product;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
+use App\Models\ShippingOffer;
 use App\Models\ShippingRule;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
-use App\Services\Customs\CustomsTermsSnapshot;
 use App\Services\Customs\DutiesSupportTable;
+use App\Services\PostageSources\OfferStore;
+use App\Services\PostageSources\UnresolvedPurchaseResolver;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Mockery\MockInterface;
 
 /**
@@ -60,10 +61,10 @@ afterEach(function (): void {
  *
  * @param  array<string, mixed>  $shipmentAttributes
  */
-function snapshotPackage(Client $client, array $shipmentAttributes): Package
+function snapshotPackage(Client $client, array $shipmentAttributes, string $carrierName = 'MockCarrier'): Package
 {
-    $carrier = Carrier::query()->where('name', 'MockCarrier')->first()
-        ?? Carrier::factory()->create(['name' => 'MockCarrier', 'active' => true]);
+    $carrier = Carrier::query()->where('name', $carrierName)->first()
+        ?? Carrier::factory()->create(['name' => $carrierName, 'active' => true]);
     $service = CarrierService::query()->where('service_code', 'TEST')->first()
         ?? CarrierService::factory()->create([
             'carrier_id' => $carrier->id,
@@ -118,42 +119,50 @@ function snapshotPackage(Client $client, array $shipmentAttributes): Package
  *
  * @param  array<int, ShipRequest>  $sent
  */
-function snapshotCarrier(array &$sent, bool $sendsTerms = true): MockInterface
+function snapshotCarrier(array &$sent, bool $sendsTerms = true, string $carrierName = 'MockCarrier', ?DeclaredCustomsTerms $declares = null): MockInterface
 {
     $adapter = $sendsTerms
         ? Mockery::mock(DirectCarrierAdapter::class, SendsCustomsTerms::class)
         : Mockery::mock(DirectCarrierAdapter::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('customsDocumentDelivery')->andReturn(CustomsDocumentDelivery::FusedIntoLabel);
-    $adapter->shouldReceive('getCarrierName')->andReturn('MockCarrier');
+    $adapter->shouldReceive('getCarrierName')->andReturn($carrierName);
     $adapter->shouldReceive('isConfigured')->andReturnTrue();
-    $adapter->shouldReceive('createShipment')->once()->andReturnUsing(function (ShipRequest $request) use (&$sent): ShipResponse {
+    if ($sendsTerms) {
+        $adapter->shouldReceive('declaredCustomsTerms')->andReturnUsing(fn (ShipRequest $request): DeclaredCustomsTerms => $declares ?? new DeclaredCustomsTerms(
+            dutiesTerms: $request->customsTerms?->dutiesTerms,
+            registration: $request->customsTerms?->registration,
+            recipientTaxIdType: $request->recipientTaxId?->type,
+            exportItn: $request->exportItn,
+        ));
+    }
+    $adapter->shouldReceive('createShipment')->once()->andReturnUsing(function (ShipRequest $request) use (&$sent, $carrierName): ShipResponse {
         $sent[] = $request;
 
         return ShipResponse::success(
             trackingNumber: 'TRACK'.random_int(1000, 9999),
             cost: 7.50,
-            carrier: 'MockCarrier',
+            carrier: $carrierName,
             service: 'Test Service',
             labelData: base64_encode('label'),
         );
     });
 
-    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+    app(CarrierRegistry::class)->registerInstance($carrierName, $adapter);
 
     return $adapter;
 }
 
-function snapshotShip(Package $package): void
+function snapshotShip(Package $package, string $carrierName = 'MockCarrier'): void
 {
-    $rate = quotedDirectly($package, new RateResponse('MockCarrier', 'TEST', 'Test Service', 7.50, carrierServiceId: CarrierService::query()->where('service_code', 'TEST')->value('id')));
+    $rate = quotedDirectly($package, new RateResponse($carrierName, 'TEST', 'Test Service', 7.50, carrierServiceId: CarrierService::query()->where('service_code', 'TEST')->value('id')));
 
     $result = app(PackageShippingWorkflow::class)->ship(
         $package,
         new PackageShippingRequest(selectedRate: $rate, userId: auth()->id()),
     );
 
-    expect($result->success)->toBeTrue();
+    expect($result->success)->toBeTrue($result->message ?? $result->title ?? '');
 }
 
 it('records an order-sourced term and registration, the ITN and the recipient tax ID type', function (): void {
@@ -266,23 +275,18 @@ it('records nothing for an adapter that does not send customs terms, rather than
     expect($package->fresh()->activeLabel()->firstOrFail()->customs_terms)->toBeNull();
 });
 
-it('records a source-decided purchase as such, declaring nothing of its own', function (): void {
-    $resolved = new ResolvedCustomsTerms(
-        applies: true,
-        destinationCountry: 'DE',
-        dutiesTerms: DutiesTerms::Ddp,
-        dutiesTermsOrigin: CustomsTermsOrigin::Order,
-    );
-    $request = new ShipRequest(
-        fromAddress: AddressData::fromConfig(),
-        toAddress: new AddressData('Erika', 'Mustermann', 'Pariser Platz 1', 'Berlin', null, '10117', 'DE'),
-        packageData: new PackageData(weight: 2.0, length: 10, width: 8, height: 4),
-        exportItn: 'X20261008123456',
-        customsTerms: $resolved->asSourceDecided(),
-        recipientTaxId: new RecipientTaxId(RecipientTaxIdType::Vat, 'DE123456789'),
-    );
+it('records a source-decided purchase through the workflow as such, declaring nothing of its own', function (): void {
+    // Amazon Shipping on a connection takes no terms from PolyBag, and its
+    // adapter does not send them: the workflow still records who decided.
+    $client = Client::factory()->ddpToEu()->create();
+    $package = snapshotPackage($client, ['export_itn' => 'X20261008123456', 'recipient_tax_id_type' => RecipientTaxIdType::Vat, 'recipient_tax_id' => 'DE123456789'], Carrier::AMAZON_SHIPPING);
+    $client->update(['exporter_ein' => '123456789']);
+    $sent = [];
+    snapshotCarrier($sent, sendsTerms: false, carrierName: Carrier::AMAZON_SHIPPING);
 
-    expect(app(CustomsTermsSnapshot::class)->forRequest($request))->toBe([
+    snapshotShip($package, Carrier::AMAZON_SHIPPING);
+
+    expect($package->fresh()->activeLabel()->firstOrFail()->customs_terms)->toBe([
         'duties_terms' => null,
         'duties_terms_source' => 'source_decided',
         'registration' => null,
@@ -290,4 +294,91 @@ it('records a source-decided purchase as such, declaring nothing of its own', fu
         'export_itn' => null,
         'duties_support_version' => app(DutiesSupportTable::class)->version(),
     ]);
+});
+
+it('records what an adapter reports it declared, not what the Shipment resolved', function (): void {
+    $client = Client::factory()->ddpToEu()->create();
+    $package = snapshotPackage($client, ['export_itn' => 'X20261008123456']);
+    $client->update(['exporter_ein' => '123456789']);
+    $sent = [];
+    snapshotCarrier($sent, declares: new DeclaredCustomsTerms(dutiesTerms: DutiesTerms::Ddp));
+
+    snapshotShip($package);
+
+    $snapshot = $package->fresh()->activeLabel()->firstOrFail()->customs_terms;
+
+    expect($snapshot['duties_terms'])->toBe('ddp')
+        ->and($snapshot['export_itn'])->toBeNull();
+});
+
+it('records the terms that were sent when a lost purchase is recovered after the Shipment changed', function (): void {
+    // The label is bought on DDU and not recorded; a manager then switches the
+    // order to DDP; recovery finds the DDU label and must record DDU.
+    Schema::table('package_labels', fn (Blueprint $table) => $table->dropColumn('carrier_account_fingerprint'));
+
+    $client = Client::factory()->create();
+    $package = snapshotPackage($client, ['duties_terms' => 'ddu']);
+    $sold = ShipResponse::success(trackingNumber: 'TRACK123', cost: 7.50, carrier: 'MockCarrier', service: 'Test Service', labelData: base64_encode('label'));
+
+    $adapter = Mockery::mock(DirectCarrierAdapter::class, SendsCustomsTerms::class, RecoversUnresolvedPurchase::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('customsDocumentDelivery')->andReturn(CustomsDocumentDelivery::FusedIntoLabel);
+    $adapter->shouldReceive('getCarrierName')->andReturn('MockCarrier');
+    $adapter->shouldReceive('isConfigured')->andReturnTrue();
+    $adapter->shouldReceive('declaredCustomsTerms')->andReturnUsing(fn (ShipRequest $request): DeclaredCustomsTerms => new DeclaredCustomsTerms(dutiesTerms: $request->customsTerms?->dutiesTerms));
+    $adapter->shouldReceive('createShipment')->once()->andReturnUsing(function (ShipRequest $request) use ($sold): ShipResponse {
+        app(OfferStore::class)->recordPurchase($request->offer, 'SOURCE-SHIPMENT-1');
+
+        return $sold;
+    });
+    $adapter->shouldReceive('recoverPurchase')->once()->andReturn($sold);
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $rate = new RateResponse('MockCarrier', 'TEST', 'Test Service', 7.50, carrierServiceId: CarrierService::query()->where('service_code', 'TEST')->value('id'));
+    $workflow = app(PackageShippingWorkflow::class);
+    $first = $workflow->ship($package, new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate)));
+
+    expect($first->title)->toBe('Label Bought but Not Recorded')
+        ->and(ShippingOffer::query()->whereNotNull('consumed_at')->sole()->declared_customs_terms['duties_terms'])->toBe('ddu');
+
+    Schema::table('package_labels', fn (Blueprint $table) => $table->string('carrier_account_fingerprint', 64)->nullable());
+    $package->shipment->update(['duties_terms' => 'ddp']);
+
+    $second = $workflow->ship($package->fresh(), new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate)));
+
+    expect($second->success)->toBeTrue()
+        ->and($package->fresh()->activeLabel()->firstOrFail()->customs_terms['duties_terms'])->toBe('ddu');
+});
+
+it('gives a label recorded by hand the terms its purchase declared', function (): void {
+    $package = Package::factory()->create(['status' => PackageStatus::Unshipped]);
+    $snapshot = [
+        'duties_terms' => 'ddp',
+        'duties_terms_source' => 'client',
+        'registration' => ['regime' => 'ioss', 'number' => 'IM0000000001', 'source' => 'client'],
+        'recipient_tax_id' => null,
+        'export_itn' => null,
+        'duties_support_version' => '2026-10-08',
+    ];
+    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+        'package_id' => $package->id,
+        'consumed_at' => now()->subDay(),
+        'declared_customs_terms' => $snapshot,
+    ]);
+
+    app(UnresolvedPurchaseResolver::class)->recordLabel($offer, '1Z999AA10123456784', User::factory()->manager()->create());
+
+    expect($package->fresh()->activeLabel()->firstOrFail()->customs_terms)->toBe($snapshot);
+});
+
+it('records nothing for a label recorded by hand whose purchase declared nothing', function (): void {
+    $package = Package::factory()->create(['status' => PackageStatus::Unshipped]);
+    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+        'package_id' => $package->id,
+        'consumed_at' => now()->subDay(),
+    ]);
+
+    app(UnresolvedPurchaseResolver::class)->recordLabel($offer, '1Z999AA10123456784', User::factory()->manager()->create());
+
+    expect($package->fresh()->activeLabel()->firstOrFail()->customs_terms)->toBeNull();
 });

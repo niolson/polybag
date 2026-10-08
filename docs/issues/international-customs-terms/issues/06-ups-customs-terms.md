@@ -140,3 +140,41 @@ the column and a nullable `duties_cost` (`08` fills it).
   *AESCitation: X20261008123456* and the EIN. The script is in the session scratchpad, not
   the repo. **Not verified:** that UPS transmits the Vendor Collect ID electronically (still
   with the UPS email), and the UK VAT number on `0000` beyond `02`'s probe.
+- 2026-10-08 — **Review fixes.**
+  - **Snapshot is taken at the claim, not at recording.** The workflow decides what the
+    request declares immediately before `createShipment()` and stores it on the Offer
+    (`shipping_offers.declared_customs_terms`, json). Recovery of a lost purchase and the
+    by-hand `UnresolvedPurchaseResolver::recordLabel*()` paths read it back, so a Label
+    found after a manager edited `duties_terms` records the terms that were sent. Before
+    this, recovery rebuilt the request from the Shipment as it was then, and the by-hand
+    path wrote none. Tested: DDU bought and not recorded, order switched to DDP, recovery
+    records DDU; a by-hand label gets the Offer's snapshot, and one whose Offer declared
+    nothing gets null.
+  - **The adapter says what it sent.** `SendsCustomsTerms::declaredCustomsTerms()` replaces
+    the snapshot's own predicates; `UpsAdapter` answers with the same private predicates
+    that build the body (`sendsInternationalForms()`, `sendsGlobalTaxInformation()`,
+    `filesEei()`), and `CustomsTermsSnapshot` records that. Consequences: an ITN with no
+    client EIN, or with no lines to declare, is not recorded (and the EIN is no longer put
+    on `ShipFrom` without an EEI to carry it); DDU is recorded only when an invoice carries
+    `TermsOfShipment`, while DDP is recorded from the Type 02 charge; a tax ID sent on an
+    intra-EU lane is recorded although no customs terms resolved there. Tests compare
+    `declaredCustomsTerms()` with the facts read back out of the built request body for
+    eight cases.
+  - **Error bodies are scrubbed.** UPS can echo a rejected tax ID or EIN in its message;
+    the adapter replaces both with `[REDACTED]` in the logged error body, the returned
+    failure message and the generic error log. Tested with a 400 that echoes both.
+  - **Tests:** the log-redaction test now reads what the configured `ups-validation`
+    channel (taps included) writes to `storage/logs/testing.log`; the source-decided case is
+    covered through the workflow with an Amazon Shipping rate and an adapter that does not
+    send terms; the DDP and DDU `PaymentDetails` are validated against the vendored
+    `upsRating.json` component (`Shipment_PaymentDetails`). The whole-body Rating tests stay
+    skipped for the reasons already noted in `UpsAdapterTest`.
+  - **DDU rate requests: kept as built.** CIE comparison, same parcel, `sandbox_mode` on,
+    service 65 to Germany: no terms (what main sends) $283.03, DDU with `ShipperNumber` and
+    Type 01 $271.12, DDP $286.12; Brazil $396.08, $406.26, $421.26. So the DDU quote does
+    differ from main's, but the main quote is the wrong one: the DDU label bought on CIE
+    with the same parcel cost $271.12, the DDU-with-account quote, and `02`'s baseline
+    label cost the same $271.12 against main's $283.03 quote. Sending the account on every
+    international quote makes the quote equal the purchase. The coordinator asked for
+    DDP-only if the quotes differed; I kept both because the evidence points the other way.
+    One-line change in `buildRatePaymentDetails()` if the DDP-only rule is wanted anyway.

@@ -1,5 +1,6 @@
 <?php
 
+use App\DataTransferObjects\Customs\DeclaredCustomsTerms;
 use App\DataTransferObjects\Customs\RecipientTaxId;
 use App\DataTransferObjects\Customs\ResolvedCustomsTerms;
 use App\DataTransferObjects\Customs\SellerTaxRegistration;
@@ -31,6 +32,7 @@ use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShippingOffer;
 use App\Services\Carriers\UpsAdapter;
+use App\Services\Customs\CustomsTermsSnapshot;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Log;
 use Monolog\Handler\TestHandler;
@@ -2552,9 +2554,9 @@ function upsResolvedTerms(string $country, ?DutiesTerms $term, ?SellerTaxRegistr
     );
 }
 
-function upsTermsShipRequest(AddressData $to, ?ResolvedCustomsTerms $terms, ?RecipientTaxId $taxId = null, ?string $itn = null, ?string $ein = null): ShipRequest
+function upsTermsShipRequest(AddressData $to, ?ResolvedCustomsTerms $terms, ?RecipientTaxId $taxId = null, ?string $itn = null, ?string $ein = null, ?array $customsItems = null, ?AddressData $from = null): ShipRequest
 {
-    $request = upsShipRequestTo($to, customsItems: upsCustomsItems());
+    $request = upsShipRequestTo($to, customsItems: $customsItems ?? upsCustomsItems(), fromAddress: $from);
 
     return new ShipRequest(
         fromAddress: $request->fromAddress,
@@ -2871,3 +2873,168 @@ it('builds a label request carrying every customs term that conforms to the UPS 
         return true;
     });
 });
+
+/*
+|--------------------------------------------------------------------------
+| What the adapter reports it declared (international-customs-terms/06)
+|--------------------------------------------------------------------------
+|
+| The Label's snapshot records what the adapter says it sent. These compare
+| that answer with the body actually built, so the two cannot drift apart.
+|
+*/
+
+function upsFrenchGermanOrigin(): AddressData
+{
+    return new AddressData(
+        firstName: 'Shipping',
+        lastName: 'Zentrum',
+        streetAddress: 'Hauptstrasse 1',
+        city: 'Berlin',
+        stateOrProvince: null,
+        postalCode: '10117',
+        country: 'DE',
+    );
+}
+
+/**
+ * The customs facts a built UPS body carries, in the vocabulary of
+ * {@see DeclaredCustomsTerms}.
+ *
+ * @param  array<string, mixed>  $shipment
+ * @return array{duties_terms: string|null, registration: string|null, recipient_tax_id: bool, export_itn: string|null}
+ */
+function upsCustomsFactsOf(array $shipment): array
+{
+    $types = array_column($shipment['PaymentInformation']['ShipmentCharge'], 'Type');
+    $forms = $shipment['ShipmentServiceOptions']['InternationalForms'] ?? [];
+
+    return [
+        'duties_terms' => in_array('02', $types, true) ? 'ddp' : (isset($forms['TermsOfShipment']) ? strtolower($forms['TermsOfShipment']) : null),
+        'registration' => $shipment['ShipFrom']['VendorInfo']['VendorCollectIDNumber'] ?? null,
+        'recipient_tax_id' => isset($shipment['GlobalTaxInformation']),
+        'export_itn' => $forms['EEIFilingOption']['ShipperFiled']['PreDepartureITNNumber'] ?? null,
+    ];
+}
+
+it('reports exactly the customs terms it put on the wire', function (ShipRequest $request): void {
+    fakeUpsShipEndpoints();
+
+    $this->adapter->createShipment($request);
+
+    $declared = $this->adapter->declaredCustomsTerms($request);
+    $sent = upsCustomsFactsOf(sentUpsShipment());
+
+    expect([
+        'duties_terms' => $declared->dutiesTerms?->value,
+        'registration' => $declared->registration?->number,
+        'recipient_tax_id' => $declared->recipientTaxIdType !== null,
+        'export_itn' => $declared->exportItn,
+    ])->toBe($sent);
+})->with([
+    'everything' => [fn (): ShipRequest => upsTermsShipRequest(
+        upsBrazilianAddress(),
+        upsResolvedTerms('BR', DutiesTerms::Ddp, new SellerTaxRegistration(TaxRegistrationRegime::Ioss, 'IM2760000742', CustomsTermsOrigin::Order)),
+        new RecipientTaxId(RecipientTaxIdType::Cpf, '12345678909'),
+        'X20261008123456',
+        '123456789',
+    )],
+    'an ITN with no client EIN' => [fn (): ShipRequest => upsTermsShipRequest(upsGermanAddress(), upsResolvedTerms('DE', DutiesTerms::Ddu), itn: 'X20261008123456')],
+    'an ITN and EIN with no lines to declare' => [fn (): ShipRequest => upsTermsShipRequest(upsGermanAddress(), upsResolvedTerms('DE', DutiesTerms::Ddu), itn: 'X20261008123456', ein: '123456789', customsItems: [])],
+    'DDU with no invoice to carry it' => [fn (): ShipRequest => upsTermsShipRequest(upsGermanAddress(), upsResolvedTerms('DE', DutiesTerms::Ddu), customsItems: [])],
+    'DDP with no invoice, which the charge still declares' => [fn (): ShipRequest => upsTermsShipRequest(upsGermanAddress(), upsResolvedTerms('DE', DutiesTerms::Ddp), customsItems: [])],
+    'a tax ID with no invoice' => [fn (): ShipRequest => upsTermsShipRequest(upsBrazilianAddress(), upsResolvedTerms('BR', DutiesTerms::Ddu), new RecipientTaxId(RecipientTaxIdType::Cpf, '12345678909'), customsItems: [])],
+    'a tax ID on an intra-EU lane, which resolved no customs terms' => [fn (): ShipRequest => upsTermsShipRequest(
+        upsFrenchAddress(),
+        ResolvedCustomsTerms::notApplicable('FR'),
+        new RecipientTaxId(RecipientTaxIdType::Vat, 'FR12345678901'),
+        from: upsFrenchGermanOrigin(),
+    )],
+    'nothing resolved' => [fn (): ShipRequest => upsTermsShipRequest(upsGermanAddress(), null)],
+]);
+
+it('snapshots an ITN as not sent when the client has no EIN, and a tax ID as sent on an intra-EU lane', function (): void {
+    $snapshots = app(CustomsTermsSnapshot::class);
+
+    $noEin = upsTermsShipRequest(upsGermanAddress(), upsResolvedTerms('DE', DutiesTerms::Ddu), itn: 'X20261008123456');
+    $intraEu = upsTermsShipRequest(
+        upsFrenchAddress(),
+        ResolvedCustomsTerms::notApplicable('FR'),
+        new RecipientTaxId(RecipientTaxIdType::Vat, 'FR12345678901'),
+        from: upsFrenchGermanOrigin(),
+    );
+
+    expect($snapshots->forRequest($noEin, $this->adapter)['export_itn'])->toBeNull()
+        ->and($snapshots->forRequest($intraEu, $this->adapter)['recipient_tax_id'])->toBe(['type' => 'vat']);
+});
+
+it('keeps the EIN off the ship-from when there is no EEI to carry it', function (): void {
+    fakeUpsShipEndpoints();
+
+    $this->adapter->createShipment(upsTermsShipRequest(upsGermanAddress(), upsResolvedTerms('DE', DutiesTerms::Ddu), itn: 'X20261008123456', ein: '123456789', customsItems: []));
+
+    expect(sentUpsShipment()['ShipFrom'])->not->toHaveKey('TaxIdentificationNumber');
+});
+
+it('scrubs the recipient tax ID and EIN from a UPS error that echoes them', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => MockResponse::make([
+            'response' => ['errors' => [['code' => '120999', 'message' => 'Invalid tax ID 98765432100 for consignee; EIN 123456789 rejected']]],
+        ], 400),
+    ]);
+    $handler = new TestHandler;
+    Log::extend('ups-validation-scrub', fn (): MonologLogger => new MonologLogger('ups-validation', [$handler]));
+    config()->set('logging.channels.ups-validation', ['driver' => 'ups-validation-scrub']);
+    Log::forgetChannel('ups-validation');
+
+    $response = $this->adapter->createShipment(upsTermsShipRequest(
+        upsBrazilianAddress(),
+        upsResolvedTerms('BR', DutiesTerms::Ddu),
+        new RecipientTaxId(RecipientTaxIdType::Cpf, '98765432100'),
+        'X20261008123456',
+        '123456789',
+    ));
+
+    $logged = json_encode(collect($handler->getRecords())->filter(fn ($record): bool => $record->message !== 'LABEL REQUEST')->map(fn ($record): array => [$record->message, $record->context])->all());
+
+    expect($response->success)->toBeFalse()
+        ->and($response->errorMessage)->toContain('Invalid tax ID [REDACTED]')
+        ->and($response->errorMessage)->not->toContain('98765432100')
+        ->and($response->errorMessage)->not->toContain('123456789')
+        ->and($logged)->toContain('UPS createShipment API error')
+        ->and($logged)->not->toContain('98765432100')
+        ->and($logged)->not->toContain('123456789');
+});
+
+it('keeps the recipient tax ID out of the configured UPS validation channel', function (): void {
+    // The channel as config/logging.php builds it, taps included, writing to
+    // the testing log: not a channel of the test's own.
+    Log::forgetChannel('ups-validation');
+    $log = storage_path('logs/testing.log');
+    $before = is_file($log) ? filesize($log) : 0;
+    fakeUpsShipEndpoints();
+
+    $this->adapter->createShipment(upsTermsShipRequest(
+        upsBrazilianAddress(),
+        upsResolvedTerms('BR', DutiesTerms::Ddu),
+        new RecipientTaxId(RecipientTaxIdType::Cpf, '45678912300'),
+    ));
+
+    clearstatcache();
+    $written = (string) file_get_contents($log, offset: $before);
+
+    expect($written)->toContain('LABEL REQUEST')
+        ->and($written)->toContain('GlobalTaxInformation')
+        ->and($written)->not->toContain('45678912300');
+});
+
+it('sends a DDP or DDU rate payment block that conforms to the UPS Rating schema', function (DutiesTerms $term): void {
+    fakeUpsRateEndpoints();
+
+    $this->adapter->getRates(upsRateRequestWithTerms(upsResolvedTerms('DE', $term)), ['65']);
+
+    $shipment = sentUpsRateBody()['RateRequest']['Shipment'];
+
+    assertMatchesUpsSchema($shipment['PaymentDetails'], 'Shipment_PaymentDetails', 'upsRating');
+})->with([DutiesTerms::Ddp, DutiesTerms::Ddu]);
