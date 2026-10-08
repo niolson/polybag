@@ -56,8 +56,9 @@ Add the same for SE. Replace the sources with a USPS one if USPS confirms (quest
 the USPS email from `02`). Bump `version`.
 
 **Lookup.** `DutiesSupportTable::supportFor()` takes the regime of
-`ResolvedCustomsTerms::$applicableRegistration`, not `$registration`, so a registration
-withheld over the threshold does not trigger it. An override applies only when the
+`ResolvedCustomsTerms::$registration`, the registration actually declared. Not
+`$applicableRegistration`: that keeps a registration the threshold withholds, so it would
+drop DDU rates for a parcel that carries no IOSS number. An override applies only when the
 regime matches, and the entry's `effective_from` still gates the whole entry.
 `DutiesSupportTable::errors()` validates the new key: a known regime, a valid support
 value, and a source and checked date.

@@ -109,13 +109,23 @@ international Package that lack an origin or an HS code.
     number"*. This is customs behavior, so it applies to every carrier. Same signal as
     `ConsigneeType`: a non-blank company name.
 - 2026-10-08 — From `02` and `11`:
-  - **The ITN rule is per tariff line, not per parcel.** 15 CFR 30.37(a) exempts
-    commodities *"classified under an individual Schedule B number… $2,500 or less…
-    regardless of the total shipment value"*. A $3,000 parcel of ten $300 lines needs
-    no EEI. Block only when one classification is over $2,500. Group lines by the first
-    six digits of the HS code, since PolyBag stores HS codes, not Schedule B numbers.
-    Treat a line with no HS code as its own group. The FedEx sandbox refused a single
-    $3,000 line claiming 30.37(a); before building, check with one sandbox label of ten
-    $300 lines that FedEx applies the rule per line too.
+  - **The ITN rule is per classification, not per parcel.** 15 CFR 30.37(a) exempts
+    commodities *"classified under an individual Schedule B number or HTSUSA commodity
+    classification code… $2,500 or less… regardless of the total shipment value"*, summed
+    over every line with that classification. A $3,000 parcel of ten $300 lines in
+    different classifications needs no EEI. When a classification is unknown, err toward
+    requiring the ITN, because a missed filing is a false exemption claim:
+    - **Group** lines by their full HS code as stored (digits only), sum each group, and
+      block when any group is over $2,500. Do not truncate to six digits, which merges
+      classifications that differ only past the sixth digit and over-blocks.
+    - **A shorter code that prefixes a longer one** on the same parcel (`610910` and
+      `6109100012`) cannot be told apart, so merge them into one group.
+    - **A line with no HS code** could belong to any classification. If any line lacks a
+      code and the parcel total is over $2,500, block: the exemption cannot be shown. The
+      fix is to add HS codes or enter an ITN.
+
+    The FedEx sandbox refused a single $3,000 line claiming 30.37(a). Before building,
+    check with one sandbox label of ten $300 lines, each with a different HS code, that
+    FedEx also applies the rule per classification.
   - **Add the `11` rule:** a Shipment with an ITN whose client has no `exporter_ein` is
     blocked, with the client form as the fix.
