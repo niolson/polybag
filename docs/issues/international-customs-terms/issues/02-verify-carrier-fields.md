@@ -305,3 +305,16 @@ Per carrier, record the request sent and the answer received in `.scratch/intern
     should be reported in the 'Sender Customs Reference Number' field"*. That is
     `exportersReference`, which supports the TEM result. It is still open what USPS does
     with it when prepay is on.
+
+- 2026-10-08 — **FedEx ITN threshold, per classification.** One international priority
+  label to GB per variant through `FedexAdapter::createShipment()` on the sandbox, no
+  `exportDetail` unless stated. Ten $300 lines with ten different six-digit HS codes
+  ($3,000) bought a label and FedEx printed `NO EEI 30.37(a)` itself; claiming
+  `NO_EEI_30_37_A` explicitly also bought. Controls were refused with
+  `SHIPMENTVALIDATION.EEIEDIT.ERROR` ("The FTR Exemption or AES Citation you provided is
+  not valid for EEI"): ten $300 lines sharing one code, ten with the placeholder code
+  `000000`, one $3,000 line and one $9,000 line. One $2,400 line bought. The sandbox
+  does not validate HS codes; it groups identical ones. FedEx therefore applies the
+  $2,500 limit per classification, matching 15 CFR 30.37(a) and `05`'s rule. Still
+  open: other destinations, prefix-related codes of different lengths, and production.
+  All sandbox labels were voided.

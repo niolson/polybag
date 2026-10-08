@@ -173,9 +173,14 @@ international Package that lack an origin or an HS code.
   - *ITN rule.* Per classification as the `02`/`11` comment specifies: lines grouped by the
     full HS code (digits only), a shorter code that prefixes a longer one merged into its
     group, and a parcel over $2,500 with an unclassified line blocked. It applies only to
-    a US origin and never to Canada. **The FedEx sandbox check the comment asks for (one
-    label of ten $300 lines with different HS codes) has not been run.** The rule is built
-    on the regulation's text, as the comment says; run the label before relying on it.
+    a US origin and never to Canada. **FedEx sandbox check, run 2026-10-08:** ten $300
+    lines with ten different HS codes and no ITN bought a label (FedEx printed `NO EEI
+    30.37(a)` itself); the same $3,000 with one shared code, one $3,000 line and one $9,000
+    line were each refused with `SHIPMENTVALIDATION.EEIEDIT.ERROR`, and one $2,400 line
+    bought. So FedEx applies the exemption per classification, as the rule here does. Not
+    tested: GB was the only destination, codes were all six digits (so whether FedEx
+    merges a shorter code that prefixes a longer one is unconfirmed), and it is the
+    sandbox, not production.
   - *Batch rate reasons.* `UnattendedRateSelector::refusal()` now names the rates the
     customs terms dropped ("no duties terms are set for Italy or the EU", "USPS dropped:
     Germany requires prepaid duties (IMM)") when nothing was buyable, titled *Customs
