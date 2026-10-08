@@ -30,8 +30,10 @@ PolyBag does not lodge the declaration; the carrier does, from the label request
 
 - **FedEx** sends `"NA"` (`FedexAdapter::NO_STANDARD_PRODUCT_ID`) where a GTIN would go.
   `05` asked FedEx whether that should be `"NA"` or `"NO"` and got no reply.
-- **UPS** omits identifier `0300` and sends `productIdentifierExemptIndicator: "false"`
-  (`UpsAdapter::PRODUCT_IDENTIFIER_NOT_EXEMPT`).
+- **UPS** omits identifier `0300` and sends `ProductIdentifierExemptIndicator: false`
+  (`UpsAdapter::PRODUCT_IDENTIFIER_NOT_EXEMPT`). Until 2026-10-08 it sent the camelCase
+  string `"false"` from UPS's August guidance; the published spec has the PascalCase
+  boolean, and CIE accepts it (`international-customs-terms/02`).
 
 Neither carrier has said that it turns these into `Y081`. If one does not, a line with no
 GTIN reaches customs with no S-PID and no exception code, and could be held from

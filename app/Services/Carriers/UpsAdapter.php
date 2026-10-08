@@ -71,14 +71,14 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
     private const PARTY_TYPE_CONSUMER = '02';
 
     /**
-     * Sent as `productIdentifierExemptIndicator` beside a product's EU product
-     * identifiers. The UPS guidance (v1.0, August 2026) shows the field only in
-     * XML and the vendored spec predates it, so whether the JSON API wants the
-     * string or a boolean is unknown; it is a string here because every other
-     * value in the body is. `eu-product-identifiers/05` confirms it against
-     * UPS — change it here, and record what UPS said.
+     * Sent as `ProductIdentifierExemptIndicator` beside a product's EU product
+     * identifiers. The published Shipping spec (UPS-API/api-documentation,
+     * 2026-10-05) defines it as a JSON boolean, unlike every other value in
+     * the body; the camelCase string the August 2026 guidance showed was
+     * accepted by CIE but is not the published field
+     * (`international-customs-terms/02`).
      */
-    private const PRODUCT_IDENTIFIER_NOT_EXEMPT = 'false';
+    private const PRODUCT_IDENTIFIER_NOT_EXEMPT = false;
 
     private const PRODUCT_ID_MAX_LENGTH = 100;
 
@@ -1540,7 +1540,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
             }
 
             if ($declaresEuProductIdentifiers && ($identifiers = $this->euProductIdentifiers($item)) !== null) {
-                $product['productIdentifierExemptIndicator'] = self::PRODUCT_IDENTIFIER_NOT_EXEMPT;
+                $product['ProductIdentifierExemptIndicator'] = self::PRODUCT_IDENTIFIER_NOT_EXEMPT;
                 $product['ProductIdentifier'] = $identifiers;
             }
 

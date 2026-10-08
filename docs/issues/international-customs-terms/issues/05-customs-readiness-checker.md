@@ -90,3 +90,42 @@ international Package that lack an origin or an HS code.
   check's purchase-time block owns that message: batch ship must record "no duties terms
   are set for <country>" and its fix, not "no rates". The same goes for rates dropped by
   `duties-support.json`: surface their reasons on the batch row. Add a test for each.
+- 2026-10-08 — From `02`:
+  - **Decide the KR block before building it.** FedEx's Global Trade advisory `KRA0011`
+    says the foreign shipper is not responsible for the PCCC and need not put it on the
+    air waybill or invoice; the Korean recipient supplies it at import. Blocking a KR
+    consumer label for a missing PCCC may therefore refuse parcels FedEx would carry.
+    That advisory may be stale (others in the same feed are), and UPS and USPS have not
+    been asked. Choose one: keep KR as a block, make it a warning, or drop KR from
+    `recipient-tax-id.json`. Record the choice and its source in the file. BR stays a
+    block: FedEx's `BRA0100` says a parcel without CPF or CNPJ is caged.
+  - **Warn on a FedEx DDU label with no recipient email.** The FedEx Ship API guide says
+    that without `recipients.contact.emailAddress` FedEx cannot collect duties from the
+    recipient and *"charges fall back to the shipper"*. `07` sends the email when the
+    Shipment has one; this check should warn when an international FedEx DDU Shipment
+    has none.
+  - **Warn on IOSS with a company name in the recipient address.** FedEx's IOSS guide:
+    customs is *"likely to treat your package as a B2B shipment and ignore your IOSS
+    number"*. This is customs behavior, so it applies to every carrier. Same signal as
+    `ConsigneeType`: a non-blank company name.
+- 2026-10-08 — From `02` and `11`:
+  - **The ITN rule is per classification, not per parcel.** 15 CFR 30.37(a) exempts
+    commodities *"classified under an individual Schedule B number or HTSUSA commodity
+    classification code… $2,500 or less… regardless of the total shipment value"*, summed
+    over every line with that classification. A $3,000 parcel of ten $300 lines in
+    different classifications needs no EEI. When a classification is unknown, err toward
+    requiring the ITN, because a missed filing is a false exemption claim:
+    - **Group** lines by their full HS code as stored (digits only), sum each group, and
+      block when any group is over $2,500. Do not truncate to six digits, which merges
+      classifications that differ only past the sixth digit and over-blocks.
+    - **A shorter code that prefixes a longer one** on the same parcel (`610910` and
+      `6109100012`) cannot be told apart, so merge them into one group.
+    - **A line with no HS code** could belong to any classification. If any line lacks a
+      code and the parcel total is over $2,500, block: the exemption cannot be shown. The
+      fix is to add HS codes or enter an ITN.
+
+    The FedEx sandbox refused a single $3,000 line claiming 30.37(a). Before building,
+    check with one sandbox label of ten $300 lines, each with a different HS code, that
+    FedEx also applies the rule per classification.
+  - **Add the `11` rule:** a Shipment with an ITN whose client has no `exporter_ein` is
+    blocked, with the client form as the fix.

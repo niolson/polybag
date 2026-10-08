@@ -2229,8 +2229,8 @@ it('does not read a UPS 2xx it cannot read as a void', function (MockResponse $r
 /**
  * upsShipping.json with the EU product identifier fields under
  * InternationalForms_Product, which the vendored Shipping.yaml predates. Taken
- * from the UPS Ship API guidance "EU Product Identifier (PID) Requirements",
- * v1.0, August 2026; drop it once UPS republishes the spec with them. Product
+ * from the published Shipping.yaml (UPS-API/api-documentation, 2026-10-05);
+ * drop it once the vendored copy is refreshed. Product
  * is also closed to other keys here, so a misspelled identifier key fails
  * rather than validating as an unknown property UPS would ignore.
  *
@@ -2241,9 +2241,8 @@ function upsShippingSchemaWithProductIdentifiers(): Closure
     return function (array $document): array {
         $product = &$document['components']['schemas']['InternationalForms_Product'];
 
-        $product['properties']['productIdentifierExemptIndicator'] = [
-            'type' => 'string',
-            'enum' => ['true', 'false'],
+        $product['properties']['ProductIdentifierExemptIndicator'] = [
+            'type' => 'boolean',
         ];
         $product['properties']['ProductIdentifier'] = [
             'type' => 'array',
@@ -2335,7 +2334,7 @@ it('sends the EU product identifiers on every product bound for the EU', functio
 
     $products = sentUpsProducts();
 
-    expect($products[0]['productIdentifierExemptIndicator'])->toBe('false')
+    expect($products[0]['ProductIdentifierExemptIndicator'])->toBeFalse()
         ->and($products[0]['ProductIdentifier'])->toBe([
             ['ProductID' => 'SKU-12345', 'ProductIDTypeCode' => '0100'],
             ['ProductID' => 'MFG-67890', 'ProductIDTypeCode' => '0200'],
@@ -2368,8 +2367,8 @@ it('leaves out the identifiers and exempt indicator of a product with no manufac
     $products = sentUpsProducts();
 
     expect($products[0])->not->toHaveKey('ProductIdentifier')
-        ->and($products[0])->not->toHaveKey('productIdentifierExemptIndicator')
-        ->and($products[1]['productIdentifierExemptIndicator'])->toBe('false')
+        ->and($products[0])->not->toHaveKey('ProductIdentifierExemptIndicator')
+        ->and($products[1]['ProductIdentifierExemptIndicator'])->toBeFalse()
         ->and($products[1]['ProductIdentifier'])->toHaveCount(2);
 });
 
@@ -2391,7 +2390,7 @@ it('sends no product identifiers outside the EU', function (): void {
     ]));
 
     expect(sentUpsProducts()[0])->not->toHaveKey('ProductIdentifier')
-        ->and(sentUpsProducts()[0])->not->toHaveKey('productIdentifierExemptIndicator');
+        ->and(sentUpsProducts()[0])->not->toHaveKey('ProductIdentifierExemptIndicator');
 });
 
 it('names a consignee with a company a business and one without a consumer', function (?string $company, string $consigneeType): void {
@@ -2436,7 +2435,7 @@ it('logs the EU product identifiers in the label request', function (): void {
     $labelRequest = collect($handler->getRecords())->firstWhere('message', 'LABEL REQUEST');
     $product = $labelRequest->context['payload']['ShipmentRequest']['Shipment']['ShipmentServiceOptions']['InternationalForms']['Product'][0];
 
-    expect($product['productIdentifierExemptIndicator'])->toBe('false')
+    expect($product['ProductIdentifierExemptIndicator'])->toBeFalse()
         ->and($product['ProductIdentifier'])->toHaveCount(3);
 });
 

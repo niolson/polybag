@@ -62,7 +62,246 @@ Per carrier, record the request sent and the answer received in `.scratch/intern
 
 ## Acceptance criteria
 
-- [ ] Every *verify* cell in the PRD's mapping table is replaced with the confirmed field,
-      or marked unanswerable with the reason
-- [ ] The open questions above are answered or carried forward with who was asked
-- [ ] Captures are in `.scratch/`, and the PRD links to nothing in it that is private
+- [x] Every *verify* cell in the PRD's mapping table is replaced with the confirmed field,
+      or marked unanswerable with the reason. Sandbox-confirmed on 2026-10-08; FedEx
+      IOSS and UK VAT stay qualified (see Comments)
+- [ ] The open questions above are answered or carried forward with who was asked:
+      answered where a sandbox or spec could answer; the rest are listed under
+      *Still open* below with who to ask, not yet asked
+- [x] Captures are in `.scratch/`, and the PRD links to nothing in it that is private
+
+## Comments
+
+- 2026-10-08 — **Sandbox round.** Read the current specs (UPS Shipping on GitHub, USPS
+  International Labels 3.3.11, FedEx Ship and Rate JSON), then bought labels through
+  the real adapters on UPS CIE, the FedEx sandbox and USPS TEM, changing one field per
+  variant. A label being accepted proves little, because all three sandboxes accept
+  fields they then ignore. So each finding below is the document the carrier sent back
+  (commercial invoice, EEI page or label) or a refusal. Captures and an index are in
+  `.scratch/international-customs-terms/`.
+
+  **UPS (CIE)**
+
+  - **DDP.** A second `ShipmentCharge` (Type `02`, `BillShipper`) buys, and the
+    invoice prints *Terms of Sale: DDP* only when `InternationalForms.TermsOfShipment`
+    is also `DDP`. With the charge alone the terms box is blank. Send both.
+  - **DDP in rates.** A Rating request with the same Type `02` charge (account number
+    in `Shipper.ShipperNumber` and `BillShipper`) returns an extra itemized charge
+    `378`, $15.00, and the total goes up. Duties themselves are not estimated:
+    `TaxInformationIndicator` adds only a "rate excludes taxes, duties" disclaimer.
+  - **Seller registration** goes in `Shipment.ShipFrom.VendorInfo` (not `Shipper`):
+    `VendorCollectIDTypeCode` + `VendorCollectIDNumber` + `ConsigneeType`. The invoice
+    prints `0356` as "IOSS:", `0357` as "VOEC:" and `1052` as "ARN:". **UK:** `0358`
+    (formerly HMRC) is marked deprecated; CIE accepts it and **drops it from the
+    invoice without a word**. `0000` prints the number with no label. UPS has no current
+    code for a UK VAT number.
+  - **Recipient tax ID.** `Shipment.GlobalTaxInformation.AgentTaxIdentificationNumber[]`
+    with `AgentRole` `30` (consignee) and `IDNumberTypeCode` `0005` (personal) or `1002`
+    (company); it prints as the consignee's *Tax ID/VAT No.* `ShipTo.TaxIdentificationNumber`
+    is deprecated.
+  - **ITN / exemption.** Only through the EEI form: `FormType` `11` (alongside `01`),
+    `EEIFilingOption.Code` `1`, `ShipperFiled.Code` `A` + `PreDepartureITNNumber`, or
+    `B` + `ExemptionLegend` (`30.37(a)`, `30.36`, …). The EEI form also needs
+    `ExportDate`, `InBondCode` `70`, `PointOfOrigin`/`Type`, `ModeOfTransport`,
+    `PartiesToTransaction`, `Contacts.UltimateConsignee` with a type, and the shipper's
+    EIN on `ShipFrom`. Without them the request fails with `128261`. The invoice prints
+    "AESCitation: …" and an extra *UPS EEI DATA* page comes back. `EEIFilingOption`
+    without `FormType` `11` is accepted and ignored.
+  - **Australia, per line:** `Product.TaxesPaid` is documented as Singapore-only.
+    CIE accepts `1` on an AU invoice line and leaves the *Taxes Paid* column blank.
+
+  **FedEx (sandbox)**
+
+  - The sandbox bought CA, GB, DE, NO, AU, BR and KR labels straight through
+    `FedexAdapter::createShipment()`. `eu-product-identifiers/05` got 500s to Poland on
+    2026-10-01, so the sandbox's EU coverage differs by destination, not across the
+    board.
+  - **DDP.** `termsOfSale: DDP` + `dutiesPayment` `SENDER` with a payor account: the
+    invoice ticks *Duties and Taxes Payable by: Exporter* and prints *Terms DDP*.
+  - **DDP in rates.** Not answerable here. The Rate API accepts only `SENDER` (already
+    known), the sandbox returns the same canned prices with or without
+    `edtRequestType: ALL`, with duties always 0, and the adapter's rate request declares
+    a $1.00 placeholder commodity, so no estimate could mean anything anyway.
+  - **Seller registration.** `tinType` is an enum with no IOSS, VOEC or ARN value
+    (`PERSONAL_NATIONAL`, `PERSONAL_STATE`, `FEDERAL`, `BUSINESS_NATIONAL`,
+    `BUSINESS_STATE`, `BUSINESS_UNION`). Anything else gets
+    `422 Invalid field value in the enum tinType`. `BUSINESS_UNION` prints on the
+    label as **"ex-EORI: IM…"** and on the invoice as a plain shipper *Tax ID#*;
+    `BUSINESS_NATIONAL` (VOEC, UK VAT, ARN) shows only on the invoice. `usage: "IOSS"`
+    is accepted and changes nothing. Whether FedEx's customs data treats either as an
+    IOSS number cannot be seen from the documents.
+  - **Recipient tax ID.** Recipient `tins` (`PERSONAL_NATIONAL`) prints as the
+    consignee's and importer's *Tax ID#* for BR and KR. `recipientCustomsId`
+    (documented as "used for populating brazil tax id") is accepted but not printed.
+  - **ITN / exemption.** `customsClearanceDetail.exportDetail.exportComplianceStatement`
+    takes `AESX…` (prints "AES X…") or a predefined `NO_EEI_30_37_A` / `NO_EEI_30_36`.
+    FedEx validates it: `30.36` to GB is refused (`SHIPMENTVALIDATION.EEIEDIT.ERROR`),
+    and so is a $3,000 GB parcel sent with no statement or with `30.37(a)`. **When the
+    field is left out, FedEx prints an exemption itself** (`NO EEI 30.37(a)`, or
+    `30.36` to CA).
+  - **Australia, per line:** no commodity field for it in the Ship API.
+
+  **USPS (TEM)**
+
+  - **`prepayDutiesTaxesFees: true`** to NL (optional), DE (required) and GB returns
+    `prepaidDutiesTaxesFees` with `packageFee` and per-item `dutyPrice` / `taxPrice`.
+    The duty is $3.37, which looks like the €3. TEM's tax amounts are implausible, so
+    treat the numbers as test data. Postage is unchanged, because the landed cost is
+    billed separately.
+  - **"Not available" country** (PL): `400`, code `030031`, *"DDP is not available for
+    the provided country and product options."*, parameter `totalLandedCost`.
+  - **DDP-required country without the flag** (DE): **accepted** in TEM. Whether
+    production enforces it is open.
+  - **IOSS.** `customsForm.exportersReference` `{referenceType: VAT_NUMBER}` prints in
+    the label's *Exporter's reference* box. With prepay on, it makes USPS **return no
+    `prepaidDutiesTaxesFees` at all**, not even the duty. In `importersReference` it
+    prints as *Importer's Reference* and VAT is still charged. So USPS reads the
+    exporter side as the seller registration, but what that does to DDP is open.
+  - **Recipient tax ID:** `importersReference` (`TAX_CODE` for a CPF) prints as
+    *Importer's Reference*.
+  - **ToS acceptance:** the spec's description of `prepayDutiesTaxesFees` reads
+    *"By continuing, you agree to the [Zonos] terms and conditions… and certify that
+    you will use DDP to ship goods to customers."* Sending the flag is taken as the
+    sender agreeing, with no enrolment step named. So `08` needs PolyBag to show the
+    Zonos terms and record who accepted them before it ever sends the flag.
+
+  **Still open: who to ask**
+
+  - **USPS** (API support / account rep): what IOSS + prepay does, and whether the
+    €3 duty is then unpaid. Whether production refuses DE/BE/DK/FI/FR/PT without the
+    flag. Whether the ToS reading above is right. Whether the exporter's reference
+    reaches Norway in the ITMATT pre-advice. What happens after 31 October to a DDP
+    parcel into Germany with no IOSS.
+  - **FedEx** (integrator support, the same thread as the `eu-product-identifiers`
+    form): which `tinType` customs reads as IOSS, VOEC, ARN and UK VAT, given that
+    `BUSINESS_UNION` prints as an EORI. (The planned production `edtRequestType` check
+    is dropped: see the next comment.)
+  - **UPS** (API support): the code for a UK VAT number now that `0358` is
+    deprecated. A production DDP + IOSS buy-and-void on or after 25 October, alongside
+    the check already due from `eu-product-identifiers/05`.
+  - **Australia, all three:** none of them takes a per-item GST-paid mark, only one
+    ARN per shipment. Unless a carrier says otherwise, `05` keeps blocking AU parcels
+    that mix an item over AUD 1,000 with an ARN.
+  - **UK:** where the seller's UK VAT number belongs. UPS has no current code,
+    FedEx can only send it as a generic TIN, and USPS as the exporter's reference.
+    Needs a carrier answer or an HMRC source.
+- 2026-10-08 — **FedEx documentation and the other FedEx APIs.** Read the Ship API
+  developer guide and the specs for Global Trade and Trade Documents Upload, plus
+  FedEx's *Estimated Duties and Taxes* knowledge-base document (APAC). Captures and
+  the specs are in `.scratch/international-customs-terms/`.
+  - **IOSS.** The guide says only that the IOSS number goes in `shipper.tins[].number`,
+    and never names a `tinType`. The question stays with FedEx.
+  - **Recipient email.** The guide: *"By default, FedEx bills the recipient for duties
+    and taxes, so always include the recipient's email address… Without it, we can't
+    contact them to collect payment, and charges fall back to the shipper."*
+    `FedexAdapter` never sends `recipients.contact.emailAddress`, so a DDU label can
+    still bill duties to the carrier account. Raised on `07` and `05`.
+  - **Estimated Duties and Taxes is not a separate API.** It is
+    `requestedShipment.edtRequestType: ALL` on the Rate API, enabled per account, and
+    FedEx's terms rule it out here: *"should not be made available for integration into
+    a 3rd party reseller solution, which includes FedEx Compatible Solutions"* nor to
+    *"rate shopping systems"*. PolyBag is in FedEx Compatible. It also estimates the
+    duties themselves (it needs HS10 codes and real values), not a DDP fee. **Answer to
+    "does a FedEx rate show the DDP cost": no, and the production check is dropped.**
+    Ask FedEx only if the restriction turns out not to apply to us.
+  - **Trade Documents Upload** only uploads documents and images, so nothing in 02.
+  - **Global Trade** (`/globaltrade/v1/shipments/regulatorydetails/retrieve`) returns
+    FedEx's import advisories per destination. Queried on the sandbox for DE, GB, NO,
+    AU, BR and KR. Some advisories are years out of date: DE still gives the €22
+    threshold that ended in 2021, and GB the £600 importer-VAT rule. So it is a hint,
+    not a source.
+    - **BR** (`BRA0100`): the recipient's CPF or CNPJ is mandatory, or a passport for a
+      non-resident; without it the parcel "will not be cleared by Customs and will be
+      caged". *"Automation devices — shippers must enter the recipient's tax ID number
+      in the tax ID field."* This confirms recipient `tins`, which is the field the
+      invoice printed. `recipientCustomsId` is not needed.
+    - **KR** (`KRA0011`): *"The foreign shipper… is NOT responsible for obtaining the
+      PCCC. Nor does the foreign shipper need to write or insert the PCCC on the
+      International Air Waybill or Commercial Invoice."* This challenges the KR block
+      in `recipient-tax-id.json`; raised on `05`.
+    - **NO** (`NOA0032`): the importer's VAT number, or a personal ID number for
+      private recipients. Nothing on VOEC.
+    - **AU** (`AUA0001`): an ABN when the importer has one; nothing on ARN or on
+      marking items GST-paid.
+    - Nothing on IOSS for any destination.
+- 2026-10-08 — **Web research, one agent per carrier.** I checked the claims that
+  matter against their sources; the rest are marked as secondary.
+  - **Germany, settled.** Swiss Post (EU customs reform page, updated 30 September
+    2026): *"From 01.11.2026, PDDP will become mandatory for all B2C consignments to
+    Germany with a value of up to EUR 150, even without IOSS registration."* A
+    secondary trade bulletin (IDS Trac, 13 August) puts the end of Deutsche Post's DDU
+    transition at 31 October. No USPS statement yet.
+  - **IOSS parcels must be DDP in nine countries, not six.** Pirate Ship (a USPS
+    reseller) and Swiss Post both list AT, BE, DK, FI, FR, DE, LU, PT and SE as requiring
+    prepaid duties *with* IOSS. `duties-support.json` has AT and SE as `either` and LU as
+    not found. Two consequences:
+    - **USPS must support IOSS + DDP**, and TEM dropped the landed cost whenever the
+      IOSS number was sent. That is the first question for USPS; `08` cannot be built
+      for these destinations until it is answered.
+    - **The support file cannot say "DDP required when the order has an IOSS number".**
+      As built in `04`, a DDU USPS rate to AT, LU or SE passes the filter for an IOSS
+      order. Decide before `08`: a conditional field in `duties-support.json`, or a
+      readiness rule in `05`.
+  - **USPS offers DDP to LU and MC** (usps.com *Prepaid Import Duties*, eligible
+    countries list). `duties-support.json` has no USPS entry for either, so USPS DDP
+    rates there are dropped today. Update the file from the IMM country pages.
+  - **USPS DDP terms.** The same page: *"You will have the option to prepay those
+    costs and accept the USPS DDP service provider's terms of service."* No exemption
+    for API platforms is described, so `08` keeps its acceptance step.
+  - **FedEx IOSS.** FedEx's IOSS guide (fedex.com, APAC): *"If you use FedEx Web
+    Services — Please enter your IOSS number in the TIN field"*, as the bare 12
+    characters with no `IOSS` prefix. It names no `tinType`; one integrator
+    (Shiptheory, 2022) says *Business Union*. FedEx's own eBay integration (Ship&co
+    changelog, March 2026) sends IOSS, VOEC, ABN and others as shipper tax IDs shown on
+    the invoice. So shipper `tins` is right for every regime, and only the type value is
+    open.
+  - **IOSS and a business name.** FedEx's guide: *"Do not include the name of a business
+    in the recipient's address if you want to use the IOSS. If you do, customs
+    authorities are likely to treat your package as a B2B shipment and ignore your IOSS
+    number."* That is a customs rule, not a FedEx one, so it applies to all three
+    carriers; raised on `05`.
+  - **FedEx shipper `tins`:** only the first prints in the invoice's tax ID field, and
+    the rest go to special instructions (Starshipit, reporting FedEx; secondary). An EIN
+    (over $2,500) and an IOSS number (€150 or less) never share a parcel, but `07`
+    should send the registration first.
+  - **FedEx Australia:** *"Transporters are required by the legislation to electronically
+    report ARN and ABN details"* (FedEx regulatory alert, May 2018); shipment-level only.
+  - **UPS `0358`:** the spec said `0358 = HMRC` until a bulk commit on 2025-07-30
+    changed it to `Deprecated`, with no note and no replacement. WorldShip help and a
+    UPS EU VAT guide still list an HMRC number as a Vendor Collect ID. `0000` stays the
+    fallback until UPS answers.
+  - **UPS `378`:** the 2026 UPS rate guide charges Duty and Tax Forwarding at $15.00 per
+    shipment *"if the duties and/or taxes are billed outside the destination country"*.
+    That matches the $15.00 itemized `378` in the CIE rate, though no source names the
+    code.
+  - **Found while checking UPS, outside this issue:** the current UPS spec defines
+    `ProductIdentifierExemptIndicator` (PascalCase) as `type: boolean`.
+    `UpsAdapter` sends `productIdentifierExemptIndicator` (camelCase) with the string
+    `"false"`, so production UPS is likely to ignore it or reject it. Only the indicator
+    is wrong: `ProductIdentifier`, `ProductID` and `ProductIDTypeCode` match the spec.
+    The field appeared in the spec on 2026-10-05. Integrators give 1 November for
+    enforcement; no source confirms UPS's 25 October.
+  - **Not found anywhere public:**
+    - USPS: what IOSS + prepay does, which field USPS reads IOSS from, whether
+      production refuses DE without the flag, VOEC transmission, and the UK VAT field.
+    - FedEx: the `tinType` per regime.
+    - UPS: whether Vendor Collect IDs are transmitted electronically.
+
+    These go to the carriers, drafted in `.scratch/international-customs-terms/emails.md`.
+- 2026-10-08 — **Two fixes from the research.**
+  - **UPS:** `UpsAdapter` now sends `ProductIdentifierExemptIndicator: false`
+    (PascalCase key, JSON boolean), as the published spec defines it. One CIE label to a
+    German consumer with all three identifiers came back `1 Success`. The test's
+    stand-in schema was corrected to match. `eu-product-identifiers/06` notes the
+    change.
+  - **USPS LU and MC** are now `ddp_required` in `duties-support.json`. The IMM
+    Luxembourg page (`il_028`) reads *"service is required for all dutiable items"*,
+    although IMM 360's own table leaves LU out. The IMM lists Monaco under France
+    (*"Includes Corsica, Mayotte, and Monaco"*). The version stays `2026-10-08`, the
+    same day `04` set it; nothing writes a snapshot yet. The PRD's coverage table
+    matches.
+  - **USPS IOSS field, from the IMM France page:** the 2 EUR customs fee *"can be paid
+    before mailing using the… (IOSS) platform… the payer identification number…
+    should be reported in the 'Sender Customs Reference Number' field"*. That is
+    `exportersReference`, which supports the TEM result. It is still open what USPS does
+    with it when prepay is on.

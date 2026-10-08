@@ -12,6 +12,8 @@ Repo: `polybag`
 answers. The first complete path: client policy → resolved terms → rate → label →
 snapshot. `07` and `08` follow its shape.
 
+Sending an ITN also needs the client's EIN from `11`.
+
 ## Problem
 
 `UpsAdapter` sends only the transportation charge, so every UPS international parcel is
@@ -23,9 +25,13 @@ DDU, and no registration, recipient tax ID or export filing reaches UPS.
 Type `02`, `BillShipper` on the same account, so the rate includes UPS's Duty and Tax
 Forwarding Surcharge. `InternationalForms.TermsOfShipment` says DDP or DDU.
 
-**Seller registration** goes in `VendorInfo` (Vendor Collect ID) with the type `02`
-confirmed. **Recipient tax ID** goes on the ship-to. **Export filing** sends the ITN or
-the exemption in the field `02` confirmed.
+**Seller registration** goes in `ShipFrom.VendorInfo` (Vendor Collect ID): `0356` IOSS,
+`0357` VOEC, `1052` ARN, and `0000` for a UK VAT number (`0358` is deprecated and dropped
+silently; see Comments). **Recipient tax ID** goes in
+`Shipment.GlobalTaxInformation.AgentTaxIdentificationNumber`, `AgentRole` `30`
+(`ShipTo.TaxIdentificationNumber` is deprecated). **Export filing** with an ITN requests
+the EEI form (`FormType` `11` beside `01`) with `EEIFilingOption` `1` / `ShipperFiled` `A`;
+an exemption is not sent to UPS (see Comments).
 
 **Snapshot.** At purchase, the shipping workflow writes `package_labels.customs_terms`:
 term and source, registration and source, ITN or exemption, `duties-support.json` version.
@@ -36,8 +42,10 @@ the column and a nullable `duties_cost` (`08` fills it).
 
 - [ ] A DDP UPS rate request and ship request carry the Type `02` charge and
       `TermsOfShipment: DDP`; DDU carries only Type `01` and `DDU`
-- [ ] IOSS, recipient tax ID and ITN appear where `02` found UPS wants them, and are
-      absent when not resolved
+- [ ] IOSS, recipient tax ID and ITN appear in the fields above, and are absent when not
+      resolved; an ITN carries the client's EIN (`11`)
+- [ ] The UPS validation log of a label to Brazil holds no CPF (`PiiRedactor` over
+      `GlobalTaxInformation`)
 - [ ] The UPS request schema test accepts every new field
 - [ ] A purchased label's `customs_terms` matches what was sent, for an order-sourced and
       a client-sourced term
@@ -52,3 +60,33 @@ the column and a nullable `duties_cost` (`08` fills it).
   that the snapshot of a label to Brazil holds no CPF. `PiiRedactor` already covers UPS's
   `TaxIdentificationNumber`; check that it covers whichever field `02` finds UPS wants for
   the ship-to tax ID.
+- 2026-10-08 — `02`'s UPS answers, verified in CIE against the returned invoices:
+  - **DDP** needs both the Type `02` `BillShipper` charge *and*
+    `InternationalForms.TermsOfShipment: DDP`. With the charge alone the invoice's terms
+    box is blank. In the Rating request the account number must also be in
+    `Shipper.ShipperNumber`. The rate then carries itemized charge `378`, the $15.00 Duty
+    and Tax Forwarding charge.
+  - **Vendor Collect ID** prints on the invoice as "IOSS:", "VOEC:", "ARN:"; with `0000`
+    the number prints with no label. Whether UPS transmits it electronically is in the
+    UPS email.
+  - **Recipient tax ID** in `GlobalTaxInformation` prints as the consignee's *Tax ID/VAT
+    No.* Use `IDNumberTypeCode` `0005` (personal) or `1002` (company), `IDNumberCustomerRole`
+    `18`, `IDNumberPurposeCode` `01`, issuing and requesting country the destination, and
+    `IncludeIDNumberOnShippingBrokerageDocs` `01`.
+  - **ITN** needs the full EEI form, or CIE refuses it (`128261`):
+    - `ExportDate`: the ship date.
+    - `InBondCode`: `70`.
+    - `PointOfOrigin`: the Location's state, with `PointOfOriginType` `S`.
+    - `ModeOfTransport`: `Air`.
+    - `PartiesToTransaction`: `N`.
+    - `Contacts.UltimateConsignee`: the ship-to, with `UltimateConsigneeType` `D` for a
+      consumer and `R` for a company.
+    - The EIN from `11`.
+
+    UPS returns an extra *UPS EEI DATA* page with the forms. **Do not send an exemption:**
+    `EEIFilingOption` without `FormType` `11` is accepted and ignored, and requesting
+    the EEI form for every parcel just to print `NO EEI 30.37(a)` adds a page and fields
+    for nothing. `ExemptionLegend` is specified at exactly 20 characters, which UPS has
+    not explained (UPS email).
+  - **Australia:** `Product.TaxesPaid` is Singapore-only; CIE accepts it and prints
+    nothing. Send the ARN only.

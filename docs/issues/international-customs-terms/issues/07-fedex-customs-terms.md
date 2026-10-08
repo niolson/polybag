@@ -10,6 +10,8 @@ Repo: `polybag`
 
 [PRD](../PRD.md). Needs `01`, `02`'s FedEx answers and `06` (the snapshot and the shape).
 
+Sending an ITN also needs the client's EIN from `11`.
+
 ## Problem
 
 After `01` FedEx ships everything DDU. It has to follow the resolved terms instead, and
@@ -30,3 +32,28 @@ the ITN or exemption in `exportDetail`.
 - [ ] Registration, recipient tax ID and export filing appear only when resolved
 - [ ] `fedexShip.json` accepts every new field
 - [ ] The purchase snapshot from `06` is written for FedEx labels
+
+## Comments
+
+- 2026-10-08 — `02`'s FedEx answers, which change the desired behavior above:
+  - **Rate requests stay `SENDER`.** The Rate API refuses anything else
+    (`RATE.PAYMENTTYPE.NOTALLOWED`), so "in both rate and ship requests" holds for ship
+    requests only. A quote bills no one, and there is no DDP fee to quote: the duty
+    estimate (`edtRequestType`) is barred for FedEx Compatible solutions.
+  - **DDP** prints *Payable by Exporter / Terms DDP* only with both `termsOfSale: DDP`
+    and `dutiesPayment` `SENDER` with a payor account.
+  - **Send the recipient email** (`recipients[0].contact.emailAddress`) whenever the
+    Shipment has one. The Ship API guide says that without it FedEx cannot collect
+    duties from the recipient and *"charges fall back to the shipper"*, so today a DDU
+    label can still bill the carrier account. Add a test.
+  - **Seller registration:** the `tinType` is still open with FedEx. The only accepted
+    values are `PERSONAL_NATIONAL`, `PERSONAL_STATE`, `FEDERAL`, `BUSINESS_NATIONAL`,
+    `BUSINESS_STATE` and `BUSINESS_UNION`; `BUSINESS_UNION` prints on the label as
+    "ex-EORI". Do not build this part until FedEx answers.
+  - **Recipient tax ID:** recipient `tins`, `PERSONAL_NATIONAL` (or a business type for a
+    CNPJ). It prints on the invoice, and FedEx's `BRA0100` asks for exactly this field.
+    `recipientCustomsId` does not print and is not needed.
+  - **ITN or exemption:** `exportDetail.exportComplianceStatement`, either `AESX…` or a
+    predefined value (`NO_EEI_30_37_A`; `NO_EEI_30_36` only to CA). FedEx validates it
+    and refuses a parcel over $2,500 without an ITN. Omitted, it prints 30.37(a) or
+    30.36 on its own, so send the statement only when PolyBag has resolved one.

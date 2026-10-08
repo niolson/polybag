@@ -16,8 +16,9 @@
         "and the carrier's default applies meanwhile. Bump version whenever an entry changes.",
         "",
         "USPS is the International Mail Manual's DDP table (IMM 360) for Priority Mail Express",
-        "International, Priority Mail International and First-Class Package International. LU is",
-        "in none of its lists, so it takes the default. UPS and FedEx express accepted DDU",
+        "International, Priority Mail International and First-Class Package International, read",
+        "from each country page (IMM 360's own table omits LU, whose page requires DDP; MC is",
+        "listed under France). UPS and FedEx express accepted DDU",
         "throughout the EU as of 2026-10-01; international-customs-terms/02 verifies both terms",
         "against their APIs."
     ],
@@ -126,10 +127,21 @@
                     "source": "https://pe.usps.com/text/imm/immc3_017.htm",
                     "checked": "2026-10-01"
                 },
+                "LU": {
+                    "support": "ddp_required",
+                    "source": "https://pe.usps.com/text/imm/il_028.htm",
+                    "checked": "2026-10-08"
+                },
                 "LV": {
                     "support": "ddu_only",
                     "source": "https://pe.usps.com/text/imm/immc3_017.htm",
                     "checked": "2026-10-01"
+                },
+                "MC": {
+                    "support": "ddp_required",
+                    "source": "https://pe.usps.com/text/imm/fh_005.htm",
+                    "checked": "2026-10-08",
+                    "note": "IMM lists Monaco under France (\"Includes Corsica, Mayotte, and Monaco\"), so France's DDP rule applies."
                 },
                 "MT": {
                     "support": "either",
