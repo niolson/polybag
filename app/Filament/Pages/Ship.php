@@ -13,6 +13,8 @@ use App\Enums\Role;
 use App\Exceptions\PackageDraftIncompleteException;
 use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Concerns\PrintsLabels;
+use App\Models\Client;
+use App\Models\ClientTaxRegistration;
 use App\Models\Package;
 use App\Models\ShippingMethod;
 use App\Services\ShipmentLocationGuard;
@@ -64,6 +66,17 @@ class Ship extends Page
     public ?string $deliverByDate = null;
 
     public bool $allRatesLate = false;
+
+    /**
+     * Why quoted rates were dropped for the Shipment's customs terms, each
+     * with the fix when there is one place to make it (ADR-0008 decision 4).
+     *
+     * @var list<array{carrier: string|null, reason: string, fixUrl: string|null, fixLabel: string|null}>
+     */
+    public array $droppedRates = [];
+
+    /** Rates were quoted and the customs terms dropped every one. */
+    public bool $allRatesDroppedForCustomsTerms = false;
 
     public string $labelFormat = 'pdf';
 
@@ -341,7 +354,35 @@ class Ship extends Page
             $this->package->id,
             $this->package->updated_at->timestamp,
             $this->package->shipment?->updated_at->timestamp ?? 0,
+            $this->clientCustomsTermsDigest(),
         ]);
+    }
+
+    /**
+     * A digest of the client's duties policy and tax registrations, which
+     * decide which rates survive the customs-terms filter but live on rows the
+     * Package and Shipment timestamps do not cover. Read fresh, so an edit on
+     * the client form or in Settings is not served from a stale quote.
+     */
+    private function clientCustomsTermsDigest(): string
+    {
+        $clientId = $this->package->shipment?->client_id;
+
+        if ($clientId === null) {
+            return '-';
+        }
+
+        $client = Client::query()->find($clientId);
+
+        return md5((string) json_encode([
+            $client?->duties_policy,
+            ClientTaxRegistration::query()
+                ->where('client_id', $clientId)
+                ->orderBy('regime')
+                ->get(['regime', 'number'])
+                ->map(fn (ClientTaxRegistration $registration): string => $registration->regime->value.':'.$registration->number)
+                ->all(),
+        ]));
     }
 
     /**
@@ -386,6 +427,8 @@ class Ship extends Page
         $this->allRatesLate = $options->allRatesLate;
         $this->selectedRateIndex = $options->selectedRateIndex;
         $this->blindPurchaseOffers = $options->blindPurchaseOffers;
+        $this->droppedRates = $options->droppedRates;
+        $this->allRatesDroppedForCustomsTerms = $options->allRatesDroppedForCustomsTerms;
         $this->selectedBlindOfferId = null;
         $this->confirmedBlindPurchase = false;
     }

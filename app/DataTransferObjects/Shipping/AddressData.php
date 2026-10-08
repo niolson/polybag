@@ -3,6 +3,7 @@
 namespace App\DataTransferObjects\Shipping;
 
 use App\Enums\DestinationZone;
+use App\Enums\TaxRegistrationRegime;
 use App\Models\Location;
 use App\Models\Shipment;
 use App\Services\PhoneParserService;
@@ -139,6 +140,19 @@ readonly class AddressData
     public function isInEuropeanUnion(): bool
     {
         return in_array(strtoupper(trim($this->country)), self::EU_MEMBER_STATES, true);
+    }
+
+    /**
+     * Whether this is a Northern Ireland address: `GB` with a `BT` postcode.
+     *
+     * Northern Ireland is UK for VAT but stays in the EU customs territory for
+     * goods, so an EU IOSS registration covers it as well as a UK VAT one
+     * ({@see TaxRegistrationRegime::covers()}).
+     */
+    public function isNorthernIreland(): bool
+    {
+        return strtoupper(trim($this->country)) === 'GB'
+            && str_starts_with(strtoupper(trim((string) $this->postalCode)), 'BT');
     }
 
     /**

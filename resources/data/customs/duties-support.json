@@ -1,0 +1,196 @@
+{
+    "version": "2026-10-08",
+    "notes": [
+        "What each carrier can do with duties terms to each destination (ADR-0008 decision 4).",
+        "support is ddp_required (ships there only with duties prepaid), either, or ddu_only",
+        "(cannot prepay duties there). A rate whose support does not fit the Shipment's",
+        "resolved duties term is dropped with the reason named, never forced to the other term.",
+        "",
+        "Carrier keys are matched through CarrierAlias::lookupKey against the canonical carrier",
+        "name. A carrier not listed here is not filtered. Each carrier has a default for the",
+        "countries it does not list, and an authority: the short name a dropped rate's reason",
+        "cites. Every entry, default included, names its source (an https URL, or a path in this",
+        "repository) and the date it was checked.",
+        "",
+        "An entry with effective_from later than the day of the quote is ignored until that day,",
+        "and the carrier's default applies meanwhile. Bump version whenever an entry changes.",
+        "",
+        "USPS is the International Mail Manual's DDP table (IMM 360) for Priority Mail Express",
+        "International, Priority Mail International and First-Class Package International. LU is",
+        "in none of its lists, so it takes the default. UPS and FedEx express accepted DDU",
+        "throughout the EU as of 2026-10-01; international-customs-terms/02 verifies both terms",
+        "against their APIs."
+    ],
+    "carriers": {
+        "usps": {
+            "authority": "IMM",
+            "default": {
+                "support": "ddu_only",
+                "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                "checked": "2026-10-01",
+                "note": "IMM 360 offers DDP only to the countries listed below."
+            },
+            "countries": {
+                "AT": {
+                    "support": "either",
+                    "source": "https://pe.usps.com/text/imm/ab_013.htm",
+                    "checked": "2026-10-01"
+                },
+                "BE": {
+                    "support": "ddp_required",
+                    "source": "https://pe.usps.com/text/imm/ab_020.htm",
+                    "checked": "2026-10-01"
+                },
+                "BG": {
+                    "support": "ddu_only",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "CA": {
+                    "support": "either",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "CY": {
+                    "support": "ddu_only",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "CZ": {
+                    "support": "ddu_only",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "DE": {
+                    "support": "ddp_required",
+                    "source": "https://pe.usps.com/text/imm/fh_011.htm",
+                    "checked": "2026-10-01"
+                },
+                "DK": {
+                    "support": "ddp_required",
+                    "source": "https://pe.usps.com/text/imm/ce_021.htm",
+                    "checked": "2026-10-01"
+                },
+                "EE": {
+                    "support": "either",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "ES": {
+                    "support": "either",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "FI": {
+                    "support": "ddp_required",
+                    "source": "https://pe.usps.com/text/imm/fh_004.htm",
+                    "checked": "2026-10-01"
+                },
+                "FR": {
+                    "support": "ddp_required",
+                    "source": "https://pe.usps.com/text/imm/fh_005.htm",
+                    "checked": "2026-10-01"
+                },
+                "GB": {
+                    "support": "either",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "GR": {
+                    "support": "ddu_only",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "HR": {
+                    "support": "ddu_only",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "HU": {
+                    "support": "ddu_only",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "IE": {
+                    "support": "ddu_only",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "IT": {
+                    "support": "either",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "LT": {
+                    "support": "ddu_only",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "LV": {
+                    "support": "ddu_only",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "MT": {
+                    "support": "either",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "NL": {
+                    "support": "either",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "PL": {
+                    "support": "ddu_only",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "PT": {
+                    "support": "ddp_required",
+                    "source": "https://pe.usps.com/text/imm/ps_009.htm",
+                    "checked": "2026-10-01",
+                    "note": "Gifts up to EUR 45 are excepted from the DDP requirement; PolyBag does not distinguish gifts, so PT is DDP-required here."
+                },
+                "RO": {
+                    "support": "ddu_only",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "SE": {
+                    "support": "either",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "SI": {
+                    "support": "ddu_only",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                },
+                "SK": {
+                    "support": "either",
+                    "source": "https://pe.usps.com/text/imm/immc3_017.htm",
+                    "checked": "2026-10-01"
+                }
+            }
+        },
+        "ups": {
+            "authority": "UPS",
+            "default": {
+                "support": "either",
+                "source": "docs/issues/international-customs-terms/PRD.md",
+                "checked": "2026-10-01"
+            },
+            "countries": {}
+        },
+        "fedex": {
+            "authority": "FedEx",
+            "default": {
+                "support": "either",
+                "source": "docs/issues/international-customs-terms/PRD.md",
+                "checked": "2026-10-01"
+            },
+            "countries": {}
+        }
+    }
+}

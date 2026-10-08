@@ -51,14 +51,17 @@ enum TaxRegistrationRegime: string implements HasLabel
 
     /**
      * Whether a registration under this regime covers a parcel to the
-     * destination. Northern Ireland addresses are `GB`, so UK VAT covers them.
+     * destination. Northern Ireland addresses are `GB`, so UK VAT covers them;
+     * IOSS covers them too, at £135 ({@see self::lowValueThresholdFor()}),
+     * because Northern Ireland stays in the EU customs territory for goods
+     * (HMRC; PRD *Tax registration regimes*).
      */
     public function covers(AddressData $destination): bool
     {
         $country = strtoupper(trim($destination->country));
 
         return match ($this) {
-            self::Ioss => $destination->isInEuropeanUnion(),
+            self::Ioss => $destination->isInEuropeanUnion() || $destination->isNorthernIreland(),
             self::UkVat => $country === 'GB',
             self::Voec => $country === 'NO',
             self::Arn => $country === 'AU',
@@ -139,5 +142,54 @@ enum TaxRegistrationRegime: string implements HasLabel
             self::Voec => 'NOK',
             self::Arn => 'AUD',
         };
+    }
+
+    /**
+     * The low-value threshold for a parcel to this destination. The same as
+     * {@see self::lowValueThreshold()} everywhere but one place: IOSS into
+     * Northern Ireland applies to consignments of £135 or less (HMRC).
+     */
+    public function lowValueThresholdFor(AddressData $destination): int
+    {
+        return $this === self::Ioss && $destination->isNorthernIreland()
+            ? self::UkVat->lowValueThreshold()
+            : $this->lowValueThreshold();
+    }
+
+    /**
+     * The currency of {@see self::lowValueThresholdFor()}.
+     */
+    public function thresholdCurrencyFor(AddressData $destination): string
+    {
+        return $this === self::Ioss && $destination->isNorthernIreland()
+            ? self::UkVat->thresholdCurrency()
+            : $this->thresholdCurrency();
+    }
+
+    /**
+     * Whether the threshold is measured on each item rather than on the whole
+     * consignment. VOEC and ARN test each item; IOSS and UK VAT test the
+     * consignment's goods value (PRD *Tax registration regimes*).
+     */
+    public function measuresEachItem(): bool
+    {
+        return match ($this) {
+            self::Ioss, self::UkVat => false,
+            self::Voec, self::Arn => true,
+        };
+    }
+
+    /**
+     * Whether a value, in the threshold's currency, is over the threshold.
+     *
+     * VOEC applies to items *under* NOK 3,000, so one at exactly 3,000 is
+     * over. The others apply up to and including their figure: €150, £135
+     * and AUD 1,000 or less.
+     */
+    public function exceedsThreshold(float $value, int $threshold): bool
+    {
+        $value = round($value, 2);
+
+        return $this === self::Voec ? $value >= $threshold : $value > $threshold;
     }
 }

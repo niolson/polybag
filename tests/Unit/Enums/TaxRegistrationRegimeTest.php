@@ -72,6 +72,32 @@ it('knows its low-value threshold and currency', function (TaxRegistrationRegime
     [TaxRegistrationRegime::Arn, 1000, 'AUD'],
 ]);
 
+it('covers Northern Ireland with IOSS too, at £135', function (): void {
+    $belfast = new AddressData('Test', 'Recipient', '1 Example Street', 'Belfast', null, 'BT1 5GS', 'GB');
+    $london = new AddressData('Test', 'Recipient', '1 Example Street', 'London', null, 'SW1A 1AA', 'GB');
+
+    expect($belfast->isNorthernIreland())->toBeTrue()
+        ->and($london->isNorthernIreland())->toBeFalse()
+        ->and(TaxRegistrationRegime::Ioss->covers($belfast))->toBeTrue()
+        ->and(TaxRegistrationRegime::Ioss->covers($london))->toBeFalse()
+        ->and(TaxRegistrationRegime::Ioss->lowValueThresholdFor($belfast))->toBe(135)
+        ->and(TaxRegistrationRegime::Ioss->thresholdCurrencyFor($belfast))->toBe('GBP')
+        ->and(TaxRegistrationRegime::Ioss->lowValueThresholdFor(regimeDestination('DE')))->toBe(150)
+        ->and(TaxRegistrationRegime::Ioss->thresholdCurrencyFor(regimeDestination('DE')))->toBe('EUR');
+});
+
+it('measures VOEC and ARN per item, and VOEC only under its figure', function (): void {
+    expect(TaxRegistrationRegime::Voec->measuresEachItem())->toBeTrue()
+        ->and(TaxRegistrationRegime::Arn->measuresEachItem())->toBeTrue()
+        ->and(TaxRegistrationRegime::Ioss->measuresEachItem())->toBeFalse()
+        ->and(TaxRegistrationRegime::UkVat->measuresEachItem())->toBeFalse()
+        ->and(TaxRegistrationRegime::Voec->exceedsThreshold(3000.0, 3000))->toBeTrue()
+        ->and(TaxRegistrationRegime::Voec->exceedsThreshold(2999.99, 3000))->toBeFalse()
+        ->and(TaxRegistrationRegime::Ioss->exceedsThreshold(150.0, 150))->toBeFalse()
+        ->and(TaxRegistrationRegime::Ioss->exceedsThreshold(150.01, 150))->toBeTrue()
+        ->and(TaxRegistrationRegime::Arn->exceedsThreshold(1000.0, 1000))->toBeFalse();
+});
+
 it('reads a regime from import input in any case', function (): void {
     expect(TaxRegistrationRegime::fromInput('UK_VAT'))->toBe(TaxRegistrationRegime::UkVat)
         ->and(TaxRegistrationRegime::fromInput(' ioss '))->toBe(TaxRegistrationRegime::Ioss)

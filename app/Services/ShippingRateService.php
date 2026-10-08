@@ -7,11 +7,13 @@ use App\Contracts\BlindPurchaseSource;
 use App\Contracts\CarrierAdapterInterface;
 use App\Contracts\DeclaresSellableServices;
 use App\Contracts\PostageOfferSource;
+use App\DataTransferObjects\Customs\ResolvedCustomsTerms;
 use App\DataTransferObjects\PostageSources\OfferDraft;
 use App\DataTransferObjects\PostageSources\PostageSourceCandidate;
 use App\DataTransferObjects\PostageSources\PostageSourceResolution;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
+use App\DataTransferObjects\Shipping\DroppedRate;
 use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
@@ -42,6 +44,7 @@ use App\Services\PostageSources\PostageSourceResolver;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\Shipping\ContentsFilter;
+use App\Services\Shipping\DutiesTermsFilter;
 use App\Services\Shipping\PackagingFilter;
 use Carbon\CarbonImmutable;
 use Closure;
@@ -92,6 +95,24 @@ class ShippingRateService
      */
     private array $packagingIneligibleSourceKeys = [];
 
+    /**
+     * Why rates quoted in the last getShippingRates() call were dropped for
+     * the Shipment's customs terms, one per carrier and reason.
+     *
+     * @var list<DroppedRate>
+     */
+    private array $droppedRates = [];
+
+    /** The customs terms the last getShippingRates() call quoted on. */
+    private ?ResolvedCustomsTerms $customsTerms = null;
+
+    /**
+     * Whether the last getShippingRates() call had rates to offer and the
+     * customs-terms filter dropped every one, as opposed to no source
+     * answering at all.
+     */
+    private bool $allRatesDroppedForCustomsTerms = false;
+
     /** Package owning the configured-source and blind-offer snapshot. */
     private ?int $ratedPackageId = null;
 
@@ -130,6 +151,58 @@ class ShippingRateService
     }
 
     /**
+     * Why rates quoted by the last getShippingRates() call were dropped for
+     * the Shipment's customs terms ({@see DutiesTermsFilter}).
+     *
+     * @return list<DroppedRate>
+     */
+    public function getDroppedRates(): array
+    {
+        return $this->droppedRates;
+    }
+
+    /**
+     * The customs terms the last getShippingRates() call quoted on.
+     */
+    public function getCustomsTerms(): ?ResolvedCustomsTerms
+    {
+        return $this->customsTerms;
+    }
+
+    /**
+     * Whether the last getShippingRates() call quoted rates and the customs
+     * terms dropped all of them.
+     */
+    public function allRatesDroppedForCustomsTerms(): bool
+    {
+        return $this->allRatesDroppedForCustomsTerms;
+    }
+
+    /**
+     * Make unredeemable the Offers a source issued for rates the customs-terms
+     * filter dropped. Amazon issues its own Offers inside `getRates()`, before
+     * any filter runs, and {@see offer()} only stamps the rates it keeps, so a
+     * dropped rate's Offer would otherwise stay spendable with no quote
+     * fingerprint to retire it.
+     *
+     * @param  list<RateResponse>  $rates
+     */
+    private function retireOffersOf(Package $package, array $rates): void
+    {
+        $offerIds = array_values(array_filter(array_map(fn (RateResponse $rate): ?string => $rate->offerId, $rates)));
+
+        if ($offerIds === []) {
+            return;
+        }
+
+        ShippingOffer::query()
+            ->where('package_id', $package->id)
+            ->whereIn('public_id', $offerIds)
+            ->whereNull('consumed_at')
+            ->update(['expires_at' => now()->subSecond()]);
+    }
+
+    /**
      * Get shipping rates for a package from all applicable carriers.
      *
      * @return Collection<int, RateResponse>
@@ -142,12 +215,16 @@ class ShippingRateService
         $this->packagingIneligibleSourceKeys = [];
         $this->ratedPackageId = null;
         $this->ratedShippingMethodId = null;
+        $this->droppedRates = [];
+        $this->customsTerms = null;
+        $this->allRatesDroppedForCustomsTerms = false;
 
         $package = Package::with(['packageItems', 'shipment.shippingMethod.postageSources'])
             ->findOrFail($packageId);
 
         $destination = AddressData::fromShipment($package->shipment);
         $rateRequest = RateRequest::fromPackage($package, $destination);
+        $this->customsTerms = $rateRequest->customsTerms;
         $tasks = $this->buildRatingTasks($package, $rateRequest, $destination);
 
         // One ship date per task, read once and used twice: the source is
@@ -160,24 +237,53 @@ class ShippingRateService
         // never offered, and must not be logged as one (ADR-0005 decision 4).
         // Nor was one for a service whose required contents the package does
         // not have, such as Media Mail for a parcel that is not all media
-        // (ADR-0006 decision 11). Each rate keeps the key of the task that
-        // quoted it, so its offer is windowed on that task's date.
+        // (ADR-0006 decision 11). Nor was one whose carrier cannot ship on
+        // the Shipment's duties term, or any rate PolyBag sets terms on while
+        // an EU term is unresolved (ADR-0008 decisions 1 and 4). Each rate
+        // keeps the key of the task that quoted it, so its offer is windowed
+        // on that task's date.
         $packageData = PackageData::fromPackage($package);
+        $dutiesTermsFilter = app(DutiesTermsFilter::class);
         $rateOptions = collect();
         $rateTaskKeys = [];
+        $dropped = [];
+        $droppedForTerms = [];
+        $quoted = 0;
 
         foreach ($this->fetchRatesConcurrently($tasks, $rateRequest, $shipDates) as $taskKey => $taskRates) {
-            $kept = ContentsFilter::keepQualifying(
+            $eligible = ContentsFilter::keepQualifying(
                 PackagingFilter::keepCompatible($taskRates, $packageData->carrierPackaging),
                 $packageData->qualifyingContents,
             );
+            $quoted += $eligible->count();
+            $filtered = $dutiesTermsFilter->apply($eligible, $this->customsTerms);
 
-            foreach ($kept as $rate) {
+            foreach ($filtered['dropped'] as $notice) {
+                $dropped[$notice->carrier.'|'.$notice->reason] = $notice;
+            }
+
+            array_push($droppedForTerms, ...$filtered['droppedRates']);
+
+            foreach ($filtered['kept'] as $rate) {
                 $rateOptions->push($rate);
                 $rateTaskKeys[] = $taskKey;
             }
         }
 
+        $this->retireOffersOf($package, $droppedForTerms);
+
+        if ($this->customsTerms?->isUnresolved()) {
+            $dropped = [
+                'unresolved' => $dutiesTermsFilter->unresolvedNotice(
+                    $this->customsTerms,
+                    otherOffersRemain: $rateOptions->isNotEmpty() || $this->blindPurchaseOffers->isNotEmpty(),
+                ),
+                ...$dropped,
+            ];
+        }
+
+        $this->droppedRates = array_values($dropped);
+        $this->allRatesDroppedForCustomsTerms = $quoted > 0 && $rateOptions->isEmpty() && $droppedForTerms !== [];
         $rates = $this->offer($package, $rateOptions, $rateTaskKeys, $shipDates, $rateRequest->fingerprint());
         $this->ratedPackageId = $package->id;
         $this->ratedShippingMethodId = $package->shipment?->shipping_method_id;

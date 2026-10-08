@@ -84,3 +84,9 @@ international Package that lack an origin or an HS code.
     This check is therefore the only place such an order is stopped. Its message should
     say the imported value was invalid, not just that it is missing, when the import
     recorded that warning.
+- 2026-10-08 — From the review of `04`: batch ship and automation filter rates through
+  `getShippingRates()`, but only the Ship page reads `getDroppedRates()`. So a batch row
+  for an EU Shipment with no duties terms fails with a generic "no rate" reason. This
+  check's purchase-time block owns that message: batch ship must record "no duties terms
+  are set for <country>" and its fix, not "no rates". The same goes for rates dropped by
+  `duties-support.json`: surface their reasons on the batch row. Add a test for each.

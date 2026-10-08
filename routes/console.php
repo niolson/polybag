@@ -54,6 +54,16 @@ Schedule::command('packages:sync-shopify-label-costs')
     ->withoutOverlapping()
     ->runInBackground();
 
+// The ECB publishes its euro reference rates at about 16:00 CET on working
+// days. Two runs cover both CET and CEST, and the second retries a failed
+// first; the fetch is idempotent. A seller tax registration's low-value
+// threshold is tested at these rates (`international-customs-terms/04`).
+Schedule::command('exchange-rates:fetch')
+    ->cron('30 15,21 * * *')
+    ->timezone('UTC')
+    ->withoutOverlapping()
+    ->runInBackground();
+
 // Detection, not prevention: the writers keep each package and its label
 // record consistent by construction, and this names anything that slipped
 // past them. Report only — the repair is a person's decision (ADR-0004).
