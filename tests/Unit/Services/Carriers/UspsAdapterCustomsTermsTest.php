@@ -13,9 +13,11 @@ use App\Enums\DutiesTerms;
 use App\Enums\RecipientTaxIdType;
 use App\Enums\TaxRegistrationRegime;
 use App\Http\Integrations\USPS\Requests\InternationalLabel;
+use App\Http\Integrations\USPS\Requests\InternationalLabelReprint;
 use App\Http\Integrations\USPS\Requests\PaymentAuthorization;
 use App\Logging\PiiRedactor;
 use App\Models\CarrierAccount;
+use App\Models\ShippingOffer;
 use App\Models\User;
 use App\Services\Carriers\UspsAdapter;
 use App\Services\Customs\CustomsTermsSnapshot;
@@ -56,7 +58,7 @@ function uspsIoss(string $number = 'IM2760000742'): SellerTaxRegistration
     return new SellerTaxRegistration(TaxRegistrationRegime::Ioss, $number, CustomsTermsOrigin::Client);
 }
 
-function uspsTermsRequest(?ResolvedCustomsTerms $terms, ?AddressData $to = null, ?RecipientTaxId $taxId = null, ?string $itn = null): ShipRequest
+function uspsTermsRequest(?ResolvedCustomsTerms $terms, ?AddressData $to = null, ?RecipientTaxId $taxId = null, ?string $itn = null, ?ShippingOffer $offer = null): ShipRequest
 {
     return new ShipRequest(
         fromAddress: new AddressData(firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle', stateOrProvince: 'WA', postalCode: '98072'),
@@ -73,6 +75,7 @@ function uspsTermsRequest(?ResolvedCustomsTerms $terms, ?AddressData $to = null,
         exportItn: $itn,
         customsTerms: $terms,
         recipientTaxId: $taxId,
+        offer: $offer,
     );
 }
 
@@ -89,6 +92,27 @@ function fakeUspsTermsLabel(array $metadata = []): void
         InternationalLabel::class => MockResponse::make(
             body: "--boundary\r\nContent-Type: application/json\r\n\r\n{$json}\r\n--boundary\r\nContent-Type: application/pdf\r\n\r\nJVBERi0xLjQKYmFzZTY0bGFiZWxkYXRh\r\n--boundary--",
             headers: ['Content-Type' => 'multipart/mixed; boundary=boundary'],
+        ),
+    ]);
+}
+
+/**
+ * The reply to a reprint by idempotency key: the label's metadata and the PDF,
+ * which on a DDP label carries the prepaid-duties service but not the
+ * `prepaidDutiesTaxesFees` breakdown (checked against TEM, 2026-10-09).
+ *
+ * @param  array<string, mixed>  $metadata
+ */
+function fakeUspsTermsReprint(array $metadata = []): void
+{
+    $json = json_encode(['internationalTrackingNumber' => 'LN123456789US', 'postage' => 42.50, ...$metadata]);
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        PaymentAuthorization::class => MockResponse::make(['paymentAuthorizationToken' => 'test_payment_token']),
+        InternationalLabelReprint::class => MockResponse::make(
+            body: "--boundary\r\nContent-Type: application/json\r\n\r\n{$json}\r\n--boundary\r\nContent-Type: application/pdf\r\n\r\nJVBERi0xLjQKYmFzZTY0bGFiZWxkYXRh\r\n--boundary--",
+            headers: ['Content-Type' => 'multipart/form-data; boundary=boundary'],
         ),
     ]);
 }
@@ -168,6 +192,68 @@ it('sums the package fee alone when no item carries a cost', function (): void {
     $response = $this->adapter->createShipment(uspsTermsRequest(uspsTermsFor('DE', DutiesTerms::Ddp)));
 
     expect($response->dutiesCost)->toBe(1.25);
+});
+
+it('takes the prepaid total from the prepaid-duties service, which the breakdown can miss by a cent', function (): void {
+    // TEM, package 243: the parts add to 286.06, the service reads 286.08.
+    fakeUspsTermsLabel([
+        'extraServices' => [
+            ['serviceID' => '370', 'serviceName' => 'USPS Delivery Duties Paid Fee', 'price' => 0],
+            ['serviceID' => '371', 'serviceName' => 'Prepaid Duties, Taxes, and Fees', 'price' => 286.08],
+        ],
+        'prepaidDutiesTaxesFees' => [
+            'packageFee' => 39.14,
+            'itemCosts' => [
+                ['dutyPrice' => 40.78, 'taxPrice' => 162.69, 'itemDescription' => 'Snowboard'],
+                ['dutyPrice' => 8.71, 'taxPrice' => 34.74, 'itemDescription' => 'Mug'],
+            ],
+        ],
+    ]);
+
+    $response = $this->adapter->createShipment(uspsTermsRequest(uspsTermsFor('DE', DutiesTerms::Ddp)));
+
+    expect($response->dutiesCost)->toBe(286.08);
+});
+
+it('ignores a prepaid-duties service priced at zero and falls back to the breakdown', function (): void {
+    fakeUspsTermsLabel([
+        'extraServices' => [['serviceID' => '371', 'serviceName' => 'Prepaid Duties, Taxes, and Fees', 'price' => 0]],
+        'prepaidDutiesTaxesFees' => ['packageFee' => 1.25],
+    ]);
+
+    $response = $this->adapter->createShipment(uspsTermsRequest(uspsTermsFor('DE', DutiesTerms::Ddp)));
+
+    expect($response->dutiesCost)->toBe(1.25);
+});
+
+it('records the prepaid total on a purchase recovered by its key, whose reply has no breakdown', function (): void {
+    fakeUspsTermsReprint(['extraServices' => [
+        ['serviceID' => '370', 'serviceName' => 'USPS Delivery Duties Paid Fee', 'price' => 0],
+        ['serviceID' => '371', 'serviceName' => 'Prepaid Duties, Taxes, and Fees', 'price' => 31.16],
+    ]]);
+    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+        'purchase_context' => [UspsAdapter::PURCHASE_CONTEXT_KEY => '3a2befe8-4475-48c7-a327-fe53439b355b'],
+    ]);
+
+    $response = $this->adapter->recoverPurchase(uspsTermsRequest(uspsTermsFor('DE', DutiesTerms::Ddp), offer: $offer));
+
+    expect($response)->not->toBeNull()
+        ->and($response->success)->toBeTrue()
+        ->and($response->dutiesCost)->toBe(31.16);
+
+    Saloon::assertSent(fn (Request $sent): bool => $sent instanceof InternationalLabelReprint);
+});
+
+it('still records no duties cost on a recovered DDU purchase', function (): void {
+    fakeUspsTermsReprint();
+    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+        'purchase_context' => [UspsAdapter::PURCHASE_CONTEXT_KEY => '3a2befe8-4475-48c7-a327-fe53439b355b'],
+    ]);
+
+    $response = $this->adapter->recoverPurchase(uspsTermsRequest(uspsTermsFor('PL', DutiesTerms::Ddu), offer: $offer));
+
+    expect($response?->success)->toBeTrue()
+        ->and($response->dutiesCost)->toBeNull();
 });
 
 it('declares a registration as the exporter reference on a DDU label', function (): void {

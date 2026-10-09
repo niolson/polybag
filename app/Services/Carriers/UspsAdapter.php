@@ -198,6 +198,12 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
     private const REPRINT_LOOKBACK_DAYS = 7;
 
     /**
+     * The extra service whose price is the duties, taxes and fees USPS prepaid on
+     * a DDP label (service 370 is the DDP fee itself, priced at zero).
+     */
+    private const PREPAID_DUTIES_SERVICE_ID = '371';
+
+    /**
      * Where the purchase's `X-Idempotency-Key` lives on the offer.
      *
      * The only thing a direct USPS offer's `purchase_context` holds. It is
@@ -1511,16 +1517,30 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
     }
 
     /**
-     * The duties and taxes USPS prepaid, from the label's metadata: the
-     * package fee plus each item's duty and tax. Null when USPS reports
-     * nothing, which is what a DDU label does. A DDP label with no
-     * `prepaidDutiesTaxesFees` is logged, since it means USPS bought it as DDU.
-     * Postage is unchanged by it.
+     * The duties and taxes USPS prepaid, from the label's metadata. The total
+     * is the price of the "Prepaid Duties, Taxes, and Fees" extra service
+     * ({@see self::PREPAID_DUTIES_SERVICE_ID}), which the purchase and the
+     * reprint-by-key reply both carry, so a recovered purchase records it too.
+     * The `prepaidDutiesTaxesFees` breakdown, which only the purchase reply
+     * has, is the fallback: the package fee plus each item's duty and tax, which
+     * can differ from the total by a cent or two of USPS rounding. Null when
+     * USPS reports neither, which is what a DDU label does. A DDP label with
+     * neither is logged, since it means USPS bought it as DDU. Postage is
+     * unchanged by it.
      *
      * @param  array<array-key, mixed>  $metadata
      */
     private function prepaidDutiesCost(array $metadata, ShipRequest $request): ?float
     {
+        foreach (is_array($metadata['extraServices'] ?? null) ? $metadata['extraServices'] : [] as $service) {
+            if (is_array($service)
+                && (string) ($service['serviceID'] ?? '') === self::PREPAID_DUTIES_SERVICE_ID
+                && is_numeric($service['price'] ?? null)
+                && (float) $service['price'] > 0) {
+                return round((float) $service['price'], 2);
+            }
+        }
+
         $prepaid = $metadata['prepaidDutiesTaxesFees'] ?? null;
 
         if (! is_array($prepaid)) {
