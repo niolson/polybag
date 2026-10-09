@@ -616,3 +616,14 @@ it('does not mark a USPS DDU rate', function (): void {
 
     expect(collect($options->rateOptions)->firstWhere('carrier', 'USPS'))->not->toHaveKey('dutiesCharge');
 });
+
+it('drops a USPS DDP rate once the account\'s CRID changes after acceptance', function (): void {
+    $package = dutiesFilterPackage('NL', dutiesFilterMethod(), ['duties_terms' => DutiesTerms::Ddp]);
+    $account = CarrierAccount::query()->first();
+    $account->update(['credentials' => ['crid' => '1111']]);
+    $account->recordDdpTermsAcceptance(User::factory()->create());
+    $account->fresh()->update(['credentials' => ['crid' => '2222']]);
+
+    expect(quotedCarriers($package))->toBe(['UPS'])
+        ->and(droppedReasons())->toBe(['USPS DDP: account terms not accepted']);
+});

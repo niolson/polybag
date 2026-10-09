@@ -110,6 +110,24 @@ class EditCarrierAccount extends EditRecord
                     $this->redirect(static::getUrl(['record' => $this->carrierAccountRecord()->id]));
                 }),
 
+            Action::make('usps_withdraw_ddp_terms')
+                ->label('Withdraw DDP terms')
+                ->icon('heroicon-o-x-circle')
+                ->color('danger')
+                ->visible(fn (): bool => $this->carrierAccountRecord()->carrier?->name === Carrier::USPS && $this->carrierAccountRecord()->hasAcceptedDdpTerms())
+                ->authorize(fn (): bool => Gate::allows('acceptDdpTerms', $this->carrierAccountRecord()))
+                ->requiresConfirmation()
+                ->modalDescription('USPS DDP rates stop being offered on this account until an Admin accepts the terms again.')
+                ->action(function (): void {
+                    if (Gate::denies('acceptDdpTerms', $this->carrierAccountRecord())) {
+                        abort(403);
+                    }
+
+                    $this->carrierAccountRecord()->withdrawDdpTermsAcceptance();
+                    Notification::make()->success()->title('USPS DDP terms withdrawn for this account.')->send();
+                    $this->redirect(static::getUrl(['record' => $this->carrierAccountRecord()->id]));
+                }),
+
             // FedEx wizard and disconnect
             $this->fedexRegisterAction(),
             $this->fedexDisconnectAction(),

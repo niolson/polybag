@@ -79,6 +79,16 @@ class CarrierAccount extends Model
             }
         });
 
+        // Acceptance of USPS's DDP terms belongs to the payer who gave it. A
+        // new CRID or EPS account is a new payer, who has accepted nothing.
+        // Token refreshes and other edits leave both identifiers alone.
+        static::saving(function (CarrierAccount $account): void {
+            if ($account->exists && $account->ddp_terms_accepted_at !== null && $account->billingIdentityChanged()) {
+                $account->ddp_terms_accepted_at = null;
+                $account->ddp_terms_accepted_by = null;
+            }
+        });
+
         static::saved(function (CarrierAccount $account): void {
             if ($account->wasChanged('carrier_id')) {
                 $account->restampScopes();
@@ -121,6 +131,36 @@ class CarrierAccount extends Model
     }
 
     /**
+     * Whether this save moves the account to another USPS payer: the CRID or
+     * the EPS account number was set and then changed to something else. A
+     * blank EPS account being filled in (auto-populated from the OAuth token)
+     * is not a change of payer.
+     */
+    private function billingIdentityChanged(): bool
+    {
+        if ($this->isDirty('carrier_id')) {
+            return true;
+        }
+
+        if (! $this->isDirty('credentials')) {
+            return false;
+        }
+
+        $original = $this->getOriginal('credentials');
+        $original = is_array($original) ? $original : [];
+
+        foreach (['crid', 'eps_account'] as $key) {
+            $before = $original[$key] ?? null;
+
+            if (filled($before) && $this->credential($key) !== $before) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Record that $admin accepted the USPS prepaid-duties terms for this
      * account. The columns are not mass assignable, so only this method
      * writes them; the caller has authorized the Admin.
@@ -131,6 +171,11 @@ class CarrierAccount extends Model
             'ddp_terms_accepted_at' => now(),
             'ddp_terms_accepted_by' => $admin->id,
         ])->save();
+    }
+
+    public function withdrawDdpTermsAcceptance(): void
+    {
+        $this->forceFill(['ddp_terms_accepted_at' => null, 'ddp_terms_accepted_by' => null])->save();
     }
 
     /**

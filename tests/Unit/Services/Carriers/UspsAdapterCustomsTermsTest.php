@@ -368,3 +368,16 @@ it('redacts the importer and exporter references from a logged payload', functio
         ],
     ]);
 });
+
+it('refuses DDP and drops the rate once the CRID changes after acceptance', function (): void {
+    $this->account->update(['credentials' => [...$this->account->fresh()->credentials, 'crid' => '11111111']]);
+    fakeUspsTermsLabel();
+
+    $response = $this->adapter->createShipment(uspsTermsRequest(uspsTermsFor('DE', DutiesTerms::Ddp)));
+
+    expect($this->account->fresh()->hasAcceptedDdpTerms())->toBeFalse()
+        ->and($response->success)->toBeFalse()
+        ->and($response->errorMessage)->toContain('USPS DDP: account terms not accepted');
+
+    Saloon::assertNothingSent();
+});

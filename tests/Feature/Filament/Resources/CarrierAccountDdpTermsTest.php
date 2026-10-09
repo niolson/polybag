@@ -64,6 +64,12 @@ it('keeps a manager from accepting the terms', function (): void {
 
     Livewire::test(EditCarrierAccount::class, ['record' => $this->account->id])->assertForbidden();
 
+    // Even with the page reached some other way, the action itself refuses.
+    $this->actingAs(User::factory()->admin()->create());
+    $component = Livewire::test(EditCarrierAccount::class, ['record' => $this->account->id]);
+    $this->actingAs($manager);
+    $component->assertActionHidden('usps_accept_ddp_terms');
+
     expect($this->account->fresh()->hasAcceptedDdpTerms())->toBeFalse();
 });
 
@@ -78,4 +84,39 @@ it('builds an accepted account from the factory state', function (): void {
 
     expect($account->hasAcceptedDdpTerms())->toBeTrue()
         ->and($account->ddpTermsAcceptedBy)->toBeInstanceOf(User::class);
+});
+
+it('lets an Admin withdraw acceptance, and no one else', function (): void {
+    $this->account->recordDdpTermsAcceptance(User::factory()->create());
+    $this->actingAs(User::factory()->admin()->create());
+
+    Livewire::test(EditCarrierAccount::class, ['record' => $this->account->id])
+        ->callAction('usps_withdraw_ddp_terms')
+        ->assertNotified('USPS DDP terms withdrawn for this account.');
+
+    expect($this->account->fresh()->hasAcceptedDdpTerms())->toBeFalse()
+        ->and($this->account->fresh()->ddp_terms_accepted_by)->toBeNull();
+});
+
+it('loses acceptance when the CRID or EPS account changes', function (string $key, string $value): void {
+    $this->account->update(['credentials' => [...$this->account->credentials, 'crid' => '1111', 'eps_account' => '2222']]);
+    $this->account->recordDdpTermsAcceptance(User::factory()->create());
+
+    $this->account->fresh()->update(['credentials' => [...$this->account->fresh()->credentials, $key => $value]]);
+
+    expect($this->account->fresh()->hasAcceptedDdpTerms())->toBeFalse()
+        ->and($this->account->fresh()->ddp_terms_accepted_by)->toBeNull();
+})->with([['crid', '9999'], ['eps_account', '8888']]);
+
+it('keeps acceptance through unrelated edits and token refreshes', function (): void {
+    $this->account->update(['credentials' => [...$this->account->credentials, 'crid' => '1111', 'eps_account' => '2222']]);
+    $this->account->recordDdpTermsAcceptance(User::factory()->create());
+
+    $account = $this->account->fresh();
+    $account->update(['name' => 'Renamed', 'active' => false]);
+    $account->mergeSecret('oauth_token', 'new-token');
+    $account->mergeCredential('oauth_connected_at', now()->toIso8601String());
+    $account->save();
+
+    expect($this->account->fresh()->hasAcceptedDdpTerms())->toBeTrue();
 });

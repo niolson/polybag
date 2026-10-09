@@ -183,3 +183,11 @@ enrolment instead, this shrinks to a confirmation checkbox with no terms text.
     `usps.com` and the flag's description say sending it is the agreement, which is why the
     acceptance is recorded on the account. USPS's answer on IOSS plus prepay would let
     `duties-support.json` and the refusal be reversed together.
+- 2026-10-09 — **Review fix: acceptance no longer survives a change of payer.**
+  `CarrierAccount` clears `ddp_terms_accepted_at` and `_by` in a `saving` hook when the
+  CRID or EPS account number is changed from a set value to another, or the carrier changes,
+  so no path (form, direct update) bypasses it. Edits to the name, active flag, scopes, other
+  credentials and OAuth token refreshes keep it; a blank EPS account being auto-populated
+  does not count as a change. Also added an Admin-only "Withdraw DDP terms" action
+  (`withdrawDdpTermsAcceptance()`), and the manager test now asserts the action itself is
+  hidden. Unverified: whether the MID should count as payer identity (it is not treated so).
