@@ -81,12 +81,28 @@ class UnattendedRateSelector
         $heldBlind = collect();
         /** @var Collection<int, BlindPurchaseOffer> $heldForSourceTerms */
         $heldForSourceTerms = collect();
-        $finish = fn (UnattendedRateSelection $selection): UnattendedRateSelection => $selection->holdingBlindOffers(
-            $heldBlind,
-            $channel?->name,
-            $heldForSourceTerms,
-            $sourceTermsDestination,
-        );
+        $finish = function (UnattendedRateSelection $selection) use ($package, $heldBlind, $heldForSourceTerms, $channel, $sourceTermsDestination): UnattendedRateSelection {
+            $heldOffers = $heldBlind->merge($heldForSourceTerms);
+
+            // A blind offer a rule or the sole-choice rule would have bought was
+            // held, and rate shopping bought a direct or quoted rate instead:
+            // said, so the swap is never silent.
+            if ($selection->rate !== null && $heldOffers->isNotEmpty()) {
+                logger()->info('Replaced a held blind purchase with a quoted purchase', [
+                    'package_id' => $package->id,
+                    'destination' => $sourceTermsDestination ?? $package->shipment->country,
+                    'held_sources' => $heldOffers->map(fn (BlindPurchaseOffer $offer): string => $offer->source)->unique()->values()->all(),
+                    'held_for' => $heldForSourceTerms->isNotEmpty() ? 'source_decided_terms' : 'postage_setting',
+                ]);
+            }
+
+            return $selection->holdingBlindOffers(
+                $heldBlind,
+                $channel?->name,
+                $heldForSourceTerms,
+                $sourceTermsDestination,
+            );
+        };
 
         // Why a blind offer the rules would buy is held: the connection's
         // setting first, then the destination. Null when nothing holds it.
@@ -290,9 +306,11 @@ class UnattendedRateSelector
                 'Source Decides Duties Terms',
                 "This package was offered {$selection->heldForSourceTermsSummary()}, but the source decides the duties terms on a label to {$this->sourceTermsCountry($selection)}, "
                 .'and PolyBag has not verified what it declares there, so automation does not buy it. '
+                .$this->amazonShippingNote($selection)
                 .$this->contentRestrictionNote($selection)
                 .$this->deactivatedNote($selection)
                 .$this->postageSettingNote($selection)
+                .$this->droppedRatesNote($package)
                 .'Ship this package from the Ship page, where a person chooses it.',
             );
         }
@@ -303,6 +321,7 @@ class UnattendedRateSelector
                 "This package was offered {$selection->heldByPostageSettingSummary()}, but the connection \"{$selection->postageSettingConnection}\" sells postage to a packer only, so automation does not buy it. "
                 .$this->contentRestrictionNote($selection)
                 .$this->deactivatedNote($selection)
+                .$this->droppedRatesNote($package)
                 .'Ship this package from the Ship page, or set the connection\'s postage setting to Packer and automation.',
             );
         }
@@ -425,7 +444,35 @@ class UnattendedRateSelector
         return $selection->heldForSourceTermsAnything()
             ? 'Automation also never buys '.$selection->heldForSourceTermsSummary()
                 ." into {$this->sourceTermsCountry($selection)}, because the source decides the duties terms and PolyBag has not verified what it declares there. "
+                .$this->amazonShippingNote($selection)
             : '';
+    }
+
+    /**
+     * Why Amazon Shipping, sold on a connection, is among the held offers:
+     * PolyBag sends it no duties terms, and it ships within the continental
+     * US only, so it is not a service for these destinations anyway.
+     */
+    private function amazonShippingNote(UnattendedRateSelection $selection): string
+    {
+        return $selection->heldAmazonShipping()
+            ? 'PolyBag cannot set duties terms on Amazon Shipping, which ships within the continental US only. '
+            : '';
+    }
+
+    /**
+     * What else the Shipment's customs terms ruled out. A held offer makes an
+     * attended alternative available, which is why the refusal would
+     * otherwise never mention it: with no EU duties terms set, setting them is
+     * what lets a direct rate be bought unattended.
+     */
+    private function droppedRatesNote(Package $package): string
+    {
+        $dropped = $this->shippingRateService->droppedRatesFor($package->id);
+
+        return $dropped === []
+            ? ''
+            : implode(' ', array_map(fn (DroppedRate $notice): string => rtrim($notice->reason, '.').'.', $dropped)).' ';
     }
 
     private function sourceTermsCountry(UnattendedRateSelection $selection): string

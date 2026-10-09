@@ -28,9 +28,11 @@ use App\Jobs\GenerateLabelJob;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
+use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\LabelBatch;
 use App\Models\LabelBatchItem;
+use App\Models\Location;
 use App\Models\Package;
 use App\Models\Product;
 use App\Models\Shipment;
@@ -45,6 +47,8 @@ use App\Services\Carriers\CarrierRegistry;
 use App\Services\Customs\CustomsTermsSnapshot;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\Shipping\DutiesTermsFilter;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Livewire\Livewire;
 use Mockery\MockInterface;
 
@@ -160,16 +164,38 @@ function sdAmazonRate(float $price = 4.00): RateResponse
     );
 }
 
-function sdRegisterAmazonQuote(): MockInterface
+/**
+ * A second service on the method's own carrier, quoted as a plain direct
+ * rate, cheaper or dearer than the Amazon offer as the test needs.
+ */
+function sdDirectRate(float $price = 9.00): RateResponse
+{
+    $service = CarrierService::firstOrCreate(
+        ['service_code' => 'DIRECT'],
+        [
+            'carrier_id' => (Carrier::where('name', 'MockCarrier')->first() ?? Carrier::factory()->create(['name' => 'MockCarrier', 'active' => true]))->id,
+            'name' => 'Direct Ground',
+            'active' => true,
+        ],
+    );
+    ShippingMethod::query()->each(fn (ShippingMethod $method) => $method->carrierServices()->syncWithoutDetaching([$service->id]));
+
+    return new RateResponse('MockCarrier', 'DIRECT', 'Direct Ground', $price, carrierServiceId: $service->id);
+}
+
+/**
+ * @param  list<RateResponse>|null  $rates  What the adapter quotes; the Amazon offer alone by default
+ */
+function sdRegisterAmazonQuote(?array $rates = null): MockInterface
 {
     $adapter = Mockery::mock(DirectCarrierAdapter::class);
     $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
     $adapter->shouldReceive('isConfigured')->andReturnTrue();
     $adapter->shouldReceive('prepareRateRequest')->andReturnNull();
     $adapter->shouldReceive('customsDocumentDelivery')->andReturn(CustomsDocumentDelivery::FusedIntoLabel);
-    $adapter->shouldReceive('getRates')->andReturn(collect([sdAmazonRate()]));
-    $adapter->shouldReceive('createShipment')->andReturn(ShipResponse::success(
-        trackingNumber: 'AMZ123',
+    $adapter->shouldReceive('getRates')->andReturnUsing(fn (): Collection => collect($rates ?? [sdAmazonRate()]));
+    $adapter->shouldReceive('createShipment')->andReturnUsing(fn (ShipRequest $request): ShipResponse => ShipResponse::success(
+        trackingNumber: 'T-'.$request->selectedRate?->serviceCode,
         cost: 4.00,
         carrier: 'MockCarrier',
         service: 'Ground',
@@ -474,4 +500,161 @@ it('does not label a domestic Shopify purchase', function (): void {
     $options = app(PackageShippingWorkflow::class)->prepareRates($package->fresh());
 
     expect($options->blindPurchaseOffers[0])->not->toHaveKey('dutiesDecidedBy');
+});
+
+/**
+ * @param  array<string, mixed>  $shipmentAttributes
+ */
+function sdEuPackage(string $country, array $shipmentAttributes = [], UnlistedServices $amazon = UnlistedServices::Any): Package
+{
+    $package = sdAmazonPackage($country, $amazon);
+    $package->shipment->update(['client_id' => Client::factory()->ddpToEu()->create()->id, ...$shipmentAttributes]);
+
+    return $package;
+}
+
+it('buys a direct rate on the same EU package while the Amazon offer is held', function (): void {
+    $package = sdEuPackage('DE');
+    // The Amazon offer is cheaper, so only the hold keeps it from winning.
+    sdRegisterAmazonQuote([sdAmazonRate(2.00), sdDirectRate(9.00)]);
+
+    $result = sdAutoShip($this->user, $package);
+
+    expect($result->success)->toBeTrue()
+        ->and($package->fresh()->tracking_number)->toBe('T-DIRECT');
+});
+
+it('buys a direct rate on the same EU package while a Shopify blind purchase a rule selects is held, and says so in the log', function (): void {
+    $package = sdShopifyPackage('DE');
+    $package->shipment->update(['client_id' => Client::factory()->ddpToEu()->create()->id]);
+    sdShopifyRule($package);
+    sdRegisterShopify();
+    sdRegisterAmazonQuote([sdDirectRate(9.00)]);
+    $log = Log::spy();
+
+    $result = sdAutoShip($this->user, $package);
+
+    expect($result->success)->toBeTrue()
+        ->and($package->fresh()->tracking_number)->toBe('T-DIRECT');
+
+    $log->shouldHaveReceived('info', ['Replaced a held blind purchase with a quoted purchase', [
+        'package_id' => $package->id,
+        'destination' => 'DE',
+        'held_sources' => ['Shopify'],
+        'held_for' => 'source_decided_terms',
+    ]]);
+});
+
+it('does not log a replacement when nothing was held', function (): void {
+    $package = sdShopifyPackage('US');
+    sdShopifyRule($package);
+    sdRegisterShopify();
+    $log = Log::spy();
+
+    sdAutoShip($this->user, $package);
+
+    $log->shouldNotHaveReceived('info', fn (string $message): bool => $message === 'Replaced a held blind purchase with a quoted purchase');
+});
+
+it('does not hold an Amazon offer on an EU-to-EU lane', function (): void {
+    $package = sdAmazonPackage('FR');
+    $package->update(['location_id' => Location::factory()->create(['country' => 'DE'])->id]);
+    sdRegisterAmazonQuote();
+
+    expect(sdAutoShip($this->user, $package)->success)->toBeTrue();
+});
+
+it('does not hold an Amazon offer to a destination outside the regimes', function (string $country, array $attributes): void {
+    $package = sdAmazonPackage($country);
+    $package->shipment->update($attributes);
+    sdRegisterAmazonQuote();
+
+    expect(sdAutoShip($this->user, $package)->success)->toBeTrue();
+})->with([
+    'Canada' => ['CA', []],
+    'a US territory' => ['PR', ['city' => 'San Juan', 'state_or_province' => 'PR', 'postal_code' => '00901']],
+]);
+
+it('holds an Amazon offer to Northern Ireland as GB', function (): void {
+    $package = sdAmazonPackage('GB');
+    $package->shipment->update(['city' => 'Belfast', 'postal_code' => 'BT1 5GS']);
+    sdRegisterAmazonQuote();
+
+    $result = sdAutoShip($this->user, $package);
+
+    expect($result->title)->toBe('Source Decides Duties Terms')
+        ->and($result->message)->toContain('United Kingdom');
+});
+
+it('keeps a held offer held whatever the shipping method allows, and says so beside the allowance refusal', function (UnlistedServices $amazon): void {
+    $package = sdEuPackage('DE', amazon: $amazon);
+    // A direct rate for a service the method does not list is refused by the
+    // allowance, so the refusal is the method's, with the hold named beside it.
+    $unlisted = CarrierService::factory()->create([
+        'carrier_id' => CarrierService::where('service_code', 'GROUND')->value('carrier_id'),
+        'name' => 'Unlisted',
+        'service_code' => 'UNLISTED',
+        'active' => true,
+    ]);
+    sdRegisterAmazonQuote([sdAmazonRate(2.00), new RateResponse('MockCarrier', 'UNLISTED', 'Unlisted', 5.00, carrierServiceId: $unlisted->id)]);
+
+    $result = sdAutoShip($this->user, $package);
+
+    expect($result->title)->toBe('Not Allowed by Shipping Method')
+        ->and($result->message)->toContain('Automation also never buys MockCarrier Ground')
+        ->and($result->message)->toContain('Germany')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+})->with([
+    'method lists services only' => UnlistedServices::None,
+    'method allows any service' => UnlistedServices::Any,
+]);
+
+it('holds a strict Amazon rule\'s pre-selected rate', function (): void {
+    $package = sdAmazonPackage('DE');
+    ShippingRule::factory()->source(ShippingRuleSource::Amazon)->create([
+        'shipping_method_id' => $package->shipment->shipping_method_id,
+        'action' => ShippingRuleAction::UseService,
+        'carrier_service_id' => null,
+        'any_service' => true,
+    ]);
+    $adapter = sdRegisterAmazonQuote();
+
+    $result = sdAutoShip($this->user, $package);
+
+    expect($result->title)->toBe('Source Decides Duties Terms')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+
+    $adapter->shouldNotHaveReceived('createShipment');
+});
+
+it('says which customs setting would let a direct rate be bought, beside a held Amazon offer', function (): void {
+    $package = sdAmazonPackage('DE');
+    sdRegisterAmazonQuote([sdAmazonRate(), sdDirectRate()]);
+
+    $result = sdAutoShip($this->user, $package);
+
+    expect($result->title)->toBe('Source Decides Duties Terms')
+        ->and($result->message)->toContain('Choose EU duties terms');
+});
+
+it('says which customs setting would let a direct rate be bought, beside a packer-only connection', function (): void {
+    $package = sdShopifyPackage('DE');
+    setPostageSetting($package, PostageSetting::PackerOnly);
+    sdRegisterShopify();
+
+    $result = sdAutoShip($this->user, $package);
+
+    expect($result->title)->toBe('Connection Sells to Packers Only')
+        ->and($result->message)->toContain('Choose EU duties terms');
+});
+
+it('adds nothing about customs terms when none were ruled out', function (): void {
+    $package = sdEuPackage('DE');
+    sdRegisterAmazonQuote();
+
+    $result = sdAutoShip($this->user, $package);
+
+    expect($result->title)->toBe('Source Decides Duties Terms')
+        ->and($result->message)->not->toContain('Choose EU duties terms')
+        ->and($result->message)->not->toContain('continental');
 });

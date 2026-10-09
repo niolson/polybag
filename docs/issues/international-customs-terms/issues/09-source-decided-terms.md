@@ -113,3 +113,26 @@ close.
   `duties-support.json` entries were added. The "Amazon offer ... is listed" criterion is
   verified by the offer surviving the filter and carrying the label; the Ship page
   rendering is asserted with Livewire, not in a browser.
+- 2026-10-09 — From the review. **Amazon Shipping sold on a connection is held too**, and
+  deliberately: PolyBag sends its purchase no terms, so the source decides them, and it
+  ships within the continental US only, so holding it for EU, GB, NO and AU costs nothing.
+  ADR-0008 decision 5 says so, and the refusal adds "PolyBag cannot set duties terms on
+  Amazon Shipping, which ships within the continental US only" when it is among the held
+  offers; wording for Buy Shipping and Shopify is unchanged.
+  - **Dropped-rate reasons are no longer hidden.** A held offer sets
+    `attendedAlternativeAvailable`, which is what kept `droppedRatesFor()` from being read,
+    so with no EU terms set the refusal never said that setting them would let a direct rate
+    be bought. The "Source Decides" and "Connection Sells to Packers Only" refusals now
+    append the customs-terms reasons.
+  - **A swap is logged.** When a held blind offer is passed over and rate shopping buys a
+    quoted or direct rate instead, `UnattendedRateSelector` logs "Replaced a held blind
+    purchase with a quoted purchase" with the package id, destination country and held
+    source names (no other identifiers).
+  - **Tests added:** a Buy Shipping purchase to Germany through `ship()` records
+    `source_decided` (fails without the `rateFromOffer()` fix), and recovery records the
+    terms stamped on the Offer; Amazon Shipping to Germany held by batch ship while a direct
+    rate on the same package is bought; direct rate bought beside a held Amazon offer and
+    beside a held Shopify purchase; EU-to-EU, Canada, a US territory (not held) and Northern
+    Ireland (held as GB); the allowance refusal with the hold named beside it under both
+    `UnlistedServices` settings; a strict Amazon rule's pre-selected rate.
+

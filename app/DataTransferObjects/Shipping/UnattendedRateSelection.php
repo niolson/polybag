@@ -2,6 +2,8 @@
 
 namespace App\DataTransferObjects\Shipping;
 
+use App\Models\Carrier;
+use App\Models\CarrierAlias;
 use App\Services\RateSelector;
 use Illuminate\Support\Collection;
 
@@ -133,6 +135,15 @@ readonly class UnattendedRateSelection
     {
         return ($this->heldForSourceTerms?->isNotEmpty() ?? false)
             || ($this->blindOffersHeldForSourceTerms?->isNotEmpty() ?? false);
+    }
+
+    /**
+     * Whether Amazon Shipping sold on a connection is among the held rates.
+     */
+    public function heldAmazonShipping(): bool
+    {
+        return ($this->heldForSourceTerms ?? collect())
+            ->contains(fn (RateResponse $rate): bool => CarrierAlias::lookupKey($rate->carrier) === CarrierAlias::lookupKey(Carrier::AMAZON_SHIPPING));
     }
 
     /**
