@@ -3,7 +3,9 @@
 namespace App\Services\Customs;
 
 use App\DataTransferObjects\Customs\DutiesSupportEntry;
+use App\DataTransferObjects\Shipping\AddressData;
 use App\Enums\DutiesSupport;
+use App\Enums\TaxRegistrationRegime;
 use App\Models\Carrier;
 use App\Models\CarrierAlias;
 use App\Services\AddressReferenceService;
@@ -30,6 +32,13 @@ class DutiesSupportTable
      */
     public const CARRIERS = [Carrier::USPS, Carrier::UPS, Carrier::FEDEX];
 
+    /**
+     * The keys a default or country entry may carry; a country entry may also carry `with_registration`.
+     *
+     * @var list<string>
+     */
+    private const ENTRY_KEYS = ['support', 'source', 'checked', 'effective_from', 'note'];
+
     /** @var array<string, mixed>|null */
     private ?array $table = null;
 
@@ -52,8 +61,14 @@ class DutiesSupportTable
      *
      * A country entry whose `effective_from` is later than `$on` is not in
      * force yet, and the carrier's default answers instead.
+     *
+     * An entry may carry a `with_registration` override for a regime: some
+     * postal operators take a parcel either way but only DDP once it carries
+     * an IOSS number. It applies only when `$registration` is that regime,
+     * which is the registration actually declared, not one a threshold
+     * withholds, and only while the entry itself is in force.
      */
-    public function supportFor(string $carrier, string $country, CarbonInterface $on): ?DutiesSupportEntry
+    public function supportFor(string $carrier, string $country, CarbonInterface $on, ?TaxRegistrationRegime $registration = null): ?DutiesSupportEntry
     {
         $key = CarrierAlias::lookupKey($carrier);
         $carrierEntry = $this->table()['carriers'][$key] ?? null;
@@ -74,6 +89,23 @@ class DutiesSupportTable
         if (! is_array($entry)) {
             $entry = $carrierEntry['default'];
             $isDefault = true;
+        }
+
+        $override = ! $isDefault && $registration !== null
+            ? ($entry['with_registration'][$registration->value] ?? null)
+            : null;
+
+        if (is_array($override)) {
+            return new DutiesSupportEntry(
+                carrier: $key,
+                country: $country,
+                support: DutiesSupport::from($override['support']),
+                source: (string) $override['source'],
+                checked: CarbonImmutable::parse($override['checked']),
+                authority: (string) ($override['authority'] ?? $carrierEntry['authority']),
+                effectiveFrom: isset($entry['effective_from']) ? CarbonImmutable::parse($entry['effective_from']) : null,
+                registration: $registration,
+            );
         }
 
         return new DutiesSupportEntry(
@@ -104,8 +136,10 @@ class DutiesSupportTable
     {
         $errors = [];
 
-        if (! is_string($table['version'] ?? null) || ! self::isDate($table['version'])) {
-            $errors[] = 'version must be an ISO date.';
+        if (! is_string($table['version'] ?? null)
+            || preg_match('/^(\d{4}-\d{2}-\d{2})(\.\d+)?$/', $table['version'], $version) !== 1
+            || ! self::isDate($version[1])) {
+            $errors[] = 'version must be an ISO date, with a .N suffix for a later change the same day.';
         }
 
         if (! is_array($table['notes'] ?? null)) {
@@ -142,6 +176,11 @@ class DutiesSupportTable
                 $errors[] = "carriers.{$key}.default must give the support for unlisted countries.";
             } else {
                 array_push($errors, ...self::entryErrors("carriers.{$key}.default", $carrier['default']));
+                array_push($errors, ...self::unknownKeyErrors("carriers.{$key}.default", $carrier['default'], self::ENTRY_KEYS));
+
+                if (array_key_exists('with_registration', $carrier['default'])) {
+                    $errors[] = "carriers.{$key}.default.with_registration is never read; an override belongs on a country entry.";
+                }
             }
 
             if (! is_array($carrier['countries'] ?? null)) {
@@ -164,7 +203,75 @@ class DutiesSupportTable
                 }
 
                 array_push($errors, ...self::entryErrors($path, $entry));
+                array_push($errors, ...self::unknownKeyErrors($path, $entry, [...self::ENTRY_KEYS, 'with_registration']));
+
+                if (array_key_exists('with_registration', $entry)) {
+                    array_push($errors, ...self::registrationErrors("{$path}.with_registration", $entry['with_registration'], $country));
+                }
             }
+        }
+
+        return $errors;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function registrationErrors(string $path, mixed $overrides, string $country): array
+    {
+        if (! is_array($overrides) || $overrides === []) {
+            return ["{$path} must be an object keyed by registration regime."];
+        }
+
+        $errors = [];
+
+        foreach ($overrides as $regime => $override) {
+            $overridePath = "{$path}.{$regime}";
+
+            if (TaxRegistrationRegime::tryFrom((string) $regime) === null) {
+                $errors[] = "{$overridePath} is not a known registration regime (".implode(', ', array_column(TaxRegistrationRegime::cases(), 'value')).').';
+            }
+
+            $regimeCase = TaxRegistrationRegime::tryFrom((string) $regime);
+
+            if ($regimeCase !== null && ! $regimeCase->covers(new AddressData('', '', '', '', null, null, $country))) {
+                $errors[] = "{$overridePath} can never apply: a {$regimeCase->getLabel()} registration does not cover {$country}.";
+            }
+
+            if (! is_array($override)) {
+                $errors[] = "{$overridePath} must be an object.";
+
+                continue;
+            }
+
+            array_push($errors, ...self::unknownKeyErrors($overridePath, $override, ['support', 'source', 'checked', 'authority', 'note']));
+
+            if (array_key_exists('authority', $override)
+                && (! is_string($override['authority']) || trim($override['authority']) === '')) {
+                $errors[] = "{$overridePath}.authority must name who the rule comes from.";
+            }
+
+            if (array_key_exists('effective_from', $override)) {
+                $errors[] = "{$overridePath}.effective_from is not supported; the entry's own effective_from gates it.";
+            }
+
+            array_push($errors, ...self::entryErrors($overridePath, $override));
+        }
+
+        return $errors;
+    }
+
+    /**
+     * @param  array<string, mixed>  $entry
+     * @param  list<string>  $allowed
+     * @return list<string>
+     */
+    private static function unknownKeyErrors(string $path, array $entry, array $allowed): array
+    {
+        $errors = [];
+
+        foreach (array_diff(array_keys($entry), $allowed) as $unknown) {
+            $errors[] = "{$path}.{$unknown} is not a known key (".implode(', ', $allowed).').';
         }
 
         return $errors;

@@ -25,6 +25,7 @@ use App\Services\Customs\CustomsTermsResolver;
  * @param  ConvertedAmount|null  $convertedValue  The value compared with the threshold, in its currency: the consignment's for IOSS and UK VAT, null for the per-item regimes
  * @param  int|null  $threshold  The applicable regime's threshold for this destination
  * @param  string|null  $thresholdCurrency  Its currency
+ * @param  bool  $recipientIsBusiness  The destination address names a company, the only business signal the app has; rules that bind only consumer parcels, such as USPS's IOSS prepaid-duties rule, do not apply
  * @param  list<CustomsLineOverLimit>  $linesOverLimit  For VOEC and ARN, which test each item, the lines with an item over the limit
  */
 readonly class ResolvedCustomsTerms
@@ -44,6 +45,7 @@ readonly class ResolvedCustomsTerms
         public ?int $threshold = null,
         public ?string $thresholdCurrency = null,
         public array $linesOverLimit = [],
+        public bool $recipientIsBusiness = false,
     ) {}
 
     /**
@@ -98,12 +100,12 @@ readonly class ResolvedCustomsTerms
     /**
      * What the Offer fingerprint binds: the term and the registration
      * declared. A change to either — a manager editing `duties_terms`, a
-     * client adding an IOSS number, a consignment crossing its threshold —
+     * client adding an IOSS number, a consignment crossing its threshold, a company name added to the recipient —
      * changes what would be bought, so an Offer quoted before must not stay
      * spendable after. Values and rate dates are left out: they matter only
      * through the registration they decide.
      *
-     * @return array{applies: bool, duties_terms: string|null, registration: string|null}
+     * @return array{applies: bool, duties_terms: string|null, registration: string|null, recipient_is_business: bool}
      */
     public function fingerprintInputs(): array
     {
@@ -113,6 +115,7 @@ readonly class ResolvedCustomsTerms
             'registration' => $this->registration === null
                 ? null
                 : $this->registration->regime->value.':'.$this->registration->number,
+            'recipient_is_business' => $this->recipientIsBusiness,
         ];
     }
 }

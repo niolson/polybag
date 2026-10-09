@@ -172,6 +172,87 @@ it('keeps USPS rates for a DDP Shipment to the Netherlands', function (): void {
         ->and(droppedReasons())->toBe([]);
 });
 
+it('drops a USPS DDU rate to Austria and Sweden for a declared IOSS registration, and keeps DDP', function (string $country, string $name): void {
+    $client = Client::factory()->create();
+    ClientTaxRegistration::factory()->ioss()->for($client)->create();
+    $method = dutiesFilterMethod();
+
+    $ddu = dutiesFilterPackage($country, $method, ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddu]);
+
+    expect(quotedCarriers($ddu))->toBe([Carrier::UPS])
+        ->and(droppedReasons())->toBe(["USPS dropped: {$name} requires prepaid duties with an IOSS number (Swiss Post)"]);
+
+    $ddp = dutiesFilterPackage($country, $method, ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddp]);
+
+    expect(quotedCarriers($ddp))->toEqualCanonicalizing([Carrier::USPS, Carrier::UPS])
+        ->and(droppedReasons())->toBe([]);
+})->with([['AT', 'Austria'], ['SE', 'Sweden']]);
+
+it('keeps a USPS DDU rate to Austria and Sweden when no registration is declared', function (string $country): void {
+    $package = dutiesFilterPackage($country, dutiesFilterMethod(), ['duties_terms' => DutiesTerms::Ddu]);
+
+    expect(quotedCarriers($package))->toEqualCanonicalizing([Carrier::USPS, Carrier::UPS])
+        ->and(droppedReasons())->toBe([]);
+})->with(['AT', 'SE']);
+
+it('keeps a USPS DDU rate to Austria and Sweden for a business recipient, whatever the IOSS registration', function (string $country): void {
+    $client = Client::factory()->create();
+    ClientTaxRegistration::factory()->ioss()->for($client)->create();
+    $method = dutiesFilterMethod();
+
+    $ddu = dutiesFilterPackage($country, $method, ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddu, 'company' => 'Acme GmbH']);
+
+    expect(quotedCarriers($ddu))->toEqualCanonicalizing([Carrier::USPS, Carrier::UPS])
+        ->and(droppedReasons())->toBe([]);
+
+    $ddp = dutiesFilterPackage($country, $method, ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddp, 'company' => 'Acme GmbH']);
+
+    expect(quotedCarriers($ddp))->toEqualCanonicalizing([Carrier::USPS, Carrier::UPS]);
+})->with(['AT', 'SE']);
+
+it('retires an Offer when a company name turns the recipient into a business', function (): void {
+    $client = Client::factory()->create();
+    ClientTaxRegistration::factory()->ioss()->for($client)->create();
+    $package = dutiesFilterPackage('AT', dutiesFilterMethod(), ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddp]);
+    app(ShippingRateService::class)->getShippingRates($package->id);
+    $offer = ShippingOffer::query()->where('package_id', $package->id)->where('carrier', Carrier::USPS)->firstOrFail();
+
+    $package->shipment->update(['company' => 'Acme GmbH']);
+
+    expect($offer->quoteInputsChangedSince($package->fresh()))->toBeTrue();
+});
+
+it('applies the override to an IOSS registration the order carries', function (): void {
+    $package = dutiesFilterPackage('AT', dutiesFilterMethod(), [
+        'duties_terms' => DutiesTerms::Ddu,
+        'seller_tax_regime' => 'ioss',
+        'seller_tax_number' => 'IM0400000000',
+    ]);
+
+    expect(quotedCarriers($package))->toBe([Carrier::UPS])
+        ->and(droppedReasons())->toBe(['USPS dropped: Austria requires prepaid duties with an IOSS number (Swiss Post)']);
+});
+
+it('does not apply the override when the consignment is over the threshold and the registration is withheld', function (): void {
+    $client = Client::factory()->create();
+    ClientTaxRegistration::factory()->ioss()->for($client)->create();
+    $package = dutiesFilterPackage('AT', dutiesFilterMethod(), ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddu]);
+    ShipmentItem::query()->where('shipment_id', $package->shipment_id)->update(['value' => 400.0]);
+
+    expect(quotedCarriers($package->fresh()))->toEqualCanonicalizing([Carrier::USPS, Carrier::UPS])
+        ->and(app(ShippingRateService::class)->getCustomsTerms()?->registrationWithheld())->toBeTrue()
+        ->and(droppedReasons())->toBe([]);
+});
+
+it('leaves UPS and FedEx rates to Austria and Sweden alone under an IOSS registration', function (string $country): void {
+    $client = Client::factory()->create();
+    ClientTaxRegistration::factory()->ioss()->for($client)->create();
+    $package = dutiesFilterPackage($country, dutiesFilterMethod([Carrier::UPS, Carrier::FEDEX]), ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddu]);
+
+    expect(quotedCarriers($package))->toEqualCanonicalizing([Carrier::UPS, Carrier::FEDEX])
+        ->and(droppedReasons())->toBe([]);
+})->with(['AT', 'SE']);
+
 it('takes the term from the client when the order has none', function (): void {
     $client = Client::factory()->withDutiesPolicy(['EU' => 'ddp', 'PL' => 'ddu'])->create();
     $method = dutiesFilterMethod();
