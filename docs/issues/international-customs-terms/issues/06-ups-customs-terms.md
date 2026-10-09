@@ -198,3 +198,19 @@ the column and a nullable `duties_cost` (`08` fills it).
     business/consumer `01`/`02` of `Shipment.ConsigneeType`: that field means company or
     individual, which the company name does answer, and the review's reseller concern does
     not apply to it.
+- 2026-10-09 — **Scrubbing no longer touches data (PR #381 review, confirmed).** The
+  previous fix scrubbed the decoded Label Recovery reply before reading it, so an EIN that
+  was a substring of a tracking number (`030388962` in `1Z14A6G90303889622`) rewrote the
+  recovered tracking number. Now `recoverPurchase()` parses the unmodified reply, and
+  `scrubCustomsIds()` is applied only to what is written to a log or put in a failure
+  message: the recovery log bodies, the "voided / no shipment" failure text, the API-error
+  and generic-error failure messages and their logs, and the unreadable-purchase log.
+  Audit: no scrubbed string reaches a returned or stored value except failure messages,
+  which are display text (the Offer's `purchase_failure_reason` stores one). **The
+  unreadable-purchase reason carried by `UnreadablePurchaseResponseException` stays
+  scrubbed:** the workflow only logs its message and never compares it, the tracking
+  number travels separately and untouched, and the reason can embed a response fragment.
+  Scrubbing also matches whole tokens now (not adjacent to a letter or digit), so a
+  nine-digit EIN no longer garbles a longer identifier in a logged line either. Tests: the
+  reviewer's tracking number and an EIN-bearing customs form recovered unchanged, the same
+  EIN redacted from the logged body, and a failure message keeping a longer identifier.

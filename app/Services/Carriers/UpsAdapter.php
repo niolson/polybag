@@ -1286,7 +1286,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
             return null;
         }
 
-        $body = $this->scrubCustomsIds($this->decodeJsonSafely($response), $request);
+        $body = $this->decodeJsonSafely($response);
 
         if (! $response->successful()) {
             $errors = data_get($body, 'response.errors', data_get($body, 'errors', []));
@@ -1311,7 +1311,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
             }
 
             if (array_intersect($codes, [self::RECOVERY_NOT_FOUND, self::RECOVERY_VOIDED]) !== []) {
-                $message = data_get($errors, '0.message') ?? 'UPS has no shipment for the earlier purchase attempt.';
+                $message = $this->scrubCustomsIds((string) (data_get($errors, '0.message') ?? 'UPS has no shipment for the earlier purchase attempt.'), $request);
 
                 return ShipResponse::failure(in_array(self::RECOVERY_VOIDED, $codes, true)
                     ? 'The shipment from the earlier purchase attempt has since been voided at UPS.'
@@ -1334,7 +1334,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
         if (empty($trackingNumber) || empty($labelData)) {
             Log::channel('ups-validation')->error('UPS Label Recovery answered without a tracking number or label', [
                 'offer' => $recoveryKey,
-                'body' => $body,
+                'body' => $this->scrubCustomsIds($body, $request),
             ]);
 
             return null;
@@ -1874,7 +1874,9 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
 
     /**
      * Take the recipient's tax ID and the client's EIN out of text bound for a
-     * log or a screen. UPS can echo a rejected number back in its message, and
+     * log or a screen. Never applied to a value that is returned or stored as
+     * data (tracking numbers, documents, identifiers): only to log lines and
+     * failure messages. UPS can echo a rejected number back in its message, and
      * a key-based redaction cannot see it there.
      *
      * @template T of string|array<array-key, mixed>|null
@@ -1893,13 +1895,18 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
             return $value;
         }
 
+        // Whole tokens only: an EIN is nine digits and would otherwise match
+        // inside a tracking number or a document, garbling the very line that
+        // is kept for diagnosis.
+        $pattern = '/(?<![A-Za-z0-9])(?:'.implode('|', array_map(fn (string $secret): string => preg_quote($secret, '/'), $secrets)).')(?![A-Za-z0-9])/';
+
         if (is_string($value)) {
-            return str_replace($secrets, '[REDACTED]', $value);
+            return preg_replace($pattern, '[REDACTED]', $value) ?? $value;
         }
 
-        array_walk_recursive($value, function (mixed &$leaf) use ($secrets): void {
+        array_walk_recursive($value, function (mixed &$leaf) use ($pattern): void {
             if (is_string($leaf)) {
-                $leaf = str_replace($secrets, '[REDACTED]', $leaf);
+                $leaf = preg_replace($pattern, '[REDACTED]', $leaf) ?? $leaf;
             }
         });
 

@@ -1885,7 +1885,7 @@ it('refuses to classify a packaging code it never sends', function (string $code
 /**
  * A domestic ship request from an offer, the way the workflow builds one.
  */
-function upsOfferShipRequest(ShippingOffer $offer, array $references = ['ORD-10042'], string $labelFormat = 'image', ?int $labelDpi = null): ShipRequest
+function upsOfferShipRequest(ShippingOffer $offer, array $references = ['ORD-10042'], string $labelFormat = 'image', ?int $labelDpi = null, ?string $ein = null): ShipRequest
 {
     return new ShipRequest(
         fromAddress: new AddressData(firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle', stateOrProvince: 'WA', postalCode: '98072'),
@@ -1896,6 +1896,7 @@ function upsOfferShipRequest(ShippingOffer $offer, array $references = ['ORD-100
         labelDpi: $labelDpi,
         references: $references,
         offer: $offer,
+        exporterEin: $ein,
     );
 }
 
@@ -3124,4 +3125,52 @@ it('keeps the recipient tax ID and EIN out of the log when a 200 reply cannot be
         ->and($logged)->toContain('[REDACTED]')
         ->and($logged)->not->toContain('98765432100')
         ->and($logged)->not->toContain('123456789');
+});
+
+it('recovers a tracking number untouched when the EIN is a substring of it, and still keeps the EIN out of the log', function (): void {
+    $handler = new TestHandler;
+    Log::extend('ups-validation-scrub', fn (): MonologLogger => new MonologLogger('ups-validation', [$handler]));
+    config()->set('logging.channels.ups-validation', ['driver' => 'ups-validation-scrub']);
+    Log::forgetChannel('ups-validation');
+    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['carrier' => 'UPS']);
+
+    // The EIN 030388962 sits inside the tracking number 1Z14A6G90303889622.
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        LabelRecovery::class => upsLabelRecoveryFound(form: base64_encode('invoice 030388962 030388962')),
+    ]);
+
+    $response = $this->adapter->recoverPurchase(upsOfferShipRequest($offer, ein: '030388962'));
+
+    expect($response->success)->toBeTrue()
+        ->and($response->trackingNumber)->toBe('1Z14A6G90303889622')
+        ->and($response->customsFormData)->toBe(base64_encode('invoice 030388962 030388962'));
+
+    // And on the path that logs the body: the tracking number stays readable,
+    // the EIN standing alone does not.
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        LabelRecovery::class => MockResponse::make(['LabelRecoveryResponse' => [
+            'ShipmentIdentificationNumber' => '1Z14A6G90303889622',
+            'Note' => 'exporter 030388962 rejected',
+        ]]),
+    ]);
+
+    expect($this->adapter->recoverPurchase(upsOfferShipRequest($offer, ein: '030388962')))->toBeNull();
+
+    $logged = json_encode(collect($handler->getRecords())->map(fn ($record): array => [$record->message, $record->context])->all());
+
+    expect($logged)->toContain('exporter [REDACTED] rejected')
+        ->and($logged)->not->toContain('exporter 030388962');
+});
+
+it('scrubs only whole tokens, so a number inside a longer identifier survives', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => MockResponse::make(['response' => ['errors' => [['message' => 'Bad 030388962 for shipment 1Z14A6G90303889622']]]], 400),
+    ]);
+
+    $response = $this->adapter->createShipment(upsTermsShipRequest(upsGermanAddress(), upsResolvedTerms('DE', DutiesTerms::Ddu), ein: '030388962'));
+
+    expect($response->errorMessage)->toBe('Bad [REDACTED] for shipment 1Z14A6G90303889622');
 });
