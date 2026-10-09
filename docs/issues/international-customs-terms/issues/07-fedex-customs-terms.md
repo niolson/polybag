@@ -1,6 +1,6 @@
 # FedEx sends the resolved customs terms
 
-Status: ready-for-agent
+Status: done — 2026-10-09
 Category: enhancement
 Repo: `polybag`
 
@@ -27,11 +27,11 @@ the ITN or exemption in `exportDetail`.
 
 ## Acceptance criteria
 
-- [ ] DDP and DDU produce the right `dutiesPayment` and `termsOfSale`, in both rate and
-      ship requests
-- [ ] Registration, recipient tax ID and export filing appear only when resolved
-- [ ] `fedexShip.json` accepts every new field
-- [ ] The purchase snapshot from `06` is written for FedEx labels
+- [x] DDP and DDU produce the right `dutiesPayment` and `termsOfSale`, in both rate and
+      ship requests (ship requests only: rate requests stay `SENDER`, see Comments)
+- [x] Registration, recipient tax ID and export filing appear only when resolved
+- [x] `fedexShip.json` accepts every new field
+- [x] The purchase snapshot from `06` is written for FedEx labels
 
 ## Comments
 
@@ -57,3 +57,71 @@ the ITN or exemption in `exportDetail`.
     predefined value (`NO_EEI_30_37_A`; `NO_EEI_30_36` only to CA). FedEx validates it
     and refuses a parcel over $2,500 without an ITN. Omitted, it prints 30.37(a) or
     30.36 on its own, so send the statement only when PolyBag has resolved one.
+- 2026-10-09 — Built. **Wire format** (`FedexAdapter`, now `SendsCustomsTerms`). Ship
+  requests: DDP is `termsOfSale: DDP` with `dutiesPayment` `SENDER` and the payor account;
+  DDU is `RECIPIENT` with no payor and `DDU`; a request with no resolved term still
+  declares DDU, as since `01`. **Rate requests are unchanged** (`SENDER`, per `02`), with a
+  test that DDP and DDU terms on the `RateRequest` do not change it. Shipper `tins`:
+  the seller registration first, then the client's EIN (`FEDERAL`) when an ITN is sent;
+  the recipient's `tins` hold the recipient tax ID (`PERSONAL_NATIONAL`, or
+  `BUSINESS_NATIONAL` for a CNPJ or a VAT/other ID of a recipient with a company name).
+  `customsClearanceDetail.exportDetail.exportComplianceStatement` is `AES` plus the ITN
+  (`AESX20261008123456`) and is omitted otherwise; an exemption is never sent. All of it is
+  sent only on a label with a customs declaration. The recipient email goes in
+  `recipients[0].contact.emailAddress` whenever the Shipment has one of at most 80
+  characters, domestic labels included. A TIN longer than FedEx's 18 characters is left
+  out, not cut, and not recorded.
+  **Unconfirmed with FedEx: the IOSS `tinType`.** Built as `BUSINESS_UNION`
+  (`FedexAdapter::IOSS_TIN_TYPE`, one constant, marked in code); FedEx support has not
+  confirmed it, and its enum has no IOSS value. The sandbox prints it as "ex-EORI" on the
+  label and as the shipper's *Tax ID#* on the invoice, which cannot show whether customs
+  reads it as IOSS. Change that one constant when FedEx answers. Also not confirmed with
+  FedEx: `BUSINESS_NATIONAL` for UK VAT, VOEC and ARN (the type `02`'s probe tried and
+  saw on the invoice; `tinTypeFor()` is where a regime would be left out instead, and
+  nothing is recorded for a registration that is not sent), and `FEDERAL` for the EIN
+  (`11` named FEDERAL or BUSINESS_NATIONAL; `02` never tested it).
+  **Declared terms.** `declaredCustomsTerms()` answers with the predicates that build the
+  body, so the snapshot records only what was sent: nothing for a request with no customs
+  declaration (same customs zone, or no lines, which is refused first), a registration or
+  tax ID only if its TIN fits, the ITN only when the statement is sent. Tests compare it
+  with the facts read back out of the built body for six cases, including a registration
+  and a tax ID too long for a TIN. Unlike UPS, FedEx takes an ITN without the EIN on the
+  request (FedEx holds the EIN on the account), so an ITN is sent and recorded whether or
+  not the EIN is known; the EIN rides with it when it is, and `05` still blocks the
+  Shipment without one.
+  **Review lessons from `06`, applied.** Tax IDs and the EIN are scrubbed (whole tokens,
+  `scrubCustomsIds()`) only from log lines and failure messages: the API-error log and the
+  returned failure message, the no-answer warning, the generic-error log and message.
+  Nothing parsed or persisted is scrubbed (the response is read unmodified), and tests
+  cover an error echoing both, a 503 echoing both, a longer identifier containing the
+  EIN as a substring surviving in the message, and the configured `fedex-validation`
+  channel holding no CPF (`tins` and `recipients` are redacted by key). **EEI transport
+  mode and consignee classification: not applicable.** FedEx's Ship API has no such
+  fields; the only export fields are `exportComplianceStatement`, `permitNumber`,
+  `b13AFilingOption` (Canadian exports) and `destinationControlDetail`, and the ITN is the
+  one PolyBag holds. Field names were checked against FedEx's Ship spec (the copy in
+  `.scratch/`, since `fedexShip.json` is hand-written and FedEx's spec cannot be vendored):
+  `TaxpayerIdentification` (`number` max 18, `tinType`, `usage`), `ExportDetail`,
+  `Contact.emailAddress` (max 80).
+  **Schema.** `fedexShip.json` gains `Tin`, `Party.tins`, `Contact.emailAddress`,
+  `exportDetail`, and ties the term to the payment: DDP needs `SENDER` with a payor, DDU
+  `RECIPIENT` with none. Guarded in `FedexSchemaValidationTest`.
+  **Tests.** `FedexAdapterCustomsTermsTest` (new, 38 cases) and five additions to
+  `FedexSchemaValidationTest`.
+- 2026-10-09 — **Sandbox check**, `sandbox_mode` already on and not touched, through the
+  real adapter (script in the session scratchpad), commercial invoice requested, both
+  labels voided (`cancelledShipment: true`). A DDP rate and label to Germany with IOSS
+  `IM2760000742` as `BUSINESS_UNION`: bought; the invoice ticks *Duties and Taxes Payable
+  by: Exporter*, prints *Terms DDP* and the shipper *Tax ID#: IM2760000742*, and the
+  label prints *ex-EORI: IM2760000742*. A DDU label to Brazil with a CPF, ITN
+  `X20261008123456` and an EIN: bought; the invoice ticks *Consignee* and prints *Terms
+  DDU*, the shipper *Tax ID#* is the EIN and the consignee's and importer's is the CPF,
+  and the label and invoice print *AES X20261008123456*. As `02` warned, the sandbox
+  accepts fields it ignores, so this shows the fields are accepted and printed, not
+  that production customs reads them.
+- **Not verified:** the IOSS `tinType` (above); `BUSINESS_NATIONAL` and `FEDERAL` as
+  FedEx's customs data reads them; that a production DDU label with a recipient email now
+  stops billing the carrier account (the sandbox bills nothing); the ITN threshold
+  outside GB and in production (`02`); a FedEx production label. Nothing in the
+  readiness check (`05`) changed: it blocks on terms and IDs it already knew, and FedEx
+  declines nothing it would need to name.
