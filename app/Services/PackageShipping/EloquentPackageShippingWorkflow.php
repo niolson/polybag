@@ -7,6 +7,7 @@ use App\Contracts\PackageDraftWorkflow;
 use App\Contracts\PackageShippingWorkflow;
 use App\Contracts\PostageOfferSource;
 use App\Contracts\RecoversUnresolvedPurchase;
+use App\Contracts\SendsCustomsTerms;
 use App\DataTransferObjects\Customs\CustomsFinding;
 use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingOptions;
@@ -23,6 +24,7 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\RuleEvaluationResult;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\CustomsTermsOrigin;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\Role;
@@ -43,6 +45,7 @@ use App\Models\User;
 use App\Notifications\LabelNotRecorded;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Customs\CustomsReadiness;
+use App\Services\Customs\CustomsTermsSnapshot;
 use App\Services\InactiveCatalog;
 use App\Services\PostageSources\OfferStore;
 use App\Services\PostageSources\PostageSourceDispatcher;
@@ -75,6 +78,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         private readonly PackageDraftWorkflow $packageDrafts,
         private readonly UnattendedRateSelector $unattendedRates,
         private readonly CustomsReadiness $customsReadiness,
+        private readonly CustomsTermsSnapshot $customsTermsSnapshot,
     ) {}
 
     public function prepareRates(Package $package): PackageShippingOptions
@@ -550,6 +554,12 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 $shipRequest = $shipRequest->withDeclaredWeightOverride();
             }
 
+            // What this purchase declares, decided from the request that is
+            // sent. Kept on the offer at the claim below: a purchase whose
+            // reply never arrives is recorded later, by recovery or by hand,
+            // and must record what was sent, not the Shipment as it is then.
+            $declaredTerms = $this->declaredCustomsTerms($adapter, $shipRequest);
+
             // The one-way door, immediately before the money is spent. The
             // inspection above was advisory; this is the claim that a
             // concurrent attempt loses.
@@ -565,6 +575,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 }
 
                 $offer = $claim->offer;
+                $offer->forceFill(['declared_customs_terms' => $declaredTerms])->save();
             }
 
             $response = $adapter->createShipment($shipRequest);
@@ -587,6 +598,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 $response,
                 $request,
                 $blindOffer === null ? $selectedRate?->carrierServiceId : null,
+                $declaredTerms,
             );
 
             return $unrecorded ?? PackageShippingResult::shipped($response, $selectedRate, $package);
@@ -1112,7 +1124,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             'offer' => $offer->public_id,
         ]);
 
-        return $this->recordBoughtLabel($package, $offer, $response, $request, $offer->carrier_service_id)
+        return $this->recordBoughtLabel($package, $offer, $response, $request, $offer->carrier_service_id, $offer->declared_customs_terms)
             ?? PackageShippingResult::shipped($response, null, $package);
     }
 
@@ -1137,11 +1149,12 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         ShipResponse $response,
         PackageShippingRequest $request,
         ?int $carrierServiceId,
+        ?array $customsTerms = null,
     ): ?PackageShippingResult {
         try {
-            DB::transaction(function () use ($package, $offer, $response, $request, $carrierServiceId): void {
+            DB::transaction(function () use ($package, $offer, $response, $request, $carrierServiceId, $customsTerms): void {
                 $this->recordPurchaseAgainstOffer($offer, $response->trackingNumber);
-                $package->markShipped($response, $response->postageSource, $request->userId, $carrierServiceId);
+                $package->markShipped($response, $response->postageSource, $request->userId, $carrierServiceId, customsTerms: $customsTerms);
             });
 
             return null;
@@ -1189,6 +1202,27 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
             return PackageShippingResult::labelNotRecorded($seller, $response->trackingNumber, $recoverable);
         }
+    }
+
+    /**
+     * What the Label bought through this seller declared, for its record.
+     *
+     * Recorded when the adapter sends the customs terms, or when the seller
+     * decided them and PolyBag declared none (ADR-0008 decision 5). A direct
+     * adapter that does not send them yet is not recorded: a snapshot of terms
+     * the carrier never saw would be false.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function declaredCustomsTerms(?object $seller, ShipRequest $shipRequest): ?array
+    {
+        $sourceDecided = $shipRequest->customsTerms?->dutiesTermsOrigin === CustomsTermsOrigin::SourceDecided;
+
+        if (! $seller instanceof SendsCustomsTerms && ! $sourceDecided) {
+            return null;
+        }
+
+        return $this->customsTermsSnapshot->forRequest($shipRequest, $seller);
     }
 
     /**

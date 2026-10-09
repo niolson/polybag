@@ -4,7 +4,11 @@ namespace App\Services\Carriers;
 
 use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\RecoversUnresolvedPurchase;
+use App\Contracts\SendsCustomsTerms;
 use App\Contracts\UsesCarrierAccount;
+use App\DataTransferObjects\Customs\DeclaredCustomsTerms;
+use App\DataTransferObjects\Customs\RecipientTaxId;
+use App\DataTransferObjects\Customs\ResolvedCustomsTerms;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\CustomsItem;
@@ -19,6 +23,8 @@ use App\DataTransferObjects\Tracking\TrackingEventData;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\CarrierPackaging;
 use App\Enums\CustomsDocumentDelivery;
+use App\Enums\DutiesTerms;
+use App\Enums\RecipientTaxIdType;
 use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
 use App\Exceptions\Carriers\CarrierException;
@@ -53,7 +59,7 @@ use Saloon\Exceptions\Request\ServerException;
 use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
 
-class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, UsesCarrierAccount
+class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, SendsCustomsTerms, UsesCarrierAccount
 {
     use BuildsCustomerReferences;
     use ConsultsCarrierPolicyForOffers;
@@ -81,6 +87,81 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
     private const PRODUCT_IDENTIFIER_NOT_EXEMPT = false;
 
     private const PRODUCT_ID_MAX_LENGTH = 100;
+
+    /**
+     * `ShipmentCharge.Type`: transportation, and duties and taxes.
+     */
+    private const CHARGE_TRANSPORTATION = '01';
+
+    private const CHARGE_DUTIES_AND_TAXES = '02';
+
+    /**
+     * The Vendor Collect ID type code each seller registration regime prints
+     * under, verified on CIE against the returned invoices
+     * (`international-customs-terms/02`). UPS has no current code for a UK VAT
+     * number: `0358` is deprecated, and CIE accepts it and drops it from the
+     * invoice without a word, so `0000` (the number with no label) is used.
+     */
+    private const VENDOR_COLLECT_ID_TYPE_CODES = [
+        'ioss' => '0356',
+        'voec' => '0357',
+        'arn' => '1052',
+        'uk_vat' => '0000',
+    ];
+
+    /**
+     * `GlobalTaxInformation` role and ID types for the consignee's tax ID.
+     */
+    private const AGENT_ROLE_CONSIGNEE = '30';
+
+    private const ID_NUMBER_PERSONAL_TAX = '0005';
+
+    private const ID_NUMBER_COMPANY_TAX = '1002';
+
+    /**
+     * The values of the EEI form a shipper-filed ITN needs beside the ITN
+     * itself, or CIE refuses it with 128261.
+     */
+    private const FORM_TYPE_INVOICE = '01';
+
+    private const FORM_TYPE_EEI = '11';
+
+    private const EEI_SHIPPER_FILED = '1';
+
+    private const EEI_SHIPPER_FILED_ITN = 'A';
+
+    private const EEI_NOT_IN_BOND = '70';
+
+    private const EEI_POINT_OF_ORIGIN_STATE = 'S';
+
+    /**
+     * `ModeOfTransport` values from the Shipping schema. A UPS service that
+     * crosses the US land border by road is exported by truck; every other
+     * service is flown. Air is also the fallback for a service this table
+     * does not know: all of UPS's worldwide and express services are air, and
+     * a service that is neither is one the app does not sell abroad.
+     */
+    private const EEI_TRANSPORT_AIR = 'Air';
+
+    private const EEI_TRANSPORT_TRUCK = 'Truck';
+
+    /**
+     * The services that go by road, by code: Ground (03), Standard (11), 3 Day
+     * Select (12) and the Ground Saver family (92, 93, 95), all of which UPS
+     * runs on its ground network. They only leave the US by road to Canada or
+     * Mexico, so the lane decides below.
+     *
+     * @var list<string>
+     */
+    private const GROUND_NETWORK_SERVICES = ['03', '11', '12', '92', '93', '95'];
+
+    private const LAND_BORDER_COUNTRIES = ['CA', 'MX'];
+
+    private const ULTIMATE_CONSIGNEE_DIRECT_CONSUMER = 'D';
+
+    private const ULTIMATE_CONSIGNEE_OTHER = 'O';
+
+    private const EEI_PARTIES_NOT_RELATED = 'N';
 
     private function resolveConnector(?CarrierAccount $account): UpsConnector
     {
@@ -561,8 +642,10 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
                 ],
                 'Shipment' => [
                     'Shipper' => [
+                        ...$this->buildRateShipperNumber($request),
                         'Address' => $this->buildRateOriginAddress($request),
                     ],
+                    ...$this->buildRatePaymentDetails($request),
                     'ShipTo' => [
                         'Address' => $this->buildRateDestinationAddress($request),
                     ],
@@ -642,6 +725,8 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
                 'ShipFrom' => [
                     'Name' => trim($request->fromAddress->company ?: $request->fromAddress->firstName.' '.$request->fromAddress->lastName),
                     'Address' => $this->buildAddress($request->fromAddress),
+                    ...$this->buildVendorInfo($request),
+                    ...$this->buildExporterTaxId($request),
                 ],
                 // UPS decides from these two whether a shipment falls under
                 // rules that turn on who is buying, the EU product identifiers
@@ -651,14 +736,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
                 'ShipperType' => self::PARTY_TYPE_BUSINESS,
                 'ConsigneeType' => filled($request->toAddress->company) ? self::PARTY_TYPE_BUSINESS : self::PARTY_TYPE_CONSUMER,
                 'PaymentInformation' => [
-                    'ShipmentCharge' => [
-                        [
-                            'Type' => '01',
-                            'BillShipper' => [
-                                'AccountNumber' => $this->resolveAccountNumber($account),
-                            ],
-                        ],
-                    ],
+                    'ShipmentCharge' => $this->buildShipmentCharges($request->customsTerms, $this->resolveAccountNumber($account)),
                 ],
                 'Service' => [
                     'Code' => $serviceCode,
@@ -687,6 +765,10 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
                 ],
             ];
 
+            if (($globalTaxInformation = $this->buildGlobalTaxInformation($request)) !== null) {
+                $shipment['GlobalTaxInformation'] = $globalTaxInformation;
+            }
+
             // Saturday delivery follows the quote the operator chose, not the
             // request flag: extractRateDetails() tags a rate only when UPS
             // priced it for Saturday, so the label matches what was quoted.
@@ -703,7 +785,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
             // InternationalForms on ShipmentServiceOptions, not on Shipment —
             // sent a level higher it validates against the schema and is then
             // silently ignored, so no customs invoice is ever generated.
-            if (! $request->fromAddress->sharesCustomsZoneWith($request->toAddress) && ! empty($request->customsItems)) {
+            if ($this->sendsInternationalForms($request)) {
                 $shipment['ShipmentServiceOptions']['InternationalForms'] = $this->buildCustomsDetail($request);
                 $shipment['InvoiceLineTotal'] = $this->buildShipInvoiceLineTotal($request);
             }
@@ -789,7 +871,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
             // property.
             Log::channel('ups-validation')->warning('UPS createShipment got no answer; the offer stays unresolved', [
                 'exception' => $e::class,
-                'error' => $e->getMessage(),
+                'error' => $this->scrubCustomsIds($e->getMessage(), $request),
                 'offer' => $request->offer?->public_id,
             ]);
 
@@ -798,18 +880,19 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
             // Accepted and charged — see unreadablePurchase().
             throw $e;
         } catch (RequestException $e) {
-            $rawResponse = $this->decodeJsonSafely($e->getResponse());
+            $rawResponse = $this->scrubCustomsIds($this->decodeJsonSafely($e->getResponse()), $request);
 
             Log::channel('ups-validation')->error('UPS createShipment API error', [
                 'status' => $e->getResponse()->status(),
                 'body' => $rawResponse,
             ]);
 
-            return ShipResponse::failure(
+            return ShipResponse::failure($this->scrubCustomsIds(
                 data_get($rawResponse, 'response.errors.0.message')
                     ?? data_get($rawResponse, 'errors.0.message')
-                    ?? $e->getMessage()
-            );
+                    ?? $e->getMessage(),
+                $request,
+            ));
         } catch (\Throwable $e) {
             if ($response !== null) {
                 // Anything that breaks after the 2xx is still an accepted
@@ -824,11 +907,11 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
 
             Log::channel('ups-validation')->error('UPS createShipment error', [
                 'exception' => $e::class,
-                'error' => $e->getMessage(),
+                'error' => $this->scrubCustomsIds($e->getMessage(), $request),
                 'trace' => $e->getTraceAsString(),
             ]);
 
-            return ShipResponse::failure($e->getMessage());
+            return ShipResponse::failure($this->scrubCustomsIds($e->getMessage(), $request));
         }
     }
 
@@ -852,14 +935,14 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
         ?\Throwable $previous = null,
     ): never {
         Log::channel('ups-validation')->error('UPS createShipment accepted the purchase but its reply could not be read; the offer stays unresolved', [
-            'reason' => $reason,
+            'reason' => $this->scrubCustomsIds($reason, $request),
             'status' => $response->status(),
             'offer' => $request->offer?->public_id,
             'tracking_number' => $trackingNumber,
-            'body' => $response->body(),
+            'body' => $this->scrubCustomsIds($response->body(), $request),
         ]);
 
-        throw new UnreadablePurchaseResponseException(Carrier::UPS, $reason, $trackingNumber, $previous);
+        throw new UnreadablePurchaseResponseException(Carrier::UPS, $this->scrubCustomsIds($reason, $request), $trackingNumber, $previous);
     }
 
     public function cancelShipment(string $trackingNumber, Package $package): CancelResponse
@@ -1119,7 +1202,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
         // or the adapter's own classification, rather than fail in a log line.
         Log::channel('ups-validation')->debug('LABEL RESPONSE', [
             'status' => $response->status(),
-            'body' => $this->decodeJsonSafely($response),
+            'body' => $this->scrubCustomsIds($this->decodeJsonSafely($response), $request),
         ]);
 
         // The request is sent once (see CreateShipment::$tries), which also
@@ -1197,7 +1280,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
             Log::channel('ups-validation')->warning('Could not ask UPS what became of a purchase', [
                 'offer' => $recoveryKey,
                 'exception' => $e::class,
-                'error' => $e->getMessage(),
+                'error' => $this->scrubCustomsIds($e->getMessage(), $request),
             ]);
 
             return null;
@@ -1228,7 +1311,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
             }
 
             if (array_intersect($codes, [self::RECOVERY_NOT_FOUND, self::RECOVERY_VOIDED]) !== []) {
-                $message = data_get($errors, '0.message') ?? 'UPS has no shipment for the earlier purchase attempt.';
+                $message = $this->scrubCustomsIds((string) (data_get($errors, '0.message') ?? 'UPS has no shipment for the earlier purchase attempt.'), $request);
 
                 return ShipResponse::failure(in_array(self::RECOVERY_VOIDED, $codes, true)
                     ? 'The shipment from the earlier purchase attempt has since been voided at UPS.'
@@ -1251,7 +1334,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
         if (empty($trackingNumber) || empty($labelData)) {
             Log::channel('ups-validation')->error('UPS Label Recovery answered without a tracking number or label', [
                 'offer' => $recoveryKey,
-                'body' => $body,
+                'body' => $this->scrubCustomsIds($body, $request),
             ]);
 
             return null;
@@ -1547,10 +1630,14 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
             $products[] = $product;
         }
 
+        $filesEei = $this->filesEei($request);
+
         return [
-            // A list of the forms requested, not a code/description pair. 01 is Invoice.
-            'FormType' => ['01'],
+            // A list of the forms requested, not a code/description pair. 01 is
+            // Invoice; 11 is EEI, requested only when an ITN is declared.
+            'FormType' => $filesEei ? [self::FORM_TYPE_INVOICE, self::FORM_TYPE_EEI] : [self::FORM_TYPE_INVOICE],
             'InvoiceDate' => now()->format('Ymd'),
+            ...$this->buildTermsOfShipment($request->customsTerms),
             'ReasonForExport' => 'SALE',
             'CurrencyCode' => 'USD',
             'Product' => $products,
@@ -1564,8 +1651,335 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Us
                     ...$this->buildPhone($request->toAddress),
                     'Address' => $this->buildAddress($request->toAddress),
                 ],
+                ...($filesEei ? ['UltimateConsignee' => $this->buildUltimateConsignee($request)] : []),
             ],
+            ...($filesEei ? $this->buildEeiForm($request) : []),
         ];
+    }
+
+    /**
+     * The shipment charges: transportation, and for DDP the duties and taxes
+     * on the same account, which makes the rate carry UPS's Duty and Tax
+     * Forwarding surcharge (itemized charge 378) and the label bill the
+     * shipper at the door. DDU sends transportation only.
+     *
+     * @return list<array{Type: string, BillShipper: array{AccountNumber: string|null}}>
+     */
+    private function buildShipmentCharges(?ResolvedCustomsTerms $terms, ?string $accountNumber): array
+    {
+        $types = [self::CHARGE_TRANSPORTATION];
+
+        if ($terms?->dutiesTerms === DutiesTerms::Ddp) {
+            $types[] = self::CHARGE_DUTIES_AND_TAXES;
+        }
+
+        return array_map(fn (string $type): array => [
+            'Type' => $type,
+            'BillShipper' => ['AccountNumber' => $accountNumber],
+        ], $types);
+    }
+
+    /**
+     * `InternationalForms.TermsOfShipment`. UPS prints the terms on the
+     * invoice only when this is sent as well as the Type 02 charge; with the
+     * charge alone the terms box is blank.
+     *
+     * @return array{TermsOfShipment?: string}
+     */
+    private function buildTermsOfShipment(?ResolvedCustomsTerms $terms): array
+    {
+        return $terms?->dutiesTerms === null
+            ? []
+            : ['TermsOfShipment' => strtoupper($terms->dutiesTerms->value)];
+    }
+
+    /**
+     * The shipper number a priced-for-duties rate request is billed under.
+     * UPS wants the account on `Shipper` as well as in the charge before it
+     * itemizes the duties surcharge.
+     *
+     * @return array{ShipperNumber?: string}
+     */
+    private function buildRateShipperNumber(RateRequest $request): array
+    {
+        $accountNumber = $this->resolveAccountNumber($this->ratingAccount($request));
+
+        return $this->ratesDutiesTerm($request) && filled($accountNumber)
+            ? ['ShipperNumber' => $accountNumber]
+            : [];
+    }
+
+    /**
+     * The charges a rate is priced on, sent only where there is a duties term
+     * to price: transportation, plus duties and taxes for DDP.
+     *
+     * @return array{PaymentDetails?: array{ShipmentCharge: list<array{Type: string, BillShipper: array{AccountNumber: string|null}}>}}
+     */
+    private function buildRatePaymentDetails(RateRequest $request): array
+    {
+        $accountNumber = $this->resolveAccountNumber($this->ratingAccount($request));
+
+        if (! $this->ratesDutiesTerm($request) || blank($accountNumber)) {
+            return [];
+        }
+
+        return ['PaymentDetails' => [
+            'ShipmentCharge' => $this->buildShipmentCharges($request->customsTerms, $accountNumber),
+        ]];
+    }
+
+    private function ratesDutiesTerm(RateRequest $request): bool
+    {
+        return $request->customsTerms !== null
+            && $request->customsTerms->applies
+            && $request->customsTerms->dutiesTerms !== null;
+    }
+
+    /**
+     * The seller's registration, on `ShipFrom.VendorInfo`, when one is
+     * declared. The Vendor Collect ID prints on the invoice as "IOSS:",
+     * "VOEC:" and "ARN:"; a UK VAT number prints with no label.
+     *
+     * @return array{VendorInfo?: array{VendorCollectIDTypeCode: string, VendorCollectIDNumber: string, ConsigneeType: string}}
+     */
+    private function buildVendorInfo(ShipRequest $request): array
+    {
+        $registration = $request->customsTerms?->registration;
+
+        if ($registration === null) {
+            return [];
+        }
+
+        return ['VendorInfo' => [
+            'VendorCollectIDTypeCode' => self::VENDOR_COLLECT_ID_TYPE_CODES[$registration->regime->value],
+            'VendorCollectIDNumber' => mb_substr($registration->number, 0, 35),
+            'ConsigneeType' => $this->consigneeType($request->toAddress),
+        ]];
+    }
+
+    /**
+     * The client's EIN on the shipper, which the EEI form needs.
+     *
+     * @return array{TaxIdentificationNumber?: string, TaxIDType?: array{Code: string}}
+     */
+    private function buildExporterTaxId(ShipRequest $request): array
+    {
+        return $this->filesEei($request)
+            ? ['TaxIdentificationNumber' => (string) $request->exporterEin, 'TaxIDType' => ['Code' => 'EIN']]
+            : [];
+    }
+
+    /**
+     * The consignee's tax ID, as UPS prints it on the invoice: "Tax ID/VAT
+     * No.". `ShipTo.TaxIdentificationNumber` is deprecated. A CPF is personal
+     * and a CNPJ a company's; any other ID follows whether the consignee has a
+     * company name.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function buildGlobalTaxInformation(ShipRequest $request): ?array
+    {
+        $taxId = $request->recipientTaxId;
+
+        if (! $taxId instanceof RecipientTaxId || ! $this->sendsGlobalTaxInformation($request)) {
+            return null;
+        }
+
+        $isCompany = match ($taxId->type) {
+            RecipientTaxIdType::Cpf, RecipientTaxIdType::Pccc => false,
+            RecipientTaxIdType::Cnpj => true,
+            RecipientTaxIdType::Vat, RecipientTaxIdType::Other => filled($request->toAddress->company),
+        };
+        $country = strtoupper($request->toAddress->country);
+
+        return [
+            'ConsigneeTypeValue' => $this->consigneeType($request->toAddress),
+            'AgentTaxIdentificationNumber' => [[
+                'AgentRole' => self::AGENT_ROLE_CONSIGNEE,
+                'TaxIdentificationNumber' => [[
+                    'IdentificationNumber' => $taxId->number,
+                    'IDNumberTypeCode' => $isCompany ? self::ID_NUMBER_COMPANY_TAX : self::ID_NUMBER_PERSONAL_TAX,
+                    'IDNumberCustomerRole' => '18',
+                    'IDNumberEncryptionIndicator' => '0',
+                    'IDNumberPurposeCode' => '01',
+                    'IDNumberIssuingCntryCd' => $country,
+                    'IDNumberRequestingCntryCd' => $country,
+                    'IncludeIDNumberOnShippingBrokerageDocs' => '01',
+                ]],
+            ]],
+        ];
+    }
+
+    /**
+     * Whether the label files EEI: an ITN is declared and the EIN that goes
+     * with it is known. The readiness check refuses an ITN with no EIN before
+     * the adapter is reached, so the second test only keeps a hand-built
+     * request from sending a form CIE refuses.
+     *
+     * An exemption is never sent. `EEIFilingOption` without form 11 is
+     * accepted and ignored, and requesting the EEI form for every parcel just
+     * to print `NO EEI 30.37(a)` adds a page and fields for nothing
+     * (`international-customs-terms/02`).
+     */
+    private function filesEei(ShipRequest $request): bool
+    {
+        return $this->sendsInternationalForms($request)
+            && filled($request->exportItn)
+            && filled($request->exporterEin);
+    }
+
+    /**
+     * Whether the request carries `InternationalForms`: the lane crosses a
+     * customs zone and there are lines to declare. The duties term, the ITN and
+     * the EIN all ride on it.
+     */
+    private function sendsInternationalForms(ShipRequest $request): bool
+    {
+        return ! $request->fromAddress->sharesCustomsZoneWith($request->toAddress) && $request->customsItems !== [];
+    }
+
+    /**
+     * Whether the consignee's tax ID is sent: one is held and the lane crosses
+     * a customs zone, whether or not there are lines to declare.
+     */
+    private function sendsGlobalTaxInformation(ShipRequest $request): bool
+    {
+        return $request->recipientTaxId instanceof RecipientTaxId
+            && ! $request->fromAddress->sharesCustomsZoneWith($request->toAddress);
+    }
+
+    /**
+     * What {@see CreateShipment()} puts on the wire, answered with the
+     * predicates that build the body. DDP is declared by the Type 02 charge
+     * whatever the lines; DDU only by the invoice's `TermsOfShipment`, so a
+     * request with no invoice declares none.
+     */
+    public function declaredCustomsTerms(ShipRequest $request): DeclaredCustomsTerms
+    {
+        $terms = $request->customsTerms;
+
+        $dutiesTerms = match (true) {
+            $terms?->dutiesTerms === DutiesTerms::Ddp => DutiesTerms::Ddp,
+            $terms?->dutiesTerms !== null && $this->sendsInternationalForms($request) => $terms->dutiesTerms,
+            default => null,
+        };
+
+        return new DeclaredCustomsTerms(
+            dutiesTerms: $dutiesTerms,
+            registration: $terms?->registration,
+            recipientTaxIdType: $this->sendsGlobalTaxInformation($request) ? $request->recipientTaxId?->type : null,
+            exportItn: $this->filesEei($request) ? $request->exportItn : null,
+        );
+    }
+
+    /**
+     * Take the recipient's tax ID and the client's EIN out of text bound for a
+     * log or a screen. Never applied to a value that is returned or stored as
+     * data (tracking numbers, documents, identifiers): only to log lines and
+     * failure messages. UPS can echo a rejected number back in its message, and
+     * a key-based redaction cannot see it there.
+     *
+     * @template T of string|array<array-key, mixed>|null
+     *
+     * @param  T  $value
+     * @return T
+     */
+    private function scrubCustomsIds(string|array|null $value, ShipRequest $request): string|array|null
+    {
+        $secrets = array_values(array_filter(
+            [$request->recipientTaxId?->number, $request->exporterEin],
+            fn (?string $secret): bool => filled($secret),
+        ));
+
+        if ($secrets === [] || $value === null) {
+            return $value;
+        }
+
+        // Whole tokens only: an EIN is nine digits and would otherwise match
+        // inside a tracking number or a document, garbling the very line that
+        // is kept for diagnosis.
+        $pattern = '/(?<![A-Za-z0-9])(?:'.implode('|', array_map(fn (string $secret): string => preg_quote($secret, '/'), $secrets)).')(?![A-Za-z0-9])/';
+
+        if (is_string($value)) {
+            return preg_replace($pattern, '[REDACTED]', $value) ?? $value;
+        }
+
+        array_walk_recursive($value, function (mixed &$leaf) use ($pattern): void {
+            if (is_string($leaf)) {
+                $leaf = preg_replace($pattern, '[REDACTED]', $leaf) ?? $leaf;
+            }
+        });
+
+        return $value;
+    }
+
+    /**
+     * The EEI fields beside the invoice. Each is required: without them UPS
+     * refuses the request (128261).
+     *
+     * @return array<string, mixed>
+     */
+    private function buildEeiForm(ShipRequest $request): array
+    {
+        return [
+            'EEIFilingOption' => [
+                'Code' => self::EEI_SHIPPER_FILED,
+                'ShipperFiled' => [
+                    'Code' => self::EEI_SHIPPER_FILED_ITN,
+                    'Description' => 'ShipperFiled',
+                    'PreDepartureITNNumber' => (string) $request->exportItn,
+                ],
+            ],
+            'ExportDate' => ($request->shipDate ?? now())->format('Ymd'),
+            'ExportingCarrier' => 'UPS',
+            'InBondCode' => self::EEI_NOT_IN_BOND,
+            'PointOfOrigin' => (string) $request->fromAddress->stateOrProvince,
+            'PointOfOriginType' => self::EEI_POINT_OF_ORIGIN_STATE,
+            'ModeOfTransport' => $this->modeOfTransport($request),
+            'PartiesToTransaction' => self::EEI_PARTIES_NOT_RELATED,
+        ];
+    }
+
+    /**
+     * How the goods leave the country: by truck on a ground-network service
+     * to Canada or Mexico, else by air.
+     */
+    private function modeOfTransport(ShipRequest $request): string
+    {
+        $serviceCode = (string) ($request->selectedRate->metadata['serviceCode'] ?? $request->selectedRate->serviceCode);
+        $overland = in_array(strtoupper($request->toAddress->country), self::LAND_BORDER_COUNTRIES, true);
+
+        return $overland && in_array($serviceCode, self::GROUND_NETWORK_SERVICES, true)
+            ? self::EEI_TRANSPORT_TRUCK
+            : self::EEI_TRANSPORT_AIR;
+    }
+
+    /**
+     * The ship-to as the EEI's ultimate consignee: a direct consumer, or
+     * other/unknown when the address has a company name.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildUltimateConsignee(ShipRequest $request): array
+    {
+        $isCompany = filled($request->toAddress->company);
+        $address = $this->buildAddress($request->toAddress);
+
+        return [
+            'CompanyName' => mb_substr($isCompany ? (string) $request->toAddress->company : $this->buildAttentionName($request->toAddress), 0, 35),
+            'Address' => $address,
+            // A company may be buying for its own use or to resell, and the
+            // order does not say; only an individual is known to be a direct
+            // consumer. UPS classifies the rest as Other/Unknown.
+            'UltimateConsigneeType' => $isCompany
+                ? ['Code' => self::ULTIMATE_CONSIGNEE_OTHER, 'Description' => 'Other/Unknown']
+                : ['Code' => self::ULTIMATE_CONSIGNEE_DIRECT_CONSUMER, 'Description' => 'Direct Consumer'],
+        ];
+    }
+
+    private function consigneeType(AddressData $address): string
+    {
+        return filled($address->company) ? self::PARTY_TYPE_BUSINESS : self::PARTY_TYPE_CONSUMER;
     }
 
     /**

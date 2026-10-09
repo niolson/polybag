@@ -1,6 +1,6 @@
 # UPS sends the resolved customs terms, and the Label records them
 
-Status: ready-for-agent
+Status: done — 2026-10-08
 Category: enhancement
 Repo: `polybag`
 
@@ -40,16 +40,16 @@ the column and a nullable `duties_cost` (`08` fills it).
 
 ## Acceptance criteria
 
-- [ ] A DDP UPS rate request and ship request carry the Type `02` charge and
+- [x] A DDP UPS rate request and ship request carry the Type `02` charge and
       `TermsOfShipment: DDP`; DDU carries only Type `01` and `DDU`
-- [ ] IOSS, recipient tax ID and ITN appear in the fields above, and are absent when not
+- [x] IOSS, recipient tax ID and ITN appear in the fields above, and are absent when not
       resolved; an ITN carries the client's EIN (`11`)
-- [ ] The UPS validation log of a label to Brazil holds no CPF (`PiiRedactor` over
+- [x] The UPS validation log of a label to Brazil holds no CPF (`PiiRedactor` over
       `GlobalTaxInformation`)
-- [ ] The UPS request schema test accepts every new field
-- [ ] A purchased label's `customs_terms` matches what was sent, for an order-sourced and
+- [x] The UPS request schema test accepts every new field
+- [x] A purchased label's `customs_terms` matches what was sent, for an order-sourced and
       a client-sourced term
-- [ ] One CIE sandbox DDP label with an IOSS number is bought and recorded in the
+- [x] One CIE sandbox DDP label with an IOSS number is bought and recorded in the
       issue's comments
 
 ## Comments
@@ -90,3 +90,127 @@ the column and a nullable `duties_cost` (`08` fills it).
     not explained (UPS email).
   - **Australia:** `Product.TaxesPaid` is Singapore-only; CIE accepts it and prints
     nothing. Send the ARN only.
+- 2026-10-08 — Built. **Wire format.** `UpsAdapter` reads the terms off `ShipRequest::$customsTerms`
+  (and `RateRequest::$customsTerms`), the new `$recipientTaxId` and `$exporterEin`, and
+  `$exportItn`. DDP adds a Type `02` `BillShipper` charge on the same account and
+  `TermsOfShipment: DDP`; DDU sends Type `01` and `DDU`; a request with no terms, or a
+  source-decided one, sends neither. Rate requests with a duties term carry
+  `PaymentDetails.ShipmentCharge` (`01`, plus `02` for DDP) and `Shipper.ShipperNumber`; one with
+  none is unchanged. The registration goes in `ShipFrom.VendorInfo` (`ioss` `0356`, `voec`
+  `0357`, `arn` `1052`, `uk_vat` `0000`) with `ConsigneeType` from the company name. The
+  recipient tax ID goes in `GlobalTaxInformation.AgentTaxIdentificationNumber` as the single
+  item of an array, `AgentRole` `30`, type `0005` for a CPF or PCCC and `1002` for a CNPJ (a
+  VAT or other ID follows whether the consignee has a company name). An ITN files the EEI:
+  `FormType` `01` and `11`, `EEIFilingOption` `1` / `ShipperFiled` `A` with
+  `PreDepartureITNNumber`, the rest of `02`'s list, the ship-to as `UltimateConsignee`
+  (`D`, or `R` with a company name) and the client's EIN with `TaxIDType` `EIN` on `ShipFrom`.
+  An ITN with no EIN files no EEI (the readiness check refuses that before the adapter is
+  reached), and an exemption is never sent.
+  **Snapshot.** `ShipRequest` now carries the resolved terms (source-decided for a blind
+  purchase or a non-direct or Amazon Shipping rate, via `asSourceDecided()`).
+  `CustomsTermsSnapshot` builds the record in `EloquentPackageShippingWorkflow` and
+  `Package::markShipped()` writes `package_labels.customs_terms` (json) and `duties_cost`
+  (decimal, nullable, from `ShipResponse::$dutiesCost`, which nothing sets yet; `08` fills it).
+  The snapshot holds the term and its source, the registration (regime, number, source), the
+  recipient tax ID's *type* only, the ITN and the `duties-support.json` version; null for a
+  label that crosses no customs border. **It is written only for an adapter that implements
+  the new `App\Contracts\SendsCustomsTerms` marker, or for a source-decided purchase.** FedEx
+  and USPS do not send terms yet, so a snapshot for them would record terms the carrier never
+  saw; `07` and `08` add the marker when they do. Recovery of an unresolved purchase snapshots
+  from the request rebuilt at recovery time.
+  **Deviations and surprises.** (1) `PiiRedactor` needed no change: `AgentTaxIdentificationNumber`
+  matches `tax_?id`, so the whole `GlobalTaxInformation` subtree is redacted (tested through
+  `PiiRedactionProcessor`, the ship-to `Contacts` and the EIN likewise). (2) The vendored
+  Shipping schema requires `IDNumberEncryptionIndicator` (sent as `0`, not in `02`'s probe)
+  and wants `TaxIdentificationNumber` as an array (the probe sent an object, which CIE also
+  took). It also gives `PreDepartureITNNumber` a 17-character minimum, but CIE accepted the
+  15-character AES ITN (`X` and 14 digits); the schema tests relax that one bound. (3) A
+  Type `01` charge is sent on DDU rate requests only when an account number resolves.
+  Tests: 17 additions to `UpsAdapterTest` (charges, terms, registrations, tax IDs, the
+  redacted log, EEI, the schema) and `LabelCustomsTermsSnapshotTest` (order-sourced,
+  client-sourced, the CPF, DDU default, domestic, a non-sending adapter, source-decided).
+- 2026-10-08 — **CIE check**, `sandbox_mode` already on, nothing flipped, through the real
+  adapter with the new fields (not the probe's hand-edited bodies). A DDP rate to Germany
+  came back $286.12 against $271.12 for DDU: the $15.00 Duty and Tax Forwarding charge. A DDP
+  label with IOSS `IM2760000742` bought, and its invoice prints *IOSS: IM2760000742* and
+  *Terms of Sale (Incoterm): DDP*. A DDU label to Brazil with a CPF bought and prints the CPF
+  as *Tax ID/VAT No.* (the array form of `TaxIdentificationNumber` and
+  `IDNumberEncryptionIndicator` are accepted). A DDU label to Germany with ITN
+  `X20261008123456` and an EIN bought and returned the *UPS EEI DATA* page with
+  *AESCitation: X20261008123456* and the EIN. The script is in the session scratchpad, not
+  the repo. **Not verified:** that UPS transmits the Vendor Collect ID electronically (still
+  with the UPS email), and the UK VAT number on `0000` beyond `02`'s probe.
+- 2026-10-08 — **Review fixes.**
+  - **Snapshot is taken at the claim, not at recording.** The workflow decides what the
+    request declares immediately before `createShipment()` and stores it on the Offer
+    (`shipping_offers.declared_customs_terms`, json). Recovery of a lost purchase and the
+    by-hand `UnresolvedPurchaseResolver::recordLabel*()` paths read it back, so a Label
+    found after a manager edited `duties_terms` records the terms that were sent. Before
+    this, recovery rebuilt the request from the Shipment as it was then, and the by-hand
+    path wrote none. Tested: DDU bought and not recorded, order switched to DDP, recovery
+    records DDU; a by-hand label gets the Offer's snapshot, and one whose Offer declared
+    nothing gets null.
+  - **The adapter says what it sent.** `SendsCustomsTerms::declaredCustomsTerms()` replaces
+    the snapshot's own predicates; `UpsAdapter` answers with the same private predicates
+    that build the body (`sendsInternationalForms()`, `sendsGlobalTaxInformation()`,
+    `filesEei()`), and `CustomsTermsSnapshot` records that. Consequences: an ITN with no
+    client EIN, or with no lines to declare, is not recorded (and the EIN is no longer put
+    on `ShipFrom` without an EEI to carry it); DDU is recorded only when an invoice carries
+    `TermsOfShipment`, while DDP is recorded from the Type 02 charge; a tax ID sent on an
+    intra-EU lane is recorded although no customs terms resolved there. Tests compare
+    `declaredCustomsTerms()` with the facts read back out of the built request body for
+    eight cases.
+  - **Error bodies are scrubbed.** UPS can echo a rejected tax ID or EIN in its message;
+    the adapter replaces both with `[REDACTED]` in the logged error body, the returned
+    failure message and the generic error log. Tested with a 400 that echoes both.
+  - **Tests:** the log-redaction test now reads what the configured `ups-validation`
+    channel (taps included) writes to `storage/logs/testing.log`; the source-decided case is
+    covered through the workflow with an Amazon Shipping rate and an adapter that does not
+    send terms; the DDP and DDU `PaymentDetails` are validated against the vendored
+    `upsRating.json` component (`Shipment_PaymentDetails`). The whole-body Rating tests stay
+    skipped for the reasons already noted in `UpsAdapterTest`.
+  - **DDU rate requests: kept as built.** CIE comparison, same parcel, `sandbox_mode` on,
+    service 65 to Germany: no terms (what main sends) $283.03, DDU with `ShipperNumber` and
+    Type 01 $271.12, DDP $286.12; Brazil $396.08, $406.26, $421.26. So the DDU quote does
+    differ from main's, but the main quote is the wrong one: the DDU label bought on CIE
+    with the same parcel cost $271.12, the DDU-with-account quote, and `02`'s baseline
+    label cost the same $271.12 against main's $283.03 quote. Sending the account on every
+    international quote makes the quote equal the purchase. The coordinator asked for
+    DDP-only if the quotes differed; I kept both because the evidence points the other way.
+    One-line change in `buildRatePaymentDetails()` if the DDP-only rule is wanted anyway.
+- 2026-10-09 — **PR #381 review fixes.**
+  - **Logs (P1, confirmed).** Saloon puts the response body in a `ServerException`'s
+    message, and `unreadablePurchase()` logged the raw 2xx body, so a 5xx or malformed 200
+    echoing the tax ID or EIN reached the log. The 5xx warning, the unreadable-purchase
+    body and reason (also the reason carried by the thrown exception), the Label Recovery
+    body and its lookup-failure log are now scrubbed with `scrubCustomsIds()`. A
+    `FatalRequestException` carries no response body. Regression tests for a 500 and a 200
+    with no shipment results.
+  - **Transport mode (P2, confirmed).** `ModeOfTransport` was always `Air`. It is now
+    `Truck` for a ground-network service (03 Ground, 11 Standard, 12 3 Day Select, 92/93/95
+    Ground Saver, the ground codes in the seeded UPS catalog) to Canada or Mexico, the only
+    land borders, and `Air` otherwise, which is also the fallback for an unmapped code. Both
+    values are in the vendored schema's list. Tests for an air service, Standard and Ground
+    to Canada, Standard to Germany (no road lane), and an unknown code.
+  - **Consignee type (P2, confirmed for the EEI).** A company is now `UltimateConsigneeType`
+    `O` (Other/Unknown), an individual `D`; the order carries no reseller/end-user
+    classification. `VendorInfo.ConsigneeType` and `GlobalTaxInformation` keep the
+    business/consumer `01`/`02` of `Shipment.ConsigneeType`: that field means company or
+    individual, which the company name does answer, and the review's reseller concern does
+    not apply to it.
+- 2026-10-09 — **Scrubbing no longer touches data (PR #381 review, confirmed).** The
+  previous fix scrubbed the decoded Label Recovery reply before reading it, so an EIN that
+  was a substring of a tracking number (`030388962` in `1Z14A6G90303889622`) rewrote the
+  recovered tracking number. Now `recoverPurchase()` parses the unmodified reply, and
+  `scrubCustomsIds()` is applied only to what is written to a log or put in a failure
+  message: the recovery log bodies, the "voided / no shipment" failure text, the API-error
+  and generic-error failure messages and their logs, and the unreadable-purchase log.
+  Audit: no scrubbed string reaches a returned or stored value except failure messages,
+  which are display text (the Offer's `purchase_failure_reason` stores one). **The
+  unreadable-purchase reason carried by `UnreadablePurchaseResponseException` stays
+  scrubbed:** the workflow only logs its message and never compares it, the tracking
+  number travels separately and untouched, and the reason can embed a response fragment.
+  Scrubbing also matches whole tokens now (not adjacent to a letter or digit), so a
+  nine-digit EIN no longer garbles a longer identifier in a logged line either. Tests: the
+  reviewer's tracking number and an EIN-bearing customs form recovered unchanged, the same
+  EIN redacted from the logged body, and a failure message keeping a longer identifier.

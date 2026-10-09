@@ -218,7 +218,7 @@ class UnresolvedPurchaseResolver
                 metadata: $locked->postageDataSource?->source_type === AmazonSource::class
                     ? AmazonBuyShippingAdapter::labelMetadata($locked, $sourceReference)
                     : [],
-            ), $locked->postage_source, $user->id, $locked->carrier_service_id, $announce);
+            ), $locked->postage_source, $user->id, $locked->carrier_service_id, $announce, $locked->declared_customs_terms);
         });
 
         $this->audit($offer, $package, $outcome, $user, $note, ['tracking_number' => $trackingNumber]);
