@@ -47,7 +47,7 @@ enrolment instead, this shrinks to a confirmation checkbox with no terms text.
 - [x] Only an Admin can record acceptance; a manager cannot
 - [x] An account without acceptance gets no USPS DDP rates, and the reason is shown
 - [x] The USPS label request schema test accepts the new fields
-- [ ] A DDP label to Germany (no registration) buys with TEM and stores the response's `duties_cost`
+- [x] A DDP label to Germany (no registration) buys with TEM and stores the response's `duties_cost` (2026-10-09, packages 243 and 244)
 - [x] `PiiRedactor` redacts `importersReference` and `exportersReference` as the 2026-10-07 comment says
 
 ## Comments
@@ -191,3 +191,23 @@ enrolment instead, this shrinks to a confirmation checkbox with no terms text.
   does not count as a change. Also added an Admin-only "Withdraw DDP terms" action
   (`withdrawDdpTermsAcceptance()`), and the manager test now asserts the action itself is
   hidden. Unverified: whether the MID should count as payer identity (it is not treated so).
+- 2026-10-09 — **Sandbox run through the app, TEM.** Shipped packages to Germany with DDP and
+  no registration, through the Ship page and the real adapter.
+  - **Package 243** ($830, two lines): bought. The request sent `prepayDutiesTaxesFees: true`
+    and no `exportersReference`; the response carried service 370 (DDP fee) and
+    `prepaidDutiesTaxesFees`. `duties_cost` is 286.06, which is the 39.14 package fee plus both
+    lines' `dutyPrice` and `taxPrice`. The `customs_terms` snapshot says `ddp`, source `client`,
+    no registration and no recipient tax ID. The same request also carried `incoterm: "1"` and
+    `europeanUnionProductID` from `eu-product-identifiers/07`, and TEM accepted both.
+  - **Package 244** (about $34, under EUR 150): bought, `duties_cost` 31.16 (6.14 package fee,
+    3.37 duty, 21.65 tax). The duty is the flat $3.37 the research round saw; TEM's tax
+    amounts are test data.
+  - **Label postage is unchanged:** 79.61 on both labels. The duties are billed separately and
+    never print on the label, so the stored `duties_cost` is the only record of them.
+  - **Rate filter, package 245 (not shipped), under EUR 150:** with the client's IOSS
+    registration declared, USPS DDP to Germany is absent; DDU still shows USPS; DDP to Poland
+    drops USPS ("cannot take prepaid duties"). All as `duties-support.json` says.
+  - **Still not run:** the registration path with DDU (the number printing in the label's
+    Exporter's reference box), the `030031` decline, and a reprint. The unverified list above
+    otherwise stands.
+
