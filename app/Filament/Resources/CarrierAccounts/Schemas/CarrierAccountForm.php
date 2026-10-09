@@ -139,6 +139,17 @@ class CarrierAccountForm
                     ->columns(2)
                     ->collapsible(),
 
+                Section::make('Prepaid Duties (DDP)')
+                    ->description('Prepaying duties and taxes bills this account at purchase. USPS makes sending the flag an agreement to its provider\'s terms, so an Admin records the acceptance here.')
+                    ->schema([
+                        TextEntry::make('usps_ddp_terms_status')
+                            ->label('DDP Terms')
+                            ->state(fn (?CarrierAccount $record): HtmlString => static::renderDdpTermsStatus($record))
+                            ->columnSpanFull(),
+                    ])
+                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === Carrier::USPS)
+                    ->collapsible(),
+
                 Section::make('Advanced / API App Credentials')
                     ->description('Your own USPS developer app credentials. Hosted installs normally leave these empty and use the shared OAuth connection; self-hosted installs fill them in — see docs/self-hosting.md.')
                     ->schema([
@@ -294,6 +305,27 @@ class CarrierAccountForm
                     ->collapsed()
                     ->collapsible(),
             ]);
+    }
+
+    /**
+     * Where USPS's prepaid-duties terms are published.
+     */
+    public const string DDP_TERMS_URL = 'https://zonos.com/docs/legal/usps-terms-of-service';
+
+    public static function renderDdpTermsStatus(?CarrierAccount $record): HtmlString
+    {
+        $link = '<a href="'.e(self::DDP_TERMS_URL).'" target="_blank" rel="noopener noreferrer" class="text-primary-600 underline">terms of service</a>';
+
+        if ($record?->hasAcceptedDdpTerms()) {
+            $by = $record->ddpTermsAcceptedBy?->name;
+
+            return new HtmlString('<span class="text-success-600 dark:text-success-400 font-medium">Accepted</span> '
+                .e($record->ddp_terms_accepted_at->format('M j, Y'))
+                .($by !== null ? ' by '.e($by) : '')
+                .' — USPS DDP rates are offered on this account. The '.$link.'.');
+        }
+
+        return new HtmlString('<span class="text-gray-400 dark:text-gray-500">Not accepted</span> — USPS DDP rates are not offered on this account until an Admin accepts the '.$link.' using the "Accept USPS DDP terms" action above.');
     }
 
     private static function renderAccountOauthStatus(?CarrierAccount $record): HtmlString

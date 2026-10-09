@@ -9,6 +9,7 @@ use App\Contracts\PostageOfferSource;
 use App\Contracts\RecoversUnresolvedPurchase;
 use App\Contracts\SendsCustomsTerms;
 use App\DataTransferObjects\Customs\CustomsFinding;
+use App\DataTransferObjects\Customs\ResolvedCustomsTerms;
 use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingOptions;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
@@ -25,6 +26,7 @@ use App\DataTransferObjects\Shipping\RuleEvaluationResult;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CustomsTermsOrigin;
+use App\Enums\DutiesTerms;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\Role;
@@ -36,6 +38,7 @@ use App\Exceptions\PackageDraftIncompleteException;
 use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
+use App\Models\CarrierAlias;
 use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\Shipment;
@@ -66,6 +69,12 @@ use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 
 class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 {
+    /**
+     * What the Ship page says of a USPS rate bought with duties prepaid: USPS
+     * charges them to the account on top of the postage shown.
+     */
+    public const string USPS_DDP_NOTICE = 'DDP: duties charged to the account at purchase';
+
     public function __construct(
         private readonly ShippingRateService $shippingRateService,
         private readonly RuleEvaluator $ruleEvaluator,
@@ -148,6 +157,12 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
             if ($crossesBorder && ($decidedBy = $classifiedRate->rate->sourceDecidedBy()) !== null) {
                 $rateArray['dutiesDecidedBy'] = $decidedBy;
+            }
+
+            // A USPS DDP label bills the duties to the account at purchase,
+            // on top of the postage shown. Display only.
+            if ($crossesBorder && $this->prepaysDutiesAtPurchase($classifiedRate->rate, $this->shippingRateService->getCustomsTerms())) {
+                $rateArray['dutiesCharge'] = self::USPS_DDP_NOTICE;
             }
 
             // Shown, so the packer sees why an offer cannot be chosen, and
@@ -1569,6 +1584,13 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         }
 
         $this->offerStore->recordPurchase($offer, $trackingNumber);
+    }
+
+    private function prepaysDutiesAtPurchase(RateResponse $rate, ?ResolvedCustomsTerms $terms): bool
+    {
+        return $terms?->dutiesTerms === DutiesTerms::Ddp
+            && ! $rate->isSourceDecided()
+            && CarrierAlias::lookupKey($rate->carrier) === CarrierAlias::lookupKey(Carrier::USPS);
     }
 
     /**

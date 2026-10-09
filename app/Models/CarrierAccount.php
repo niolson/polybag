@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Http\Integrations\Fedex\FedexConnector;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\SettingsService;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -14,6 +15,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Cache;
 use InvalidArgumentException;
 
+/**
+ * @property CarbonInterface|null $ddp_terms_accepted_at
+ * @property int|null $ddp_terms_accepted_by
+ */
 class CarrierAccount extends Model
 {
     use HasFactory;
@@ -43,6 +48,7 @@ class CarrierAccount extends Model
     {
         return [
             'active' => 'boolean',
+            'ddp_terms_accepted_at' => 'datetime',
             'credentials' => 'array',
             'secret_credentials' => 'encrypted:array',
         ];
@@ -94,6 +100,37 @@ class CarrierAccount extends Model
     public function carrier(): BelongsTo
     {
         return $this->belongsTo(Carrier::class);
+    }
+
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function ddpTermsAcceptedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'ddp_terms_accepted_by');
+    }
+
+    /**
+     * Whether an Admin has recorded this account's acceptance of USPS's
+     * prepaid-duties terms. Until then no USPS DDP rate is offered on it and
+     * the adapter will not send `prepayDutiesTaxesFees`.
+     */
+    public function hasAcceptedDdpTerms(): bool
+    {
+        return $this->ddp_terms_accepted_at !== null;
+    }
+
+    /**
+     * Record that $admin accepted the USPS prepaid-duties terms for this
+     * account. The columns are not mass assignable, so only this method
+     * writes them; the caller has authorized the Admin.
+     */
+    public function recordDdpTermsAcceptance(User $admin): void
+    {
+        $this->forceFill([
+            'ddp_terms_accepted_at' => now(),
+            'ddp_terms_accepted_by' => $admin->id,
+        ])->save();
     }
 
     /**

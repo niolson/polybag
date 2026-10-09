@@ -1,6 +1,7 @@
 <?php
 
 use App\Contracts\DirectCarrierAdapter;
+use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\Customs\ResolvedCustomsTerms;
 use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
@@ -11,9 +12,11 @@ use App\Enums\OfferRejection;
 use App\Enums\PackageStatus;
 use App\Filament\Pages\Settings;
 use App\Filament\Pages\Ship;
+use App\Filament\Resources\CarrierAccounts\CarrierAccountResource;
 use App\Filament\Resources\Clients\ClientResource;
 use App\Models\BoxSize;
 use App\Models\Carrier;
+use App\Models\CarrierAccount;
 use App\Models\CarrierService;
 use App\Models\Client;
 use App\Models\ClientTaxRegistration;
@@ -78,13 +81,17 @@ function dutiesFilterMethod(array $carriers = [Carrier::USPS, Carrier::UPS], ?Cl
         ]);
         $method->carrierServices()->attach($service->id);
 
+        // USPS DDP needs an account whose Admin accepted USPS's terms; the
+        // acceptance tests below take it away.
+        $accountId = $name === Carrier::USPS ? CarrierAccount::factory()->usps()->ddpTermsAccepted()->create()->id : null;
+
         $adapter = Mockery::mock(DirectCarrierAdapter::class);
         $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
         $adapter->shouldReceive('getCarrierName')->andReturn($name);
         $adapter->shouldReceive('isConfigured')->andReturnTrue();
         $adapter->shouldReceive('prepareRateRequest')->andReturnNull();
         $adapter->shouldReceive('getRates')->andReturnUsing(fn (): Collection => collect([
-            new RateResponse($name, $code, "{$name} International", 30.00, offerId: $offerIdFor($name), carrierServiceId: $service->id, carrierId: $carrier->id),
+            new RateResponse($name, $code, "{$name} International", 30.00, offerId: $offerIdFor($name), carrierAccountId: $accountId, carrierServiceId: $service->id, carrierId: $carrier->id),
         ]));
         $adapter->shouldNotReceive('createShipment');
 
@@ -547,4 +554,65 @@ it('keeps an Offer redeemable when the order day\'s rate is fetched after it was
         ->and($later->customsTerms?->registration)->not->toBeNull()
         ->and($later->fingerprint())->toBe($quoted->fingerprint())
         ->and(app(OfferStore::class)->inspect($package->fresh(), $offer->public_id)->rejection)->toBeNull();
+});
+
+it('drops a USPS DDP rate on an account that has not accepted the terms, and says why', function (): void {
+    $package = dutiesFilterPackage('NL', dutiesFilterMethod(), ['duties_terms' => DutiesTerms::Ddp]);
+    CarrierAccount::query()->update(['ddp_terms_accepted_at' => null, 'ddp_terms_accepted_by' => null]);
+
+    expect(quotedCarriers($package))->toBe(['UPS'])
+        ->and(droppedReasons())->toBe(['USPS DDP: account terms not accepted']);
+
+    $dropped = app(ShippingRateService::class)->getDroppedRates()[0];
+
+    expect($dropped->carrier)->toBe('USPS')
+        ->and($dropped->fixUrl)->toBe(CarrierAccountResource::getUrl('edit', ['record' => CarrierAccount::query()->first()]));
+});
+
+it('keeps a USPS DDU rate on an account that has not accepted the terms', function (): void {
+    $package = dutiesFilterPackage('NL', dutiesFilterMethod(), ['duties_terms' => DutiesTerms::Ddu]);
+    CarrierAccount::query()->update(['ddp_terms_accepted_at' => null, 'ddp_terms_accepted_by' => null]);
+
+    expect(quotedCarriers($package))->toBe(['USPS', 'UPS'])
+        ->and(droppedReasons())->toBe([]);
+});
+
+it('keeps a UPS DDP rate whatever the USPS account accepted', function (): void {
+    $package = dutiesFilterPackage('NL', dutiesFilterMethod(), ['duties_terms' => DutiesTerms::Ddp]);
+    CarrierAccount::query()->update(['ddp_terms_accepted_at' => null, 'ddp_terms_accepted_by' => null]);
+
+    expect(quotedCarriers($package))->toContain('UPS');
+});
+
+it('keeps the support reason when a USPS rate is dropped for the country, not the terms', function (): void {
+    $package = dutiesFilterPackage('PL', dutiesFilterMethod(), ['duties_terms' => DutiesTerms::Ddp]);
+    CarrierAccount::query()->update(['ddp_terms_accepted_at' => null, 'ddp_terms_accepted_by' => null]);
+
+    quotedCarriers($package);
+
+    expect(droppedReasons())->toHaveCount(1)
+        ->and(droppedReasons()[0])->toContain('Poland')
+        ->and(droppedReasons()[0])->not->toContain('terms not accepted');
+});
+
+it('marks a USPS DDP rate on the Ship page as charged to the account at purchase', function (): void {
+    $package = dutiesFilterPackage('NL', dutiesFilterMethod(), ['duties_terms' => DutiesTerms::Ddp]);
+
+    $options = app(PackageShippingWorkflow::class)->prepareRates($package);
+    $usps = collect($options->rateOptions)->firstWhere('carrier', 'USPS');
+    $ups = collect($options->rateOptions)->firstWhere('carrier', 'UPS');
+
+    expect($usps['dutiesCharge'])->toBe('DDP: duties charged to the account at purchase')
+        ->and($ups)->not->toHaveKey('dutiesCharge');
+
+    Livewire::test(Ship::class, ['package_id' => $package->id])
+        ->assertSee('DDP: duties charged to the account at purchase');
+});
+
+it('does not mark a USPS DDU rate', function (): void {
+    $package = dutiesFilterPackage('NL', dutiesFilterMethod(), ['duties_terms' => DutiesTerms::Ddu]);
+
+    $options = app(PackageShippingWorkflow::class)->prepareRates($package);
+
+    expect(collect($options->rateOptions)->firstWhere('carrier', 'USPS'))->not->toHaveKey('dutiesCharge');
 });
