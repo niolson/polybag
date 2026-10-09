@@ -4,6 +4,7 @@ use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\Customs\CustomsFinding;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
+use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
@@ -40,8 +41,10 @@ use App\Models\ShippingOffer;
 use App\Models\ShippingRule;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
+use App\Services\Carriers\FedexAdapter;
 use App\Services\Customs\CustomsReadiness;
 use App\Services\Customs\CustomsReferenceData;
+use App\Support\FedexRecipientEmail;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Livewire\Livewire;
 
@@ -532,6 +535,55 @@ describe('carrier warnings', function (): void {
             ->and(findingCodes(readinessFor($withEmail, rate: $fedex)))->not->toContain('fedex_ddu_without_email')
             ->and(findingCodes(readinessFor($noEmail, rate: new RateResponse(Carrier::UPS, '07', 'UPS', 60.0))))->not->toContain('fedex_ddu_without_email');
     });
+
+    it('warns when the recipient email is longer than FedEx takes, and only from 81 characters', function (int $length, bool $warns): void {
+        $fedex = new RateResponse(Carrier::FEDEX, 'INTL', 'FedEx International Priority', 60.0);
+        $email = str_repeat('a', $length - 12).'@example.com';
+        $package = readinessPackage('JP', [['value' => 20.0]], ['email' => $email]);
+
+        $finding = findingNamed(readinessFor($package, rate: $fedex), 'fedex_ddu_without_email');
+
+        expect(mb_strlen($email))->toBe($length);
+
+        if ($warns) {
+            expect($finding?->severity)->toBe(CustomsFindingSeverity::Warn)
+                ->and($finding->title)->toBe('Recipient Email Too Long')
+                ->and($finding->message)->toContain('at most 80 characters')
+                ->and($finding->message)->toContain('Shorten or replace');
+        } else {
+            expect($finding)->toBeNull();
+        }
+
+        // Another carrier does not need the email, so it is never warned about.
+        expect(findingCodes(readinessFor($package, rate: new RateResponse(Carrier::UPS, '07', 'UPS', 60.0))))->not->toContain('fedex_ddu_without_email');
+    })->with([
+        'a valid 82-character email' => [82, true],
+        '81 characters' => [81, true],
+        '80 characters' => [80, false],
+    ]);
+
+    it('agrees with the FedEx adapter about which emails are sent', function (?string $email): void {
+        $sent = FedexRecipientEmail::usable($email) !== null;
+        $fedex = new RateResponse(Carrier::FEDEX, 'INTL', 'FedEx International Priority', 60.0);
+        $warned = in_array('fedex_ddu_without_email', findingCodes(readinessFor(readinessPackage('JP', [['value' => 20.0]], ['email' => $email]), rate: $fedex)), true);
+
+        $contact = (new ReflectionMethod(FedexAdapter::class, 'buildContact'))->invoke(
+            new FedexAdapter,
+            new AddressData('A', 'B', '1 Main St', 'Tokyo', null, '100-0001', 'JP', email: $email),
+            null,
+            false,
+            true,
+        );
+
+        expect(isset($contact['contact']['emailAddress']))->toBe($sent)
+            ->and($warned)->toBe(! $sent);
+    })->with([
+        'none' => [null],
+        'blank' => ['   '],
+        'short' => ['a@example.com'],
+        '80 characters' => [str_repeat('a', 68).'@example.com'],
+        '82 characters' => [str_repeat('a', 70).'@example.com'],
+    ]);
 });
 
 describe('the moved guards', function (): void {

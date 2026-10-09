@@ -97,6 +97,15 @@ the ITN or exemption in `exportDetail`.
   logs; `$responseData` itself stays unmodified for parsing, and the tracking number and
   label data are asserted untouched. The rate, tracking and void logs carry none of
   these IDs and are left alone.
+- 2026-10-09 — **PR #382 review fix: an overlong email.** The adapter leaves out a
+  recipient email over 80 characters, but readiness warned only about a blank one, so a
+  DDU label with a valid 82-character email went through with no billing warning. The
+  eligibility rule now lives in `App\Support\FedexRecipientEmail` (trimmed, non-empty, at
+  most 80 characters), called by both `FedexAdapter` and `CustomsReadiness`. The
+  `fedex_ddu_without_email` warning keeps its scope (DDU, FedEx or no carrier chosen yet)
+  and, for a too-long email, is titled *Recipient Email Too Long*, names the 80-character
+  limit and says to shorten or replace it. Tests: 82 and 81 characters warn, 80 does not,
+  UPS is never warned, and the adapter's built contact and the warning agree for six inputs.
   Nothing parsed or persisted is scrubbed (the response is read unmodified), and tests
   cover an error echoing both, a 503 echoing both, a longer identifier containing the
   EIN as a substring surviving in the message, and the configured `fedex-validation`

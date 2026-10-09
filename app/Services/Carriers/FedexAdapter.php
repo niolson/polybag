@@ -48,6 +48,7 @@ use App\Services\Carriers\Concerns\IdentifiesCatalogServices;
 use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
 use App\Services\SettingsService;
+use App\Support\FedexRecipientEmail;
 use App\Support\LabelText;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -121,11 +122,6 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
      * FedEx takes an ITN as `AES` and the filing number AES returned.
      */
     private const string ITN_PREFIX = 'AES';
-
-    /**
-     * The longest `contact.emailAddress` FedEx accepts.
-     */
-    private const int MAX_EMAIL_LENGTH = 80;
 
     private function resolveConnector(?CarrierAccount $account): FedexConnector
     {
@@ -1904,9 +1900,7 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
      */
     private function recipientEmail(AddressData $address): ?string
     {
-        $email = trim((string) $address->email);
-
-        return $email !== '' && mb_strlen($email) <= self::MAX_EMAIL_LENGTH ? $email : null;
+        return FedexRecipientEmail::usable($address->email);
     }
 
     /**
