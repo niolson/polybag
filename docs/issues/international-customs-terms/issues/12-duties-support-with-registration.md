@@ -120,3 +120,8 @@ carrier's IMM authority, while the source is not USPS.
   DDU rates to AT and SE are kept. The flag joins the fingerprint inputs, so adding or
   removing a company name retires Offers quoted before. The override's `note` records the
   scope; overrides may carry `note`; version `2026-10-08.2`.
+- 2026-10-09 — The USPS AT and SE override is superseded by `08`'s decision: IOSS to those
+  two (and the other seven prepaid-duties countries) is now `unavailable`, not `ddp_required`,
+  because USPS's API drops DDP when it carries the IOSS number. Swiss Post's page is no longer
+  the cited source; the override cites `08`'s test results. The B2C-only limit still holds.
+

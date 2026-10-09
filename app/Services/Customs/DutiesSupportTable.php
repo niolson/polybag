@@ -67,8 +67,13 @@ class DutiesSupportTable
      * an IOSS number. It applies only when `$registration` is that regime,
      * which is the registration actually declared, not one a threshold
      * withholds, and only while the entry itself is in force.
+     *
+     * An override is a postal rule about consumer parcels unless it carries a
+     * `business_support`, which answers instead for a business recipient. A
+     * limit of the carrier's API rather than of the destination post binds a
+     * business parcel just as much, since the registration is still sent.
      */
-    public function supportFor(string $carrier, string $country, CarbonInterface $on, ?TaxRegistrationRegime $registration = null): ?DutiesSupportEntry
+    public function supportFor(string $carrier, string $country, CarbonInterface $on, ?TaxRegistrationRegime $registration = null, bool $recipientIsBusiness = false): ?DutiesSupportEntry
     {
         $key = CarrierAlias::lookupKey($carrier);
         $carrierEntry = $this->table()['carriers'][$key] ?? null;
@@ -94,6 +99,10 @@ class DutiesSupportTable
         $override = ! $isDefault && $registration !== null
             ? ($entry['with_registration'][$registration->value] ?? null)
             : null;
+
+        if (is_array($override) && $recipientIsBusiness) {
+            $override = isset($override['business_support']) ? [...$override, 'support' => $override['business_support']] : null;
+        }
 
         if (is_array($override)) {
             return new DutiesSupportEntry(
@@ -244,11 +253,15 @@ class DutiesSupportTable
                 continue;
             }
 
-            array_push($errors, ...self::unknownKeyErrors($overridePath, $override, ['support', 'source', 'checked', 'authority', 'note']));
+            array_push($errors, ...self::unknownKeyErrors($overridePath, $override, ['support', 'business_support', 'source', 'checked', 'authority', 'note']));
 
             if (array_key_exists('authority', $override)
                 && (! is_string($override['authority']) || trim($override['authority']) === '')) {
                 $errors[] = "{$overridePath}.authority must name who the rule comes from.";
+            }
+
+            if (array_key_exists('business_support', $override) && DutiesSupport::tryFrom((string) $override['business_support']) === null) {
+                $errors[] = "{$overridePath}.business_support must be one of ".implode(', ', array_column(DutiesSupport::cases(), 'value')).'.';
             }
 
             if (array_key_exists('effective_from', $override)) {

@@ -2,6 +2,7 @@
 
 namespace App\Services\Shipping;
 
+use App\DataTransferObjects\Customs\DutiesSupportEntry;
 use App\DataTransferObjects\Customs\ResolvedCustomsTerms;
 use App\DataTransferObjects\Shipping\DroppedRate;
 use App\DataTransferObjects\Shipping\RateResponse;
@@ -33,7 +34,8 @@ use Illuminate\Support\Collection;
  * Two cases drop:
  *
  * - **The carrier's support does not fit the term**, from
- *   `duties-support.json`: `ddp_required` with DDU, `ddu_only` with DDP.
+ *   `duties-support.json`: `ddp_required` with DDU, `ddu_only` with DDP,
+ *   `unavailable` with either.
  *   `international-customs-terms/08` adds a second reason here: a USPS
  *   account that has not accepted the DDP terms.
  * - **The term is unresolved**: an EU destination with no term from the order
@@ -84,7 +86,7 @@ class DutiesTermsFilter
                 continue;
             }
 
-            $entry = $this->dutiesSupport->supportFor($rate->carrier, $terms->destinationCountry, $on, $terms->recipientIsBusiness ? null : $terms->registration?->regime);
+            $entry = $this->dutiesSupport->supportFor($rate->carrier, $terms->destinationCountry, $on, $terms->registration?->regime, $terms->recipientIsBusiness);
 
             if ($entry === null || $entry->support->allows($terms->dutiesTerms)) {
                 $kept->push($rate);
@@ -97,8 +99,7 @@ class DutiesTermsFilter
                 '%s dropped: %s %s (%s)',
                 $carrier,
                 $this->countryName($terms->destinationCountry),
-                ($entry->support === DutiesSupport::DdpRequired ? 'requires prepaid duties' : 'cannot take prepaid duties')
-                    .($entry->registration !== null ? ' with '.$this->registrationName($entry->registration) : ''),
+                $this->limitation($entry),
                 $entry->authority,
             );
 
@@ -158,6 +159,23 @@ class DutiesTermsFilter
             fixUrl: ClientResource::getUrl('edit', ['record' => $client]),
             fixLabel: "Set duties terms for {$client->name}",
         );
+    }
+
+    /**
+     * What the entry says the carrier cannot do, such as "requires prepaid
+     * duties with an IOSS number".
+     */
+    private function limitation(DutiesSupportEntry $entry): string
+    {
+        $registration = $entry->registration !== null ? $this->registrationName($entry->registration) : null;
+
+        return match ($entry->support) {
+            DutiesSupport::DdpRequired => 'requires prepaid duties'.($registration !== null ? " with {$registration}" : ''),
+            DutiesSupport::Unavailable => $registration !== null
+                ? "requires prepaid duties, which cannot be combined with {$registration}"
+                : 'cannot be shipped to on either term',
+            default => 'cannot take prepaid duties'.($registration !== null ? " with {$registration}" : ''),
+        };
     }
 
     /**

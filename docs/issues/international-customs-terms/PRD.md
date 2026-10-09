@@ -197,7 +197,7 @@ cell is the best field available, with the doubt named in `02`.
 | DDP surcharge in a rate | Not quoted; landed cost comes back on the label | Rating with the Type `02` charge returns itemized charge `378` | Not quoted: Rate API takes only `SENDER`; duty estimates (`edtRequestType`) are barred for FedEx Compatible solutions |
 | DDU | Omit the flag | Only Type `01` | `paymentType: RECIPIENT`, `termsOfSale: DDU` |
 | Terms on the invoice | — | `InternationalForms.TermsOfShipment` | `commercialInvoice.termsOfSale` |
-| IOSS / VOEC / ARN | `customsForm.exportersReference`, `VAT_NUMBER` (with prepay it suppresses the landed cost: *qualified*) | `ShipFrom.VendorInfo`, `0356` / `0357` / `1052` | Shipper `tins`; no IOSS type, `BUSINESS_UNION` prints as EORI (*qualified*) |
+| IOSS / VOEC / ARN | `customsForm.exportersReference`, `VAT_NUMBER` (*qualified*: any exporter reference, whatever its value or type, silently turns prepay off, so the label is DDU) | `ShipFrom.VendorInfo`, `0356` / `0357` / `1052` | Shipper `tins`; no IOSS type, `BUSINESS_UNION` prints as EORI (*qualified*) |
 | UK VAT | `exportersReference` (*qualified*) | No current code: `0358` deprecated and dropped, `0000` unlabelled (*qualified*) | Shipper `tins`, `BUSINESS_NATIONAL` (*qualified*) |
 | Recipient tax ID | `customsForm.importersReference` (`TAX_CODE`) | `GlobalTaxInformation.AgentTaxIdentificationNumber`, role `30`, type `0005` / `1002` | Recipient `tins`, `PERSONAL_NATIONAL` (prints); `recipientCustomsId` does not |
 | Export ITN or exemption | `customsForm.AESITN` | EEI form (`FormType` `11`), `EEIFilingOption` `1`, `ShipperFiled` `A` + ITN or `B` + legend | `exportDetail.exportComplianceStatement`: `AESX…` or `NO_EEI_30_37_A`; FedEx prints 30.37(a) itself if omitted |

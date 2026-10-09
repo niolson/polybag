@@ -172,21 +172,44 @@ it('keeps USPS rates for a DDP Shipment to the Netherlands', function (): void {
         ->and(droppedReasons())->toBe([]);
 });
 
-it('drops a USPS DDU rate to Austria and Sweden for a declared IOSS registration, and keeps DDP', function (string $country, string $name): void {
+it('gives an IOSS Shipment to a prepaid-duties country no USPS rate on either term', function (string $country, string $name): void {
     $client = Client::factory()->create();
     ClientTaxRegistration::factory()->ioss()->for($client)->create();
     $method = dutiesFilterMethod();
 
-    $ddu = dutiesFilterPackage($country, $method, ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddu]);
+    foreach ([DutiesTerms::Ddu, DutiesTerms::Ddp] as $terms) {
+        $package = dutiesFilterPackage($country, $method, ['client_id' => $client->id, 'duties_terms' => $terms]);
 
-    expect(quotedCarriers($ddu))->toBe([Carrier::UPS])
-        ->and(droppedReasons())->toBe(["USPS dropped: {$name} requires prepaid duties with an IOSS number (Swiss Post)"]);
+        expect(quotedCarriers($package))->toBe([Carrier::UPS])
+            ->and(droppedReasons())->toBe(["USPS dropped: {$name} requires prepaid duties, which cannot be combined with an IOSS number (USPS API test)"]);
+    }
+})->with([['AT', 'Austria'], ['SE', 'Sweden'], ['DE', 'Germany'], ['FR', 'France']]);
 
-    $ddp = dutiesFilterPackage($country, $method, ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddp]);
+it('keeps a USPS DDU rate with an IOSS number where duties are not required, and drops DDP', function (): void {
+    $client = Client::factory()->create();
+    ClientTaxRegistration::factory()->ioss()->for($client)->create();
+    $method = dutiesFilterMethod();
 
-    expect(quotedCarriers($ddp))->toEqualCanonicalizing([Carrier::USPS, Carrier::UPS])
+    $ddu = dutiesFilterPackage('NL', $method, ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddu]);
+
+    expect(quotedCarriers($ddu))->toEqualCanonicalizing([Carrier::USPS, Carrier::UPS])
         ->and(droppedReasons())->toBe([]);
-})->with([['AT', 'Austria'], ['SE', 'Sweden']]);
+
+    $ddp = dutiesFilterPackage('NL', $method, ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddp]);
+
+    expect(quotedCarriers($ddp))->toBe([Carrier::UPS])
+        ->and(droppedReasons())->toBe(['USPS dropped: Netherlands cannot take prepaid duties with an IOSS number (USPS API test)']);
+});
+
+it('keeps USPS DDP when the consignment is over the IOSS threshold, since no number is declared', function (): void {
+    $client = Client::factory()->create();
+    ClientTaxRegistration::factory()->ioss()->for($client)->create();
+    $package = dutiesFilterPackage('NL', dutiesFilterMethod(), ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddp]);
+    ShipmentItem::query()->where('shipment_id', $package->shipment_id)->update(['value' => 400.0]);
+
+    expect(quotedCarriers($package->fresh()))->toEqualCanonicalizing([Carrier::USPS, Carrier::UPS])
+        ->and(droppedReasons())->toBe([]);
+});
 
 it('keeps a USPS DDU rate to Austria and Sweden when no registration is declared', function (string $country): void {
     $package = dutiesFilterPackage($country, dutiesFilterMethod(), ['duties_terms' => DutiesTerms::Ddu]);
@@ -195,7 +218,7 @@ it('keeps a USPS DDU rate to Austria and Sweden when no registration is declared
         ->and(droppedReasons())->toBe([]);
 })->with(['AT', 'SE']);
 
-it('keeps a USPS DDU rate to Austria and Sweden for a business recipient, whatever the IOSS registration', function (string $country): void {
+it('keeps a USPS DDU rate to Austria and Sweden for a business recipient, but not DDP, which would lose the number', function (string $country, string $name): void {
     $client = Client::factory()->create();
     ClientTaxRegistration::factory()->ioss()->for($client)->create();
     $method = dutiesFilterMethod();
@@ -207,13 +230,39 @@ it('keeps a USPS DDU rate to Austria and Sweden for a business recipient, whatev
 
     $ddp = dutiesFilterPackage($country, $method, ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddp, 'company' => 'Acme GmbH']);
 
-    expect(quotedCarriers($ddp))->toEqualCanonicalizing([Carrier::USPS, Carrier::UPS]);
-})->with(['AT', 'SE']);
+    expect(quotedCarriers($ddp))->toBe([Carrier::UPS])
+        ->and(droppedReasons())->toBe(["USPS dropped: {$name} cannot take prepaid duties with an IOSS number (USPS API test)"]);
+})->with([['AT', 'Austria'], ['SE', 'Sweden']]);
+
+it('gives a business recipient in Germany no USPS rate under an IOSS registration', function (): void {
+    $client = Client::factory()->create();
+    ClientTaxRegistration::factory()->ioss()->for($client)->create();
+    $package = dutiesFilterPackage('DE', dutiesFilterMethod(), ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddp, 'company' => 'Acme GmbH']);
+
+    expect(quotedCarriers($package))->toBe([Carrier::UPS])
+        ->and(droppedReasons())->toBe(['USPS dropped: Germany requires prepaid duties, which cannot be combined with an IOSS number (USPS API test)']);
+});
+
+it('drops a USPS DDP rate to Great Britain under UK VAT, for a consumer and a business alike', function (?string $company): void {
+    $client = Client::factory()->create();
+    ClientTaxRegistration::factory()->ukVat()->for($client)->create();
+    ExchangeRate::factory()->quoting('GBP', 0.85, now()->subDay()->toDateString())->create();
+    $method = dutiesFilterMethod();
+
+    $ddp = dutiesFilterPackage('GB', $method, ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddp, 'company' => $company]);
+
+    expect(quotedCarriers($ddp))->toBe([Carrier::UPS])
+        ->and(droppedReasons())->toBe(['USPS dropped: United Kingdom cannot take prepaid duties with a UK VAT number (USPS API test)']);
+
+    $ddu = dutiesFilterPackage('GB', $method, ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddu, 'company' => $company]);
+
+    expect(quotedCarriers($ddu))->toEqualCanonicalizing([Carrier::USPS, Carrier::UPS]);
+})->with([[null], ['Acme Ltd']]);
 
 it('retires an Offer when a company name turns the recipient into a business', function (): void {
     $client = Client::factory()->create();
     ClientTaxRegistration::factory()->ioss()->for($client)->create();
-    $package = dutiesFilterPackage('AT', dutiesFilterMethod(), ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddp]);
+    $package = dutiesFilterPackage('NL', dutiesFilterMethod(), ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddu]);
     app(ShippingRateService::class)->getShippingRates($package->id);
     $offer = ShippingOffer::query()->where('package_id', $package->id)->where('carrier', Carrier::USPS)->firstOrFail();
 
@@ -230,7 +279,7 @@ it('applies the override to an IOSS registration the order carries', function ()
     ]);
 
     expect(quotedCarriers($package))->toBe([Carrier::UPS])
-        ->and(droppedReasons())->toBe(['USPS dropped: Austria requires prepaid duties with an IOSS number (Swiss Post)']);
+        ->and(droppedReasons())->toBe(['USPS dropped: Austria requires prepaid duties, which cannot be combined with an IOSS number (USPS API test)']);
 });
 
 it('does not apply the override when the consignment is over the threshold and the registration is withheld', function (): void {
@@ -476,7 +525,8 @@ it('does not serve stale rates on the Ship page after a client policy edit', fun
 it('keeps an Offer redeemable when the order day\'s rate is fetched after it was quoted', function (): void {
     ExchangeRate::query()->delete();
     ExchangeRate::factory()->quoting('USD', 1.25, '2026-10-07')->create();
-    $client = Client::factory()->ddpToEu()->withIossRegistration()->create();
+    // DDU: USPS cannot carry an IOSS number on DDP, so it would have no Offer.
+    $client = Client::factory()->withDutiesPolicy([Client::DUTIES_POLICY_EU => DutiesTerms::Ddu->value])->withIossRegistration()->create();
     $package = dutiesFilterPackage('NL', dutiesFilterMethod(), ['client_id' => $client->id]);
     // $160 of goods, ordered at 16:30 in Frankfurt: after the ECB published
     // the 8th's rates, before PolyBag fetched them.

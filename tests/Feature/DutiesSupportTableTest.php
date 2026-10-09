@@ -90,7 +90,7 @@ it('names what is wrong with a malformed table', function (string $problem, Clos
     }, 'carriers.usps.countries.EU is not an ISO 3166-1 alpha-2 country code.'],
     'a bad support value' => ['support', function (array &$table): void {
         $table['carriers']['usps']['countries']['DE']['support'] = 'ddp';
-    }, 'carriers.usps.countries.DE.support must be one of ddp_required, either, ddu_only.'],
+    }, 'carriers.usps.countries.DE.support must be one of ddp_required, either, ddu_only, unavailable.'],
     'an entry with no source' => ['source', function (array &$table): void {
         unset($table['carriers']['usps']['countries']['FR']['source']);
     }, 'carriers.usps.countries.FR.source must name where the entry comes from.'],
@@ -111,7 +111,7 @@ it('names what is wrong with a malformed table', function (string $problem, Clos
     }, 'carriers.usps.countries.AT.with_registration.vat is not a known registration regime (ioss, uk_vat, voec, arn).'],
     'an override with a bad support value' => ['override support', function (array &$table): void {
         $table['carriers']['usps']['countries']['AT']['with_registration']['ioss']['support'] = 'ddp';
-    }, 'carriers.usps.countries.AT.with_registration.ioss.support must be one of ddp_required, either, ddu_only.'],
+    }, 'carriers.usps.countries.AT.with_registration.ioss.support must be one of ddp_required, either, ddu_only, unavailable.'],
     'an override with no source' => ['override source', function (array &$table): void {
         unset($table['carriers']['usps']['countries']['SE']['with_registration']['ioss']['source']);
     }, 'carriers.usps.countries.SE.with_registration.ioss.source must name where the entry comes from.'],
@@ -129,7 +129,7 @@ it('names what is wrong with a malformed table', function (string $problem, Clos
     }, 'carriers.usps.default.suport is not a known key (support, source, checked, effective_from, note).'],
     'an unknown key in an override' => ['override key', function (array &$table): void {
         $table['carriers']['usps']['countries']['AT']['with_registration']['ioss']['effective_form'] = '2026-11-01';
-    }, 'carriers.usps.countries.AT.with_registration.ioss.effective_form is not a known key (support, source, checked, authority, note).'],
+    }, 'carriers.usps.countries.AT.with_registration.ioss.effective_form is not a known key (support, business_support, source, checked, authority, note).'],
     'an override for a regime that cannot cover the country' => ['uncovered regime', function (array &$table): void {
         $table['carriers']['usps']['countries']['AT']['with_registration']['uk_vat'] = $table['carriers']['usps']['countries']['AT']['with_registration']['ioss'];
     }, 'carriers.usps.countries.AT.with_registration.uk_vat can never apply: a UK VAT (GB) registration does not cover AT.'],
@@ -149,11 +149,11 @@ it('answers AT and SE with the IOSS override only for a declared IOSS registrati
         expect($without?->support)->toBe(DutiesSupport::Either)
             ->and($without?->registration)->toBeNull()
             ->and($table->supportFor('USPS', $country, $today, TaxRegistrationRegime::UkVat)?->support)->toBe(DutiesSupport::Either)
-            ->and($with?->support)->toBe(DutiesSupport::DdpRequired)
+            ->and($with?->support)->toBe(DutiesSupport::Unavailable)
             ->and($with?->registration)->toBe(TaxRegistrationRegime::Ioss)
-            ->and($with?->authority)->toBe('Swiss Post')
-            ->and($with?->source)->toBe('https://www.post.ch/en/pages/eu-customs-reform-2026')
-            ->and($with?->checked->toDateString())->toBe('2026-10-08')
+            ->and($with?->authority)->toBe('USPS API test')
+            ->and($with?->source)->toBe('docs/issues/international-customs-terms/issues/08-usps-customs-terms.md')
+            ->and($with?->checked->toDateString())->toBe('2026-10-09')
             ->and($table->supportFor('UPS', $country, $today, TaxRegistrationRegime::Ioss)?->support)->toBe(DutiesSupport::Either);
     }
 });
@@ -165,7 +165,7 @@ it('gates an override with the entry\'s effective date', function (): void {
     $support = new DutiesSupportTable(temporaryDutiesSupport($table));
 
     expect($support->supportFor('USPS', 'AT', CarbonImmutable::parse('2026-10-31'), TaxRegistrationRegime::Ioss)?->support)->toBe(DutiesSupport::DduOnly)
-        ->and($support->supportFor('USPS', 'AT', CarbonImmutable::parse('2026-11-01'), TaxRegistrationRegime::Ioss)?->support)->toBe(DutiesSupport::DdpRequired);
+        ->and($support->supportFor('USPS', 'AT', CarbonImmutable::parse('2026-11-01'), TaxRegistrationRegime::Ioss)?->support)->toBe(DutiesSupport::Unavailable);
 });
 
 it('ignores an entry until its effective date, and applies it from then on', function (): void {
@@ -201,4 +201,48 @@ it('names every registration regime in a reason', function (): void {
         'voec' => 'a VOEC number',
         'arn' => 'an ARN',
     ]);
+});
+
+it('cannot send a registration and prepaid duties together on USPS, so no IOSS or UK VAT parcel is left on DDP', function (): void {
+    $table = new DutiesSupportTable;
+    $today = CarbonImmutable::parse('2026-10-09');
+
+    // Prepaid duties are required with IOSS in these nine, so no term is left.
+    foreach (['AT', 'BE', 'DE', 'DK', 'FI', 'FR', 'LU', 'PT', 'SE'] as $country) {
+        expect($table->supportFor('USPS', $country, $today, TaxRegistrationRegime::Ioss)?->support)->toBe(DutiesSupport::Unavailable, $country);
+    }
+
+    // Elsewhere DDU still works with the number, but DDP would silently lose it.
+    foreach (['EE', 'ES', 'IT', 'MT', 'NL', 'SK'] as $country) {
+        expect($table->supportFor('USPS', $country, $today, TaxRegistrationRegime::Ioss)?->support)->toBe(DutiesSupport::DduOnly, $country)
+            ->and($table->supportFor('USPS', $country, $today)?->support)->toBe(DutiesSupport::Either, $country);
+    }
+
+    expect($table->supportFor('USPS', 'GB', $today, TaxRegistrationRegime::UkVat)?->support)->toBe(DutiesSupport::DduOnly)
+        ->and($table->supportFor('USPS', 'GB', $today)?->support)->toBe(DutiesSupport::Either)
+        ->and($table->supportFor('UPS', 'DE', $today, TaxRegistrationRegime::Ioss)?->support)->toBe(DutiesSupport::Either);
+});
+
+it('answers a business recipient from business_support, and skips an override without one', function (): void {
+    $table = new DutiesSupportTable;
+    $today = CarbonImmutable::parse('2026-10-09');
+    $ioss = TaxRegistrationRegime::Ioss;
+
+    expect($table->supportFor('USPS', 'AT', $today, $ioss, recipientIsBusiness: true)?->support)->toBe(DutiesSupport::DduOnly)
+        ->and($table->supportFor('USPS', 'DE', $today, $ioss, recipientIsBusiness: true)?->support)->toBe(DutiesSupport::Unavailable)
+        ->and($table->supportFor('USPS', 'GB', $today, TaxRegistrationRegime::UkVat, recipientIsBusiness: true)?->support)->toBe(DutiesSupport::DduOnly);
+
+    $withoutBusiness = committedDutiesSupport();
+    unset($withoutBusiness['carriers']['usps']['countries']['AT']['with_registration']['ioss']['business_support']);
+    $support = new DutiesSupportTable(temporaryDutiesSupport($withoutBusiness));
+
+    expect($support->supportFor('USPS', 'AT', $today, $ioss, recipientIsBusiness: true)?->support)->toBe(DutiesSupport::Either);
+});
+
+it('rejects a business_support that is not a support value', function (): void {
+    $table = committedDutiesSupport();
+    $table['carriers']['usps']['countries']['AT']['with_registration']['ioss']['business_support'] = 'maybe';
+
+    expect(DutiesSupportTable::errors($table))
+        ->toContain('carriers.usps.countries.AT.with_registration.ioss.business_support must be one of ddp_required, either, ddu_only, unavailable.');
 });
