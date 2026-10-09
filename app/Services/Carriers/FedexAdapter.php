@@ -764,7 +764,7 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
 
                 if ($isSaturdayError) {
                     Log::channel('fedex-validation')->info('FedEx Saturday delivery rejected, retrying without', [
-                        'errors' => $errors,
+                        'errors' => $this->scrubCustomsIds($errors, $request),
                     ]);
                     $saturdayApplied = false;
                     // Remove only SATURDAY_DELIVERY, preserve other special services (e.g. FEDEX_ONE_RATE)
@@ -800,14 +800,14 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
             }
 
             Log::channel('fedex-validation')->debug('LABEL RESPONSE', [
-                'body' => $responseData,
+                'body' => $this->scrubCustomsIds($responseData, $request),
             ]);
 
             $shipmentData = $responseData['output']['transactionShipments'][0] ?? null;
 
             if (! $shipmentData) {
                 Log::channel('fedex-validation')->error('FedEx createShipment missing shipment data', [
-                    'output' => $responseData['output'] ?? null,
+                    'output' => $this->scrubCustomsIds($responseData['output'] ?? null, $request),
                 ]);
 
                 return ShipResponse::failure('FedEx response missing shipment data');
@@ -819,7 +819,7 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
 
             if (empty($trackingNumber)) {
                 Log::channel('fedex-validation')->error('FedEx createShipment missing tracking number', [
-                    'shipmentData' => $shipmentData,
+                    'shipmentData' => $this->scrubCustomsIds($shipmentData, $request),
                 ]);
 
                 return ShipResponse::failure('FedEx response missing tracking number');
@@ -829,7 +829,7 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
 
             if (empty($labelData)) {
                 Log::channel('fedex-validation')->error('FedEx createShipment missing label data', [
-                    'pieceResponses' => $shipmentData['pieceResponses'] ?? null,
+                    'pieceResponses' => $this->scrubCustomsIds($shipmentData['pieceResponses'] ?? null, $request),
                 ]);
 
                 return ShipResponse::failure('FedEx response missing label data');
@@ -1874,8 +1874,9 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
     /**
      * The recipient's own tax ID as FedEx prints it on the invoice, which is
      * also the field FedEx's Brazil advisory asks automation to fill. A CPF
-     * and a PCCC are personal and a CNPJ a company's; any other ID follows
-     * whether the consignee has a company name.
+     * and a PCCC are personal; a CNPJ and a VAT number are a business's by
+     * definition; any other ID follows whether the consignee has a company
+     * name.
      *
      * @return array{number: string, tinType: string}|null
      */
@@ -1889,8 +1890,8 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
 
         $isCompany = match ($taxId->type) {
             RecipientTaxIdType::Cpf, RecipientTaxIdType::Pccc => false,
-            RecipientTaxIdType::Cnpj => true,
-            RecipientTaxIdType::Vat, RecipientTaxIdType::Other => filled($request->toAddress->company),
+            RecipientTaxIdType::Cnpj, RecipientTaxIdType::Vat => true,
+            RecipientTaxIdType::Other => filled($request->toAddress->company),
         };
 
         return ['number' => $taxId->number, 'tinType' => $isCompany ? 'BUSINESS_NATIONAL' : 'PERSONAL_NATIONAL'];

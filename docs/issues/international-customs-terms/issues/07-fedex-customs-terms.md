@@ -64,7 +64,8 @@ the ITN or exemption in `exportDetail`.
   test that DDP and DDU terms on the `RateRequest` do not change it. Shipper `tins`:
   the seller registration first, then the client's EIN (`FEDERAL`) when an ITN is sent;
   the recipient's `tins` hold the recipient tax ID (`PERSONAL_NATIONAL`, or
-  `BUSINESS_NATIONAL` for a CNPJ or a VAT/other ID of a recipient with a company name).
+  `BUSINESS_NATIONAL` for a CNPJ or a VAT number, which is a business's whatever the
+  company name; only an `other` ID follows the company name).
   `customsClearanceDetail.exportDetail.exportComplianceStatement` is `AES` plus the ITN
   (`AESX20261008123456`) and is omitted otherwise; an exemption is never sent. All of it is
   sent only on a label with a customs declaration. The recipient email goes in
@@ -91,7 +92,11 @@ the ITN or exemption in `exportDetail`.
   Shipment without one.
   **Review lessons from `06`, applied.** Tax IDs and the EIN are scrubbed (whole tokens,
   `scrubCustomsIds()`) only from log lines and failure messages: the API-error log and the
-  returned failure message, the no-answer warning, the generic-error log and message.
+  returned failure message, the no-answer warning, the generic-error log and message,
+  and (review fix) the Saturday-retry line, `LABEL RESPONSE` and the three missing-data
+  logs; `$responseData` itself stays unmodified for parsing, and the tracking number and
+  label data are asserted untouched. The rate, tracking and void logs carry none of
+  these IDs and are left alone.
   Nothing parsed or persisted is scrubbed (the response is read unmodified), and tests
   cover an error echoing both, a 503 echoing both, a longer identifier containing the
   EIN as a substring surviving in the message, and the configured `fedex-validation`

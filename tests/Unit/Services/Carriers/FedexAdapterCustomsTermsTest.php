@@ -304,8 +304,10 @@ it('sends the recipient tax ID as the recipient TIN', function (RecipientTaxIdTy
     'CPF' => [RecipientTaxIdType::Cpf, '12345678909', null, 'PERSONAL_NATIONAL'],
     'CNPJ' => [RecipientTaxIdType::Cnpj, '12ABC34501DE35', 'Acme Ltda', 'BUSINESS_NATIONAL'],
     'PCCC' => [RecipientTaxIdType::Pccc, 'P123456789012', null, 'PERSONAL_NATIONAL'],
+    'a VAT number, whatever the company name' => [RecipientTaxIdType::Vat, 'BR123456', null, 'BUSINESS_NATIONAL'],
     'a VAT number of a company' => [RecipientTaxIdType::Vat, 'BR123456', 'Acme Ltda', 'BUSINESS_NATIONAL'],
-    'a VAT number of a person' => [RecipientTaxIdType::Vat, 'BR123456', null, 'PERSONAL_NATIONAL'],
+    'another ID of a company' => [RecipientTaxIdType::Other, 'ABC123', 'Acme Ltda', 'BUSINESS_NATIONAL'],
+    'another ID of a person' => [RecipientTaxIdType::Other, 'ABC123', null, 'PERSONAL_NATIONAL'],
 ]);
 
 it('leaves out a recipient tax ID longer than FedEx takes, and does not record it', function (): void {
@@ -555,3 +557,132 @@ it('keeps the recipient tax ID out of the configured FedEx validation channel', 
         ->and($written)->toContain('customsClearanceDetail')
         ->and($written)->not->toContain('45678912300');
 });
+
+/**
+ * Run $call against the configured fedex-validation channel (taps included,
+ * writing to the testing log) and return what it wrote meanwhile.
+ */
+function fedexLogWrittenDuring(Closure $call): string
+{
+    Log::forgetChannel('fedex-validation');
+    $log = storage_path('logs/testing.log');
+    $before = is_file($log) ? filesize($log) : 0;
+
+    $call();
+
+    clearstatcache();
+
+    return (string) file_get_contents($log, offset: $before);
+}
+
+function fedexBrazilRequestWithCpf(array $specialServiceCodes = []): ShipRequest
+{
+    $request = fedexCustomsShipRequest(
+        fedexCustomsBrazil(),
+        fedexCustomsTerms('BR', DutiesTerms::Ddu),
+        new RecipientTaxId(RecipientTaxIdType::Cpf, '98765432100'),
+        'X20261008123456',
+        '123456789',
+    );
+
+    return new ShipRequest(
+        fromAddress: $request->fromAddress,
+        toAddress: $request->toAddress,
+        packageData: $request->packageData,
+        selectedRate: $request->selectedRate,
+        customsItems: $request->customsItems,
+        specialServiceCodes: $specialServiceCodes,
+        shipDate: $request->shipDate,
+        exportItn: $request->exportItn,
+        customsTerms: $request->customsTerms,
+        recipientTaxId: $request->recipientTaxId,
+        exporterEin: $request->exporterEin,
+    );
+}
+
+it('keeps the tax ID out of the Saturday-retry log line, even when the retry succeeds', function (): void {
+    $calls = 0;
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => function () use (&$calls): MockResponse {
+            $calls++;
+
+            return $calls === 1
+                ? MockResponse::make(['errors' => [['code' => 'SHIPMENT.SATURDAY.NOTALLOWED', 'message' => 'Saturday delivery not allowed; invalid TIN 98765432100 and EIN 123456789', 'parameterList' => [['key' => 'tin', 'value' => '98765432100']]]]], 422)
+                : MockResponse::make(['output' => ['transactionShipments' => [[
+                    'masterTrackingNumber' => '794644790138',
+                    'pieceResponses' => [['trackingNumber' => '794644790138', 'packageDocuments' => [['encodedLabel' => 'JVBERi0xLjQKYmFzZTY0bGFiZWxkYXRh']]]],
+                ]]]]);
+        },
+    ]);
+
+    $response = null;
+    $written = fedexLogWrittenDuring(function () use (&$response): void {
+        $response = $this->adapter->createShipment(fedexBrazilRequestWithCpf(['saturday_delivery']));
+    });
+
+    expect($calls)->toBe(2)
+        ->and($response->success)->toBeTrue()
+        ->and($written)->toContain('retrying without')
+        ->and($written)->not->toContain('98765432100')
+        ->and($written)->not->toContain('123456789');
+});
+
+it('keeps the tax ID out of the LABEL RESPONSE log, and parses the reply untouched', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => MockResponse::make(['output' => [
+            // The EIN is a substring of the tracking number: a whole-token
+            // scrub leaves it, and nothing parsed is scrubbed anyway.
+            'alerts' => [['code' => 'TIN.WARNING', 'message' => 'Check tax ID 98765432100 for the recipient', 'parameterList' => [['key' => 'tin', 'value' => '98765432100']]]],
+            'transactionShipments' => [[
+                'masterTrackingNumber' => '794644790138',
+                'pieceResponses' => [['trackingNumber' => '794644790138', 'packageDocuments' => [['encodedLabel' => 'JVBERi0xLjQKYmFzZTY0bGFiZWxkYXRh']]]],
+            ]],
+        ]]),
+    ]);
+
+    $response = null;
+    $written = fedexLogWrittenDuring(function () use (&$response): void {
+        $response = $this->adapter->createShipment(fedexBrazilRequestWithCpf());
+    });
+
+    expect($response->success)->toBeTrue()
+        ->and($response->trackingNumber)->toBe('794644790138')
+        ->and($response->labelData)->toBe('JVBERi0xLjQKYmFzZTY0bGFiZWxkYXRh')
+        ->and($written)->toContain('LABEL RESPONSE')
+        ->and($written)->not->toContain('98765432100');
+});
+
+it('keeps the tax ID out of the missing-data logs', function (array $output, string $log, string $failure): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => MockResponse::make(['output' => $output]),
+    ]);
+
+    $response = null;
+    $written = fedexLogWrittenDuring(function () use (&$response): void {
+        $response = $this->adapter->createShipment(fedexBrazilRequestWithCpf());
+    });
+
+    expect($response->success)->toBeFalse()
+        ->and($response->errorMessage)->toBe($failure)
+        ->and($written)->toContain($log)
+        ->and($written)->not->toContain('98765432100');
+})->with([
+    'no shipment' => [
+        ['alerts' => [['code' => 'X', 'message' => 'tax ID 98765432100 unreadable']]],
+        'FedEx createShipment missing shipment data',
+        'FedEx response missing shipment data',
+    ],
+    'no tracking number' => [
+        ['transactionShipments' => [['serviceName' => 'tax ID 98765432100', 'pieceResponses' => []]]],
+        'FedEx createShipment missing tracking number',
+        'FedEx response missing tracking number',
+    ],
+    'no label' => [
+        ['transactionShipments' => [['masterTrackingNumber' => '794644790138', 'pieceResponses' => [['trackingNumber' => '794644790138', 'packageDocuments' => [['note' => 'tax ID 98765432100']]]]]]],
+        'FedEx createShipment missing label data',
+        'FedEx response missing label data',
+    ],
+]);
