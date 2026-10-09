@@ -1,6 +1,6 @@
 # USPS prepays duties when the terms say DDP, gated by account terms acceptance
 
-Status: needs-info
+Status: ready-for-agent
 Category: enhancement
 Repo: `polybag`
 
@@ -8,7 +8,10 @@ Repo: `polybag`
 
 ## Parent
 
-[PRD](../PRD.md); ADR-0008 decision 4. Needs `02`'s USPS answers, `04`, `06` and `12` (IOSS parcels to AT and SE must be DDP).
+[PRD](../PRD.md); ADR-0008 decision 4. Needs `02`'s USPS answers, `04`, `06` and `12`, all done. The IOSS-plus-prepay question that
+blocked this is settled for now by the comments dated 2026-10-09: USPS is dropped for a parcel
+carrying a registration, so the adapter never has to send both. Build `eu-product-identifiers/07`
+first; it edits the same request builder.
 
 ## Problem
 
@@ -19,7 +22,11 @@ countries that require DDP, and no registration reaches the customs form.
 
 **Purchase.** The label request sends `prepayDutiesTaxesFees: true` when the resolved term
 is DDP. The returned `prepaidDutiesTaxesFees` total is stored in
-`package_labels.duties_cost`. The seller registration goes where `02` found USPS wants it.
+`package_labels.duties_cost`. The seller registration goes where `02` found USPS wants it
+(`customsForm.exportersReference`, `VAT_NUMBER`). **Never together with the flag:** any exporter
+reference makes USPS silently drop `prepayDutiesTaxesFees`, so the adapter throws before buying
+a label that sends both, rather than buying DDU while recording DDP. This holds whatever the
+rate filter did, and covers Northern Ireland, which the country-keyed table cannot express.
 The rate request stays transport-only (no duty quote — PRD *Later*).
 
 **Account acceptance.** `carrier_accounts.ddp_terms_accepted_at` and
@@ -33,10 +40,15 @@ enrolment instead, this shrinks to a confirmation checkbox with no terms text.
 ## Acceptance criteria
 
 - [ ] DDP sends the flag; DDU does not
+- [ ] A request with a registration and DDP is refused before any call to USPS, with a reason
+      naming the exporter-reference limit; a registration with DDU is sent in
+      `exportersReference`; DDP without a registration sends no exporter reference
 - [ ] `duties_cost` is stored from a response that carries it, and is null otherwise
 - [ ] Only an Admin can record acceptance; a manager cannot
 - [ ] An account without acceptance gets no USPS DDP rates, and the reason is shown
 - [ ] The USPS label request schema test accepts the new fields
+- [ ] A DDP label to Germany (no registration) buys with TEM and stores the response's `duties_cost`
+- [ ] `PiiRedactor` redacts `importersReference` and `exportersReference` as the 2026-10-07 comment says
 
 ## Comments
 
@@ -47,7 +59,7 @@ enrolment instead, this shrinks to a confirmation checkbox with no terms text.
   recipient's number (the seller's registration may stay), with a test. Also keep the
   recipient tax ID out of the snapshot, as `06` does.
 - 2026-10-08 — `02`'s USPS answers, from TEM and the IMM:
-  - **Blocked until USPS answers (`needs-info`).** With `prepayDutiesTaxesFees: true` and
+  - **Superseded 2026-10-09: no longer blocked.** With `prepayDutiesTaxesFees: true` and
     an IOSS number in `exportersReference`, TEM returns no `prepaidDutiesTaxesFees` at
     all, not even the duty. Nine EU destinations take IOSS parcels only with duties
     prepaid (`12`), so if IOSS and prepay do not combine, USPS cannot carry an IOSS
