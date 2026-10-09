@@ -29,6 +29,7 @@ use App\Models\ShippingOffer;
 use App\Services\Carriers\UspsAdapter;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use Saloon\Contracts\Body\HasBody;
 use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Exceptions\Request\ServerException;
 use Saloon\Exceptions\Request\Statuses\InternalServerErrorException;
@@ -2199,6 +2200,117 @@ it('leaves the invoice number off the customs form when no reference is printed'
 
         return ! array_key_exists('invoiceNumber', $request->body()->all()['customsForm']);
     });
+});
+
+/**
+ * @param  array<int, CustomsItem>  $items
+ * @return array<string, mixed> the customsForm USPS was sent
+ */
+function sentUspsCustomsForm(AddressData $to, array $items, string $labelClass = InternationalLabel::class): array
+{
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        PaymentAuthorization::class => MockResponse::make(['paymentAuthorizationToken' => 'test_payment_token']),
+        $labelClass => MockResponse::make(
+            body: "--boundary\r\nContent-Type: application/json\r\n\r\n{\"trackingNumber\":\"LN123456789US\",\"internationalTrackingNumber\":\"LN123456789US\",\"postage\":42.50}\r\n--boundary\r\nContent-Type: application/pdf\r\n\r\nJVBERi0xLjQKYmFzZTY0bGFiZWxkYXRh\r\n--boundary--",
+            headers: ['Content-Type' => 'multipart/mixed; boundary=boundary']
+        ),
+    ]);
+
+    $request = new ShipRequest(
+        fromAddress: new AddressData(firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle', stateOrProvince: 'WA', postalCode: '98072'),
+        toAddress: $to,
+        packageData: new PackageData(weight: 2.5, length: 10, width: 8, height: 6),
+        selectedRate: new RateResponse(
+            carrier: 'USPS',
+            serviceCode: 'PRIORITY_MAIL_INTERNATIONAL',
+            serviceName: 'Priority Mail International',
+            price: 42.50,
+            metadata: ['mailClass' => 'PRIORITY_MAIL_INTERNATIONAL', 'processingCategory' => 'MACHINABLE', 'rateIndicator' => 'SP'],
+        ),
+        customsItems: $items,
+    );
+
+    expect(test()->adapter->createShipment($request)->success)->toBeTrue();
+
+    $form = null;
+    Saloon::assertSent(function (Request $sent) use (&$form, $labelClass): bool {
+        if (! $sent instanceof $labelClass || ! $sent instanceof HasBody) {
+            return false;
+        }
+
+        $body = $sent->body()->all();
+        assertMatchesUspsSchema($body, $labelClass === Label::class ? 'LabelRequest' : 'InternationalLabelRequest');
+        $form = $body['customsForm'];
+
+        return true;
+    });
+
+    return $form;
+}
+
+function uspsAddressIn(string $country, ?string $company = null): AddressData
+{
+    return new AddressData(firstName: 'Camille', lastName: 'Durand', streetAddress: '12 Rue de Rivoli', city: 'Paris', stateOrProvince: 'IDF', postalCode: '75001', country: $country, company: $company);
+}
+
+it('declares an EU consumer parcel with its product identifiers', function (): void {
+    $form = sentUspsCustomsForm(uspsAddressIn('FR'), [
+        new CustomsItem(description: 'Blue Widget', quantity: 1, unitValue: 19.99, weight: 0.5, countryOfOrigin: 'US', merchantProductId: 'SKU1', manufacturerProductId: 'MPN1', standardProductId: '00012345678905'),
+        new CustomsItem(description: 'Red Widget', quantity: 1, unitValue: 9.99, weight: 0.5, countryOfOrigin: 'US', merchantProductId: 'SKU2', manufacturerProductId: 'MPN2'),
+        new CustomsItem(description: 'Green Widget', quantity: 1, unitValue: 9.99, weight: 0.5, countryOfOrigin: 'US', merchantProductId: 'SKU3'),
+    ]);
+
+    expect($form['incoterm'])->toBe('1')
+        ->and($form['contents'][0]['europeanUnionProductID'])->toBe([
+            'merchantProductIdentifier' => 'SKU1',
+            'nonstandardizedManufacturerProductIdentifier' => 'MPN1',
+            'standardizedManufacturerProductIdentifier' => '00012345678905',
+        ])
+        ->and($form['contents'][1]['europeanUnionProductID'])->toBe([
+            'merchantProductIdentifier' => 'SKU2',
+            'nonstandardizedManufacturerProductIdentifier' => 'MPN2',
+        ])
+        ->and($form['contents'][2])->not->toHaveKey('europeanUnionProductID');
+});
+
+it('declares an EU business parcel as business to business and still sends the identifiers', function (): void {
+    $form = sentUspsCustomsForm(uspsAddressIn('FR', 'Maison Durand SARL'), [
+        new CustomsItem(description: 'Blue Widget', quantity: 1, unitValue: 19.99, weight: 0.5, countryOfOrigin: 'US', merchantProductId: 'SKU1', manufacturerProductId: 'MPN1'),
+    ]);
+
+    expect($form['incoterm'])->toBe('2')
+        ->and($form['contents'][0]['europeanUnionProductID']['merchantProductIdentifier'])->toBe('SKU1');
+});
+
+it('sends neither commerce type nor identifiers outside the EU', function (): void {
+    $item = new CustomsItem(description: 'Blue Widget', quantity: 1, unitValue: 19.99, weight: 0.5, countryOfOrigin: 'US', merchantProductId: 'SKU1', manufacturerProductId: 'MPN1');
+
+    $canada = sentUspsCustomsForm(uspsAddressIn('CA'), [$item]);
+    $apo = sentUspsCustomsForm(new AddressData(firstName: 'John', lastName: 'Doe', streetAddress: 'PSC 402 BOX 301', city: 'FPO', stateOrProvince: 'AE', postalCode: '09532'), [$item], Label::class);
+
+    expect($canada)->not->toHaveKey('incoterm')
+        ->and($canada['contents'][0])->not->toHaveKey('europeanUnionProductID')
+        ->and($apo)->not->toHaveKey('incoterm')
+        ->and($apo['contents'][0])->not->toHaveKey('europeanUnionProductID');
+});
+
+it('strips punctuation from identifiers for USPS and cuts them to the field length', function (): void {
+    $form = sentUspsCustomsForm(uspsAddressIn('FR'), [
+        new CustomsItem(description: 'Blue Widget', quantity: 1, unitValue: 19.99, weight: 0.5, countryOfOrigin: 'US', merchantProductId: 'SKU-123/A', manufacturerProductId: str_repeat('M', 80), standardProductId: '---'),
+        new CustomsItem(description: 'Red Widget', quantity: 1, unitValue: 9.99, weight: 0.5, countryOfOrigin: 'US', merchantProductId: str_repeat('S', 60), manufacturerProductId: '//-'),
+        new CustomsItem(description: 'Pink Widget', quantity: 1, unitValue: 9.99, weight: 0.5, countryOfOrigin: 'US', merchantProductId: str_repeat('S', 60), manufacturerProductId: 'MPN 3'),
+    ]);
+
+    expect($form['contents'][0]['europeanUnionProductID'])->toBe([
+        'merchantProductIdentifier' => 'SKU123A',
+        'nonstandardizedManufacturerProductIdentifier' => str_repeat('M', 70),
+    ])
+        ->and($form['contents'][1])->not->toHaveKey('europeanUnionProductID')
+        ->and($form['contents'][2]['europeanUnionProductID'])->toBe([
+            'merchantProductIdentifier' => str_repeat('S', 50),
+            'nonstandardizedManufacturerProductIdentifier' => 'MPN3',
+        ]);
 });
 
 it('omits the customs form for ordinary domestic destinations', function (): void {

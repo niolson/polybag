@@ -144,6 +144,7 @@
         "AESITN": { "type": "string", "minLength": 1 },
         "customsContentType": { "type": "string", "enum": ["MERCHANDISE"] },
         "invoiceNumber": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "incoterm": { "type": "string", "enum": ["1", "2"], "description": "The commerce type, not DDP/DDU: 1 business to consumer, 2 business to business. Sent only to EU destinations. Added from the field definitions USPS posted on 2026-10-07; not yet in a published spec." },
         "contents": {
           "type": "array",
           "minItems": 1,
@@ -163,7 +164,19 @@
         "weightUOM": { "type": "string", "enum": ["lb"] },
         "itemTotalWeight": { "type": "number", "minimum": 0 },
         "countryofOrigin": { "type": "string", "pattern": "^[A-Z]{2}$" },
-        "HSTariffNumber": { "type": "string", "minLength": 1 }
+        "HSTariffNumber": { "type": "string", "minLength": 1 },
+        "europeanUnionProductID": { "$ref": "#/definitions/EuropeanUnionProductID" }
+      }
+    },
+    "EuropeanUnionProductID": {
+      "description": "Per-line EU product identifiers, from the field definitions USPS posted on 2026-10-07 (not yet in a published spec). Letters and digits only. The standardized identifier is omitted, never a placeholder, when the product has none.",
+      "type": "object",
+      "required": ["merchantProductIdentifier", "nonstandardizedManufacturerProductIdentifier"],
+      "additionalProperties": false,
+      "properties": {
+        "merchantProductIdentifier": { "type": "string", "pattern": "^[A-Za-z0-9]{1,50}$" },
+        "nonstandardizedManufacturerProductIdentifier": { "type": "string", "pattern": "^[A-Za-z0-9]{1,70}$" },
+        "standardizedManufacturerProductIdentifier": { "type": "string", "pattern": "^[A-Za-z0-9]{1,50}$" }
       }
     },
     "ImageInfo": {

@@ -1,6 +1,6 @@
 # USPS: `incoterm` and `europeanUnionProductID` on EU-bound international labels
 
-Status: ready-for-agent
+Status: ready-for-human
 Category: enhancement
 Repo: `polybag`
 
@@ -110,3 +110,43 @@ The rate request is not touched.
   PolyBag works both out from the shipment instead
 - How a missing GTIN is declared as `Y081`, which is `06`'s question. USPS's "omit when
   unavailable" is the same answer UPS gives
+
+## Comments
+
+### 2026-10-09: built from the field definitions in this issue
+
+Status moved to `ready-for-human`: the code is done, the verification criterion is not.
+
+Built:
+
+- `UspsAdapter::buildCustomsForm()` adds `incoterm` (via `euCommerceType()`, named for
+  the commerce type it holds, never derived from the duties term) when
+  `isInEuropeanUnion()`: `"2"` with a company name, else `"1"`. Other destinations,
+  APO included, are unchanged.
+- Each line with both a merchant and a manufacturer identifier gains
+  `europeanUnionProductID` (`euProductIdentifiers()`), standard identifier only when
+  present, on `"1"` and `"2"` alike (the issue's default). A line missing either gets no
+  block.
+- `alphanumericProductIdentifier()` is the one method that strips non-`[A-Za-z0-9]`
+  characters and cuts to 50/70/50. An identifier empty after stripping counts as
+  missing. `CustomsItem` and the FedEx and UPS bodies are untouched. The rate request is
+  untouched.
+- `tests/Fixtures/Schemas/uspsLabel.json` is hand-written, so the two fields and the
+  patterns were added to it directly (not a vendored-spec patch as for UPS); it still
+  validates every body in `UspsAdapterTest`. The new tests cover the France consumer and
+  business cases, the missing GTIN and missing part number lines, Canada and APO, and
+  `SKU-123/A`, punctuation-only and over-length identifiers.
+- The `usps-validation` log already records the whole label payload, so the block shows
+  there without further change.
+
+No deviations from the issue.
+
+Not verified (nothing was sent to USPS):
+
+- The published 2026-10-14 spec has not been compared with the definitions here.
+- Whether the request without the block fails.
+- Whether the block is accepted on an `incoterm` `"2"` form. If USPS rejects it, send
+  the block only with `"1"` (one condition in `buildCustomsForm()`).
+- Whether a value with a hyphen fails, and what USPS wants for punctuated SKUs. The
+  stripping is the stated default until USPS answers; only `alphanumericProductIdentifier()`
+  changes.

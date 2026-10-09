@@ -8,6 +8,7 @@ use App\Contracts\RecoversUnresolvedPurchase;
 use App\Contracts\UsesCarrierAccount;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
+use App\DataTransferObjects\Shipping\CustomsItem;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
@@ -116,6 +117,15 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
      * @var array<int, int>
      */
     private const INTERNATIONAL_EXTRA_SERVICES = [930, 931, 820];
+
+    /**
+     * Values of `customsForm.incoterm`, which USPS uses for the commerce type
+     * (not DDP/DDU). "3" consumer to consumer and "4" consumer to business are
+     * never sent: the shipper is always a business.
+     */
+    private const COMMERCE_TYPE_BUSINESS_TO_CONSUMER = '1';
+
+    private const COMMERCE_TYPE_BUSINESS_TO_BUSINESS = '2';
 
     /**
      * Plain-language equivalents for USPS label API error codes.
@@ -1265,6 +1275,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
      */
     private function buildCustomsForm(ShipRequest $request): array
     {
+        $commerceType = $this->euCommerceType($request->toAddress);
         $contents = [];
 
         foreach ($request->customsItems as $item) {
@@ -1286,6 +1297,10 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
                 $contentItem['HSTariffNumber'] = $item->hsTariffNumber;
             }
 
+            if ($commerceType !== null && ($productIds = $this->euProductIdentifiers($item)) !== null) {
+                $contentItem['europeanUnionProductID'] = $productIds;
+            }
+
             $contents[] = $contentItem;
         }
 
@@ -1300,8 +1315,70 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
             'AESITN' => $this->exportFilingReference($request),
             'customsContentType' => 'MERCHANDISE',
             ...($reference !== null ? ['invoiceNumber' => $reference] : []),
+            // USPS names this field `incoterm`, but it holds the commerce type.
+            // It has nothing to do with the duties terms (DDP/DDU).
+            ...($commerceType !== null ? ['incoterm' => $commerceType] : []),
             'contents' => $contents,
         ];
+    }
+
+    /**
+     * What USPS's `customsForm.incoterm` declares for an EU destination:
+     * "1" business to consumer, "2" business to business. The adapter always
+     * sends merchandise from a business, so only the consignee varies, and a
+     * consignee with no company name is a consumer (as in UpsAdapter's
+     * ConsigneeType). "3" and "4" are never sent. Null outside the EU.
+     */
+    private function euCommerceType(AddressData $to): ?string
+    {
+        if (! $to->isInEuropeanUnion()) {
+            return null;
+        }
+
+        return filled($to->company) ? self::COMMERCE_TYPE_BUSINESS_TO_BUSINESS : self::COMMERCE_TYPE_BUSINESS_TO_CONSUMER;
+    }
+
+    /**
+     * The `europeanUnionProductID` block for one line, or null when the line
+     * lacks a merchant or manufacturer identifier (after USPS's character
+     * limits are applied). A partial block is an invalid body. The standard
+     * identifier is added only when there is one, never as a placeholder.
+     *
+     * @return array{merchantProductIdentifier: string, nonstandardizedManufacturerProductIdentifier: string, standardizedManufacturerProductIdentifier?: string}|null
+     */
+    private function euProductIdentifiers(CustomsItem $item): ?array
+    {
+        $merchant = $this->alphanumericProductIdentifier($item->merchantProductId, 50);
+        $manufacturer = $this->alphanumericProductIdentifier($item->manufacturerProductId, 70);
+
+        if ($merchant === null || $manufacturer === null) {
+            return null;
+        }
+
+        $standard = $this->alphanumericProductIdentifier($item->standardProductId, 50);
+
+        return [
+            'merchantProductIdentifier' => $merchant,
+            'nonstandardizedManufacturerProductIdentifier' => $manufacturer,
+            ...($standard !== null ? ['standardizedManufacturerProductIdentifier' => $standard] : []),
+        ];
+    }
+
+    /**
+     * USPS's identifier patterns allow only letters and digits. Until USPS says
+     * how punctuated SKUs are meant to be sent, strip everything else and cut
+     * to the field's length; an identifier left empty counts as missing. This
+     * is the only place that changes if USPS answers differently.
+     */
+    private function alphanumericProductIdentifier(?string $identifier, int $maxLength): ?string
+    {
+        if ($identifier === null) {
+            return null;
+        }
+
+        $stripped = mb_substr(preg_replace('/[^A-Za-z0-9]/', '', $identifier) ?? '', 0, $maxLength);
+
+        return $stripped === '' ? null : $stripped;
     }
 
     /**
