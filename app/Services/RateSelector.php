@@ -132,10 +132,13 @@ class RateSelector
 
         [$heldBySetting, $unrestricted] = $this->partitionByPostageSetting($unrestricted->values(), $channelSource);
 
-        [$heldForSourceTerms, $unrestricted] = $this->partitionBySourceTerms($unrestricted->values(), $sourceTermsDestination);
-
         $inactive = InactiveCatalog::among($unrestricted);
         [$deactivated, $unrestricted] = $unrestricted->partition(fn (RateResponse $rate): bool => $inactive->includes($rate));
+
+        // After the inactivity check: the Ship page grays an inactive service
+        // out, so it is no attended alternative and must be reported as
+        // inactive, not as held for the destination.
+        [$heldForSourceTerms, $unrestricted] = $this->partitionBySourceTerms($unrestricted->values(), $sourceTermsDestination);
 
         [$eligible, $notAllowed] = $this->partitionByAllowance($unrestricted->values(), $method);
 

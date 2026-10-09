@@ -45,9 +45,11 @@ use App\Models\User;
 use App\Services\AmazonBuyShippingService;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Customs\CustomsTermsSnapshot;
+use App\Services\PackageShipping\UnattendedRateSelector;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\Shipping\DutiesTermsFilter;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Livewire\Livewire;
 use Mockery\MockInterface;
@@ -657,4 +659,53 @@ it('adds nothing about customs terms when none were ruled out', function (): voi
     expect($result->title)->toBe('Source Decides Duties Terms')
         ->and($result->message)->not->toContain('Choose EU duties terms')
         ->and($result->message)->not->toContain('continental');
+});
+
+it('holds an Amazon offer for the destination the database holds now, not the one the loaded Shipment remembers', function (): void {
+    $package = sdAmazonPackage('CA');
+    sdRegisterAmazonQuote();
+    $loaded = Package::with('shipment')->findOrFail($package->id);
+
+    DB::table('shipments')->where('id', $package->shipment_id)->update([
+        'country' => 'DE', 'city' => 'Berlin', 'state_or_province' => null, 'postal_code' => '10117',
+    ]);
+
+    $selection = app(UnattendedRateSelector::class)->select($loaded);
+
+    expect($loaded->shipment->country)->toBe('DE')
+        ->and($selection->rate)->toBeNull()
+        ->and($selection->heldForSourceTerms)->toHaveCount(1)
+        ->and($selection->sourceTermsDestination)->toBe('DE');
+});
+
+it('holds a Shopify blind purchase for the destination the database holds now', function (): void {
+    $package = sdShopifyPackage('CA');
+    sdRegisterShopify();
+    $loaded = Package::with('shipment')->findOrFail($package->id);
+
+    DB::table('shipments')->where('id', $package->shipment_id)->update([
+        'country' => 'DE', 'city' => 'Berlin', 'state_or_province' => null, 'postal_code' => '10117',
+    ]);
+
+    $selection = app(UnattendedRateSelector::class)->select($loaded);
+
+    expect($selection->blindOffer)->toBeNull()
+        ->and($selection->blindOffersHeldForSourceTerms)->toHaveCount(1);
+});
+
+it('reports an inactive Amazon service as inactive, not as held for the destination', function (): void {
+    $package = sdEuPackage('DE');
+    // Amazon maps the offer to a service somebody deactivated; the method's own
+    // service stays active, so the source is still asked.
+    $deactivated = CarrierService::factory()->create([
+        'carrier_id' => CarrierService::where('service_code', 'GROUND')->value('carrier_id'),
+        'service_code' => 'PRIORITY',
+        'active' => false,
+    ]);
+    $rate = sdAmazonRate();
+    sdRegisterAmazonQuote([new RateResponse($rate->carrier, $rate->serviceCode, $rate->serviceName, $rate->price, observedService: $rate->observedService, carrierServiceId: $deactivated->id)]);
+
+    $result = sdAutoShip($this->user, $package);
+
+    expect($result->title)->toBe('Inactive Services Only');
 });

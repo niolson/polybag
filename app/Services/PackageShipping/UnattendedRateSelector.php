@@ -68,7 +68,11 @@ class UnattendedRateSelector
      */
     public function select(Package $package): UnattendedRateSelection
     {
-        $package->loadMissing(['packageItems.product', 'packageItems.shipmentItem', 'shipment.shippingMethod']);
+        // Read afresh: the hold below, the rules and the quote must all see the
+        // destination the database holds now, or a Shipment edited since this
+        // Package was loaded would be held (or not) for the wrong country
+        // while rate shopping, which reloads, quotes the right one.
+        $package->load(['location', 'packageItems.product', 'packageItems.shipmentItem', 'shipment.shippingMethod']);
 
         $ruleResult = $this->ruleEvaluator->evaluate($package->shipment, $package);
         $method = $package->shipment->shippingMethod

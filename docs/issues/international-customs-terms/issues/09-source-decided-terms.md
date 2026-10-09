@@ -135,4 +135,15 @@ close.
     beside a held Shopify purchase; EU-to-EU, Canada, a US territory (not held) and Northern
     Ireland (held as GB); the allowance refusal with the hold named beside it under both
     `UnlistedServices` settings; a strict Amazon rule's pre-selected rate.
+- 2026-10-09 — From the PR review. **Stale destination:** `UnattendedRateSelector::select()`
+  used `loadMissing()`, so a Shipment edited after the Package was loaded was held (or not)
+  for its old country while rate shopping, which reloads, quoted the new one. It now
+  `load()`s the Package's location, items and Shipment first, so the hold, the rules, the
+  blind-offer branches and the purchase that follows (same instance) all read the database's
+  destination. The Ship page badge reads the terms the quote itself resolved, so it was not
+  affected. **Inactive services:** `RateSelector::selectForAutomation()` now applies the
+  inactivity check before the source-terms hold, so an inactive Amazon service is reported as
+  inactive rather than sent to a Ship page that disables it. Blind offers have no inactivity
+  check anywhere (neither the Ship page nor the purchase gate them), so those branches have no
+  such ordering. Regression tests cover both.
 
