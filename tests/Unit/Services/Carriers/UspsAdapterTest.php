@@ -29,6 +29,7 @@ use App\Models\ShippingOffer;
 use App\Services\Carriers\UspsAdapter;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use Saloon\Contracts\Body\HasBody;
 use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Exceptions\Request\ServerException;
 use Saloon\Exceptions\Request\Statuses\InternalServerErrorException;
@@ -2234,7 +2235,7 @@ function sentUspsCustomsForm(AddressData $to, array $items, string $labelClass =
 
     $form = null;
     Saloon::assertSent(function (Request $sent) use (&$form, $labelClass): bool {
-        if (! $sent instanceof $labelClass) {
+        if (! $sent instanceof $labelClass || ! $sent instanceof HasBody) {
             return false;
         }
 
