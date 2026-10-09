@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -42,6 +43,17 @@ class CarrierAccountFactory extends Factory
         return $this->state(fn () => [
             'carrier_id' => fn (): int => Carrier::firstOrCreate(['name' => Carrier::FEDEX])->id,
             'name' => 'FedEx Account',
+        ]);
+    }
+
+    /**
+     * An account whose Admin has accepted USPS's prepaid-duties terms.
+     */
+    public function ddpTermsAccepted(): static
+    {
+        return $this->state(fn () => [
+            'ddp_terms_accepted_at' => now(),
+            'ddp_terms_accepted_by' => User::factory(),
         ]);
     }
 

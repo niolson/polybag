@@ -4,14 +4,19 @@ namespace App\Filament\Resources\CarrierAccounts\Pages;
 
 use App\Filament\Resources\CarrierAccounts\CarrierAccountResource;
 use App\Filament\Resources\CarrierAccounts\Concerns\HasFedexRegistration;
+use App\Filament\Resources\CarrierAccounts\Schemas\CarrierAccountForm;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
+use App\Models\User;
 use App\Services\Carriers\UspsAdapter;
 use App\Services\OAuthService;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
+use Filament\Forms\Components\Checkbox;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\HtmlString;
 use LogicException;
 
 class EditCarrierAccount extends EditRecord
@@ -71,6 +76,55 @@ class EditCarrierAccount extends EditRecord
                 ->action(function (): void {
                     app(OAuthService::class)->disconnectAccount($this->record, 'usps');
                     Notification::make()->success()->title('USPS disconnected.')->send();
+                    $this->redirect(static::getUrl(['record' => $this->carrierAccountRecord()->id]));
+                }),
+
+            Action::make('usps_accept_ddp_terms')
+                ->label('Accept USPS DDP terms')
+                ->icon('heroicon-o-document-check')
+                ->color('gray')
+                ->visible(fn (): bool => $this->carrierAccountRecord()->carrier?->name === Carrier::USPS && ! $this->carrierAccountRecord()->hasAcceptedDdpTerms())
+                ->authorize(fn (): bool => Gate::allows('acceptDdpTerms', $this->carrierAccountRecord()))
+                ->modalHeading('Accept USPS prepaid-duties terms')
+                ->modalDescription(new HtmlString(
+                    'Sending USPS a label with prepaid duties and taxes (DDP) is agreement to the provider\'s '
+                    .'<a href="'.e(CarrierAccountForm::DDP_TERMS_URL).'" target="_blank" rel="noopener noreferrer" class="text-primary-600 underline">terms of service</a>. '
+                    .'Duties, taxes and fees on each such label are charged to this account at purchase, on top of the postage.'
+                ))
+                ->schema([
+                    Checkbox::make('accepted')
+                        ->label('I have read and accept the terms for this account, and will use DDP to ship goods to customers.')
+                        ->accepted()
+                        ->required(),
+                ])
+                ->modalSubmitActionLabel('Accept terms')
+                ->action(function (): void {
+                    $user = auth()->user();
+
+                    if (! $user instanceof User || Gate::denies('acceptDdpTerms', $this->carrierAccountRecord())) {
+                        abort(403);
+                    }
+
+                    $this->carrierAccountRecord()->recordDdpTermsAcceptance($user);
+                    Notification::make()->success()->title('USPS DDP terms accepted for this account.')->send();
+                    $this->redirect(static::getUrl(['record' => $this->carrierAccountRecord()->id]));
+                }),
+
+            Action::make('usps_withdraw_ddp_terms')
+                ->label('Withdraw DDP terms')
+                ->icon('heroicon-o-x-circle')
+                ->color('danger')
+                ->visible(fn (): bool => $this->carrierAccountRecord()->carrier?->name === Carrier::USPS && $this->carrierAccountRecord()->hasAcceptedDdpTerms())
+                ->authorize(fn (): bool => Gate::allows('acceptDdpTerms', $this->carrierAccountRecord()))
+                ->requiresConfirmation()
+                ->modalDescription('USPS DDP rates stop being offered on this account until an Admin accepts the terms again.')
+                ->action(function (): void {
+                    if (Gate::denies('acceptDdpTerms', $this->carrierAccountRecord())) {
+                        abort(403);
+                    }
+
+                    $this->carrierAccountRecord()->withdrawDdpTermsAcceptance();
+                    Notification::make()->success()->title('USPS DDP terms withdrawn for this account.')->send();
                     $this->redirect(static::getUrl(['record' => $this->carrierAccountRecord()->id]));
                 }),
 

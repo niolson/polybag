@@ -15,6 +15,8 @@ use App\Enums\DutiesTerms;
 use App\Enums\PackageStatus;
 use App\Enums\RecipientTaxIdType;
 use App\Enums\ShippingRuleAction;
+use App\Http\Integrations\USPS\Requests\InternationalLabel;
+use App\Http\Integrations\USPS\Requests\PaymentAuthorization;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
@@ -30,6 +32,7 @@ use App\Models\ShippingOffer;
 use App\Models\ShippingRule;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
+use App\Services\Carriers\UspsAdapter;
 use App\Services\Customs\DutiesSupportTable;
 use App\Services\PostageSources\OfferStore;
 use App\Services\PostageSources\UnresolvedPurchaseResolver;
@@ -37,6 +40,8 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Mockery\MockInterface;
+use Saloon\Http\Faking\MockResponse;
+use Saloon\Laravel\Facades\Saloon;
 
 /**
  * `international-customs-terms/06`: the shipping workflow records what a Label
@@ -381,4 +386,55 @@ it('records nothing for a label recorded by hand whose purchase declared nothing
     app(UnresolvedPurchaseResolver::class)->recordLabel($offer, '1Z999AA10123456784', User::factory()->manager()->create());
 
     expect($package->fresh()->activeLabel()->firstOrFail()->customs_terms)->toBeNull();
+});
+
+it('buys a DDP label to Germany through the USPS adapter and stores the prepaid duties on the Label', function (): void {
+    $account = createUspsAccount();
+    $account->recordDdpTermsAcceptance(User::factory()->create());
+    $package = snapshotPackage(Client::factory()->create(), ['duties_terms' => 'ddp', 'recipient_tax_id_type' => RecipientTaxIdType::Vat, 'recipient_tax_id' => 'DE123456789'], 'USPS');
+    app(CarrierRegistry::class)->registerInstance('USPS', new UspsAdapter);
+
+    $json = json_encode([
+        'internationalTrackingNumber' => 'LN123456789US',
+        'postage' => 31.40,
+        'prepaidDutiesTaxesFees' => ['packageFee' => 2.0, 'itemCosts' => [['dutyPrice' => 3.0, 'taxPrice' => 4.75, 'itemDescription' => 'Widget']]],
+    ]);
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        PaymentAuthorization::class => MockResponse::make(['paymentAuthorizationToken' => 'test_payment_token']),
+        InternationalLabel::class => MockResponse::make(
+            body: "--boundary\r\nContent-Type: application/json\r\n\r\n{$json}\r\n--boundary\r\nContent-Type: application/pdf\r\n\r\nJVBERi0xLjQKYmFzZTY0bGFiZWxkYXRh\r\n--boundary--",
+            headers: ['Content-Type' => 'multipart/mixed; boundary=boundary'],
+        ),
+    ]);
+
+    $rate = quotedDirectly($package, new RateResponse(
+        'USPS',
+        'TEST',
+        'Priority Mail International',
+        31.40,
+        metadata: ['mailClass' => 'PRIORITY_MAIL_INTERNATIONAL', 'processingCategory' => 'MACHINABLE', 'rateIndicator' => 'SP'],
+        carrierAccountId: $account->id,
+        carrierServiceId: CarrierService::query()->where('service_code', 'TEST')->value('id'),
+    ));
+
+    $result = app(PackageShippingWorkflow::class)->ship($package, new PackageShippingRequest(selectedRate: $rate, userId: auth()->id()));
+
+    expect($result->success)->toBeTrue($result->message ?? $result->title ?? '');
+
+    $label = $package->fresh()->activeLabel()->firstOrFail();
+
+    expect((float) $label->duties_cost)->toBe(9.75)
+        ->and((float) $label->cost)->toBe(31.40)
+        ->and($label->customs_terms)->toMatchArray([
+            'duties_terms' => 'ddp',
+            'duties_terms_source' => 'order',
+            'registration' => null,
+            'recipient_tax_id' => ['type' => 'vat'],
+        ])
+        ->and(json_encode($label->customs_terms))->not->toContain('DE123456789');
+
+    Saloon::assertSent(fn ($sent): bool => $sent instanceof InternationalLabel
+        && $sent->body()->all()['packageDescription']['prepayDutiesTaxesFees'] === true
+        && $sent->body()->all()['customsForm']['importersReference']['reference'] === 'DE123456789');
 });

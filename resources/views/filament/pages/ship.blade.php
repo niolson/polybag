@@ -328,6 +328,9 @@
                                             @if(!empty($rate['dutiesDecidedBy']))
                                                 <x-filament::badge color="info" size="sm">Duties: decided by {{ $rate['dutiesDecidedBy'] }}</x-filament::badge>
                                             @endif
+                                            @if(!empty($rate['dutiesCharge']))
+                                                <x-filament::badge color="warning" size="sm">{{ $rate['dutiesCharge'] }}</x-filament::badge>
+                                            @endif
                                             @isset($rate['otdrProtection'])
                                                 @if($rate['otdrProtection']['protected'])
                                                     <x-filament::badge color="success" size="sm">OTDR protected</x-filament::badge>

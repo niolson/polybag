@@ -65,6 +65,7 @@ readonly class ShipResponse
         array $appliedServices = [],
         ?int $carrierAccountId = null,
         ?string $customsFormData = null,
+        ?float $dutiesCost = null,
     ): self {
         return new self(
             success: true,
@@ -80,6 +81,7 @@ readonly class ShipResponse
             appliedServices: $appliedServices,
             carrierAccountId: $carrierAccountId,
             customsFormData: $customsFormData,
+            dutiesCost: $dutiesCost,
         );
     }
 

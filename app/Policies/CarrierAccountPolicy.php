@@ -42,4 +42,13 @@ class CarrierAccountPolicy
     {
         return $user->role->isAtLeast(Role::Admin);
     }
+
+    /**
+     * Accepting USPS's prepaid-duties terms makes the account holder liable for
+     * duties and taxes on every DDP label, so a manager cannot.
+     */
+    public function acceptDdpTerms(User $user, CarrierAccount $carrierAccount): bool
+    {
+        return $user->role->isAtLeast(Role::Admin);
+    }
 }

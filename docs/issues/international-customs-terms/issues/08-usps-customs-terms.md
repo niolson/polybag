@@ -1,6 +1,6 @@
 # USPS prepays duties when the terms say DDP, gated by account terms acceptance
 
-Status: ready-for-agent
+Status: ready-for-human
 Category: enhancement
 Repo: `polybag`
 
@@ -39,16 +39,16 @@ enrolment instead, this shrinks to a confirmation checkbox with no terms text.
 
 ## Acceptance criteria
 
-- [ ] DDP sends the flag; DDU does not
-- [ ] A request with a registration and DDP is refused before any call to USPS, with a reason
+- [x] DDP sends the flag; DDU does not
+- [x] A request with a registration and DDP is refused before any call to USPS, with a reason
       naming the exporter-reference limit; a registration with DDU is sent in
       `exportersReference`; DDP without a registration sends no exporter reference
-- [ ] `duties_cost` is stored from a response that carries it, and is null otherwise
-- [ ] Only an Admin can record acceptance; a manager cannot
-- [ ] An account without acceptance gets no USPS DDP rates, and the reason is shown
-- [ ] The USPS label request schema test accepts the new fields
+- [x] `duties_cost` is stored from a response that carries it, and is null otherwise
+- [x] Only an Admin can record acceptance; a manager cannot
+- [x] An account without acceptance gets no USPS DDP rates, and the reason is shown
+- [x] The USPS label request schema test accepts the new fields
 - [ ] A DDP label to Germany (no registration) buys with TEM and stores the response's `duties_cost`
-- [ ] `PiiRedactor` redacts `importersReference` and `exportersReference` as the 2026-10-07 comment says
+- [x] `PiiRedactor` redacts `importersReference` and `exportersReference` as the 2026-10-07 comment says
 
 ## Comments
 
@@ -121,4 +121,73 @@ enrolment instead, this shrinks to a confirmation checkbox with no terms text.
     in `exportersReference` on a request that sends `prepayDutiesTaxesFees: true`; throw
     rather than buy a DDU label recorded as DDP. That also covers Northern Ireland.
     Reverse the table entries if USPS names a supported request shape.
-
+- 2026-10-09 — **Built; waiting on a human for the live checks.** Branch
+  `usps-customs-terms`. Nothing was sent to USPS; every test uses Saloon fakes.
+  - **Purchase.** `UspsAdapter` adopts `SendsCustomsTerms`. International labels send
+    `packageDescription.prepayDutiesTaxesFees: true` when the resolved term is DDP, and
+    never `false`. A seller registration goes in `customsForm.exportersReference` as
+    `VAT_NUMBER` whatever the regime; the recipient tax ID in `importersReference`
+    (`VAT_NUMBER` for a VAT number, `TAX_CODE` for the rest, CPF included). A number over the
+    field's 28 characters is left out, never cut, and `declaredCustomsTerms()` agrees, so the
+    snapshot records only what was sent. APO/FPO/DPO labels declare none of it. The
+    `incoterm` commerce type and `europeanUnionProductID` from `eu-product-identifiers/07`
+    are untouched.
+  - **Refusals, before the idempotency key is issued and before any request:** a registration
+    that would be sent with DDP (message names the exporter-reference limit, the
+    destination, and that nothing was bought; also covers Northern Ireland), and a DDP label
+    on an account without recorded acceptance ("USPS DDP: account terms not accepted").
+    The second is a backstop to the rate filter; it is not in the issue.
+  - **`duties_cost`:** `packageFee` plus every `itemCosts[].dutyPrice` and `taxPrice`, null
+    when `prepaidDutiesTaxesFees` is absent. A DDP label that comes back without it logs a
+    warning (it means USPS bought it as DDU). The recovery (reprint) path reads the same
+    field; whether a reprint reply carries it is unknown. `ShipResponse::success()` gained a
+    `dutiesCost` parameter.
+  - **`030031`:** a 400 with that code on a DDP label becomes a decline naming the
+    destination ("USPS cannot prepay duties and taxes to Germany ... Nothing was bought")
+    and logs a warning that `duties-support.json` disagrees with USPS.
+  - **Acceptance.** Migration `2026_10_09_120000` adds `carrier_accounts.ddp_terms_accepted_at`
+    and `ddp_terms_accepted_by` (nullable FK to users, null on delete); not mass
+    assignable. An "Accept USPS DDP terms" action on the USPS carrier account edit page
+    shows the terms link (https://zonos.com/docs/legal/usps-terms-of-service), needs a
+    checkbox, and is authorized by a new `CarrierAccountPolicy::acceptDdpTerms()` (Admin
+    only; the whole resource was already Admin only, so a manager cannot reach the page
+    either). A "Prepaid Duties (DDP)" section shows who accepted and when. There is no
+    way to withdraw acceptance in the UI. `DutiesTermsFilter` drops a USPS DDP rate quoted
+    on an account without acceptance, or naming no account, with "USPS DDP: account terms
+    not accepted" and a link to the account; the support-table reason wins when both apply.
+    The Ship page marks a USPS DDP rate "DDP: duties charged to the account at purchase"
+    (`dutiesCharge` on the rate option).
+  - **Redaction.** `PiiRedactor` redacts `importersReference` and `exportersReference`
+    whole. The issue's 10-07 comment asks for both; the exporter's registration is therefore
+    gone from the validation log too, since a log line cannot tell which number a
+    reference is. The snapshot holds only the recipient tax ID's type.
+  - **Schema fixture.** `uspsLabel.json` gains `prepayDutiesTaxesFees` (boolean, `true`
+    only), `exportersReference`, `importersReference` and a `CustomsReference` definition
+    (type enum `TAX_CODE`/`VAT_NUMBER`/`IMPORTER_CODE`, `reference` 1-28, closed), guarded in
+    `UspsSchemaValidationTest`.
+  - **Tests.** `UspsAdapterCustomsTermsTest` (new), `CarrierAccountDdpTermsTest` (new),
+    additions to `DutiesTermsRateFilterTest` (its fake USPS rates now name an accepted
+    account), `LabelCustomsTermsSnapshotTest` (a DDP label to Germany through the real
+    adapter stores `duties_cost` and a snapshot with no tax ID) and
+    `UspsSchemaValidationTest`.
+  - **Deviations.** The rate request is unchanged. `duties-support.json` is unchanged.
+    The rate filter reads the account from `RateResponse::$carrierAccountId`; a USPS DDP
+    rate with no account is dropped.
+  - **Not verified (hence `ready-for-human`):** that TEM or production accepts these exact
+    bodies (the acceptance criterion "a DDP label to Germany buys with TEM and stores
+    the response's `duties_cost`" is still open); the production behavior of
+    `prepayDutiesTaxesFees` and the shape of `prepaidDutiesTaxesFees` outside TEM; that
+    `VAT_NUMBER` for a non-IOSS registration (UK VAT, VOEC, ARN) is read as such; that a
+    reprint reply carries the prepaid duties; the text of the Zonos terms, which nobody
+    has read for this change, and whether USPS expects acceptance recorded anywhere else.
+    `usps.com` and the flag's description say sending it is the agreement, which is why the
+    acceptance is recorded on the account. USPS's answer on IOSS plus prepay would let
+    `duties-support.json` and the refusal be reversed together.
+- 2026-10-09 — **Review fix: acceptance no longer survives a change of payer.**
+  `CarrierAccount` clears `ddp_terms_accepted_at` and `_by` in a `saving` hook when the
+  CRID or EPS account number is changed from a set value to another, or the carrier changes,
+  so no path (form, direct update) bypasses it. Edits to the name, active flag, scopes, other
+  credentials and OAuth token refreshes keep it; a blank EPS account being auto-populated
+  does not count as a change. Also added an Admin-only "Withdraw DDP terms" action
+  (`withdrawDdpTermsAcceptance()`), and the manager test now asserts the action itself is
+  hidden. Unverified: whether the MID should count as payer identity (it is not treated so).

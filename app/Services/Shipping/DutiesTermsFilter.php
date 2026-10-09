@@ -8,10 +8,14 @@ use App\DataTransferObjects\Shipping\DroppedRate;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\AmazonChannelType;
 use App\Enums\DutiesSupport;
+use App\Enums\DutiesTerms;
 use App\Enums\TaxRegistrationRegime;
 use App\Filament\Pages\Settings;
+use App\Filament\Resources\CarrierAccounts\CarrierAccountResource;
 use App\Filament\Resources\Clients\ClientResource;
 use App\Models\Carrier;
+use App\Models\CarrierAccount;
+use App\Models\CarrierAlias;
 use App\Models\Client;
 use App\Models\ShippingOffer;
 use App\Services\AddressReferenceService;
@@ -36,8 +40,8 @@ use Illuminate\Support\Collection;
  * - **The carrier's support does not fit the term**, from
  *   `duties-support.json`: `ddp_required` with DDU, `ddu_only` with DDP,
  *   `unavailable` with either.
- *   `international-customs-terms/08` adds a second reason here: a USPS
- *   account that has not accepted the DDP terms.
+ *   A second reason: a USPS DDP rate quoted on an
+ *   account that has not accepted USPS's DDP terms.
  * - **The term is unresolved**: an EU destination with no term from the order
  *   or the client. Every rate PolyBag would set terms on is dropped, and
  *   {@see self::unresolvedNotice()} names the fix — Settings in single-client
@@ -88,13 +92,21 @@ class DutiesTermsFilter
 
             $entry = $this->dutiesSupport->supportFor($rate->carrier, $terms->destinationCountry, $on, $terms->registration?->regime, $terms->recipientIsBusiness);
 
+            $carrier = Carrier::labelForName($rate->carrier);
+
             if ($entry === null || $entry->support->allows($terms->dutiesTerms)) {
+                if (($notAccepted = $this->unacceptedDdpTerms($rate, $terms, $carrier)) !== null) {
+                    $droppedRates[] = $rate;
+                    $dropped[$carrier.'|'.$notAccepted->reason] = $notAccepted;
+
+                    continue;
+                }
+
                 $kept->push($rate);
 
                 continue;
             }
 
-            $carrier = Carrier::labelForName($rate->carrier);
             $reason = sprintf(
                 '%s dropped: %s %s (%s)',
                 $carrier,
@@ -108,6 +120,35 @@ class DutiesTermsFilter
         }
 
         return ['kept' => $kept, 'dropped' => array_values($dropped), 'droppedRates' => $droppedRates];
+    }
+
+    /**
+     * The reason a USPS DDP rate is dropped when the account that quoted it
+     * has not accepted USPS's prepaid-duties terms, or null when the rate is
+     * not a USPS DDP rate or the terms were accepted. The account holder is
+     * billed for the duties, so an Admin must have accepted them first
+     * (ADR-0008 decision 4). A rate that names no account is dropped as well:
+     * nothing could vouch for the acceptance.
+     */
+    private function unacceptedDdpTerms(RateResponse $rate, ResolvedCustomsTerms $terms, string $carrier): ?DroppedRate
+    {
+        if ($terms->dutiesTerms !== DutiesTerms::Ddp
+            || CarrierAlias::lookupKey($rate->carrier) !== CarrierAlias::lookupKey(Carrier::USPS)) {
+            return null;
+        }
+
+        $account = $rate->carrierAccountId !== null ? CarrierAccount::query()->find($rate->carrierAccountId) : null;
+
+        if ($account?->hasAcceptedDdpTerms()) {
+            return null;
+        }
+
+        return new DroppedRate(
+            carrier: $carrier,
+            reason: 'USPS DDP: account terms not accepted',
+            fixUrl: $account !== null ? CarrierAccountResource::getUrl('edit', ['record' => $account]) : null,
+            fixLabel: $account !== null ? "Accept the terms on {$account->name}" : null,
+        );
     }
 
     /**

@@ -5,7 +5,11 @@ namespace App\Services\Carriers;
 use App\Contracts\DeclaresSellableServices;
 use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\RecoversUnresolvedPurchase;
+use App\Contracts\SendsCustomsTerms;
 use App\Contracts\UsesCarrierAccount;
+use App\DataTransferObjects\Customs\DeclaredCustomsTerms;
+use App\DataTransferObjects\Customs\RecipientTaxId;
+use App\DataTransferObjects\Customs\SellerTaxRegistration;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\CustomsItem;
@@ -20,6 +24,8 @@ use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\BoxSizeType;
 use App\Enums\CarrierPackaging;
 use App\Enums\CustomsDocumentDelivery;
+use App\Enums\DutiesTerms;
+use App\Enums\RecipientTaxIdType;
 use App\Enums\ServiceCapability;
 use App\Enums\TrackingStatus;
 use App\Exceptions\Carriers\CarrierException;
@@ -40,6 +46,7 @@ use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Package;
 use App\Models\ShippingOffer;
+use App\Services\AddressReferenceService;
 use App\Services\Carriers\Concerns\BuildsCustomerReferences;
 use App\Services\Carriers\Concerns\ConsultsCarrierPolicyForOffers;
 use App\Services\Carriers\Concerns\DecodesJsonResponses;
@@ -62,7 +69,7 @@ use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
 use voku\helper\ASCII;
 
-class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, RecoversUnresolvedPurchase, UsesCarrierAccount
+class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, RecoversUnresolvedPurchase, SendsCustomsTerms, UsesCarrierAccount
 {
     use BuildsCustomerReferences;
     use ConsultsCarrierPolicyForOffers;
@@ -126,6 +133,21 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
     private const COMMERCE_TYPE_BUSINESS_TO_CONSUMER = '1';
 
     private const COMMERCE_TYPE_BUSINESS_TO_BUSINESS = '2';
+
+    /**
+     * The longest `reference` a `customsForm` importer or exporter reference
+     * takes. A longer number is left out rather than cut: a truncated tax ID
+     * or registration is a wrong one.
+     */
+    private const MAX_CUSTOMS_REFERENCE_LENGTH = 28;
+
+    /**
+     * The 400 USPS answers a `prepayDutiesTaxesFees` label with when it cannot
+     * prepay duties to the destination: "DDP is not available for the provided
+     * country and product options." It means `duties-support.json` says DDP
+     * works there and USPS says it does not.
+     */
+    private const DDP_NOT_AVAILABLE = '030031';
 
     /**
      * Plain-language equivalents for USPS label API error codes.
@@ -550,6 +572,10 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
             return ShipResponse::failure("USPS needs an international address written in roman letters, and the {$unromanizable} has characters that cannot be romanized automatically. Enter a romanized address on the shipment and buy the label again.");
         }
 
+        if ($isInternational && ($refusal = $this->prepaidDutiesRefusal($request)) !== null) {
+            return ShipResponse::failure($refusal);
+        }
+
         $idempotencyKey = $this->issueIdempotencyKey($request);
 
         return $isInternational
@@ -757,6 +783,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
             labelDpi: $request->labelDpi,
             shipDate: $request->shipDate,
             carrierAccountId: $account?->id,
+            dutiesCost: $isInternational ? $this->prepaidDutiesCost($response->metadata, $request) : null,
         );
     }
 
@@ -1058,6 +1085,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
                     ...$this->buildCustomerReference($request),
                     ...($mapped['packageOptions'] !== [] ? ['packageOptions' => $mapped['packageOptions']] : []),
                     ...($mapped['hazmat'] ? ['contentType' => 'HAZMAT'] : []),
+                    ...($this->prepaysDuties($request) ? ['prepayDutiesTaxesFees' => true] : []),
                 ],
                 'customsForm' => $this->buildCustomsForm($request),
                 'imageInfo' => $imageInfo,
@@ -1079,7 +1107,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
 
             if (! $response->successful()) {
                 $payload = $this->decodeJsonSafely($response);
-                $errorMessage = $this->describeLabelError($payload);
+                $errorMessage = $this->prepaidDutiesDeclined($payload, $request) ?? $this->describeLabelError($payload);
                 Log::channel('usps-validation')->error('USPS createInternationalShipment API error', [
                     'status' => $response->status(),
                     'error' => $errorMessage,
@@ -1108,6 +1136,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
                     ...$mapped['appliedCodes'],
                 ],
                 carrierAccountId: $account?->id,
+                dutiesCost: $this->prepaidDutiesCost($response->metadata, $request),
             );
         } catch (FatalRequestException|RequestTimeOutException|ServerException $e) {
             // No answer is not a refusal — see createShipment().
@@ -1310,6 +1339,8 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         // the form itself, so the reference is repeated there to keep an
         // international label matchable to its package.
         $reference = $this->labelReferences($request, maxLength: 30, maxCount: 1)[0] ?? null;
+        $exporterReference = $this->exporterReference($request);
+        $importerReference = $this->importerReference($request);
 
         return [
             'AESITN' => $this->exportFilingReference($request),
@@ -1318,8 +1349,223 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
             // USPS names this field `incoterm`, but it holds the commerce type.
             // It has nothing to do with the duties terms (DDP/DDU).
             ...($commerceType !== null ? ['incoterm' => $commerceType] : []),
+            ...($exporterReference !== null ? ['exportersReference' => $exporterReference] : []),
+            ...($importerReference !== null ? ['importersReference' => $importerReference] : []),
             'contents' => $contents,
         ];
+    }
+
+    /**
+     * Whether the label crosses a customs border on the international
+     * endpoint, which is where the duties terms, registration and recipient tax
+     * ID are declared. A domestic label with a customs form (APO, FPO, DPO)
+     * declares none of them.
+     */
+    private function declaresCustomsTerms(ShipRequest $request): bool
+    {
+        return strtoupper(trim($request->toAddress->country)) !== 'US' && $request->customsItems !== [];
+    }
+
+    /**
+     * Whether this label asks USPS to prepay duties, taxes and fees: the
+     * Shipment resolved DDP. `prepayDutiesTaxesFees` is sent for DDP and for
+     * nothing else; DDU is USPS's default.
+     */
+    private function prepaysDuties(ShipRequest $request): bool
+    {
+        return $this->declaresCustomsTerms($request)
+            && $request->customsTerms?->dutiesTerms === DutiesTerms::Ddp;
+    }
+
+    /**
+     * The seller registration as `customsForm.exportersReference`, printed as
+     * the label's Exporter's reference. USPS reads any registration as a
+     * `VAT_NUMBER` whatever its regime, and drops `prepayDutiesTaxesFees`
+     * silently when any exporter reference is present, so this is sent only on
+     * a DDU label ({@see self::prepaidDutiesRefusal()} refuses the rest).
+     *
+     * @return array{referenceType: string, reference: string}|null
+     */
+    private function exporterReference(ShipRequest $request): ?array
+    {
+        $registration = $this->sentRegistration($request);
+
+        return $registration === null ? null : ['referenceType' => 'VAT_NUMBER', 'reference' => $registration->number];
+    }
+
+    /**
+     * The registration this request declares: the resolved one, when the label
+     * declares customs terms and the number fits the field.
+     */
+    private function sentRegistration(ShipRequest $request): ?SellerTaxRegistration
+    {
+        $registration = $request->customsTerms?->registration;
+
+        return $this->declaresCustomsTerms($request) && $registration !== null && $this->fitsCustomsReference($registration->number)
+            ? $registration
+            : null;
+    }
+
+    /**
+     * The recipient's tax ID as `customsForm.importersReference`, printed as
+     * the Importer's Reference. It never interferes with DDP. A Brazilian CPF
+     * is a `TAX_CODE`; a VAT number is a `VAT_NUMBER`; the other IDs are tax
+     * codes too, since none is an importer code.
+     *
+     * @return array{referenceType: string, reference: string}|null
+     */
+    private function importerReference(ShipRequest $request): ?array
+    {
+        $taxId = $this->sentRecipientTaxId($request);
+
+        if ($taxId === null) {
+            return null;
+        }
+
+        return [
+            'referenceType' => $taxId->type === RecipientTaxIdType::Vat ? 'VAT_NUMBER' : 'TAX_CODE',
+            'reference' => $taxId->number,
+        ];
+    }
+
+    private function sentRecipientTaxId(ShipRequest $request): ?RecipientTaxId
+    {
+        $taxId = $request->recipientTaxId;
+
+        return $this->declaresCustomsTerms($request) && $taxId instanceof RecipientTaxId && $this->fitsCustomsReference($taxId->number)
+            ? $taxId
+            : null;
+    }
+
+    private function fitsCustomsReference(?string $number): bool
+    {
+        return filled($number) && mb_strlen((string) $number) <= self::MAX_CUSTOMS_REFERENCE_LENGTH;
+    }
+
+    /**
+     * Why this label must not be sent, when it asks for prepaid duties and
+     * USPS would not buy it as asked. Checked before any request, so nothing
+     * is bought.
+     *
+     * - **A registration with DDP.** Any exporter reference makes USPS drop
+     *   `prepayDutiesTaxesFees` without a warning, and the label is bought
+     *   DDU while PolyBag records DDP. `duties-support.json` already drops
+     *   these rates, but its table is keyed by country and cannot express
+     *   Northern Ireland, so the adapter is the backstop.
+     * - **An account that has not accepted USPS's DDP terms.** Sending the flag
+     *   is agreement to them, and the account holder is billed.
+     */
+    private function prepaidDutiesRefusal(ShipRequest $request): ?string
+    {
+        if (! $this->prepaysDuties($request)) {
+            return null;
+        }
+
+        if (($registration = $this->sentRegistration($request)) !== null) {
+            $country = $this->countryName($request->toAddress->country);
+
+            return "USPS cannot prepay duties and taxes on a parcel that declares a seller registration ({$registration->regime->value} {$registration->number}): "
+                ."any exporter reference makes USPS drop the prepayment and bill the recipient instead. Nothing was bought. To {$country}, ship on DDU terms or with another carrier.";
+        }
+
+        $account = $this->resolveAccount($request->locationId, $request->clientId);
+
+        if ($account === null || ! $account->hasAcceptedDdpTerms()) {
+            return 'USPS DDP: account terms not accepted. An Admin must accept the USPS prepaid-duties terms on the USPS carrier account before this label can be bought with duties prepaid.';
+        }
+
+        return null;
+    }
+
+    /**
+     * The decline for USPS's "DDP is not available" refusal, naming the
+     * destination, or null for any other error. It is not an unexpected error:
+     * it means the support table disagrees with USPS.
+     *
+     * @param  array<array-key, mixed>|null  $payload
+     */
+    private function prepaidDutiesDeclined(?array $payload, ShipRequest $request): ?string
+    {
+        if (! $this->prepaysDuties($request)) {
+            return null;
+        }
+
+        $codes = array_map(fn (mixed $error): string => is_array($error) ? (string) ($error['code'] ?? '') : '', $payload['error']['errors'] ?? []);
+
+        if (! in_array(self::DDP_NOT_AVAILABLE, $codes, true)) {
+            return null;
+        }
+
+        $country = $this->countryName($request->toAddress->country);
+
+        Log::channel('usps-validation')->warning('USPS cannot prepay duties where duties-support.json says it can', [
+            'destination' => strtoupper($request->toAddress->country),
+        ]);
+
+        return "USPS cannot prepay duties and taxes to {$country} for these products (DDP is not available for the provided country and product options). Nothing was bought. Ship to {$country} on DDU terms or with another carrier.";
+    }
+
+    private function countryName(string $country): string
+    {
+        return app(AddressReferenceService::class)->getCountryOptions()[strtoupper($country)] ?? strtoupper($country);
+    }
+
+    /**
+     * The duties and taxes USPS prepaid, from the label's metadata: the
+     * package fee plus each item's duty and tax. Null when USPS reports
+     * nothing, which is what a DDU label does. A DDP label with no
+     * `prepaidDutiesTaxesFees` is logged, since it means USPS bought it as DDU.
+     * Postage is unchanged by it.
+     *
+     * @param  array<array-key, mixed>  $metadata
+     */
+    private function prepaidDutiesCost(array $metadata, ShipRequest $request): ?float
+    {
+        $prepaid = $metadata['prepaidDutiesTaxesFees'] ?? null;
+
+        if (! is_array($prepaid)) {
+            if ($this->prepaysDuties($request)) {
+                Log::channel('usps-validation')->warning('USPS accepted a DDP label but reported no prepaid duties', [
+                    'destination' => strtoupper($request->toAddress->country),
+                ]);
+            }
+
+            return null;
+        }
+
+        $total = is_numeric($prepaid['packageFee'] ?? null) ? (float) $prepaid['packageFee'] : 0.0;
+
+        foreach (is_array($prepaid['itemCosts'] ?? null) ? $prepaid['itemCosts'] : [] as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $total += (is_numeric($item['dutyPrice'] ?? null) ? (float) $item['dutyPrice'] : 0.0)
+                + (is_numeric($item['taxPrice'] ?? null) ? (float) $item['taxPrice'] : 0.0);
+        }
+
+        return round($total, 2);
+    }
+
+    /**
+     * What `createInternationalShipment()` puts on the wire, answered with the
+     * predicates that build the body: the term is declared with the customs
+     * declaration, and each registration or tax ID only when it fits its
+     * reference. The ITN is the filing reference when EEI was filed, never the
+     * exemption `AESITN` falls back to.
+     */
+    public function declaredCustomsTerms(ShipRequest $request): DeclaredCustomsTerms
+    {
+        if (! $this->declaresCustomsTerms($request)) {
+            return DeclaredCustomsTerms::none();
+        }
+
+        return new DeclaredCustomsTerms(
+            dutiesTerms: $request->customsTerms?->dutiesTerms,
+            registration: $this->sentRegistration($request),
+            recipientTaxIdType: $this->sentRecipientTaxId($request)?->type,
+            exportItn: filled($request->exportItn) ? (string) $request->exportItn : null,
+        );
     }
 
     /**
