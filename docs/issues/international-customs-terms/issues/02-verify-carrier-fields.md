@@ -318,3 +318,12 @@ Per carrier, record the request sent and the answer received in `.scratch/intern
   $2,500 limit per classification, matching 15 CFR 30.37(a) and `05`'s rule. Still
   open: other destinations, prefix-related codes of different lengths, and production.
   All sandbox labels were voided.
+- 2026-10-09 — **USPS exporter reference vs prepay, full matrix.** 53 TEM variants through
+  `UspsAdapter` (`.scratch/international-customs-terms/usps-ioss.php`). Any
+  `exportersReference` (any value, any `referenceType`, any country tried) makes USPS drop
+  `prepayDutiesTaxesFees` without a warning: `201`, no services 370/371, no
+  `prepaidDutiesTaxesFees`, i.e. a DDU label. `importersReference` leaves DDP untouched.
+  So the earlier "IOSS suppresses the landed cost" was a property of the exporter field,
+  not of IOSS. Details and the build consequence are in `08`. Still open for USPS:
+  whether it is intended, and whether production matches TEM.
+

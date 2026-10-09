@@ -70,3 +70,43 @@ enrolment instead, this shrinks to a confirmation checkbox with no terms text.
     USPS DDP service provider's terms of service"*. No enrolment alternative was found,
     so build the full acceptance step, not the checkbox fallback.
   - **ITN:** `AESITN` takes the ITN, else the exemption; no EIN (`11` is not needed here).
+- 2026-10-09 — **Wider matrix (53 variants, TEM; captures in `.scratch/international-customs-terms/usps/2026-10-09-sandbox-ioss/`).**
+  The 10-08 reading was too narrow:
+  - **Any `exportersReference` silently turns prepay off.** The label is bought with `201`,
+    no extra services 370/371, no `prepaidDutiesTaxesFees`, and no warning. It is a DDU label,
+    with unchanged postage. The value is irrelevant (IOSS, `DE123456789`, `ABC123`, a US EIN,
+    an `IOSS ` prefix, with `contact`), and so is the `referenceType` (`VAT_NUMBER`, `TAX_CODE`,
+    `IMPORTER_CODE`). Same in DE, AT, SE, BE, NL, FR and GB.
+  - **`importersReference` never interferes.** Any type, DDP stays intact (370/371, duty, tax,
+    package fee). Setting both sides loses DDP, as the exporter side wins.
+  - So an IOSS number in the exporter reference and DDP cannot be sent together. The IOSS
+    number in the importer reference keeps DDP but is only printed, and VAT is charged again.
+  - **Build consequence:** the adapter must not send a registration in `exportersReference`
+    on a DDP label. Otherwise it buys DDU while `duties_cost` and the Ship page say DDP.
+    Fail or drop USPS for that parcel, with the reason shown. For the nine IOSS-needs-prepay
+    destinations (`12`), that means USPS is unavailable for IOSS clients until USPS names a
+    supported request shape.
+  - The email to USPS was already sent with question 1 worded as an "IOSS + DDP" response
+    gap. A follow-up is drafted in `.scratch/international-customs-terms/emails.md`.
+- 2026-10-09 — **Decision: option 3, USPS is dropped for a parcel carrying a registration it
+  cannot declare with DDP.** Built in `duties-support.json` (version `2026-10-09`) with a new
+  `unavailable` support value, which `04`'s filter reads like the others:
+  - **IOSS to AT, BE, DE, DK, FI, FR, LU, PT, SE:** `unavailable`. DDP is required there and
+    cannot carry the number, so USPS has no rate on either term. Reason shown: "USPS dropped:
+    Germany requires prepaid duties, which cannot be combined with an IOSS number".
+  - **IOSS to EE, ES, IT, MT, NL, SK, and UK VAT to GB:** `ddu_only`. DDU keeps the number;
+    DDP would lose it silently, so it is dropped with the existing "cannot take prepaid duties
+    with an IOSS number" reason. These countries replaced no earlier rule; AT and SE's
+    Swiss Post `ddp_required` override is superseded.
+  - Not covered: Northern Ireland (a `GB` address covered by IOSS), since the table is keyed
+    by country. VOEC and ARN need nothing: USPS does not offer DDP to NO or AU.
+  - A registration withheld over its threshold skips the override, so USPS DDP stays available.
+    A business recipient does not: the registration is still sent, so the API limit binds it.
+    An override carries `business_support` for that case (`ddu_only` for AT, SE, the DDU-only
+    countries and GB; `unavailable` for the other seven, whose IMM rule needs DDP regardless).
+    Found in review; the first version skipped the override for a company name.
+  - **Still required when this issue is built:** `UspsAdapter` must never place a registration
+    in `exportersReference` on a request that sends `prepayDutiesTaxesFees: true`; throw
+    rather than buy a DDU label recorded as DDP. That also covers Northern Ireland.
+    Reverse the table entries if USPS names a supported request shape.
+

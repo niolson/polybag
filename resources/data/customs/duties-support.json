@@ -1,5 +1,5 @@
 {
-    "version": "2026-10-08.2",
+    "version": "2026-10-09.1",
     "notes": [
         "What each carrier can do with duties terms to each destination (ADR-0008 decision 4).",
         "support is ddp_required (ships there only with duties prepaid), either, or ddu_only",
@@ -22,8 +22,12 @@
         "over its threshold does not count). It has its own source and checked date, since its",
         "evidence differs from the entry's, and an optional authority naming who the rule comes",
         "from in a dropped rate's reason (default: the carrier's authority). The entry's",
+        "An override is a consumer-parcel rule unless it has business_support, the support for a recipient with a company name; one that has none is skipped for a business. A limit of the carrier's API binds both.",
         "effective_from gates the whole entry, overrides included. Only postal rules need it:",
         "UPS and FedEx clear as their own declarants.",
+        "",
+        "support is also unavailable: the carrier cannot ship there at all with the registration declared",
+        "(only in with_registration; USPS's API cannot send a registration and prepaid duties together).",
         "",
         "USPS is the International Mail Manual's DDP table (IMM 360) for Priority Mail Express",
         "International, Priority Mail International and First-Class Package International, read",
@@ -48,18 +52,29 @@
                     "checked": "2026-10-01",
                     "with_registration": {
                         "ioss": {
-                            "support": "ddp_required",
-                            "source": "https://www.post.ch/en/pages/eu-customs-reform-2026",
-                            "checked": "2026-10-08",
-                            "authority": "Swiss Post",
-                            "note": "B2C consignments only; Swiss Post lists B2B as recipient paid. PolyBag treats a recipient with a company name as business."
+                            "support": "unavailable",
+                            "business_support": "ddu_only",
+                            "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
+                            "checked": "2026-10-09",
+                            "authority": "USPS API test",
+                            "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, and IOSS parcels here must be prepaid. No request shape carries both; the importer reference prints the number but is not recognised as IOSS."
                         }
                     }
                 },
                 "BE": {
                     "support": "ddp_required",
                     "source": "https://pe.usps.com/text/imm/ab_020.htm",
-                    "checked": "2026-10-01"
+                    "checked": "2026-10-01",
+                    "with_registration": {
+                        "ioss": {
+                            "support": "unavailable",
+                            "business_support": "unavailable",
+                            "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
+                            "checked": "2026-10-09",
+                            "authority": "USPS API test",
+                            "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, and IOSS parcels here must be prepaid. No request shape carries both; the importer reference prints the number but is not recognised as IOSS."
+                        }
+                    }
                 },
                 "BG": {
                     "support": "ddu_only",
@@ -84,37 +99,107 @@
                 "DE": {
                     "support": "ddp_required",
                     "source": "https://pe.usps.com/text/imm/fh_011.htm",
-                    "checked": "2026-10-01"
+                    "checked": "2026-10-01",
+                    "with_registration": {
+                        "ioss": {
+                            "support": "unavailable",
+                            "business_support": "unavailable",
+                            "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
+                            "checked": "2026-10-09",
+                            "authority": "USPS API test",
+                            "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, and IOSS parcels here must be prepaid. No request shape carries both; the importer reference prints the number but is not recognised as IOSS."
+                        }
+                    }
                 },
                 "DK": {
                     "support": "ddp_required",
                     "source": "https://pe.usps.com/text/imm/ce_021.htm",
-                    "checked": "2026-10-01"
+                    "checked": "2026-10-01",
+                    "with_registration": {
+                        "ioss": {
+                            "support": "unavailable",
+                            "business_support": "unavailable",
+                            "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
+                            "checked": "2026-10-09",
+                            "authority": "USPS API test",
+                            "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, and IOSS parcels here must be prepaid. No request shape carries both; the importer reference prints the number but is not recognised as IOSS."
+                        }
+                    }
                 },
                 "EE": {
                     "support": "either",
                     "source": "https://pe.usps.com/text/imm/immc3_017.htm",
-                    "checked": "2026-10-01"
+                    "checked": "2026-10-01",
+                    "with_registration": {
+                        "ioss": {
+                            "support": "ddu_only",
+                            "business_support": "ddu_only",
+                            "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
+                            "checked": "2026-10-09",
+                            "authority": "USPS API test",
+                            "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, where the registration goes, so a DDP parcel with a registration would be bought DDU."
+                        }
+                    }
                 },
                 "ES": {
                     "support": "either",
                     "source": "https://pe.usps.com/text/imm/immc3_017.htm",
-                    "checked": "2026-10-01"
+                    "checked": "2026-10-01",
+                    "with_registration": {
+                        "ioss": {
+                            "support": "ddu_only",
+                            "business_support": "ddu_only",
+                            "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
+                            "checked": "2026-10-09",
+                            "authority": "USPS API test",
+                            "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, where the registration goes, so a DDP parcel with a registration would be bought DDU."
+                        }
+                    }
                 },
                 "FI": {
                     "support": "ddp_required",
                     "source": "https://pe.usps.com/text/imm/fh_004.htm",
-                    "checked": "2026-10-01"
+                    "checked": "2026-10-01",
+                    "with_registration": {
+                        "ioss": {
+                            "support": "unavailable",
+                            "business_support": "unavailable",
+                            "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
+                            "checked": "2026-10-09",
+                            "authority": "USPS API test",
+                            "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, and IOSS parcels here must be prepaid. No request shape carries both; the importer reference prints the number but is not recognised as IOSS."
+                        }
+                    }
                 },
                 "FR": {
                     "support": "ddp_required",
                     "source": "https://pe.usps.com/text/imm/fh_005.htm",
-                    "checked": "2026-10-01"
+                    "checked": "2026-10-01",
+                    "with_registration": {
+                        "ioss": {
+                            "support": "unavailable",
+                            "business_support": "unavailable",
+                            "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
+                            "checked": "2026-10-09",
+                            "authority": "USPS API test",
+                            "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, and IOSS parcels here must be prepaid. No request shape carries both; the importer reference prints the number but is not recognised as IOSS."
+                        }
+                    }
                 },
                 "GB": {
                     "support": "either",
                     "source": "https://pe.usps.com/text/imm/immc3_017.htm",
-                    "checked": "2026-10-01"
+                    "checked": "2026-10-01",
+                    "with_registration": {
+                        "uk_vat": {
+                            "support": "ddu_only",
+                            "business_support": "ddu_only",
+                            "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
+                            "checked": "2026-10-09",
+                            "authority": "USPS API test",
+                            "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, where the registration goes, so a DDP parcel with a registration would be bought DDU."
+                        }
+                    }
                 },
                 "GR": {
                     "support": "ddu_only",
@@ -139,7 +224,17 @@
                 "IT": {
                     "support": "either",
                     "source": "https://pe.usps.com/text/imm/immc3_017.htm",
-                    "checked": "2026-10-01"
+                    "checked": "2026-10-01",
+                    "with_registration": {
+                        "ioss": {
+                            "support": "ddu_only",
+                            "business_support": "ddu_only",
+                            "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
+                            "checked": "2026-10-09",
+                            "authority": "USPS API test",
+                            "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, where the registration goes, so a DDP parcel with a registration would be bought DDU."
+                        }
+                    }
                 },
                 "LT": {
                     "support": "ddu_only",
@@ -149,7 +244,17 @@
                 "LU": {
                     "support": "ddp_required",
                     "source": "https://pe.usps.com/text/imm/il_028.htm",
-                    "checked": "2026-10-08"
+                    "checked": "2026-10-08",
+                    "with_registration": {
+                        "ioss": {
+                            "support": "unavailable",
+                            "business_support": "unavailable",
+                            "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
+                            "checked": "2026-10-09",
+                            "authority": "USPS API test",
+                            "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, and IOSS parcels here must be prepaid. No request shape carries both; the importer reference prints the number but is not recognised as IOSS."
+                        }
+                    }
                 },
                 "LV": {
                     "support": "ddu_only",
@@ -165,12 +270,32 @@
                 "MT": {
                     "support": "either",
                     "source": "https://pe.usps.com/text/imm/immc3_017.htm",
-                    "checked": "2026-10-01"
+                    "checked": "2026-10-01",
+                    "with_registration": {
+                        "ioss": {
+                            "support": "ddu_only",
+                            "business_support": "ddu_only",
+                            "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
+                            "checked": "2026-10-09",
+                            "authority": "USPS API test",
+                            "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, where the registration goes, so a DDP parcel with a registration would be bought DDU."
+                        }
+                    }
                 },
                 "NL": {
                     "support": "either",
                     "source": "https://pe.usps.com/text/imm/immc3_017.htm",
-                    "checked": "2026-10-01"
+                    "checked": "2026-10-01",
+                    "with_registration": {
+                        "ioss": {
+                            "support": "ddu_only",
+                            "business_support": "ddu_only",
+                            "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
+                            "checked": "2026-10-09",
+                            "authority": "USPS API test",
+                            "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, where the registration goes, so a DDP parcel with a registration would be bought DDU."
+                        }
+                    }
                 },
                 "PL": {
                     "support": "ddu_only",
@@ -181,7 +306,17 @@
                     "support": "ddp_required",
                     "source": "https://pe.usps.com/text/imm/ps_009.htm",
                     "checked": "2026-10-01",
-                    "note": "Gifts up to EUR 45 are excepted from the DDP requirement; PolyBag does not distinguish gifts, so PT is DDP-required here."
+                    "note": "Gifts up to EUR 45 are excepted from the DDP requirement; PolyBag does not distinguish gifts, so PT is DDP-required here.",
+                    "with_registration": {
+                        "ioss": {
+                            "support": "unavailable",
+                            "business_support": "unavailable",
+                            "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
+                            "checked": "2026-10-09",
+                            "authority": "USPS API test",
+                            "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, and IOSS parcels here must be prepaid. No request shape carries both; the importer reference prints the number but is not recognised as IOSS."
+                        }
+                    }
                 },
                 "RO": {
                     "support": "ddu_only",
@@ -194,11 +329,12 @@
                     "checked": "2026-10-01",
                     "with_registration": {
                         "ioss": {
-                            "support": "ddp_required",
-                            "source": "https://www.post.ch/en/pages/eu-customs-reform-2026",
-                            "checked": "2026-10-08",
-                            "authority": "Swiss Post",
-                            "note": "B2C consignments only; Swiss Post lists B2B as recipient paid. PolyBag treats a recipient with a company name as business."
+                            "support": "unavailable",
+                            "business_support": "ddu_only",
+                            "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
+                            "checked": "2026-10-09",
+                            "authority": "USPS API test",
+                            "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, and IOSS parcels here must be prepaid. No request shape carries both; the importer reference prints the number but is not recognised as IOSS."
                         }
                     }
                 },
@@ -210,7 +346,17 @@
                 "SK": {
                     "support": "either",
                     "source": "https://pe.usps.com/text/imm/immc3_017.htm",
-                    "checked": "2026-10-01"
+                    "checked": "2026-10-01",
+                    "with_registration": {
+                        "ioss": {
+                            "support": "ddu_only",
+                            "business_support": "ddu_only",
+                            "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
+                            "checked": "2026-10-09",
+                            "authority": "USPS API test",
+                            "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, where the registration goes, so a DDP parcel with a registration would be bought DDU."
+                        }
+                    }
                 }
             }
         },

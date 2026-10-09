@@ -18,6 +18,13 @@ enum DutiesSupport: string
     case DduOnly = 'ddu_only';
 
     /**
+     * The carrier cannot ship there on either term. Used by a registration
+     * override when the carrier requires prepaid duties but cannot declare the
+     * registration with them.
+     */
+    case Unavailable = 'unavailable';
+
+    /**
      * Whether a rate under this support may be sold on the given term. A rate
      * that may not is dropped, never forced to the other term.
      */
@@ -27,6 +34,7 @@ enum DutiesSupport: string
             self::Either => true,
             self::DdpRequired => $terms === DutiesTerms::Ddp,
             self::DduOnly => $terms === DutiesTerms::Ddu,
+            self::Unavailable => false,
         };
     }
 }
