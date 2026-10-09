@@ -275,3 +275,34 @@ it('fails loudly when the schema name is unknown', function (): void {
     expect(fn () => assertMatchesUspsSchema(validUspsLabelBody(), 'DoesNotExist'))
         ->toThrow(AssertionFailedError::class, 'not defined');
 });
+
+it('accepts the prepayment flag and the importer and exporter references', function (): void {
+    $body = validUspsInternationalLabelBody([
+        'packageDescription' => ['prepayDutiesTaxesFees' => true],
+        'customsForm' => [
+            'importersReference' => ['referenceType' => 'TAX_CODE', 'reference' => '12345678909'],
+            'exportersReference' => ['referenceType' => 'VAT_NUMBER', 'reference' => 'IM2760000742'],
+        ],
+    ]);
+
+    assertMatchesUspsSchema($body, 'InternationalLabelRequest');
+});
+
+it('rejects a customs reference with an unknown type, a long number or a stray key', function (array $reference): void {
+    $body = validUspsInternationalLabelBody(['customsForm' => ['exportersReference' => $reference]]);
+
+    expect(fn () => assertMatchesUspsSchema($body, 'InternationalLabelRequest'))
+        ->toThrow(AssertionFailedError::class);
+})->with([
+    'unknown type' => [['referenceType' => 'EORI', 'reference' => 'IM2760000742']],
+    'over 28 characters' => [['referenceType' => 'VAT_NUMBER', 'reference' => str_repeat('9', 29)]],
+    'misspelled key' => [['referenceType' => 'VAT_NUMBER', 'referenceNumber' => 'IM2760000742']],
+    'no number' => [['referenceType' => 'VAT_NUMBER']],
+]);
+
+it('rejects a prepayment flag that is not a boolean true', function (mixed $flag): void {
+    $body = validUspsInternationalLabelBody(['packageDescription' => ['prepayDutiesTaxesFees' => $flag]]);
+
+    expect(fn () => assertMatchesUspsSchema($body, 'InternationalLabelRequest'))
+        ->toThrow(AssertionFailedError::class);
+})->with(['string' => 'true', 'false' => false]);
