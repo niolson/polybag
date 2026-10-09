@@ -207,7 +207,17 @@ enrolment instead, this shrinks to a confirmation checkbox with no terms text.
   - **Rate filter, package 245 (not shipped), under EUR 150:** with the client's IOSS
     registration declared, USPS DDP to Germany is absent; DDU still shows USPS; DDP to Poland
     drops USPS ("cannot take prepaid duties"). All as `duties-support.json` says.
-  - **Still not run:** the registration path with DDU (the number printing in the label's
-    Exporter's reference box), the `030031` decline, and a reprint. The unverified list above
-    otherwise stands.
+  - **Registration with DDU, package 245 (EUR 15.64 order, DDU, IOSS number on the order):**
+    bought twice. The first label (185) went to an address that was really Newfoundland, Canada
+    (`A0A 1P0`) with country `NL`, a test-data quirk where the province code sat in the country
+    field, so the EU rules ran on it. It was voided, and the Shipment's address corrected to a
+    real Dutch one (Kortgene), and bought again as label 186. Both requests sent the IOSS number in
+    `exportersReference`, `incoterm: "1"`, no `prepayDutiesTaxesFees` and no `importersReference`;
+    TEM returned no extra services and no `prepaidDutiesTaxesFees`; `duties_cost` is null; the
+    snapshot records `ddu`, source `order`, and the IOSS registration from the order. The
+    printed CP72 shows the number in the *Exporter's reference* box, *Importer's reference*
+    blank, postage 68.14. The void kept label 185 as history and left 186 the active label.
+    The validation log shows `exportersReference` as `[REDACTED]`, as `PiiRedactor` now does.
+  - **Still not run:** the `030031` decline (the rate filter hides Poland first, so only the unit
+    tests reach it) and a reprint. The unverified list above otherwise stands.
 
