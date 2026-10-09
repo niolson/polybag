@@ -36,6 +36,9 @@ readonly class UnattendedRateSelection
      * @param  Collection<int, RateResponse>|null  $heldByPostageSetting  Rates refused because the connection sells postage to a packer only (ADR-0006 decision 6). Decided before the allowance, so not `notAllowed`: no method can release them
      * @param  Collection<int, BlindPurchaseOffer>|null  $blindOffersHeldByPostageSetting  Blind offers a rule or the sole-choice rule would have bought, refused for the same reason
      * @param  string|null  $postageSettingConnection  The name of the connection whose postage setting held them
+     * @param  Collection<int, RateResponse>|null  $heldForSourceTerms  Rates whose source decides the duties terms, refused because the destination is one whose source-decided terms nobody has verified (ADR-0008 decision 5). Decided before the allowance, so not `notAllowed`: no method can release them
+     * @param  Collection<int, BlindPurchaseOffer>|null  $blindOffersHeldForSourceTerms  Blind offers a rule or the sole-choice rule would have bought, refused for the same reason
+     * @param  string|null  $sourceTermsDestination  The destination country that held them
      */
     public function __construct(
         public ?RateResponse $rate,
@@ -52,6 +55,9 @@ readonly class UnattendedRateSelection
         public ?Collection $heldByPostageSetting = null,
         public ?Collection $blindOffersHeldByPostageSetting = null,
         public ?string $postageSettingConnection = null,
+        public ?Collection $heldForSourceTerms = null,
+        public ?Collection $blindOffersHeldForSourceTerms = null,
+        public ?string $sourceTermsDestination = null,
     ) {
         if ($rate !== null && $blindOffer !== null) {
             throw new \InvalidArgumentException('Unattended shipping may select either a rate or a blind purchase, never both.');
@@ -120,14 +126,44 @@ readonly class UnattendedRateSelection
     }
 
     /**
-     * The same selection, also holding back these blind offers, which a rule
-     * or the sole-choice rule would have bought.
-     *
-     * @param  Collection<int, BlindPurchaseOffer>  $offers
+     * Whether a destination whose source-decided terms are unverified is what
+     * stood between automation and an offer (ADR-0008 decision 5).
      */
-    public function holdingBlindOffers(Collection $offers, string $connection): self
+    public function heldForSourceTermsAnything(): bool
     {
-        if ($offers->isEmpty()) {
+        return ($this->heldForSourceTerms?->isNotEmpty() ?? false)
+            || ($this->blindOffersHeldForSourceTerms?->isNotEmpty() ?? false);
+    }
+
+    /**
+     * The offers held for the destination, as an operator would name them.
+     */
+    public function heldForSourceTermsSummary(): string
+    {
+        return ($this->heldForSourceTerms ?? collect())
+            ->map(fn (RateResponse $rate): string => trim("{$rate->carrier} {$rate->serviceName}"))
+            ->merge(($this->blindOffersHeldForSourceTerms ?? collect())
+                ->map(fn (BlindPurchaseOffer $offer): string => "{$offer->sourceLabel} {$offer->selectionLabel}"))
+            ->unique()
+            ->implode(', ');
+    }
+
+    /**
+     * The same selection, also holding back these blind offers, which a rule
+     * or the sole-choice rule would have bought: those the connection's
+     * postage setting refuses, and those whose source-decided duties terms
+     * the destination makes unverified. Each keeps its own reason.
+     *
+     * @param  Collection<int, BlindPurchaseOffer>  $heldByPostageSetting
+     * @param  Collection<int, BlindPurchaseOffer>  $heldForSourceTerms
+     */
+    public function holdingBlindOffers(
+        Collection $heldByPostageSetting,
+        ?string $connection,
+        Collection $heldForSourceTerms,
+        ?string $sourceTermsDestination,
+    ): self {
+        if ($heldByPostageSetting->isEmpty() && $heldForSourceTerms->isEmpty()) {
             return $this;
         }
 
@@ -144,8 +180,11 @@ readonly class UnattendedRateSelection
             contentRestricted: $this->contentRestricted,
             deactivated: $this->deactivated,
             heldByPostageSetting: $this->heldByPostageSetting,
-            blindOffersHeldByPostageSetting: ($this->blindOffersHeldByPostageSetting ?? collect())->merge($offers)->values(),
-            postageSettingConnection: $connection,
+            blindOffersHeldByPostageSetting: ($this->blindOffersHeldByPostageSetting ?? collect())->merge($heldByPostageSetting)->values(),
+            postageSettingConnection: $heldByPostageSetting->isNotEmpty() ? $connection : $this->postageSettingConnection,
+            heldForSourceTerms: $this->heldForSourceTerms,
+            blindOffersHeldForSourceTerms: ($this->blindOffersHeldForSourceTerms ?? collect())->merge($heldForSourceTerms)->values(),
+            sourceTermsDestination: $heldForSourceTerms->isNotEmpty() ? $sourceTermsDestination : $this->sourceTermsDestination,
         );
     }
 

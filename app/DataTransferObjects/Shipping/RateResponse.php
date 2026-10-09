@@ -6,6 +6,7 @@ use App\DataTransferObjects\PostageSources\ObservedServiceIdentity;
 use App\Enums\PostageSourceKind;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
+use App\Models\CarrierAlias;
 use App\Models\CarrierService;
 use App\Models\ShippingOffer;
 use App\Services\RateSelector;
@@ -54,6 +55,31 @@ readonly class RateResponse
         return $this->observedService !== null
             ? PostageSourceKind::from($this->observedService->source)
             : PostageSourceKind::Direct;
+    }
+
+    /**
+     * Who decides the duties terms of a label bought on this rate, when
+     * PolyBag cannot set them (ADR-0008 decision 5): Amazon, for Buy Shipping
+     * and for Amazon Shipping sold on a connection; Shopify, for a rate its
+     * kind quoted. Null for a rate on a carrier account, whose terms PolyBag
+     * sends. Named for the Ship page, which says "Duties: decided by Amazon".
+     */
+    public function sourceDecidedBy(): ?string
+    {
+        return match (true) {
+            $this->sourceKind() === PostageSourceKind::Shopify => 'Shopify',
+            $this->sourceKind() === PostageSourceKind::Amazon,
+            CarrierAlias::lookupKey($this->carrier) === CarrierAlias::lookupKey(Carrier::AMAZON_SHIPPING) => 'Amazon',
+            default => null,
+        };
+    }
+
+    /**
+     * Whether the source, not PolyBag, decides this rate's duties terms.
+     */
+    public function isSourceDecided(): bool
+    {
+        return $this->sourceDecidedBy() !== null;
     }
 
     /**

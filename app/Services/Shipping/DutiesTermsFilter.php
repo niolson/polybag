@@ -5,14 +5,14 @@ namespace App\Services\Shipping;
 use App\DataTransferObjects\Customs\ResolvedCustomsTerms;
 use App\DataTransferObjects\Shipping\DroppedRate;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\Enums\AmazonChannelType;
 use App\Enums\DutiesSupport;
-use App\Enums\PostageSourceKind;
 use App\Enums\TaxRegistrationRegime;
 use App\Filament\Pages\Settings;
 use App\Filament\Resources\Clients\ClientResource;
 use App\Models\Carrier;
-use App\Models\CarrierAlias;
 use App\Models\Client;
+use App\Models\ShippingOffer;
 use App\Services\AddressReferenceService;
 use App\Services\Customs\DutiesSupportTable;
 use App\Services\SettingsService;
@@ -115,11 +115,16 @@ class DutiesTermsFilter
      * a channel, and Amazon Shipping sold on a connection, whose purchase
      * takes no duties terms either. Such a rate skips the support check and
      * the unresolved-EU refusal alike.
+     *
+     * At purchase the rate is rebuilt from the stored Offer, which does not
+     * keep the observed service that marks a rate as Amazon's; the Offer says
+     * so itself, by the channel Amazon quoted it on, so pass it when there is
+     * one.
      */
-    public function isSourceDecided(RateResponse $rate): bool
+    public function isSourceDecided(RateResponse $rate, ?ShippingOffer $offer = null): bool
     {
-        return $rate->sourceKind() !== PostageSourceKind::Direct
-            || CarrierAlias::lookupKey($rate->carrier) === CarrierAlias::lookupKey(Carrier::AMAZON_SHIPPING);
+        return $rate->isSourceDecided()
+            || $offer?->amazonChannelType() === AmazonChannelType::Amazon;
     }
 
     /**

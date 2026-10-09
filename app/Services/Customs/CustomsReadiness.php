@@ -172,8 +172,8 @@ class CustomsReadiness
         $terms = $this->resolver->resolve($shipment, $origin, $destination, $lines);
 
         $sourceDecided = $blindOffer !== null
-            || $channel === AmazonChannelType::Amazon
-            || ($rate !== null && $this->dutiesTermsFilter->isSourceDecided($rate));
+            || ($rate !== null && $this->dutiesTermsFilter->isSourceDecided($rate, $offer))
+            || $channel === AmazonChannelType::Amazon;
 
         if ($sourceDecided) {
             $terms = $terms->asSourceDecided();

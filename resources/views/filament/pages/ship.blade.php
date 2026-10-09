@@ -325,6 +325,9 @@
                                             @if($inactiveReason)
                                                 <x-filament::badge color="gray" size="sm">Inactive</x-filament::badge>
                                             @endif
+                                            @if(!empty($rate['dutiesDecidedBy']))
+                                                <x-filament::badge color="info" size="sm">Duties: decided by {{ $rate['dutiesDecidedBy'] }}</x-filament::badge>
+                                            @endif
                                             @isset($rate['otdrProtection'])
                                                 @if($rate['otdrProtection']['protected'])
                                                     <x-filament::badge color="success" size="sm">OTDR protected</x-filament::badge>
@@ -403,6 +406,9 @@
                                         <div class="flex items-center gap-2 font-medium text-sm text-gray-900 dark:text-white">
                                             <span>{{ $offer['sourceLabel'] }}</span>
                                             <span>{{ $offer['selectionLabel'] }}</span>
+                                            @if(!empty($offer['dutiesDecidedBy']))
+                                                <x-filament::badge color="info" size="sm">Duties: decided by {{ $offer['dutiesDecidedBy'] }}</x-filament::badge>
+                                            @endif
                                         </div>
                                         <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                                             Price and service unknown until purchase — you will be asked to confirm

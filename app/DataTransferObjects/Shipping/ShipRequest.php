@@ -317,7 +317,7 @@ readonly class ShipRequest
             packageId: $package->id,
             offer: $offer,
             exportItn: $package->shipment->export_itn,
-            customsTerms: self::customsTermsFor($package, $fromAddress, $toAddress, app(DutiesTermsFilter::class)->isSourceDecided($rate)),
+            customsTerms: self::customsTermsFor($package, $fromAddress, $toAddress, app(DutiesTermsFilter::class)->isSourceDecided($rate, $offer)),
             recipientTaxId: RecipientTaxId::fromShipment($package->shipment),
             exporterEin: $package->shipment->client?->exporter_ein,
         );

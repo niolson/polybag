@@ -112,6 +112,11 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         $descriptions = [];
         $options = [];
 
+        // Display only, and only where the label crosses a customs border: who
+        // decides the duties terms of a rate PolyBag cannot set them on
+        // (ADR-0008 decision 5). Nothing reads it back at purchase.
+        $crossesBorder = $this->shippingRateService->getCustomsTerms()?->applies === true;
+
         foreach ($classified as $key => $classifiedRate) {
             $labels[$key] = $classifiedRate->rate->formLabel();
             $description = $classifiedRate->rate->formDescription();
@@ -141,6 +146,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 ];
             }
 
+            if ($crossesBorder && ($decidedBy = $classifiedRate->rate->sourceDecidedBy()) !== null) {
+                $rateArray['dutiesDecidedBy'] = $decidedBy;
+            }
+
             // Shown, so the packer sees why an offer cannot be chosen, and
             // unselectable: nothing buys a deactivated service or carrier.
             if (($reason = $inactive->reasonFor($classifiedRate->rate)) !== null) {
@@ -161,7 +170,9 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             // Alongside the rates, never among them, and never pre-selected on
             // the attended page: a person must choose and confirm it here.
             blindPurchaseOffers: $this->shippingRateService->getBlindPurchaseOffers($ruleResult->excludesBlindOffer(...))
-                ->map(fn (BlindPurchaseOffer $offer): array => $offer->toArray())
+                ->map(fn (BlindPurchaseOffer $offer): array => $crossesBorder
+                    ? [...$offer->toArray(), 'dutiesDecidedBy' => $offer->source]
+                    : $offer->toArray())
                 ->values()
                 ->all(),
             droppedRates: array_map(
