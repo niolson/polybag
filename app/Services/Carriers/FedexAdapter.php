@@ -3,7 +3,11 @@
 namespace App\Services\Carriers;
 
 use App\Contracts\DirectCarrierAdapter;
+use App\Contracts\SendsCustomsTerms;
 use App\Contracts\UsesCarrierAccount;
+use App\DataTransferObjects\Customs\DeclaredCustomsTerms;
+use App\DataTransferObjects\Customs\RecipientTaxId;
+use App\DataTransferObjects\Customs\SellerTaxRegistration;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\CustomsItem;
@@ -18,8 +22,11 @@ use App\DataTransferObjects\Tracking\TrackingEventData;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\CarrierPackaging;
 use App\Enums\CustomsDocumentDelivery;
+use App\Enums\DutiesTerms;
 use App\Enums\FedexPackageType;
+use App\Enums\RecipientTaxIdType;
 use App\Enums\ServiceCapability;
+use App\Enums\TaxRegistrationRegime;
 use App\Enums\TrackingStatus;
 use App\Exceptions\Carriers\CarrierException;
 use App\Http\Integrations\Fedex\FedexConnector;
@@ -41,6 +48,7 @@ use App\Services\Carriers\Concerns\IdentifiesCatalogServices;
 use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
 use App\Services\SettingsService;
+use App\Support\FedexRecipientEmail;
 use App\Support\LabelText;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -51,7 +59,7 @@ use Saloon\Exceptions\Request\Statuses\GatewayTimeoutException;
 use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
 
-class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
+class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarrierAccount
 {
     use BuildsCustomerReferences;
     use ConsultsCarrierPolicyForOffers;
@@ -67,6 +75,53 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
      * Nothing was bought that FedEx will bill, so the remedy is a retry.
      */
     public const NO_ANSWER_MESSAGE = 'FedEx did not answer the label request. Nothing was bought — try again.';
+
+    /**
+     * The `tinType` FedEx's customs data reads as an IOSS number.
+     *
+     * UNCONFIRMED. FedEx's `tinType` enum has no IOSS value, its IOSS guide
+     * says only "enter your IOSS number in the TIN field", and FedEx support
+     * has not answered which type customs reads as IOSS. `BUSINESS_UNION` is
+     * the best reading (one integrator reports it; the sandbox prints it as
+     * "ex-EORI"), so it is built with it. If FedEx names another type, this
+     * constant is the one line to change
+     * (`international-customs-terms/07`, Comments).
+     */
+    public const string IOSS_TIN_TYPE = 'BUSINESS_UNION';
+
+    /**
+     * The `tinType` a seller registration regime is sent as.
+     *
+     * Only IOSS is the unconfirmed guess above. For the others the sandbox
+     * (`international-customs-terms/02`) accepted `BUSINESS_NATIONAL` and
+     * printed it as the shipper's tax ID on the invoice; FedEx has not said
+     * that customs reads it as a VAT, VOEC or ARN registration.
+     */
+    private function tinTypeFor(TaxRegistrationRegime $regime): string
+    {
+        return match ($regime) {
+            TaxRegistrationRegime::Ioss => self::IOSS_TIN_TYPE,
+            TaxRegistrationRegime::UkVat, TaxRegistrationRegime::Voec, TaxRegistrationRegime::Arn => 'BUSINESS_NATIONAL',
+        };
+    }
+
+    /**
+     * The `tinType` of the client's EIN, sent beside an export ITN.
+     * `international-customs-terms/11` left FEDERAL or BUSINESS_NATIONAL open;
+     * an EIN is the federal tax ID, so FEDERAL. Not confirmed with FedEx.
+     */
+    private const string EIN_TIN_TYPE = 'FEDERAL';
+
+    /**
+     * The longest `tins[].number` FedEx accepts. A longer ID is left out
+     * rather than cut, because a truncated tax ID is a wrong one.
+     */
+    private const int MAX_TIN_LENGTH = 18;
+
+    /**
+     * FedEx takes an ITN as `AES` and the filing number AES returned.
+     */
+    private const string ITN_PREFIX = 'AES';
 
     private function resolveConnector(?CarrierAccount $account): FedexConnector
     {
@@ -582,6 +637,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
                         $request->toAddress,
                         $request->toAddress->requiresCustomsDeclaration() ? null : $request->fromAddress->phone,
                         includeResidentialClassification: true,
+                        includeEmail: true,
                     ),
                 ],
                 ...($request->shipDate ? [
@@ -643,7 +699,15 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
                     );
                 }
 
-                $requestedShipment['customsClearanceDetail'] = $this->buildCustomsClearanceDetail($request);
+                $requestedShipment['customsClearanceDetail'] = $this->buildCustomsClearanceDetail($request, $account);
+
+                if (($shipperTins = $this->shipperTins($request)) !== []) {
+                    $requestedShipment['shipper']['tins'] = $shipperTins;
+                }
+
+                if (($recipientTin = $this->recipientTin($request)) !== null) {
+                    $requestedShipment['recipients'][0]['tins'] = [$recipientTin];
+                }
             }
 
             // Build special service types
@@ -696,7 +760,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
 
                 if ($isSaturdayError) {
                     Log::channel('fedex-validation')->info('FedEx Saturday delivery rejected, retrying without', [
-                        'errors' => $errors,
+                        'errors' => $this->scrubCustomsIds($errors, $request),
                     ]);
                     $saturdayApplied = false;
                     // Remove only SATURDAY_DELIVERY, preserve other special services (e.g. FEDEX_ONE_RATE)
@@ -721,24 +785,25 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
             if (! $response->successful()) {
                 $errors = $responseData['errors'] ?? [];
                 $errorMessage = ! empty($errors) ? ($errors[0]['message'] ?? 'Unknown FedEx error') : 'FedEx API error';
+                $errorMessage = $this->scrubCustomsIds($errorMessage, $request);
                 Log::channel('fedex-validation')->error('FedEx createShipment API error', [
                     'status' => $response->status(),
-                    'errors' => $errors,
-                    'body' => $responseData,
+                    'errors' => $this->scrubCustomsIds($errors, $request),
+                    'body' => $this->scrubCustomsIds($responseData, $request),
                 ]);
 
                 return ShipResponse::failure($errorMessage);
             }
 
             Log::channel('fedex-validation')->debug('LABEL RESPONSE', [
-                'body' => $responseData,
+                'body' => $this->scrubCustomsIds($responseData, $request),
             ]);
 
             $shipmentData = $responseData['output']['transactionShipments'][0] ?? null;
 
             if (! $shipmentData) {
                 Log::channel('fedex-validation')->error('FedEx createShipment missing shipment data', [
-                    'output' => $responseData['output'] ?? null,
+                    'output' => $this->scrubCustomsIds($responseData['output'] ?? null, $request),
                 ]);
 
                 return ShipResponse::failure('FedEx response missing shipment data');
@@ -750,7 +815,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
 
             if (empty($trackingNumber)) {
                 Log::channel('fedex-validation')->error('FedEx createShipment missing tracking number', [
-                    'shipmentData' => $shipmentData,
+                    'shipmentData' => $this->scrubCustomsIds($shipmentData, $request),
                 ]);
 
                 return ShipResponse::failure('FedEx response missing tracking number');
@@ -760,7 +825,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
 
             if (empty($labelData)) {
                 Log::channel('fedex-validation')->error('FedEx createShipment missing label data', [
-                    'pieceResponses' => $shipmentData['pieceResponses'] ?? null,
+                    'pieceResponses' => $this->scrubCustomsIds($shipmentData['pieceResponses'] ?? null, $request),
                 ]);
 
                 return ShipResponse::failure('FedEx response missing label data');
@@ -790,18 +855,18 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
             // a label that will never be billed. `postage-source-split/18`.
             Log::channel('fedex-validation')->warning('FedEx createShipment got no answer', [
                 'exception' => $e::class,
-                'error' => $e->getMessage(),
+                'error' => $this->scrubCustomsIds($e->getMessage(), $request),
             ]);
 
             return ShipResponse::failure(self::NO_ANSWER_MESSAGE);
         } catch (\Exception $e) {
             Log::channel('fedex-validation')->error('FedEx createShipment error', [
                 'exception' => $e::class,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
+                'error' => $this->scrubCustomsIds($e->getMessage(), $request),
+                'trace' => $this->scrubCustomsIds($e->getTraceAsString(), $request),
             ]);
 
-            return ShipResponse::failure($e->getMessage());
+            return ShipResponse::failure($this->scrubCustomsIds($e->getMessage(), $request));
         }
     }
 
@@ -1497,6 +1562,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
         AddressData $address,
         ?string $fallbackPhone = null,
         bool $includeResidentialClassification = false,
+        bool $includeEmail = false,
     ): array {
         return [
             'contact' => array_filter([
@@ -1504,6 +1570,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
                 'companyName' => $this->labelText($address->company, 'companyName'),
                 'phoneNumber' => $address->phone ?? $fallbackPhone,
                 'phoneExtension' => $address->phoneExtension,
+                'emailAddress' => $includeEmail ? $this->recipientEmail($address) : null,
             ]),
             'address' => [
                 'streetLines' => $this->buildStreetLines($address->streetAddress, $address->streetAddress2),
@@ -1630,7 +1697,7 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
      *
      * @return array<string, mixed>
      */
-    private function buildCustomsClearanceDetail(ShipRequest $request): array
+    private function buildCustomsClearanceDetail(ShipRequest $request, ?CarrierAccount $account): array
     {
         $commodities = [];
         $declaresEuProductIdentifiers = $request->toAddress->isInEuropeanUnion();
@@ -1671,16 +1738,228 @@ class FedexAdapter implements DirectCarrierAdapter, UsesCarrierAccount
             $commodities[] = $commodity;
         }
 
+        $terms = $this->declaredDutiesTerms($request);
+
         return [
             'commercialInvoice' => [
                 'shipmentPurpose' => 'SOLD',
-                'termsOfSale' => 'DDU',
+                // FedEx prints "Terms DDP" only with both this and a SENDER
+                // dutiesPayment that names a payor account.
+                'termsOfSale' => strtoupper($terms->value),
             ],
-            'dutiesPayment' => [
-                'paymentType' => 'RECIPIENT',
-            ],
+            'dutiesPayment' => $this->buildDutiesPayment($terms, $account),
+            ...$this->buildExportDetail($request),
             'commodities' => $commodities,
         ];
+    }
+
+    /**
+     * Who is billed for duties. DDP bills the shipping account, so the
+     * payor is named; DDU bills the recipient, which FedEx can only collect
+     * from when the recipient contact carries an email address
+     * ({@see self::recipientEmail()}).
+     *
+     * @return array<string, mixed>
+     */
+    private function buildDutiesPayment(DutiesTerms $terms, ?CarrierAccount $account): array
+    {
+        if ($terms === DutiesTerms::Ddu) {
+            return ['paymentType' => 'RECIPIENT'];
+        }
+
+        return [
+            'paymentType' => 'SENDER',
+            'payor' => ['responsibleParty' => ['accountNumber' => ['value' => $this->resolveAccountNumber($account)]]],
+        ];
+    }
+
+    /**
+     * The term a customs label carries: the one resolved for the Shipment, and
+     * DDU when none was (FedEx bills the recipient by default, and a request
+     * built without terms has always declared that).
+     */
+    private function declaredDutiesTerms(ShipRequest $request): DutiesTerms
+    {
+        return $request->customsTerms->dutiesTerms ?? DutiesTerms::Ddu;
+    }
+
+    /**
+     * Whether the request carries a customs declaration: it crosses a customs
+     * zone and has lines to declare. Without lines `createShipment()` refuses
+     * before anything is sent.
+     */
+    private function sendsCustomsDeclaration(ShipRequest $request): bool
+    {
+        return ! $request->toAddress->sharesCustomsZoneWith($request->fromAddress) && $request->customsItems !== [];
+    }
+
+    /**
+     * The ITN as FedEx reads it, sent only when the Shipment has one. An
+     * exemption is never sent: when the field is left out FedEx prints
+     * `NO EEI 30.37(a)` (or `30.36` to Canada) itself, and refuses a parcel
+     * over $2,500 with no ITN (`international-customs-terms/02`).
+     */
+    private function exportComplianceStatement(ShipRequest $request): ?string
+    {
+        if (! $this->sendsCustomsDeclaration($request) || blank($request->exportItn)) {
+            return null;
+        }
+
+        $itn = strtoupper((string) $request->exportItn);
+
+        return str_starts_with($itn, self::ITN_PREFIX) ? $itn : self::ITN_PREFIX.$itn;
+    }
+
+    /**
+     * @return array{exportDetail?: array{exportComplianceStatement: string}}
+     */
+    private function buildExportDetail(ShipRequest $request): array
+    {
+        $statement = $this->exportComplianceStatement($request);
+
+        return $statement === null ? [] : ['exportDetail' => ['exportComplianceStatement' => $statement]];
+    }
+
+    /**
+     * The shipper's tax IDs, the seller registration first and the EIN after:
+     * FedEx prints only the first in the invoice's tax ID field. The EIN goes
+     * only with an ITN, never for an exemption
+     * (`international-customs-terms/11`).
+     *
+     * @return list<array{number: string, tinType: string}>
+     */
+    private function shipperTins(ShipRequest $request): array
+    {
+        $tins = [];
+
+        if (($registration = $this->sentRegistration($request)) !== null) {
+            $tins[] = [
+                'number' => $registration->number,
+                'tinType' => $this->tinTypeFor($registration->regime),
+            ];
+        }
+
+        if ($this->exportComplianceStatement($request) !== null && $this->fitsTin($request->exporterEin)) {
+            $tins[] = ['number' => (string) $request->exporterEin, 'tinType' => self::EIN_TIN_TYPE];
+        }
+
+        return $tins;
+    }
+
+    /**
+     * The registration this request sends as a shipper TIN: the declared one,
+     * when the number fits a TIN. {@see self::tinTypeFor()} is where a regime
+     * FedEx has no type for would be left out.
+     */
+    private function sentRegistration(ShipRequest $request): ?SellerTaxRegistration
+    {
+        $registration = $request->customsTerms?->registration;
+
+        if (! $this->sendsCustomsDeclaration($request) || $registration === null || ! $this->fitsTin($registration->number)) {
+            return null;
+        }
+
+        return $registration;
+    }
+
+    private function fitsTin(?string $number): bool
+    {
+        return filled($number) && mb_strlen((string) $number) <= self::MAX_TIN_LENGTH;
+    }
+
+    /**
+     * The recipient's own tax ID as FedEx prints it on the invoice, which is
+     * also the field FedEx's Brazil advisory asks automation to fill. A CPF
+     * and a PCCC are personal; a CNPJ and a VAT number are a business's by
+     * definition; any other ID follows whether the consignee has a company
+     * name.
+     *
+     * @return array{number: string, tinType: string}|null
+     */
+    private function recipientTin(ShipRequest $request): ?array
+    {
+        $taxId = $request->recipientTaxId;
+
+        if (! $taxId instanceof RecipientTaxId || ! $this->sendsCustomsDeclaration($request) || ! $this->fitsTin($taxId->number)) {
+            return null;
+        }
+
+        $isCompany = match ($taxId->type) {
+            RecipientTaxIdType::Cpf, RecipientTaxIdType::Pccc => false,
+            RecipientTaxIdType::Cnpj, RecipientTaxIdType::Vat => true,
+            RecipientTaxIdType::Other => filled($request->toAddress->company),
+        };
+
+        return ['number' => $taxId->number, 'tinType' => $isCompany ? 'BUSINESS_NATIONAL' : 'PERSONAL_NATIONAL'];
+    }
+
+    /**
+     * The recipient's email, sent whenever the Shipment has one that FedEx
+     * will take. Without it FedEx cannot contact the recipient to collect
+     * duties, and "charges fall back to the shipper" (Ship API guide).
+     */
+    private function recipientEmail(AddressData $address): ?string
+    {
+        return FedexRecipientEmail::usable($address->email);
+    }
+
+    /**
+     * What `createShipment()` puts on the wire, answered with the predicates
+     * that build the body: the term is declared with the customs declaration,
+     * and each registration, tax ID or ITN only when its TIN or statement is
+     * actually sent.
+     */
+    public function declaredCustomsTerms(ShipRequest $request): DeclaredCustomsTerms
+    {
+        if (! $this->sendsCustomsDeclaration($request)) {
+            return DeclaredCustomsTerms::none();
+        }
+
+        return new DeclaredCustomsTerms(
+            dutiesTerms: $this->declaredDutiesTerms($request),
+            registration: $this->sentRegistration($request),
+            recipientTaxIdType: $this->recipientTin($request) !== null ? $request->recipientTaxId?->type : null,
+            exportItn: $this->exportComplianceStatement($request) !== null ? $request->exportItn : null,
+        );
+    }
+
+    /**
+     * Take the recipient's tax ID and the client's EIN out of text bound for a
+     * log or a screen. Never applied to a value that is returned or stored as
+     * data (tracking numbers, documents): only to log lines and failure
+     * messages. FedEx can echo a rejected number back in its message, and a
+     * key-based redaction cannot see it there. Whole tokens only, so a
+     * nine-digit EIN does not garble a longer identifier.
+     *
+     * @template T of string|array<array-key, mixed>|null
+     *
+     * @param  T  $value
+     * @return T
+     */
+    private function scrubCustomsIds(string|array|null $value, ShipRequest $request): string|array|null
+    {
+        $secrets = array_values(array_filter(
+            [$request->recipientTaxId?->number, $request->exporterEin],
+            fn (?string $secret): bool => filled($secret),
+        ));
+
+        if ($secrets === [] || $value === null) {
+            return $value;
+        }
+
+        $pattern = '/(?<![A-Za-z0-9])(?:'.implode('|', array_map(fn (string $secret): string => preg_quote($secret, '/'), $secrets)).')(?![A-Za-z0-9])/';
+
+        if (is_string($value)) {
+            return preg_replace($pattern, '[REDACTED]', $value) ?? $value;
+        }
+
+        array_walk_recursive($value, function (mixed &$leaf) use ($pattern): void {
+            if (is_string($leaf)) {
+                $leaf = preg_replace($pattern, '[REDACTED]', $leaf) ?? $leaf;
+            }
+        });
+
+        return $value;
     }
 
     /**

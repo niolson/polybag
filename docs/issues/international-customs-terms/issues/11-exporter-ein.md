@@ -67,10 +67,10 @@ say that such a client needs its filer to supply the ITN, not offer a field for 
       a malformed value is rejected on save
 - [x] `05` blocks a Shipment with an ITN whose client has no EIN, and lets it through
       once the EIN is set
-- [ ] `06` and `07` send the EIN only when they send an ITN, never for an exemption;
+- [x] `06` and `07` send the EIN only when they send an ITN, never for an exemption;
       request schema tests accept the fields
-- [ ] One CIE label and one FedEx sandbox label with an ITN and an EIN are recorded in
-      this issue's comments
+- [x] One CIE label and one FedEx sandbox label with an ITN and an EIN are recorded in
+      this issue's comments (see the entry below)
 
 ## Comments
 
@@ -84,3 +84,10 @@ say that such a client needs its filer to supply the ITN, not offer a field for 
   (Settings in a single-client install) and "A manager must add it." for a user who cannot
   edit the client. Tested in `CustomsReadinessTest`. Sending the EIN still waits on `06` and
   `07`.
+- **2026-10-09, sending done (`06`, `07`).** UPS sends the EIN on the EEI form (`06`); FedEx
+  sends it as the second shipper `tins` entry, after any seller registration, only when an
+  ITN is sent, with `tinType` `FEDERAL`. `FEDERAL` is the maintainer's reading of `11`'s
+  "FEDERAL or BUSINESS_NATIONAL" and is not confirmed with FedEx. Labels: UPS CIE (`06`'s
+  comments) and the FedEx sandbox (`07`'s comments, a BR label with an ITN and an EIN; the
+  invoice prints the EIN as the shipper's *Tax ID#*). The status is left for the
+  maintainer.

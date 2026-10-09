@@ -25,6 +25,7 @@ use App\Models\Shipment;
 use App\Models\ShippingOffer;
 use App\Services\SettingsService;
 use App\Services\Shipping\DutiesTermsFilter;
+use App\Support\FedexRecipientEmail;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -688,12 +689,15 @@ class CustomsReadiness
 
         if (($key === null || $key === CarrierAlias::lookupKey(Carrier::FEDEX))
             && $terms->dutiesTerms === DutiesTerms::Ddu
-            && blank($destination->email)) {
+            && FedexRecipientEmail::usable($destination->email) === null) {
+            $tooLong = FedexRecipientEmail::isTooLong($destination->email);
             $findings[] = new CustomsFinding(
                 CustomsFindingSeverity::Warn,
                 'fedex_ddu_without_email',
-                'No Recipient Email',
-                'FedEx cannot collect duties from the recipient without an email address, and the charges fall back to the shipper. Add an email to the shipment before buying this DDU label from FedEx.',
+                $tooLong ? 'Recipient Email Too Long' : 'No Recipient Email',
+                $tooLong
+                    ? sprintf('FedEx takes an email address of at most %d characters and this one is longer, so it is not sent. FedEx cannot collect duties from the recipient without it, and the charges fall back to the shipper. Shorten or replace the email on the shipment before buying this DDU label from FedEx.', FedexRecipientEmail::MAX_LENGTH)
+                    : 'FedEx cannot collect duties from the recipient without an email address, and the charges fall back to the shipper. Add an email to the shipment before buying this DDU label from FedEx.',
             );
         }
 

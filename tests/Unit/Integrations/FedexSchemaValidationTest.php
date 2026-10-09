@@ -515,3 +515,65 @@ it('fails loudly when the schema name is unknown', function (): void {
     expect(fn () => assertMatchesFedexSchema(validFedexShipBody(), 'DoesNotExist'))
         ->toThrow(AssertionFailedError::class, 'not defined');
 });
+
+/**
+ * The customs-terms additions (`international-customs-terms/07`): the term is
+ * declared twice and must agree, tax IDs are typed TINs, and the ITN is an
+ * AES citation.
+ *
+ * @param  array<string, mixed>  $customs
+ * @param  array<string, mixed>  $shipment
+ * @return array<string, mixed>
+ */
+function fedexShipBodyWithCustoms(array $customs, array $shipment = []): array
+{
+    return validFedexShipBody([
+        'requestedShipment' => array_replace_recursive([
+            'serviceType' => 'FEDEX_INTERNATIONAL_PRIORITY',
+            'customsClearanceDetail' => validFedexCustomsClearanceDetail($customs),
+        ], $shipment),
+    ]);
+}
+
+it('accepts a DDP declaration with its payor, TINs, a recipient email and an ITN', function (): void {
+    assertMatchesFedexSchema(fedexShipBodyWithCustoms([
+        'commercialInvoice' => ['termsOfSale' => 'DDP'],
+        'dutiesPayment' => ['paymentType' => 'SENDER', 'payor' => ['responsibleParty' => ['accountNumber' => ['value' => '123456789']]]],
+        'exportDetail' => ['exportComplianceStatement' => 'AESX20261008123456'],
+    ], [
+        'shipper' => ['tins' => [['number' => 'IM2760000742', 'tinType' => 'BUSINESS_UNION'], ['number' => '123456789', 'tinType' => 'FEDERAL']]],
+        'recipients' => [['contact' => ['emailAddress' => 'anna@example.com'], 'tins' => [['number' => '12345678909', 'tinType' => 'PERSONAL_NATIONAL']]]],
+    ]), 'CreateShipmentRequest');
+});
+
+it('rejects a DDP invoice paid by the recipient, and a DDU invoice paid by the sender', function (string $terms, string $payment): void {
+    expect(fn () => assertMatchesFedexSchema(fedexShipBodyWithCustoms([
+        'commercialInvoice' => ['termsOfSale' => $terms],
+        'dutiesPayment' => ['paymentType' => $payment],
+    ]), 'CreateShipmentRequest'))->toThrow(AssertionFailedError::class);
+})->with([
+    'DDP, recipient' => ['DDP', 'RECIPIENT'],
+    'DDU, sender' => ['DDU', 'SENDER'],
+]);
+
+it('rejects a SENDER duties payment with no payor', function (): void {
+    expect(fn () => assertMatchesFedexSchema(fedexShipBodyWithCustoms([
+        'commercialInvoice' => ['termsOfSale' => 'DDP'],
+        'dutiesPayment' => ['paymentType' => 'SENDER'],
+    ]), 'CreateShipmentRequest'))->toThrow(AssertionFailedError::class);
+});
+
+it('rejects a TIN type outside FedEx\'s enum, and a number over 18 characters', function (string $number, string $type, string $needle): void {
+    expect(fn () => assertMatchesFedexSchema(fedexShipBodyWithCustoms([], [
+        'shipper' => ['tins' => [['number' => $number, 'tinType' => $type]]],
+    ]), 'CreateShipmentRequest'))->toThrow(AssertionFailedError::class, $needle);
+})->with([
+    'IOSS is not a type' => ['IM2760000742', 'IOSS', 'tinType'],
+    'a long number' => ['1234567890123456789', 'FEDERAL', 'number'],
+]);
+
+it('rejects an export compliance statement that is not an AES citation', function (string $statement): void {
+    expect(fn () => assertMatchesFedexSchema(fedexShipBodyWithCustoms([
+        'exportDetail' => ['exportComplianceStatement' => $statement],
+    ]), 'CreateShipmentRequest'))->toThrow(AssertionFailedError::class, 'exportComplianceStatement');
+})->with(['X20261008123456', 'NO_EEI_30_37_A']);
