@@ -62,12 +62,7 @@ class CustomsTermsResolver
         $shipment = $package->shipment;
         $destination ??= AddressData::fromShipment($shipment);
 
-        if ($origin === null) {
-            $package->loadMissing('location');
-            $origin = $package->location !== null
-                ? AddressData::fromLocation($package->location)
-                : AddressData::fromConfig();
-        }
+        $origin ??= $this->originFor($package);
 
         if ($this->crossesNoCustomsBorder($origin, $destination)) {
             return ResolvedCustomsTerms::notApplicable($destination->country, $shipment->client_id);
@@ -82,6 +77,45 @@ class CustomsTermsResolver
             $destination,
             $package->packageItems->map(CustomsItem::fromPackageItem(...))->values()->all(),
         );
+    }
+
+    /**
+     * The destination country when a label to it is a customs crossing into a
+     * regime whose duties terms nobody has verified a source decides: an EU,
+     * GB, NO or AU destination, the countries a seller registration covers
+     * ({@see TaxRegistrationRegime::covers()}). Null for every other
+     * destination, and for a label that crosses no customs border.
+     *
+     * Automation does not buy Amazon Buy Shipping or Shopify Shipping postage
+     * into these until a test purchase shows what the source declares
+     * (ADR-0008 decision 5). Cheaper than {@see self::forPackage()}: it reads
+     * only the two addresses, so a batch of hundreds asks it per package.
+     */
+    public function unverifiedSourceTermsDestination(Package $package): ?string
+    {
+        $destination = AddressData::fromShipment($package->shipment);
+        $origin = $this->originFor($package);
+
+        if ($this->crossesNoCustomsBorder($origin, $destination)) {
+            return null;
+        }
+
+        foreach (TaxRegistrationRegime::cases() as $regime) {
+            if ($regime->covers($destination)) {
+                return strtoupper(trim($destination->country));
+            }
+        }
+
+        return null;
+    }
+
+    private function originFor(Package $package): AddressData
+    {
+        $package->loadMissing('location');
+
+        return $package->location !== null
+            ? AddressData::fromLocation($package->location)
+            : AddressData::fromConfig();
     }
 
     /**

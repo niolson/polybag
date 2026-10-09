@@ -9,6 +9,8 @@ use App\DataTransferObjects\Shipping\OfferRequirements;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\UnattendedRateSelection;
 use App\Models\Package;
+use App\Services\AddressReferenceService;
+use App\Services\Customs\CustomsTermsResolver;
 use App\Services\PostageSources\PostageSourceResolver;
 use App\Services\RateSelector;
 use App\Services\RuleEvaluator;
@@ -30,6 +32,8 @@ class UnattendedRateSelector
         private readonly RuleEvaluator $ruleEvaluator,
         private readonly RateSelector $rateSelector,
         private readonly PostageSourceResolver $postageSourceResolver,
+        private readonly CustomsTermsResolver $customsTerms,
+        private readonly AddressReferenceService $addresses,
     ) {}
 
     /**
@@ -48,6 +52,13 @@ class UnattendedRateSelector
      * setting allows automation (ADR-0006 decision 6). An offer the setting
      * holds back is kept in the result, so the refusal can name the setting.
      *
+     * Postage whose source decides the duties terms — Amazon Buy Shipping,
+     * Amazon Shipping on a connection, a Shopify blind purchase — is bought
+     * only for a destination outside the EU, GB, NO and AU, until a test
+     * purchase shows what the source declares there (ADR-0008 decision 5).
+     * Both paths hold it, and a hold names the destination, not the postage
+     * setting. A person can still buy it from the Ship page.
+     *
      * Deliberately not routed through {@see EloquentPackageShippingWorkflow::prepareRates()}. That builds the
      * attended view — where a service outside the allowance is *supposed* to appear, with
      * its price, for a packer to take responsibility for — and its
@@ -57,19 +68,61 @@ class UnattendedRateSelector
      */
     public function select(Package $package): UnattendedRateSelection
     {
-        $package->loadMissing(['packageItems.product', 'packageItems.shipmentItem', 'shipment.shippingMethod']);
+        // Read afresh: the hold below, the rules and the quote must all see the
+        // destination the database holds now, or a Shipment edited since this
+        // Package was loaded would be held (or not) for the wrong country
+        // while rate shopping, which reloads, quotes the right one.
+        $package->load(['location', 'packageItems.product', 'packageItems.shipmentItem', 'shipment.shippingMethod']);
 
         $ruleResult = $this->ruleEvaluator->evaluate($package->shipment, $package);
         $method = $package->shipment->shippingMethod
             ?? throw new \LogicException('autoShip() refuses a shipment with no shipping method before selecting a rate.');
         $channel = $this->postageSourceResolver->channelSourceFor($package);
         $blindAllowed = $channel?->postageSetting()->allowsAutomation() ?? false;
+        $sourceTermsDestination = $this->customsTerms->unverifiedSourceTermsDestination($package);
 
         /** @var Collection<int, BlindPurchaseOffer> $heldBlind */
         $heldBlind = collect();
-        $finish = fn (UnattendedRateSelection $selection): UnattendedRateSelection => $channel === null
-            ? $selection
-            : $selection->holdingBlindOffers($heldBlind, $channel->name);
+        /** @var Collection<int, BlindPurchaseOffer> $heldForSourceTerms */
+        $heldForSourceTerms = collect();
+        $finish = function (UnattendedRateSelection $selection) use ($package, $heldBlind, $heldForSourceTerms, $channel, $sourceTermsDestination): UnattendedRateSelection {
+            $heldOffers = $heldBlind->merge($heldForSourceTerms);
+
+            // A blind offer a rule or the sole-choice rule would have bought was
+            // held, and rate shopping bought a direct or quoted rate instead:
+            // said, so the swap is never silent.
+            if ($selection->rate !== null && $heldOffers->isNotEmpty()) {
+                logger()->info('Replaced a held blind purchase with a quoted purchase', [
+                    'package_id' => $package->id,
+                    'destination' => $sourceTermsDestination ?? $package->shipment->country,
+                    'held_sources' => $heldOffers->map(fn (BlindPurchaseOffer $offer): string => $offer->source)->unique()->values()->all(),
+                    'held_for' => $heldForSourceTerms->isNotEmpty() ? 'source_decided_terms' : 'postage_setting',
+                ]);
+            }
+
+            return $selection->holdingBlindOffers(
+                $heldBlind,
+                $channel?->name,
+                $heldForSourceTerms,
+                $sourceTermsDestination,
+            );
+        };
+
+        // Why a blind offer the rules would buy is held: the connection's
+        // setting first, then the destination. Null when nothing holds it.
+        $holdBlind = function (BlindPurchaseOffer $offer) use ($blindAllowed, $sourceTermsDestination, $heldBlind, $heldForSourceTerms): bool {
+            $held = ! $blindAllowed ? $heldBlind : ($sourceTermsDestination !== null ? $heldForSourceTerms : null);
+
+            if ($held === null) {
+                return false;
+            }
+
+            if (! $held->contains(fn (BlindPurchaseOffer $other): bool => $other->id() === $offer->id())) {
+                $held->push($offer);
+            }
+
+            return true;
+        };
 
         // A blind purchase is never held to the method's requirements: a rule
         // naming it, or its being the method's only choice, is the operator's
@@ -81,18 +134,16 @@ class UnattendedRateSelector
                 ->reject($ruleResult->excludesBlindOffer(...))
                 ->first(fn (BlindPurchaseOffer $offer): bool => $offer->id() === $ruleResult->preSelectedBlindPurchaseId);
 
-            if ($blindOffer && $blindAllowed) {
+            // A rule cannot reach what the connection sells to a packer only,
+            // or what a source decides the duties terms of for a destination
+            // nobody has verified. Rate shopping goes on, as it does when the
+            // offer is gone.
+            if ($blindOffer && ! $holdBlind($blindOffer)) {
                 return new UnattendedRateSelection(
                     rate: null,
                     notAllowed: collect(),
                     blindOffer: $blindOffer,
                 );
-            }
-
-            // A rule cannot reach what the connection sells to a packer only.
-            // Rate shopping goes on, as it does when the offer is gone.
-            if ($blindOffer) {
-                $heldBlind->push($blindOffer);
             }
         }
 
@@ -125,7 +176,7 @@ class UnattendedRateSelector
                     ]);
                 }
 
-                return $finish($this->rateSelector->selectForAutomation($rates, $deadline, $method, $requirements, $channel));
+                return $finish($this->rateSelector->selectForAutomation($rates, $deadline, $method, $requirements, $channel, $sourceTermsDestination));
             }
 
             logger()->info('A shipping rule names a service no source quoted, or an Exclude rule removed, for this package; rate shopping instead', [
@@ -140,7 +191,7 @@ class UnattendedRateSelector
             $rates = $rates->reject(fn (RateResponse $rate): bool => $ruleResult->excludes($rate));
         }
 
-        $selection = $this->rateSelector->selectForAutomation($rates, $deadline, $method, $requirements, $channel);
+        $selection = $this->rateSelector->selectForAutomation($rates, $deadline, $method, $requirements, $channel, $sourceTermsDestination);
 
         if ($selection->rate === null) {
             $blindOffer = $this->shippingRateService->soleBlindPurchaseOfferForAutomation(
@@ -148,17 +199,13 @@ class UnattendedRateSelector
                 $ruleResult->excludesBlindOffer(...),
             );
 
-            if ($blindOffer && $blindAllowed) {
+            if ($blindOffer && ! $holdBlind($blindOffer)) {
                 return new UnattendedRateSelection(
                     rate: null,
                     notAllowed: $selection->notAllowed,
                     shippingMethodName: $selection->shippingMethodName,
                     blindOffer: $blindOffer,
                 );
-            }
-
-            if ($blindOffer && ! $heldBlind->contains(fn (BlindPurchaseOffer $held): bool => $held->id() === $blindOffer->id())) {
-                $heldBlind->push($blindOffer);
             }
         }
 
@@ -177,6 +224,8 @@ class UnattendedRateSelector
             heldByPostageSetting: $selection->heldByPostageSetting,
             blindOffersHeldByPostageSetting: $selection->blindOffersHeldByPostageSetting,
             postageSettingConnection: $selection->postageSettingConnection,
+            heldForSourceTerms: $selection->heldForSourceTerms,
+            sourceTermsDestination: $selection->sourceTermsDestination,
         ));
     }
 
@@ -244,8 +293,30 @@ class UnattendedRateSelector
             ]);
         }
 
+        if ($selection->heldForSourceTermsAnything()) {
+            logger()->info('Held source-decided postage from automated purchase into a destination whose duties terms are unverified', [
+                'package_id' => $package->id,
+                'destination' => $selection->sourceTermsDestination,
+                'held' => $selection->heldForSourceTermsSummary(),
+            ]);
+        }
+
         if ($selection->refusedForRequirements()) {
             return $this->refusedForMethodRequirements($package, $selection);
+        }
+
+        if (! $selection->notAllowedAnything() && $selection->heldForSourceTermsAnything()) {
+            return PackageShippingResult::attendedSelectionRequired(
+                'Source Decides Duties Terms',
+                "This package was offered {$selection->heldForSourceTermsSummary()}, but the source decides the duties terms on a label to {$this->sourceTermsCountry($selection)}, "
+                .'and PolyBag has not verified what it declares there, so automation does not buy it. '
+                .$this->amazonShippingNote($selection)
+                .$this->contentRestrictionNote($selection)
+                .$this->deactivatedNote($selection)
+                .$this->postageSettingNote($selection)
+                .$this->droppedRatesNote($package)
+                .'Ship this package from the Ship page, where a person chooses it.',
+            );
         }
 
         if (! $selection->notAllowedAnything() && $selection->heldByPostageSettingAnything()) {
@@ -254,6 +325,7 @@ class UnattendedRateSelector
                 "This package was offered {$selection->heldByPostageSettingSummary()}, but the connection \"{$selection->postageSettingConnection}\" sells postage to a packer only, so automation does not buy it. "
                 .$this->contentRestrictionNote($selection)
                 .$this->deactivatedNote($selection)
+                .$this->droppedRatesNote($package)
                 .'Ship this package from the Ship page, or set the connection\'s postage setting to Packer and automation.',
             );
         }
@@ -288,6 +360,7 @@ class UnattendedRateSelector
             .$this->contentRestrictionNote($selection)
             .$this->deactivatedNote($selection)
             .$this->postageSettingNote($selection)
+            .$this->sourceTermsNote($selection)
             .'Add the service to the shipping method or allow its source any service, or ship this package from the Ship page, where a person chooses the rate.',
         );
     }
@@ -365,6 +438,55 @@ class UnattendedRateSelector
     }
 
     /**
+     * A sentence naming what the destination held back beside another
+     * refusal, so an operator changing the shipping method does not expect
+     * that to release it. Only a person on the Ship page, or a verified source,
+     * would.
+     */
+    private function sourceTermsNote(UnattendedRateSelection $selection): string
+    {
+        return $selection->heldForSourceTermsAnything()
+            ? 'Automation also never buys '.$selection->heldForSourceTermsSummary()
+                ." into {$this->sourceTermsCountry($selection)}, because the source decides the duties terms and PolyBag has not verified what it declares there. "
+                .$this->amazonShippingNote($selection)
+            : '';
+    }
+
+    /**
+     * Why Amazon Shipping, sold on a connection, is among the held offers:
+     * PolyBag sends it no duties terms, and it ships within the continental
+     * US only, so it is not a service for these destinations anyway.
+     */
+    private function amazonShippingNote(UnattendedRateSelection $selection): string
+    {
+        return $selection->heldAmazonShipping()
+            ? 'PolyBag cannot set duties terms on Amazon Shipping, which ships within the continental US only. '
+            : '';
+    }
+
+    /**
+     * What else the Shipment's customs terms ruled out. A held offer makes an
+     * attended alternative available, which is why the refusal would
+     * otherwise never mention it: with no EU duties terms set, setting them is
+     * what lets a direct rate be bought unattended.
+     */
+    private function droppedRatesNote(Package $package): string
+    {
+        $dropped = $this->shippingRateService->droppedRatesFor($package->id);
+
+        return $dropped === []
+            ? ''
+            : implode(' ', array_map(fn (DroppedRate $notice): string => rtrim($notice->reason, '.').'.', $dropped)).' ';
+    }
+
+    private function sourceTermsCountry(UnattendedRateSelection $selection): string
+    {
+        $code = (string) $selection->sourceTermsDestination;
+
+        return $this->addresses->getCountryOptions()[$code] ?? $code;
+    }
+
+    /**
      * Nothing met what the order's shipping method requires. Said as such,
      * because "no rates" would send the operator to the carrier when the rates
      * are right there on the Ship page, marked (`amazon-buy-shipping/17`).
@@ -423,6 +545,7 @@ class UnattendedRateSelector
             .$this->contentRestrictionNote($selection)
             .$this->deactivatedNote($selection)
             .$this->postageSettingNote($selection)
+            .$this->sourceTermsNote($selection)
             .'Ship it from the Ship page, where a person chooses the rate, or change the requirement on the shipping method.',
         );
     }

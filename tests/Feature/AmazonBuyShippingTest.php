@@ -214,6 +214,82 @@ function amazonPurchaseResponse(string $shipmentId = 'amzn1.sid.abc123', string 
     ]]);
 }
 
+it('records a Buy Shipping purchase to Germany as source-decided, though the rate is rebuilt from the Offer', function (): void {
+    // `international-customs-terms/09`: the rebuilt rate has lost the observed
+    // service that marks it Amazon's, so the Offer's channel has to say so, or
+    // the Label records nothing at all.
+    $this->package->shipment->update([
+        'company' => null,
+        'city' => 'Berlin',
+        'state_or_province' => null,
+        'postal_code' => '10117',
+        'country' => 'DE',
+    ]);
+    $this->package->packageItems->first()->product->update(['country_of_origin' => 'US']);
+
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse(),
+        PurchaseShipment::class => amazonPurchaseResponse(),
+    ]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package->fresh()), [])->first();
+
+    $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package->fresh(), new PackageShippingRequest(
+        selectedRate: $rate,
+        labelFormat: 'zpl',
+        labelDpi: 300,
+    ));
+
+    $label = $this->package->fresh()->activeLabel()->firstOrFail();
+    $offer = ShippingOffer::where('public_id', $rate->offerId)->sole();
+
+    expect($result->success)->toBeTrue()
+        ->and($label->customs_terms['duties_terms_source'])->toBe('source_decided')
+        ->and($label->customs_terms['duties_terms'])->toBeNull()
+        ->and($label->customs_terms['registration'])->toBeNull()
+        ->and($label->postage_data_source_id)->toBe($this->source->id)
+        ->and($offer->declared_customs_terms)->toBe($label->customs_terms);
+});
+
+it('records the stamped source-decided terms when a lost Buy Shipping purchase is recovered', function (): void {
+    $this->package->shipment->update([
+        'company' => null,
+        'city' => 'Berlin',
+        'state_or_province' => null,
+        'postal_code' => '10117',
+        'country' => 'DE',
+    ]);
+    $this->package->packageItems->first()->product->update(['country_of_origin' => 'US']);
+
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package->fresh()), [])->first();
+    $stamped = [
+        'duties_terms' => null,
+        'duties_terms_source' => 'source_decided',
+        'registration' => null,
+        'recipient_tax_id' => null,
+        'export_itn' => null,
+        'duties_support_version' => 'stamped-at-claim',
+    ];
+
+    // Spent with nothing heard back, the terms stamped when it was claimed.
+    ShippingOffer::where('public_id', $rate->offerId)->sole()
+        ->forceFill(['consumed_at' => now(), 'declared_customs_terms' => $stamped])->save();
+
+    Saloon::fake([
+        GetShippingRates::class => amazonRatesResponse(),
+        PurchaseShipment::class => amazonPurchaseResponse(),
+    ]);
+
+    $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package->fresh(), new PackageShippingRequest(
+        selectedRate: $rate,
+    ));
+
+    expect($result->success)->toBeTrue()
+        ->and($this->package->fresh()->activeLabel()->firstOrFail()->customs_terms)->toBe($stamped);
+});
+
 function amazonBuyShippingSource(): DataSource
 {
     return DataSource::factory()->create([

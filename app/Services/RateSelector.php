@@ -108,9 +108,15 @@ class RateSelector
      * narrows: the method cannot release what the connection refuses to
      * automation.
      *
+     * So is a rate whose source decides the duties terms (Amazon, Shopify),
+     * into a destination whose source-decided terms nobody has verified: EU,
+     * GB, NO and AU (ADR-0008 decision 5). It is kept for the Ship page, where
+     * a person chooses it, and named in the result as its own refusal.
+     *
      * @param  Collection<int, RateResponse>  $rates
      * @param  ShippingMethod  $method  The shipment's shipping method, whose postage-source rows are the allowance. A shipment with none is never rated (`carrier-catalog-reset/16`)
      * @param  DataSource|null  $channelSource  The package's channel connection, whose postage setting governs the Amazon Buy Shipping it sells for its own orders
+     * @param  string|null  $sourceTermsDestination  The destination country when source-decided duties terms are held from automation there, else null
      */
     public function selectForAutomation(
         Collection $rates,
@@ -118,6 +124,7 @@ class RateSelector
         ShippingMethod $method,
         ?OfferRequirements $requirements = null,
         ?DataSource $channelSource = null,
+        ?string $sourceTermsDestination = null,
     ): UnattendedRateSelection {
         $requirements ??= OfferRequirements::none();
 
@@ -127,6 +134,11 @@ class RateSelector
 
         $inactive = InactiveCatalog::among($unrestricted);
         [$deactivated, $unrestricted] = $unrestricted->partition(fn (RateResponse $rate): bool => $inactive->includes($rate));
+
+        // After the inactivity check: the Ship page grays an inactive service
+        // out, so it is no attended alternative and must be reported as
+        // inactive, not as held for the destination.
+        [$heldForSourceTerms, $unrestricted] = $this->partitionBySourceTerms($unrestricted->values(), $sourceTermsDestination);
 
         [$eligible, $notAllowed] = $this->partitionByAllowance($unrestricted->values(), $method);
 
@@ -157,6 +169,7 @@ class RateSelector
             attendedAlternativeAvailable: $notAllowed->isNotEmpty()
                 || $contentRestricted->isNotEmpty()
                 || $heldBySetting->isNotEmpty()
+                || $heldForSourceTerms->isNotEmpty()
                 || $late->isNotEmpty()
                 || $unprotected->isNotEmpty()
                 || $eligible->contains(fn (RateResponse $rate): bool => $rate->priceUnknown),
@@ -168,7 +181,28 @@ class RateSelector
             deactivated: $deactivated->values(),
             heldByPostageSetting: $heldBySetting,
             postageSettingConnection: $heldBySetting->isNotEmpty() ? $channelSource?->name : null,
+            heldForSourceTerms: $heldForSourceTerms,
+            sourceTermsDestination: $heldForSourceTerms->isNotEmpty() ? $sourceTermsDestination : null,
         );
+    }
+
+    /**
+     * Split off the rates whose source decides the duties terms, when the
+     * destination is one whose source-decided terms nobody has verified
+     * (ADR-0008 decision 5). With no such destination, nothing is held.
+     *
+     * @param  Collection<int, RateResponse>  $rates
+     * @return array{0: Collection<int, RateResponse>, 1: Collection<int, RateResponse>} held, then the rest
+     */
+    private function partitionBySourceTerms(Collection $rates, ?string $sourceTermsDestination): array
+    {
+        if ($sourceTermsDestination === null) {
+            return [collect(), $rates];
+        }
+
+        [$held, $rest] = $rates->partition(fn (RateResponse $rate): bool => $rate->isSourceDecided());
+
+        return [$held->values(), $rest->values()];
     }
 
     /**

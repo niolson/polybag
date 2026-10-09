@@ -90,6 +90,10 @@ recorded as `source_decided`. Automation does not buy them for EU, GB, NO or AU
 destinations until a test purchase establishes what the source declares, at which point
 the source gets entries in `duties-support.json` like a carrier.
 
+Amazon Shipping sold on a connection is held the same way: PolyBag sends its purchase no
+terms either, so the source decides them. It ships within the continental US only, so
+holding it for these destinations costs nothing.
+
 ### 6. What was declared is recorded on the Label
 
 `package_labels.customs_terms` snapshots the duties term and where it came from (`order`,

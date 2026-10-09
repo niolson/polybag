@@ -4,6 +4,8 @@ use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
 use App\Enums\ShippingRuleAction;
@@ -14,6 +16,7 @@ use App\Jobs\GenerateLabelJob;
 use App\Models\Carrier;
 use App\Models\CarrierAccountScope;
 use App\Models\CarrierService;
+use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\LabelBatch;
 use App\Models\LabelBatchItem;
@@ -170,4 +173,68 @@ it('is not dropped by a rule excluding Amazon Buy Shipping', function (): void {
 
     expect(batchShip($this->package)->status)->toBe(LabelBatchItemStatus::Success);
     Saloon::assertSent(PurchaseShipment::class);
+});
+
+/**
+ * `international-customs-terms/09`: PolyBag sends Amazon Shipping no duties
+ * terms, so unattended it is held for the destinations a source decides
+ * terms for, though it is a direct rate in every other respect.
+ */
+function externalPackageToGermany(Package $package): void
+{
+    $package->shipment->update([
+        'client_id' => Client::factory()->ddpToEu()->create()->id,
+        'company' => null,
+        'city' => 'Berlin',
+        'state_or_province' => null,
+        'postal_code' => '10117',
+        'country' => 'DE',
+    ]);
+}
+
+it('holds Amazon Shipping from batch ship into the EU, saying why', function (): void {
+    externalPackageToGermany($this->package);
+
+    $item = batchShip($this->package);
+
+    expect($item->status)->toBe(LabelBatchItemStatus::Failed)
+        ->and($item->error_message)->toContain('Amazon Shipping Ground')
+        ->and($item->error_message)->toContain('Germany')
+        ->and($item->error_message)->toContain('PolyBag cannot set duties terms on Amazon Shipping')
+        ->and($item->error_message)->toContain('continental US');
+
+    Saloon::assertNotSent(PurchaseShipment::class);
+});
+
+it('still buys a direct rate on the same EU package while Amazon Shipping is held', function (): void {
+    externalPackageToGermany($this->package);
+
+    $carrier = Carrier::factory()->create(['name' => 'MockCarrier', 'active' => true]);
+    $service = CarrierService::factory()->create(['carrier_id' => $carrier->id, 'name' => 'Ground', 'service_code' => 'GROUND', 'active' => true]);
+    $this->package->shipment->shippingMethod->carrierServices()->attach($service->id);
+
+    $adapter = Mockery::mock(DirectCarrierAdapter::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('isConfigured')->andReturnTrue();
+    $adapter->shouldReceive('prepareRateRequest')->andReturnNull();
+    $adapter->shouldReceive('customsDocumentDelivery')->andReturn(CustomsDocumentDelivery::FusedIntoLabel);
+    // Dearer than Amazon Shipping, so only the hold makes this the choice.
+    $adapter->shouldReceive('getRates')->andReturn(collect([
+        new RateResponse(carrier: 'MockCarrier', serviceCode: 'GROUND', serviceName: 'Ground', price: 99.00, carrierServiceId: $service->id, carrierId: $carrier->id),
+    ]));
+    $adapter->shouldReceive('createShipment')->once()->andReturn(ShipResponse::success(
+        trackingNumber: 'DIRECT-DE-1',
+        cost: 99.00,
+        carrier: 'MockCarrier',
+        service: 'Ground',
+        labelData: base64_encode('label'),
+    ));
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $item = batchShip($this->package);
+
+    expect($item->status)->toBe(LabelBatchItemStatus::Success)
+        ->and($this->package->fresh()->tracking_number)->toBe('DIRECT-DE-1');
+
+    Saloon::assertNotSent(PurchaseShipment::class);
 });

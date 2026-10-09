@@ -1,6 +1,6 @@
 # Amazon Buy Shipping and Shopify Shipping offers have source-decided terms
 
-Status: ready-for-agent
+Status: done — 2026-10-09
 Category: enhancement
 Repo: `polybag`
 
@@ -47,14 +47,103 @@ close.
 
 ## Acceptance criteria
 
-- [ ] An Amazon offer into the EU is listed for a client with no EU terms, and labeled
-- [ ] Batch ship and auto-ship do not buy an Amazon offer into the EU, and say why; a
+- [x] An Amazon offer into the EU is listed for a client with no EU terms, and labeled
+- [x] Batch ship and auto-ship do not buy an Amazon offer into the EU, and say why; a
       domestic Amazon offer is unaffected
-- [ ] A Shopify blind purchase into the EU, pre-selected by a shipping rule, is held by
+- [x] A Shopify blind purchase into the EU, pre-selected by a shipping rule, is held by
       auto-ship and batch ship, with the destination named as the reason, not the
       postage setting
-- [ ] A Shopify blind purchase into the EU that is the method's sole eligible choice is
+- [x] A Shopify blind purchase into the EU that is the method's sole eligible choice is
       held the same way
-- [ ] The same Shopify purchase to a domestic destination is still bought on both paths
-- [ ] A person can still buy the Shopify purchase into the EU from the Ship page
-- [ ] The Label snapshot records `source_decided` for both sources
+- [x] The same Shopify purchase to a domestic destination is still bought on both paths
+- [x] A person can still buy the Shopify purchase into the EU from the Ship page
+- [x] The Label snapshot records `source_decided` for both sources
+
+## Comments
+
+- 2026-10-09 — Built. **Mechanism reused, not parallel:** `06` and `07` already made
+  `ShipRequest.customsTerms` carry `asSourceDecided()`, `CustomsTermsSnapshot` record
+  `source_decided` for a seller that sends no terms, and `DutiesTermsFilter` /
+  `CustomsReadiness` skip the support filter and the unresolved-EU refusal for such a
+  rate. This issue added the label and the automation guard on top of them.
+  - **Where the guard lives.** The issue names `EloquentPackageShippingWorkflow::selectedRateForAutoShip()`;
+    that method no longer exists. Both blind branches (a rule's pre-selected purchase and
+    `ShippingRateService::soleBlindPurchaseOfferForAutomation()`) now sit in
+    `UnattendedRateSelector::select()`, which `autoShip()` and so Pack, Manual Ship, View
+    Package and batch ship (`GenerateLabelJob`) all go through. Guarded there.
+  - **"Restricted destination"** is `CustomsTermsResolver::unverifiedSourceTermsDestination()`:
+    the label crosses a customs border and some `TaxRegistrationRegime::covers()` the
+    destination, so EU, GB (Northern Ireland included), NO and AU, derived from the regime
+    list rather than a second country list. A label that crosses no border (an EU origin to
+    an EU destination) is not held.
+  - **Quoted offers.** `RateSelector::selectForAutomation()` takes that destination and
+    partitions off every rate whose source decides the terms (`RateResponse::isSourceDecided()`:
+    Amazon Buy Shipping, and Amazon Shipping sold on a connection, which the duties filter
+    already treated as source-decided) before the allowance, as it does for the postage
+    setting. They land in `UnattendedRateSelection::heldForSourceTerms`, not `notAllowed`,
+    so no shipping method change releases them.
+  - **Blind purchases.** Both branches hold the offer into
+    `blindOffersHeldForSourceTerms`, apart from `blindOffersHeldByPostageSetting`. When a
+    connection both sells to packers only and the destination is restricted, the postage
+    setting is named: the setting is decided first, and changing it is the operator's
+    first step either way.
+  - **Refusal.** `PackageShippingResult::attendedSelectionRequired('Source Decides Duties Terms', ...)`
+    names the offers and the destination country, and says to use the Ship page; batch ship
+    items carry the message. Where another refusal also applies, a sentence is appended
+    beside the postage-setting one.
+  - **Ship page.** `prepareRates()` adds a display-only `dutiesDecidedBy` ("Amazon" or
+    "Shopify", the blind offer's own `source`) to rates and blind offers when the label
+    crosses a customs border, rendered as a "Duties: decided by ..." badge. Nothing reads
+    it back at purchase: the purchase rebuilds the rate from the Offer, and the blind offer
+    from the server's own list.
+  - **Label snapshot.** `terms: source_decided` was already recorded as
+    `duties_terms_source`; "the source" is the Label's own `postage_source` and
+    `postage_data_source_id`, so the snapshot's shape is unchanged.
+- 2026-10-09 — **A gap in `06`, found and fixed here.** At purchase the rate is rebuilt
+  from the stored Offer (`rateFromOffer()`), which does not keep the observed service that
+  marks a rate as Amazon's. `ShipRequest::fromPackageAndRate()` therefore saw an Amazon Buy
+  Shipping purchase as a direct rate: it resolved terms PolyBag never sends and, because
+  that adapter sends none, recorded no snapshot at all. `DutiesTermsFilter::isSourceDecided()`
+  now also takes the Offer and treats one quoted on the `AMAZON` channel as source-decided,
+  the same fact `CustomsReadiness` already read, and both callers pass it. Amazon Shipping
+  on a connection was unaffected (it is recognised by carrier name).
+- 2026-10-09 — **Unverified.** Everything is covered by tests against mocked adapters; no
+  Amazon sandbox or Shopify purchase was run, so what either source actually declares on a
+  label into the EU, GB, NO or AU is still unknown, as the issue expects. No
+  `duties-support.json` entries were added. The "Amazon offer ... is listed" criterion is
+  verified by the offer surviving the filter and carrying the label; the Ship page
+  rendering is asserted with Livewire, not in a browser.
+- 2026-10-09 — From the review. **Amazon Shipping sold on a connection is held too**, and
+  deliberately: PolyBag sends its purchase no terms, so the source decides them, and it
+  ships within the continental US only, so holding it for EU, GB, NO and AU costs nothing.
+  ADR-0008 decision 5 says so, and the refusal adds "PolyBag cannot set duties terms on
+  Amazon Shipping, which ships within the continental US only" when it is among the held
+  offers; wording for Buy Shipping and Shopify is unchanged.
+  - **Dropped-rate reasons are no longer hidden.** A held offer sets
+    `attendedAlternativeAvailable`, which is what kept `droppedRatesFor()` from being read,
+    so with no EU terms set the refusal never said that setting them would let a direct rate
+    be bought. The "Source Decides" and "Connection Sells to Packers Only" refusals now
+    append the customs-terms reasons.
+  - **A swap is logged.** When a held blind offer is passed over and rate shopping buys a
+    quoted or direct rate instead, `UnattendedRateSelector` logs "Replaced a held blind
+    purchase with a quoted purchase" with the package id, destination country and held
+    source names (no other identifiers).
+  - **Tests added:** a Buy Shipping purchase to Germany through `ship()` records
+    `source_decided` (fails without the `rateFromOffer()` fix), and recovery records the
+    terms stamped on the Offer; Amazon Shipping to Germany held by batch ship while a direct
+    rate on the same package is bought; direct rate bought beside a held Amazon offer and
+    beside a held Shopify purchase; EU-to-EU, Canada, a US territory (not held) and Northern
+    Ireland (held as GB); the allowance refusal with the hold named beside it under both
+    `UnlistedServices` settings; a strict Amazon rule's pre-selected rate.
+- 2026-10-09 — From the PR review. **Stale destination:** `UnattendedRateSelector::select()`
+  used `loadMissing()`, so a Shipment edited after the Package was loaded was held (or not)
+  for its old country while rate shopping, which reloads, quoted the new one. It now
+  `load()`s the Package's location, items and Shipment first, so the hold, the rules, the
+  blind-offer branches and the purchase that follows (same instance) all read the database's
+  destination. The Ship page badge reads the terms the quote itself resolved, so it was not
+  affected. **Inactive services:** `RateSelector::selectForAutomation()` now applies the
+  inactivity check before the source-terms hold, so an inactive Amazon service is reported as
+  inactive rather than sent to a Ship page that disables it. Blind offers have no inactivity
+  check anywhere (neither the Ship page nor the purchase gate them), so those branches have no
+  such ordering. Regression tests cover both.
+
