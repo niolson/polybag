@@ -111,3 +111,12 @@ carrier's IMM authority, while the source is not USPS.
   read), and rejects an override whose regime does not cover the entry's country, asked of
   `TaxRegistrationRegime::covers()`. Reasons name the registration through an explicit
   per-regime match ("an IOSS number", "a UK VAT number", "a VOEC number", "an ARN").
+- 2026-10-08 — Review fix: **the override is B2C-only.** Swiss Post's page (re-read) limits the
+  IOSS prepaid-duties obligation to "B2C consignments with IOSS registration" and lists "all
+  B2B consignments" as recipient paid. `ResolvedCustomsTerms` gains `recipientIsBusiness`
+  (a company name on the destination, the same signal `CustomsReadiness` uses for its
+  IOSS-with-company warning and the product-identifier rule; the app has no other), and
+  `DutiesTermsFilter` passes no registration to `supportFor()` for such a recipient, so USPS
+  DDU rates to AT and SE are kept. The flag joins the fingerprint inputs, so adding or
+  removing a company name retires Offers quoted before. The override's `note` records the
+  scope; overrides may carry `note`; version `2026-10-08.2`.

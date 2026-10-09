@@ -244,7 +244,7 @@ class DutiesSupportTable
                 continue;
             }
 
-            array_push($errors, ...self::unknownKeyErrors($overridePath, $override, ['support', 'source', 'checked', 'authority']));
+            array_push($errors, ...self::unknownKeyErrors($overridePath, $override, ['support', 'source', 'checked', 'authority', 'note']));
 
             if (array_key_exists('authority', $override)
                 && (! is_string($override['authority']) || trim($override['authority']) === '')) {

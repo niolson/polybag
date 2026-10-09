@@ -1,5 +1,5 @@
 {
-    "version": "2026-10-08.1",
+    "version": "2026-10-08.2",
     "notes": [
         "What each carrier can do with duties terms to each destination (ADR-0008 decision 4).",
         "support is ddp_required (ships there only with duties prepaid), either, or ddu_only",
@@ -51,7 +51,8 @@
                             "support": "ddp_required",
                             "source": "https://www.post.ch/en/pages/eu-customs-reform-2026",
                             "checked": "2026-10-08",
-                            "authority": "Swiss Post"
+                            "authority": "Swiss Post",
+                            "note": "B2C consignments only; Swiss Post lists B2B as recipient paid. PolyBag treats a recipient with a company name as business."
                         }
                     }
                 },
@@ -196,7 +197,8 @@
                             "support": "ddp_required",
                             "source": "https://www.post.ch/en/pages/eu-customs-reform-2026",
                             "checked": "2026-10-08",
-                            "authority": "Swiss Post"
+                            "authority": "Swiss Post",
+                            "note": "B2C consignments only; Swiss Post lists B2B as recipient paid. PolyBag treats a recipient with a company name as business."
                         }
                     }
                 },

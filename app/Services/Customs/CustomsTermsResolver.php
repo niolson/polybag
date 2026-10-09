@@ -111,6 +111,7 @@ class CustomsTermsResolver
             'dutiesTerms' => $dutiesTerms,
             'dutiesTermsOrigin' => $dutiesTermsOrigin,
             'consignmentValue' => $consignmentValue,
+            'recipientIsBusiness' => filled($destination->company),
         ];
 
         if ($registration === null) {

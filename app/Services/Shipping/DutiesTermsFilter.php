@@ -84,7 +84,7 @@ class DutiesTermsFilter
                 continue;
             }
 
-            $entry = $this->dutiesSupport->supportFor($rate->carrier, $terms->destinationCountry, $on, $terms->registration?->regime);
+            $entry = $this->dutiesSupport->supportFor($rate->carrier, $terms->destinationCountry, $on, $terms->recipientIsBusiness ? null : $terms->registration?->regime);
 
             if ($entry === null || $entry->support->allows($terms->dutiesTerms)) {
                 $kept->push($rate);

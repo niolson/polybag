@@ -129,7 +129,7 @@ it('names what is wrong with a malformed table', function (string $problem, Clos
     }, 'carriers.usps.default.suport is not a known key (support, source, checked, effective_from, note).'],
     'an unknown key in an override' => ['override key', function (array &$table): void {
         $table['carriers']['usps']['countries']['AT']['with_registration']['ioss']['effective_form'] = '2026-11-01';
-    }, 'carriers.usps.countries.AT.with_registration.ioss.effective_form is not a known key (support, source, checked, authority).'],
+    }, 'carriers.usps.countries.AT.with_registration.ioss.effective_form is not a known key (support, source, checked, authority, note).'],
     'an override for a regime that cannot cover the country' => ['uncovered regime', function (array &$table): void {
         $table['carriers']['usps']['countries']['AT']['with_registration']['uk_vat'] = $table['carriers']['usps']['countries']['AT']['with_registration']['ioss'];
     }, 'carriers.usps.countries.AT.with_registration.uk_vat can never apply: a UK VAT (GB) registration does not cover AT.'],
