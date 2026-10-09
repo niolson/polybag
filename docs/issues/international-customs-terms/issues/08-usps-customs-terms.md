@@ -220,4 +220,23 @@ enrolment instead, this shrinks to a confirmation checkbox with no terms text.
     The validation log shows `exportersReference` as `[REDACTED]`, as `PiiRedactor` now does.
   - **Still not run:** the `030031` decline (the rate filter hides Poland first, so only the unit
     tests reach it) and a reprint. The unverified list above otherwise stands.
+- 2026-10-09 — **Reprint by key, probed on TEM; `duties_cost` now reads service 371.** Reprinting
+  a package in the app reprints the stored label and calls nothing at USPS, so the open question
+  was only ever `recoverPurchase()`, which asks USPS for the label by the offer's idempotency
+  key. The key is stored on the consumed offer, so a probe could ask
+  (`.scratch/international-customs-terms/usps-reprint-duties.php`, sandbox only). For packages
+  244 and 243 the reply is `200` with the same tracking number, extra services `370` and `371`,
+  and **no `prepaidDutiesTaxesFees`**. A recovered DDP purchase would therefore have stored a null
+  `duties_cost` and logged "USPS accepted a DDP label but reported no prepaid duties", both wrong.
+  - Service `371` ("Prepaid Duties, Taxes, and Fees") carries the total in its `price` on the
+    purchase reply and the reprint reply alike: 31.16 and 286.08 for the two labels. The parts of
+    the breakdown on package 243 add to 286.06, so USPS's own total differs from its parts by 2
+    cents of rounding.
+  - **Change:** `UspsAdapter::prepaidDutiesCost()` takes the price of service `371` when it is a
+    positive number, else falls back to the breakdown's sum, else null (and logs only then).
+    Recovery now records the same figure a purchase does. Tests: a reply with both (service wins
+    by 2 cents), a zero-priced service (falls back), a recovered DDP purchase with no breakdown,
+    and a recovered DDU purchase (still null).
+  - **Assumed, not confirmed:** that the price of service `371` is what USPS bills for the
+    prepayment. It is named for it and matches the breakdown to the cent on a one-line label.
 
