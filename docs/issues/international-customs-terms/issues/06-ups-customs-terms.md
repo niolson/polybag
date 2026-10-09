@@ -178,3 +178,23 @@ the column and a nullable `duties_cost` (`08` fills it).
     international quote makes the quote equal the purchase. The coordinator asked for
     DDP-only if the quotes differed; I kept both because the evidence points the other way.
     One-line change in `buildRatePaymentDetails()` if the DDP-only rule is wanted anyway.
+- 2026-10-09 — **PR #381 review fixes.**
+  - **Logs (P1, confirmed).** Saloon puts the response body in a `ServerException`'s
+    message, and `unreadablePurchase()` logged the raw 2xx body, so a 5xx or malformed 200
+    echoing the tax ID or EIN reached the log. The 5xx warning, the unreadable-purchase
+    body and reason (also the reason carried by the thrown exception), the Label Recovery
+    body and its lookup-failure log are now scrubbed with `scrubCustomsIds()`. A
+    `FatalRequestException` carries no response body. Regression tests for a 500 and a 200
+    with no shipment results.
+  - **Transport mode (P2, confirmed).** `ModeOfTransport` was always `Air`. It is now
+    `Truck` for a ground-network service (03 Ground, 11 Standard, 12 3 Day Select, 92/93/95
+    Ground Saver, the ground codes in the seeded UPS catalog) to Canada or Mexico, the only
+    land borders, and `Air` otherwise, which is also the fallback for an unmapped code. Both
+    values are in the vendored schema's list. Tests for an air service, Standard and Ground
+    to Canada, Standard to Germany (no road lane), and an unknown code.
+  - **Consignee type (P2, confirmed for the EEI).** A company is now `UltimateConsigneeType`
+    `O` (Other/Unknown), an individual `D`; the order carries no reseller/end-user
+    classification. `VendorInfo.ConsigneeType` and `GlobalTaxInformation` keep the
+    business/consumer `01`/`02` of `Shipment.ConsigneeType`: that field means company or
+    individual, which the company name does answer, and the review's reseller concern does
+    not apply to it.

@@ -18,6 +18,7 @@ use App\Enums\TaxRegistrationRegime;
 use App\Enums\TrackingStatus;
 use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
+use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
 use App\Http\Integrations\Ups\Requests\CreateShipment;
 use App\Http\Integrations\Ups\Requests\LabelRecovery;
 use App\Http\Integrations\Ups\Requests\Rate;
@@ -2554,9 +2555,9 @@ function upsResolvedTerms(string $country, ?DutiesTerms $term, ?SellerTaxRegistr
     );
 }
 
-function upsTermsShipRequest(AddressData $to, ?ResolvedCustomsTerms $terms, ?RecipientTaxId $taxId = null, ?string $itn = null, ?string $ein = null, ?array $customsItems = null, ?AddressData $from = null): ShipRequest
+function upsTermsShipRequest(AddressData $to, ?ResolvedCustomsTerms $terms, ?RecipientTaxId $taxId = null, ?string $itn = null, ?string $ein = null, ?array $customsItems = null, ?AddressData $from = null, string $service = '03'): ShipRequest
 {
-    $request = upsShipRequestTo($to, customsItems: $customsItems ?? upsCustomsItems(), fromAddress: $from);
+    $request = upsShipRequestTo($to, customsItems: $customsItems ?? upsCustomsItems(), fromAddress: $from, rateMetadata: ['serviceCode' => $service]);
 
     return new ShipRequest(
         fromAddress: $request->fromAddress,
@@ -2818,7 +2819,7 @@ it('files the EEI with the ITN, the client EIN and the form CIE refuses without'
         ->and($shipment['ShipFrom']['TaxIDType'])->toBe(['Code' => 'EIN']);
 });
 
-it('names a company consignee a reseller on the EEI', function (): void {
+it('names a company consignee other/unknown on the EEI, not a reseller', function (): void {
     fakeUpsShipEndpoints();
 
     $this->adapter->createShipment(upsTermsShipRequest(
@@ -2830,7 +2831,7 @@ it('names a company consignee a reseller on the EEI', function (): void {
 
     $consignee = sentUpsShipment()['ShipmentServiceOptions']['InternationalForms']['Contacts']['UltimateConsignee'];
 
-    expect($consignee['UltimateConsigneeType']['Code'])->toBe('R')
+    expect($consignee['UltimateConsigneeType']['Code'])->toBe('O')
         ->and($consignee['CompanyName'])->toBe('Maison Martin GmbH');
 });
 
@@ -3038,3 +3039,89 @@ it('sends a DDP or DDU rate payment block that conforms to the UPS Rating schema
 
     assertMatchesUpsSchema($shipment['PaymentDetails'], 'Shipment_PaymentDetails', 'upsRating');
 })->with([DutiesTerms::Ddp, DutiesTerms::Ddu]);
+
+it('declares the EEI transport mode from the service and the lane', function (string $service, AddressData $to, string $mode): void {
+    fakeUpsShipEndpoints();
+
+    $this->adapter->createShipment(upsTermsShipRequest(
+        $to,
+        upsResolvedTerms($to->country, DutiesTerms::Ddu),
+        itn: 'X20261008123456',
+        ein: '123456789',
+        service: $service,
+    ));
+
+    expect(sentUpsShipment()['ShipmentServiceOptions']['InternationalForms']['ModeOfTransport'])->toBe($mode);
+})->with([
+    'an air service to Germany' => ['07', fn (): AddressData => upsGermanAddress(), 'Air'],
+    'Worldwide Saver to Canada' => ['65', fn (): AddressData => upsCanadianAddress(), 'Air'],
+    'Standard to Canada, which UPS runs by road' => ['11', fn (): AddressData => upsCanadianAddress(), 'Truck'],
+    'Ground to Canada' => ['03', fn (): AddressData => upsCanadianAddress(), 'Truck'],
+    'a ground-network service to Germany, which has no road lane' => ['11', fn (): AddressData => upsGermanAddress(), 'Air'],
+    'a service this table does not know' => ['99', fn (): AddressData => upsCanadianAddress(), 'Air'],
+]);
+
+it('keeps the recipient tax ID and EIN out of the log when a 5xx echoes them', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => MockResponse::make('Gateway failure for tax ID 98765432100 and EIN 123456789', 500),
+    ]);
+    $handler = new TestHandler;
+    Log::extend('ups-validation-scrub', fn (): MonologLogger => new MonologLogger('ups-validation', [$handler]));
+    config()->set('logging.channels.ups-validation', ['driver' => 'ups-validation-scrub']);
+    Log::forgetChannel('ups-validation');
+
+    $thrown = null;
+
+    try {
+        $this->adapter->createShipment(upsTermsShipRequest(
+            upsBrazilianAddress(),
+            upsResolvedTerms('BR', DutiesTerms::Ddu),
+            new RecipientTaxId(RecipientTaxIdType::Cpf, '98765432100'),
+            'X20261008123456',
+            '123456789',
+        ));
+    } catch (ServerException $e) {
+        $thrown = $e;
+    }
+
+    $logged = json_encode(collect($handler->getRecords())->filter(fn ($record): bool => $record->message !== 'LABEL REQUEST')->map(fn ($record): array => [$record->message, $record->context])->all());
+
+    expect($thrown)->not->toBeNull()
+        ->and($logged)->toContain('got no answer')
+        ->and($logged)->not->toContain('98765432100')
+        ->and($logged)->not->toContain('123456789');
+});
+
+it('keeps the recipient tax ID and EIN out of the log when a 200 reply cannot be read', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => MockResponse::make(['ShipmentResponse' => ['Note' => 'accepted tax ID 98765432100 EIN 123456789']], 200),
+    ]);
+    $handler = new TestHandler;
+    Log::extend('ups-validation-scrub', fn (): MonologLogger => new MonologLogger('ups-validation', [$handler]));
+    config()->set('logging.channels.ups-validation', ['driver' => 'ups-validation-scrub']);
+    Log::forgetChannel('ups-validation');
+
+    $thrown = null;
+
+    try {
+        $this->adapter->createShipment(upsTermsShipRequest(
+            upsBrazilianAddress(),
+            upsResolvedTerms('BR', DutiesTerms::Ddu),
+            new RecipientTaxId(RecipientTaxIdType::Cpf, '98765432100'),
+            'X20261008123456',
+            '123456789',
+        ));
+    } catch (UnreadablePurchaseResponseException $e) {
+        $thrown = $e;
+    }
+
+    $logged = json_encode(collect($handler->getRecords())->filter(fn ($record): bool => $record->message !== 'LABEL REQUEST')->map(fn ($record): array => [$record->message, $record->context])->all());
+
+    expect($thrown)->not->toBeNull()
+        ->and($logged)->toContain('could not be read')
+        ->and($logged)->toContain('[REDACTED]')
+        ->and($logged)->not->toContain('98765432100')
+        ->and($logged)->not->toContain('123456789');
+});

@@ -134,7 +134,32 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
 
     private const EEI_POINT_OF_ORIGIN_STATE = 'S';
 
-    private const EEI_MODE_OF_TRANSPORT = 'Air';
+    /**
+     * `ModeOfTransport` values from the Shipping schema. A UPS service that
+     * crosses the US land border by road is exported by truck; every other
+     * service is flown. Air is also the fallback for a service this table
+     * does not know: all of UPS's worldwide and express services are air, and
+     * a service that is neither is one the app does not sell abroad.
+     */
+    private const EEI_TRANSPORT_AIR = 'Air';
+
+    private const EEI_TRANSPORT_TRUCK = 'Truck';
+
+    /**
+     * The services that go by road, by code: Ground (03), Standard (11), 3 Day
+     * Select (12) and the Ground Saver family (92, 93, 95), all of which UPS
+     * runs on its ground network. They only leave the US by road to Canada or
+     * Mexico, so the lane decides below.
+     *
+     * @var list<string>
+     */
+    private const GROUND_NETWORK_SERVICES = ['03', '11', '12', '92', '93', '95'];
+
+    private const LAND_BORDER_COUNTRIES = ['CA', 'MX'];
+
+    private const ULTIMATE_CONSIGNEE_DIRECT_CONSUMER = 'D';
+
+    private const ULTIMATE_CONSIGNEE_OTHER = 'O';
 
     private const EEI_PARTIES_NOT_RELATED = 'N';
 
@@ -846,7 +871,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
             // property.
             Log::channel('ups-validation')->warning('UPS createShipment got no answer; the offer stays unresolved', [
                 'exception' => $e::class,
-                'error' => $e->getMessage(),
+                'error' => $this->scrubCustomsIds($e->getMessage(), $request),
                 'offer' => $request->offer?->public_id,
             ]);
 
@@ -910,14 +935,14 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
         ?\Throwable $previous = null,
     ): never {
         Log::channel('ups-validation')->error('UPS createShipment accepted the purchase but its reply could not be read; the offer stays unresolved', [
-            'reason' => $reason,
+            'reason' => $this->scrubCustomsIds($reason, $request),
             'status' => $response->status(),
             'offer' => $request->offer?->public_id,
             'tracking_number' => $trackingNumber,
-            'body' => $response->body(),
+            'body' => $this->scrubCustomsIds($response->body(), $request),
         ]);
 
-        throw new UnreadablePurchaseResponseException(Carrier::UPS, $reason, $trackingNumber, $previous);
+        throw new UnreadablePurchaseResponseException(Carrier::UPS, $this->scrubCustomsIds($reason, $request), $trackingNumber, $previous);
     }
 
     public function cancelShipment(string $trackingNumber, Package $package): CancelResponse
@@ -1255,13 +1280,13 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
             Log::channel('ups-validation')->warning('Could not ask UPS what became of a purchase', [
                 'offer' => $recoveryKey,
                 'exception' => $e::class,
-                'error' => $e->getMessage(),
+                'error' => $this->scrubCustomsIds($e->getMessage(), $request),
             ]);
 
             return null;
         }
 
-        $body = $this->decodeJsonSafely($response);
+        $body = $this->scrubCustomsIds($this->decodeJsonSafely($response), $request);
 
         if (! $response->successful()) {
             $errors = data_get($body, 'response.errors', data_get($body, 'errors', []));
@@ -1903,14 +1928,28 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
             'InBondCode' => self::EEI_NOT_IN_BOND,
             'PointOfOrigin' => (string) $request->fromAddress->stateOrProvince,
             'PointOfOriginType' => self::EEI_POINT_OF_ORIGIN_STATE,
-            'ModeOfTransport' => self::EEI_MODE_OF_TRANSPORT,
+            'ModeOfTransport' => $this->modeOfTransport($request),
             'PartiesToTransaction' => self::EEI_PARTIES_NOT_RELATED,
         ];
     }
 
     /**
-     * The ship-to as the EEI's ultimate consignee: a direct consumer, or a
-     * reseller when the address has a company name.
+     * How the goods leave the country: by truck on a ground-network service
+     * to Canada or Mexico, else by air.
+     */
+    private function modeOfTransport(ShipRequest $request): string
+    {
+        $serviceCode = (string) ($request->selectedRate->metadata['serviceCode'] ?? $request->selectedRate->serviceCode);
+        $overland = in_array(strtoupper($request->toAddress->country), self::LAND_BORDER_COUNTRIES, true);
+
+        return $overland && in_array($serviceCode, self::GROUND_NETWORK_SERVICES, true)
+            ? self::EEI_TRANSPORT_TRUCK
+            : self::EEI_TRANSPORT_AIR;
+    }
+
+    /**
+     * The ship-to as the EEI's ultimate consignee: a direct consumer, or
+     * other/unknown when the address has a company name.
      *
      * @return array<string, mixed>
      */
@@ -1922,9 +1961,12 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
         return [
             'CompanyName' => mb_substr($isCompany ? (string) $request->toAddress->company : $this->buildAttentionName($request->toAddress), 0, 35),
             'Address' => $address,
+            // A company may be buying for its own use or to resell, and the
+            // order does not say; only an individual is known to be a direct
+            // consumer. UPS classifies the rest as Other/Unknown.
             'UltimateConsigneeType' => $isCompany
-                ? ['Code' => 'R', 'Description' => 'Reseller']
-                : ['Code' => 'D', 'Description' => 'Direct Consumer'],
+                ? ['Code' => self::ULTIMATE_CONSIGNEE_OTHER, 'Description' => 'Other/Unknown']
+                : ['Code' => self::ULTIMATE_CONSIGNEE_DIRECT_CONSUMER, 'Description' => 'Direct Consumer'],
         ];
     }
 
