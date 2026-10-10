@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources\ShipmentResource\RelationManagers;
 
+use App\Filament\Resources\ProductResource;
+use App\Models\Product;
 use App\Services\SettingsService;
 use Filament\Actions;
 use Filament\Forms;
@@ -40,7 +42,10 @@ class ShipmentItemsRelationManager extends RelationManager
             ->recordTitleAttribute('product.name')
             ->columns([
                 Tables\Columns\TextColumn::make('product.name')
-                    ->label('Product'),
+                    ->label('Product')
+                    ->url(fn ($record): ?string => $record->product instanceof Product && ProductResource::canEdit($record->product)
+                        ? ProductResource::getUrl('edit', ['record' => $record->product])
+                        : null),
                 Tables\Columns\TextColumn::make('product.barcode')
                     ->label('Barcode'),
                 Tables\Columns\TextColumn::make('quantity'),

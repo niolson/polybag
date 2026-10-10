@@ -7,8 +7,8 @@ use App\Models\PackageLabel;
 use Illuminate\Support\Facades\Session;
 
 /**
- * The Label this browser session last bought: what the REPRINTLAST and
- * VOIDLAST commands act on (ADR-0007, decision 4). Remembered by Label, not
+ * The Label this browser session last bought: what the REPRINT and
+ * VOID commands act on (ADR-0007, decision 4). Remembered by Label, not
  * Package, so that once it is voided and the Package bought again, the
  * commands refuse rather than act on the replacement.
  */

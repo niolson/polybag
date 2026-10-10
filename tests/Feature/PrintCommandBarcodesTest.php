@@ -12,7 +12,7 @@ it('includes a scale zero command barcode', function (): void {
 
     Livewire::test(PrintCommandBarcodes::class)
         ->assertSet('commands', fn (array $commands): bool => collect($commands)->contains(
-            fn (array $command): bool => $command['code'] === '%CZEROSCALE'
+            fn (array $command): bool => $command['code'] === '%CZERO'
                 && $command['label'] === 'Zero Scale',
         ));
 });

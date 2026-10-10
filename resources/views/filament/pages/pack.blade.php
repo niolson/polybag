@@ -12,6 +12,9 @@
         x-data="{
             scaleConnected: false,
             scaleStable: true,
+            scaleUnderZero: false,
+            scaleReadingIsZero: false,
+            minimumWeight: '0.05',
             autoShipEnabled: @js((bool) auth()->user()->auto_ship_enabled),
             labelFormat: PrinterSettings.labelFormat(),
             labelDpi: PrinterSettings.labelDpi(),
@@ -125,10 +128,10 @@
             executeCommand(name) {
                 const commands = {
                     SHIP: () => this.shipPackage(),
-                    REPRINTLAST: () => $wire.reprintLastLabel(),
-                    VOIDLAST: () => $wire.cancelLastLabel(),
-                    ZEROSCALE: () => this.zeroScale(),
-                    CLEARSHIPMENT: () => this.clearShipment(),
+                    REPRINT: () => $wire.reprintLastLabel(),
+                    VOID: () => $wire.cancelLastLabel(),
+                    ZERO: () => this.zeroScale(),
+                    CLEAR: () => this.clearShipment(),
                 };
 
                 return commands[name]?.();
@@ -347,10 +350,25 @@
                 }, 500);
             },
 
-                        isReadyToShip() {
+            // A parcel lighter than the scale can resolve settles at a stable
+            // 0.00. A scale that has reported a steady zero, with that reading
+            // still in the field untouched, is saying "too light to read", so
+            // ship it at the minimum weight. Typed or cleared weights never
+            // qualify.
+            usesMinimumWeight() {
+                return this.scaleConnected
+                    && this.scaleReadingIsZero
+                    && String(this.weight) === this.lastScaleWeight;
+            },
+
+            effectiveWeight() {
+                return this.usesMinimumWeight() ? this.minimumWeight : this.weight;
+            },
+
+            isReadyToShip() {
                 if (!this.hasShipment) return false;
 
-                const w = parseFloat(this.weight);
+                const w = parseFloat(this.effectiveWeight());
                 const h = parseFloat(this.height);
                 const wi = parseFloat(this.width);
                 const d = parseFloat(this.length);
@@ -381,7 +399,7 @@
                     await $wire.ship(
                         this.packingItems,
                         this.boxSizeId,
-                        this.weight,
+                        String(this.effectiveWeight()),
                         this.height,
                         this.width,
                         this.length,
@@ -406,6 +424,8 @@
                     await ScaleUtils.claimScale();
                     await ScaleUtils.startScaleStream((result) => {
                         this.scaleStable = result.isStable;
+                        this.scaleUnderZero = result.weight < 0;
+                        this.scaleReadingIsZero = result.isStable && result.weight >= 0 && result.weight.toFixed(2) === '0.00';
                         const formatted = result.weight.toFixed(2);
                         if (formatted !== this.lastScaleWeight) {
                             this.lastScaleWeight = formatted;
@@ -496,7 +516,10 @@
                             <span x-show="!scaleConnected" x-cloak class="text-xs font-normal text-gray-500 dark:text-gray-400">
                                 (No scale connected)
                             </span>
-                            <span x-show="scaleConnected && !scaleStable" x-cloak class="text-xs font-normal text-warning-500">
+                            <span x-show="scaleConnected && scaleUnderZero" x-cloak class="text-xs font-normal text-danger-600 dark:text-danger-400">
+                                Negative weight — zero the scale
+                            </span>
+                            <span x-show="scaleConnected && !scaleStable && !scaleUnderZero" x-cloak class="text-xs font-normal text-warning-500">
                                 In motion...
                             </span>
                         </label>
@@ -506,9 +529,12 @@
                                 step="0.01"
                                 x-model="weight"
                                 x-bind:disabled="isShipping"
-                                x-bind:style="scaleConnected && !scaleStable ? 'color: var(--warning-500)' : ''"
+                                x-bind:style="scaleConnected && scaleUnderZero ? 'color: var(--danger-600)' : (scaleConnected && !scaleStable ? 'color: var(--warning-500)' : '')"
                             />
                         </x-filament::input.wrapper>
+                        <p x-show="usesMinimumWeight()" x-cloak class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            Too light for the scale to read. Ships as <span x-text="minimumWeight"></span> lbs.
+                        </p>
                     </div>
                     <div>
                         <label class="fi-fo-field-wrp-label text-sm font-medium text-gray-950 dark:text-white">

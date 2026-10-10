@@ -21,7 +21,7 @@
         /** @type {Function|null} Bound WebHID inputreport listener (for removal) */
         _webHidListener: null,
 
-        /** @type {{weight: number, isStable: boolean}|null} Last scale reading */
+        /** @type {{weight: number, isStable: boolean, isUnderZero: boolean}|null} Last scale reading */
         _lastReading: null,
 
         /**
@@ -108,11 +108,19 @@
          * @private
          */
         _computeWeight(status, unit, signedScaleFactor, weightRaw) {
+            // Status 5 is HID "Under Zero". The raw field is unsigned, so a
+            // negative weight arrives as a wrapped 16-bit value or a magnitude;
+            // either way it is below zero, never a positive weight.
+            const isUnderZero = status === 5;
+            if (isUnderZero && weightRaw > 0x7FFF) weightRaw = 0x10000 - weightRaw;
+
             let grossWeight = weightRaw * Math.pow(10, signedScaleFactor);
 
             // Convert to pounds
             if (unit === 2) grossWeight = grossWeight / 453.592;       // grams
             else if (unit === 11) grossWeight = grossWeight / 16;       // ounces
+
+            if (isUnderZero) grossWeight = -Math.abs(grossWeight);
 
             let statusText = 'Unknown';
             let isStable = false;
@@ -120,12 +128,13 @@
                 case 2: statusText = 'Zero'; isStable = true; break;
                 case 3: statusText = 'In motion...'; break;
                 case 4: statusText = 'Stable'; isStable = true; break;
-                case 5: statusText = 'Fault'; break;
+                case 1: statusText = 'Fault'; break;
+                case 5: statusText = 'Under zero'; break;
             }
 
-            this._lastReading = { weight: grossWeight, isStable };
+            this._lastReading = { weight: grossWeight, isStable, isUnderZero };
 
-            return { weight: grossWeight, status: statusText, isStable };
+            return { weight: grossWeight, status: statusText, isStable, isUnderZero };
         },
 
         /**
@@ -137,13 +146,15 @@
                 throw new Error('No scale reading is available yet.');
             }
 
-            if (!this._lastReading.isStable) {
+            if (!this._lastReading.isStable && !this._lastReading.isUnderZero) {
                 throw new Error('Wait for the scale to stop moving before zeroing.');
             }
 
             // A stable non-empty reading is still stable — reject it here so a
             // package left on the platform can't get baked into the new zero point.
-            if (Math.abs(this._lastReading.weight) > 0.1) {
+            // A negative reading is the platform reading below zero, which is
+            // exactly what zeroing fixes, however far below it is.
+            if (this._lastReading.weight > 0.1) {
                 throw new Error('Clear the platform before zeroing the scale.');
             }
 

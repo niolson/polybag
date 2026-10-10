@@ -12,10 +12,10 @@ use Filament\Support\Contracts\HasLabel;
 enum ScanCommand: string implements HasDescription, HasLabel
 {
     case Ship = 'SHIP';
-    case ReprintLast = 'REPRINTLAST';
-    case VoidLast = 'VOIDLAST';
-    case ZeroScale = 'ZEROSCALE';
-    case ClearShipment = 'CLEARSHIPMENT';
+    case ReprintLast = 'REPRINT';
+    case VoidLast = 'VOID';
+    case ZeroScale = 'ZERO';
+    case ClearShipment = 'CLEAR';
 
     public function getLabel(): string
     {

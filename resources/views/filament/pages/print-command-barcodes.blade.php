@@ -119,7 +119,15 @@
             generateBarcodes();
         });
 
+        document.addEventListener('barcodes:ready', function() {
+            generateBarcodes();
+        });
+
         function generateBarcodes() {
+            if (typeof JsBarcode === 'undefined') {
+                return;
+            }
+
             document.querySelectorAll('.barcode-svg[data-code]').forEach(function(svg) {
                 const code = svg.getAttribute('data-code');
                 if (code) {

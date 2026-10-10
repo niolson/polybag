@@ -53,7 +53,6 @@ class PostageSourcesRelationManager extends RelationManager
                         PostageSourceKind::Amazon => 'Lets automation buy any service Amazon offers, including ones not mapped to a catalog service. The Ship page shows every offer either way.',
                         default => 'Lets this source sell beyond the services the method lists.',
                     })
-                    ->formatStateUsing(fn (mixed $state): bool => self::asUnlisted($state) === UnlistedServices::Any)
                     ->dehydrateStateUsing(fn (bool $state): UnlistedServices => $state ? UnlistedServices::Any : UnlistedServices::None)
                     ->visible(fn (Get $get): bool => in_array(UnlistedServices::Any, self::kindFrom($get)?->acceptedUnlistedServices() ?? [], true)),
             ]);
@@ -78,6 +77,13 @@ class PostageSourcesRelationManager extends RelationManager
             ])
             ->recordActions([
                 Actions\EditAction::make()
+                    // The toggle casts its loaded state to a bool before any
+                    // formatter runs, which would read every enum as true then
+                    // fail to parse it, so hand it the bool directly.
+                    ->mutateRecordDataUsing(fn (array $data): array => [
+                        ...$data,
+                        'unlisted_services' => self::asUnlisted($data['unlisted_services'] ?? null) === UnlistedServices::Any,
+                    ])
                     // Direct has nothing to edit: it sells the listed services or,
                     // with no row, nothing.
                     ->visible(fn (ShippingMethodPostageSource $record): bool => count($record->source_kind->acceptedUnlistedServices()) > 1),
