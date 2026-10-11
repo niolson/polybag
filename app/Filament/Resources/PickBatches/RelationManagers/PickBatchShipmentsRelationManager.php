@@ -4,6 +4,7 @@ namespace App\Filament\Resources\PickBatches\RelationManagers;
 
 use App\Filament\Resources\ShipmentResource;
 use App\Models\Location;
+use App\Models\PickBatchShipment;
 use App\Services\PickBatchService;
 use App\Services\SettingsService;
 use Filament\Actions\Action;
@@ -37,7 +38,10 @@ class PickBatchShipmentsRelationManager extends RelationManager
                     ->label('Tote')
                     ->badge()
                     ->color('info')
-                    ->visible(fn (): bool => $this->getOwnerRecord()->pickBatchShipments()->whereNotNull('tote_code')->exists()),
+                    ->visible(fn (): bool => PickBatchShipment::query()
+                        ->where('pick_batch_id', $this->getOwnerRecord()->getKey())
+                        ->whereNotNull('tote_code')
+                        ->exists()),
                 Tables\Columns\TextColumn::make('shipment.shipment_reference')
                     ->label('Reference')
                     ->url(fn ($record): ?string => $record->shipment_id
