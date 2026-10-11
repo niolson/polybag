@@ -352,7 +352,7 @@
 
             // A parcel lighter than the scale can resolve settles at a stable
             // 0.00. A scale that has reported a steady zero, with that reading
-            // still in the field untouched, is saying "too light to read", so
+            // still in the field untouched, is saying it is too light to read, so
             // ship it at the minimum weight. Typed or cleared weights never
             // qualify.
             usesMinimumWeight() {
