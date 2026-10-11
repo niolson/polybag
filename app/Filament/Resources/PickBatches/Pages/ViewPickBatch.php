@@ -170,10 +170,10 @@ class ViewPickBatch extends ViewRecord
      */
     private function summaryPdf(): string
     {
-        return base64_encode(app(GotenbergService::class)->pdfFromView('pick-batches.summary', [
-            'pickBatch' => $this->record,
-            'rows' => app(PickBatchService::class)->summaryRows($this->pickBatch()),
-        ]));
+        return base64_encode(app(GotenbergService::class)->pdfFromView(
+            'pick-batches.summary',
+            app(PickBatchService::class)->summaryViewData($this->pickBatch()),
+        ));
     }
 
     /**

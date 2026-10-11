@@ -13,9 +13,7 @@ class PickBatchController extends Controller
 {
     public function summary(PickBatch $pickBatch): View
     {
-        $rows = app(PickBatchService::class)->summaryRows($pickBatch);
-
-        return view('pick-batches.summary', compact('pickBatch', 'rows'));
+        return view('pick-batches.summary', app(PickBatchService::class)->summaryViewData($pickBatch));
     }
 
     public function packSlips(Request $request, PickBatch $pickBatch, PickBatchService $pickBatches, PackSlipRenderer $renderer, SettingsService $settings): View
