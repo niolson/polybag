@@ -286,3 +286,22 @@ it('records Mark as printed on the batch\'s browser view against that view\'s re
 
     expect(Shipment::query()->whereNotNull('pack_slip_printed_at')->count())->toBe(2);
 });
+
+it('renders print mode as a switch that swaps the view actions for print actions', function (): void {
+    [$batch] = batchOfShipments(1);
+
+    Livewire::test(ViewPickBatch::class, ['record' => $batch->id])
+        ->assertSeeHtml('role="switch"')
+        ->assertSeeHtml('aria-checked="false"')
+        ->assertSeeHtml('$wire.$entangle(\'printMode\', true)')
+        ->assertSee('Direct Print')
+        ->assertActionVisible('viewSummary')
+        ->assertActionHidden('printSummary')
+        ->assertActionVisible('printBoth')
+        ->assertActionDisabled('printBoth')
+        ->set('printMode', true)
+        ->assertSeeHtml('aria-checked="true"')
+        ->assertActionHidden('viewSummary')
+        ->assertActionVisible('printSummary')
+        ->assertActionEnabled('printBoth');
+});

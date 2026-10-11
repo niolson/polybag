@@ -4,6 +4,7 @@ namespace App\Filament\Resources\PickBatches\Pages;
 
 use App\DataTransferObjects\PackSlips\PackSlipPrintJob;
 use App\Enums\PickBatchStatus;
+use App\Filament\Actions\ToggleAction;
 use App\Filament\Resources\PickBatches\PickBatchResource;
 use App\Models\PickBatch;
 use App\Services\GotenbergService;
@@ -38,12 +39,10 @@ class ViewPickBatch extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
-            Action::make('togglePrintMode')
-                ->label(fn (): string => $this->printMode ? 'Print' : 'View')
-                ->icon(fn (): string => $this->printMode ? 'heroicon-o-printer' : 'heroicon-o-eye')
-                ->color('gray')
-                ->outlined(fn (): bool => ! $this->printMode)
-                ->action(fn (): bool => $this->printMode = ! $this->printMode),
+            // On, the document actions print to the workstation's printers; off, they
+            // open in a browser tab.
+            ToggleAction::make('printMode')
+                ->label('Direct Print'),
 
             // View mode — open HTML in a new tab
             Action::make('viewSummary')
@@ -103,7 +102,8 @@ class ViewPickBatch extends ViewRecord
             Action::make('printBoth')
                 ->label('Print Both')
                 ->icon('heroicon-o-printer')
-                ->visible(fn (): bool => $this->printMode && self::printsPackSlips())
+                ->visible(fn (): bool => self::printsPackSlips())
+                ->disabled(fn (): bool => ! $this->printMode)
                 ->action(function (): void {
                     try {
                         $summary = $this->summaryPdf();
