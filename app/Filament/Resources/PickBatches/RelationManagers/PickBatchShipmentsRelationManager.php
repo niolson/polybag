@@ -36,7 +36,8 @@ class PickBatchShipmentsRelationManager extends RelationManager
                 Tables\Columns\TextColumn::make('tote_code')
                     ->label('Tote')
                     ->badge()
-                    ->color('info'),
+                    ->color('info')
+                    ->visible(fn (): bool => $this->getOwnerRecord()->pickBatchShipments()->whereNotNull('tote_code')->exists()),
                 Tables\Columns\TextColumn::make('shipment.shipment_reference')
                     ->label('Reference')
                     ->url(fn ($record): ?string => $record->shipment_id
@@ -97,6 +98,6 @@ class PickBatchShipmentsRelationManager extends RelationManager
                         $this->dispatch('pick-batch-updated');
                     }),
             ])
-            ->defaultSort('tote_code', 'asc');
+            ->defaultSort('id', 'asc');
     }
 }

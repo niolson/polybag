@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\DB;
 
 class PickBatchService
 {
+    public function __construct(private SettingsService $settings) {}
+
     /**
      * Create a pick batch from a pre-selected collection of shipments.
      * Silently skips any that are not in 'pending' picking status.
@@ -54,11 +56,13 @@ class PickBatchService
                 'total_shipments' => $eligible->count(),
             ]);
 
+            $picksToTotes = $this->picksToTotes();
+
             foreach ($eligible as $index => $shipment) {
                 PickBatchShipment::create([
                     'pick_batch_id' => $batch->id,
                     'shipment_id' => $shipment->id,
-                    'tote_code' => sprintf('T%02d', $index + 1),
+                    'tote_code' => $picksToTotes ? sprintf('T%02d', $index + 1) : null,
                 ]);
             }
 
@@ -67,6 +71,15 @@ class PickBatchService
 
             return $batch;
         });
+    }
+
+    /**
+     * Whether new batches assign each Shipment a labeled tote. Off, a batch has no
+     * tote codes and its summary names each Shipment by its reference instead.
+     */
+    public function picksToTotes(): bool
+    {
+        return (bool) $this->settings->get('pick_to_tote_enabled', true);
     }
 
     /**
@@ -183,7 +196,8 @@ class PickBatchService
     {
         $rows = $batch->pickBatchShipments()
             ->whereNotNull('shipment_id')
-            ->get(['shipment_id', 'tote_code'])
+            ->orderBy('id')
+            ->get(['id', 'shipment_id', 'tote_code'])
             ->sortBy('tote_code', SORT_NATURAL)
             ->values();
 
@@ -197,44 +211,71 @@ class PickBatchService
     }
 
     /**
+     * Everything the picking summary view needs: the batch, its rows, and which
+     * optional columns to print. The last column lists totes when the batch was
+     * picked to totes, and Shipment references when it was not.
+     *
+     * @return array{pickBatch: PickBatch, rows: array<int, array<string, mixed>>, columns: array{bin: bool, sku: bool, barcode: bool, totes: bool}}
+     */
+    public function summaryViewData(PickBatch $batch): array
+    {
+        return [
+            'pickBatch' => $batch,
+            'rows' => $this->summaryRows($batch),
+            'columns' => [
+                'bin' => (bool) $this->settings->get('pick_summary_show_bin', true),
+                'sku' => (bool) $this->settings->get('pick_summary_show_sku', true),
+                'barcode' => (bool) $this->settings->get('pick_summary_show_barcode', false),
+                'totes' => $batch->pickBatchShipments()->whereNotNull('tote_code')->exists(),
+            ],
+        ];
+    }
+
+    /**
      * Build the aggregated product rows for the picking summary document.
      *
      * `totes` is a map of tote_code => quantity for that product in that tote,
-     * sorted naturally by tote code.
+     * sorted naturally by tote code. `orders` lists each Shipment's reference and
+     * quantity for that product, in batch order.
      *
-     * @return array<int, array{bin_location: string|null, sku: string, product_name: string, quantity: int, totes: array<string, int>}>
+     * @return array<int, array{bin_location: string|null, sku: string, barcode: string|null, product_name: string, quantity: int, totes: array<string, int>, orders: array<int, array{reference: string, quantity: int}>}>
      */
     public function summaryRows(PickBatch $batch): array
     {
-        $batch->load('pickBatchShipments.shipment.shipmentItems.product');
+        $batch->load(['pickBatchShipments' => fn ($query) => $query->orderBy('id'), 'pickBatchShipments.shipment.shipmentItems.product']);
 
         $rows = collect();
 
         foreach ($batch->pickBatchShipments as $pivot) {
-            foreach ($pivot->shipment->shipmentItems as $item) {
-                $key = $item->product_id;
+            $toteCode = $pivot->tote_code ?? '';
+            $shipmentId = (int) $pivot->shipment_id;
 
-                if ($rows->has($key)) {
-                    $row = $rows->get($key);
-                    $row['quantity'] += $item->quantity;
-                    $toteCode = $pivot->tote_code ?? '';
-                    $row['totes'][$toteCode] = ($row['totes'][$toteCode] ?? 0) + $item->quantity;
-                    $rows->put($key, $row);
-                } else {
-                    $toteCode = $pivot->tote_code ?? '';
-                    $rows->put($key, [
-                        'bin_location' => $item->product?->bin_location,
-                        'sku' => $item->product?->sku ?? '—',
-                        'product_name' => $item->product?->name ?? '—',
-                        'quantity' => $item->quantity,
-                        'totes' => [$toteCode => $item->quantity],
-                    ]);
-                }
+            foreach ($pivot->shipment->shipmentItems as $item) {
+                $row = $rows->get($item->product_id) ?? [
+                    'bin_location' => $item->product?->bin_location,
+                    'sku' => $item->product?->sku ?? '—',
+                    'barcode' => $item->product?->barcode,
+                    'product_name' => $item->product?->name ?? '—',
+                    'quantity' => 0,
+                    'totes' => [],
+                    'orders' => [],
+                ];
+
+                $row['quantity'] += $item->quantity;
+                $row['totes'][$toteCode] = ($row['totes'][$toteCode] ?? 0) + $item->quantity;
+                $row['orders'][$shipmentId] ??= [
+                    'reference' => $pivot->shipment->shipment_reference ?? (string) $shipmentId,
+                    'quantity' => 0,
+                ];
+                $row['orders'][$shipmentId]['quantity'] += $item->quantity;
+
+                $rows->put($item->product_id, $row);
             }
         }
 
         $rows = $rows->map(function (array $row): array {
             uksort($row['totes'], fn ($a, $b): int => strnatcasecmp($a, $b));
+            $row['orders'] = array_values($row['orders']);
 
             return $row;
         });

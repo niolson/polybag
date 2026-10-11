@@ -97,6 +97,10 @@ class Settings extends Page
             'pack_slips_enabled' => $settings->packSlipsEnabled(),
             'picking_enabled' => $settings->get('picking_enabled', false),
             'require_picking_before_shipping' => $settings->get('require_picking_before_shipping', false),
+            'pick_to_tote_enabled' => $settings->get('pick_to_tote_enabled', true),
+            'pick_summary_show_bin' => $settings->get('pick_summary_show_bin', true),
+            'pick_summary_show_sku' => $settings->get('pick_summary_show_sku', true),
+            'pick_summary_show_barcode' => $settings->get('pick_summary_show_barcode', false),
             'label_reference_source' => $settings->get('label_reference_source', LabelReferenceResolver::DEFAULT_SOURCE->value),
             'carrier_api_timeout' => $settings->get('carrier_api_timeout', 15),
             'address_validation_google_enabled' => $settings->get('address_validation_google_enabled', false),
@@ -418,6 +422,27 @@ class Settings extends Page
                         ])
                         ->columns(1),
 
+                    Section::make('Pick Batches')
+                        ->description('How pickers work a batch and what its Picking Summary prints')
+                        ->visible(fn (Get $get): bool => (bool) $get('picking_enabled'))
+                        ->schema([
+                            Toggle::make('pick_to_tote_enabled')
+                                ->label('Pick to Totes')
+                                ->helperText('When enabled, each order in a new batch gets a numbered tote (T01, T02, …), printed on the Picking Summary and on its pack slip. Turn this off if pickers don\'t sort into labeled totes: the summary lists order references instead.')
+                                ->default(true),
+                            Toggle::make('pick_summary_show_bin')
+                                ->label('Bin Column')
+                                ->helperText('The product\'s bin location. Rows are sorted by bin either way.')
+                                ->default(true),
+                            Toggle::make('pick_summary_show_sku')
+                                ->label('SKU Column')
+                                ->default(true),
+                            Toggle::make('pick_summary_show_barcode')
+                                ->label('Barcode Column')
+                                ->default(false),
+                        ])
+                        ->columns(1),
+
                     Section::make('Shipping Labels')
                         ->description('What carriers print on the labels this instance buys')
                         ->schema([
@@ -654,6 +679,10 @@ class Settings extends Page
             'pack_slips_enabled' => (bool) ($data['pack_slips_enabled'] ?? true),
             'picking_enabled' => (bool) ($data['picking_enabled'] ?? false),
             'require_picking_before_shipping' => (bool) ($data['require_picking_before_shipping'] ?? false),
+            'pick_to_tote_enabled' => (bool) ($data['pick_to_tote_enabled'] ?? true),
+            'pick_summary_show_bin' => (bool) ($data['pick_summary_show_bin'] ?? true),
+            'pick_summary_show_sku' => (bool) ($data['pick_summary_show_sku'] ?? true),
+            'pick_summary_show_barcode' => (bool) ($data['pick_summary_show_barcode'] ?? false),
             'label_reference_source' => ($labelReferenceSource ?? LabelReferenceResolver::DEFAULT_SOURCE)->value,
             'carrier_api_timeout' => (int) ($data['carrier_api_timeout'] ?? 15),
             'address_validation_google_enabled' => (bool) ($data['address_validation_google_enabled'] ?? false),
@@ -682,6 +711,13 @@ class Settings extends Page
         // left out of the form state, so saving without it must not clear it.
         if (! array_key_exists('pack_slip_logo', $data)) {
             unset($settings['pack_slip_logo']);
+        }
+
+        // The pick batch fields are hidden while picking is off; keep what was saved.
+        foreach (['pick_to_tote_enabled', 'pick_summary_show_bin', 'pick_summary_show_sku', 'pick_summary_show_barcode'] as $key) {
+            if (! array_key_exists($key, $data)) {
+                unset($settings[$key]);
+            }
         }
 
         if (! $settings['require_mfa'] && DataSource::where('source_type', AmazonSource::class)->where('active', true)->exists()) {

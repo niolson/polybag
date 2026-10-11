@@ -68,7 +68,10 @@ class ViewShipment extends ViewRecord
                 ->color('gray')
                 ->visible(fn (): bool => $this->shipment()->status === ShipmentStatus::Open)
                 ->authorize(fn (): bool => auth()->user()->can('printPackSlip', $this->shipment()))
-                ->requiresConfirmation(fn (): bool => $this->shipment()->activePickBatch() !== null)
+                ->requiresConfirmation(fn (): bool => $this->shipment()->activePickBatch()?->pickBatchShipments()
+                    ->where('shipment_id', $this->shipment()->id)
+                    ->whereNotNull('tote_code')
+                    ->exists() ?? false)
                 ->modalHeading('Print without the tote code?')
                 ->modalDescription(fn (): string => 'This Shipment is in pick batch #'.$this->shipment()->activePickBatch()?->id
                     .'. A slip printed here has no tote code; print the batch\'s pack slips for one that does.')
