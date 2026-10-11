@@ -216,15 +216,15 @@ where it does not apply rejects it. It is never reinterpreted.
 | Code | Does | Acts on |
 |---|---|---|
 | `%CSHIP` | Buy and print a label | The Package being packed (same as F12) |
-| `%CREPRINTLAST` | Reprint | The Label this browser session last bought |
-| `%CVOIDLAST` | Void, if this user bought it | The Label this browser session last bought |
-| `%CZEROSCALE` | Zero the scale | This workstation's scale |
-| `%CCLEARSHIPMENT` | Clear the loaded Shipment | This page |
+| `%CREPRINT` | Reprint | The Label this browser session last bought |
+| `%CVOID` | Void, if this user bought it | The Label this browser session last bought |
+| `%CZERO` | Zero the scale | This workstation's scale |
+| `%CCLEAR` | Clear the loaded Shipment | This page |
 
 The last Label is remembered by its own ID, not its Package's. If it has since been voided,
-even if the Package has been bought again, `REPRINTLAST` and `VOIDLAST` refuse rather than
+even if the Package has been bought again, `REPRINT` and `VOID` refuse rather than
 act on the replacement. "Reprint the current Package's active Label" is a different
-command from `REPRINTLAST` and would get its own name. The old `*1`–`*4` and `*0` stop
+command from `REPRINT` and would get its own name. The old `*1`–`*4` and `*0` stop
 working; stations reprint their sheets.
 
 Operator-defined actions (`M`) will invoke the same application actions, with the same

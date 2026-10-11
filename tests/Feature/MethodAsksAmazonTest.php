@@ -112,6 +112,26 @@ describe('the amazon row', function (): void {
         expect($method->fresh()->allowsUnlistedServices(PostageSourceKind::Amazon))->toBeTrue();
     });
 
+    it('opens the edit modal with the toggle on when the row allows any service', function (): void {
+        $method = ShippingMethod::factory()->create();
+        $row = ShippingMethodPostageSource::factory()->amazon()->any()->for($method)->create();
+        $listed = ShippingMethodPostageSource::factory()->amazon()->for(ShippingMethod::factory())->create();
+
+        Livewire::test(PostageSourcesRelationManager::class, [
+            'ownerRecord' => $method,
+            'pageClass' => EditShippingMethod::class,
+        ])
+            ->mountAction(TestAction::make(EditAction::class)->table($row))
+            ->assertSchemaStateSet(['unlisted_services' => true]);
+
+        Livewire::test(PostageSourcesRelationManager::class, [
+            'ownerRecord' => $listed->shippingMethod,
+            'pageClass' => EditShippingMethod::class,
+        ])
+            ->mountAction(TestAction::make(EditAction::class)->table($listed))
+            ->assertSchemaStateSet(['unlisted_services' => false]);
+    });
+
     it('is described as listed services only, or any service', function (): void {
         $listed = ShippingMethod::factory()->create();
         ShippingMethodPostageSource::factory()->amazon()->for($listed)->create();

@@ -111,7 +111,11 @@
                     <ul class="divide-y divide-gray-200 dark:divide-gray-700">
                         @foreach($package->packageItems as $item)
                             <li class="py-2 flex justify-between">
-                                <span>{{ $item->product?->name ?? $item->shipmentItem?->description ?? $item->barcode }}</span>
+                                @if($item->product && \App\Filament\Resources\ProductResource::canEdit($item->product))
+                                    <a href="{{ \App\Filament\Resources\ProductResource::getUrl('edit', ['record' => $item->product]) }}" class="text-primary-600 hover:underline dark:text-primary-400">{{ $item->product->name }}</a>
+                                @else
+                                    <span>{{ $item->product?->name ?? $item->shipmentItem?->description ?? $item->barcode }}</span>
+                                @endif
                                 <span class="text-gray-500">x{{ $item->quantity }}</span>
                             </li>
                         @endforeach

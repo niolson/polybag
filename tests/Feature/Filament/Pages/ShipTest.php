@@ -10,7 +10,9 @@ use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\PackageStatus;
+use App\Enums\Role;
 use App\Filament\Pages\Ship;
+use App\Filament\Resources\ProductResource;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
@@ -338,3 +340,19 @@ it('badges an Amazon order with the programs it is enrolled in', function (array
     'ordinary' => [[], [], ['Prime', 'Premium']],
     'ship plus' => [['FBM_SHIP_PLUS'], [], ['Prime', 'Premium']],
 ]);
+
+it('links package items to the product page for users who can edit products', function (): void {
+    $package = createShippablePackage();
+    $url = ProductResource::getUrl('edit', ['record' => $package->packageItems->first()->product]);
+
+    Livewire::test(Ship::class, ['package_id' => $package->id])->assertSeeHtml('href="'.$url.'"');
+});
+
+it('does not link package items to the product page for users who cannot edit products', function (): void {
+    $package = createShippablePackage();
+    $url = ProductResource::getUrl('edit', ['record' => $package->packageItems->first()->product]);
+
+    $this->actingAs(User::factory()->create(['role' => Role::User]));
+
+    Livewire::test(Ship::class, ['package_id' => $package->id])->assertDontSeeHtml('href="'.$url.'"');
+});

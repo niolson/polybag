@@ -263,10 +263,6 @@ class Ship extends Page
                 ->icon('heroicon-o-printer')
                 ->keybindings(['f12'])
                 ->visible(fn (): bool => $this->isShipped()),
-            Action::make('Back')
-                ->action(fn () => $this->redirect($this->returnUrl))
-                ->icon('heroicon-o-arrow-left')
-                ->color('gray'),
         ];
     }
 

@@ -212,14 +212,14 @@ describe('PolyBag codes', function (): void {
     it('gives the browser every command\'s barcode', function (): void {
         Livewire::test(Pack::class)
             ->assertSeeHtml('%CSHIP')
-            ->assertSeeHtml('%CZEROSCALE');
+            ->assertSeeHtml('%CZERO');
 
         expect((new Pack)->scanCommandCodes())->toMatchArray([
             '%CSHIP' => 'SHIP',
-            '%CREPRINTLAST' => 'REPRINTLAST',
-            '%CVOIDLAST' => 'VOIDLAST',
-            '%CZEROSCALE' => 'ZEROSCALE',
-            '%CCLEARSHIPMENT' => 'CLEARSHIPMENT',
+            '%CREPRINT' => 'REPRINT',
+            '%CVOID' => 'VOID',
+            '%CZERO' => 'ZERO',
+            '%CCLEAR' => 'CLEAR',
         ]);
     });
 });
