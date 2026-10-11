@@ -274,7 +274,7 @@ class ClientForm
                             ->visibility('public')
                             ->image()
                             ->panelLayout('grid')
-                            ->itemPanelAspectRatio('0.4')
+                            ->itemPanelAspectRatio('0.6')
                             ->maxSize(10240)
                             ->acceptedFileTypes(['image/svg+xml', 'image/png', 'image/jpeg', 'image/gif', 'image/webp'])
                             ->saveUploadedFileUsing(SvgUploadSanitizer::saveUsing())
