@@ -5,9 +5,10 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ $title }}</title>
     <style>
+        /* The QZ Tray path drops pale hairlines and text (#ccc rules, #888 scan code). Keep every line and text color dark. */
         @page { size: 4in 6in; margin: 0; }
         * { box-sizing: border-box; }
-        body { font-family: sans-serif; font-size: 8pt; margin: 0; color: #111; }
+        body { font-family: sans-serif; font-size: 10pt; margin: 0; color: #111; }
 
         .slip {
             width: 4in;
@@ -21,14 +22,14 @@
             display: flex;
             gap: 0.1in;
             padding-bottom: 0.08in;
-            border-bottom: 1px solid #ccc;
+            border-bottom: 1px solid #555;
             margin-bottom: 0.08in;
             min-height: 0.65in;
             align-items: flex-start;
         }
         .logo-cell { flex: 0 0 50%; }
         .logo-cell img { max-width: 100%; max-height: 0.55in; object-fit: contain; object-position: left top; }
-        .return-address-cell { flex: 1; font-size: 7pt; line-height: 1.35; text-align: right; color: #333; }
+        .return-address-cell { flex: 1; font-size: 9pt; line-height: 1.35; text-align: right; color: #000; }
         .return-address-cell .co { font-weight: bold; color: #111; }
 
         /* Row 2: Tote | Order + barcode */
@@ -36,14 +37,14 @@
             display: flex;
             gap: 0.1in;
             padding-bottom: 0.08in;
-            border-bottom: 1px solid #ccc;
+            border-bottom: 1px solid #555;
             margin-bottom: 0.08in;
             align-items: center;
         }
         .tote-cell { flex: 0 0 35%; }
-        .tote-label { font-size: 6.5pt; color: #666; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 2px; }
+        .tote-label { font-size: 8pt; color: #000; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 2px; }
         .tote-code {
-            font-size: 20pt;
+            font-size: 22pt;
             font-weight: bold;
             border: 2px solid #111;
             display: inline-block;
@@ -52,30 +53,28 @@
         }
         .order-cell { flex: 1; text-align: right; }
         .barcode-wrap svg { display: block; width: 100%; height: 30px; margin-left: auto; }
-        .order-ref { font-family: monospace; font-size: 7pt; color: #555; margin-top: 2px; }
-        .order-ref .scan-code { color: #888; margin-left: 4px; }
+        .order-ref { font-family: monospace; font-size: 9pt; color: #000; margin-top: 2px; }
+        .order-ref .scan-code { color: #000; margin-left: 4px; }
 
-        /* Row 3: Ship-to | Order summary placeholder */
+        /* Row 3: Ship-to */
         .row-recipient {
             display: flex;
             gap: 0.1in;
             padding-bottom: 0.08in;
-            border-bottom: 1px solid #ccc;
+            border-bottom: 1px solid #555;
             margin-bottom: 0.08in;
         }
         .ship-to-cell { flex: 1; line-height: 1.45; }
-        .ship-to-cell .name { font-size: 9pt; font-weight: bold; }
-        .ship-to-cell .addr { font-size: 8pt; }
-        .order-summary-cell { flex: 0 0 38%; border: 1px solid #e0e0e0; min-height: 0.85in; background: #fafafa; }
+        .ship-to-cell .name { font-size: 12pt; font-weight: bold; }
+        .ship-to-cell .addr { font-size: 10pt; }
 
         /* Row 4: Items table */
-        .items-table { width: 100%; border-collapse: collapse; font-size: 7.5pt; }
-        .items-table th { text-align: left; border-bottom: 1.5px solid #111; padding: 3px 4px; font-size: 7.5pt; }
-        .items-table td { padding: 3px 4px; border-bottom: 1px solid #e8e8e8; vertical-align: top; }
-        .items-table tr:last-child td { border-bottom: none; }
+        .items-table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+        .items-table th { text-align: left; border-bottom: 1.5px solid #111; padding: 3px 4px; font-size: 9.5pt; }
+        .items-table td { padding: 3px 4px; vertical-align: top; }
 
         /* Row 5: Footer (custom message / return instructions) */
-        .row-footer { margin-top: 0.08in; padding-top: 0.06in; border-top: 1px solid #ccc; font-size: 7pt; color: #444; line-height: 1.4; }
+        .row-footer { margin-top: 0.08in; padding-top: 0.06in; border-top: 1px solid #555; font-size: 9pt; color: #000; line-height: 1.4; }
         .row-footer .footer-label { font-weight: bold; color: #111; margin-bottom: 1px; }
         .row-footer .footer-block + .footer-block { margin-top: 0.05in; }
 
@@ -193,7 +192,7 @@
             </div>
         </div>
 
-        {{-- Row 3: Ship-to address | Order summary placeholder --}}
+        {{-- Row 3: Ship-to address --}}
         <div class="row-recipient">
             <div class="ship-to-cell">
                 <div class="name">{{ trim(($shipment->first_name ?? '').' '.($shipment->last_name ?? '')) }}</div>
@@ -206,7 +205,6 @@
                 @endif
                 <div class="addr">{{ $shipment->city }}, {{ $shipment->state_or_province }} {{ $shipment->postal_code }}</div>
             </div>
-            <div class="order-summary-cell"></div>
         </div>
 
         {{-- Row 4: Items table --}}
