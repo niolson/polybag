@@ -696,6 +696,21 @@ it('does not overwrite location fields when saving in multi-location mode', func
 
 // ─── MFA required while an active Amazon SP-API source exists ─────────────────
 
+it('groups the settings into tabs', function (): void {
+    Livewire::test(Settings::class)
+        ->assertSeeText(['General', 'Warehouse', 'Shipping', 'Pack Slips & Picking', 'Security', 'Data Retention']);
+});
+
+it('hides the pack slips and picking tab when it would be empty', function (): void {
+    Setting::create(['key' => 'multi_client_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+    app(SettingsService::class)->clearCache();
+
+    Livewire::test(Settings::class)
+        ->assertDontSeeText('Pack Slips & Picking')
+        ->fillForm(['picking_enabled' => true])
+        ->assertSeeText('Pack Slips & Picking');
+});
+
 it('blocks disabling MFA while an active Amazon data source exists', function (): void {
     Setting::create(['key' => 'require_mfa', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
     app(SettingsService::class)->clearCache();
@@ -708,7 +723,8 @@ it('blocks disabling MFA while an active Amazon data source exists', function ()
     Livewire::test(Settings::class)
         ->fillForm(['require_mfa' => false])
         ->call('save')
-        ->assertHasErrors(['data.require_mfa']);
+        ->assertHasErrors(['data.require_mfa'])
+        ->assertDispatched('form-validation-error');
 
     expect(app(SettingsService::class)->get('require_mfa'))->toBeTrue();
 });

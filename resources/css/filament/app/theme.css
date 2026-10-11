@@ -399,3 +399,17 @@ body.fi-body.dark .fi-simple-layout::before {
 .fi-simple-main .fi-ac > .fi-btn {
     width: 100% !important;
 }
+
+/* Image upload previews — FilePond paints #222 behind the image, which shows
+ * through a transparent logo. Logos print on white, so preview them on a light
+ * tile in both themes. Outside @layer because Filament's FilePond CSS is
+ * unlayered and would win over any layered rule. */
+.fi-fo-file-upload .filepond--image-preview {
+    background: rgb(243 244 246);
+}
+
+/* FilePond sizes the image from JavaScript, so padding would not shrink it;
+ * scale it inside its tile instead to leave space around the edges. */
+.fi-fo-file-upload .filepond--image-clip {
+    transform: scale(0.8);
+}
