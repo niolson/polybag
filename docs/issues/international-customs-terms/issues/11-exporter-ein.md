@@ -52,8 +52,7 @@ a floor user cannot edit a client.
 - UPS: on the EEI form request, in `GlobalTaxInformation` if CIE accepts it there for
   the shipper, else `ShipFrom.TaxIdentificationNumber` + `TaxIDType` `EIN`. `06` builds
   the rest of the EEI form.
-- FedEx: in `shipper.tins`. The `tinType` is in the FedEx email from `02` (`FEDERAL` or
-  `BUSINESS_NATIONAL`). Send it after any seller registration, because FedEx prints only
+- FedEx: in `shipper.tins`, `tinType` `BUSINESS_NATIONAL`. Send it after any seller registration, because FedEx prints only
   the first shipper TIN in the invoice's tax ID field.
 - USPS: nothing. `AESITN` carries the ITN alone.
 
@@ -91,3 +90,7 @@ say that such a client needs its filer to supply the ITN, not offer a field for 
   comments) and the FedEx sandbox (`07`'s comments, a BR label with an ITN and an EIN; the
   invoice prints the EIN as the shipper's *Tax ID#*). The status is left for the
   maintainer.
+- **2026-10-12, tinType changed.** The EIN now goes as `BUSINESS_NATIONAL`, not `FEDERAL`:
+  `FEDERAL` is in the schema enum, but the Ship API guide's valid `Tins/TinType` values
+  (`.scratch/fedex-ship-api-docs.md`) omit it and list `BUSINESS_NATIONAL`. The earlier `FEDERAL` was a guess. Still not confirmed by a
+  FedEx production buy.

@@ -62,7 +62,7 @@ the ITN or exemption in `exportDetail`.
   DDU is `RECIPIENT` with no payor and `DDU`; a request with no resolved term still
   declares DDU, as since `01`. **Rate requests are unchanged** (`SENDER`, per `02`), with a
   test that DDP and DDU terms on the `RateRequest` do not change it. Shipper `tins`:
-  the seller registration first, then the client's EIN (`FEDERAL`) when an ITN is sent;
+  the seller registration first, then the client's EIN (`BUSINESS_NATIONAL`) when an ITN is sent;
   the recipient's `tins` hold the recipient tax ID (`PERSONAL_NATIONAL`, or
   `BUSINESS_NATIONAL` for a CNPJ or a VAT number, which is a business's whatever the
   company name; only an `other` ID follows the company name).
@@ -79,8 +79,8 @@ the ITN or exemption in `exportDetail`.
   reads it as IOSS. Change that one constant when FedEx answers. Also not confirmed with
   FedEx: `BUSINESS_NATIONAL` for UK VAT, VOEC and ARN (the type `02`'s probe tried and
   saw on the invoice; `tinTypeFor()` is where a regime would be left out instead, and
-  nothing is recorded for a registration that is not sent), and `FEDERAL` for the EIN
-  (`11` named FEDERAL or BUSINESS_NATIONAL; `02` never tested it).
+  nothing is recorded for a registration that is not sent), and, since 2026-10-12, `BUSINESS_NATIONAL` for the EIN
+  too (it was `FEDERAL`; the Ship API guide's valid `Tins/TinType` values omit `FEDERAL`).
   **Declared terms.** `declaredCustomsTerms()` answers with the predicates that build the
   body, so the snapshot records only what was sent: nothing for a request with no customs
   declaration (same customs zone, or no lines, which is refused first), a registration or
@@ -133,7 +133,7 @@ the ITN or exemption in `exportDetail`.
   and the label and invoice print *AES X20261008123456*. As `02` warned, the sandbox
   accepts fields it ignores, so this shows the fields are accepted and printed, not
   that production customs reads them.
-- **Not verified:** the IOSS `tinType` (above); `BUSINESS_NATIONAL` and `FEDERAL` as
+- **Not verified:** the IOSS `tinType` (above); `BUSINESS_NATIONAL` as
   FedEx's customs data reads them; that a production DDU label with a recipient email now
   stops billing the carrier account (the sandbox bills nothing); the ITN threshold
   outside GB and in production (`02`); a FedEx production label. Nothing in the

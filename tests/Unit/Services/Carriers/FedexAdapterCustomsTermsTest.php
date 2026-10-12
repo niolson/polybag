@@ -176,16 +176,17 @@ function sentFedexCustomsShipment(): array
  * DeclaredCustomsTerms, read out of the body and not out of the adapter.
  *
  * @param  array<string, mixed>  $shipment
+ * @param  string|null  $ein  the exporter EIN sent beside an ITN, which is not a registration
  * @return array{duties_terms: string|null, registration: string|null, recipient_tax_id: bool, export_itn: string|null}
  */
-function fedexCustomsFactsOf(array $shipment): array
+function fedexCustomsFactsOf(array $shipment, ?string $ein = null): array
 {
     $customs = $shipment['customsClearanceDetail'] ?? null;
     $statement = $customs['exportDetail']['exportComplianceStatement'] ?? null;
 
     return [
         'duties_terms' => $customs === null ? null : strtolower($customs['commercialInvoice']['termsOfSale']),
-        'registration' => collect($shipment['shipper']['tins'] ?? [])->firstWhere('tinType', '!=', 'FEDERAL')['number'] ?? null,
+        'registration' => collect($shipment['shipper']['tins'] ?? [])->firstWhere('number', '!=', $ein)['number'] ?? null,
         'recipient_tax_id' => isset($shipment['recipients'][0]['tins']),
         'export_itn' => $statement === null ? null : substr($statement, 3),
     ];
@@ -339,7 +340,7 @@ it('sends an ITN as the export compliance statement, with the EIN after the regi
     expect($shipment['customsClearanceDetail']['exportDetail'])->toBe(['exportComplianceStatement' => 'AESX20261008123456'])
         ->and($shipment['shipper']['tins'])->toBe([
             ['number' => 'IM2760000742', 'tinType' => FedexAdapter::IOSS_TIN_TYPE],
-            ['number' => '123456789', 'tinType' => 'FEDERAL'],
+            ['number' => '123456789', 'tinType' => 'BUSINESS_NATIONAL'],
         ]);
 });
 
@@ -402,7 +403,7 @@ it('reports exactly the customs terms it put on the wire', function (ShipRequest
     $this->adapter->createShipment($request);
 
     $declared = $this->adapter->declaredCustomsTerms($request);
-    $sent = fedexCustomsFactsOf(sentFedexCustomsShipment());
+    $sent = fedexCustomsFactsOf(sentFedexCustomsShipment(), $request->exporterEin);
 
     expect([
         'duties_terms' => $declared->dutiesTerms?->value,

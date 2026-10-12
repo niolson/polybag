@@ -541,7 +541,7 @@ it('accepts a DDP declaration with its payor, TINs, a recipient email and an ITN
         'dutiesPayment' => ['paymentType' => 'SENDER', 'payor' => ['responsibleParty' => ['accountNumber' => ['value' => '123456789']]]],
         'exportDetail' => ['exportComplianceStatement' => 'AESX20261008123456'],
     ], [
-        'shipper' => ['tins' => [['number' => 'IM2760000742', 'tinType' => 'BUSINESS_UNION'], ['number' => '123456789', 'tinType' => 'FEDERAL']]],
+        'shipper' => ['tins' => [['number' => 'IM2760000742', 'tinType' => 'BUSINESS_UNION'], ['number' => '123456789', 'tinType' => 'BUSINESS_NATIONAL']]],
         'recipients' => [['contact' => ['emailAddress' => 'anna@example.com'], 'tins' => [['number' => '12345678909', 'tinType' => 'PERSONAL_NATIONAL']]]],
     ]), 'CreateShipmentRequest');
 });
@@ -569,7 +569,7 @@ it('rejects a TIN type outside FedEx\'s enum, and a number over 18 characters', 
     ]), 'CreateShipmentRequest'))->toThrow(AssertionFailedError::class, $needle);
 })->with([
     'IOSS is not a type' => ['IM2760000742', 'IOSS', 'tinType'],
-    'a long number' => ['1234567890123456789', 'FEDERAL', 'number'],
+    'a long number' => ['1234567890123456789', 'BUSINESS_NATIONAL', 'number'],
 ]);
 
 it('rejects an export compliance statement that is not an AES citation', function (string $statement): void {

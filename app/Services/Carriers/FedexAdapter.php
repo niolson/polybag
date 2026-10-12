@@ -107,10 +107,10 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
 
     /**
      * The `tinType` of the client's EIN, sent beside an export ITN.
-     * `international-customs-terms/11` left FEDERAL or BUSINESS_NATIONAL open;
-     * an EIN is the federal tax ID, so FEDERAL. Not confirmed with FedEx.
+     * FEDERAL is in FedEx's enum but not in its documented options;
+     * BUSINESS_NATIONAL is.
      */
-    private const string EIN_TIN_TYPE = 'FEDERAL';
+    private const string EIN_TIN_TYPE = 'BUSINESS_NATIONAL';
 
     /**
      * The longest `tins[].number` FedEx accepts. A longer ID is left out
