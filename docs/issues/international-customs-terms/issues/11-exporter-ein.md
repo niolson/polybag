@@ -1,6 +1,6 @@
 # The client's EIN goes with every export ITN
 
-Status: ready-for-agent
+Status: done — 2026-10-12
 Category: enhancement
 Repo: `polybag`
 
