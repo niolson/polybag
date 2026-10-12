@@ -326,4 +326,32 @@ Per carrier, record the request sent and the answer received in `.scratch/intern
   So the earlier "IOSS suppresses the landed cost" was a property of the exporter field,
   not of IOSS. Details and the build consequence are in `08`. Still open for USPS:
   whether it is intended, and whether production matches TEM.
+- 2026-10-12 — **UPS API support replied** to the questions under *Still open: UPS*. The
+  reply reads as a documentation summary, not an engineering answer: it names no code
+  where we asked for one and cites public pages (developer announcements, WorldShip VCID
+  help, the PLD certify EEI codes page). Treat it as weak evidence.
+  - **UK VAT code: not answered.** It confirms `0358` is deprecated and that UPS now calls
+    the UK identifier an "HMRC Number" Vendor Collect ID, but lists no replacement code.
+    `0000` stays the fallback. Re-ask for the literal `VendorCollectIDTypeCode`.
+  - **Electronic transmission:** VCIDs are customs-validation data that UPS uses in
+    clearance, not invoice-print fields. Inferred from UPS's stated purpose for VCIDs,
+    not from a statement about the API payload. Good enough to treat IOSS and VOEC as
+    reaching customs; not confirmed for UK.
+  - **`378`:** consistent with the Duty and Tax Forwarding Surcharge, which is what the
+    2026 rate guide says. UPS did not name the code. No new post-1 July 2026 US→EU charge
+    that it could verify.
+  - **ITN / exemption:** it says an ITN or an exemption legend can be declared, and that
+    UPS's accepted legend is `NOEEI30.37 (A)` (14 characters, no space after `NOEEI`),
+    not `NO EEI 30.37(a)`. Two things to settle against CIE before relying on it:
+    - Our captures used `ExemptionLegend` `30.37(a)` and the request only worked inside
+      the EEI form (`FormType` `11`). UPS's "Yes" does not say whether the EEI form can
+      be skipped, so the earlier finding stands.
+    - Re-buy with `NOEEI30.37 (A)` and see whether the "AESCitation" line on the invoice
+      changes. If it prints, use that string; if CIE drops it, keep `30.37(a)`.
+  - **Australia:** UPS found no `Product.TaxesPaid` equivalent for AU and no
+    "GST already paid" flag; the ARN (`1052`) is the only mechanism. This matches the CIE
+    result and is now the answer for UPS, so `05` keeps blocking AU parcels that mix an
+    item over AUD 1,000 with an ARN. FedEx and USPS are still unasked.
+  - **Still open for UPS:** the UK VAT code, and the production DDP + IOSS buy-and-void on
+    or after 25 October.
 
