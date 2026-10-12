@@ -1,6 +1,6 @@
 # Make fake carriers good enough to finish a demo
 
-Status: needs-triage
+Status: done — 2026-10-12
 
 Pass: 1 (found while reviewing the plan)
 
@@ -44,3 +44,17 @@ carriers today:
   own fakes, as `ShippingFlowTest` does.
 
 ## Comments
+
+- 2026-10-12 — Done. Fake carriers print a sample 4×6 label (PDF, or ZPL at 203/300 dpi
+  when asked for) with the order's addresses and the tracking number as plain text, and no
+  barcode of any kind. USPS folds a sample customs declaration into the label, UPS returns a
+  sample commercial invoice for the document printer, FedEx returns none, each as its real
+  adapter does. End of Day goes through a new `CreatesCarrierManifest` contract that the
+  fake implements, so it produces a sample form without calling USPS; the real USPS path
+  is unchanged. Found while testing: the fakes quoted only domestic services, so an
+  international method had no rates; they now quote an international table when the
+  destination country differs from the origin. Letter pages keep their bands half an inch
+  inside the edges, after the first invoice printed with its top band cut off. Verified
+  on hardware: PDF and ZPL labels, void, UPS label and invoice, USPS declaration, End of
+  Day. Not done: a PNG variant (nothing asks for one) and moving the real USPS SCAN form
+  onto the new contract.
