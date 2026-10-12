@@ -100,12 +100,15 @@ it('approximates Amazon from the lane when no rate exists yet', function (): voi
         ->and($adapter->customsDocumentDelivery($from, customsLaneAddress('US', 'PR')))->toBe(CustomsDocumentDelivery::None);
 });
 
-it('lets a test choose the fake carrier\'s answer', function (): void {
+it('mirrors the real carrier\'s answer from the fake carrier unless a test chooses one', function (): void {
     $from = customsLaneAddress('US');
     $to = customsLaneAddress('CA', 'ON');
 
-    expect((new FakeCarrierAdapter('USPS'))->customsDocumentDelivery($from, $to))->toBe(CustomsDocumentDelivery::None)
-        ->and((new FakeCarrierAdapter('UPS', CustomsDocumentDelivery::Separate))->customsDocumentDelivery($from, $to))->toBe(CustomsDocumentDelivery::Separate);
+    expect((new FakeCarrierAdapter('USPS'))->customsDocumentDelivery($from, $to))->toBe(CustomsDocumentDelivery::FusedIntoLabel)
+        ->and((new FakeCarrierAdapter('UPS'))->customsDocumentDelivery($from, $to))->toBe(CustomsDocumentDelivery::Separate)
+        ->and((new FakeCarrierAdapter('FedEx'))->customsDocumentDelivery($from, $to))->toBe(CustomsDocumentDelivery::NotRequested)
+        ->and((new FakeCarrierAdapter('UPS'))->customsDocumentDelivery($from, customsLaneAddress('US', 'CA')))->toBe(CustomsDocumentDelivery::None)
+        ->and((new FakeCarrierAdapter('USPS', CustomsDocumentDelivery::Separate))->customsDocumentDelivery($from, $to))->toBe(CustomsDocumentDelivery::Separate);
 });
 
 it('needs a report printer only for a separate document', function (): void {

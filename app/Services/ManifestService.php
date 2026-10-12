@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Contracts\CreatesCarrierManifest;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\ManifestResponse;
 use App\Enums\PackageStatus;
@@ -14,6 +15,7 @@ use App\Models\CarrierAccount;
 use App\Models\Location;
 use App\Models\Manifest;
 use App\Models\Package;
+use App\Services\Carriers\CarrierRegistry;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
@@ -49,6 +51,9 @@ class ManifestService
      * queries that feed this already filter on provenance; the guard is here
      * because the rule protects a request to USPS, and a caller assembling its
      * own collection must not be able to route around it.
+     *
+     * A carrier whose adapter creates its own form ({@see CreatesCarrierManifest})
+     * is asked for it; the rest still dispatch by name below.
      */
     public function createManifest(string $carrier, Collection $packages, ?CarbonImmutable $shipDate = null, ?int $locationId = null): ManifestResponse
     {
@@ -58,11 +63,64 @@ class ManifestService
             );
         }
 
+        $adapter = app(CarrierRegistry::class)->directAdapterFor($carrier);
+
+        if ($adapter instanceof CreatesCarrierManifest && $adapter->supportsCarrierManifest()) {
+            return $this->createAdapterManifest($adapter, $carrier, $packages, $shipDate, $locationId);
+        }
+
         return match ($carrier) {
             Carrier::USPS => $this->createUspsManifest($packages, $shipDate, $locationId),
             Carrier::FEDEX => $this->createFedexManifest(),
             default => ManifestResponse::failure("Unsupported carrier: {$carrier}"),
         };
+    }
+
+    /**
+     * Ask the adapter for the form, then record it and put the Packages on it,
+     * as the USPS path does for each SCAN form.
+     *
+     * @param  Collection<int, Package>  $packages
+     */
+    private function createAdapterManifest(CreatesCarrierManifest $adapter, string $carrier, Collection $packages, ?CarbonImmutable $shipDate, ?int $locationId): ManifestResponse
+    {
+        try {
+            $location = $locationId ? Location::find($locationId) : null;
+            $fromAddress = $location ? AddressData::fromLocation($location) : AddressData::fromConfig();
+
+            $response = $adapter->createCarrierManifest($packages->values(), $fromAddress, $shipDate ?? CarbonImmutable::now());
+        } catch (\Exception $e) {
+            logger()->error('Carrier manifest error', ['carrier' => $carrier, 'error' => $e->getMessage()]);
+
+            return ManifestResponse::failure($e->getMessage());
+        }
+
+        if (! $response->success) {
+            return $response;
+        }
+
+        $manifest = DB::transaction(function () use ($response, $carrier, $packages, $locationId): Manifest {
+            $manifest = Manifest::create([
+                'carrier' => $carrier,
+                'location_id' => $locationId,
+                'manifest_number' => $response->manifestNumber,
+                'image' => $response->image,
+                'manifest_date' => now()->toDateString(),
+                'package_count' => $packages->count(),
+            ]);
+
+            $this->markManifested($packages->pluck('tracking_number')->all(), $manifest);
+
+            return $manifest;
+        });
+
+        ManifestCreatedEvent::dispatch($manifest, $packages->count());
+
+        return ManifestResponse::success(
+            manifestNumber: (string) $response->manifestNumber,
+            carrier: $carrier,
+            image: $response->image,
+        );
     }
 
     /**
