@@ -106,7 +106,8 @@ Each pass looks for one kind of problem.
 | Directory | Call | Why |
 |---|---|---|
 | Fake carriers for the fallback (`01`) | **In** | The fallback script cannot print, document or manifest without it |
-| `box-size-seed-data` | **In** | Default box names disagree with their dimensions; a prospect sees them first |
+| `box-size-seed-data` `01` | **In** | Default box names disagree with their dimensions; a prospect sees them first |
+| `box-size-seed-data` `02`, `03` | Out | Features: active/inactive Box Sizes and the carrier packaging catalog |
 | `order-reconciliation` `01` | **In** | Showing where each void came from is a display fix |
 | `end-of-day-count` | **Check in pass 1** | End of Day is on the demo path |
 | `order-reconciliation` `03`, ADR-0009 | **Before the first customer**, off the demo's critical path | The purchase check that stops double shipments; the billing definition |
