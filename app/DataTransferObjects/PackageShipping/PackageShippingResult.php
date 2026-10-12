@@ -90,6 +90,20 @@ readonly class PackageShippingResult
         return new self(success: false, title: 'Not Ready', message: $message, leavePackageIntact: true);
     }
 
+    /**
+     * The order was cancelled, so nothing may be bought for it
+     * (`order-reconciliation/02`). Leaves the package intact, to be unpacked.
+     */
+    public static function shipmentCancelled(): self
+    {
+        return new self(
+            success: false,
+            title: 'Order Cancelled',
+            message: 'This order is cancelled, so no label can be bought for it. Unpack the package, or ask a manager to reopen the order.',
+            leavePackageIntact: true,
+        );
+    }
+
     public static function customsWeightOverrideRequired(): self
     {
         return new self(

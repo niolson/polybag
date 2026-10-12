@@ -30,6 +30,7 @@ use App\Enums\DutiesTerms;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\Role;
+use App\Enums\ShipmentStatus;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
 use App\Exceptions\LabelNotRecoverableException;
@@ -227,6 +228,12 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         // it. Read here too: a stale page's package can still say unshipped.
         if (Package::whereKey($package->id)->where('status', PackageStatus::Shipped)->exists()) {
             return null;
+        }
+
+        // Read from the database: an import or a manager may have cancelled the
+        // order since the page or the batch loaded it.
+        if (Shipment::query()->whereKey($package->shipment_id)->where('status', ShipmentStatus::Cancelled)->exists()) {
+            return PackageShippingResult::shipmentCancelled();
         }
 
         if ($package->shipment?->isBlockedByPicking()) {

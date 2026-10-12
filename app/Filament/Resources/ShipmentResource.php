@@ -10,6 +10,7 @@ use App\Enums\PickingStatus;
 use App\Enums\RecipientTaxIdType;
 use App\Enums\Role;
 use App\Enums\ShipmentStatus;
+use App\Enums\ShipmentStatusOrigin;
 use App\Enums\TaxRegistrationRegime;
 use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Pages\UnmappedChannelReferences;
@@ -69,6 +70,45 @@ class ShipmentResource extends Resource
     public static function needsShippingMethodUrl(): string
     {
         return static::getUrl('index', ['filters' => ['needs_shipping_method' => ['isActive' => true]]]);
+    }
+
+    /**
+     * The URL of the Shipments list filtered to Shipments flagged for review.
+     */
+    public static function flaggedForReviewUrl(): string
+    {
+        return static::getUrl('index', ['filters' => ['flagged_for_review' => ['isActive' => true]]]);
+    }
+
+    /**
+     * Said on the status field when the source closed the order, so a manager
+     * changing it knows they are overriding the source (`order-reconciliation/02`).
+     */
+    public static function closedBySourceNotice(?Shipment $record): ?string
+    {
+        if (! $record?->wasClosedBySource()) {
+            return null;
+        }
+
+        $source = $record->dataSource->name ?? 'The source';
+        $when = $record->status_changed_at?->timezone(Location::timezone())->format('M j, Y g:i A');
+
+        return "{$source} reported this order ".strtolower((string) $record->status->getLabel())
+            .($when !== null ? " on {$when}" : '')
+            .'. Changing it here overrides the source.';
+    }
+
+    /**
+     * Who set the status and when, under the status on the Shipment view.
+     */
+    private static function statusOriginText(Shipment $record): ?string
+    {
+        if ($record->status_origin === null) {
+            return null;
+        }
+
+        return $record->status_origin->getLabel()
+            .($record->status_changed_at ? ', '.$record->status_changed_at->timezone(Location::timezone())->format('M j, Y g:i A') : '');
     }
 
     private static function flagsMissingMethod(Shipment $record): bool
@@ -132,6 +172,16 @@ class ShipmentResource extends Resource
                         Forms\Components\Select::make('status')
                             ->options(ShipmentStatus::class)
                             ->disabled(fn (): bool => ! auth()->user()?->role->isAtLeast(Role::Manager))
+                            ->helperText(fn (?Shipment $record): ?string => self::closedBySourceNotice($record))
+                            ->visibleOn('edit'),
+                        Forms\Components\TextInput::make('external_carrier')
+                            ->label('Carrier (shipped elsewhere)')
+                            ->maxLength(255)
+                            ->visibleOn('edit'),
+                        Forms\Components\TextInput::make('external_tracking_number')
+                            ->label('Tracking number (shipped elsewhere)')
+                            ->helperText('For an order shipped without PolyBag. PolyBag does not track it.')
+                            ->maxLength(255)
                             ->visibleOn('edit'),
                         Forms\Components\Select::make('channel_id')
                             ->relationship('channel', 'name')
@@ -349,7 +399,18 @@ class ShipmentResource extends Resource
                     ->placeholder('—')
                     ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('status')
-                    ->badge(),
+                    ->badge()
+                    ->description(fn (Shipment $record): ?string => match ($record->status_origin) {
+                        ShipmentStatusOrigin::Source => 'By the source',
+                        ShipmentStatusOrigin::Manager => 'By a manager',
+                        default => null,
+                    }),
+                Tables\Columns\TextColumn::make('review_reason')
+                    ->label('Review')
+                    ->badge()
+                    ->tooltip(fn (Shipment $record): ?string => $record->review_reason?->getDescription())
+                    ->placeholder('—')
+                    ->toggleable(),
                 Tables\Columns\TextColumn::make('picking_status')
                     ->badge()
                     ->toggleable(isToggledHiddenByDefault: true)
@@ -418,6 +479,13 @@ class ShipmentResource extends Resource
                     ->relationship('shippingMethod', 'name')
                     ->label('Shipping Method')
                     ->preload(),
+                Tables\Filters\SelectFilter::make('status_origin')
+                    ->label('Status set by')
+                    ->options(ShipmentStatusOrigin::class),
+                Tables\Filters\Filter::make('flagged_for_review')
+                    ->label('Flagged for review')
+                    ->toggle()
+                    ->query(fn (Builder $query): Builder => $query->scopes('flaggedForReview')),
                 Tables\Filters\Filter::make('needs_shipping_method')
                     ->label('Needs shipping method')
                     ->toggle()
@@ -456,7 +524,9 @@ class ShipmentResource extends Resource
                 $filters['channel'],
                 $filters['shipping_method'],
                 app(SettingsService::class)->packSlipsEnabled() ? $filters['pack_slip'] : null,
+                $filters['status_origin'],
                 $filters['needs_shipping_method'],
+                $filters['flagged_for_review'],
                 $filters['created_at'],
             ])))
             ->defaultSort('created_at', 'desc')
@@ -585,7 +655,21 @@ class ShipmentResource extends Resource
                             ->icon('heroicon-o-clipboard')
                             ->iconPosition('after'),
                         TextEntry::make('status')
-                            ->badge(),
+                            ->badge()
+                            ->helperText(fn (Shipment $record): ?string => self::statusOriginText($record)),
+                        TextEntry::make('review_reason')
+                            ->label('Needs review')
+                            ->badge()
+                            ->helperText(fn (Shipment $record): ?string => $record->review_reason?->getDescription())
+                            ->visible(fn (Shipment $record): bool => $record->review_reason !== null),
+                        TextEntry::make('external_carrier')
+                            ->label('Shipped elsewhere by')
+                            ->visible(fn (Shipment $record): bool => filled($record->external_carrier)),
+                        TextEntry::make('external_tracking_number')
+                            ->label('Tracking (shipped elsewhere)')
+                            ->copyable()
+                            ->helperText('PolyBag does not track this parcel.')
+                            ->visible(fn (Shipment $record): bool => filled($record->external_tracking_number)),
                         TextEntry::make('fulfilled_by')
                             ->label('Fulfillment')
                             ->badge()

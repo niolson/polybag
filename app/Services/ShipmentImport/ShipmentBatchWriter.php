@@ -5,6 +5,7 @@ namespace App\Services\ShipmentImport;
 use App\Enums\Deliverability;
 use App\Enums\ImportExistingBehavior;
 use App\Enums\ShipmentStatus;
+use App\Enums\ShipmentStatusOrigin;
 use App\Models\DataSource;
 use App\Models\Shipment;
 use Illuminate\Support\Arr;
@@ -141,6 +142,21 @@ class ShipmentBatchWriter
 
         if ($remethodedIds !== []) {
             Shipment::whereIn('id', $remethodedIds)->update(['validation_attempted_at' => null]);
+        }
+
+        // A status the source wrote is the source's (`order-reconciliation/02`),
+        // whoever set the one before: a closed row here is a closure applied by
+        // this import, since `shouldUpdate()` never rewrites a closed Shipment.
+        // That includes one a manager reopened, whose `manager` origin it replaces.
+        $closedSourceRecordIds = array_column(array_filter(
+            $rowsToWrite,
+            fn (array $row): bool => ($row['status'] ?? ShipmentStatus::Open->value) !== ShipmentStatus::Open->value,
+        ), 'source_record_id');
+
+        if ($closedSourceRecordIds !== []) {
+            Shipment::where('data_source_id', $importSource->id)
+                ->whereIn('source_record_id', $closedSourceRecordIds)
+                ->update(['status_origin' => ShipmentStatusOrigin::Source, 'status_changed_at' => now()]);
         }
 
         $shipmentsBySourceRecord = Shipment::where('data_source_id', $importSource->id)

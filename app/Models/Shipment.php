@@ -11,7 +11,9 @@ use App\Enums\PackSlipState;
 use App\Enums\PickBatchStatus;
 use App\Enums\PickingStatus;
 use App\Enums\RecipientTaxIdType;
+use App\Enums\ShipmentReviewReason;
 use App\Enums\ShipmentStatus;
+use App\Enums\ShipmentStatusOrigin;
 use App\Enums\TaxRegistrationRegime;
 use App\Enums\ValidationTrigger;
 use App\Models\Concerns\HasDefaultClient;
@@ -83,7 +85,8 @@ class Shipment extends Model
 
     /**
      * Recipient data `PurgePiiCommand` clears once retention passes
-     * (`pii-retention/02`).
+     * (`pii-retention/02`). `external_tracking_number` is deliberately absent:
+     * like a Label's tracking number it identifies a parcel, not a person.
      *
      * @var list<string>
      */
@@ -165,6 +168,9 @@ class Shipment extends Model
         'data_source_id',
         'data_source_location_id',
         'status',
+        'status_origin',
+        'external_carrier',
+        'external_tracking_number',
         'picking_status',
         'deliver_by',
         'duties_terms',
@@ -186,6 +192,10 @@ class Shipment extends Model
         'deliverability' => Deliverability::class,
         'validation_source' => AddressValidator::class,
         'status' => ShipmentStatus::class,
+        'status_origin' => ShipmentStatusOrigin::class,
+        'status_changed_at' => 'datetime',
+        'review_reason' => ShipmentReviewReason::class,
+        'review_flagged_at' => 'datetime',
         'picking_status' => PickingStatus::class,
         'deliver_by' => 'date',
         'duties_terms' => DutiesTerms::class,
@@ -202,6 +212,10 @@ class Shipment extends Model
     protected static function booted(): void
     {
         static::saving(function (Shipment $shipment): void {
+            if ($shipment->exists && $shipment->isDirty('status')) {
+                $shipment->status_changed_at = now();
+            }
+
             // Recipient data written back after a purge, by a manager's edit,
             // is held again and needs its own retention clock.
             if ($shipment->pii_purged_at !== null && collect(self::PII_FIELDS)->contains(
@@ -254,11 +268,14 @@ class Shipment extends Model
     /**
      * @return array<string, mixed>
      */
-    #[SearchUsingPrefix(['shipment_reference'])]
+    #[SearchUsingPrefix(['shipment_reference', 'external_tracking_number'])]
     public function toSearchableArray(): array
     {
         return [
             'shipment_reference' => $this->shipment_reference,
+            // Shipped by other software (`order-reconciliation/02`), so the
+            // number a customer quotes still finds the order.
+            'external_tracking_number' => $this->external_tracking_number,
             'first_name' => $this->first_name,
             'last_name' => $this->last_name,
             'address1' => $this->address1,
@@ -272,15 +289,15 @@ class Shipment extends Model
      */
     public function updateShippedStatus(): void
     {
-        // Don't change status of voided shipments
-        if ($this->status === ShipmentStatus::Void) {
+        // A cancelled order stays cancelled whatever its packages say.
+        if ($this->status === ShipmentStatus::Cancelled) {
             return;
         }
 
         $hasShippedPackage = $this->packages()->where('status', PackageStatus::Shipped)->exists();
 
         if (! $hasShippedPackage) {
-            $this->update(['status' => ShipmentStatus::Open]);
+            $this->reopen();
 
             return;
         }
@@ -305,15 +322,57 @@ class Shipment extends Model
         if ($allItemsShipped) {
             $this->markShipped();
         } else {
-            $this->update(['status' => ShipmentStatus::Open]);
+            $this->reopen();
         }
     }
 
     private function markShipped(): void
     {
-        $this->update(['status' => ShipmentStatus::Shipped]);
+        $this->update(['status' => ShipmentStatus::Shipped, 'status_origin' => ShipmentStatusOrigin::PolyBag]);
 
         app(PickBatchService::class)->removeFromActiveBatches($this);
+    }
+
+    /**
+     * Back to open once its packages no longer ship it. An open Shipment has no
+     * origin; only a move off `open` records one.
+     */
+    private function reopen(): void
+    {
+        $this->update(['status' => ShipmentStatus::Open, 'status_origin' => null]);
+    }
+
+    /**
+     * Whether the originating connection, not PolyBag or a manager, set the
+     * current status.
+     */
+    public function wasClosedBySource(): bool
+    {
+        return $this->status !== ShipmentStatus::Open
+            && $this->status_origin === ShipmentStatusOrigin::Source;
+    }
+
+    /**
+     * Ask a person to look at this Shipment. A newer reason replaces an older
+     * one: the flag says what is wrong now.
+     */
+    public function flagForReview(ShipmentReviewReason $reason): void
+    {
+        $this->forceFill(['review_reason' => $reason, 'review_flagged_at' => now()])->save();
+    }
+
+    public function clearReviewFlag(): void
+    {
+        $this->forceFill(['review_reason' => null, 'review_flagged_at' => null])->save();
+    }
+
+    /**
+     * Shipments flagged for a person to look at: the *Flagged for review*
+     * filter and the Exceptions widget.
+     */
+    public function scopeFlaggedForReview(Builder $query): Builder
+    {
+        return $query->whereNotNull('review_reason');
     }
 
     /**

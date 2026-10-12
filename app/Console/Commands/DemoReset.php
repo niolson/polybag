@@ -6,6 +6,7 @@ use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
 use App\Enums\ShipmentStatus;
+use App\Enums\ShipmentStatusOrigin;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\Channel;
@@ -24,6 +25,7 @@ use App\Services\ShipmentImport\ImportReferenceResolver;
 use App\Services\ShipmentImport\PackageExportService;
 use App\Services\ShipmentImport\ShipmentImportService;
 use App\Services\ShipmentImport\Sources\DatabaseSource;
+use Carbon\CarbonInterface;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -394,15 +396,19 @@ class DemoReset extends Command
             ->chunkById(200, function ($shipments) use (&$manifests, &$shipped, $locationId, $boxSizeIds, $userIds, $timezone): void {
                 DB::transaction(function () use ($shipments, &$manifests, &$shipped, $locationId, $boxSizeIds, $userIds, $timezone): void {
                     foreach ($shipments as $shipment) {
-                        $this->fabricatePackage($shipment, $manifests, $locationId, $boxSizeIds, $userIds, $timezone);
+                        $shippedAt = $this->fabricatePackage($shipment, $manifests, $locationId, $boxSizeIds, $userIds, $timezone);
                         $shipped++;
-                    }
 
-                    DB::table('shipments')->whereIn('id', $shipments->pluck('id'))->update([
-                        'status' => ShipmentStatus::Shipped->value,
-                        'checked' => true,
-                        'deliverability' => 'yes',
-                    ]);
+                        // Shipped by its fabricated Label, so PolyBag set the
+                        // status, when that Label shipped (`order-reconciliation/02`).
+                        DB::table('shipments')->where('id', $shipment->id)->update([
+                            'status' => ShipmentStatus::Shipped->value,
+                            'status_origin' => ShipmentStatusOrigin::PolyBag->value,
+                            'status_changed_at' => $shippedAt->format('Y-m-d H:i:s'),
+                            'checked' => true,
+                            'deliverability' => 'yes',
+                        ]);
+                    }
                 });
             });
 
@@ -419,7 +425,7 @@ class DemoReset extends Command
      * @param  array<int, int>  $boxSizeIds
      * @param  array<int, int>  $userIds
      */
-    private function fabricatePackage(Shipment $shipment, array &$manifests, ?int $locationId, array $boxSizeIds, array $userIds, string $timezone): void
+    private function fabricatePackage(Shipment $shipment, array &$manifests, ?int $locationId, array $boxSizeIds, array $userIds, string $timezone): CarbonInterface
     {
         $carrier = $this->pickCarrier();
         $service = $this->pickService($carrier);
@@ -491,6 +497,8 @@ class DemoReset extends Command
         if ($packageItemRows !== []) {
             DB::table('package_items')->insert($packageItemRows);
         }
+
+        return $shippedAt;
     }
 
     /**

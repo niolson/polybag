@@ -10,6 +10,7 @@ use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
+use App\Enums\ShipmentStatus;
 use App\Exceptions\PackageDraftIncompleteException;
 use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Concerns\PrintsLabels;
@@ -175,6 +176,14 @@ class Ship extends Page
 
         // The purchase refuses these too. Turning them away here sends the
         // packer to finish the package, instead of quoting rates for it.
+        if ($this->package->shipment->status === ShipmentStatus::Cancelled) {
+            $this->notifyError('Order Cancelled', 'This order is cancelled, so no label can be bought for it.');
+            $this->package = null;
+            $this->redirect($this->returnUrl);
+
+            return;
+        }
+
         if ($this->package->shipment->isBlockedByPicking()) {
             $this->notifyError('Not Picked', 'This shipment must be picked before it can be shipped.');
             $this->package = null;

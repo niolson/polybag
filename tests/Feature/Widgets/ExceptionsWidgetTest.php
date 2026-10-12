@@ -106,9 +106,9 @@ it('is cleared by the dashboard cache invalidation, under the key it caches by',
 
     Livewire::actingAs(User::factory()->manager()->create())->test(ExceptionsWidget::class);
 
-    expect(Cache::has('widget:exceptions:v3'))->toBeTrue();
+    expect(Cache::has('widget:exceptions:v4'))->toBeTrue();
 
     InvalidateDashboardCache::invalidateAll();
 
-    expect(Cache::has('widget:exceptions:v3'))->toBeFalse();
+    expect(Cache::has('widget:exceptions:v4'))->toBeFalse();
 });

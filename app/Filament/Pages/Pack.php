@@ -144,6 +144,21 @@ class Pack extends Page
                 return;
             }
 
+            // Nothing can be bought for a cancelled order, so packing it is
+            // wasted work. Reopening it is a manager's call, on the Shipment.
+            if ($this->shipment->status === ShipmentStatus::Cancelled) {
+                $this->notifyWarning(
+                    'Order Cancelled',
+                    "Shipment {$this->shipment->shipment_reference} is cancelled"
+                    .($this->shipment->wasClosedBySource() ? ' at its source' : '')
+                    .'. A manager can reopen it from the Shipment page.',
+                );
+                $this->shipment = null;
+                $this->redirect('/pack');
+
+                return;
+            }
+
             if ($this->shipment->isBlockedByPicking()) {
                 $this->notifyWarning(
                     'Picking Required',

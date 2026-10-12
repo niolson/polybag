@@ -19,7 +19,7 @@ class InvalidateDashboardCache implements ShouldQueue
         'widget:cost_trend:v2',
         'widget:carrier_breakdown:week',
         'widget:carrier_breakdown:month',
-        'widget:exceptions:v3',
+        'widget:exceptions:v4',
     ];
 
     public function handle(object $event): void

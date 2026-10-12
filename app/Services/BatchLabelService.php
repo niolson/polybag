@@ -58,6 +58,10 @@ class BatchLabelService
             return 'Already shipped';
         }
 
+        if ($shipment->status === ShipmentStatus::Cancelled) {
+            return 'Order cancelled';
+        }
+
         if ($shipment->isAmazonFulfilled()) {
             return 'Fulfilled by Amazon (FBA)';
         }

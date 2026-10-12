@@ -21,10 +21,12 @@ twice.
   `includeClosed: false` on each run. Amazon reads `UNSHIPPED`/`PARTIALLY_SHIPPED` orders
   updated within the connection's `lookback_days`. An order fulfilled elsewhere or
   cancelled just drops out of the feed, and nothing changes locally.
-- **A Database source can report a status, but it is dropped once there is a Package.**
-  `ShipmentBatchWriter::shouldUpdate()` refuses to move an open Shipment off `open` when
-  it has any Package, a Package Draft included. That protects packed work, but it also
-  drops a cancellation without telling anyone.
+- **A Database source cannot report a status at all.** Its field mapping has no status
+  field; only the historical Amazon import sends one (`_import_status`). And even that is
+  dropped once there is a Package: `ShipmentBatchWriter::shouldUpdate()` refuses to move
+  an open Shipment off `open` when it has any Package, a Package Draft included.
+  (Corrected 2026-10-12 while building `02`; the first draft said a Database source could
+  report a status.)
 - **`ShopifyFulfillmentSynchronizer` only covers Labels bought through Shopify Shipping.**
   Every fifteen minutes it asks Shopify whether those Labels were voided in the Shopify
   admin and where the parcels are. It never looks at the order, and never looks at
@@ -76,18 +78,22 @@ no extra code.
   `ShopifyFulfillmentOrderRepointer` already handles. Each candidate is confirmed with
   one request for its order, then marked shipped (with the fulfillment's tracking) or
   cancelled.
-- **Amazon.** Within the same `lookback_days` window, also ask for `SHIPPED` and
-  `CANCELED` orders. A `SHIPPED` order closes a matching open Shipment; a `CANCELED` one
-  is matched against open *and* recently shipped Shipments (below). This adds requests
-  per page of orders, not per order.
+- **Amazon.** A second `searchOrders` asks for `SHIPPED` and `CANCELLED` orders updated
+  since the connection's last successful reconciliation (a watermark on the connection),
+  not over the whole `lookback_days` window. A month of shipped orders would be many
+  pages, and `searchOrders` refills one request every three minutes (burst 20, shared
+  with the import itself). Since the watermark, it is normally one page. A `SHIPPED`
+  order closes a matching open Shipment; a `CANCELLED` one is matched against open *and*
+  recently shipped Shipments (below). The first run, with no watermark, starts from
+  `lookback_days`.
 - **Cancellation after PolyBag shipped.** An order can be cancelled after its Label was
   bought, and decision 4 has to catch that. So cancellation detection also covers
   Shipments shipped here, for as long as their Label could still be voided or the parcel
   stopped: until delivery, bounded by the same day window the Shopify synchronizer uses.
   For Shopify that is a separate check on those orders' cancellation, because a shipped
   order is not in the open fulfillment-order set to go missing from it.
-- **Database.** When the field mapping supplies a status, apply it instead of dropping
-  it (decision 4 covers Shipments that have a Package).
+- **Database.** Add a status field to the field mapping, and apply it instead of
+  dropping it (decision 4 covers Shipments that have a Package).
 
 ### 3. PolyBag recognizes its own fulfillments
 
@@ -108,13 +114,49 @@ keeps its status and is flagged (decision 4).
   parcel may need stopping. This is the case that costs money, and only a person can
   settle it.
 
-### 5. Check the order at the source just before buying a Label
+### 5. Check the order at the source before buying a Label, without waiting on it
 
-Before buying a Label for a Shipment from a Shopify or Amazon connection, re-read the
-order and refuse if it has been fulfilled or cancelled. This applies on the Ship page,
-in batch ship and in auto-ship. It is what actually stops a double shipment;
-reconciliation only shortens how long a stale Shipment sits there. It costs one request
-per Label.
+Before a Label is bought for a Shipment from a Shopify or Amazon connection, PolyBag
+must know the order is still open at the source, and refuses if it has been fulfilled or
+cancelled. This applies on the Ship page, in batch ship and in auto-ship. It is what
+actually stops a double shipment; reconciliation only shortens how long a stale Shipment
+sits there.
+
+**The check must not add a wait to the purchase.** So it runs earlier, and the purchase
+reuses the answer:
+
+- **Ship page: alongside rate shopping.** The order lookup is sent with the rate quotes,
+  in the same concurrent fan-out. One order lookup returns well before the slowest
+  carrier quote, so it adds no time to the page. The result is stored on the Shipment
+  (`source_checked_at` and what was found). At purchase, a check younger than ten
+  minutes is reused, so a normal purchase sends no extra request. An older one, from a
+  page left open, is repeated first.
+- **Pack page: an early warning.** Opening Pack starts the same lookup without holding up
+  the page (deferred, not on the request that renders it). If the order is closed, a
+  banner says so before anything is packed. It warns and does not block; the Ship page
+  blocks.
+- **Batch ship and auto-ship: one lookup per connection, not per Label.** Amazon's
+  `getOrder` is limited to 0.5 requests a second with a burst of 30, against 5 a second
+  for rates and purchases, so a per-Label lookup would be the slowest step of any batch
+  over 30 Amazon orders: a 100-order batch would wait about 140 seconds for it. Instead,
+  before the batch:
+  - **Amazon:** one `searchOrders` for `SHIPPED` and `CANCELLED` orders updated since the
+    connection's last reconciliation (the watermark slice 07 keeps), normally one page.
+    `searchOrders` has its own tight limit (burst 20, refilling one every three minutes,
+    shared with the import), so if it is throttled the batch falls back to `getOrder`
+    for as many orders as the bucket allows, and treats the rest as unreachable.
+  - **Shopify:** one `nodes(ids:)` query per 250 orders.
+
+**If the source cannot be reached, the Label is still bought, with a warning.** Shipping
+must keep working while, say, AWS us-east-1 is down. Attended, the Ship page shows the
+warning and the purchase goes ahead. Unattended, the Package is bought and the batch
+result says which orders were not checked. Either way the Label records that its order
+was not verified, so it can be found afterwards.
+
+**Partly fulfilled elsewhere is flagged, not adjusted.** Shopify splits the fulfillment
+order; Amazon reports `PARTIALLY_SHIPPED`. PolyBag does not shrink the Shipment's items.
+The Shipment is flagged for review, the Ship page says which items the source reports
+shipped, and unattended purchases skip it.
 
 **Replacements are the one exception, and only when attended.** A lost or damaged parcel
 is replaced by sending an already-shipped order again, which `ShipmentPolicy::reship`
@@ -145,35 +187,53 @@ EventBridge, not plain HTTP, so Amazon stays on polling.
 Shopify does not guarantee delivery, so the poll stays as a backstop. With webhooks in
 place it can run every hour or two instead of every fifteen minutes.
 
-## Slices
+### 7. A manager can change a Shipment's status, and is told when the source closed it
 
-Issue files will be cut from these once the open questions below are answered.
+A source can close an order by mistake, or an order fulfilled elsewhere can come back. A
+Manager or Admin can set any status by hand, which records `status_origin = manager`.
+When the Shipment was closed by its source, the form says so before saving ("Shopify
+reported this order cancelled on …"), and the change is audit-logged. A shipper cannot
+change status. The next reconciliation does not undo a manager's change unless the
+source reports something newer than it.
 
-1. **Show where each void came from** on the Packages list and the Shipment view. This
-   is small and also fits `release-polish`.
-2. **Rename `Void` to `Cancelled`; add `status_origin` and the external carrier and
-   tracking fields.** Show them on the Shipments list and the Shipment view.
-3. **Check the order before purchase** (decision 5), for Shopify and Amazon.
-4. **Shopify reconciliation on import** (decisions 2 and 3), including the flag on a
-   draft or shipped Package (decision 4).
-5. **Amazon reconciliation on import**, the same way.
-6. **Database sources:** apply a reported status, flagging any Package, instead of
-   dropping it.
-7. **Shopify webhooks for hosted instances**, then slow the backstop poll.
+### 8. Amazon Buy Shipping Labels can be voided in Seller Central
 
-## Open questions
+Confirmed 2026-10-12. So Amazon needs the void detection the Shopify synchronizer has:
+a Label voided there must become `VoidedUpstream` here and the Package unshipped. How
+the Shipping v2 API reports it (tracking, a shipment lookup, or not at all) is not yet
+known, so the slice starts with a probe.
 
-1. **What if the source cannot be reached at purchase time?** Attended: warn and let the
-   operator go ahead, or refuse? Unattended: skip the Package and report it, most likely.
-2. **Partial fulfillment elsewhere.** Shopify splits the fulfillment order; Amazon reports
-   `PARTIALLY_SHIPPED`. Shrink the Shipment's items to what is left, or flag it for
-   someone to look at? Flagging is safer for a first version.
-3. **Amazon rate limits at purchase.** The check is one order lookup per Label. Batch
-   ship needs to know whether that limit or the label purchase limit is the slower one.
-4. **Can a Buy Shipping Label be cancelled from Seller Central?** If it can, Amazon needs
-   the same void detection the Shopify synchronizer has. Not yet checked.
-5. **Should a manager be able to reopen a Shipment the source closed?** For a source that
-   closed it by mistake, or an order fulfilled elsewhere that came back.
+## Issues
+
+| # | Issue | Status | Needs |
+|---|---|---|---|
+| [01](issues/01-show-where-each-void-came-from.md) | Show where each void came from | `ready-for-agent` | — |
+| [02](issues/02-cancelled-status-origin-and-review-flag.md) | Rename `Void` to `Cancelled`; `status_origin`, external tracking, the review flag, and manager status changes | `done` | — |
+| [03](issues/03-check-the-order-on-the-ship-page.md) | Check the order on the Ship page, alongside rate shopping | `ready-for-agent` | 02 |
+| [04](issues/04-check-orders-before-batch-and-auto-ship.md) | Check orders before batch ship and auto-ship, one lookup per connection | `ready-for-agent` | 03, 07 |
+| [05](issues/05-warn-on-the-pack-page.md) | Warn on the Pack page when the order is closed | `ready-for-agent` | 03 |
+| [06](issues/06-shopify-reconciliation-on-import.md) | Shopify reconciliation on import | `ready-for-agent` | 02, 03 |
+| [07](issues/07-amazon-reconciliation-on-import.md) | Amazon reconciliation on import | `ready-for-agent` | 02, 03 |
+| [08](issues/08-database-sources-apply-a-reported-status.md) | Database sources report and apply a status | `ready-for-agent` | 02 |
+| [09](issues/09-detect-buy-shipping-labels-voided-in-seller-central.md) | Detect Buy Shipping Labels voided in Seller Central | `ready-for-human` | — |
+| [10](issues/10-shopify-webhooks.md) | Shopify webhooks for hosted instances, then slow the backstop poll | `needs-triage` | 06 |
+
+`01`, `02`, `08` and `09` can start in parallel. `03` is the one that stops double
+shipments, so it goes first after `02`.
+
+## Answered questions
+
+Answered 2026-10-12; each now lives in the decision named.
+
+1. **Source unreachable at purchase:** ship, with a warning, attended and unattended
+   (decision 5).
+2. **Partial fulfillment elsewhere:** flag it (decision 5).
+3. **Amazon rate limits at purchase:** `getOrder` is the bottleneck, 0.5/s with a burst
+   of 30, against 5/s for rates and purchases. Hence one lookup per connection in batch
+   ship, and the Ship page's check running alongside rates (decision 5).
+4. **Buy Shipping Labels can be voided in Seller Central** (decision 8, issue `09`).
+5. **A manager can change a source-closed Shipment's status**, with a message saying the
+   source closed it (decision 7).
 
 ## Related
 
@@ -185,5 +245,7 @@ Issue files will be cut from these once the open questions below are answered.
   customer needs one.
 - `shelved-drafts/01` keeps the rest of its scope: flagging a draft whose order changed,
   an explicit hold, and stale weight.
+- `pii-retention/03` (import marketplace cancellations) is covered by `02`, `06` and `07`
+  here, and can close as superseded once they land.
 
 ## Comments
