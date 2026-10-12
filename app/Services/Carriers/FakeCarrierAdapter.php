@@ -91,6 +91,32 @@ class FakeCarrierAdapter implements CreatesCarrierManifest, DirectCarrierAdapter
         ],
     ];
 
+    /**
+     * Quoted instead of {@see self::RATES} when the parcel leaves its origin
+     * country, so an international shipping method has something to show and
+     * a domestic one never offers a lane it cannot ship. The same rule about
+     * real catalog codes applies.
+     *
+     * @var array<string, array<int, array{code: string, name: string, price: float, transit: string, days: int}>>
+     */
+    private const INTERNATIONAL_RATES = [
+        Carrier::USPS => [
+            ['code' => 'FIRST-CLASS_PACKAGE_INTERNATIONAL_SERVICE', 'name' => 'First-Class Package International Service', 'price' => 18.60, 'transit' => '7-21 Business Days', 'days' => 15],
+            ['code' => 'PRIORITY_MAIL_INTERNATIONAL', 'name' => 'Priority Mail International', 'price' => 46.20, 'transit' => '6-10 Business Days', 'days' => 8],
+            ['code' => 'PRIORITY_MAIL_EXPRESS_INTERNATIONAL', 'name' => 'Priority Mail Express International', 'price' => 68.90, 'transit' => '3-5 Business Days', 'days' => 4],
+        ],
+        Carrier::FEDEX => [
+            ['code' => 'FEDEX_INTERNATIONAL_CONNECT_PLUS', 'name' => 'FedEx International Connect Plus', 'price' => 39.80, 'transit' => '2-5 Business Days', 'days' => 5],
+            ['code' => 'INTERNATIONAL_ECONOMY', 'name' => 'FedEx International Economy', 'price' => 58.40, 'transit' => '4-6 Business Days', 'days' => 5],
+            ['code' => 'FEDEX_INTERNATIONAL_PRIORITY', 'name' => 'FedEx International Priority', 'price' => 84.10, 'transit' => '1-3 Business Days', 'days' => 3],
+        ],
+        Carrier::UPS => [
+            ['code' => '11', 'name' => 'UPS Standard', 'price' => 41.50, 'transit' => '3-7 Business Days', 'days' => 6],
+            ['code' => '08', 'name' => 'UPS Worldwide Expedited', 'price' => 71.25, 'transit' => '2-5 Business Days', 'days' => 4],
+            ['code' => '65', 'name' => 'UPS Worldwide Saver', 'price' => 89.60, 'transit' => '1-3 Business Days', 'days' => 3],
+        ],
+    ];
+
     /** @var array<string, string> */
     private const TRACKING_PREFIXES = [
         Carrier::USPS => '9400',
@@ -135,7 +161,9 @@ class FakeCarrierAdapter implements CreatesCarrierManifest, DirectCarrierAdapter
 
     public function getRates(RateRequest $request, array $serviceCodes): Collection
     {
-        $rates = self::RATES[$this->carrierName] ?? [];
+        $rates = $request->destinationCountry === $request->originCountry
+            ? self::RATES[$this->carrierName] ?? []
+            : self::INTERNATIONAL_RATES[$this->carrierName] ?? [];
 
         // Taken the way a real adapter takes it, so the offer the rate service
         // issues records the account — and the purchase's account check
