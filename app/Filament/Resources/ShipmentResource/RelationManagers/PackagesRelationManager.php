@@ -12,6 +12,7 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
 class PackagesRelationManager extends RelationManager
@@ -44,6 +45,7 @@ class PackagesRelationManager extends RelationManager
     {
         return $table
             ->recordTitleAttribute('tracking_number')
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['activeLabel', 'latestVoidedLabel']))
             ->columns([
                 Tables\Columns\TextColumn::make('tracking_number'),
                 Tables\Columns\TextColumn::make('tracking_status')
@@ -55,6 +57,7 @@ class PackagesRelationManager extends RelationManager
                     ->money('USD'),
                 Tables\Columns\TextColumn::make('status')
                     ->badge(),
+                PackageResource::makeLastVoidColumn(),
                 Tables\Columns\IconColumn::make('exported')
                     ->boolean(),
             ])
