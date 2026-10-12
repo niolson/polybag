@@ -21,9 +21,21 @@ use App\Services\Carriers\Concerns\ConsultsCarrierPolicyForOffers;
 use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
 use App\Services\Carriers\Concerns\IdentifiesCatalogServices;
 use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
+use App\Services\Carriers\Samples\SampleCanvas;
+use App\Services\Carriers\Samples\SampleDocuments;
+use App\Services\Carriers\Samples\SamplePdfWriter;
+use App\Services\Carriers\Samples\SampleZplWriter;
 use Illuminate\Support\Collection;
 use Saloon\Http\Response;
 
+/**
+ * A carrier that quotes, sells and voids without calling anyone,
+ * for `FAKE_CARRIERS=true` demos and for tests that register it themselves.
+ *
+ * What it prints is built from the order at purchase time and is plainly a
+ * sample: see {@see SampleDocuments} for what keeps it from passing as
+ * postage.
+ */
 class FakeCarrierAdapter implements DirectCarrierAdapter, UsesCarrierAccount
 {
     use ConsultsCarrierPolicyForOffers;
@@ -83,9 +95,24 @@ class FakeCarrierAdapter implements DirectCarrierAdapter, UsesCarrierAccount
         Carrier::UPS => '1Z99',
     ];
 
+    /**
+     * How each carrier's real adapter delivers the customs declaration for a
+     * lane that carries one, mirrored so a demo shows the same paperwork.
+     *
+     * @var array<string, CustomsDocumentDelivery>
+     */
+    private const CUSTOMS_DOCUMENT_DELIVERY = [
+        Carrier::USPS => CustomsDocumentDelivery::FusedIntoLabel,
+        Carrier::UPS => CustomsDocumentDelivery::Separate,
+        Carrier::FEDEX => CustomsDocumentDelivery::NotRequested,
+    ];
+
+    /**
+     * @param  CustomsDocumentDelivery|null  $customsDocumentDelivery  A fixed answer for a test to prove the report printer gate with, for every lane. Null mirrors the real carrier.
+     */
     public function __construct(
         private readonly string $carrierName,
-        public CustomsDocumentDelivery $customsDocumentDelivery = CustomsDocumentDelivery::None,
+        public ?CustomsDocumentDelivery $customsDocumentDelivery = null,
     ) {}
 
     public function getCarrierName(): string
@@ -133,24 +160,58 @@ class FakeCarrierAdapter implements DirectCarrierAdapter, UsesCarrierAccount
         return collect();
     }
 
+    /**
+     * Sell a sample label for the order: ZPL when the workstation asked for
+     * ZPL, at its print density, and a PDF otherwise.
+     *
+     * International paperwork comes back the way this carrier's real adapter
+     * returns it — inside the label for USPS, as a separate Letter invoice for
+     * UPS, and not at all for FedEx, which never requests one.
+     */
     public function createShipment(ShipRequest $request): ShipResponse
     {
         $prefix = self::TRACKING_PREFIXES[$this->carrierName] ?? 'FAKE';
         $tracking = $prefix.str_pad((string) random_int(0, 9999999999), 10, '0', STR_PAD_LEFT).random_int(100, 999);
+        $service = $request->selectedRate->serviceName;
 
-        // Minimal valid 1x1 white pixel PDF
-        $labelData = base64_encode('%PDF-1.0 1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj 3 0 obj<</Type/Page/MediaBox[0 0 288 432]/Parent 2 0 R>>endobj xref 0 4 trailer<</Size 4/Root 1 0 R>> startxref 0 %%EOF');
+        $documents = new SampleDocuments;
+        $pages = [$documents->shippingLabel($request, $this->carrierName, $service, $tracking)];
+        $customsForm = null;
+
+        $delivery = $request->customsItems === []
+            ? CustomsDocumentDelivery::None
+            : $this->customsDocumentDelivery($request->fromAddress, $request->toAddress, $request->selectedRate);
+
+        if ($delivery === CustomsDocumentDelivery::FusedIntoLabel) {
+            $pages[] = $documents->customsDeclaration($request, $this->carrierName, $tracking);
+        } elseif ($delivery === CustomsDocumentDelivery::Separate) {
+            $customsForm = $this->pdf([$documents->commercialInvoice($request, $this->carrierName, $tracking)]);
+        }
+
+        $isZpl = $request->labelFormat === 'zpl';
+        $dpi = in_array($request->labelDpi, SampleZplWriter::SUPPORTED_DPI, true) ? $request->labelDpi : 203;
 
         return ShipResponse::success(
             trackingNumber: $tracking,
             cost: $request->selectedRate->price,
             carrier: $this->carrierName,
-            service: $request->selectedRate->serviceName,
-            labelData: $labelData,
-            labelFormat: $request->labelFormat,
+            service: $service,
+            labelData: $isZpl ? base64_encode((new SampleZplWriter)->render($pages, $dpi)) : $this->pdf($pages),
+            labelFormat: $isZpl ? 'zpl' : 'pdf',
+            labelDpi: $isZpl ? $dpi : null,
             shipDate: $request->shipDate,
             appliedServices: $request->specialServiceCodes,
+            customsFormData: $customsForm,
         );
+    }
+
+    /**
+     * @param  list<SampleCanvas>  $pages
+     * @return string Base64 of the PDF
+     */
+    private function pdf(array $pages): string
+    {
+        return base64_encode((new SamplePdfWriter)->render($pages));
     }
 
     public function cancelShipment(string $trackingNumber, Package $package): CancelResponse
@@ -184,11 +245,18 @@ class FakeCarrierAdapter implements DirectCarrierAdapter, UsesCarrierAccount
     }
 
     /**
-     * Whatever a test says, so the report printer gate can be proved in both
-     * directions — a fused carrier not blocked, a separate one blocked.
+     * What the real carrier would answer for this lane, unless a test fixed
+     * the answer — so the report printer gate can be proved in both
+     * directions, a fused carrier not blocked and a separate one blocked.
      */
     public function customsDocumentDelivery(AddressData $from, AddressData $to, ?RateResponse $rate = null): CustomsDocumentDelivery
     {
-        return $this->customsDocumentDelivery;
+        if ($this->customsDocumentDelivery !== null) {
+            return $this->customsDocumentDelivery;
+        }
+
+        return $from->sharesCustomsZoneWith($to)
+            ? CustomsDocumentDelivery::None
+            : self::CUSTOMS_DOCUMENT_DELIVERY[$this->carrierName] ?? CustomsDocumentDelivery::None;
     }
 }
