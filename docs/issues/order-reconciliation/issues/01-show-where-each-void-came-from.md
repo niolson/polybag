@@ -1,6 +1,6 @@
 # Show where each void came from
 
-Status: ready-for-agent
+Status: done — 2026-10-12
 Category: enhancement
 Repo: `polybag`
 
@@ -27,6 +27,30 @@ outside PolyBag.
 
 ## Acceptance criteria
 
-- [ ] Packages list column and filter for the latest voided Label's `void_reason`
-- [ ] Shipment view shows it per Package
-- [ ] Feature tests for each `VoidReason` value on both pages
+- [x] Packages list column and filter for the latest voided Label's `void_reason`
+- [x] Shipment view shows it per Package
+- [x] Feature tests for each `VoidReason` value on both pages
+
+## Comments
+
+**2026-10-12 — built.**
+
+- A **Last void** column (toggleable) and filter on the Packages list, and the same column
+  on the Shipment view's Packages table (`PackagesRelationManager`). The cell is
+  `VoidReason::getLabel()`, so it reads as View Package does, with the void's date and
+  time beneath it.
+- `Package::latestVoidedLabel()` is a one-of-many relation (latest `voided_at`, then
+  `id`), eager-loaded with `activeLabel` on both tables, so neither adds a query per row.
+  `Package::lastVoidReason()` is the one rule the column follows, and the filter applies
+  the same rule in SQL (`whereDoesntHave('activeLabel')` plus `whereHas` on the
+  one-of-many relation).
+- **A Package bought again after a void shows nothing.** The issue asks about a Package
+  "whose most recent Label was voided", and once it is bought again its most recent
+  Label is the active one. Showing the old void beside a live Label would read as if the
+  live Label had been voided. The filter excludes such Packages for the same reason. The
+  void is still on View Package's Labels history. So the column only says something while
+  the Package is unshipped after a void, which is when someone needs to act on a Label
+  voided outside PolyBag.
+- Tests: `tests/Feature/Filament/Resources/PackageLastVoidTest.php`. They cover each
+  `VoidReason` on both pages and in the filter, a Package never voided, one bought again,
+  and the latest of several voids winning even when the older void was written later.

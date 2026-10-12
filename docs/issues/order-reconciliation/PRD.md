@@ -207,7 +207,7 @@ known, so the slice starts with a probe.
 
 | # | Issue | Status | Needs |
 |---|---|---|---|
-| [01](issues/01-show-where-each-void-came-from.md) | Show where each void came from | `ready-for-agent` | — |
+| [01](issues/01-show-where-each-void-came-from.md) | Show where each void came from | `done` | — |
 | [02](issues/02-cancelled-status-origin-and-review-flag.md) | Rename `Void` to `Cancelled`; `status_origin`, external tracking, the review flag, and manager status changes | `done` | — |
 | [03](issues/03-check-the-order-on-the-ship-page.md) | Check the order on the Ship page, alongside rate shopping | `ready-for-agent` | 02 |
 | [04](issues/04-check-orders-before-batch-and-auto-ship.md) | Check orders before batch ship and auto-ship, one lookup per connection | `ready-for-agent` | 03, 07 |

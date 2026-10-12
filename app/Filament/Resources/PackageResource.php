@@ -7,6 +7,7 @@ use App\Enums\PackageDraftState;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\TrackingStatus;
+use App\Enums\VoidReason;
 use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\PackageResource\Pages;
 use App\Filament\Resources\PackageResource\RelationManagers\PackageItemsRelationManager;
@@ -304,6 +305,7 @@ class PackageResource extends Resource
                 'shipment',
                 'postageDataSource',
                 'activeLabel.carrierService',
+                'latestVoidedLabel',
                 app(SettingsService::class)->get('multi_client_enabled', false) ? 'shipment.client' : null,
                 app(SettingsService::class)->get('multi_location_enabled', false) ? 'location' : null,
             ])))
@@ -391,6 +393,7 @@ class PackageResource extends Resource
                     ->badge()
                     ->state(fn (Package $record): PackageStatus|PackageDraftState => $record->draftState() ?? $record->status)
                     ->tooltip(fn (Package $record): ?string => $record->status === PackageStatus::Unshipped ? 'Unshipped' : null),
+                static::makeLastVoidColumn(),
                 Tables\Columns\TextColumn::make('tracking_status')
                     ->badge()
                     ->placeholder('—')
@@ -443,6 +446,20 @@ class PackageResource extends Resource
                     ->query(fn (Builder $query, array $data): Builder => $query->when(
                         PackageDraftState::tryFrom((string) ($data['value'] ?? '')),
                         fn (Builder $query, PackageDraftState $state): Builder => $query->whereDraftState($state),
+                    )),
+                // The same rule as the column: only a package still unshipped
+                // after a void has a last void to filter on.
+                Tables\Filters\SelectFilter::make('last_void_reason')
+                    ->label('Last void')
+                    ->options(VoidReason::class)
+                    ->query(fn (Builder $query, array $data): Builder => $query->when(
+                        VoidReason::tryFrom((string) ($data['value'] ?? '')),
+                        fn (Builder $query, VoidReason $reason): Builder => $query
+                            ->whereDoesntHave('activeLabel')
+                            ->whereHas(
+                                'latestVoidedLabel',
+                                fn (Builder $label): Builder => $label->where('void_reason', $reason),
+                            ),
                     )),
                 Tables\Filters\SelectFilter::make('tracking_status')
                     ->options(TrackingStatus::class)
@@ -646,6 +663,26 @@ class PackageResource extends Resource
                         }),
                 ]),
             ]);
+    }
+
+    /**
+     * Who voided the package's label, for a package unshipped after a void.
+     *
+     * A package bought again since shows nothing: its most recent label is the
+     * active one, and the void it replaced is on View Package with the rest of
+     * the history. Reads `activeLabel` and `latestVoidedLabel`, which the
+     * table's query should eager-load.
+     */
+    public static function makeLastVoidColumn(): Tables\Columns\TextColumn
+    {
+        return Tables\Columns\TextColumn::make('last_void_reason')
+            ->label('Last void')
+            ->state(fn (Package $record): ?VoidReason => $record->lastVoidReason())
+            ->description(fn (Package $record): ?string => $record->lastVoidReason() === null
+                ? null
+                : $record->latestVoidedLabel->voided_at->copy()->tz(Location::timezone())->format('M j, Y g:i A'))
+            ->placeholder('—')
+            ->toggleable();
     }
 
     public static function makeTrackAction(): Actions\Action
