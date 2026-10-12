@@ -1,6 +1,6 @@
 # Import duties terms and recipient tax IDs from Shopify orders
 
-Status: ready-for-human
+Status: done — 2026-10-12
 Category: enhancement
 Repo: `polybag`
 
@@ -122,3 +122,6 @@ Amazon is out of scope here: Amazon orders bought on Amazon postage are `09`'s c
   required by the install guide, covers the new fields. Left for a human: sync once and
   check 7198-7200 show `ddp` and the BR and KR IDs; a CNPJ order and a duties-included
   order are still untested against Shopify.
+- **2026-10-12, verified.** After a sync on the dev store, shipment 7198 (IT) shows `ddp`
+  with no tax ID, 7199 (BR) shows `ddp` and a CPF (11 digits), and 7200 (KR) shows `ddp` and a
+  PCCC. Untested against Shopify: a CNPJ order and an order with duties included in the price.
