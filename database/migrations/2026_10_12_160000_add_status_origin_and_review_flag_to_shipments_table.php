@@ -31,8 +31,6 @@ return new class extends Migration
         // Only the Shipment form ever set `void`.
         DB::table('shipments')->where('status', 'cancelled')->update(['status_origin' => 'manager']);
 
-        // A shipped Shipment with no shipped Package came from a historical
-        // Amazon import, which reports orders already shipped elsewhere.
         DB::table('shipments')
             ->where('status', 'shipped')
             ->whereExists(fn ($query) => $query->select(DB::raw(1))
@@ -41,10 +39,19 @@ return new class extends Migration
                 ->where('packages.status', 'shipped'))
             ->update(['status_origin' => 'polybag']);
 
+        // A shipped Shipment with no shipped Package came from a historical
+        // Amazon import, which reports orders already shipped elsewhere...
         DB::table('shipments')
             ->where('status', 'shipped')
             ->whereNull('status_origin')
+            ->whereNotNull('data_source_id')
             ->update(['status_origin' => 'source']);
+
+        // ...or, with no connection behind it, was marked shipped on the form.
+        DB::table('shipments')
+            ->where('status', 'shipped')
+            ->whereNull('status_origin')
+            ->update(['status_origin' => 'manager']);
     }
 
     public function down(): void

@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\ServiceEvidence;
+use App\Enums\ShipmentStatusOrigin;
 use App\Http\Integrations\Fedex\FedexConnector;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Http\Integrations\Fedex\Requests\UploadEtdDocument;
@@ -346,6 +347,7 @@ class FedexRunEtdTestCase extends Command
                 'state_or_province' => data_get($recipient, 'address.stateOrProvinceCode'),
                 'postal_code' => data_get($recipient, 'address.postalCode'),
                 'status' => 'shipped',
+                'status_origin' => ShipmentStatusOrigin::PolyBag,
                 'metadata' => [
                     'fedex_test_case_id' => 'IntegratorUS09',
                     'fedex_test_case_description' => 'Electronic Trade Documents',

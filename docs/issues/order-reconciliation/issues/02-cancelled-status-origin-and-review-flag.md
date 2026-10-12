@@ -76,8 +76,8 @@ and when ("Shopify reported this order cancelled on 12 Oct"), from the audit tra
 
 - `ShipmentStatus::Cancelled` (`cancelled`) replaces `Void`; the migration renames the
   rows and backfills `status_origin`: cancelled → `manager` (only the form ever set
-  `void`), shipped with a shipped Package → `polybag`, shipped without one → `source`
-  (the historical Amazon import).
+  `void`), shipped with a shipped Package → `polybag`, shipped without one → `source` if
+  it has a connection (the historical Amazon import), else `manager` (marked on the form).
 - New columns on `shipments`: `status_origin`, `status_changed_at` (stamped by the model
   whenever `status` changes, and by the import writer, which bypasses model events),
   `external_carrier`, `external_tracking_number` (indexed, searchable through
@@ -116,3 +116,12 @@ writer stamped `source` only on rows with no origin, so an order a manager had r
 kept `manager` when the source then closed it, and the source-closed notice never
 showed. Every closure the writer applies now records `source` and its time. Both have
 regression tests that fail without the fix.
+
+**2026-10-12 — second review.** Two more fixes. The migration backfilled every shipped
+Shipment with no shipped Package as `source`, including ones with no connection that a
+manager marked shipped, so the form claimed a source had closed them; those are now
+`manager`, with a migration test. And `demo:reset` marked its historical Shipments shipped
+with a raw update and no origin; they now record `polybag` and the fabricated Label's ship
+time (`app:fedex-run-etd-test-case` likewise records `polybag`). Not fixed here: a void
+that reopens a Shipment the source shipped clears its `source` origin
+(`Shipment::reopen()`), to be dealt with in `03`.

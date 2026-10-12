@@ -3,6 +3,7 @@
 use App\Console\Commands\DemoReset;
 use App\Enums\PackageStatus;
 use App\Enums\ShipmentStatus;
+use App\Enums\ShipmentStatusOrigin;
 use App\Models\ChannelAlias;
 use App\Models\Client;
 use App\Models\DataSource;
@@ -159,6 +160,9 @@ it('resets demo data end to end', function (): void {
             ->and($shipment->packages)->toHaveCount(1);
 
         $package = $shipment->packages->first();
+
+        expect($shipment->status_origin)->toBe(ShipmentStatusOrigin::PolyBag)
+            ->and($shipment->status_changed_at?->equalTo($package->shipped_at))->toBeTrue();
 
         expect($package->status)->toBe(PackageStatus::Shipped)
             ->and($package->tracking_number)->not->toBeNull()
