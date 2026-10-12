@@ -46,6 +46,10 @@ approval looks the same as one somebody forgot.
 
 ## Proposed direction
 
+Detecting cancellation and re-checking at purchase moved to `order-reconciliation`
+(2026-10-12), which also covers orders shipped by other software. This issue keeps the
+draft-side work: the review flag, the hold, and stale weight.
+
 - **Detect cancellation.** On each import, find open Shipments from that source whose
   order has been cancelled. That may need an explicit cancelled-orders query per
   channel, because absence from an open-orders feed does not by itself mean cancelled.
@@ -82,3 +86,7 @@ approval looks the same as one somebody forgot.
    re-weighing before an unattended purchase, rather than only showing the age?
 
 ## Comments
+
+- 2026-10-12 — Cancellation detection and the purchase-time re-check moved to
+  `order-reconciliation`, widened to orders fulfilled elsewhere. Its decision 4 answers
+  open question 2: the draft stays, flagged, and nothing can be bought for it.
