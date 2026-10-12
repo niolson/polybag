@@ -54,7 +54,45 @@ schema, not from a real checkout**.
   no localized fields. Only a checkout in a Market with duties collection on, and the
   Brazil/Korea fields enabled, produces them.
 
-To finish: in the dev store admin, turn on duties and import taxes for a market (EU or
+**First real EU order, 2026-10-12 (#1261, shipment 7193, DE).** Shopify charged VAT at
+checkout: one tax line `DE MwSt` at 0.19, 6.80 on the order. But `originalTotalDutiesSet`,
+`currentTotalDutiesSet` and `LineItem.duties` are all null, `dutiesIncluded` is false, and
+`localizedFields` is empty. Orders #1259 and #1260 (also DE, before the VAT setting) have no
+tax lines at all. So **destination VAT is not reported as duties**: it arrives in
+`taxLines`/`totalTaxSet`, and `originalTotalDutiesSet` stays null for a German order. The
+imported shipment has `duties_terms` null, as `ShopifySource` does today. This changes the
+question: the signal that the customer already paid import VAT is a destination-country tax
+line, not a duties amount. Whether to treat it as DDP (and whether this store is collecting
+VAT as IOSS or as ordinary local tax, which the order does not say) is a decision, and
+duties proper may only appear for non-EU markets or non-EU origin pricing. Not yet probed:
+a UK or CH order, which are the markets where Shopify collects duties.
+
+**Order with duties, 2026-10-12 (#1263, shipment 7198, IT).** This one carries them:
+`originalTotalDutiesSet` is 3.00 EUR presentment (3.36 USD shop), equal to
+`currentTotalDutiesSet`, and the one line item has a `Duty` of 3.36 USD with
+`countryCodeOfOrigin` VN and `harmonizedSystemCode` 3304990000. So the EU €3 customs duty is
+reported as a duty, separate from the 22% VAT (22.17, one tax line titled `TAX`, so the tax
+line's title is not a reliable signal). `dutiesIncluded` is **false** even though duties
+were charged: it describes duties-included pricing, so it must not be the test.
+**Answer to question 1: `originalTotalDutiesSet` greater than zero**, confirmed on this
+order; it is null (not zero) when none were charged. The imported shipment has
+`duties_terms` null, so the import does not read it yet. The duty lines also carry origin
+country and HS code per item, which `ShopifySource` could import for customs content.
+**Brazil and Korea, 2026-10-12 (#1264 shipment 7199, #1265 shipment 7200).** Question 2 is
+answered. Both orders carry duties in `originalTotalDutiesSet` (BR 6.18 USD; KR 37,323 KRW,
+27.82 USD) and per-line `Duty` records with origin and HS code, so the rule holds for
+non-EU destinations too. The tax IDs are in `localizedFields`:
+- **BR:** `SHIPPING_CREDENTIAL_BR`, purpose `SHIPPING`, title `CPF/CNPJ`, value
+  `007.408.869-67`: **with punctuation**, and the same key for a CPF and a CNPJ, so the
+  type has to come from the digit count (11 or 14) after stripping. `TAX_CREDENTIAL_BR`
+  was not populated here.
+- **KR:** `SHIPPING_CREDENTIAL_KR`, title `Personal Customs Code`, value `P123456789012`
+  (the `P` plus 12 digits form). This is the PCCC, which FedEx's advisory says the foreign
+  shipper need not supply; it is imported only because the buyer already gave it.
+- Neither order has a note, custom attribute or company line holding the ID.
+Still unanswered: an order where duties were included in the price, and a CNPJ order.
+
+Remaining: in the dev store admin, turn on duties and import taxes for a market (EU or
 UK), enable the Brazil tax field in checkout settings, place one order to each, then re-run
 `.scratch/international-customs-terms/shopify-duties.php` (read-only, `file <query>`).
 
