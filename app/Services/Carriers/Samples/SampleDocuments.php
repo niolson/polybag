@@ -29,10 +29,17 @@ class SampleDocuments
     private const DECLARATION_LINES = 8;
 
     /** How many customs lines fit on a Letter invoice page. */
-    private const INVOICE_LINES = 22;
+    private const INVOICE_LINES = 20;
 
     /** How many tracking numbers fit on one page of the end-of-day form. */
-    private const MANIFEST_LINES_PER_PAGE = 40;
+    private const MANIFEST_LINES_PER_PAGE = 36;
+
+    /**
+     * Half an inch, in points. An office printer cannot print the outer quarter
+     * inch or so of a Letter page, so a band drawn to the edge loses its top
+     * half; a thermal label printer has no such margin.
+     */
+    private const LETTER_MARGIN = 36;
 
     /**
      * The 4×6 shipping label: sender, service, recipient and tracking number,
@@ -140,10 +147,10 @@ class SampleDocuments
     public function commercialInvoice(ShipRequest $request, string $carrier, string $trackingNumber): SampleCanvas
     {
         $page = SampleCanvas::letter();
-        $page->banner(0, 30, 14, self::NOT_POSTAGE);
+        $page->banner(self::LETTER_MARGIN, 22, 12, self::NOT_POSTAGE, inset: self::LETTER_MARGIN);
 
-        $page->text(40, 46, 20, 'COMMERCIAL INVOICE', bold: true);
-        $page->text(40, 72, 10, sprintf(
+        $page->text(40, 70, 20, 'COMMERCIAL INVOICE', bold: true);
+        $page->text(40, 96, 10, sprintf(
             '%s  |  Carrier: %s  |  Tracking: %s  |  Date: %s',
             self::MARKER,
             $carrier,
@@ -151,23 +158,23 @@ class SampleDocuments
             ($request->shipDate ?? now())->format('m/d/Y'),
         ));
 
-        $page->box(40, 96, 260, 110);
-        $page->text(48, 104, 9, 'SHIPPER / EXPORTER', bold: true);
-        $this->address($page, $request->fromAddress, 48, 120, 10, 13, 244);
+        $page->box(40, 120, 260, 110);
+        $page->text(48, 128, 9, 'SHIPPER / EXPORTER', bold: true);
+        $this->address($page, $request->fromAddress, 48, 144, 10, 13, 244);
 
-        $page->box(312, 96, 260, 110);
-        $page->text(320, 104, 9, 'CONSIGNEE', bold: true);
-        $this->address($page, $request->toAddress, 320, 120, 10, 13, 244);
+        $page->box(312, 120, 260, 110);
+        $page->text(320, 128, 9, 'CONSIGNEE', bold: true);
+        $this->address($page, $request->toAddress, 320, 144, 10, 13, 244);
 
-        $page->fill(40, 222, 532, 20);
-        $page->text(46, 227, 9, 'DESCRIPTION', bold: true, inverse: true);
-        $page->text(290, 227, 9, 'HS CODE', bold: true, inverse: true);
-        $page->text(360, 227, 9, 'ORIGIN', bold: true, inverse: true);
-        $page->text(410, 227, 9, 'QTY', bold: true, inverse: true);
-        $page->text(450, 227, 9, 'WEIGHT', bold: true, inverse: true);
-        $page->text(510, 227, 9, 'VALUE', bold: true, inverse: true);
+        $page->fill(40, 246, 532, 20);
+        $page->text(46, 251, 9, 'DESCRIPTION', bold: true, inverse: true);
+        $page->text(290, 251, 9, 'HS CODE', bold: true, inverse: true);
+        $page->text(360, 251, 9, 'ORIGIN', bold: true, inverse: true);
+        $page->text(410, 251, 9, 'QTY', bold: true, inverse: true);
+        $page->text(450, 251, 9, 'WEIGHT', bold: true, inverse: true);
+        $page->text(510, 251, 9, 'VALUE', bold: true, inverse: true);
 
-        $y = 250;
+        $y = 274;
 
         foreach (array_slice($request->customsItems, 0, self::INVOICE_LINES) as $item) {
             $page->text(46, $y, 9, $item->description, width: 236);
@@ -193,10 +200,10 @@ class SampleDocuments
             $this->money($this->totalValue($request->customsItems)),
         ), bold: true);
 
-        $page->text(40, 680, 9, 'Produced by PolyBag demo mode with a sample carrier. It is not a customs declaration');
-        $page->text(40, 693, 9, 'and must not accompany a parcel.');
+        $page->text(40, 650, 9, 'Produced by PolyBag demo mode with a sample carrier. It is not a customs declaration');
+        $page->text(40, 663, 9, 'and must not accompany a parcel.');
 
-        $page->banner(722, 70, 40, self::MARKER.' - DEMO ONLY');
+        $page->banner(686, 70, 40, self::MARKER.' - DEMO ONLY', inset: self::LETTER_MARGIN);
 
         return $page;
     }
@@ -216,10 +223,10 @@ class SampleDocuments
 
         foreach ($chunks->whenEmpty(fn (Collection $c): Collection => collect([collect()])) as $index => $chunk) {
             $page = SampleCanvas::letter();
-            $page->banner(0, 30, 14, self::MARKER.' END-OF-DAY FORM - NOT ACCEPTED BY ANY CARRIER');
+            $page->banner(self::LETTER_MARGIN, 22, 12, self::MARKER.' END-OF-DAY FORM - NOT ACCEPTED BY ANY CARRIER', inset: self::LETTER_MARGIN);
 
-            $page->text(40, 46, 20, mb_strtoupper($carrier).' END-OF-DAY MANIFEST', bold: true);
-            $page->text(40, 72, 10, sprintf(
+            $page->text(40, 70, 20, mb_strtoupper($carrier).' END-OF-DAY MANIFEST', bold: true);
+            $page->text(40, 96, 10, sprintf(
                 'Manifest %s  |  Mailing date %s  |  %d package(s)  |  Page %d of %d',
                 $manifestNumber,
                 $mailingDate->format('m/d/Y'),
@@ -228,16 +235,16 @@ class SampleDocuments
                 $pageCount,
             ));
 
-            $page->text(40, 92, 9, 'ENTRY ADDRESS', bold: true);
-            $this->address($page, $from, 40, 106, 10, 13, 400);
+            $page->text(40, 116, 9, 'ENTRY ADDRESS', bold: true);
+            $this->address($page, $from, 40, 130, 10, 13, 400);
 
-            $page->fill(40, 180, 532, 18);
-            $page->text(46, 184, 9, '#', bold: true, inverse: true);
-            $page->text(80, 184, 9, 'TRACKING NUMBER', bold: true, inverse: true);
-            $page->text(330, 184, 9, 'SERVICE', bold: true, inverse: true);
-            $page->text(500, 184, 9, 'WEIGHT', bold: true, inverse: true);
+            $page->fill(40, 204, 532, 18);
+            $page->text(46, 208, 9, '#', bold: true, inverse: true);
+            $page->text(80, 208, 9, 'TRACKING NUMBER', bold: true, inverse: true);
+            $page->text(330, 208, 9, 'SERVICE', bold: true, inverse: true);
+            $page->text(500, 208, 9, 'WEIGHT', bold: true, inverse: true);
 
-            $y = 204;
+            $y = 228;
 
             foreach ($chunk->values() as $row => $package) {
                 $page->text(46, $y, 9, (string) ($index * self::MANIFEST_LINES_PER_PAGE + $row + 1));
@@ -247,7 +254,7 @@ class SampleDocuments
                 $y += 12.5;
             }
 
-            $page->banner(722, 70, 40, self::MARKER.' - DEMO ONLY');
+            $page->banner(686, 70, 40, self::MARKER.' - DEMO ONLY', inset: self::LETTER_MARGIN);
             $pages[] = $page;
         }
 

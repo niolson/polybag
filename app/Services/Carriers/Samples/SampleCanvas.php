@@ -89,11 +89,16 @@ class SampleCanvas
      * A black band across the page with white text centered in it. The SAMPLE
      * banners are drawn this way so they read from across a room.
      */
-    public function banner(float $y, float $height, float $size, string $text): self
+    /**
+     * A black band with centered white text, across the page less `$inset` on each side.
+     * A label runs it edge to edge; a Letter page insets it past the printer's unprintable margin.
+     */
+    public function banner(float $y, float $height, float $size, string $text, float $inset = 0): self
     {
-        $this->fill(0, $y, $this->width, $height);
+        $width = $this->width - 2 * $inset;
+        $this->fill($inset, $y, $width, $height);
 
-        return $this->text(0, $y + ($height - $size) / 2, $size, $text, bold: true, inverse: true, width: $this->width, center: true);
+        return $this->text($inset, $y + ($height - $size) / 2, $size, $text, bold: true, inverse: true, width: $width, center: true);
     }
 
     /** @return list<SampleElement> */
