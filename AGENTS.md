@@ -104,7 +104,9 @@ Server-operations tooling for our own hosted deployment lives in a separate priv
 - **CarrierAccount** — Per-carrier API credentials; supports multiple accounts per carrier with OAuth
 - **CarrierAccountScope** — Routes a `CarrierAccount` to a specific `Location` and/or `Client` combination with priority-based resolution
 - **BoxSize** — Scannable dimensions plus physical form and optional carrier-supplied
-  packaging identity; compatible packaging is enforced while rating and buying
+  packaging identity; compatible packaging is enforced while rating and buying. An
+  inactive one stays in the catalog, off the barcode sheet, Pack lookup and pickers;
+  carrier packaging is seeded inactive by the reference-data sync
 - **Channel** — Sales channel source (Shopify, Amazon, database import)
 - **Product** — Product catalog with barcodes and weights; scoped to a `Client`
 - **DataSource** — A connected account (Database/Shopify/Amazon), shown in the UI as a

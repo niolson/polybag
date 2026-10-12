@@ -12,7 +12,7 @@ class OperationalDefaultsSeeder extends Seeder
     public function run(): void
     {
         $this->call([
-            BoxSizeSeeder::class,
+            CommonBoxSizeSeeder::class,
             ShippingMethodSeeder::class,
         ]);
     }

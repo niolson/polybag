@@ -3,10 +3,51 @@
 use App\Enums\BoxSizeType;
 use App\Enums\CarrierPackaging;
 use App\Models\BoxSize;
-use Database\Seeders\BoxSizeSeeder;
+use App\Models\Setting;
+use Database\Seeders\CarrierPackagingSeeder;
+use Database\Seeders\CommonBoxSizeSeeder;
+use Database\Seeders\OnceOnlySeeder;
+use Database\Seeders\ReferenceDataSeeder;
+
+it('seeds the common set active and fits it on one printed sheet', function (): void {
+    $this->seed(CommonBoxSizeSeeder::class);
+
+    // The barcode sheet holds 24 to a page.
+    expect(BoxSize::count())->toBeLessThanOrEqual(24)
+        ->and(BoxSize::where('active', false)->exists())->toBeFalse()
+        ->and(BoxSize::whereNotNull('carrier_packaging')->exists())->toBeFalse();
+});
+
+it('seeds every fixed-size carrier packaging, inactive', function (): void {
+    $this->seed(CarrierPackagingSeeder::class);
+
+    foreach (CarrierPackaging::cases() as $packaging) {
+        $seeded = BoxSize::where('carrier_packaging', $packaging)->exists();
+
+        expect($seeded)->toBe(! in_array($packaging, CarrierPackagingSeeder::UNSIZED, true), $packaging->value);
+    }
+
+    expect(BoxSize::where('active', true)->exists())->toBeFalse();
+});
+
+it('seeds the carrier packaging as part of the reference-data sync, once only', function (): void {
+    $this->seed(ReferenceDataSeeder::class);
+
+    $tube = BoxSize::where('carrier_packaging', CarrierPackaging::FedexTube)->firstOrFail();
+    $count = BoxSize::count();
+
+    expect(Setting::query()->whereKey(OnceOnlySeeder::markerFor('carrier-packaging-v1'))->exists())->toBeTrue();
+
+    $tube->delete();
+    $this->seed(ReferenceDataSeeder::class);
+
+    // A deleted row stays deleted.
+    expect(BoxSize::count())->toBe($count - 1)
+        ->and(BoxSize::where('carrier_packaging', CarrierPackaging::FedexTube)->exists())->toBeFalse();
+});
 
 it('seeds every USPS Priority Mail flat-rate packaging as a box size the flat-rate services rate on', function (): void {
-    $this->seed(BoxSizeSeeder::class);
+    $this->seed(CarrierPackagingSeeder::class);
 
     $expected = [
         [CarrierPackaging::UspsFlatRateEnvelope, BoxSizeType::PADDED_MAILER],
@@ -31,17 +72,10 @@ it('seeds every USPS Priority Mail flat-rate packaging as a box size the flat-ra
 
     // The two medium box shapes share one carrier identity and are told apart by label.
     expect(BoxSize::where('carrier_packaging', CarrierPackaging::UspsMediumFlatRateBox)->count())->toBe(2);
-
-    // Express envelopes are separate USPS stock and are not seeded.
-    expect(BoxSize::whereIn('carrier_packaging', [
-        CarrierPackaging::UspsExpressFlatRateEnvelope,
-        CarrierPackaging::UspsExpressLegalFlatRateEnvelope,
-        CarrierPackaging::UspsExpressPaddedFlatRateEnvelope,
-    ])->exists())->toBeFalse();
 });
 
 it('seeds the USPS packaging at the outside dimensions USPS publishes', function (): void {
-    $this->seed(BoxSizeSeeder::class);
+    $this->seed(CarrierPackagingSeeder::class);
 
     // Postal Store outside dimensions as length, width, height, rounded to the column's two decimals.
     $published = [
@@ -63,11 +97,11 @@ it('seeds the USPS packaging at the outside dimensions USPS publishes', function
     }
 });
 
-it('seeds both shapes of the FedEx Small and Medium Box at the inside dimensions FedEx publishes', function (): void {
-    $this->seed(BoxSizeSeeder::class);
+it('seeds both shapes of the FedEx Small and Medium Box at the dimensions FedEx publishes for One Rate', function (): void {
+    $this->seed(CarrierPackagingSeeder::class);
 
     $published = [
-        [CarrierPackaging::FedexSmallBox, [12.25, 10.9, 1.5]],
+        [CarrierPackaging::FedexSmallBox, [12.38, 10.88, 1.5]],
         [CarrierPackaging::FedexSmallBox, [11.25, 8.75, 2.63]],
         [CarrierPackaging::FedexMediumBox, [13.25, 11.5, 2.38]],
         [CarrierPackaging::FedexMediumBox, [11.25, 8.75, 4.38]],
@@ -86,7 +120,8 @@ it('seeds both shapes of the FedEx Small and Medium Box at the inside dimensions
 });
 
 it('stores every seeded size longest side first and names each in its stored order', function (): void {
-    $this->seed(BoxSizeSeeder::class);
+    $this->seed(CommonBoxSizeSeeder::class);
+    $this->seed(CarrierPackagingSeeder::class);
 
     foreach (BoxSize::all() as $row) {
         expect((float) $row->length)->toBeGreaterThanOrEqual((float) $row->width, $row->label)
@@ -104,19 +139,26 @@ it('stores every seeded size longest side first and names each in its stored ord
     }
 });
 
-it('reseeds without duplicating box sizes', function (): void {
-    $this->seed(BoxSizeSeeder::class);
-    $count = BoxSize::count();
+it('gives every seeded box size its own code', function (): void {
+    $this->seed(CommonBoxSizeSeeder::class);
+    $this->seed(CarrierPackagingSeeder::class);
 
-    $this->seed(BoxSizeSeeder::class);
-
-    expect(BoxSize::count())->toBe($count)
-        ->and(BoxSize::pluck('code')->unique()->count())->toBe($count);
+    expect(BoxSize::pluck('code')->unique()->count())->toBe(BoxSize::count())
+        ->and(BoxSize::count())->toBe(13 + count(CarrierPackagingSeeder::PACKAGING));
 });
 
-it('leaves a box the operator already gave a seeded code unchanged', function (): void {
+it('reseeds the common set without duplicating box sizes', function (): void {
+    $this->seed(CommonBoxSizeSeeder::class);
+    $count = BoxSize::count();
+
+    $this->seed(CommonBoxSizeSeeder::class);
+
+    expect(BoxSize::count())->toBe($count);
+});
+
+it('leaves a box the operator already gave a seeded code unchanged', function (string $seeder, string $code): void {
     $operatorBox = BoxSize::factory()->create([
-        'code' => '01',
+        'code' => $code,
         'label' => 'Our shoebox',
         'type' => BoxSizeType::BOX,
         'length' => 14,
@@ -125,11 +167,15 @@ it('leaves a box the operator already gave a seeded code unchanged', function ()
         'carrier_packaging' => null,
     ]);
 
-    $this->seed(BoxSizeSeeder::class);
+    $this->seed($seeder);
 
     $operatorBox->refresh();
 
     expect($operatorBox->label)->toBe('Our shoebox')
         ->and((float) $operatorBox->length)->toBe(14.0)
-        ->and(BoxSize::where('code', '01')->count())->toBe(1);
-});
+        ->and($operatorBox->active)->toBeTrue()
+        ->and(BoxSize::where('code', $code)->count())->toBe(1);
+})->with([
+    'common set' => [CommonBoxSizeSeeder::class, '01'],
+    'carrier packaging' => [CarrierPackagingSeeder::class, 'USPS-01'],
+]);

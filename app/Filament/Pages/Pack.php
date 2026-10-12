@@ -81,6 +81,9 @@ class Pack extends Page
 
     public array $boxSizes = [];
 
+    /** Inactive box sizes by code, so a scan of one is reported as inactive rather than unknown. */
+    public array $inactiveBoxSizes = [];
+
     public ?int $boxSizeId = null;
 
     /** Whether the shipment has a Package Draft, so every change must be saved to it — including one that empties it. */
@@ -115,6 +118,7 @@ class Pack extends Page
 
         // Load box sizes for client-side lookup (cached)
         $this->boxSizes = app(CacheService::class)->getBoxSizesForPacking();
+        $this->inactiveBoxSizes = app(CacheService::class)->getInactiveBoxSizesForPacking();
 
         if ($shipment_id) {
             $this->shipment = Shipment::with(['client', 'location'])->findOrFail($shipment_id);

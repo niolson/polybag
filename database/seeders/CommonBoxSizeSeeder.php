@@ -12,7 +12,8 @@ use Illuminate\Database\Seeder;
  *
  * Every row is stored length ≥ width ≥ height and named in that order. A code
  * that already exists is left alone, so reseeding never changes a row an
- * operator owns.
+ * operator owns. Loaded by the Setup Wizard's starter toggle; carrier
+ * packaging is seeded separately, inactive, by {@see CarrierPackagingSeeder}.
  */
 class CommonBoxSizeSeeder extends Seeder
 {

@@ -19,6 +19,8 @@ class ReferenceDataSeeder extends Seeder
             CarrierAliasSeeder::class,
             SpecialServiceSeeder::class,
             CarrierServiceSpecialServiceSeeder::class,
+            // Once only and inactive: a warehouse activates what it stocks.
+            CarrierPackagingSeeder::class,
         ]);
     }
 }

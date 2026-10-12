@@ -30,7 +30,7 @@ of those codes.
   dimensions to type again.
 - **A common set.** About a dozen generic sizes that box suppliers commonly stock replace
   the old warehouse's list. Loading it stays optional, and its rows start active.
-- **Carrier packaging is a catalog, seeded inactive.** Every `CarrierPackaging` case
+- **Carrier packaging is a catalog, seeded inactive.** Every fixed-size `CarrierPackaging` case
   is seeded at its published outside dimensions and starts inactive, whatever carriers the
   install uses. A warehouse activates the packaging it stocks. This replaces per-carrier
   toggles in the Setup Wizard.
@@ -43,10 +43,13 @@ of those codes.
 
 1. [Replace the starter set with common box sizes](issues/01-replace-the-starter-set-with-common-box-sizes.md):
    seed data only, so it is in scope for `release-polish`
-2. [Mark Box Sizes active or inactive](issues/02-mark-box-sizes-active-or-inactive.md):
-   a feature, so it waits until the release closes
+2. [Mark Box Sizes active or inactive](issues/02-mark-box-sizes-active-or-inactive.md)
 3. [Seed the carrier packaging catalog inactive](issues/03-seed-the-carrier-packaging-catalog-inactive.md):
    needs `02`
+
+All three were brought into `release-polish` on 2026-10-12. The barcode sheet fits 24 to a
+page, and a demo may well print it. With the common set active and the carrier catalog
+inactive, a fresh install prints 13, and most installs should stay at 24 or fewer.
 
 No live installs exist yet, so nothing migrates or renames rows already seeded on an
 existing database.

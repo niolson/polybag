@@ -24,6 +24,7 @@
             scanToAddMode: @js($scanToAddMode),
             packingValidationEnabled: @js($packingValidationEnabled),
             boxSizes: @js($boxSizes),
+            inactiveBoxSizes: @js($inactiveBoxSizes),
             boxSizeId: @js($boxSizeId),
             weight: @js($weight),
             height: @js($height),
@@ -68,11 +69,14 @@
                 if (upper.startsWith(this.scanCodePrefix)) {
                     const command = this.commandCodes[upper];
                     const boxCode = this.hasShipment ? this.boxAliasForScanCode(upper) : undefined;
+                    const inactiveBoxCode = this.hasShipment ? this.boxAliasForScanCode(upper, this.inactiveBoxSizes) : undefined;
 
                     if (command) {
                         this.executeCommand(command);
                     } else if (boxCode !== undefined) {
                         this.scanBox(boxCode);
+                    } else if (inactiveBoxCode !== undefined) {
+                        this.notifyInactiveBox(inactiveBoxCode);
                     } else {
                         $wire.openScanCode(trimmed);
                     }
@@ -88,6 +92,7 @@
                 }
 
                 const isBoxCode = !!this.boxSizes[trimmed];
+                const isInactiveBoxCode = !!this.inactiveBoxSizes[trimmed];
                 const hasDimensions = this.height && this.width && this.length;
 
                 if (this.scanToAddMode) {
@@ -95,6 +100,8 @@
                     // otherwise always try to look up as a product
                     if (isBoxCode && !hasDimensions) {
                         this.scanBox(trimmed);
+                    } else if (isInactiveBoxCode && !hasDimensions) {
+                        this.notifyInactiveBox(trimmed);
                     } else {
                         $wire.addItemByScan(trimmed);
                     }
@@ -106,6 +113,8 @@
                         hasDimensions ? this.scanProduct(trimmed) : this.scanBox(trimmed);
                     } else if (isBoxCode) {
                         this.scanBox(trimmed);
+                    } else if (isInactiveBoxCode && !isProduct) {
+                        this.notifyInactiveBox(trimmed);
                     } else {
                         this.scanProduct(trimmed);
                     }
@@ -114,15 +123,24 @@
                 this.input = '';
             },
 
-            // The alias of the active box a Box Size code names, matched by its
-            // numeric ID so leading zeros read as the server's parser reads them.
-            boxAliasForScanCode(upper) {
+            // The alias of the box a Box Size code names, among the active boxes
+            // unless another lookup is given, matched by its numeric ID so
+            // leading zeros read as the server's parser reads them.
+            boxAliasForScanCode(upper, boxes = this.boxSizes) {
                 const match = upper.match(new RegExp(`^${this.scanCodePrefix}B(\\d{1,18})$`));
                 const id = match ? Number(match[1]) : 0;
 
                 return id > 0
-                    ? Object.keys(this.boxSizes).find((code) => this.boxSizes[code].id === id)
+                    ? Object.keys(boxes).find((code) => boxes[code].id === id)
                     : undefined;
+            },
+
+            notifyInactiveBox(code) {
+                new FilamentNotification()
+                    .title('Box size inactive')
+                    .body(`${this.inactiveBoxSizes[code].label} (${code}) is inactive. Ask a manager to activate it under Box Sizes.`)
+                    .warning()
+                    .send();
             },
 
             executeCommand(name) {
