@@ -27,6 +27,37 @@ the Shipment today.
 
 Answer against a development store before writing code.
 
+## Findings so far
+
+Probed read-only on `polybag-test` (Shopify Plus development store, API 2026-07, scopes
+include `read_orders`) on 2026-10-12. The store's 100 orders are all seeded and none
+carries duties or a localized field, so the **field names and semantics below come from the
+schema, not from a real checkout**.
+
+- **Duties.** `Order.originalTotalDutiesSet` is "the total amount of duties calculated when
+  an order was created, before any modifications" (`currentTotalDutiesSet` is after
+  returns, refunds and edits, so it is the wrong one). `Order.dutiesIncluded` is a separate
+  boolean: "whether duties are included in the subtotal price", i.e. the store's
+  duties-included pricing. `LineItem.duties` lists per-line `Duty` records. So the likely
+  rule is `originalTotalDutiesSet` greater than zero, and it still needs a real order to
+  show what a duties-included order reports in it. All 100 seeded orders return null
+  duties and `dutiesIncluded: false`.
+- **Recipient tax ID.** It is not a note attribute or the address's company line. Shopify
+  has `Order.localizedFields` (`key`, `countryCode`, `purpose`, `title`, `value`),
+  "additional fields required by certain countries on international orders". Keys include
+  `TAX_CREDENTIAL_BR` and `SHIPPING_CREDENTIAL_BR` (Brazil), `SHIPPING_CREDENTIAL_KR`
+  (Korea), `TAX_CREDENTIAL_IT`, `_PT`, `_ES`, `_MX`, `_CO`, `_CL` and others. Whether a
+  Brazil CPF lands in the tax or the shipping credential, and how a CPF is told from a CNPJ
+  (length, or a `_TYPE_` key as Colombia and Mexico have), needs a real order. The seeded
+  Italy orders have none.
+- **Why no real order.** The Admin API cannot create one: `orderCreate` takes no duties and
+  no localized fields. Only a checkout in a Market with duties collection on, and the
+  Brazil/Korea fields enabled, produces them.
+
+To finish: in the dev store admin, turn on duties and import taxes for a market (EU or
+UK), enable the Brazil tax field in checkout settings, place one order to each, then re-run
+`.scratch/international-customs-terms/shopify-duties.php` (read-only, `file <query>`).
+
 ## Desired behavior (once answered)
 
 `ShopifySource` sets `duties_terms: ddp` when the order carries duties, and leaves it null

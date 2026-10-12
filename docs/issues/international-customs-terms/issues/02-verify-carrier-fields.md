@@ -355,3 +355,8 @@ Per carrier, record the request sent and the answer received in `.scratch/intern
   - **Still open for UPS:** the UK VAT code, and the production DDP + IOSS buy-and-void on
     or after 25 October.
 
+- 2026-10-12 — **UPS legend format, CIE.** `ExemptionLegend` `NOEEI30.37 (A)`, the string UPS
+  API support gave, is refused: `400`, `128267` *Missing or Invalid Forms EEIFilingOption
+  ExemptionLegend*. The same request with `30.37(a)` (U10) still buys and the invoice prints
+  `AESCitation: NOEEI 30.37(a)`. Keep `30.37(a)`; UPS's reply described the printed citation,
+  not the field value. Variant `U15` in `.scratch/international-customs-terms/ups.php`.
