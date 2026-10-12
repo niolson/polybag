@@ -272,5 +272,16 @@ describe('the Shipments list', function (): void {
 });
 
 it('finds a Shipment by the tracking number it shipped elsewhere with', function (): void {
-    expect(ShipmentResource::getGloballySearchableAttributes())->toContain('external_tracking_number');
+    $this->actingAs(User::factory()->admin()->create());
+    $shipment = Shipment::factory()->closedBySource('shipped')->create([
+        'shipment_reference' => 'ORD-ELSEWHERE-1',
+        'external_tracking_number' => '9400100000000000000001',
+    ]);
+    Shipment::factory()->create(['shipment_reference' => 'ORD-OTHER-1']);
+
+    $results = ShipmentResource::getGlobalSearchResults('9400100000000000000001');
+
+    expect($results)->toHaveCount(1)
+        ->and((string) $results->first()->title)->toBe('ORD-ELSEWHERE-1')
+        ->and($results->first()->url)->toContain((string) $shipment->id);
 });

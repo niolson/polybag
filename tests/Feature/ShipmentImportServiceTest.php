@@ -1394,6 +1394,25 @@ it('records a status the source closed as the source\'s, and leaves an open one 
         ->and($fresh->status_changed_at)->not->toBeNull();
 });
 
+it('replaces a manager\'s origin when the source closes an order the manager reopened', function (): void {
+    ShipmentImportService::forSource(fakeSource(collect([onExistingRow()])), $this->dataSource)->import();
+
+    $shipment = Shipment::where('shipment_reference', 'ORD-EXIST-001')->firstOrFail();
+    $shipment->forceFill(['status_origin' => ShipmentStatusOrigin::Manager, 'status_changed_at' => now()->subDay()])->save();
+
+    ShipmentImportService::forSource(
+        fakeSource(collect([onExistingRow(['_import_status' => ShipmentStatus::Shipped->value])])),
+        $this->dataSource,
+    )->import();
+
+    $fresh = $shipment->fresh();
+
+    expect($fresh->status)->toBe(ShipmentStatus::Shipped)
+        ->and($fresh->status_origin)->toBe(ShipmentStatusOrigin::Source)
+        ->and($fresh->status_changed_at->isToday())->toBeTrue()
+        ->and($fresh->wasClosedBySource())->toBeTrue();
+});
+
 it('treats item changes as source changes for update-if-changed', function (): void {
     $items = collect([['sku' => 'EXIST-SKU', 'name' => 'Widget', 'quantity' => 1]]);
 

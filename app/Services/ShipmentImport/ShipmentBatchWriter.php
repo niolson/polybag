@@ -144,9 +144,10 @@ class ShipmentBatchWriter
             Shipment::whereIn('id', $remethodedIds)->update(['validation_attempted_at' => null]);
         }
 
-        // A status the source wrote is the source's (`order-reconciliation/02`).
-        // Only rows it just closed lack an origin: an open row was written as
-        // open, and a closed one is never written again.
+        // A status the source wrote is the source's (`order-reconciliation/02`),
+        // whoever set the one before: a closed row here is a closure applied by
+        // this import, since `shouldUpdate()` never rewrites a closed Shipment.
+        // That includes one a manager reopened, whose `manager` origin it replaces.
         $closedSourceRecordIds = array_column(array_filter(
             $rowsToWrite,
             fn (array $row): bool => ($row['status'] ?? ShipmentStatus::Open->value) !== ShipmentStatus::Open->value,
@@ -155,7 +156,6 @@ class ShipmentBatchWriter
         if ($closedSourceRecordIds !== []) {
             Shipment::where('data_source_id', $importSource->id)
                 ->whereIn('source_record_id', $closedSourceRecordIds)
-                ->whereNull('status_origin')
                 ->update(['status_origin' => ShipmentStatusOrigin::Source, 'status_changed_at' => now()]);
         }
 

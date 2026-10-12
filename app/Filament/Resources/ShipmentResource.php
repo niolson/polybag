@@ -134,7 +134,7 @@ class ShipmentResource extends Resource
      */
     public static function getGloballySearchableAttributes(): array
     {
-        return ['shipment_reference', 'external_tracking_number'];
+        return ['shipment_reference'];
     }
 
     /**

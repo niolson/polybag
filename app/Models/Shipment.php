@@ -268,11 +268,14 @@ class Shipment extends Model
     /**
      * @return array<string, mixed>
      */
-    #[SearchUsingPrefix(['shipment_reference'])]
+    #[SearchUsingPrefix(['shipment_reference', 'external_tracking_number'])]
     public function toSearchableArray(): array
     {
         return [
             'shipment_reference' => $this->shipment_reference,
+            // Shipped by other software (`order-reconciliation/02`), so the
+            // number a customer quotes still finds the order.
+            'external_tracking_number' => $this->external_tracking_number,
             'first_name' => $this->first_name,
             'last_name' => $this->last_name,
             'address1' => $this->address1,

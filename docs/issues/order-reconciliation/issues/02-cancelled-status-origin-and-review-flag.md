@@ -80,7 +80,8 @@ and when ("Shopify reported this order cancelled on 12 Oct"), from the audit tra
   (the historical Amazon import).
 - New columns on `shipments`: `status_origin`, `status_changed_at` (stamped by the model
   whenever `status` changes, and by the import writer, which bypasses model events),
-  `external_carrier`, `external_tracking_number` (indexed, in global search),
+  `external_carrier`, `external_tracking_number` (indexed, searchable through
+  `Shipment::toSearchableArray()`, which is what `InteractsWithScoutSearch` reads),
   `review_reason` and `review_flagged_at`. Enums `ShipmentStatusOrigin` and
   `ShipmentReviewReason`; `Shipment::flagForReview()`, `clearReviewFlag()`,
   `wasClosedBySource()` and the `flaggedForReview` scope are what later slices call.
@@ -107,3 +108,11 @@ and when ("Shopify reported this order cancelled on 12 Oct"), from the audit tra
   so `08` only has to supply the value.
 - Tests: `tests/Feature/ShipmentStatusOriginTest.php`, plus updates to `PurgePiiTest`,
   `ExceptionsWidgetTest` and `ShipmentImportServiceTest`. Full suite green (4865).
+
+**2026-10-12 — review fixes.** The external tracking number was only added to
+`getGloballySearchableAttributes()`, which `InteractsWithScoutSearch` ignores, so it was
+never searchable; it is now in `toSearchableArray()` (prefix-searched). And the import
+writer stamped `source` only on rows with no origin, so an order a manager had reopened
+kept `manager` when the source then closed it, and the source-closed notice never
+showed. Every closure the writer applies now records `source` and its time. Both have
+regression tests that fail without the fix.
