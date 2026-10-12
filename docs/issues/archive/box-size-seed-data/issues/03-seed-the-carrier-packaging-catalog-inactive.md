@@ -1,10 +1,11 @@
 # Seed the carrier packaging catalog inactive
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Created: 2026-10-12
 
-Part of [box-size-seed-data](../PRD.md). Needs `02`.
+Part of [box-size-seed-data](../PRD.md). Needs `02`. Brought into `release-polish` on
+2026-10-12.
 
 ## Problem
 
@@ -30,10 +31,23 @@ so they all print on the barcode sheet whether the warehouse stocks them or not.
 
 ## Acceptance
 
-- [ ] A fresh install has a seeded, inactive row for every `CarrierPackaging` case
-- [ ] Activating one puts it on the barcode sheet and the Pack lookup with no dimensions
+- [x] A fresh install has a seeded, inactive row for every `CarrierPackaging` case
+- [x] Activating one puts it on the barcode sheet and the Pack lookup with no dimensions
       to enter
-- [ ] The starter toggle loads only the common set
-- [ ] Adding a `CarrierPackaging` case without a seeded row fails a test
+- [x] The starter toggle loads only the common set
+- [x] Adding a `CarrierPackaging` case without a seeded row fails a test
 
 ## Comments
+
+- 2026-10-12: Built. `CarrierPackagingSeeder` is a `OnceOnlySeeder` (batch
+  `carrier-packaging-v1`) run by `ReferenceDataSeeder`, so every install gets the catalog
+  at its first start and a row an Admin deletes stays deleted. It seeds 35 rows covering
+  25 of the 27 cases. `FedexBox` and `UpsExpressBox` are generic codes for any box from
+  that carrier, with no size to seed; they are listed in `CarrierPackagingSeeder::UNSIZED`
+  and the coverage test skips them. A case added later needs a `-v2` batch to reach
+  databases already seeded. FedEx dimensions follow FedEx's US One Rate page, which
+  changed the Small Box (flat) from `01`'s 12.25 × 10.9 to 12.38 × 10.88. UPS dimensions
+  come from UPS's published Express Box sizes, and its 30 lb limit is used for all UPS
+  rows. Max weights are informational; nothing enforces them. `BoxSizeSeeder` was
+  removed: the Setup Wizard's toggle and `OperationalDefaultsSeeder` call
+  `CommonBoxSizeSeeder` directly.

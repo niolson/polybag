@@ -43,12 +43,32 @@ class CacheService
     public function getBoxSizesForPacking(): array
     {
         return $this->getBoxSizes()
+            ->filter(fn (BoxSize $box): bool => $box->active)
             ->map(fn (BoxSize $box): array => [
                 'id' => $box->id,
                 'code' => $box->code,
                 'height' => (string) $box->height,
                 'width' => (string) $box->width,
                 'length' => (string) $box->length,
+            ])
+            ->keyBy('code')
+            ->toArray();
+    }
+
+    /**
+     * Inactive box sizes keyed by code, so Pack can say a scanned box is
+     * inactive rather than unknown.
+     *
+     * @return array<string, array{id: int, code: string, label: string}>
+     */
+    public function getInactiveBoxSizesForPacking(): array
+    {
+        return $this->getBoxSizes()
+            ->reject(fn (BoxSize $box): bool => $box->active)
+            ->map(fn (BoxSize $box): array => [
+                'id' => $box->id,
+                'code' => $box->code,
+                'label' => $box->label,
             ])
             ->keyBy('code')
             ->toArray();

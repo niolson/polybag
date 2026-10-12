@@ -19,6 +19,7 @@ class BoxSizeFactory extends Factory
         return [
             'label' => fake()->words(2, true),
             'code' => fake()->unique()->regexify('[A-Z][0-9]'),
+            'active' => true,
             'type' => fake()->randomElement(BoxSizeType::cases()),
             'height' => fake()->randomFloat(2, 2, 20),
             'width' => fake()->randomFloat(2, 2, 20),
@@ -26,6 +27,16 @@ class BoxSizeFactory extends Factory
             'max_weight' => fake()->randomFloat(2, 10, 70),
             'empty_weight' => fake()->randomFloat(2, 0.1, 2),
         ];
+    }
+
+    /**
+     * A box size kept in the catalog but out of use.
+     */
+    public function inactive(): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'active' => false,
+        ]);
     }
 
     /**

@@ -24,13 +24,14 @@ class PrintBoxSizeBarcodes extends Page
     public Collection $boxSizes;
 
     /**
-     * Group the sheet by type, in the enum's order, and print each group smallest first.
+     * The active Box Sizes, grouped by type in the enum's order and smallest first in each group.
      */
     public function mount(): void
     {
         $typeOrder = array_flip(array_map(fn (BoxSizeType $type): string => $type->value, BoxSizeType::cases()));
 
         $this->boxSizes = app(CacheService::class)->getBoxSizes()
+            ->filter(fn (BoxSize $boxSize): bool => $boxSize->active)
             ->sortBy([
                 fn (BoxSize $a, BoxSize $b): int => $typeOrder[$a->type->value] <=> $typeOrder[$b->type->value],
                 fn (BoxSize $a, BoxSize $b): int => self::volume($a) <=> self::volume($b),

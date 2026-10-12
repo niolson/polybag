@@ -1,11 +1,11 @@
 # Mark Box Sizes active or inactive
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Created: 2026-10-12
 
-Part of [box-size-seed-data](../PRD.md). A new feature, so it waits until
-`release-polish` closes.
+Part of [box-size-seed-data](../PRD.md). Brought into `release-polish` on
+2026-10-12.
 
 ## Problem
 
@@ -33,12 +33,23 @@ deleted, has to type the dimensions in again.
 
 ## Acceptance
 
-- [ ] Deactivating a Box Size removes it from the barcode sheet, the Pack lookup and the
+- [x] Deactivating a Box Size removes it from the barcode sheet, the Pack lookup and the
       pickers, and activating it brings it back with its dimensions unchanged
-- [ ] Scanning an inactive code at Pack shows a message that the box is inactive
-- [ ] A Package Draft saved with a Box Size that has since been deactivated can still be
+- [x] Scanning an inactive code at Pack shows a message that the box is inactive
+- [x] A Package Draft saved with a Box Size that has since been deactivated can still be
       shipped
-- [ ] Bulk activate and deactivate work from the table
-- [ ] Tests cover each of the above
+- [x] Bulk activate and deactivate work from the table
+- [x] Tests cover each of the above
 
 ## Comments
+
+- 2026-10-12: Built, ahead of the release on request: printing one page of barcodes without
+  deleting box sizes may come up in a demo. `active` defaults to true. `BoxSize::active()`
+  filters the barcode sheet, `CacheService::getBoxSizesForPacking()`, Manual Ship and the
+  batch-ship picker. Pack gets the inactive ones separately
+  (`getInactiveBoxSizesForPacking()`) and warns "Box size inactive" for a typed code or a
+  `%B` scan code. A typed code that is also a product in the order still goes to the
+  product. The table has a toggle column, an active filter, a packaging filter (own or per
+  carrier) and bulk Activate/Deactivate, which save each row so the audit log and cache
+  see the change. The form and the Setup Wizard now take dimensions as length, width,
+  height, matching the sheet.

@@ -15,8 +15,11 @@ use Filament\Forms;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 
 class BoxSizeResource extends Resource
 {
@@ -43,10 +46,14 @@ class BoxSizeResource extends Resource
                         Forms\Components\Select::make('type')
                             ->options(BoxSizeType::class)
                             ->required(),
-                    ])->columns(3),
+                        Forms\Components\Toggle::make('active')
+                            ->default(true)
+                            ->inline(false)
+                            ->helperText('Inactive box sizes stay here but are left off the barcode sheet, the Pack lookup and the box pickers.'),
+                    ])->columns(4),
                 Components\Section::make('Dimensions')
                     ->schema([
-                        Forms\Components\TextInput::make('height')
+                        Forms\Components\TextInput::make('length')
                             ->required()
                             ->numeric()
                             ->minValue(0.01)
@@ -58,7 +65,7 @@ class BoxSizeResource extends Resource
                             ->minValue(0.01)
                             ->maxValue(999)
                             ->suffix('in'),
-                        Forms\Components\TextInput::make('length')
+                        Forms\Components\TextInput::make('height')
                             ->required()
                             ->numeric()
                             ->minValue(0.01)
@@ -126,13 +133,14 @@ class BoxSizeResource extends Resource
                     ->searchable(),
                 Tables\Columns\TextColumn::make('type')
                     ->formatStateUsing(fn ($state) => $state?->getLabel()),
-                Tables\Columns\TextColumn::make('height')
+                Tables\Columns\ToggleColumn::make('active'),
+                Tables\Columns\TextColumn::make('length')
                     ->numeric()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('width')
                     ->numeric()
                     ->sortable(),
-                Tables\Columns\TextColumn::make('length')
+                Tables\Columns\TextColumn::make('height')
                     ->numeric()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('max_weight')
@@ -151,10 +159,46 @@ class BoxSizeResource extends Resource
             ->filters([
                 Tables\Filters\SelectFilter::make('type')
                     ->options(BoxSizeType::class),
+                Tables\Filters\TernaryFilter::make('active'),
+                Tables\Filters\SelectFilter::make('carrier')
+                    ->label('Packaging')
+                    ->options(fn (): array => [
+                        'own' => 'Own packaging',
+                        ...collect(CarrierPackaging::groupedOptions())->keys()->mapWithKeys(fn (string $carrier): array => [$carrier => $carrier])->all(),
+                    ])
+                    ->query(fn (Builder $query, array $data): Builder => match ($data['value'] ?? null) {
+                        null, '' => $query,
+                        'own' => $query->whereNull('carrier_packaging'),
+                        default => $query->whereIn('carrier_packaging', array_keys(CarrierPackaging::groupedOptions()[$data['value']] ?? [])),
+                    }),
             ])
             ->recordActions([
                 Actions\EditAction::make(),
+            ])
+            ->toolbarActions([
+                Actions\BulkActionGroup::make([
+                    Actions\BulkAction::make('activate')
+                        ->label('Activate')
+                        ->icon(Heroicon::OutlinedCheckCircle)
+                        ->action(fn (Collection $records) => static::setActive($records, true))
+                        ->deselectRecordsAfterCompletion(),
+                    Actions\BulkAction::make('deactivate')
+                        ->label('Deactivate')
+                        ->icon(Heroicon::OutlinedXCircle)
+                        ->action(fn (Collection $records) => static::setActive($records, false))
+                        ->deselectRecordsAfterCompletion(),
+                ]),
             ]);
+    }
+
+    /**
+     * Saved one at a time so the audit log and the box size cache see each change.
+     *
+     * @param  Collection<int, BoxSize>  $records
+     */
+    public static function setActive(Collection $records, bool $active): void
+    {
+        $records->each(fn (BoxSize $boxSize) => $boxSize->update(['active' => $active]));
     }
 
     public static function getRelations(): array

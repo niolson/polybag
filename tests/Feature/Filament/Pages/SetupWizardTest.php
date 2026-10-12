@@ -35,16 +35,16 @@ it('renders the setup wizard when setup is incomplete', function (): void {
         ->assertSet('data.prepopulate_shipping_methods', false);
 });
 
-it('prepopulates starter box sizes when selected', function (): void {
+it('loads only the common box sizes when selected', function (): void {
     $component = Livewire::test(SetupWizard::class)
         ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
         ->set('data.prepopulate_box_sizes', true);
 
     invokePrivateMethod($component->instance(), 'saveBoxSizes');
 
-    expect(BoxSize::count())->toBeGreaterThan(0)
+    expect(BoxSize::count())->toBe(13)
         ->and(BoxSize::where('code', '01')->exists())->toBeTrue()
-        ->and(BoxSize::where('carrier_packaging', CarrierPackaging::UspsPaddedFlatRateEnvelope)->exists())->toBeTrue();
+        ->and(BoxSize::whereNotNull('carrier_packaging')->exists())->toBeFalse();
 });
 
 it('creates box sizes with and without carrier packaging', function (): void {

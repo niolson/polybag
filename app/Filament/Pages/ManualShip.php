@@ -394,6 +394,7 @@ class ManualShip extends Page implements HasForms
     public function getBoxSizeOptions(): array
     {
         return BoxSize::query()
+            ->active()
             ->orderBy('label')
             ->get()
             ->mapWithKeys(fn (BoxSize $box): array => [

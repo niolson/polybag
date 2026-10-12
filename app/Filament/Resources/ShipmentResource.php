@@ -469,7 +469,7 @@ class ShipmentResource extends Resource
                     ->schema([
                         Forms\Components\Select::make('box_size_id')
                             ->label('Box Size')
-                            ->options(BoxSize::query()->pluck('label', 'id'))
+                            ->options(BoxSize::query()->active()->orderBy('label')->pluck('label', 'id'))
                             ->required()
                             ->searchable(),
                         Forms\Components\Hidden::make('label_format')

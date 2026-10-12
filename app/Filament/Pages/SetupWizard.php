@@ -25,7 +25,7 @@ use App\Services\ShipmentImport\ImportConnectionConfig;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\DatabaseSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
-use Database\Seeders\BoxSizeSeeder;
+use Database\Seeders\CommonBoxSizeSeeder;
 use Database\Seeders\ShippingMethodSeeder;
 use Filament\Forms;
 use Filament\Notifications\Notification;
@@ -226,18 +226,18 @@ class SetupWizard extends Page
             ->description('Define your box sizes')
             ->schema([
                 Forms\Components\Toggle::make('prepopulate_box_sizes')
-                    ->label('Load recommended starter box sizes')
-                    ->helperText('Adds a reusable starter set of common box sizes and mailers. You can edit or remove them later.')
+                    ->label('Load common box sizes')
+                    ->helperText('Adds 13 common box, poly mailer and padded mailer sizes. You can edit, deactivate or remove them later.')
                     ->default(false),
                 Forms\Components\Placeholder::make('box_size_notice')
                     ->label('')
-                    ->content('Box sizes speed up the packing workflow by pre-filling dimensions. You can skip this step and enter dimensions manually when shipping, or add box sizes later.'),
+                    ->content('Box sizes speed up the packing workflow by pre-filling dimensions. You can skip this step and enter dimensions manually when shipping, or add box sizes later. USPS, FedEx and UPS packaging is already in the Box Sizes list, inactive: activate what you stock there.'),
                 Forms\Components\Placeholder::make('existing_box_sizes')
-                    ->label('Existing Box Sizes')
-                    ->visible(fn () => BoxSize::exists())
+                    ->label('Active Box Sizes')
+                    ->visible(fn () => BoxSize::active()->exists())
                     ->content(fn (): HtmlString => new HtmlString(
                         view('filament.pages.setup-wizard.existing-box-sizes', [
-                            'boxes' => BoxSize::all(),
+                            'boxes' => BoxSize::active()->orderBy('label')->get(),
                         ])->render()
                     )),
                 Forms\Components\Repeater::make('box_sizes')
@@ -254,7 +254,7 @@ class SetupWizard extends Page
                             ->options(BoxSizeType::class)
                             ->required()
                             ->default(BoxSizeType::BOX),
-                        Forms\Components\TextInput::make('height')
+                        Forms\Components\TextInput::make('length')
                             ->numeric()
                             ->required()
                             ->suffix('in')
@@ -266,7 +266,7 @@ class SetupWizard extends Page
                             ->suffix('in')
                             ->minValue(0.01)
                             ->maxValue(999),
-                        Forms\Components\TextInput::make('length')
+                        Forms\Components\TextInput::make('height')
                             ->numeric()
                             ->required()
                             ->suffix('in')
@@ -623,7 +623,7 @@ class SetupWizard extends Page
                     ->content(fn (): string => CarrierService::where('active', true)->count().' services enabled'),
                 Forms\Components\Placeholder::make('summary_box_sizes')
                     ->label('Box Sizes')
-                    ->content(fn (): string => BoxSize::count().' configured'),
+                    ->content(fn (): string => BoxSize::active()->count().' active'),
                 Forms\Components\Placeholder::make('summary_channels')
                     ->label('Channels')
                     ->content(fn () => Channel::where('active', true)->pluck('name')->join(', ') ?: 'None'),
@@ -801,7 +801,7 @@ class SetupWizard extends Page
         $boxSizes = $data['box_sizes'] ?? [];
 
         if ($data['prepopulate_box_sizes'] ?? false) {
-            app(BoxSizeSeeder::class)->run();
+            app(CommonBoxSizeSeeder::class)->run();
         }
 
         foreach ($boxSizes as $box) {
@@ -818,7 +818,7 @@ class SetupWizard extends Page
             ]);
         }
 
-        if (empty($boxSizes) && ! BoxSize::exists()) {
+        if (empty($boxSizes) && ! BoxSize::active()->exists()) {
             Notification::make()
                 ->info()
                 ->title('No box sizes configured')
