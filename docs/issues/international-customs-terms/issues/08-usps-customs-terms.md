@@ -239,3 +239,14 @@ enrolment instead, this shrinks to a confirmation checkbox with no terms text.
   - **Assumed, not confirmed:** that the price of service `371` is what USPS bills for the
     prepayment. It is named for it and matches the breakdown to the cent on a one-line label.
 
+- 2026-10-12 — **The `030031` decline, through the adapter on TEM.** A DDP request built by
+  hand for Poland (the rate filter would hide it) made `UspsAdapter::createShipment()` return
+  `success: false` with *"USPS cannot prepay duties and taxes to Poland for these products …
+  Nothing was bought. Ship to Poland on DDU terms or with another carrier."* USPS's reply was
+  the `400`, code `030031`, `source.parameter` `totalLandedCost`, so the decline path works
+  end to end and not only against the unit test's fake. The same probe to Germany bought
+  (`201`) with `duties_cost` 63.60, a TEM figure. That label was not voided (TEM, no
+  charge). Probe: `.scratch/international-customs-terms/usps-decline.php`.
+  Still open for `ready-for-human` is only what needs USPS or production: the live behavior
+  of the prepay flag and service 371, `VAT_NUMBER` for non-IOSS registrations, the Zonos
+  terms, and the questions in the email already sent.
