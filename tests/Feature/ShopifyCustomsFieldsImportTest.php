@@ -1,5 +1,7 @@
 <?php
 
+use App\Enums\DutiesTerms;
+use App\Enums\RecipientTaxIdType;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Models\Channel;
 use App\Models\ChannelAlias;
@@ -337,4 +339,100 @@ it('updates an open shipment and its product once on re-import, keeping the good
 
     expect(importedWidget()->updated_at->equalTo($product->updated_at))->toBeTrue()
         ->and(Shipment::count())->toBe(1);
+});
+
+/**
+ * The imported Shipment for an order carrying `$orderFields` over the usual one.
+ *
+ * @param  array<string, mixed>  $orderFields
+ */
+function importedShipmentForOrder(array $orderFields, ?DataSource $dataSource = null): Shipment
+{
+    $fulfillmentOrder = customsFieldsFulfillmentOrder();
+    $fulfillmentOrder['order'] = array_merge($fulfillmentOrder['order'], $orderFields);
+
+    importCustomsFieldsFulfillmentOrder($dataSource ?? customsFieldsShopifySource(), $fulfillmentOrder);
+
+    return Shipment::where('shipment_reference', '#1001')->firstOrFail();
+}
+
+describe('duties terms and recipient tax ID', function (): void {
+    it('ships DDP when Shopify charged duties, whatever dutiesIncluded says', function (): void {
+        $shipment = importedShipmentForOrder([
+            'dutiesIncluded' => false,
+            'originalTotalDutiesSet' => ['shopMoney' => ['amount' => '3.36']],
+        ]);
+
+        expect($shipment->duties_terms)->toBe(DutiesTerms::Ddp);
+    });
+
+    it('leaves the terms null when the order has no duties, and never says DDU', function (?array $duties): void {
+        $shipment = importedShipmentForOrder(['originalTotalDutiesSet' => $duties]);
+
+        expect($shipment->duties_terms)->toBeNull();
+    })->with([
+        'null, as Shopify returns it' => [null],
+        'zero' => [['shopMoney' => ['amount' => '0.0']]],
+    ]);
+
+    it('keeps terms a manager set when a later import sees no duties', function (): void {
+        $dataSource = customsFieldsShopifySource();
+        importedShipmentForOrder([], $dataSource)->update(['duties_terms' => DutiesTerms::Ddu]);
+
+        expect(importedShipmentForOrder([], $dataSource)->duties_terms)->toBe(DutiesTerms::Ddu);
+    });
+
+    it('imports a Brazilian CPF and strips its punctuation', function (): void {
+        $shipment = importedShipmentForOrder(['localizedFields' => ['nodes' => [
+            ['key' => 'SHIPPING_CREDENTIAL_BR', 'value' => '007.408.869-67'],
+        ]]]);
+
+        expect($shipment->recipient_tax_id_type)->toBe(RecipientTaxIdType::Cpf)
+            ->and($shipment->recipient_tax_id)->toBe('00740886967');
+    });
+
+    it('tells a CNPJ from a CPF by its length', function (): void {
+        $shipment = importedShipmentForOrder(['localizedFields' => ['nodes' => [
+            ['key' => 'SHIPPING_CREDENTIAL_BR', 'value' => '11.222.333/0001-81'],
+        ]]]);
+
+        expect($shipment->recipient_tax_id_type)->toBe(RecipientTaxIdType::Cnpj)
+            ->and($shipment->recipient_tax_id)->toBe('11222333000181');
+    });
+
+    it('imports a Korean PCCC', function (): void {
+        $shipment = importedShipmentForOrder(['localizedFields' => ['nodes' => [
+            ['key' => 'SHIPPING_CREDENTIAL_KR', 'value' => 'P123456789012'],
+        ]]]);
+
+        expect($shipment->recipient_tax_id_type)->toBe(RecipientTaxIdType::Pccc)
+            ->and($shipment->recipient_tax_id)->toBe('P123456789012');
+    });
+
+    it('reports a malformed ID instead of storing it', function (): void {
+        $shipment = importedShipmentForOrder(['localizedFields' => ['nodes' => [
+            ['key' => 'SHIPPING_CREDENTIAL_BR', 'value' => '123.456.789-00'],
+        ]]]);
+
+        expect($shipment->recipient_tax_id)->toBeNull()
+            ->and($shipment->recipient_tax_id_type)->toBeNull();
+    });
+
+    it('ignores credentials for other countries and leaves the ID alone', function (): void {
+        $shipment = importedShipmentForOrder(['localizedFields' => ['nodes' => [
+            ['key' => 'TAX_CREDENTIAL_IT', 'value' => 'RSSMRA80A01H501U'],
+        ]]]);
+
+        expect($shipment->recipient_tax_id)->toBeNull();
+    });
+
+    it('asks Shopify for the duties and localized fields', function (): void {
+        $dataSource = customsFieldsShopifySource();
+        $fulfillmentOrder = customsFieldsFulfillmentOrder();
+
+        $requests = importCustomsFieldsFulfillmentOrder($dataSource, $fulfillmentOrder);
+
+        expect($requests[0]['query'])->toContain('originalTotalDutiesSet { shopMoney { amount } }')
+            ->and($requests[0]['query'])->toContain('localizedFields(first: 10) { nodes { key value } }');
+    });
 });

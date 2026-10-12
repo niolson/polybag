@@ -1,6 +1,6 @@
 # Import duties terms and recipient tax IDs from Shopify orders
 
-Status: needs-info
+Status: ready-for-human
 Category: enhancement
 Repo: `polybag`
 
@@ -105,5 +105,20 @@ Amazon is out of scope here: Amazon orders bought on Amazon postage are `09`'s c
 
 ## Acceptance criteria
 
-- [ ] An order with duties imports as `ddp`; one without imports null
-- [ ] A collected CPF imports with its type, and an invalid one is reported, not stored
+- [x] An order with duties imports as `ddp`; one without imports null
+- [x] A collected CPF imports with its type, and an invalid one is reported, not stored
+
+## Comments
+
+- **2026-10-12, built.** `ShopifySource` now asks for `originalTotalDutiesSet` and
+  `localizedFields` on the order and sets `duties_terms: ddp` when the duties are above zero.
+  With no duties it leaves the key out rather than sending null, so a term a manager set
+  (say `ddu`) survives the next import; the cost is that a `ddp` stays if Shopify later
+  removes the duties. `SHIPPING_CREDENTIAL_KR` imports as a PCCC and
+  `SHIPPING_CREDENTIAL_BR` (or `TAX_CREDENTIAL_BR`) as a CPF, or a CNPJ at 14 characters;
+  `ShipmentRowPreparer` does the format check, so a bad ID imports the order with a warning
+  and no ID. Tests in `ShopifyCustomsFieldsImportTest`. Not run against the dev store: a
+  sync would update shipments 7198-7200 in the local database. `read_orders`, already
+  required by the install guide, covers the new fields. Left for a human: sync once and
+  check 7198-7200 show `ddp` and the BR and KR IDs; a CNPJ order and a duties-included
+  order are still untested against Shopify.

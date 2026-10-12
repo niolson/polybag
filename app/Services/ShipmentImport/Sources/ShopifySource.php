@@ -7,6 +7,8 @@ use App\Contracts\ExportDestinationInterface;
 use App\Contracts\ReconcilesSupersededRecords;
 use App\DataTransferObjects\ShipmentImport\ShopifyFulfillmentOrderIdentity;
 use App\DataTransferObjects\ShipmentImport\ShopifyMetafieldReference;
+use App\Enums\DutiesTerms;
+use App\Enums\RecipientTaxIdType;
 use App\Enums\ShopifyMetafieldOwner;
 use App\Exceptions\PermanentExportException;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
@@ -115,6 +117,8 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
               order {
                 id name email
                 shippingAddress { provinceCode zip }
+                originalTotalDutiesSet { shopMoney { amount } }
+                localizedFields(first: 10) { nodes { key value } }
               }
               destination {
                 firstName lastName company address1 address2
@@ -537,6 +541,7 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
             * (int) ($item['remainingQuantity'] ?? 0));
 
         return [
+            ...$this->customsFields($order),
             'source_record_id' => $fulfillmentOrder['id'],
             'shipment_reference' => $order['name'] ?? $fulfillmentOrder['id'],
             'first_name' => $destination['firstName'] ?? null,
@@ -580,6 +585,42 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
                 ),
             ],
         ];
+    }
+
+    /**
+     * The customs terms an order states: DDP when Shopify charged duties at
+     * checkout, and the tax ID the buyer gave for Brazil or South Korea.
+     *
+     * A key is left out when the order says nothing, so a value a manager set
+     * on the Shipment survives the next import. Charging no duties is not a
+     * decision to ship DDU, so DDP is the only term this sets.
+     * `Order.dutiesIncluded` is not the test: it describes duties-included
+     * pricing and is false on an order that was charged duties.
+     *
+     * @param  array<string, mixed>  $order
+     * @return array<string, string>
+     */
+    private function customsFields(array $order): array
+    {
+        $fields = [];
+
+        if ((float) data_get($order, 'originalTotalDutiesSet.shopMoney.amount', 0) > 0) {
+            $fields['duties_terms'] = DutiesTerms::Ddp->value;
+        }
+
+        $credentials = collect(data_get($order, 'localizedFields.nodes', []))
+            ->filter(fn (mixed $field): bool => is_array($field) && filled($field['value'] ?? null))
+            ->mapWithKeys(fn (array $field): array => [(string) ($field['key'] ?? '') => trim((string) $field['value'])]);
+
+        if (filled($pccc = $credentials->get('SHIPPING_CREDENTIAL_KR'))) {
+            $fields += ['recipient_tax_id_type' => RecipientTaxIdType::Pccc->value, 'recipient_tax_id' => $pccc];
+        } elseif (filled($brazil = $credentials->get('SHIPPING_CREDENTIAL_BR') ?? $credentials->get('TAX_CREDENTIAL_BR'))) {
+            // One Shopify field holds a CPF or a CNPJ; its length tells them apart.
+            $type = strlen(RecipientTaxIdType::Cnpj->normalize($brazil)) === 14 ? RecipientTaxIdType::Cnpj : RecipientTaxIdType::Cpf;
+            $fields += ['recipient_tax_id_type' => $type->value, 'recipient_tax_id' => $brazil];
+        }
+
+        return $fields;
     }
 
     /**
