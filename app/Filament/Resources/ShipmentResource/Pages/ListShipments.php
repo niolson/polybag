@@ -82,7 +82,7 @@ class ListShipments extends ListRecords
                     'all' => 'All',
                     ShipmentStatus::Open->value => 'Open',
                     ShipmentStatus::Shipped->value => 'Shipped',
-                    ShipmentStatus::Void->value => 'Void',
+                    ShipmentStatus::Cancelled->value => 'Cancelled',
                 ],
             ],
             [
@@ -108,7 +108,7 @@ class ListShipments extends ListRecords
         return match ($this->activeStatusTab) {
             ShipmentStatus::Open->value => $query->where('status', ShipmentStatus::Open),
             ShipmentStatus::Shipped->value => $query->where('status', ShipmentStatus::Shipped),
-            ShipmentStatus::Void->value => $query->where('status', ShipmentStatus::Void),
+            ShipmentStatus::Cancelled->value => $query->where('status', ShipmentStatus::Cancelled),
             default => $query,
         };
     }

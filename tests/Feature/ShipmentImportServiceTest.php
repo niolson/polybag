@@ -5,6 +5,7 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\Enums\Deliverability;
 use App\Enums\Role;
 use App\Enums\ShipmentStatus;
+use App\Enums\ShipmentStatusOrigin;
 use App\Models\AddressValidationAnswer;
 use App\Models\Channel;
 use App\Models\ChannelAlias;
@@ -1373,6 +1374,24 @@ it('does not mark an open shipment shipped when packing has begun', function ():
     expect($result->shipmentsSkipped)->toBe(1)
         ->and($result->shipmentsUpdated)->toBe(0)
         ->and($shipment->fresh()->status)->toBe(ShipmentStatus::Open);
+});
+
+it('records a status the source closed as the source\'s, and leaves an open one without an origin', function (): void {
+    ShipmentImportService::forSource(fakeSource(collect([onExistingRow()])), $this->dataSource)->import();
+
+    $shipment = Shipment::where('shipment_reference', 'ORD-EXIST-001')->firstOrFail();
+    expect($shipment->status_origin)->toBeNull();
+
+    ShipmentImportService::forSource(
+        fakeSource(collect([onExistingRow(['_import_status' => ShipmentStatus::Shipped->value])])),
+        $this->dataSource,
+    )->import();
+
+    $fresh = $shipment->fresh();
+
+    expect($fresh->status)->toBe(ShipmentStatus::Shipped)
+        ->and($fresh->status_origin)->toBe(ShipmentStatusOrigin::Source)
+        ->and($fresh->status_changed_at)->not->toBeNull();
 });
 
 it('treats item changes as source changes for update-if-changed', function (): void {

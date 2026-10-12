@@ -19,7 +19,7 @@ class PurgePiiCommand extends Command
                             {--dry-run : Show what would be purged without making changes}
                             {--channel= : Only purge shipments for a specific channel ID}';
 
-    protected $description = 'Purge recipient PII from shipped and void shipments after their retention period';
+    protected $description = 'Purge recipient PII from shipped and cancelled shipments after their retention period';
 
     public function handle(SettingsService $settings): int
     {
@@ -87,6 +87,7 @@ class PurgePiiCommand extends Command
         }
 
         $breakdown = collect($byStatus)
+            ->sortKeys()
             ->map(fn (int $statusCount, string $status): string => "{$statusCount} {$status}")
             ->implode(', ');
 
@@ -111,13 +112,13 @@ class PurgePiiCommand extends Command
      *  - A `shipped` Shipment counts from its latest shipped Package's
      *    `shipped_at`, or from its `updated_at` when it has no shipped Package
      *    (a historical import, or one marked shipped by hand).
-     *  - A `void` Shipment counts from its `updated_at`, the nearest record of
-     *    when it became void, and from any Package it shipped before that.
+     *  - A `cancelled` Shipment counts from its `updated_at`, the nearest record of
+     *    when it was cancelled, and from any Package it shipped before that.
      *  - An `open` Shipment is never purged: it is still work.
      *
      * Only a shipped Package counts, because a Package's status projects its
      * active Label. A draft, or a Package whose Label was voided, holds no
-     * Label to wait for, so it does not keep a shipped or void Shipment's PII.
+     * Label to wait for, so it does not keep a shipped or cancelled Shipment's PII.
      *
      * @return Builder<Shipment>
      */
@@ -127,7 +128,7 @@ class PurgePiiCommand extends Command
             ->when($channelId !== null, fn (Builder $q) => $q->where('channel_id', $channelId))
             ->when($channelId === null, fn (Builder $q) => $q->whereNull('channel_id'))
             ->whereNull('pii_purged_at')
-            ->whereIn('status', [ShipmentStatus::Shipped, ShipmentStatus::Void])
+            ->whereIn('status', [ShipmentStatus::Shipped, ShipmentStatus::Cancelled])
             ->whereDoesntHave('packages', fn (Builder $q) => $q
                 ->where('status', PackageStatus::Shipped)
                 ->where(fn (Builder $q) => $q->whereNull('shipped_at')->orWhere('shipped_at', '>', $cutoff)))

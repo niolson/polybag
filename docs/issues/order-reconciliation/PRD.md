@@ -21,10 +21,12 @@ twice.
   `includeClosed: false` on each run. Amazon reads `UNSHIPPED`/`PARTIALLY_SHIPPED` orders
   updated within the connection's `lookback_days`. An order fulfilled elsewhere or
   cancelled just drops out of the feed, and nothing changes locally.
-- **A Database source can report a status, but it is dropped once there is a Package.**
-  `ShipmentBatchWriter::shouldUpdate()` refuses to move an open Shipment off `open` when
-  it has any Package, a Package Draft included. That protects packed work, but it also
-  drops a cancellation without telling anyone.
+- **A Database source cannot report a status at all.** Its field mapping has no status
+  field; only the historical Amazon import sends one (`_import_status`). And even that is
+  dropped once there is a Package: `ShipmentBatchWriter::shouldUpdate()` refuses to move
+  an open Shipment off `open` when it has any Package, a Package Draft included.
+  (Corrected 2026-10-12 while building `02`; the first draft said a Database source could
+  report a status.)
 - **`ShopifyFulfillmentSynchronizer` only covers Labels bought through Shopify Shipping.**
   Every fifteen minutes it asks Shopify whether those Labels were voided in the Shopify
   admin and where the parcels are. It never looks at the order, and never looks at
@@ -90,8 +92,8 @@ no extra code.
   stopped: until delivery, bounded by the same day window the Shopify synchronizer uses.
   For Shopify that is a separate check on those orders' cancellation, because a shipped
   order is not in the open fulfillment-order set to go missing from it.
-- **Database.** When the field mapping supplies a status, apply it instead of dropping
-  it (decision 4 covers Shipments that have a Package).
+- **Database.** Add a status field to the field mapping, and apply it instead of
+  dropping it (decision 4 covers Shipments that have a Package).
 
 ### 3. PolyBag recognizes its own fulfillments
 
@@ -206,13 +208,13 @@ known, so the slice starts with a probe.
 | # | Issue | Status | Needs |
 |---|---|---|---|
 | [01](issues/01-show-where-each-void-came-from.md) | Show where each void came from | `ready-for-agent` | — |
-| [02](issues/02-cancelled-status-origin-and-review-flag.md) | Rename `Void` to `Cancelled`; `status_origin`, external tracking, the review flag, and manager status changes | `ready-for-agent` | — |
+| [02](issues/02-cancelled-status-origin-and-review-flag.md) | Rename `Void` to `Cancelled`; `status_origin`, external tracking, the review flag, and manager status changes | `done` | — |
 | [03](issues/03-check-the-order-on-the-ship-page.md) | Check the order on the Ship page, alongside rate shopping | `ready-for-agent` | 02 |
 | [04](issues/04-check-orders-before-batch-and-auto-ship.md) | Check orders before batch ship and auto-ship, one lookup per connection | `ready-for-agent` | 03, 07 |
 | [05](issues/05-warn-on-the-pack-page.md) | Warn on the Pack page when the order is closed | `ready-for-agent` | 03 |
 | [06](issues/06-shopify-reconciliation-on-import.md) | Shopify reconciliation on import | `ready-for-agent` | 02, 03 |
 | [07](issues/07-amazon-reconciliation-on-import.md) | Amazon reconciliation on import | `ready-for-agent` | 02, 03 |
-| [08](issues/08-database-sources-apply-a-reported-status.md) | Database sources apply a reported status | `ready-for-agent` | 02 |
+| [08](issues/08-database-sources-apply-a-reported-status.md) | Database sources report and apply a status | `ready-for-agent` | 02 |
 | [09](issues/09-detect-buy-shipping-labels-voided-in-seller-central.md) | Detect Buy Shipping Labels voided in Seller Central | `ready-for-human` | — |
 | [10](issues/10-shopify-webhooks.md) | Shopify webhooks for hosted instances, then slow the backstop poll | `needs-triage` | 06 |
 

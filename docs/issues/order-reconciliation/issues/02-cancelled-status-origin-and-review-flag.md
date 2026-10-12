@@ -1,6 +1,6 @@
 # Rename `Void` to `Cancelled`; add `status_origin`, external tracking, a review flag, and manager status changes
 
-Status: ready-for-agent
+Status: done — 2026-10-12
 Category: enhancement
 Repo: `polybag`
 
@@ -22,8 +22,8 @@ for: `Pack` only warns about `shipped`, and `BatchLabelService` only skips `ship
 
 **Status.** `ShipmentStatus::Void` becomes `Cancelled`, value `cancelled` and label both,
 with a data migration (no live tenants, so nothing else). Grep for `Void`/`'void'` on
-Shipment status everywhere, including `PurgePiiCommand`, filters and the Database
-import's status mapping; a Database source that sends `void` still maps to `Cancelled`.
+Shipment status everywhere, including `PurgePiiCommand` and filters. (The Database
+import has no status mapping to update; see the comments.)
 
 **Origin.** A `status_origin` enum column on `shipments`: `polybag`, `source`, `manager`.
 Shipping through PolyBag sets `polybag`. Existing shipped rows backfill to `polybag`,
@@ -48,8 +48,8 @@ Shown as a badge on the Shipments list and view, with a filter, and counted on
 `ExceptionsWidget` linking to that filter. A Manager or Admin can clear it, audit-logged.
 
 **Closed Shipments cannot be bought for.** A `Cancelled` Shipment is refused on the Ship
-page, skipped by batch ship and auto-ship, and blocked from Pack for a shipper; a Manager
-or Admin opening Pack sees why. A Package Draft on a closed Shipment is kept, so it can
+page, skipped by batch ship and auto-ship, and blocked from Pack for everyone, with a
+message that a manager can reopen it from the Shipment page. A Package Draft on a closed Shipment is kept, so it can
 be unpacked, but nothing can be bought for it.
 
 **Manager status changes.** A Manager or Admin can set any status on the Shipment form;
@@ -60,12 +60,50 @@ and when ("Shopify reported this order cancelled on 12 Oct"), from the audit tra
 
 ## Acceptance criteria
 
-- [ ] `Cancelled` replaces `Void` everywhere, with a data migration and tests updated
-- [ ] `status_origin`, `external_carrier`, `external_tracking_number`, `review_reason`,
+- [x] `Cancelled` replaces `Void` everywhere, with a data migration and tests updated
+- [x] `status_origin`, `external_carrier`, `external_tracking_number`, `review_reason`,
       `review_flagged_at` columns, factory states and casts
-- [ ] Shipments list and view show origin, external tracking and the review badge; a
+- [x] Shipments list and view show origin, external tracking and the review badge; a
       filter for each; `ExceptionsWidget` counts flagged Shipments
-- [ ] A `Cancelled` Shipment is refused on Ship, skipped by batch and auto-ship, and
+- [x] A `Cancelled` Shipment is refused on Ship, skipped by batch and auto-ship, and
       blocked on Pack for a shipper (tests for each path)
-- [ ] Only Manager/Admin can change status or clear a flag; the source-closed message
+- [x] Only Manager/Admin can change status or clear a flag; the source-closed message
       shows when `status_origin` is `source`; both audit-logged
+
+## Comments
+
+**2026-10-12 — built.**
+
+- `ShipmentStatus::Cancelled` (`cancelled`) replaces `Void`; the migration renames the
+  rows and backfills `status_origin`: cancelled → `manager` (only the form ever set
+  `void`), shipped with a shipped Package → `polybag`, shipped without one → `source`
+  (the historical Amazon import).
+- New columns on `shipments`: `status_origin`, `status_changed_at` (stamped by the model
+  whenever `status` changes, and by the import writer, which bypasses model events),
+  `external_carrier`, `external_tracking_number` (indexed, in global search),
+  `review_reason` and `review_flagged_at`. Enums `ShipmentStatusOrigin` and
+  `ShipmentReviewReason`; `Shipment::flagForReview()`, `clearReviewFlag()`,
+  `wasClosedBySource()` and the `flaggedForReview` scope are what later slices call.
+- An open Shipment has no origin unless a manager reopened it. Shipping through a Label
+  records `polybag`; a void that reopens the Shipment clears the origin.
+- The refusal of a cancelled order is in `EloquentPackageShippingWorkflow::notReadyToShip()`,
+  read from the database, so it covers the Ship page, auto-ship and batch ship (each Package
+  goes through it) whatever a stale page holds. `BatchLabelService` also skips it up front
+  as "Order cancelled".
+- **Deviation:** Pack blocks a cancelled order for every role, not only shippers. Nothing
+  can be bought for it, so letting a manager pack it only wastes work; a manager who
+  disagrees with the source reopens it on the Shipment form, which records `manager`.
+- Manager status changes: the status field was already Manager/Admin-only (the edit
+  page is behind `ShipmentPolicy::update`). Saving a changed status records `manager`
+  and a `ShipmentUpdated` audit row with the old and new status and origin. When the
+  source closed the order, the field says which connection and when.
+- The review flag shows as a badge on the list and view, has a list filter, and is
+  counted on `ExceptionsWidget` (cache key now `v4`). *Clear Review Flag* on the view is
+  Manager/Admin-only and audit-logged.
+- `PurgePiiCommand` does not null `external_tracking_number`: like a Label's tracking
+  number it is not recipient data (said on `Shipment::PII_FIELDS`). Its dry-run breakdown is now sorted by status.
+- **Found:** a Database source has no status mapping at all, contrary to the PRD's first
+  draft. `08` now adds the field. The import writer stamps `source` on any row it closes,
+  so `08` only has to supply the value.
+- Tests: `tests/Feature/ShipmentStatusOriginTest.php`, plus updates to `PurgePiiTest`,
+  `ExceptionsWidgetTest` and `ShipmentImportServiceTest`. Full suite green (4865).

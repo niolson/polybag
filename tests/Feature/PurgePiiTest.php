@@ -6,7 +6,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Backdate a Shipment's last update, the clock for a void one.
+ * Backdate a Shipment's last update, the clock for a cancelled one.
  */
 function lastUpdated(Shipment $shipment, Carbon $at): Shipment
 {
@@ -98,9 +98,9 @@ it('purges a company-only shipment once, and marks it purged', function (): void
         ->assertSuccessful();
 });
 
-it('purges a void shipment past retention from its last update', function (): void {
+it('purges a cancelled shipment past retention from its last update', function (): void {
     $shipment = lastUpdated(
-        Shipment::factory()->void()->create(['channel_id' => null, 'recipient_tax_id' => '12345678909']),
+        Shipment::factory()->cancelled()->create(['channel_id' => null, 'recipient_tax_id' => '12345678909']),
         now()->subDays(120),
     );
 
@@ -113,9 +113,9 @@ it('purges a void shipment past retention from its last update', function (): vo
         ->and($shipment->pii_purged_at)->not->toBeNull();
 });
 
-it('keeps a void shipment updated inside the retention period', function (): void {
+it('keeps a cancelled shipment updated inside the retention period', function (): void {
     $shipment = lastUpdated(
-        Shipment::factory()->void()->create(['channel_id' => null]),
+        Shipment::factory()->cancelled()->create(['channel_id' => null]),
         now()->subDays(5),
     );
 
@@ -124,9 +124,9 @@ it('keeps a void shipment updated inside the retention period', function (): voi
     expect($shipment->refresh()->first_name)->not->toBeNull();
 });
 
-it('keeps a void shipment whose package shipped inside the retention period', function (): void {
+it('keeps a cancelled shipment whose package shipped inside the retention period', function (): void {
     $shipment = lastUpdated(
-        Shipment::factory()->void()->create(['channel_id' => null]),
+        Shipment::factory()->cancelled()->create(['channel_id' => null]),
         now()->subDays(120),
     );
 
@@ -213,16 +213,16 @@ it('counts every eligible shipment on a dry run without purging', function (): v
         'shipment_id' => $shipped->id,
         'shipped_at' => now()->subDays(120),
     ]);
-    $void = lastUpdated(Shipment::factory()->void()->create(['channel_id' => null]), now()->subDays(120));
+    $cancelled = lastUpdated(Shipment::factory()->cancelled()->create(['channel_id' => null]), now()->subDays(120));
 
     $this->artisan('shipments:purge-pii', ['--dry-run' => true])
-        ->expectsOutputToContain('2 shipment(s) eligible (1 shipped, 1 void')
+        ->expectsOutputToContain('2 shipment(s) eligible (1 cancelled, 1 shipped')
         ->expectsOutputToContain('2 shipment(s) would be purged')
         ->assertSuccessful();
 
     expect($shipped->refresh()->address1)->not->toBeNull()
         ->and($shipped->pii_purged_at)->toBeNull()
-        ->and($void->refresh()->first_name)->not->toBeNull();
+        ->and($cancelled->refresh()->first_name)->not->toBeNull();
 });
 
 it('marks shipments an earlier purge cleared, so they are not purged again', function (): void {

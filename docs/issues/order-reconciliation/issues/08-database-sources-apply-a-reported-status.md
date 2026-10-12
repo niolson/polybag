@@ -1,4 +1,4 @@
-# Database sources apply a reported status
+# Database sources report and apply a status
 
 Status: ready-for-agent
 Category: enhancement
@@ -12,13 +12,22 @@ Repo: `polybag`
 
 ## Problem
 
-A Database source can report a status, but `ShipmentBatchWriter::shouldUpdate()` refuses
-to move an open Shipment off `open` once it has any Package, a Package Draft included,
-and drops the change without telling anyone.
+A Database source cannot report a status: the field mapping has no status field. Only
+the historical Amazon import sends one (`_import_status`, read by
+`ShipmentRowPreparer`). And `ShipmentBatchWriter::shouldUpdate()` refuses to move an open
+Shipment off `open` once it has any Package, a Package Draft included, dropping the
+change without telling anyone.
 
 ## Desired behavior
 
-When the field mapping supplies a status, apply it with `status_origin = source`:
+**A status field.** A `status` mapping field on Database sources, taking `open`,
+`shipped` and `cancelled` (and `void` as an alias for `cancelled`, the old name). An
+unknown value is reported per row and treated as absent. Optional `external_carrier`
+and `external_tracking_number` fields go with it. `docs/data-sources/database.md`
+documents all three.
+
+When the mapping supplies a status, apply it with `status_origin = source`. `02` already
+stamps `source` on any row the import closes (`ShipmentBatchWriter`):
 
 - No Package: applied as today.
 - A Package Draft and nothing bought: applied; draft kept; `review_reason =
@@ -36,6 +45,8 @@ The import result reports how many Shipments were closed and flagged.
 
 ## Acceptance criteria
 
+- [ ] A `status` mapping field (plus external carrier and tracking), with an unknown
+      value reported per row
 - [ ] `shouldUpdate()` no longer drops a status change for a Shipment with a Package;
       each case above tested
 - [ ] Import result counts closed and flagged Shipments
