@@ -6,6 +6,7 @@ use App\DataTransferObjects\Shipping\PackageData;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Models\Package;
 use App\Services\Carriers\FakeCarrierAdapter;
 use Carbon\CarbonImmutable;
 use Smalot\PdfParser\Parser;
@@ -175,3 +176,35 @@ it('prints no customs paperwork for a domestic label', function (string $carrier
     expect($response->customsFormData)->toBeNull()
         ->and(samplePdfPages($response->labelData))->toHaveCount(1);
 })->with(['USPS', 'UPS']);
+
+it('offers a manifest only where the real carrier runs one', function (): void {
+    expect((new FakeCarrierAdapter('USPS'))->supportsCarrierManifest())->toBeTrue()
+        ->and((new FakeCarrierAdapter('UPS'))->supportsCarrierManifest())->toBeFalse()
+        ->and((new FakeCarrierAdapter('FedEx'))->supportsCarrierManifest())->toBeFalse();
+});
+
+it('produces a sample end-of-day form listing every package', function (): void {
+    $packages = collect(range(1, 45))->map(fn (int $n): Package => new Package([
+        'tracking_number' => sprintf('9400SAMPLE%04d', $n),
+        'service' => 'Ground Advantage',
+        'weight' => 1.25,
+    ]));
+
+    $response = (new FakeCarrierAdapter('USPS'))->createCarrierManifest(
+        $packages,
+        sampleShipRequest()->fromAddress,
+        CarbonImmutable::parse('2026-10-14'),
+    );
+    $pages = samplePdfPages($response->image);
+
+    expect($response->success)->toBeTrue()
+        ->and($response->manifestNumber)->toStartWith('SAMPLE-20261014-')
+        ->and($pages)->toHaveCount(2)
+        ->and($pages[0])->toContain('USPS END-OF-DAY MANIFEST')
+        ->toContain('45 package(s)')
+        ->toContain('SAMPLE END-OF-DAY FORM')
+        ->toContain('9400SAMPLE0001')
+        ->toContain('100 WAREHOUSE WAY')
+        ->and($pages[1])->toContain('9400SAMPLE0045')
+        ->toContain('Page 2 of 2');
+});

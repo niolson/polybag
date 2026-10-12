@@ -2,10 +2,12 @@
 
 namespace App\Services\Carriers;
 
+use App\Contracts\CreatesCarrierManifest;
 use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\UsesCarrierAccount;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
+use App\DataTransferObjects\Shipping\ManifestResponse;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
@@ -25,18 +27,19 @@ use App\Services\Carriers\Samples\SampleCanvas;
 use App\Services\Carriers\Samples\SampleDocuments;
 use App\Services\Carriers\Samples\SamplePdfWriter;
 use App\Services\Carriers\Samples\SampleZplWriter;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Saloon\Http\Response;
 
 /**
- * A carrier that quotes, sells and voids without calling anyone,
+ * A carrier that quotes, sells, voids and manifests without calling anyone,
  * for `FAKE_CARRIERS=true` demos and for tests that register it themselves.
  *
  * What it prints is built from the order at purchase time and is plainly a
  * sample: see {@see SampleDocuments} for what keeps it from passing as
  * postage.
  */
-class FakeCarrierAdapter implements DirectCarrierAdapter, UsesCarrierAccount
+class FakeCarrierAdapter implements CreatesCarrierManifest, DirectCarrierAdapter, UsesCarrierAccount
 {
     use ConsultsCarrierPolicyForOffers;
     use HasDefaultServiceCapabilities;
@@ -206,6 +209,21 @@ class FakeCarrierAdapter implements DirectCarrierAdapter, UsesCarrierAccount
     }
 
     /**
+     * A sample end-of-day form listing the Packages, numbered so it cannot
+     * collide with a real one. Nothing is sent anywhere.
+     */
+    public function createCarrierManifest(Collection $packages, AddressData $fromAddress, CarbonImmutable $mailingDate): ManifestResponse
+    {
+        $manifestNumber = sprintf('SAMPLE-%s-%04d', $mailingDate->format('Ymd'), random_int(0, 9999));
+
+        return ManifestResponse::success(
+            manifestNumber: $manifestNumber,
+            carrier: $this->carrierName,
+            image: $this->pdf((new SampleDocuments)->manifest($this->carrierName, $manifestNumber, $fromAddress, $mailingDate, $packages)),
+        );
+    }
+
+    /**
      * @param  list<SampleCanvas>  $pages
      * @return string Base64 of the PDF
      */
@@ -234,9 +252,13 @@ class FakeCarrierAdapter implements DirectCarrierAdapter, UsesCarrierAccount
         return false;
     }
 
+    /**
+     * Only USPS runs a manifest program, as for the real carriers, so End of
+     * Day offers the sample form where it would offer a SCAN form.
+     */
     public function supportsCarrierManifest(): bool
     {
-        return false;
+        return $this->carrierName === Carrier::USPS;
     }
 
     public function packagingRequirementFor(RateResponse $rate): PackagingRequirement
