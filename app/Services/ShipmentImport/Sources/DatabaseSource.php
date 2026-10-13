@@ -2,12 +2,16 @@
 
 namespace App\Services\ShipmentImport\Sources;
 
+use App\Contracts\ClosesRecordsClosedAtSource;
 use App\Contracts\DataSourceInterface;
 use App\Contracts\ExportDestinationInterface;
 use App\DataTransferObjects\QueryPreviewResult;
+use App\DataTransferObjects\ShipmentImport\SourceClosureResult;
 use App\Enums\AuditAction;
 use App\Exceptions\PermanentExportException;
 use App\Models\AuditLog;
+use App\Models\DataSource;
+use App\Services\ShipmentImport\DatabaseClosedRecordCloser;
 use App\Services\ShipmentImport\FieldMapper;
 use App\Services\ShipmentImport\RawSqlGuard;
 use App\Services\SshTunnel;
@@ -17,13 +21,18 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 
-class DatabaseSource implements DataSourceInterface, ExportDestinationInterface
+class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface, ExportDestinationInterface
 {
     private array $config;
 
     private FieldMapper $fieldMapper;
 
     private ?SshTunnel $tunnel = null;
+
+    /** Status query executions this run, for its one audit entry. */
+    private int $statusLookups = 0;
+
+    private int $failedStatusLookups = 0;
 
     public function __construct(array $config)
     {
@@ -126,6 +135,73 @@ class DatabaseSource implements DataSourceInterface, ExportDestinationInterface
         });
     }
 
+    /**
+     * Ask the status query about every Shipment of this source still open here,
+     * and close those it reports shipped or cancelled (`order-reconciliation/08`).
+     * Without a status query there is nothing to ask.
+     *
+     * The query runs once per open Shipment, so it is audited once per run
+     * rather than once per execution: the query, how many Shipments it asked
+     * about, and how many lookups failed.
+     */
+    public function closeRecordsClosedAtSource(DataSource $dataSource, Collection $shipments): SourceClosureResult
+    {
+        if (empty($this->config['status_query'])) {
+            return new SourceClosureResult;
+        }
+
+        $query = $this->normalizeQuery($this->config['status_query']);
+        RawSqlGuard::assertStatementType($query, RawSqlGuard::READ, 'status query');
+
+        $this->statusLookups = 0;
+        $this->failedStatusLookups = 0;
+
+        try {
+            return app(DatabaseClosedRecordCloser::class)->close(
+                $dataSource,
+                fn (string $sourceRecordId): array => $this->lookUpStatus($query, $sourceRecordId),
+            );
+        } finally {
+            $this->auditStatusLookups($query);
+        }
+    }
+
+    /**
+     * The run's one audit entry for the status query, when it ran at all.
+     */
+    private function auditStatusLookups(string $query): void
+    {
+        if ($this->statusLookups === 0) {
+            return;
+        }
+
+        $this->logQueryExecution(
+            'lookup_status',
+            $query,
+            ['shipment_reference'],
+            $this->failedStatusLookups > 0 ? 'failed' : 'success',
+            ['shipments_checked' => $this->statusLookups, 'failed_lookups' => $this->failedStatusLookups],
+        );
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function lookUpStatus(string $query, string $sourceRecordId): array
+    {
+        $this->statusLookups++;
+
+        try {
+            $rows = DB::connection($this->config['connection'])->select($query, ['shipment_reference' => $sourceRecordId]);
+        } catch (\Throwable $e) {
+            $this->failedStatusLookups++;
+
+            throw $e;
+        }
+
+        return array_values(array_map(fn (object|array $row): array => (array) $row, $rows));
+    }
+
     public function getFieldMapping(): array
     {
         return $this->config['field_mapping'] ?? [];
@@ -172,6 +248,8 @@ class DatabaseSource implements DataSourceInterface, ExportDestinationInterface
         $shipments = [];
         $items = [];
         $itemsReference = null;
+        $statusRows = [];
+        $statusReference = null;
         $errors = [];
 
         try {
@@ -197,9 +275,19 @@ class DatabaseSource implements DataSourceInterface, ExportDestinationInterface
                     $errors['Items query'] = $e->getMessage();
                 }
             }
+
+            if ($reference !== null && ! empty($this->config['status_query'])) {
+                $statusReference = $reference;
+
+                try {
+                    $statusRows = $this->previewStatusRows($reference, $limit);
+                } catch (\Throwable $e) {
+                    $errors['Status query'] = $e->getMessage();
+                }
+            }
         }
 
-        return new QueryPreviewResult($shipments, $items, $itemsReference, $errors);
+        return new QueryPreviewResult($shipments, $items, $itemsReference, $errors, $statusRows, $statusReference);
     }
 
     /**
@@ -277,6 +365,37 @@ class DatabaseSource implements DataSourceInterface, ExportDestinationInterface
         return array_map(fn (array $row): array => [
             'raw' => $row,
             'mapped' => $this->fieldMapper->mapShipmentItem($row),
+        ], $rows);
+    }
+
+    /**
+     * The status query's rows for the previewed shipment. It has no field
+     * mapping, so the "mapped" side is just the columns the lookup reads, found
+     * by name ignoring case: empty when the query's aliases are wrong.
+     *
+     * @return list<array{raw: array<string, mixed>, mapped: array<string, mixed>}>
+     */
+    private function previewStatusRows(string $sourceRecordId, int $limit): array
+    {
+        $query = $this->normalizeQuery($this->config['status_query']);
+        RawSqlGuard::assertStatementType($query, RawSqlGuard::READ, 'status query');
+
+        // As for the items preview, the bound reference stays out of the audit.
+        $rows = $this->executeLogged(
+            'preview_status',
+            $query,
+            ['shipment_reference'],
+            fn (): array => $this->fetchBoundedRows($query, ['shipment_reference' => $sourceRecordId], $limit),
+            [],
+            fn (array $rows): array => ['preview_rows' => count($rows)],
+        );
+
+        return array_map(fn (array $row): array => [
+            'raw' => $row,
+            'mapped' => array_intersect_key(
+                array_change_key_case($row, CASE_LOWER),
+                array_flip(DatabaseClosedRecordCloser::COLUMNS),
+            ),
         ], $rows);
     }
 

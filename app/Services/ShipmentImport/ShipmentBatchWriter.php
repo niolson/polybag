@@ -72,6 +72,13 @@ class ShipmentBatchWriter
                 continue;
             }
 
+            // A manager's status change wins (`order-reconciliation` decision 7):
+            // a Shipment they reopened keeps its status, and the rest of the
+            // row still updates.
+            if ($existing->status === ShipmentStatus::Open && $existing->status_origin === ShipmentStatusOrigin::Manager) {
+                $row['status'] = ShipmentStatus::Open->value;
+            }
+
             if ($this->shouldUpdate($existing, $row, $behavior)) {
                 foreach ($preserveExistingFields as $field) {
                     if (is_string($field) && in_array($field, self::PRESERVABLE_FIELDS, true)) {
@@ -144,10 +151,10 @@ class ShipmentBatchWriter
             Shipment::whereIn('id', $remethodedIds)->update(['validation_attempted_at' => null]);
         }
 
-        // A status the source wrote is the source's (`order-reconciliation/02`),
-        // whoever set the one before: a closed row here is a closure applied by
-        // this import, since `shouldUpdate()` never rewrites a closed Shipment.
-        // That includes one a manager reopened, whose `manager` origin it replaces.
+        // A status the source wrote is the source's (`order-reconciliation/02`):
+        // a closed row here is a closure applied by this import, since
+        // `shouldUpdate()` never rewrites a closed Shipment, and a reopened one
+        // was written back as open above.
         $closedSourceRecordIds = array_column(array_filter(
             $rowsToWrite,
             fn (array $row): bool => ($row['status'] ?? ShipmentStatus::Open->value) !== ShipmentStatus::Open->value,

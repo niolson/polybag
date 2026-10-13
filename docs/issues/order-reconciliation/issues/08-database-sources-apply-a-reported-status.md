@@ -1,6 +1,6 @@
-# Database sources report and apply a status
+# Database sources: close the Shipments the source closed, on import
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -8,53 +8,144 @@ Repo: `polybag`
 
 ## Parent
 
-[PRD](../PRD.md), decisions 2, 4 and 7. Needs `02` (done). Trimmed 2026-10-13 with the
-PRD: no review flag, and a manager's reopen wins.
+[PRD](../PRD.md), decisions 2, 3, 4 and 7. Needs `02` (done). Reuses `06`'s
+`SourceClosureApplier`. Rewritten 2026-10-13 (see Comments).
 
 ## Problem
 
-A Database source cannot report a status: the field mapping has no status field. Only
-the historical Amazon import sends one (`_import_status`, read by
-`ShipmentRowPreparer`). And `ShipmentBatchWriter::shouldUpdate()` refuses to move an open
-Shipment off `open` once it has any Package, a Package Draft included, dropping the
-change without telling anyone.
+A Database source cannot tell PolyBag an order was cancelled or shipped elsewhere, and a
+status column in `shipments_query` would not fix that. The documented pattern reads each
+row once: the query filters on a flag such as `wms_exported_at IS NULL`, and
+`mark_exported_query` sets it after import. A row that later changes to cancelled is never
+read again. The query gets no bound parameters, so it cannot ask for rows updated since
+the last run either.
 
 ## Desired behavior
 
-**A status field.** A `status` mapping field on Database sources, taking `open`,
-`shipped` and `cancelled` (and `void` as an alias for `cancelled`, the old name). An
-unknown value is reported per row and treated as absent. Optional `external_carrier`
-and `external_tracking_number` fields go with it. `docs/data-sources/database.md`
-documents all three.
+**A status lookup query.** An optional **Status Query** (`status_query`) in the Database
+Connection section: one `SELECT` with `:shipment_reference` bound, exactly as
+`shipment_items_query` takes it, and checked by `RawSqlGuard` like the other reads. When
+it is set, `DatabaseSource` implements `ClosesRecordsClosedAtSource`: after each import
+whose fetch completed, it runs the query once per open Shipment of this source, except one
+a manager reopened (decision 7, which `SourceClosureApplier` enforces anyway), and closes
+those the source closed through `SourceClosureApplier`.
 
-When the mapping supplies a status, apply it with `status_origin = source`. `02` already
-stamps `source` on any row the import closes (`ShipmentBatchWriter`):
+The query returns these columns, by name; there is no field mapping for it:
 
-- No Package: applied as today.
-- A Package Draft and nothing bought: applied, and the draft is kept (decision 4).
-- Already `Shipped` or `Cancelled` here: nothing, as today, since `shouldUpdate()` never
-  rewrites a closed Shipment. A cancellation after PolyBag shipped is not acted on.
-- A Shipment a manager reopened (`Open`, `status_origin = manager`): its status is left
-  alone, and the rest of the row still updates (decision 7). This reverses part of `02`'s
-  review fix, which let the writer close it again. A Database row goes on reporting the
-  status the manager overrode, so every run would undo them.
+| Column | |
+| --- | --- |
+| `status` | Required. `open`, `shipped` or `cancelled`, ignoring case; `void` is an alias for `cancelled` |
+| `external_carrier` | Optional |
+| `external_tracking_number` | Optional |
 
-The import result reports how many Shipments were closed.
+A source's own values are translated in the SQL with `CASE`, not by a value-mapping
+setting. Everyone configuring this driver already writes SQL.
 
-`docs/data-sources/database.md` documents the new behavior.
+**What each answer does:**
+
+| The query returns | Result |
+| --- | --- |
+| Rows whose `status` is `cancelled` | `SourceOrderReport::cancelled()` |
+| Rows whose `status` is `shipped` | `SourceOrderReport::shipped()`, one `SourceParcel` per row that has a tracking number or carrier |
+| Rows whose `status` is `open` | No change |
+| Rows that disagree on `status`, or an unknown value | No change; reported as a run error naming the Shipment |
+| No row | No change. See *Deferred* |
+| An exception | Recorded as a run error; the lookup stops for this run, since a broken query fails the same way for every Shipment |
+
+Several rows are allowed so that a source with one row per parcel can list them all.
+Decision 3's tracking number rule matters here more than anywhere: `export_query` usually
+writes PolyBag's own tracking number back to the table this query reads. A Shipment
+whose source lists only PolyBag's parcels stays as it is, and a voided Label's parcel
+keeps the Shipment open to ship again.
+
+**Audit.** Each Database query execution is audit-logged today, which would write one row
+per open Shipment per run. Log the lookup once per run instead: the query's identity, how
+many Shipments it asked about, and how many failed. Each query still goes through
+`RawSqlGuard`.
+
+**Preview.** **Preview Queries** runs the status query against the first previewed
+shipment's reference, as it does the items query.
+
+**The import result** reports how many Shipments were closed (`shipments_closed`, which
+`ShipmentImportService` already records from `SourceClosureResult`).
+
+**The row path stays as it is,** apart from decision 7. `shipments_query` gets no status
+field. `_import_status`, sent only by the historical Amazon import, is the one status a row
+carries. `ShipmentBatchWriter` currently closes a manager-reopened Shipment when a row
+reports it closed, replacing the `manager` origin. It must leave that Shipment's status
+alone and still update the rest of the row, as decision 7 says of every import.
+
+### Docs
+
+`docs/data-sources/database.md`, section **Queries**, documents the status query:
+
+- **Contract.** The parameter, the columns, the outcomes table above, and that a missing
+  row changes nothing.
+- **A `CASE` example** for a status column with values like `new`, `picking`, `packing`,
+  `shipped`, `cancelled`, `delivered`, where `delivered` maps to `shipped` and the
+  working states map to `open`.
+- **A hold is not a cancellation.** Map one to `open`. An import never reopens a Shipment
+  it cancelled, so a hold mapped to `cancelled` stays cancelled when the hold is released.
+- **Cost.** It runs once per open Shipment each run, so the lookup column needs an index,
+  and **Scheduling** should count it in a run's length.
+- **Sources that delete rows.** A hard-deleted row is not a signal (see *Deferred*). Where
+  the ERP's DBA allows it, a delete trigger writing to a tombstone table, joined by the
+  status query to return `cancelled`, makes the deletion one. Where the ERP deletes a
+  shipment and recreates it under a new ID linked to the same order, the old Shipment stays
+  open beside the new one. Prefer a `shipment_reference` that survives the recreate, such
+  as the order number, when one order is never split across shipments.
+
+The worked example gains a status query for its `orders` table.
+
+## Deferred: a missing row as a cancellation
+
+Not built until a tenant needs it. Some ERPs hard-delete a shipment and recreate it under
+a new ID linked to the same order. PolyBag then holds two open Shipments for one order: the
+old one, with the old items and address, and the new one. Both can be packed and bought
+for, so the goods can ship twice. A tombstone table is the documented way round it, but
+needs a trigger in the tenant's ERP, which many will not allow.
+
+When a tenant needs it, add a per-source toggle "A missing row means the order was
+cancelled". Guard it: when no Shipment the run asked about returned a row, close none by
+absence and record an error, since that is a broken query or the wrong database rather
+than every order cancelled. A source that deletes and recreates under the *same*
+reference must not turn it on unless it recreates in one transaction, or a lookup between
+the delete and the insert cancels the Shipment for good. No other change is needed: the
+lookup already tells a missing row from a failed query.
 
 ## Acceptance criteria
 
-- [ ] A `status` mapping field (plus external carrier and tracking), with an unknown
-      value reported per row
-- [ ] `shouldUpdate()` no longer drops a status change for a Shipment with a Package
-      Draft; each case above tested
-- [ ] A manager-reopened Shipment keeps its status through an import that reports it
-      closed
-- [ ] Import result counts closed Shipments
-- [ ] Database source docs updated
+- [x] An optional `status_query` on Database sources, guarded, with `:shipment_reference`
+      bound; a `DatabaseSource` with one set implements `ClosesRecordsClosedAtSource`
+- [x] Each row of the outcomes table tested, including several parcel rows, a parcel that
+      is one of the Shipment's Labels, disagreeing rows and an unknown value
+- [x] A Shipment with a Package Draft closes and keeps the draft (decision 4)
+- [x] A manager-reopened Shipment is not looked up, and an import row reporting it closed
+      leaves its status alone and updates the rest of the row
+- [x] A failed query stops the lookup for the run and records one error
+- [x] The lookup writes one audit entry per run
+- [x] Preview runs the status query
+- [x] Database source docs updated, worked example included
 
 ## Comments
 
 - 2026-10-13 — Trimmed with the PRD. The review flag is gone, and a manager's reopen now
   wins over the row's status, instead of being compared with the last imported value.
+- 2026-10-13 — Rewritten. The first version put a `status` field in the shipments query's
+  field mapping, but the documented `mark_exported_query` pattern reads each row once, so
+  a later cancellation was never seen. A per-Shipment lookup works whatever the shipments
+  query does, as Shopify's does in `06`. A value-mapping setting was rejected in favor of
+  `CASE` in the query. Absence from a query that returns every open order was rejected:
+  it cannot tell shipped from cancelled, and a broken `WHERE` clause would cancel every
+  Shipment of the source. A missing lookup row as a cancellation is deferred (above). It
+  came from a real ERP that deleted and recreated shipments under new IDs before picking,
+  which worked only because its shipping software read the row when the shipment was
+  scanned.
+- 2026-10-13 — Built. `DatabaseClosedRecordCloser` asks the status query about each open
+  Shipment (`lazyById`) and hands its answer to `SourceClosureApplier`; `DatabaseSource`
+  always implements `ClosesRecordsClosedAtSource` and returns an empty result without a
+  status query. Column names are matched ignoring case, since drivers differ. The lookup
+  counts and the one audit entry live on `DatabaseSource`. The writer change is in
+  `ShipmentBatchWriter::write()`: a manager-reopened Shipment's row is written back as
+  `open`. Tests in `DatabaseClosesShipmentsOnImportTest`, plus preview coverage in
+  `DatabaseSourcePreviewTest` and `DataSourceResourceTest`.

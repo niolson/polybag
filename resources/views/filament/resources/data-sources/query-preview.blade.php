@@ -44,18 +44,19 @@
         @endforeach
 
         @foreach ([
-            ['heading' => 'Shipments', 'rows' => $preview->shipments, 'empty' => 'The shipments query returned no rows.'],
-            ['heading' => 'Items', 'rows' => $preview->items, 'empty' => 'The items query returned no rows for this shipment.'],
+            ['heading' => 'Shipments', 'rows' => $preview->shipments, 'reference' => null, 'empty' => 'The shipments query returned no rows.', 'unmapped' => 'The field mapping resolved no fields for these rows — check that its source column names match the columns above.'],
+            ['heading' => 'Items', 'rows' => $preview->items, 'reference' => $preview->itemsReference, 'empty' => 'The items query returned no rows for this shipment.', 'unmapped' => 'The field mapping resolved no fields for these rows — check that its source column names match the columns above.'],
+            ['heading' => 'Status', 'rows' => $preview->statusRows, 'reference' => $preview->statusReference, 'empty' => 'The status query returned no rows for this shipment, which leaves it as it is.', 'unmapped' => 'None of these columns is status, external_carrier or external_tracking_number — alias the query\'s columns to those names.'],
         ] as $section)
-            @continue($section['heading'] === 'Items' && $preview->itemsReference === null)
+            @continue($section['heading'] !== 'Shipments' && $section['reference'] === null)
 
             <div class="space-y-3">
                 <div class="flex items-baseline justify-between gap-4">
                     <h3 class="text-base font-semibold">{{ $section['heading'] }}</h3>
 
-                    @if ($section['heading'] === 'Items')
+                    @if ($section['reference'] !== null)
                         <span class="text-xs text-gray-500 dark:text-gray-400">
-                            shipment_reference = <span class="font-mono">{{ $preview->itemsReference }}</span>
+                            shipment_reference = <span class="font-mono">{{ $section['reference'] }}</span>
                         </span>
                     @else
                         <span class="text-xs text-gray-500 dark:text-gray-400">
@@ -67,7 +68,7 @@
                 @if ($section['rows'] === [])
                     <p class="text-gray-500 dark:text-gray-400">{{ $section['empty'] }}</p>
                 @else
-                    @foreach ([['side' => 'raw', 'title' => 'Source columns'], ['side' => 'mapped', 'title' => 'Mapped internal fields']] as $view)
+                    @foreach ([['side' => 'raw', 'title' => 'Source columns'], ['side' => 'mapped', 'title' => $section['heading'] === 'Status' ? 'Columns the status check reads' : 'Mapped internal fields']] as $view)
                         <div class="space-y-1">
                             <p class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
                                 {{ $view['title'] }}
@@ -97,10 +98,7 @@
                             </div>
 
                             @if ($view['side'] === 'mapped' && $columns($section['rows'], 'mapped') === [])
-                                <p class="text-warning-600 dark:text-warning-400">
-                                    The field mapping resolved no fields for these rows — check that its source column
-                                    names match the columns above.
-                                </p>
+                                <p class="text-warning-600 dark:text-warning-400">{{ $section['unmapped'] }}</p>
                             @endif
                         </div>
                     @endforeach

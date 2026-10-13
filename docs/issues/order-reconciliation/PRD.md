@@ -60,6 +60,10 @@ bought for, and that is accepted (decision 5).
   closes the Shipments of the closed ones, and reads every open order again once a day. A
   search Amazon throttles partway carries on from its pagination token next run.
   Amazon's item import is authoritative, as Shopify's is.
+- **Built by `08` (2026-10-13).** A Database source with a status query asks it about each
+  open Shipment after the import, by reference, and closes those it reports shipped or
+  cancelled. A row it no longer finds changes nothing. An import no longer closes a
+  Shipment a manager reopened.
 
 ## Decisions
 
@@ -98,7 +102,11 @@ read.
   no lookup per Shipment. `searchOrders` refills one request every three minutes, and
   asking only what changed costs one request a run in the usual case, where re-reading
   every open order cost one per hundred.
-- **Database (`08`).** A status field in the field mapping, applied.
+- **Database (`08`).** An optional status query, run once per open Shipment with its
+  reference bound, as the items query is. The shipments query cannot carry the status:
+  the documented pattern marks each row exported and never reads it again. A row the
+  query no longer finds changes nothing; treating a deleted row as a cancellation waits
+  for a tenant that needs it.
 
 How far behind PolyBag runs is the connection's import schedule, as often as every 5
 minutes.
@@ -194,7 +202,7 @@ and is independent of the rest.
 | [05](issues/05-warn-on-the-pack-page.md) | Warn on the Pack page | `wontfix` | — |
 | [06](issues/06-shopify-reconciliation-on-import.md) | Shopify: close the Shipments the source closed, on import | `done` | — |
 | [07](issues/07-amazon-reconciliation-on-import.md) | Amazon: close the Shipments the source closed, on import | `done` | — |
-| [08](issues/08-database-sources-apply-a-reported-status.md) | Database sources report and apply a status | `ready-for-agent` | — |
+| [08](issues/08-database-sources-apply-a-reported-status.md) | Database sources: close the Shipments the source closed, on import | `done` | — |
 | [09](issues/09-detect-buy-shipping-labels-voided-in-seller-central.md) | Detect Buy Shipping Labels voided in Seller Central | `ready-for-human` | — |
 | [10](issues/10-shopify-webhooks.md) | Shopify webhooks | `wontfix` | — |
 | [11](issues/11-shopify-reads-only-what-changed.md) | Shopify: read only the fulfillment orders that changed | `ready-for-agent` | `06` |
@@ -247,3 +255,9 @@ run. In review that asked Amazon again and again about orders almost certainly u
 and newest-first left a warehouse's oldest orders, the ones it ships first, never checked
 once more than 100 stayed open. It was replaced before merging by decision 2's current
 Amazon bullet, which costs fewer `searchOrders` requests than the import made before.
+
+**2026-10-13 — Database sources look Shipments up.** `08` first added a status field to
+the shipments query's field mapping. The documented `mark_exported_query` pattern reads
+each row once, so a later cancellation never reached it. `08` now runs a status query per
+open Shipment, as `06` looks Shipments up at Shopify, and decision 2's Database bullet
+says so.

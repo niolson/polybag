@@ -441,6 +441,26 @@ it('previews sample rows and the mapping for the configured queries', function (
     File::delete($source->settings['db_database']);
 });
 
+it('previews the status query, and says when none of its columns is one the status check reads', function (): void {
+    $this->actingAs($this->admin);
+
+    $source = previewDataSource([
+        'shipments_query' => 'SELECT order_no AS id FROM source_orders',
+        'status_query' => 'SELECT ship_to AS state FROM source_orders WHERE order_no = :shipment_reference',
+    ]);
+
+    $html = mountedModalHtml(
+        Livewire::test(EditDataSource::class, ['record' => $source->id])
+            ->mountAction(TestAction::make('test_queries')->schemaComponent('database_query')),
+    );
+
+    expect($html)->toContain('Status')
+        ->toContain('Columns the status check reads')
+        ->toContain('None of these columns is status, external_carrier or external_tracking_number');
+
+    File::delete($source->settings['db_database']);
+});
+
 it('reports a failing preview query against its label', function (): void {
     $this->actingAs($this->admin);
 
