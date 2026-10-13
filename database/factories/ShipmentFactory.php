@@ -6,7 +6,6 @@ use App\Enums\Deliverability;
 use App\Enums\DutiesTerms;
 use App\Enums\PickingStatus;
 use App\Enums\RecipientTaxIdType;
-use App\Enums\ShipmentReviewReason;
 use App\Enums\TaxRegistrationRegime;
 use App\Models\Channel;
 use App\Models\Shipment;
@@ -119,14 +118,6 @@ class ShipmentFactory extends Factory
             'status' => $status,
             'status_origin' => 'source',
             'status_changed_at' => now(),
-        ]);
-    }
-
-    public function flaggedForReview(ShipmentReviewReason $reason = ShipmentReviewReason::CancelledAfterShipped): static
-    {
-        return $this->state(fn (): array => [
-            'review_reason' => $reason,
-            'review_flagged_at' => now(),
         ]);
     }
 

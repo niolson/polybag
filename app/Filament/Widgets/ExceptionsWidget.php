@@ -36,7 +36,9 @@ class ExceptionsWidget extends BaseWidget
 
     protected function getStats(): array
     {
-        // v4 added `flagged_for_review`; an entry cached before it would lack the key.
+        // Bump the version when a count is added: an entry cached before it would
+        // lack the key. A count removed needs no bump, since older entries hold
+        // every key still read.
         $counts = Cache::remember('widget:exceptions:v4', 300, fn (): array => $this->queryCounts());
 
         return [
@@ -65,11 +67,6 @@ class ExceptionsWidget extends BaseWidget
                 ->descriptionIcon('heroicon-m-exclamation-circle')
                 ->color($counts['needs_shipping_method'] > 0 ? 'warning' : 'success')
                 ->url(ShipmentResource::needsShippingMethodUrl()),
-            Stat::make('Flagged for Review', $counts['flagged_for_review'])
-                ->description('Orders the source changed after PolyBag took them')
-                ->descriptionIcon('heroicon-m-flag')
-                ->color($counts['flagged_for_review'] > 0 ? 'danger' : 'success')
-                ->url(ShipmentResource::flaggedForReviewUrl()),
             Stat::make('Unfinished Label Purchases', $counts['unresolved_purchases'])
                 ->description('Packages that cannot be bought for until settled')
                 ->descriptionIcon('heroicon-m-question-mark-circle')
@@ -103,7 +100,6 @@ class ExceptionsWidget extends BaseWidget
                 ->distinct('shipping_method_reference')
                 ->count('shipping_method_reference'),
             'needs_shipping_method' => Shipment::query()->needingShippingMethod()->count(),
-            'flagged_for_review' => Shipment::query()->flaggedForReview()->count(),
             'unresolved_purchases' => app(UnresolvedPurchaseResolver::class)->needingAPerson()->distinct()->count('package_id'),
             'tracking_exceptions' => Package::query()
                 ->where('status', PackageStatus::Shipped)

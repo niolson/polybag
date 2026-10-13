@@ -1,6 +1,6 @@
 # Check orders before batch ship and auto-ship, one lookup per connection
 
-Status: ready-for-agent
+Status: wontfix
 Category: enhancement
 Repo: `polybag`
 
@@ -47,3 +47,9 @@ A Shipment checked by `03` within ten minutes reuses that result.
 - [ ] Shopify lookups batched by 250
 - [ ] Each result's behavior in batch ship and auto-ship, with the batch result naming
       skipped and unchecked orders
+
+## Comments
+
+- 2026-10-13 — Closed `wontfix` with `03` (PRD decision 5). Batch ship and auto-ship rely
+  on the import having closed the Shipments its source closed (`06`, `07`), and batch
+  ship already skips `Shipped` and `Cancelled` Shipments.

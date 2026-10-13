@@ -125,3 +125,10 @@ with a raw update and no origin; they now record `polybag` and the fabricated La
 time (`app:fedex-run-etd-test-case` likewise records `polybag`). Not fixed here: a void
 that reopens a Shipment the source shipped clears its `source` origin
 (`Shipment::reopen()`), to be dealt with in `03`.
+
+**2026-10-13 — review flag removed.** The PRD was cut back (decisions 4 and 5): an import
+now closes an order its source closed and flags nothing, and nothing had ever set the
+flag. Migration `2026_10_13_035607_drop_review_flag_from_shipments_table` drops
+`review_reason` and `review_flagged_at`. `ShipmentReviewReason`, the list badge and filter,
+the Shipment view entry, *Clear Review Flag* and the Exceptions widget's *Flagged for
+Review* count are gone. The `reopen()` question left above for `03` moved to `06`.

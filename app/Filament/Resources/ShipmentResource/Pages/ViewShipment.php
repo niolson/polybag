@@ -4,12 +4,10 @@ namespace App\Filament\Resources\ShipmentResource\Pages;
 
 use App\DataTransferObjects\PackSlips\PackSlipPrintJob;
 use App\DataTransferObjects\PackSlips\PackSlipRun;
-use App\Enums\AuditAction;
 use App\Enums\Deliverability;
 use App\Enums\ShipmentStatus;
 use App\Enums\ValidationTrigger;
 use App\Filament\Resources\ShipmentResource;
-use App\Models\AuditLog;
 use App\Models\Shipment;
 use App\Services\PackSlips\PackSlipRenderer;
 use Filament\Actions;
@@ -65,30 +63,6 @@ class ViewShipment extends ViewRecord
                 ->color('primary')
                 ->visible(fn (): bool => $this->shipment()->status !== ShipmentStatus::Cancelled)
                 ->url(fn (): string => '/pack/'.$this->record->id),
-            Actions\Action::make('clearReviewFlag')
-                ->label('Clear Review Flag')
-                ->icon('heroicon-o-check-circle')
-                ->color('warning')
-                ->visible(fn (): bool => $this->shipment()->review_reason !== null)
-                ->authorize(fn (): bool => auth()->user()->can('update', $this->shipment()))
-                ->requiresConfirmation()
-                ->modalHeading('Clear the review flag?')
-                ->modalDescription(fn (): ?string => $this->shipment()->review_reason?->getDescription())
-                ->modalSubmitActionLabel('It has been dealt with')
-                ->action(function (): void {
-                    $shipment = $this->shipment();
-                    $reason = $shipment->review_reason;
-                    $shipment->clearReviewFlag();
-
-                    AuditLog::record(
-                        AuditAction::ShipmentUpdated,
-                        $shipment,
-                        oldValues: ['review_reason' => $reason?->value],
-                        newValues: ['review_reason' => null],
-                    );
-
-                    Notification::make()->title('Review flag cleared')->success()->send();
-                }),
             Actions\Action::make('printPackSlip')
                 ->label(fn (): string => $this->shipment()->hasPrintedPackSlip() ? 'Reprint Pack Slip' : 'Print Pack Slip')
                 ->icon('heroicon-o-printer')

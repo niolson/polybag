@@ -8,7 +8,8 @@ Repo: `polybag`
 
 ## Parent
 
-[PRD](../PRD.md), decisions 2 and 4. Needs `02`.
+[PRD](../PRD.md), decisions 2, 4 and 7. Needs `02` (done). Trimmed 2026-10-13 with the
+PRD: no review flag, and a manager's reopen wins.
 
 ## Problem
 
@@ -30,16 +31,15 @@ When the mapping supplies a status, apply it with `status_origin = source`. `02`
 stamps `source` on any row the import closes (`ShipmentBatchWriter`):
 
 - No Package: applied as today.
-- A Package Draft and nothing bought: applied; draft kept; `review_reason =
-  closed_with_draft`.
-- A Package shipped here and the source says cancelled: status stays `Shipped`;
-  `review_reason = cancelled_after_shipped`.
-- A source `shipped` on a Shipment already shipped here: nothing.
-- A manager's change is not undone by a status the source already reported before it
-  (compare against the last imported value, since a Database row has no reliable
-  updated time).
+- A Package Draft and nothing bought: applied, and the draft is kept (decision 4).
+- Already `Shipped` or `Cancelled` here: nothing, as today, since `shouldUpdate()` never
+  rewrites a closed Shipment. A cancellation after PolyBag shipped is not acted on.
+- A Shipment a manager reopened (`Open`, `status_origin = manager`): its status is left
+  alone, and the rest of the row still updates (decision 7). This reverses part of `02`'s
+  review fix, which let the writer close it again. A Database row goes on reporting the
+  status the manager overrode, so every run would undo them.
 
-The import result reports how many Shipments were closed and flagged.
+The import result reports how many Shipments were closed.
 
 `docs/data-sources/database.md` documents the new behavior.
 
@@ -47,7 +47,14 @@ The import result reports how many Shipments were closed and flagged.
 
 - [ ] A `status` mapping field (plus external carrier and tracking), with an unknown
       value reported per row
-- [ ] `shouldUpdate()` no longer drops a status change for a Shipment with a Package;
-      each case above tested
-- [ ] Import result counts closed and flagged Shipments
+- [ ] `shouldUpdate()` no longer drops a status change for a Shipment with a Package
+      Draft; each case above tested
+- [ ] A manager-reopened Shipment keeps its status through an import that reports it
+      closed
+- [ ] Import result counts closed Shipments
 - [ ] Database source docs updated
+
+## Comments
+
+- 2026-10-13 — Trimmed with the PRD. The review flag is gone, and a manager's reopen now
+  wins over the row's status, instead of being compared with the last imported value.

@@ -1,6 +1,6 @@
 # Check the order on the Ship page, alongside rate shopping
 
-Status: ready-for-agent
+Status: wontfix
 Category: enhancement
 Repo: `polybag`
 
@@ -68,3 +68,18 @@ cannot get around it.
       confirm a replacement, and it is recorded
 - [ ] An `Unreachable` purchase succeeds and the Label records it was not verified
 - [ ] Amazon: `getOrder` request matches the vendored `orders_2026-01-01.json` schema
+
+## Comments
+
+**2026-10-13 — closed `wontfix`.** The PRD dropped the check at purchase (decision 5). A
+first build ran three review rounds on branch `order-reconciliation-03` and was not
+merged. To tell a partial shipment elsewhere from PolyBag's own parcels, it stored what
+each line had shipped at import and let a manager move that baseline on. Each review found
+another sequence of voids, re-imports, replaced fulfillment orders or refunds in which it
+shipped goods twice. Its ten-minute reuse of a stored answer also let through an order
+cancelled after the Ship page loaded.
+
+If a check at purchase comes back, ask what the source still expects (each Shopify line's
+`remainingQuantity`, Amazon's ordered less fulfilled) and store nothing. `06` and `07`
+take three pieces from the branch: its `GetOrder` request, its stray-request test guard,
+and its reship fix (`12200fdc`). Nothing else from it is needed.

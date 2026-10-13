@@ -73,14 +73,6 @@ class ShipmentResource extends Resource
     }
 
     /**
-     * The URL of the Shipments list filtered to Shipments flagged for review.
-     */
-    public static function flaggedForReviewUrl(): string
-    {
-        return static::getUrl('index', ['filters' => ['flagged_for_review' => ['isActive' => true]]]);
-    }
-
-    /**
      * Said on the status field when the source closed the order, so a manager
      * changing it knows they are overriding the source (`order-reconciliation/02`).
      */
@@ -405,12 +397,6 @@ class ShipmentResource extends Resource
                         ShipmentStatusOrigin::Manager => 'By a manager',
                         default => null,
                     }),
-                Tables\Columns\TextColumn::make('review_reason')
-                    ->label('Review')
-                    ->badge()
-                    ->tooltip(fn (Shipment $record): ?string => $record->review_reason?->getDescription())
-                    ->placeholder('—')
-                    ->toggleable(),
                 Tables\Columns\TextColumn::make('picking_status')
                     ->badge()
                     ->toggleable(isToggledHiddenByDefault: true)
@@ -482,10 +468,6 @@ class ShipmentResource extends Resource
                 Tables\Filters\SelectFilter::make('status_origin')
                     ->label('Status set by')
                     ->options(ShipmentStatusOrigin::class),
-                Tables\Filters\Filter::make('flagged_for_review')
-                    ->label('Flagged for review')
-                    ->toggle()
-                    ->query(fn (Builder $query): Builder => $query->scopes('flaggedForReview')),
                 Tables\Filters\Filter::make('needs_shipping_method')
                     ->label('Needs shipping method')
                     ->toggle()
@@ -526,7 +508,6 @@ class ShipmentResource extends Resource
                 app(SettingsService::class)->packSlipsEnabled() ? $filters['pack_slip'] : null,
                 $filters['status_origin'],
                 $filters['needs_shipping_method'],
-                $filters['flagged_for_review'],
                 $filters['created_at'],
             ])))
             ->defaultSort('created_at', 'desc')
@@ -657,11 +638,6 @@ class ShipmentResource extends Resource
                         TextEntry::make('status')
                             ->badge()
                             ->helperText(fn (Shipment $record): ?string => self::statusOriginText($record)),
-                        TextEntry::make('review_reason')
-                            ->label('Needs review')
-                            ->badge()
-                            ->helperText(fn (Shipment $record): ?string => $record->review_reason?->getDescription())
-                            ->visible(fn (Shipment $record): bool => $record->review_reason !== null),
                         TextEntry::make('external_carrier')
                             ->label('Shipped elsewhere by')
                             ->visible(fn (Shipment $record): bool => filled($record->external_carrier)),

@@ -47,8 +47,10 @@ approval looks the same as one somebody forgot.
 ## Proposed direction
 
 Detecting cancellation and re-checking at purchase moved to `order-reconciliation`
-(2026-10-12), which also covers orders shipped by other software. This issue keeps the
-draft-side work: the review flag, the hold, and stale weight.
+(2026-10-12), which also covers orders shipped by other software. It then dropped the
+re-check at purchase and closes such orders on import instead (2026-10-13). This issue
+keeps the draft-side work: flagging a draft whose order changed, the hold, and stale
+weight.
 
 - **Detect cancellation.** On each import, find open Shipments from that source whose
   order has been cancelled. That may need an explicit cancelled-orders query per
@@ -90,3 +92,7 @@ draft-side work: the review flag, the hold, and stale weight.
 - 2026-10-12 — Cancellation detection and the purchase-time re-check moved to
   `order-reconciliation`, widened to orders fulfilled elsewhere. Its decision 4 answers
   open question 2: the draft stays, flagged, and nothing can be bought for it.
+- 2026-10-13 — `order-reconciliation` was cut back. Nothing re-checks the order at
+  purchase; the import closes it within one import interval. A closed order's draft
+  stays, unflagged: nothing can be bought for a cancelled order's draft, and buying for a
+  shipped one is a manager's reship.

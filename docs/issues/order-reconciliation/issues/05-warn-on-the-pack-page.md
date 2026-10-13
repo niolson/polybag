@@ -1,6 +1,6 @@
 # Warn on the Pack page when the order is closed at the source
 
-Status: ready-for-agent
+Status: wontfix
 Category: enhancement
 Repo: `polybag`
 
@@ -34,3 +34,10 @@ Watch the Amazon budget: a Pack open is one `getOrder`, and `getOrder` has a bur
 - [ ] Page renders without waiting on the lookup (test the render does not call it)
 - [ ] Banner for each closed result; nothing for `Open` and `Unreachable`
 - [ ] A check under ten minutes old is reused, not repeated
+
+## Comments
+
+- 2026-10-13 — Closed `wontfix` (PRD decision 5). Imports close most such orders before
+  anyone packs them (`06`, `07`), and Pack already blocks a cancelled order (`02`). A
+  lookup on every Pack open would only shorten a lag the PRD accepts, at one Amazon
+  `getOrder` each.

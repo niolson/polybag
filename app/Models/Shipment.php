@@ -11,7 +11,6 @@ use App\Enums\PackSlipState;
 use App\Enums\PickBatchStatus;
 use App\Enums\PickingStatus;
 use App\Enums\RecipientTaxIdType;
-use App\Enums\ShipmentReviewReason;
 use App\Enums\ShipmentStatus;
 use App\Enums\ShipmentStatusOrigin;
 use App\Enums\TaxRegistrationRegime;
@@ -194,8 +193,6 @@ class Shipment extends Model
         'status' => ShipmentStatus::class,
         'status_origin' => ShipmentStatusOrigin::class,
         'status_changed_at' => 'datetime',
-        'review_reason' => ShipmentReviewReason::class,
-        'review_flagged_at' => 'datetime',
         'picking_status' => PickingStatus::class,
         'deliver_by' => 'date',
         'duties_terms' => DutiesTerms::class,
@@ -350,29 +347,6 @@ class Shipment extends Model
     {
         return $this->status !== ShipmentStatus::Open
             && $this->status_origin === ShipmentStatusOrigin::Source;
-    }
-
-    /**
-     * Ask a person to look at this Shipment. A newer reason replaces an older
-     * one: the flag says what is wrong now.
-     */
-    public function flagForReview(ShipmentReviewReason $reason): void
-    {
-        $this->forceFill(['review_reason' => $reason, 'review_flagged_at' => now()])->save();
-    }
-
-    public function clearReviewFlag(): void
-    {
-        $this->forceFill(['review_reason' => null, 'review_flagged_at' => null])->save();
-    }
-
-    /**
-     * Shipments flagged for a person to look at: the *Flagged for review*
-     * filter and the Exceptions widget.
-     */
-    public function scopeFlaggedForReview(Builder $query): Builder
-    {
-        return $query->whereNotNull('review_reason');
     }
 
     /**
