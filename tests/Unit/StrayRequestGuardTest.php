@@ -5,6 +5,7 @@ use App\Http\Integrations\Shopify\ShopifyConnector;
 use Illuminate\Http\Client\StrayRequestException as HttpStrayRequestException;
 use Illuminate\Support\Facades\Http;
 use Saloon\Exceptions\StrayRequestException;
+use Saloon\Http\Response;
 use Tests\TestCase;
 
 /**
@@ -18,7 +19,7 @@ it('refuses an HTTP client request nothing faked', function (): void {
 it('refuses a Saloon request with no mock client, and remembers it for teardown even when caught', function (): void {
     $straySaloonRequest = new ReflectionProperty(TestCase::class, 'straySaloonRequest');
 
-    expect(fn () => (new ShopifyConnector('test-shop.myshopify.com', 'id', 'secret', accessToken: 'shpat_test'))
+    expect(fn (): Response => (new ShopifyConnector('test-shop.myshopify.com', 'id', 'secret', accessToken: 'shpat_test'))
         ->send(new GraphQL('{ shop { id } }')))
         ->toThrow(StrayRequestException::class)
         // What teardown fails the test with, as an import that catches the
