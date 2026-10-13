@@ -1,6 +1,6 @@
 # Amazon: close the Shipments the source closed, on import
 
-Status: ready-for-agent
+Status: done — 2026-10-13
 Category: enhancement
 Repo: `polybag`
 
@@ -24,18 +24,36 @@ authoritative.
 
 ## Desired behavior
 
-**Candidates, after a complete run.** This connection's `Open` Shipments whose order the
-run did not fetch, except one a manager reopened (decision 7). Not after a historical
-import, whose query is different. Absence alone does not mean closed, because an order
-still open but not updated within `lookback_days` is missing too. So each candidate is
-looked up.
+**One search imports and closes.** A scheduled import asks `searchOrders` for every order
+updated since the connection last read through (`data_sources.import_updated_through`,
+less ten minutes for orders Amazon indexes late), with `fulfillmentStatuses` of
+`UNSHIPPED,PARTIALLY_SHIPPED,SHIPPED,CANCELLED` and `PACKAGES` in `includedData`. Amazon
+counts a status change as an update. Open orders are imported as before. A shipped or
+cancelled order closes this connection's open Shipment for it, through `06`'s closing
+step, and is never imported. A Shipment a manager reopened is left alone (decision 7).
 
-**One `getOrder` per candidate.** Orders v2026-01-01 `getOrder` with
-`includedData=FULFILLMENT,PACKAGES`. It allows 0.5 requests a second with a burst of 30,
-and nothing else in PolyBag calls it, so pace to that: newest Shipment first, at most 100
-a run, and the rest next run. Port the `GetOrder` Saloon request from commit `624cb1a6`
-on branch `order-reconciliation-03`, which matches the vendored `orders_2026-01-01.json`.
-A throttled or failed lookup leaves the Shipment for the next run, and the run completes.
+`searchOrders` refills one request every three minutes with a burst of 20. Asking only
+what changed costs one request a run unless more than 100 orders changed since the last,
+where re-reading every open order cost one request per hundred open orders.
+
+**Where it read through.** Recorded at the start of a run's search, and only once the run
+completes: a failed fetch or write reads the same changes again. Not after a historical
+import or in sandbox mode, whose searches are different ones.
+
+**Reading every open order.** Today's search (open statuses, `lookback_days`) runs instead
+when the connection has never read through or last did longer ago than `lookback_days`,
+and after the search for changes once `import_swept_at` is a day old, with the requests the changes
+leave. That retries an order whose row failed to import, which a search for changes would
+not offer again until the order changed.
+
+**A read Amazon throttles carries on next run.** Each page is a request, so a search
+longer than the burst is throttled partway. The pages read are imported or closed in that
+run, and the search's query and pagination token (good for 24 hours) are kept in
+`import_reads`; the next run continues from them. A throttled search is not retried in
+the same run, and the daily read waits while the changes are throttled. A finished
+search records when it *started*, so an order updated while it was spread over several
+runs is read again as a change. A token older than 23 hours, or one Amazon refuses, starts
+its search over; for the changes, from every open order.
 
 **Closing**, through `06`'s closing step:
 
@@ -44,7 +62,7 @@ A throttled or failed lookup leaves the Shipment for the next run, and the run c
 | `CANCELLED` | `Cancelled` |
 | `SHIPPED`, listing packages that are all PolyBag's | No change |
 | `SHIPPED`, otherwise | `Shipped`, with the `carrier` and `trackingNumber` of a package that is not PolyBag's, if it lists one, as `external_carrier` and `external_tracking_number` |
-| Anything else (`UNSHIPPED`, `PARTIALLY_SHIPPED`, `PENDING`, `PENDING_AVAILABILITY`, `UNFULFILLABLE`, or unknown) | No change |
+| `UNSHIPPED`, `PARTIALLY_SHIPPED` | Imported, as before |
 
 A package is PolyBag's by tracking number, as in `06`; one with none is not. A shipment
 confirmation cannot be withdrawn, so after PolyBag voids a Label whose export confirmed
@@ -58,15 +76,19 @@ stays, as it does for Shopify.
 
 ## Acceptance criteria
 
-- [ ] Candidates only after a complete, non-historical fetch; a manager-reopened Shipment
-      is never one
-- [ ] `getOrder` paced to 0.5 a second after the burst, at most 100 a run, newest first
-      (a test counts requests)
-- [ ] Each row of the table, including a voided PolyBag Label that Amazon still lists, and
-      `SHIPPED` with no packages
-- [ ] A line Amazon reports fully shipped leaves a Shipment with no Package, and stays on
+- [x] A connection that has read through asks only for what changed since, open and closed,
+      in one search; one that has not, or not within `lookback_days`, reads every open order
+- [x] Every open order is read again once a day, after the changes
+- [x] A throttled search imports what it read and carries on from its pagination token next
+      run; 2,500 open orders on a new connection import over a few runs
+- [x] Where it read through moves only after a complete run, and not after a historical or
+      sandbox import
+- [x] Each row of the table, including a voided PolyBag Label that Amazon still lists,
+      `SHIPPED` with no packages, and a manager-reopened Shipment
+- [x] A closed order PolyBag never imported creates no Shipment
+- [x] A line Amazon reports fully shipped leaves a Shipment with no Package, and stays on
       one with a Package
-- [ ] The `getOrder` request matches the vendored `orders_2026-01-01.json` schema
+- [x] The searches match the vendored `orders_2026-01-01.json` schema
 
 ## Comments
 
@@ -75,3 +97,39 @@ stays, as it does for Shopify.
   which refills one request every three minutes and is shared with the import. A
   `getOrder` per Shipment that left the feed needs no watermark and uses a budget
   nothing else draws on.
+- 2026-10-13 — Built first as the body then said: a `getOrder` per open Shipment that
+  left the feed, paced to its 0.5 a second after a burst of 30, newest first, at most 100
+  a run. Replaced before merging. It asked Amazon again and again about orders almost
+  certainly unchanged, and newest-first meant that once more than 100 orders stayed open
+  without an update, the oldest, which a warehouse ships first, were never checked. The
+  `searchOrders` budget that ruled out a watermark only did so for a *separate* search;
+  folded into the import's own, reading changes costs fewer requests than before.
+- 2026-10-13 — Built as the body now says.
+  - **Shape.** `AmazonSource::fetchShipments()` splits what the search returns: open orders
+    for import, shipped and cancelled ones kept for `closeRecordsClosedAtSource()`, which
+    hands them to `AmazonClosedOrderCloser` (no requests of its own) and then records
+    `import_updated_through` and, after a full read, `import_swept_at`.
+  - **Not filtered by `packageStatus`.** The table does not ask for it, and a `CANCELLED`
+    package still names a parcel that is not PolyBag's.
+  - **Authoritative items** come from `DataSource::hasAuthoritativeShipmentItems()`, true
+    for every Amazon connection, rather than a stored setting, so existing connections
+    need no migration.
+  - **Resumable reads** (review, 2026-10-13). As first built, a search longer than the
+    burst of 20 failed the run when throttled, discarding what it had read, and the next run
+    asked for as much or more: a connection with more than about 2,000 open orders could
+    never import, which was true before this issue too, and a daily read that size would
+    have blocked the changes for good. A one-day cap on the change window was tried and
+    dropped for this.
+  - **Another seller account or marketplace starts over** (review, 2026-10-13). What the
+    connection has read belongs to one account and marketplace, recorded as
+    `import_account_key`: the selling partner ID on an OAuth connection, or a keyed hash of
+    the refresh token on one with its own credentials, which never learns that ID. A run
+    whose key differs reads every open order from the start. Disconnecting keeps the
+    connection record, so reconnecting it to another seller in the same marketplace would
+    otherwise have carried on from the first seller's read time; reconnecting the same
+    seller carries on. A run in flight when the marketplace changes records the old key, so
+    the run after it starts over.
+  - **Not covered.** An order that closed before a connection first read through, or during
+    a gap longer than `lookback_days`, or while a search for changes could not finish within
+    a token's life, is never read as closed. Close those by hand. A search needing more
+    than about 23 hours of requests (some 45,000 orders) never finishes.

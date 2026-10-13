@@ -55,6 +55,11 @@ bought for, and that is accepted (decision 5).
   whose fulfillment order left the feed, 250 to a `nodes(ids:)` request, and closing
   those Shopify closed. The closing step, `SourceClosureApplier`, takes a
   `SourceOrderReport` for `07` to fill from Amazon.
+- **Built by `07` (2026-10-13).** An Amazon import asks only for the orders updated since
+  it last read through (`data_sources.import_updated_through`), open and closed together,
+  closes the Shipments of the closed ones, and reads every open order again once a day. A
+  search Amazon throttles partway carries on from its pagination token next run.
+  Amazon's item import is authoritative, as Shopify's is.
 
 ## Decisions
 
@@ -79,18 +84,20 @@ Labels (ADR-0009), so it is never billed.
 ### 2. Sync on import, not at purchase
 
 Each import run, once it has read the whole open feed, closes the Shipments whose orders
-the source has closed. Nothing is stored beyond the Shipment's own status and origin, and
-a lookup that fails leaves the Shipment for the next run.
+the source has closed. A lookup that fails leaves the Shipment for the next run. Shopify
+stores nothing beyond the Shipment's own status and origin; Amazon stores how far it has
+read.
 
 - **Shopify (`06`).** A Shipment whose fulfillment order is missing from the run's open
   set, or is now at a location the connection ignores, is looked up: the fulfillment
   order's status and location, its order's cancellation, and its fulfillments' tracking
   numbers, many to a `nodes(ids:)` request.
-- **Amazon (`07`).** A Shipment whose order is missing from the run is looked up with
-  `getOrder`, since absence alone also covers an order still open but not updated within
-  `lookback_days`. `getOrder` allows 0.5 requests a second with a burst of 30, and nothing
-  else in PolyBag calls it, so the lookups are paced to that: newest first, at most 100 a
-  run.
+- **Amazon (`07`).** The import's own `searchOrders` asks for every order updated since the
+  connection last read through, shipped and cancelled as well as open. The open ones are
+  imported and the closed ones close their Shipments, so one search does both and needs
+  no lookup per Shipment. `searchOrders` refills one request every three minutes, and
+  asking only what changed costs one request a run in the usual case, where re-reading
+  every open order cost one per hundred.
 - **Database (`08`).** A status field in the field mapping, applied.
 
 How far behind PolyBag runs is the connection's import schedule, as often as every 5
@@ -186,7 +193,7 @@ and is independent of the rest.
 | [04](issues/04-check-orders-before-batch-and-auto-ship.md) | Check orders before batch ship and auto-ship | `wontfix` | — |
 | [05](issues/05-warn-on-the-pack-page.md) | Warn on the Pack page | `wontfix` | — |
 | [06](issues/06-shopify-reconciliation-on-import.md) | Shopify: close the Shipments the source closed, on import | `done` | — |
-| [07](issues/07-amazon-reconciliation-on-import.md) | Amazon: close the Shipments the source closed, on import | `ready-for-agent` | 06 |
+| [07](issues/07-amazon-reconciliation-on-import.md) | Amazon: close the Shipments the source closed, on import | `done` | — |
 | [08](issues/08-database-sources-apply-a-reported-status.md) | Database sources report and apply a status | `ready-for-agent` | — |
 | [09](issues/09-detect-buy-shipping-labels-voided-in-seller-central.md) | Detect Buy Shipping Labels voided in Seller Central | `ready-for-human` | — |
 | [10](issues/10-shopify-webhooks.md) | Shopify webhooks | `wontfix` | — |
@@ -200,8 +207,8 @@ Answered 2026-10-12. The numbering is kept, because ADR-0009 cites question 4.
 1. **Source unreachable at purchase:** moot since decision 5 was dropped. On import, an
    unanswered lookup leaves the Shipment for the next run.
 2. **Partial fulfillment elsewhere:** not flagged (decision 5).
-3. **Amazon rate limits at purchase:** moot. On import, `getOrder` is paced and capped
-   (decision 2).
+3. **Amazon rate limits at purchase:** moot. On import, the closed orders come in the
+   import's own search, which asks only for what changed (decision 2).
 4. **Buy Shipping Labels can be voided in Seller Central** (decision 8, issue `09`).
 5. **A manager can change a source-closed Shipment's status,** and the change wins
    (decision 7).
@@ -232,3 +239,10 @@ and `08` lost its flags. `02`'s review flag was removed: the `review_reason` and
 `review_flagged_at` columns, the badge, filter and Shipment view entry, *Clear Review
 Flag*, and the Exceptions widget count. Keep the branch until `06` and `07` have copied
 the three pieces they name from it; nothing else in it is needed.
+
+**2026-10-13 — Amazon reads changes instead of looking orders up.** `07` was first built
+as specified: a `getOrder` per open Shipment that left the feed, paced and capped at 100 a
+run. In review that asked Amazon again and again about orders almost certainly unchanged,
+and newest-first left a warehouse's oldest orders, the ones it ships first, never checked
+once more than 100 stayed open. It was replaced before merging by decision 2's current
+Amazon bullet, which costs fewer `searchOrders` requests than the import made before.

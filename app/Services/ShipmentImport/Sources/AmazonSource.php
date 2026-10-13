@@ -2,8 +2,10 @@
 
 namespace App\Services\ShipmentImport\Sources;
 
+use App\Contracts\ClosesRecordsClosedAtSource;
 use App\Contracts\DataSourceInterface;
 use App\Contracts\ExportDestinationInterface;
+use App\DataTransferObjects\ShipmentImport\SourceClosureResult;
 use App\Enums\ShipmentStatus;
 use App\Exceptions\PermanentExportException;
 use App\Http\Integrations\Amazon\AmazonSpApiConnector;
@@ -16,6 +18,7 @@ use App\Models\Location;
 use App\Models\Product;
 use App\Services\ClientContext;
 use App\Services\SettingsService;
+use App\Services\ShipmentImport\AmazonClosedOrderCloser;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -26,7 +29,7 @@ use Saloon\Exceptions\Request\RequestException;
 use Saloon\Http\Response;
 use Throwable;
 
-class AmazonSource implements DataSourceInterface, ExportDestinationInterface
+class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, ExportDestinationInterface
 {
     public const HISTORICAL_IMPORT_MAX_ORDERS = 1000;
 
@@ -58,6 +61,23 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
 
     private bool $hasSentCatalogRequest = false;
 
+    /**
+     * The shipped and cancelled orders this run read, keyed by order ID, for
+     * {@see closeRecordsClosedAtSource()}.
+     *
+     * @var array<string, array<string, mixed>>
+     */
+    private array $closedOrders = [];
+
+    /**
+     * What {@see closeRecordsClosedAtSource()} records on the connection once
+     * the run completes: the reads still in progress, and how far finished
+     * ones read. Null when this run made no scheduled search.
+     *
+     * @var array<string, mixed>|null
+     */
+    private ?array $pendingReadState = null;
+
     private const CATALOG_IDENTIFIER_PRIORITY = ['UPC', 'EAN', 'GTIN', 'JAN', 'ISBN'];
 
     private const CATALOG_MAX_ATTEMPTS = 5;
@@ -74,6 +94,21 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
     private const PART_NUMBER_PLACEHOLDERS = ['n/a', 'na', 'none', 'not applicable', 'does not apply', 'unknown', 'generic'];
 
     private const SEARCH_ORDERS_PAGE_SIZE = 100;
+
+    /** How far back of where the last run read through the next one starts, for orders Amazon indexes late. */
+    private const READ_OVERLAP_MINUTES = 10;
+
+    /** How often a scheduled import reads every open order again, not only those that changed. */
+    public const SWEEP_HOURS = 24;
+
+    /**
+     * How long a stored pagination token is used. Amazon's last 24 hours; a
+     * read not finished by then starts over.
+     */
+    public const TOKEN_LIFETIME_HOURS = 23;
+
+    /** Statuses whose orders are not imported but close their Shipments. */
+    private const CLOSED_STATUSES = ['SHIPPED', 'CANCELLED'];
 
     private const CARRIER_MAP = [
         'USPS' => Carrier::USPS,
@@ -147,70 +182,322 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
         $this->catalogCheckedAt = null;
         $this->catalogRequestRate = 2.0;
         $this->hasSentCatalogRequest = false;
-        $rawOrders = [];
-        $paginationToken = null;
+        $this->closedOrders = [];
+        $this->pendingReadState = null;
         $sandbox = (bool) app(SettingsService::class)->get('sandbox_mode', false);
         $marketplaceId = (string) ($this->config['marketplace_id'] ?? 'ATVPDKIKX0DER');
-        $lookbackDays = $this->config['lookback_days'] ?? 30;
-        $lastUpdatedAfter = now()->subDays($lookbackDays)->toIso8601String();
-        $historicalImport = $this->isHistoricalImport();
-        $maxOrders = $historicalImport ? (int) $this->config['_historical_max_orders'] : null;
 
-        // Filtered here rather than in the query: SearchOrders v2026-01-01 was
-        // not confirmed to accept a fulfillment-channel parameter, and sending
-        // an unrecognized one risks a 400 on every import. Discarding client
-        // side costs a little bandwidth but keeps `maxResultsPerPage` honest,
-        // because the cap below counts orders we keep, not orders we fetched.
-        $importFbaOrders = (bool) ($this->config['import_fba_orders'] ?? false);
-        $skippedFbaOrders = 0;
+        if ($sandbox) {
+            // v2026-01-01 sandbox test cases only exist for JP/UK/BR marketplaces.
+            // Test Case 1: Japan marketplace with all includedData values.
+            //
+            // A1VC38T7YXB528 is Amazon's JP marketplace ID, which only resolves
+            // against the FE sandbox host — hence SearchOrders declaring the FE
+            // region. Sending this marketplace ID to the NA sandbox host 403s with
+            // "The marketplaces you provided are not valid for region"
+            // (see https://github.com/amzn/selling-partner-api-models/issues/5126).
+            $rawOrders = $this->searchOrders([
+                'marketplaceIds' => 'A1VC38T7YXB528',
+                'createdAfter' => '2024-12-25T00:00:00Z',
+                'includedData' => 'BUYER,RECIPIENT,PROCEEDS,EXPENSE,PROMOTION,CANCELLATION,FULFILLMENT,PACKAGES',
+            ], sandbox: true);
+        } elseif ($this->isHistoricalImport()) {
+            $rawOrders = $this->searchOrders([
+                'marketplaceIds' => $marketplaceId,
+                'fulfillmentStatuses' => 'SHIPPED',
+                'createdAfter' => (string) $this->config['_historical_created_after'],
+                'createdBefore' => (string) $this->config['_historical_created_before'],
+                'includedData' => 'RECIPIENT,PROCEEDS,FULFILLMENT,PACKAGES',
+            ], maxOrders: (int) $this->config['_historical_max_orders']);
+        } else {
+            $rawOrders = $this->searchChangedOrders($marketplaceId);
+        }
+
+        // Barcodes and part numbers come from the catalog, not the order, and
+        // only for products missing one — a packer scans the barcode, and an EU
+        // consumer label is refused without a part number. Every import does
+        // this, not just the historical one: the first live Buy Shipping order
+        // arrived through the scheduled import with no barcode and had to be
+        // packed by hand. Products already complete, or checked recently, are
+        // skipped, so a scheduled run over open orders costs a catalog call only
+        // for what is new. With product updates off nothing the lookup found
+        // could be written, so it is not made; the sandbox catalog has nothing
+        // to say either way.
+        if (! $sandbox && config('shipment-import.behavior.auto_update_products', true)) {
+            $this->catalogCheckedAt = now()->toDateTimeString();
+            $this->catalogIdentifiers = $this->fetchCatalogIdentifiers($this->asinsNeedingCatalogLookup($rawOrders), $marketplaceId);
+        }
+
+        return collect($rawOrders)->map(function (array $order): array {
+            $mapped = $this->mapOrderToShipment($order);
+            $this->orderCache[$mapped['source_record_id']] = $order;
+
+            return $mapped;
+        });
+    }
+
+    /**
+     * The orders a scheduled import reads (`order-reconciliation/07`): every
+     * order updated since the connection last read through, open or closed,
+     * in one search. `searchOrders` refills one request every three minutes
+     * with a burst of 20, so a run that only asks what changed costs one
+     * request in the usual case, however many orders are open.
+     *
+     * Open orders are returned for import. Shipped and cancelled ones are kept
+     * for {@see closeRecordsClosedAtSource()}, which closes their Shipments.
+     *
+     * Every open order within `lookback_days` is read instead when the
+     * connection has never read through or last did longer ago than that,
+     * and orders that closed in that gap are not seen as closed. It is also
+     * read once a day ({@see SWEEP_HOURS}), after the changes and with what
+     * budget they leave, to retry an order whose row failed to import, which a
+     * search for changes would not offer again until the order changed.
+     *
+     * A read Amazon throttles stops there: the pages it got are imported, and
+     * its query and pagination token are kept so the next run carries on. A
+     * finished read records when it started, so an order updated while it was
+     * spread over several runs is read again by the next search for changes.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function searchChangedOrders(string $marketplaceId): array
+    {
+        $now = now()->toImmutable();
+        $lookbackStart = $now->subDays((int) ($this->config['lookback_days'] ?? 30));
+        $dataSource = $this->dataSource();
+        $updatedThrough = $dataSource?->import_updated_through;
+        $sweptAt = $dataSource?->import_swept_at;
+
+        /** @var array{changes?: array<string, mixed>|null, sweep?: array<string, mixed>|null} $reads */
+        $reads = $dataSource->import_reads ?? [];
+        $accountKey = DataSource::importAccountKeyFor($this->config);
+        $state = ['import_account_key' => $accountKey];
+
+        // Read from another seller account or marketplace: start over. An
+        // in-flight run that read the old one also records its key, so the
+        // run after it starts over too.
+        if ($dataSource !== null && $dataSource->import_account_key !== $accountKey) {
+            $updatedThrough = null;
+            $sweptAt = null;
+            $reads = [];
+            $state += ['import_updated_through' => null, 'import_swept_at' => null];
+        }
+
+        foreach (['changes', 'sweep'] as $kind) {
+            if (isset($reads[$kind]) && $this->readHasExpired($reads[$kind], $now)) {
+                $reads[$kind] = null;
+
+                // Changes that could not be read within a token's life start
+                // over from every open order.
+                if ($kind === 'changes') {
+                    $updatedThrough = null;
+                    $state['import_updated_through'] = null;
+                }
+            }
+        }
+
+        $readsChanges = $updatedThrough !== null && $updatedThrough->greaterThan($lookbackStart);
+
+        if (($reads['changes'] ?? null) === null && $readsChanges) {
+            $reads['changes'] = $this->newRead([
+                'marketplaceIds' => $marketplaceId,
+                'fulfillmentStatuses' => 'UNSHIPPED,PARTIALLY_SHIPPED,SHIPPED,CANCELLED',
+                'lastUpdatedAfter' => $updatedThrough->copy()->subMinutes(self::READ_OVERLAP_MINUTES)->toIso8601String(),
+                'includedData' => 'RECIPIENT,PROCEEDS,FULFILLMENT,PACKAGES',
+            ], $now);
+        }
+
+        if (($reads['sweep'] ?? null) === null
+            && (! $readsChanges || $sweptAt === null || $sweptAt->lessThan($now->subHours(self::SWEEP_HOURS)))) {
+            $reads['sweep'] = $this->newRead([
+                'marketplaceIds' => $marketplaceId,
+                'fulfillmentStatuses' => 'UNSHIPPED,PARTIALLY_SHIPPED',
+                'lastUpdatedAfter' => $lookbackStart->toIso8601String(),
+                'includedData' => 'RECIPIENT,PROCEEDS,FULFILLMENT',
+            ], $now) + ['baseline' => ! $readsChanges];
+        }
+
+        /** @var array<string, array<string, mixed>> $orders */
+        $orders = [];
+        $throttled = false;
+
+        foreach (['changes', 'sweep'] as $kind) {
+            $read = $reads[$kind] ?? null;
+
+            if ($read === null || $throttled) {
+                continue;
+            }
+
+            [$read, $readOrders, $outcome] = $this->continueRead($read, $now);
+
+            foreach ($readOrders as $order) {
+                $orders[(string) ($order['orderId'] ?? '')] ??= $order;
+            }
+
+            $throttled = $outcome === 'throttled';
+            $reads[$kind] = $outcome === 'throttled' ? $read : null;
+
+            if ($outcome !== 'finished') {
+                continue;
+            }
+
+            $startedAt = CarbonImmutable::parse($read['started_at']);
+
+            if ($kind === 'changes' || ($read['baseline'] ?? false)) {
+                $state['import_updated_through'] = $startedAt;
+            }
+
+            if ($kind === 'sweep') {
+                $state['import_swept_at'] = $startedAt;
+            }
+        }
+
+        $state['import_reads'] = array_filter($reads) === [] ? null : json_encode(array_filter($reads));
+        $this->pendingReadState = $state;
+        $open = [];
+
+        foreach ($orders as $orderId => $order) {
+            if (in_array($order['fulfillment']['fulfillmentStatus'] ?? null, self::CLOSED_STATUSES, true)) {
+                $this->closedOrders[$orderId] = $order;
+
+                continue;
+            }
+
+            $open[] = $order;
+        }
+
+        return $open;
+    }
+
+    /**
+     * A search not yet sent.
+     *
+     * @param  array<string, mixed>  $query
+     * @return array{query: array<string, mixed>, token: null, token_at: null, started_at: string}
+     */
+    private function newRead(array $query, CarbonImmutable $now): array
+    {
+        return ['query' => $query, 'token' => null, 'token_at' => null, 'started_at' => $now->toIso8601String()];
+    }
+
+    /**
+     * @param  array<string, mixed>  $read
+     */
+    private function readHasExpired(array $read, CarbonImmutable $now): bool
+    {
+        return filled($read['token_at'] ?? null)
+            && CarbonImmutable::parse($read['token_at'])->lessThan($now->subHours(self::TOKEN_LIFETIME_HOURS));
+    }
+
+    /**
+     * Read a search's pages from where it stopped until Amazon has no more or
+     * throttles. Amazon refuses a token it no longer honors with a 400, and
+     * the read is dropped to start over.
+     *
+     * @param  array<string, mixed>  $read
+     * @return array{0: array<string, mixed>, 1: list<array<string, mixed>>, 2: 'finished'|'throttled'|'dropped'}
+     */
+    private function continueRead(array $read, CarbonImmutable $now): array
+    {
+        $orders = [];
 
         do {
-            $maxResultsPerPage = $maxOrders === null
-                ? self::SEARCH_ORDERS_PAGE_SIZE
-                : min(self::SEARCH_ORDERS_PAGE_SIZE, $maxOrders - count($rawOrders));
+            $query = $read['query'] + ['maxResultsPerPage' => self::SEARCH_ORDERS_PAGE_SIZE];
 
-            if ($sandbox) {
-                // v2026-01-01 sandbox test cases only exist for JP/UK/BR marketplaces.
-                // Test Case 1: Japan marketplace with all includedData values.
-                //
-                // A1VC38T7YXB528 is Amazon's JP marketplace ID, which only resolves
-                // against the FE sandbox host — hence SearchOrders declaring the FE
-                // region. Sending this marketplace ID to the NA sandbox host 403s with
-                // "The marketplaces you provided are not valid for region"
-                // (see https://github.com/amzn/selling-partner-api-models/issues/5126).
-                $query = [
-                    'marketplaceIds' => 'A1VC38T7YXB528',
-                    'createdAfter' => '2024-12-25T00:00:00Z',
-                    'includedData' => 'BUYER,RECIPIENT,PROCEEDS,EXPENSE,PROMOTION,CANCELLATION,FULFILLMENT,PACKAGES',
-                ];
-            } elseif ($historicalImport) {
-                $query = [
-                    'marketplaceIds' => $marketplaceId,
-                    'fulfillmentStatuses' => 'SHIPPED',
-                    'createdAfter' => (string) $this->config['_historical_created_after'],
-                    'createdBefore' => (string) $this->config['_historical_created_before'],
-                    'maxResultsPerPage' => $maxResultsPerPage,
-                    'includedData' => 'RECIPIENT,PROCEEDS,FULFILLMENT,PACKAGES',
-                ];
-            } else {
-                $query = [
-                    'marketplaceIds' => $marketplaceId,
-                    'fulfillmentStatuses' => 'UNSHIPPED,PARTIALLY_SHIPPED',
-                    'lastUpdatedAfter' => $lastUpdatedAfter,
-                    'maxResultsPerPage' => self::SEARCH_ORDERS_PAGE_SIZE,
-                    'includedData' => 'RECIPIENT,PROCEEDS,FULFILLMENT',
-                ];
+            if ($read['token'] !== null) {
+                $query['paginationToken'] = $read['token'];
+            }
+
+            try {
+                $json = $this->connector->send(new SearchOrders($query))->json();
+            } catch (RequestException $exception) {
+                $status = $exception->getResponse()->status();
+
+                if ($status === 429) {
+                    return [$read, $this->withoutFbaOrders($orders), 'throttled'];
+                }
+
+                if ($status === 400 && $read['token'] !== null) {
+                    Log::warning('Amazon refused a stored order search pagination token; the search starts over', [
+                        'data_source_id' => $this->config['_data_source_id'] ?? null,
+                    ]);
+
+                    return [$read, $this->withoutFbaOrders($orders), 'dropped'];
+                }
+
+                throw $exception;
+            }
+
+            array_push($orders, ...($json['orders'] ?? []));
+            $read['token'] = $json['pagination']['nextToken'] ?? null;
+            $read['token_at'] = $read['token'] === null ? null : $now->toIso8601String();
+        } while ($read['token'] !== null);
+
+        return [$read, $this->withoutFbaOrders($orders), 'finished'];
+    }
+
+    /**
+     * The orders the seller ships, unless the connection imports those Amazon
+     * fulfills itself too.
+     *
+     * @param  list<array<string, mixed>>  $orders
+     * @return list<array<string, mixed>>
+     */
+    private function withoutFbaOrders(array $orders): array
+    {
+        if ((bool) ($this->config['import_fba_orders'] ?? false)) {
+            return $orders;
+        }
+
+        $kept = array_values(array_filter($orders, fn (array $order): bool => ! $this->isFulfilledByAmazon($order)));
+
+        if (count($kept) < count($orders)) {
+            Log::info('Skipped Amazon-fulfilled (FBA) orders during import', [
+                'skipped' => count($orders) - count($kept),
+                'imported' => count($kept),
+            ]);
+        }
+
+        return $kept;
+    }
+
+    /**
+     * Every page of one search, without the orders Amazon fulfills itself
+     * unless the connection imports them.
+     *
+     * Filtered here rather than in the query: SearchOrders v2026-01-01 was not
+     * confirmed to accept a fulfillment-channel parameter, and sending an
+     * unrecognized one risks a 400 on every import. Discarding client side
+     * costs a little bandwidth but keeps `maxResultsPerPage` honest, because
+     * the cap counts orders we keep, not orders we fetched.
+     *
+     * @param  array<string, mixed>  $query
+     * @return list<array<string, mixed>>
+     */
+    private function searchOrders(array $query, bool $sandbox = false, ?int $maxOrders = null): array
+    {
+        $importFbaOrders = (bool) ($this->config['import_fba_orders'] ?? false);
+        $skippedFbaOrders = 0;
+        $rawOrders = [];
+        $paginationToken = null;
+
+        do {
+            $pageQuery = $query;
+
+            if (! $sandbox) {
+                $pageQuery['maxResultsPerPage'] = $maxOrders === null
+                    ? self::SEARCH_ORDERS_PAGE_SIZE
+                    : min(self::SEARCH_ORDERS_PAGE_SIZE, $maxOrders - count($rawOrders));
             }
 
             // Orders API v2026 requires subsequent requests to retain the
             // original values, except maxResultsPerPage and includedData.
             // https://developer-docs.amazon.com/sp-api/docs/get-orders-with-filtering-criteria
             if (! $sandbox && $paginationToken !== null) {
-                $query['paginationToken'] = $paginationToken;
+                $pageQuery['paginationToken'] = $paginationToken;
             }
 
-            $response = $this->connector->send(new SearchOrders($query));
-            $json = $response->json();
+            $json = $this->connector->send(new SearchOrders($pageQuery))->json();
 
             $orders = $json['orders'] ?? [];
             $paginationToken = $sandbox ? null : ($json['pagination']['nextToken'] ?? null);
@@ -243,27 +530,14 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
             ]);
         }
 
-        // Barcodes and part numbers come from the catalog, not the order, and
-        // only for products missing one — a packer scans the barcode, and an EU
-        // consumer label is refused without a part number. Every import does
-        // this, not just the historical one: the first live Buy Shipping order
-        // arrived through the scheduled import with no barcode and had to be
-        // packed by hand. Products already complete, or checked recently, are
-        // skipped, so a scheduled run over open orders costs a catalog call only
-        // for what is new. With product updates off nothing the lookup found
-        // could be written, so it is not made; the sandbox catalog has nothing
-        // to say either way.
-        if (! $sandbox && config('shipment-import.behavior.auto_update_products', true)) {
-            $this->catalogCheckedAt = now()->toDateTimeString();
-            $this->catalogIdentifiers = $this->fetchCatalogIdentifiers($this->asinsNeedingCatalogLookup($rawOrders), $marketplaceId);
-        }
+        return $rawOrders;
+    }
 
-        return collect($rawOrders)->map(function (array $order): array {
-            $mapped = $this->mapOrderToShipment($order);
-            $this->orderCache[$mapped['source_record_id']] = $order;
+    private function dataSource(): ?DataSource
+    {
+        $sourceId = $this->config['_data_source_id'] ?? null;
 
-            return $mapped;
-        });
+        return $sourceId ? DataSource::query()->find($sourceId) : null;
     }
 
     /**
@@ -294,6 +568,30 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
             ->values();
     }
 
+    /**
+     * Close the Shipments of the shipped and cancelled orders this run read,
+     * through {@see AmazonClosedOrderCloser}, then record how far the
+     * connection has read and where a throttled read stopped. Called only
+     * after a complete run, so a failed one reads the same pages again.
+     *
+     * A historical or sandbox import searches something else, and neither
+     * closes nor moves anything.
+     *
+     * @param  Collection<int, array<string, mixed>>  $shipments
+     */
+    public function closeRecordsClosedAtSource(DataSource $dataSource, Collection $shipments): SourceClosureResult
+    {
+        if ($this->pendingReadState === null) {
+            return new SourceClosureResult;
+        }
+
+        $result = app(AmazonClosedOrderCloser::class)->close($dataSource, $this->closedOrders);
+
+        DataSource::query()->whereKey($dataSource->id)->update($this->pendingReadState);
+
+        return $result;
+    }
+
     public function getFieldMapping(): array
     {
         return [];
@@ -301,8 +599,8 @@ class AmazonSource implements DataSourceInterface, ExportDestinationInterface
 
     public function markExported(string $sourceRecordId): bool
     {
-        // No-op: Amazon tracks fulfillment status natively.
-        // Fulfilled orders won't match the Unshipped filter on next import.
+        // No-op: Amazon tracks fulfillment status natively, and a confirmed
+        // order comes back as shipped, which closes nothing still open here.
         return false;
     }
 
