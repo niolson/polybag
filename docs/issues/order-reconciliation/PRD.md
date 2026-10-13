@@ -197,8 +197,9 @@ and is independent of the rest.
 | [08](issues/08-database-sources-apply-a-reported-status.md) | Database sources report and apply a status | `ready-for-agent` | — |
 | [09](issues/09-detect-buy-shipping-labels-voided-in-seller-central.md) | Detect Buy Shipping Labels voided in Seller Central | `ready-for-human` | — |
 | [10](issues/10-shopify-webhooks.md) | Shopify webhooks | `wontfix` | — |
+| [11](issues/11-shopify-reads-only-what-changed.md) | Shopify: read only the fulfillment orders that changed | `ready-for-agent` | `06` |
 
-`06` goes first, and `07` reuses its closing step. `08` and `09` are independent.
+`06` goes first, and `07` reuses its closing step. `08` and `09` are independent. `11` replaces `06`'s full read with a search for changes, as `07` did for Amazon.
 
 ## Answered questions
 
