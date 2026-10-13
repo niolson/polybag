@@ -612,6 +612,16 @@ class DataSourceForm
                         ->columnSpanFull()
                         ->visible(self::importsOrders(...)),
 
+                    Textarea::make('settings.status_query')
+                        ->label('Status Query')
+                        ->nullable()
+                        ->rows(3)
+                        ->rule(RawSqlGuard::rule(RawSqlGuard::READ, 'Status Query'))
+                        ->helperText('Optional. Closes shipments the source shipped or cancelled. Run after each import for every open shipment, with :shipment_reference as the placeholder. Return a status column (open, shipped or cancelled), and optionally external_carrier and external_tracking_number. A shipment with no row is left as it is. ⚠️ Runs verbatim against the configured database — must be a single SELECT statement.')
+                        ->dehydrateStateUsing(fn (?string $state): ?string => $state ? str_replace("\u{00A0}", ' ', $state) : $state)
+                        ->columnSpanFull()
+                        ->visible(self::importsOrders(...)),
+
                     Toggle::make('settings.mark_exported_enabled')
                         ->label('Mark Exported After Import')
                         ->live()

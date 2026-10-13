@@ -215,6 +215,85 @@ defaults to 1. Products are created or updated from item rows automatically unle
 Note that this query runs per shipment, not per batch. A shipments query returning 2,000
 rows means 2,000 executions of the items query, so it wants an index on the join column.
 
+#### `status_query`
+
+Optional, and what lets PolyBag notice an order cancelled or shipped by something else.
+The shipments query cannot: with a `mark_exported_query`, it reads each order once, so a
+cancellation that happens later never comes back through it. The status query instead
+asks about each shipment PolyBag still has open.
+
+After every import run whose shipments query succeeded, it runs **once per open
+shipment** from this source, with `:shipment_reference` bound exactly as in the items
+query. A shipment a manager reopened by hand is not asked about: a manager's status
+change wins over the source.
+
+It returns these columns, by name, ignoring case. There is no field mapping for it, so
+alias them:
+
+| Column | |
+| --- | --- |
+| `status` | Required. `open`, `shipped` or `cancelled`, ignoring case and surrounding spaces. `void` is accepted for `cancelled` |
+| `external_carrier` | Optional. Who shipped it, shown on the shipment |
+| `external_tracking_number` | Optional. Shown on the shipment and searchable |
+
+| The query returns | The shipment |
+| --- | --- |
+| Rows saying `cancelled` | Becomes Cancelled |
+| Rows saying `shipped` | Becomes Shipped, with the carrier and tracking number of the first row whose tracking number is not one of PolyBag's Labels, if any |
+| Rows saying `shipped`, all with PolyBag's tracking numbers | Stays open |
+| Rows saying `open` | Stays open |
+| Rows that disagree on `status`, or a value not listed above | Stays open; reported as an import error |
+| No row | Stays open |
+| An error | Reported as an import error, and no further shipment is asked about this run |
+
+A shipment closed this way records the source as the one that closed it. Nothing can be
+bought for a cancelled shipment, a Package already packed for it is kept so it can be
+unpacked, and a manager can reopen it. An import never reopens a shipment it closed.
+
+Several rows are fine, so a schema with one row per parcel can list them all. The rule
+about PolyBag's own tracking numbers matters because [`export_query`](#export_query)
+usually writes PolyBag's tracking number back into the same table this query reads. If a
+Label PolyBag bought was voided and the number is still in the row, the shipment stays
+open to ship again.
+
+**Translate your own values with `CASE`.** A source whose status column says `new`,
+`picking`, `packing`, `shipped`, `delivered` or `cancelled`:
+
+```sql
+SELECT CASE s.status
+         WHEN 'cancelled' THEN 'cancelled'
+         WHEN 'shipped'   THEN 'shipped'
+         WHEN 'delivered' THEN 'shipped'
+         ELSE 'open'                      -- new, picking, packing
+       END             AS status,
+       s.carrier       AS external_carrier,
+       s.tracking_no   AS external_tracking_number
+  FROM shipments s
+ WHERE s.order_no = :shipment_reference
+```
+
+**A hold is not a cancellation.** Map a hold status to `open`. An import never reopens a
+shipment it cancelled, so a hold mapped to `cancelled` leaves the shipment cancelled after
+the hold is released, until a manager reopens it.
+
+**It runs once per open shipment, every run.** Index the column it looks up by, and count
+it in how long a run takes when choosing a [schedule](#scheduling). Its executions are
+audited once per run rather than once each: the query, how many shipments it asked
+about, and how many lookups failed.
+
+**A deleted row is not a signal.** A shipment whose row is gone stays open, because an
+empty result cannot tell a deleted order from a query that no longer matches it. Two
+consequences:
+
+- If your ERP deletes rows, a delete trigger writing the reference to a tombstone table,
+  which the status query joins and reports as `cancelled`, turns the deletion into one.
+  It needs a DBA willing to add a trigger to the ERP.
+- If your ERP deletes a shipment and recreates it under a new ID linked to the same
+  order, the old shipment stays open beside the new one, and both can be packed. Where
+  one order is never split across shipments, key `shipment_reference` on the order
+  number instead, so the recreated row is the same shipment. Otherwise use a tombstone
+  table.
+
 #### `mark_exported_query`
 
 Gated by the **Mark Exported After Import** toggle. One `UPDATE` or `INSERT`, run once
@@ -282,7 +361,7 @@ validation rule on save and again at execution time.
 
 | Field | Allowed leading keyword |
 | --- | --- |
-| `shipments_query`, `shipment_items_query` | `SELECT` |
+| `shipments_query`, `shipment_items_query`, `status_query` | `SELECT` |
 | `mark_exported_query` | `UPDATE`, `INSERT` |
 | `export_query` | `INSERT`, `UPDATE` |
 
@@ -339,18 +418,20 @@ the number that schema actually implies.
 
 ### Previewing
 
-**Preview Queries**, at the foot of the Database Query section, runs the two read queries
+**Preview Queries**, at the foot of the Database Query section, runs the read queries
 against the configured connection and shows the first five rows twice: as raw source
 columns, and as the internal fields your mapping resolves them to. A mapping that is
-quietly dropping a column shows up here rather than mid-import.
+quietly dropping a column shows up here rather than mid-import. The items and status
+queries are run for the first previewed shipment; the status query's second view is the
+columns the status check reads, so a missing alias shows up as an empty one.
 
 It never writes. The mark-exported and export queries are *prepared and discarded* — a
 syntax and parameter check only. Read queries are bounded by consuming five rows rather
 than by rewriting your SQL, and a ten-second statement timeout is applied where the
 driver supports one.
 
-A failing items query is reported against its own label instead of aborting, so a broken
-items query still lets you see the shipment rows.
+A failing items or status query is reported against its own label instead of aborting,
+so a broken one still lets you see the shipment rows.
 
 ---
 
@@ -602,7 +683,7 @@ is picked up within a minute, with no restart. A source is scheduled only when i
 that takes longer than the interval does not stack.
 
 Pick an interval against how long a run takes, remembering the items query runs once per
-shipment. Every 5 minutes against a slow ERP over an SSH tunnel is how you end up with
+shipment imported, and the [status query](#status_query) once per open shipment. Every 5 minutes against a slow ERP over an SSH tunnel is how you end up with
 runs perpetually skipped for overlap.
 
 ### Running an import manually
@@ -646,8 +727,9 @@ shipment it has already written:
 | Always update from source | Rewrites every run |
 | Skip (keep local changes) | Never rewrites |
 
-Shipped and voided shipments are never updated, whichever is set. And in every case, a
-skipped shipment is still passed to `mark_exported_query`.
+Shipped and cancelled shipments are never updated, whichever is set. A shipment a
+manager reopened keeps its status, though the rest of the row still updates. And in
+every case, a skipped shipment is still passed to `mark_exported_query`.
 
 ### Troubleshooting
 
@@ -703,7 +785,7 @@ CREATE TABLE orders (
   ship_via        VARCHAR(40),   -- 'GROUND', '2DAY', …
   order_source    VARCHAR(40),   -- 'web', 'edi', …
   brand_name      VARCHAR(80),   -- multi-client installs only
-  status_code     CHAR(1),       -- 'R' released, 'H' hold
+  status_code     CHAR(1),       -- 'R' released, 'H' hold, 'X' cancelled
   wms_exported_at DATETIME NULL, -- written by mark_exported_query
   tracking_no     VARCHAR(40)  NULL,  -- written by export_query
   carrier_name    VARCHAR(40)  NULL,
@@ -781,6 +863,27 @@ SELECT l.item_code   AS sku,
 `:shipment_reference` receives the `id` column from the row above — `SO-10041` — bound,
 not interpolated.
 
+### Status query
+
+```sql
+SELECT CASE
+         WHEN o.status_code = 'X'      THEN 'cancelled'
+         WHEN o.shipped_at IS NOT NULL THEN 'shipped'
+         ELSE 'open'                          -- released, or on hold
+       END            AS status,
+       o.carrier_name AS external_carrier,
+       o.tracking_no  AS external_tracking_number
+  FROM orders o
+ WHERE o.order_no = :shipment_reference
+```
+
+An order cancelled in the ERP, or shipped from it, closes its shipment within one import
+run. `shipped_at` and `tracking_no` are also what the export below writes, so an order
+PolyBag shipped reads as shipped too; the shipment is already closed by then and is not
+asked about. If PolyBag's Label is voided, the tracking number left in the row is
+recognized as PolyBag's and the shipment stays open. A hold maps to `open`, not
+`cancelled`.
+
 ### Mark exported
 
 Toggle **Mark Exported After Import** on:
@@ -824,6 +927,7 @@ un-exported orders and skips the one on hold. `SO-10041` imports with two items;
 `SO-10042` with one. Both orders come back with `wms_exported_at` set, so the next
 run returns nothing until the ERP releases another order — and shipping `SO-10041` in
 PolyBag writes its tracking number, carrier, service and weight back to the `orders` row.
+Setting `SO-10042`'s `status_code` to `X` in the ERP cancels its shipment on the next run.
 
 Confirm all of that with **Preview Queries** before turning the schedule on. Then run
 `php artisan shipments:import --source-id=N` once by hand and read

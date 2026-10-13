@@ -94,6 +94,42 @@ it('reports a failing items query without losing the shipment rows', function ()
         ->and($preview->errors)->toHaveKey('Items query');
 });
 
+it('previews the status query bound to the first shipment reference, with the columns it is read by', function (): void {
+    createSourceOrders();
+
+    $preview = previewSource([
+        'shipments_query' => 'SELECT * FROM source_orders',
+        'status_query' => 'SELECT order_no, status AS STATUS, ship_to AS external_carrier FROM source_orders WHERE order_no = :shipment_reference',
+    ])->preview();
+
+    expect($preview->errors)->toBe([])
+        ->and($preview->statusReference)->toBe('A-1')
+        ->and($preview->statusRows)->toBe([[
+            'raw' => ['order_no' => 'A-1', 'STATUS' => 'new', 'external_carrier' => 'Ada'],
+            'mapped' => ['status' => 'new', 'external_carrier' => 'Ada'],
+        ]]);
+
+    $operations = AuditLog::where('action', AuditAction::DataSourceQueryExecuted)
+        ->get()
+        ->pluck('metadata.operation')
+        ->all();
+
+    expect($operations)->toBe(['preview_shipments', 'preview_status']);
+});
+
+it('reports a failing status query without losing the shipment rows', function (): void {
+    createSourceOrders();
+
+    $preview = previewSource([
+        'shipments_query' => 'SELECT * FROM source_orders',
+        'status_query' => 'SELECT status FROM no_such_table WHERE id = :shipment_reference',
+    ])->preview();
+
+    expect($preview->shipments)->toHaveCount(2)
+        ->and($preview->statusRows)->toBe([])
+        ->and($preview->errors)->toHaveKey('Status query');
+});
+
 it('refuses a non-SELECT shipments query without executing it', function (): void {
     createSourceOrders();
 

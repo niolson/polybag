@@ -14,12 +14,15 @@ final readonly class QueryPreviewResult
      * @param  list<array{raw: array<string, mixed>, mapped: array<string, mixed>}>  $shipments
      * @param  list<array{raw: array<string, mixed>, mapped: array<string, mixed>}>  $items
      * @param  array<string, string>  $errors  Query label => failure message.
+     * @param  list<array{raw: array<string, mixed>, mapped: array<string, mixed>}>  $statusRows  the status query's rows, "mapped" being the columns it is read by
      */
     public function __construct(
         public array $shipments,
         public array $items,
         public ?string $itemsReference,
         public array $errors,
+        public array $statusRows = [],
+        public ?string $statusReference = null,
     ) {}
 
     public function hasErrors(): bool

@@ -1394,23 +1394,27 @@ it('records a status the source closed as the source\'s, and leaves an open one 
         ->and($fresh->status_changed_at)->not->toBeNull();
 });
 
-it('replaces a manager\'s origin when the source closes an order the manager reopened', function (): void {
+it('keeps a manager\'s reopen when the source reports the order closed, and updates the rest of the row', function (): void {
     ShipmentImportService::forSource(fakeSource(collect([onExistingRow()])), $this->dataSource)->import();
 
     $shipment = Shipment::where('shipment_reference', 'ORD-EXIST-001')->firstOrFail();
-    $shipment->forceFill(['status_origin' => ShipmentStatusOrigin::Manager, 'status_changed_at' => now()->subDay()])->save();
+    $reopenedAt = now()->subDay()->startOfSecond();
+    $shipment->forceFill(['status_origin' => ShipmentStatusOrigin::Manager, 'status_changed_at' => $reopenedAt])->save();
 
     ShipmentImportService::forSource(
-        fakeSource(collect([onExistingRow(['_import_status' => ShipmentStatus::Shipped->value])])),
+        fakeSource(collect([onExistingRow([
+            '_import_status' => ShipmentStatus::Shipped->value,
+            'address1' => '99 Changed Ave',
+        ])])),
         $this->dataSource,
     )->import();
 
     $fresh = $shipment->fresh();
 
-    expect($fresh->status)->toBe(ShipmentStatus::Shipped)
-        ->and($fresh->status_origin)->toBe(ShipmentStatusOrigin::Source)
-        ->and($fresh->status_changed_at->isToday())->toBeTrue()
-        ->and($fresh->wasClosedBySource())->toBeTrue();
+    expect($fresh->status)->toBe(ShipmentStatus::Open)
+        ->and($fresh->status_origin)->toBe(ShipmentStatusOrigin::Manager)
+        ->and($fresh->status_changed_at->equalTo($reopenedAt))->toBeTrue()
+        ->and($fresh->address1)->toBe('99 Changed Ave');
 });
 
 it('treats item changes as source changes for update-if-changed', function (): void {
