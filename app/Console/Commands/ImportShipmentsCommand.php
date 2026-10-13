@@ -108,6 +108,7 @@ class ImportShipmentsCommand extends Command
                 ['Products Created', $result->productsCreated],
                 ['Products Updated', $result->productsUpdated],
                 ['Shipments Exported', $result->shipmentsExported],
+                ['Shipments Closed', $result->shipmentsClosed],
                 ['Duration', round($result->duration, 2).'s'],
             ]
         );

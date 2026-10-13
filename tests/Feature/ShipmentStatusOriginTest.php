@@ -57,6 +57,27 @@ describe('who set the status', function (): void {
             ->and($fresh->status_origin)->toBeNull();
     });
 
+    it('keeps an order the source shipped as shipped by the source through a reship and its void', function (): void {
+        app(SettingsService::class)->set('packing_validation_enabled', false);
+        $shipment = Shipment::factory()->closedBySource('shipped')->create();
+        ShipmentItem::factory()->for($shipment)->create();
+        $package = Package::factory()->for($shipment)->create(['status' => PackageStatus::Shipped]);
+
+        // A reship bought here does not make it PolyBag's...
+        $shipment->updateShippedStatus();
+
+        expect($shipment->fresh()->status_origin)->toBe(ShipmentStatusOrigin::Source);
+
+        // ...and voiding it does not reopen an order still shipped at the source.
+        $package->update(['status' => PackageStatus::Unshipped]);
+        $shipment->fresh()->updateShippedStatus();
+
+        $fresh = $shipment->fresh();
+
+        expect($fresh->status)->toBe(ShipmentStatus::Shipped)
+            ->and($fresh->status_origin)->toBe(ShipmentStatusOrigin::Source);
+    });
+
     it('leaves a cancelled order cancelled whatever its packages say', function (): void {
         $shipment = Shipment::factory()->cancelled()->create();
         Package::factory()->for($shipment)->create(['status' => PackageStatus::Shipped]);

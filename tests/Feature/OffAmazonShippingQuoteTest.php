@@ -30,6 +30,7 @@ use Livewire\Livewire;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\Senders\GuzzleSender;
 use Saloon\Laravel\Facades\Saloon;
+use Tests\TestCase;
 
 /**
  * `amazon-shipping-external-orders/05`, as `carrier-catalog-reset/15` made it: a
@@ -339,6 +340,9 @@ function a101Body(): array
 }
 
 it('hears A-101 on the concurrent path as a response, not as a rejected promise', function (): void {
+    // Answered by a canned Guzzle sender, which Saloon's faking would bypass.
+    TestCase::allowStraySaloonRequests();
+
     $adapter = new AmazonShippingAdapter;
     $request = RateRequest::fromPackage(externalPackage($this->shopify));
     $response = guzzleSenderAnswering(403, a101Body())
@@ -352,6 +356,9 @@ it('hears A-101 on the concurrent path as a response, not as a rejected promise'
 
 describe('a scope changed while the request is in flight', function (): void {
     beforeEach(function (): void {
+        // Answered by a canned Guzzle sender, which Saloon's faking would bypass.
+        TestCase::allowStraySaloonRequests();
+
         $this->adapter = new AmazonShippingAdapter;
         $this->request = RateRequest::fromPackage(externalPackage($this->shopify));
         $this->pending = $this->adapter->prepareRateRequest($this->request, [])->pendingRequest;

@@ -616,6 +616,8 @@ it('still settles a genuine decline from USPS or UPS', function (string $carrier
         ? [uspsGroundAdvantage($this->package), [...uspsAuthFakes(), Label::class => MockResponse::make(['error' => ['code' => '400', 'message' => 'Bad Request', 'errors' => [['code' => '020001', 'detail' => 'Invalid ZIP']]]], 400)]]
         : [upsGround($this->package), [...upsAuthFake(), UpsCreateShipment::class => MockResponse::make(['response' => ['errors' => [['code' => '120100', 'message' => 'Missing or invalid shipper number']]]], 400)]];
 
+    Saloon::fake($fakes);
+
     $result = app(PackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(selectedRate: $rate));
     $offer = ShippingOffer::where('public_id', $rate->offerId)->firstOrFail();
 

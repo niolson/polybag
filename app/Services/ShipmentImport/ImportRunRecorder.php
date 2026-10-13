@@ -24,6 +24,7 @@ class ImportRunRecorder
         'products_created' => 0,
         'products_updated' => 0,
         'shipments_exported' => 0,
+        'shipments_closed' => 0,
     ];
 
     /** @var array<int, string> */
@@ -135,6 +136,7 @@ class ImportRunRecorder
             productsCreated: $this->stats['products_created'],
             productsUpdated: $this->stats['products_updated'],
             shipmentsExported: $this->stats['shipments_exported'],
+            shipmentsClosed: $this->stats['shipments_closed'],
             errors: $this->errors,
             duration: $duration
         );

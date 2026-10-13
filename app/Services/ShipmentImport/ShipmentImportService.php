@@ -2,6 +2,7 @@
 
 namespace App\Services\ShipmentImport;
 
+use App\Contracts\ClosesRecordsClosedAtSource;
 use App\Contracts\DataSourceInterface;
 use App\Contracts\ReconcilesSupersededRecords;
 use App\Models\Client;
@@ -104,7 +105,39 @@ class ShipmentImportService
             });
         });
 
+        if ($this->source instanceof ClosesRecordsClosedAtSource) {
+            $this->closeRecordsClosedAtSource($this->source, $shipments);
+        }
+
         return $this->runRecorder->completed(microtime(true) - $startTime);
+    }
+
+    /**
+     * Close the Shipments whose orders the source closed after they left the
+     * feed (`order-reconciliation` decision 2). After the writes, so a row
+     * this run fetched is never mistaken for one that left, and outside
+     * `withoutSyncingToSearch()`, so a source's tracking number is searchable.
+     *
+     * Like {@see reconcileSupersededRecords()}, a failure is recorded and the
+     * run completes: the Shipments wait for the next run.
+     *
+     * @param  Collection<int, array<string, mixed>>  $shipments
+     */
+    private function closeRecordsClosedAtSource(ClosesRecordsClosedAtSource $source, Collection $shipments): void
+    {
+        try {
+            $result = $source->closeRecordsClosedAtSource($this->importSource, $shipments);
+        } catch (\Exception $e) {
+            $this->runRecorder->addError('Could not check whether the source closed any open shipment: '.$e->getMessage());
+
+            return;
+        }
+
+        $this->runRecorder->addStats(['shipments_closed' => $result->closed]);
+
+        foreach ($result->errors as $error) {
+            $this->runRecorder->addError($error);
+        }
     }
 
     /**

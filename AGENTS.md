@@ -204,6 +204,8 @@ an Amazon order.
 
 Shipment import sources are configured as `DataSource` records in the database (Integrations → Connections), not in `.env`. Each source can be assigned to a `Client` and has its own encrypted credentials and schedule. The scheduler, `shipments:import` and `RunDataSourceImportJob` select `DataSource::importing()` — active *and* `import_enabled`; export and origin-bound postage need only `active`.
 
+A source whose feed holds only open orders implements `ClosesRecordsClosedAtSource`: after the writes, the import looks up the open Shipments that left the feed and closes those the source closed, through `SourceClosureApplier`. Shopify does (`order-reconciliation/06`); a Shipment a manager reopened is never closed this way.
+
 Supported drivers:
 - **Database** — Custom SQL queries against MySQL, SQL Server, PostgreSQL, or SQLite. Full reference: `docs/data-sources/database.md` — query contracts, field mapping, `RawSqlGuard`, `max_affected_rows`, and least-privilege `GRANT` examples
 - **Shopify** — Via Shopify Admin API with per-source OAuth
