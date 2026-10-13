@@ -5,6 +5,8 @@ namespace App\Http\Integrations\Amazon\Requests;
 use App\Enums\AmazonSpApiRegion;
 use App\Http\Integrations\Amazon\DeclaresSandboxRegion;
 use Saloon\Enums\Method;
+use Saloon\Exceptions\Request\FatalRequestException;
+use Saloon\Exceptions\Request\RequestException;
 use Saloon\Http\Request;
 
 class SearchOrders extends Request implements DeclaresSandboxRegion
@@ -23,6 +25,16 @@ class SearchOrders extends Request implements DeclaresSandboxRegion
     protected function defaultQuery(): array
     {
         return $this->queryParams;
+    }
+
+    /**
+     * Not retried when throttled. `searchOrders` refills one request every
+     * three minutes, so a retry moments later is refused too; the import keeps
+     * what it read and carries on next run.
+     */
+    public function handleRetry(FatalRequestException|RequestException $exception, Request $request): bool
+    {
+        return ! ($exception instanceof RequestException && $exception->getResponse()->status() === 429);
     }
 
     /**

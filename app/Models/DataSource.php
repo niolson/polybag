@@ -54,6 +54,10 @@ class DataSource extends Model
         'postage_setting' => PostageSetting::class,
         'off_amazon_shipping_status' => OffAmazonShippingStatus::class,
         'off_amazon_shipping_checked_at' => 'datetime',
+        'import_updated_through' => 'datetime',
+        'import_swept_at' => 'datetime',
+        'import_reads' => 'array',
+        'import_account_key' => 'string',
         'global_export' => 'boolean',
         'schedule_interval' => ScheduleInterval::class,
         'settings' => 'array',
@@ -176,6 +180,52 @@ class DataSource extends Model
     public function isAmazon(): bool
     {
         return $this->source_type === AmazonSource::class;
+    }
+
+    /**
+     * The seller account and marketplace an Amazon import reads, for telling
+     * whether what it has read so far (`import_updated_through`,
+     * `import_swept_at`, `import_reads`) came from them. A connection
+     * reconnected to another seller account, or pointed at another
+     * marketplace, starts over.
+     *
+     * The account is the selling partner ID Amazon reports on an OAuth
+     * connection, whose refresh token can rotate. A connection with its own
+     * credentials never learns that ID, so its refresh token stands in, keyed
+     * with the app key rather than stored.
+     */
+    public function importAccountKey(): string
+    {
+        return self::importAccountKeyFor([
+            ...$this->settings ?? [],
+            'refresh_token' => $this->secret('refresh_token'),
+        ]);
+    }
+
+    /**
+     * {@see importAccountKey()} from a source's merged settings and secrets.
+     *
+     * @param  array<string, mixed>  $config
+     */
+    public static function importAccountKeyFor(array $config): string
+    {
+        $account = ($config['auth_mode'] ?? null) === 'authorization_code'
+            ? 'partner:'.($config['amazon_selling_partner_id'] ?? '')
+            : 'token:'.hash_hmac('sha256', (string) ($config['refresh_token'] ?? ''), (string) config('app.key'));
+
+        return hash('sha256', $account.'|'.($config['marketplace_id'] ?? ''));
+    }
+
+    /**
+     * Whether a re-import removes the lines the source no longer sends, while
+     * the Shipment has no Package. Shopify turns it on when fulfillment-order
+     * import is activated; Amazon always has it, since its import sends each
+     * line's ordered less fulfilled and drops one that reaches zero
+     * (`order-reconciliation/07`).
+     */
+    public function hasAuthoritativeShipmentItems(): bool
+    {
+        return $this->isAmazon() || (bool) ($this->settings['authoritative_shipment_items'] ?? false);
     }
 
     /**

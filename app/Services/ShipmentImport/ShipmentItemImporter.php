@@ -110,7 +110,7 @@ class ShipmentItemImporter
             }
         }
 
-        if (($record->settings['authoritative_shipment_items'] ?? false)
+        if ($record->hasAuthoritativeShipmentItems()
             && $items->isNotEmpty()
             && $importedShipmentItemIds !== []
             && ! $hasUnresolvedItems
