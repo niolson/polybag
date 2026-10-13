@@ -7,7 +7,6 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\AuditAction;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
-use App\Enums\ShipmentReviewReason;
 use App\Enums\ShipmentStatus;
 use App\Enums\ShipmentStatusOrigin;
 use App\Filament\Pages\Pack;
@@ -15,8 +14,6 @@ use App\Filament\Pages\Ship;
 use App\Filament\Resources\ShipmentResource;
 use App\Filament\Resources\ShipmentResource\Pages\EditShipment;
 use App\Filament\Resources\ShipmentResource\Pages\ListShipments;
-use App\Filament\Resources\ShipmentResource\Pages\ViewShipment;
-use App\Filament\Widgets\ExceptionsWidget;
 use App\Models\AuditLog;
 use App\Models\DataSource;
 use App\Models\Package;
@@ -25,7 +22,6 @@ use App\Models\ShipmentItem;
 use App\Models\User;
 use App\Services\BatchLabelService;
 use App\Services\SettingsService;
-use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
 
 function anyRate(): RateResponse
@@ -34,8 +30,8 @@ function anyRate(): RateResponse
 }
 
 /**
- * `order-reconciliation/02`: Shipment status `cancelled`, who set it, a
- * shipped-elsewhere tracking number, and a review flag a manager clears.
+ * `order-reconciliation/02`: Shipment status `cancelled`, who set it, and a
+ * shipped-elsewhere tracking number.
  */
 describe('who set the status', function (): void {
     it('records PolyBag when a Label ships the order, and nothing once it reopens', function (): void {
@@ -193,61 +189,9 @@ describe('a manager changing the status', function (): void {
     });
 });
 
-describe('the review flag', function (): void {
-    it('shows on the Shipment and a manager clears it, audit-logged', function (): void {
-        $this->actingAs(User::factory()->create(['role' => Role::Manager]));
-        $shipment = Shipment::factory()->shipped()->flaggedForReview()->create();
-
-        Livewire::test(ViewShipment::class, ['record' => $shipment->id])
-            ->assertSee('Cancelled after shipping')
-            ->callAction('clearReviewFlag')
-            ->assertNotified('Review flag cleared');
-
-        $fresh = $shipment->fresh();
-
-        expect($fresh->review_reason)->toBeNull()
-            ->and($fresh->review_flagged_at)->toBeNull()
-            ->and(AuditLog::where('action', AuditAction::ShipmentUpdated)->sole()->old_values)
-            ->toBe(['review_reason' => 'cancelled_after_shipped']);
-    });
-
-    it('cannot be cleared by a shipper', function (): void {
-        $this->actingAs(User::factory()->create(['role' => Role::User]));
-        $shipment = Shipment::factory()->flaggedForReview()->create();
-
-        Livewire::test(ViewShipment::class, ['record' => $shipment->id])
-            ->assertActionHidden('clearReviewFlag');
-
-        expect($shipment->fresh()->review_reason)->toBe(ShipmentReviewReason::CancelledAfterShipped);
-    });
-
-    it('is counted on the Exceptions widget', function (): void {
-        $this->actingAs(User::factory()->create(['role' => Role::Manager]));
-        Cache::flush();
-        Shipment::factory()->flaggedForReview(ShipmentReviewReason::ClosedWithDraft)->create();
-        Shipment::factory()->create();
-
-        Livewire::test(ExceptionsWidget::class)
-            ->assertSee('Flagged for Review')
-            ->assertSee(ShipmentResource::flaggedForReviewUrl(), escape: false);
-
-        expect(Cache::get('widget:exceptions:v4')['flagged_for_review'])->toBe(1);
-    });
-});
-
 describe('the Shipments list', function (): void {
     beforeEach(function (): void {
         $this->actingAs(User::factory()->admin()->create());
-    });
-
-    it('filters to flagged Shipments', function (): void {
-        $flagged = Shipment::factory()->flaggedForReview()->create();
-        $clear = Shipment::factory()->create();
-
-        Livewire::test(ListShipments::class)
-            ->filterTable('flagged_for_review')
-            ->assertCanSeeTableRecords([$flagged])
-            ->assertCanNotSeeTableRecords([$clear]);
     });
 
     it('filters by who set the status', function (): void {

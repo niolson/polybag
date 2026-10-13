@@ -1,6 +1,6 @@
 # Shopify webhooks for hosted instances, then slow the backstop poll
 
-Status: needs-triage
+Status: wontfix
 Category: enhancement
 Repo: `polybag`
 
@@ -30,3 +30,8 @@ two.
 - How an instance knows it is publicly reachable (a setting, or a test delivery).
 - Subscription lifecycle: on connect, on reconnect, and removal on disconnect.
 - Whether Dev Dashboard apps declare webhook topics in config rather than per shop.
+
+## Comments
+
+- 2026-10-13 — Closed `wontfix` (PRD decision 6). Polling at the import interval is the
+  design, and a webhook would only shorten a lag the PRD accepts.

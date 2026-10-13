@@ -1,4 +1,4 @@
-# Shopify reconciliation on import
+# Shopify: close the Shipments the source closed, on import
 
 Status: ready-for-agent
 Category: enhancement
@@ -8,44 +8,103 @@ Repo: `polybag`
 
 ## Parent
 
-[PRD](../PRD.md), decisions 2, 3 and 4. Needs `02` and `03` (the lookup).
+[PRD](../PRD.md), decisions 2, 3, 4 and 7. Rewritten 2026-10-13 when the PRD was cut
+back. `07` reuses the closing step built here.
 
 ## Problem
 
-The Shopify import reads open fulfillment orders only (`includeClosed: false`). An order
-fulfilled elsewhere or cancelled drops out of the feed and its Shipment stays `Open`.
+The Shopify import reads open fulfillment orders only (`includeClosed: false`, then
+`OPEN` and `IN_PROGRESS`). A fulfillment order that is cancelled, fulfilled by other
+software or by hand in the Shopify admin, or moved to a location the connection ignores
+leaves the feed or is skipped. Its Shipment stays `Open` here, where it can be packed and
+bought for.
 
 ## Desired behavior
 
-**Candidates.** After each run, every `Open` Shipment from that connection whose
-fulfillment order is missing from the set is a candidate. A fulfillment order that was
-replaced or moved is repointed first (`ShopifyFulfillmentOrderRepointer`) and is not a
-candidate. Candidates are confirmed with the `03` lookup, batched.
+**Candidates, after a complete run.** Once `fetchShipments()` has returned every page and
+the run has written its rows, this connection's `Open` Shipments are candidates when:
 
-**Outcomes:**
+- the run did not fetch their fulfillment order (`source_record_id`), or
+- the run fetched it at a location the connection ignores.
 
-- `Fulfilled`: `Shipped`, `status_origin = source`, external carrier and tracking from the
-  fulfillment.
-- `FulfilledByPolyBag`: nothing; the shipping workflow already set it.
-- `Cancelled`: `Cancelled`, `status_origin = source`.
-- `PartiallyFulfilledElsewhere`: stays `Open`, `review_reason` set.
-- `Unreachable`: nothing this run.
-- A Shipment with a Package Draft and nothing bought: closed as above, draft kept,
-  `review_reason = closed_with_draft`.
+`ShopifyFulfillmentOrderRepointer` runs before the writes, so a replaced fulfillment order
+it re-pointed is not a candidate. A Shipment a manager reopened (`status_origin =
+manager`) is never one (decision 7). A run whose fetch failed does nothing.
 
-**Cancellation after PolyBag shipped.** A Shipment shipped here is not in the open set to
-go missing from, so a separate check reads cancellation for Shopify Shipments shipped
-here whose Label is not yet delivered, within the window `ShopifyFulfillmentSynchronizer`
-uses. A cancelled order keeps `Shipped` and gets `review_reason =
-cancelled_after_shipped`. It can share the synchronizer's schedule and query.
+Check how `fulfillmentOrderMove` behaves in API 2026-07. If a fulfillment order moved
+whole keeps its ID, the import fetches it at the new location and skips it there, which
+is the second case. If it gets a new ID, the original leaves the open set, which is the
+first.
 
-**Manager changes stick.** A Shipment with `status_origin = manager` is not changed
-unless the source reports something newer than the manager's change.
+**One lookup for many.** `nodes(ids:)` over the candidates' fulfillment orders, asking
+only what the closing step needs:
+
+```graphql
+... on FulfillmentOrder {
+  id status
+  assignedLocation { location { id } }
+  order { cancelledAt }
+  fulfillments(first: 10) {
+    nodes { status trackingInfo(first: 5) { company number } }
+  }
+}
+```
+
+Measure its cost on the development store and size the batch to stay under Shopify's
+query cost limit. Expect a few dozen points per fulfillment order; the `03` query needed
+about 350 because it read every fulfillment's line items. A failed or throttled request
+leaves its Shipments for the next run, and the run still completes.
+
+**The closing step** (decision 3), shared with `07`. It takes what the source reported for
+one Shipment and applies it:
+
+| Shopify reports | The Shipment becomes |
+|---|---|
+| The order's `cancelledAt` is set, or the fulfillment order is `CANCELLED` | `Cancelled` |
+| `CLOSED`, with live fulfillments that are all PolyBag's | No change |
+| `CLOSED`, with a live fulfillment that is not PolyBag's | `Shipped`, with that fulfillment's company and tracking number as `external_carrier` and `external_tracking_number` |
+| `CLOSED`, with no live fulfillment | `Cancelled` |
+| At a location the connection ignores | `Cancelled` |
+| Anything else (`OPEN`, `IN_PROGRESS`, `ON_HOLD`, `SCHEDULED`, `INCOMPLETE`) | No change |
+
+- **Live** means not `CANCELLED`, `ERROR` or `FAILURE`.
+- **PolyBag's** means its tracking number is one of the Shipment's Labels, voided ones
+  included, compared ignoring case and spaces. A fulfillment with no tracking number is
+  not PolyBag's, because the export always sends one. PolyBag's own fulfillment is left on
+  a closed fulfillment order when cancelling it after a void failed
+  (`ShopifyFulfillmentCanceller` then tells the operator to cancel it by hand). The
+  Shipment stays open, so it can be shipped again.
+- Every closure sets `status_origin = source` through the model, so `status_changed_at` is
+  stamped and `02`'s notice on the status field says when the connection closed it. It
+  also writes an audit row saying what Shopify reported.
+- A Package Draft on the Shipment stays (decision 4).
+- The import result counts the Shipments closed.
+
+**A reship keeps the source's origin.** Port commit `12200fdc` from branch
+`order-reconciliation-03`: `Shipment::updateShippedStatus()` leaves a Shipment its source
+shipped alone, as it does a cancelled one. A manager's reship Label then neither records
+it as PolyBag's nor reopens it when voided. `02` left this open.
+
+**Tests refuse unmocked requests.** The lookup adds a Shopify call to every import, and an
+import test that does not mock it should fail rather than reach Shopify. Port the guard
+in `tests/TestCase.php` from commit `ff8c1410` on the same branch:
+`Http::preventStrayRequests()` and one global Saloon middleware. Its comments say why it
+avoids `Saloon\Config::preventStrayRequests()`.
 
 ## Acceptance criteria
 
-- [ ] Missing-from-feed candidates confirmed by lookup, never closed on absence alone
-- [ ] Repointed fulfillment orders are not candidates
-- [ ] Each outcome above, with `status_origin` and external tracking set
-- [ ] Cancellation of a shipped-here order flags it and leaves the status alone
-- [ ] A manager's status change survives the next run
+- [ ] Candidates only after a complete fetch; a re-pointed fulfillment order and a
+      manager-reopened Shipment are never candidates
+- [ ] One `nodes(ids:)` request per batch of candidates (a test counts requests)
+- [ ] Each row of the table, as tests through a mocked import run
+- [ ] A Shipment whose only fulfillment carries a voided PolyBag Label's tracking number
+      stays open; one with another tracking number, or none, closes as shipped
+- [ ] A failed lookup changes nothing, and the run completes
+- [ ] A reship Label and its void leave a source-shipped Shipment `Shipped` by `source`
+- [ ] Import tests fail on an unmocked HTTP or Saloon request
+
+## Comments
+
+- 2026-10-13 — Rewritten for the cut-back PRD. The first version confirmed candidates
+  with `03`'s purchase-time lookup, flagged partial fulfillment and a cancellation after
+  shipping for review, and let a newer source report undo a manager's change.

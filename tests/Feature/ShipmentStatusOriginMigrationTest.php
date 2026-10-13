@@ -8,12 +8,20 @@ use Illuminate\Support\Facades\Schema;
 
 beforeEach(function (): void {
     $this->migration = require database_path('migrations/2026_10_12_160000_add_status_origin_and_review_flag_to_shipments_table.php');
+    $this->dropReviewFlag = require database_path('migrations/2026_10_13_035607_drop_review_flag_from_shipments_table.php');
+
+    // Newest first: the later drop of the review flag, then this migration.
+    $this->dropReviewFlag->down();
     $this->migration->down();
 });
 
 afterEach(function (): void {
     if (! Schema::hasColumn('shipments', 'status_origin')) {
         $this->migration->up();
+    }
+
+    if (Schema::hasColumn('shipments', 'review_reason')) {
+        $this->dropReviewFlag->up();
     }
 });
 

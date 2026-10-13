@@ -1,4 +1,4 @@
-# Amazon reconciliation on import
+# Amazon: close the Shipments the source closed, on import
 
 Status: ready-for-agent
 Category: enhancement
@@ -8,44 +8,70 @@ Repo: `polybag`
 
 ## Parent
 
-[PRD](../PRD.md), decisions 2, 3 and 4. Needs `02` and `03` (the result DTO and
-`FulfilledByPolyBag` matching).
+[PRD](../PRD.md), decisions 2, 3, 4 and 7. Needs `06` for the closing step. Rewritten
+2026-10-13 when the PRD was cut back.
 
 ## Problem
 
-`AmazonSource::fetchShipments()` asks for `UNSHIPPED,PARTIALLY_SHIPPED` only. An order
-shipped elsewhere or cancelled drops out and its Shipment stays `Open`.
+`AmazonSource::fetchShipments()` asks for `UNSHIPPED,PARTIALLY_SHIPPED` orders updated
+within the connection's `lookback_days`. An order shipped elsewhere or cancelled drops
+out, and its Shipment stays `Open`.
+
+A line shipped elsewhere from an order that is still open stays on its Shipment too.
+Re-imports set each item to ordered less fulfilled, but a line that reaches zero is
+dropped from the feed and kept locally, because Amazon's item import is not
+authoritative.
 
 ## Desired behavior
 
-**A second search, from a watermark.** After the open-orders search, one more
-`searchOrders` for `fulfillmentStatuses: SHIPPED,CANCELLED` with `lastUpdatedAfter` set
-to the connection's `reconciled_through` watermark (new column on `data_sources`,
-falling back to `lookback_days` on the first run). Not over the whole `lookback_days`
-window: a month of shipped orders is many pages, and `searchOrders` refills one request
-every three minutes (burst 20) shared with the import. The watermark advances to the
-search's start time only when every page was read.
+**Candidates, after a complete run.** This connection's `Open` Shipments whose order the
+run did not fetch, except one a manager reopened (decision 7). Not after a historical
+import, whose query is different. Absence alone does not mean closed, because an order
+still open but not updated within `lookback_days` is missing too. So each candidate is
+looked up.
 
-Note the v2026 spelling is `CANCELLED` (the v0 API used `Canceled`).
+**One `getOrder` per candidate.** Orders v2026-01-01 `getOrder` with
+`includedData=FULFILLMENT,PACKAGES`. It allows 0.5 requests a second with a burst of 30,
+and nothing else in PolyBag calls it, so pace to that: newest Shipment first, at most 100
+a run, and the rest next run. Port the `GetOrder` Saloon request from commit `624cb1a6`
+on branch `order-reconciliation-03`, which matches the vendored `orders_2026-01-01.json`.
+A throttled or failed lookup leaves the Shipment for the next run, and the run completes.
 
-**Outcomes**, matched by order ID against this connection's Shipments:
+**Closing**, through `06`'s closing step:
 
-- `SHIPPED` on an `Open` Shipment: `Shipped`, `status_origin = source`, external carrier
-  and tracking from `fulfillment`/`packages` where present, unless it is PolyBag's own
-  fulfillment (`03`'s matching).
-- `CANCELLED` on an `Open` Shipment: `Cancelled`, `status_origin = source`; with a Package
-  Draft, also `review_reason = closed_with_draft`.
-- `CANCELLED` on a Shipment shipped here and not yet delivered: stays `Shipped`,
-  `review_reason = cancelled_after_shipped`.
-- `PARTIALLY_SHIPPED` from the open search, on a Shipment with nothing shipped here:
-  `review_reason = partially_fulfilled_elsewhere`.
-- A manager's status change is not undone unless Amazon's `lastUpdatedTime` is newer.
+| `fulfillment.fulfillmentStatus` | The Shipment becomes |
+|---|---|
+| `CANCELLED` | `Cancelled` |
+| `SHIPPED`, listing packages that are all PolyBag's | No change |
+| `SHIPPED`, otherwise | `Shipped`, with the `carrier` and `trackingNumber` of a package that is not PolyBag's, if it lists one, as `external_carrier` and `external_tracking_number` |
+| Anything else (`UNSHIPPED`, `PARTIALLY_SHIPPED`, `PENDING`, `PENDING_AVAILABILITY`, `UNFULFILLABLE`, or unknown) | No change |
 
-`04` reuses this watermark for batch ship.
+A package is PolyBag's by tracking number, as in `06`; one with none is not. A shipment
+confirmation cannot be withdrawn, so after PolyBag voids a Label whose export confirmed
+the order, expect Amazon to keep listing that package. The rule keeps the Shipment open
+for PolyBag to ship again.
+
+**A line shipped elsewhere.** Make Amazon's item import authoritative, as Shopify's is
+(`authoritative_shipment_items`), existing connections included. A line Amazon reports
+fully shipped then leaves a Shipment that has no Package yet. With a Package, the line
+stays, as it does for Shopify.
 
 ## Acceptance criteria
 
-- [ ] One extra `searchOrders` per run in the normal case, from the watermark; watermark
-      advances only on a complete read
-- [ ] Each outcome above
-- [ ] Request matches the vendored `orders_2026-01-01.json` schema
+- [ ] Candidates only after a complete, non-historical fetch; a manager-reopened Shipment
+      is never one
+- [ ] `getOrder` paced to 0.5 a second after the burst, at most 100 a run, newest first
+      (a test counts requests)
+- [ ] Each row of the table, including a voided PolyBag Label that Amazon still lists, and
+      `SHIPPED` with no packages
+- [ ] A line Amazon reports fully shipped leaves a Shipment with no Package, and stays on
+      one with a Package
+- [ ] The `getOrder` request matches the vendored `orders_2026-01-01.json` schema
+
+## Comments
+
+- 2026-10-13 — Rewritten for the cut-back PRD. The first version searched `SHIPPED` and
+  `CANCELLED` orders from a watermark kept on the connection. That spends `searchOrders`,
+  which refills one request every three minutes and is shared with the import. A
+  `getOrder` per Shipment that left the feed needs no watermark and uses a budget
+  nothing else draws on.
