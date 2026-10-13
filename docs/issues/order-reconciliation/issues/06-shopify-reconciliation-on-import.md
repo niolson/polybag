@@ -1,6 +1,6 @@
 # Shopify: close the Shipments the source closed, on import
 
-Status: ready-for-agent
+Status: done — 2026-10-13
 Category: enhancement
 Repo: `polybag`
 
@@ -93,18 +93,51 @@ avoids `Saloon\Config::preventStrayRequests()`.
 
 ## Acceptance criteria
 
-- [ ] Candidates only after a complete fetch; a re-pointed fulfillment order and a
+- [x] Candidates only after a complete fetch; a re-pointed fulfillment order and a
       manager-reopened Shipment are never candidates
-- [ ] One `nodes(ids:)` request per batch of candidates (a test counts requests)
-- [ ] Each row of the table, as tests through a mocked import run
-- [ ] A Shipment whose only fulfillment carries a voided PolyBag Label's tracking number
+- [x] One `nodes(ids:)` request per batch of candidates (a test counts requests)
+- [x] Each row of the table, as tests through a mocked import run
+- [x] A Shipment whose only fulfillment carries a voided PolyBag Label's tracking number
       stays open; one with another tracking number, or none, closes as shipped
-- [ ] A failed lookup changes nothing, and the run completes
-- [ ] A reship Label and its void leave a source-shipped Shipment `Shipped` by `source`
-- [ ] Import tests fail on an unmocked HTTP or Saloon request
+- [x] A failed lookup changes nothing, and the run completes
+- [x] A reship Label and its void leave a source-shipped Shipment `Shipped` by `source`
+- [x] Import tests fail on an unmocked HTTP or Saloon request
 
 ## Comments
 
 - 2026-10-13 — Rewritten for the cut-back PRD. The first version confirmed candidates
   with `03`'s purchase-time lookup, flagged partial fulfillment and a cancellation after
   shipping for review, and let a newer source report undo a manager's change.
+- 2026-10-13 — Built.
+  - **`fulfillmentOrderMove`, API 2026-07:** moving every line item re-assigns the
+    fulfillment order and keeps its ID, so the import fetches it at the new location: the
+    second case. Moving some creates a new fulfillment order for them and leaves the
+    original open with the rest, which re-imports already follow.
+  - **Query cost, measured on the development store:** 14 points requested per
+    `nodes(ids:)` request whether it names 1, 50 or 246 fulfillment orders, against a
+    20,000-point bucket. The limit is `nodes`' 250-ID input cap (`MAX_INPUT_SIZE_EXCEEDED`
+    at 251), so a batch is 250.
+  - **Every fulfillment, every tracking number** (review, 2026-10-13). The query in the
+    body truncated both: ten cancelled fulfillments ahead of a successful eleventh read as
+    `Cancelled`, and a foreign number past the fifth was missed. The lookup now asks for
+    `pageInfo` and fetches a fulfillment order's later fulfillments 50 at a time before
+    deciding (17 points a page), and `trackingInfo` takes no `first`, which in Shopify's
+    schema truncates the list. The batch still costs 14 points. A failed page leaves that
+    Shipment for the next run and the rest of the batch closes.
+  - **Shape.** `ShopifySource` implements `ClosesRecordsClosedAtSource`, which
+    `ShipmentImportService` calls after the writes, outside `withoutSyncingToSearch()` so
+    an external tracking number is searchable. `ShopifyClosedFulfillmentOrderCloser` finds
+    the candidates, looks them up and reads each answer into a `SourceOrderReport`
+    (cancelled, or shipped with `SourceParcel`s). `SourceClosureApplier` is the closing
+    step for `07`: it re-reads the Shipment under a lock, refuses one no longer open or
+    reopened by a manager, compares tracking numbers with every Label (voided included),
+    writes through the model with an audit row whose `reason` says what Shopify reported,
+    and takes the Shipment out of any active pick batch.
+  - **Counts.** `ImportResult::$shipmentsClosed`, on `shipments:import` and in the import
+    notification. A failed lookup is an import error that names the run after.
+  - **Stray requests.** Ported `ff8c1410`, and went one step further: the import catches
+    the lookup's exception, so the guard also remembers a stray Saloon request and fails
+    the test at teardown. That caught `DirectCarrierPurchaseRecoveryTest`'s *still settles
+    a genuine decline*, which never faked its responses and passed on a failed live token
+    request to USPS and UPS. It now fakes them.
+

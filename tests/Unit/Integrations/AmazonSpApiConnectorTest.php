@@ -9,6 +9,11 @@ use App\Http\Integrations\Amazon\Requests\SearchOrders;
 use App\Models\Setting;
 use App\Services\SettingsService;
 use Illuminate\Support\Facades\Cache;
+use Tests\TestCase;
+
+// These build requests to read their URLs and never send one, so they carry
+// no mock client.
+beforeEach(fn () => TestCase::allowStraySaloonRequests());
 
 function amazonConnector(): AmazonSpApiConnector
 {

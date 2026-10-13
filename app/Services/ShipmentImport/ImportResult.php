@@ -15,6 +15,8 @@ class ImportResult
         public readonly int $shipmentsExported = 0,
         public readonly array $errors = [],
         public readonly float $duration = 0.0,
+        /** Open Shipments closed because their source closed the order. */
+        public readonly int $shipmentsClosed = 0,
     ) {}
 
     public function toArray(): array
@@ -28,6 +30,7 @@ class ImportResult
             'products_created' => $this->productsCreated,
             'products_updated' => $this->productsUpdated,
             'shipments_exported' => $this->shipmentsExported,
+            'shipments_closed' => $this->shipmentsClosed,
             'errors' => $this->errors,
             'duration' => $this->duration,
         ];

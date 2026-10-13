@@ -2,11 +2,13 @@
 
 namespace App\Services\ShipmentImport\Sources;
 
+use App\Contracts\ClosesRecordsClosedAtSource;
 use App\Contracts\DataSourceInterface;
 use App\Contracts\ExportDestinationInterface;
 use App\Contracts\ReconcilesSupersededRecords;
 use App\DataTransferObjects\ShipmentImport\ShopifyFulfillmentOrderIdentity;
 use App\DataTransferObjects\ShipmentImport\ShopifyMetafieldReference;
+use App\DataTransferObjects\ShipmentImport\SourceClosureResult;
 use App\Enums\DutiesTerms;
 use App\Enums\RecipientTaxIdType;
 use App\Enums\ShopifyMetafieldOwner;
@@ -15,6 +17,7 @@ use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Http\Integrations\Shopify\ShopifyConnector;
 use App\Models\Carrier;
 use App\Models\DataSource;
+use App\Services\ShipmentImport\ShopifyClosedFulfillmentOrderCloser;
 use App\Services\ShipmentImport\ShopifyFulfillmentOrderRepointer;
 use App\Services\ShopifyFulfillmentOrderActivationService;
 use App\Services\ShopifyGoodsFingerprint;
@@ -25,7 +28,7 @@ use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 use RuntimeException;
 
-class ShopifySource implements DataSourceInterface, ExportDestinationInterface, ReconcilesSupersededRecords
+class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface, ExportDestinationInterface, ReconcilesSupersededRecords
 {
     private const ACCESS_SCOPES_QUERY = <<<'GRAPHQL'
         query AccessScopes {
@@ -431,6 +434,17 @@ class ShopifySource implements DataSourceInterface, ExportDestinationInterface, 
                 goodsFingerprint: $row['metadata'][ShopifyGoodsFingerprint::METADATA_KEY] ?? null,
             )),
         );
+    }
+
+    /**
+     * Close the Shipments whose fulfillment order Shopify has closed since it
+     * left the feed. Delegated whole to {@see ShopifyClosedFulfillmentOrderCloser}.
+     *
+     * @param  Collection<int, array<string, mixed>>  $shipments
+     */
+    public function closeRecordsClosedAtSource(DataSource $dataSource, Collection $shipments): SourceClosureResult
+    {
+        return app(ShopifyClosedFulfillmentOrderCloser::class)->close($dataSource, $this->connector, $shipments);
     }
 
     private function fetchFulfillmentOrderShipments(): Collection

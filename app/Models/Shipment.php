@@ -286,8 +286,12 @@ class Shipment extends Model
      */
     public function updateShippedStatus(): void
     {
-        // A cancelled order stays cancelled whatever its packages say.
-        if ($this->status === ShipmentStatus::Cancelled) {
+        // A cancelled order stays cancelled whatever its packages say. So does
+        // an order its source reported shipped: it stays shipped at the
+        // source, so a reship Label bought here does not make it PolyBag's,
+        // and voiding that Label does not reopen it. A manager reopens it by
+        // hand (`order-reconciliation/06`).
+        if ($this->status === ShipmentStatus::Cancelled || $this->wasShippedBySource()) {
             return;
         }
 
@@ -346,6 +350,15 @@ class Shipment extends Model
     public function wasClosedBySource(): bool
     {
         return $this->status !== ShipmentStatus::Open
+            && $this->status_origin === ShipmentStatusOrigin::Source;
+    }
+
+    /**
+     * Whether the originating connection reported this order shipped.
+     */
+    public function wasShippedBySource(): bool
+    {
+        return $this->status === ShipmentStatus::Shipped
             && $this->status_origin === ShipmentStatusOrigin::Source;
     }
 

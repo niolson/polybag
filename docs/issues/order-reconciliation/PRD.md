@@ -51,6 +51,10 @@ bought for, and that is accepted (decision 5).
   Shipment and how. A cancelled order is refused on every purchase path and blocked on
   Pack. A Manager or Admin can set any status; the form says when the source closed the
   order, and the change is audit-logged.
+- **Built by `06` (2026-10-13).** A Shopify import ends by looking up the open Shipments
+  whose fulfillment order left the feed, 250 to a `nodes(ids:)` request, and closing
+  those Shopify closed. The closing step, `SourceClosureApplier`, takes a
+  `SourceOrderReport` for `07` to fill from Amazon.
 
 ## Decisions
 
@@ -181,7 +185,7 @@ and is independent of the rest.
 | [03](issues/03-check-the-order-on-the-ship-page.md) | Check the order on the Ship page | `wontfix` | — |
 | [04](issues/04-check-orders-before-batch-and-auto-ship.md) | Check orders before batch ship and auto-ship | `wontfix` | — |
 | [05](issues/05-warn-on-the-pack-page.md) | Warn on the Pack page | `wontfix` | — |
-| [06](issues/06-shopify-reconciliation-on-import.md) | Shopify: close the Shipments the source closed, on import | `ready-for-agent` | — |
+| [06](issues/06-shopify-reconciliation-on-import.md) | Shopify: close the Shipments the source closed, on import | `done` | — |
 | [07](issues/07-amazon-reconciliation-on-import.md) | Amazon: close the Shipments the source closed, on import | `ready-for-agent` | 06 |
 | [08](issues/08-database-sources-apply-a-reported-status.md) | Database sources report and apply a status | `ready-for-agent` | — |
 | [09](issues/09-detect-buy-shipping-labels-voided-in-seller-central.md) | Detect Buy Shipping Labels voided in Seller Central | `ready-for-human` | — |

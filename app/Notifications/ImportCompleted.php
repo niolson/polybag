@@ -32,7 +32,9 @@ class ImportCompleted extends Notification
         $created = $this->stats['shipments_created'] ?? 0;
         $updated = $this->stats['shipments_updated'] ?? 0;
 
-        $body = "{$created} created, {$updated} updated";
+        $closed = $this->stats['shipments_closed'] ?? 0;
+
+        $body = "{$created} created, {$updated} updated".($closed > 0 ? ", {$closed} closed by the source" : '');
         if ($hasErrors) {
             $errorCount = count($this->errors);
             $body .= " — {$errorCount} ".($errorCount === 1 ? 'error' : 'errors').': '.Str::limit($this->errors[0], 150);

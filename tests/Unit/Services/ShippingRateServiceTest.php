@@ -56,6 +56,7 @@ use Saloon\Http\Request;
 use Saloon\Http\Response;
 use Saloon\Http\Senders\GuzzleSender;
 use Saloon\Laravel\Facades\Saloon;
+use Tests\TestCase;
 
 beforeEach(function (): void {
     $this->uspsCarrier = Carrier::factory()->usps()->create();
@@ -1818,6 +1819,9 @@ class CannedGuzzleSender extends GuzzleSender
 }
 
 it('parses concurrent rate responses from an async source that is not a carrier', function (): void {
+    // Answered by a canned Guzzle sender, which Saloon's faking would bypass.
+    TestCase::allowStraySaloonRequests();
+
     $registry = app(CarrierRegistry::class);
 
     // Two configured sources, so the service takes the concurrent path rather
