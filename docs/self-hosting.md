@@ -229,7 +229,9 @@ external vendor, this is it.
    refuse with "Reconnect Shopify with the required scopes" naming any that are missing.
    Choose the *merchant-managed* fulfillment-order scopes: an app scoped only for
    *assigned* fulfillment orders returns an empty list rather than an error, and no
-   check catches that.
+   check catches that. Add `read_all_orders` as well. It is not required, but without it
+   Shopify hides orders older than 60 days from order search, so every import run reads
+   every open fulfillment order instead of only the orders that changed.
 3. Shopify gates customer PII (the email and destination address the importer needs)
    behind protected customer data access. Request it if your app type requires it.
 4. Create a Shopify Connection with the store's `.myshopify.com` **Shop Domain**, and

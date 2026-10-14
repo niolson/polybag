@@ -29,6 +29,13 @@ use RuntimeException;
  * A fulfillment order moved whole keeps its ID (`fulfillmentOrderMove`,
  * API 2026-07), so the import fetches it at its new location; when that
  * location is ignored, it is a candidate here too.
+ *
+ * A run that searched only for changes (`order-reconciliation/11`) says
+ * nothing about a fulfillment order it did not return, so only the ones it
+ * returned and did not import are candidates: closed, cancelled, on hold, or
+ * at an ignored location. The lookup reads them again rather than the search
+ * selecting the closing fields too, which would take its cost past Shopify's
+ * limit for one query.
  */
 class ShopifyClosedFulfillmentOrderCloser
 {
@@ -82,8 +89,9 @@ class ShopifyClosedFulfillmentOrderCloser
 
     /**
      * @param  Collection<int, array<string, mixed>>  $shipments  every row the run fetched
+     * @param  list<string>|null  $answeredIds  the fulfillment orders a search for changes returned; null after a full read
      */
-    public function close(DataSource $dataSource, ShopifyConnector $connector, Collection $shipments): SourceClosureResult
+    public function close(DataSource $dataSource, ShopifyConnector $connector, Collection $shipments, ?array $answeredIds = null): SourceClosureResult
     {
         $ignoredLocationIds = DataSourceLocation::query()
             ->where('data_source_id', $dataSource->id)
@@ -91,7 +99,7 @@ class ShopifyClosedFulfillmentOrderCloser
             ->pluck('external_id')
             ->flip();
 
-        $candidates = $this->candidates($dataSource, $shipments, $ignoredLocationIds);
+        $candidates = $this->candidates($dataSource, $shipments, $ignoredLocationIds, $answeredIds);
 
         $closed = 0;
         $errors = [];
@@ -142,10 +150,15 @@ class ShopifyClosedFulfillmentOrderCloser
      *
      * @param  Collection<int, array<string, mixed>>  $shipments
      * @param  Collection<string, int>  $ignoredLocationIds
+     * @param  list<string>|null  $answeredIds
      * @return Collection<string, Shipment> keyed by fulfillment order ID
      */
-    private function candidates(DataSource $dataSource, Collection $shipments, Collection $ignoredLocationIds): Collection
+    private function candidates(DataSource $dataSource, Collection $shipments, Collection $ignoredLocationIds, ?array $answeredIds): Collection
     {
+        if ($answeredIds === []) {
+            return collect();
+        }
+
         $offered = $shipments
             ->reject(fn (array $row): bool => $ignoredLocationIds->has((string) ($row['source_location']['external_id'] ?? '')))
             ->mapWithKeys(fn (array $row): array => [(string) $row['source_record_id'] => true]);
@@ -157,6 +170,7 @@ class ShopifyClosedFulfillmentOrderCloser
                 ->whereNull('status_origin')
                 ->orWhere('status_origin', '!=', ShipmentStatusOrigin::Manager))
             ->where('source_record_id', 'like', self::FULFILLMENT_ORDER_PREFIX.'%')
+            ->when($answeredIds !== null, fn (Builder $query) => $query->whereIn('source_record_id', $answeredIds))
             ->get()
             ->reject(fn (Shipment $shipment): bool => $offered->has($shipment->source_record_id))
             ->keyBy('source_record_id');
