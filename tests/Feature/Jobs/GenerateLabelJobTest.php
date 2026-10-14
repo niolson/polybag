@@ -1,11 +1,18 @@
 <?php
 
+use App\Contracts\BlindPurchaseSource;
 use App\Contracts\DirectCarrierAdapter;
+use App\Contracts\PackageShippingWorkflow;
+use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
+use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
+use App\Enums\CustomsDocumentDelivery;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
+use App\Enums\ServiceCapability;
 use App\Enums\ShippingRuleAction;
 use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
 use App\Jobs\GenerateLabelJob;
@@ -18,6 +25,7 @@ use App\Models\PackageItem;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
+use App\Models\ShippingMethodPostageSource;
 use App\Models\ShippingOffer;
 use App\Models\ShippingRule;
 use App\Models\User;
@@ -192,6 +200,99 @@ it('keeps the package and its unresolved offer when the carrier accepted but its
         ->and($ctx['item']->package_id)->toBe($ctx['package']->id)
         ->and(Package::find($ctx['package']->id))->not->toBeNull()
         ->and(ShippingOffer::whereNotNull('consumed_at')->sole()->isAwaitingPurchaseConfirmation())->toBeTrue();
+});
+
+/**
+ * An unshipped package whose Shopify method is the sole choice, with a Shopify
+ * blind source whose purchase writes `$markers` onto the package, as
+ * ShopifyShippingLabelService does, and then fails.
+ *
+ * @param  array<string, string>  $markers
+ * @return array{package: Package, item: LabelBatchItem}
+ */
+function blindPurchaseLeavingMarkers(array $markers, string $error): array
+{
+    $source = createShopifyDataSource([], ['oauth_access_token' => 'shpat_test_token']);
+    $method = ShippingMethod::factory()->create();
+    ShippingMethodPostageSource::factory()->shopify()->any()->for($method)->create();
+    $shipment = Shipment::factory()->for($method)->create([
+        'data_source_id' => $source->id,
+        'metadata' => ['shopify_fulfillment_order_id' => 'gid://shopify/FulfillmentOrder/12345'],
+    ]);
+    $package = Package::factory()->for($shipment)->create(['status' => PackageStatus::Unshipped]);
+    allowBlindPurchase($package);
+
+    $shopify = Mockery::mock(BlindPurchaseSource::class);
+    $shopify->shouldReceive('getCarrierName')->andReturn('Shopify');
+    $shopify->shouldReceive('isConfigured')->andReturnTrue();
+    $shopify->shouldReceive('offerCapability')->andReturn(ServiceCapability::Unguaranteed);
+    $shopify->shouldReceive('offerDeclaredValueCap')->andReturnNull();
+    $shopify->shouldReceive('customsDocumentDelivery')->andReturn(CustomsDocumentDelivery::Separate);
+    $shopify->shouldReceive('blindPurchaseOffers')->andReturn(collect([new BlindPurchaseOffer(
+        source: 'Shopify', sourceLabel: 'Shopify Shipping', serviceCode: 'auto', selectionLabel: "Shopify's choice",
+    )]));
+    $shopify->shouldReceive('createShipment')->once()->andReturnUsing(function (ShipRequest $request) use ($markers, $error): ShipResponse {
+        // The adapter writes through its own copy of the package.
+        $stored = Package::find($request->packageId);
+        $stored->update(['metadata' => [...($stored->metadata ?? []), ...$markers]]);
+
+        return ShipResponse::failure($error);
+    });
+    app(CarrierRegistry::class)->registerInstance('Shopify', $shopify);
+
+    $batch = LabelBatch::factory()->create(['user_id' => User::factory()->admin()->create()->id]);
+    $item = LabelBatchItem::factory()->create([
+        'label_batch_id' => $batch->id,
+        'shipment_id' => $shipment->id,
+        'package_id' => $package->id,
+        'status' => LabelBatchItemStatus::Pending,
+    ]);
+
+    return ['package' => $package, 'item' => $item];
+}
+
+it('keeps a package whose Shopify purchase may still be running or may have sold a label', function (array $markers): void {
+    // release-polish/02: a blind purchase has no offer, so the markers on the
+    // package are its only record. Deleting it left a paid label PolyBag never
+    // recorded, and the shipment eligible to be bought again.
+    $ctx = blindPurchaseLeavingMarkers($markers, 'Shopify stopped reporting on the label purchase before it finished.');
+
+    (new GenerateLabelJob($ctx['item']->id, 'pdf', null))->handle();
+
+    $ctx['item']->refresh();
+
+    expect($ctx['item']->status)->toBe(LabelBatchItemStatus::Failed)
+        ->and($ctx['item']->error_message)->toContain('Shopify stopped reporting')
+        ->and($ctx['item']->error_message)->toContain('A label may already exist')
+        ->and($ctx['item']->package_id)->toBe($ctx['package']->id)
+        ->and(Package::find($ctx['package']->id)?->metadata)->toMatchArray($markers);
+})->with([
+    'purchase in flight' => [['shopify_purchase_result_id' => 'gid://shopify/ShippingLabelPurchaseResult/1']],
+    'label sold' => [['shopify_shipping_label_id' => 'gid://shopify/ShippingLabel/1']],
+]);
+
+it('still cleans up a package whose Shopify purchase was declined outright', function (): void {
+    $ctx = blindPurchaseLeavingMarkers([], 'Shopify could not buy the label and gave no reason.');
+
+    (new GenerateLabelJob($ctx['item']->id, 'pdf', null))->handle();
+
+    expect($ctx['item']->fresh()->package_id)->toBeNull()
+        ->and(Package::find($ctx['package']->id))->toBeNull();
+});
+
+it('keeps a package holding a Shopify purchase when auto-ship cleans up after itself', function (): void {
+    $ctx = blindPurchaseLeavingMarkers(
+        ['shopify_purchase_result_id' => 'gid://shopify/ShippingLabelPurchaseResult/1'],
+        'Shopify is still buying the label.',
+    );
+
+    $result = app(PackageShippingWorkflow::class)->autoShip(
+        $ctx['package'],
+        new PackageAutoShippingRequest(userId: $ctx['item']->labelBatch->user_id),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and(Package::find($ctx['package']->id))->not->toBeNull();
 });
 
 it('handles exceptions during label generation', function (): void {

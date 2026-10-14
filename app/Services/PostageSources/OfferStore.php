@@ -5,9 +5,11 @@ namespace App\Services\PostageSources;
 use App\DataTransferObjects\PostageSources\OfferDraft;
 use App\DataTransferObjects\PostageSources\OfferRedemption;
 use App\Enums\OfferRejection;
+use App\Enums\PackageStatus;
 use App\Enums\SourceEnvironment;
 use App\Models\Package;
 use App\Models\ShippingOffer;
+use App\Services\Carriers\ShopifyAdapter;
 use Illuminate\Database\Eloquent\Collection;
 
 /**
@@ -309,11 +311,24 @@ class OfferStore
      * delete would destroy the only evidence the purchase was ever attempted,
      * and the next attempt would buy again with nothing to ask the source
      * about (`project-review/01`).
+     *
+     * A blind purchase has no offer, so its record is the Shopify markers on
+     * the package itself. Read from the database, not the model passed in:
+     * the adapter writes them through its own copy of the package
+     * (`release-polish/02`).
      */
     public function hasUnresolvedPurchase(Package $package): bool
     {
         return $this->awaitingPurchaseConfirmation($package)->isNotEmpty()
-            || $this->boughtButUnrecorded($package)->isNotEmpty();
+            || $this->boughtButUnrecorded($package)->isNotEmpty()
+            || $this->holdsBlindPurchase($package);
+    }
+
+    private function holdsBlindPurchase(Package $package): bool
+    {
+        return ShopifyAdapter::whereHoldsPurchase(
+            Package::query()->whereKey($package->id)->where('status', '!=', PackageStatus::Shipped),
+        )->exists();
     }
 
     /**
