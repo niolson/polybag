@@ -166,5 +166,6 @@ Product's `barcode`. Also checked at `2026-10` on 2026-10-14: the closed-order l
 costed the new label), a `fulfillmentCreate` export and its `fulfillmentCancel` on order
 #1801, and a Shopify Shipping purchase bought by the maintainer for package 253. No
 `2026-07` note in `ShopifyShippingLabelService` or `ShopifyClosedFulfillmentOrderCloser`
-needed to change. Not checked: a `[NS_PID, EAN]` variant, which the store lacks and the app
-cannot create; a unit test covers it.
+needed to change. The `[NS_PID, EAN]` ordering was checked too, once the maintainer reordered SKU
+`HM-00004`: order #1859 imported `barcode` and `gtin` = the EAN and
+`manufacturer_part_number` = the `NS_PID`.
