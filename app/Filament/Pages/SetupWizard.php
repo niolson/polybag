@@ -11,6 +11,7 @@ use App\Filament\Resources\CarrierAccounts\CarrierAccountResource;
 use App\Filament\Resources\DataSources\DataSourceResource;
 use App\Filament\Support\AddressForm;
 use App\Filament\Support\TimezoneOptions;
+use App\Http\Integrations\Shopify\ShopifyConnector;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
@@ -559,7 +560,8 @@ class SetupWizard extends Page
                         Forms\Components\TextInput::make('shopify_shop_domain')
                             ->label('Shop Domain')
                             ->placeholder('your-store.myshopify.com')
-                            ->helperText('Your Shopify store domain.'),
+                            ->helperText('Your store\'s .myshopify.com domain.')
+                            ->rule('regex:'.ShopifyConnector::SHOP_DOMAIN_PATTERN),
                         Forms\Components\Select::make('shopify_channel_id')
                             ->label('Channel')
                             ->options(fn () => Channel::query()->where('active', true)->orderBy('name')->pluck('name', 'id'))

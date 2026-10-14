@@ -114,7 +114,7 @@ return [
     'azure' => [
         'client_id' => env('AZURE_CLIENT_ID'),
         'client_secret' => env('AZURE_CLIENT_SECRET'),
-        'tenant' => env('AZURE_TENANT_ID', 'common'),
+        'tenant' => env('AZURE_TENANT_ID') ?: 'organizations',
         'redirect' => '/auth/azure/callback',
         'proxy' => null,
     ],

@@ -83,6 +83,7 @@ class DataSourcesTable
             ->defaultSort('name')
             ->recordActions([
                 Action::make('run_import')
+                    ->authorize('update')
                     ->label('Run Import')
                     ->icon(Heroicon::ArrowDownTray)
                     ->visible(fn (DataSource $record): bool => $record->importsOrders())

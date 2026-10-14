@@ -194,11 +194,12 @@ Register an application in Entra ID with the redirect URI
 ```env
 AZURE_CLIENT_ID=
 AZURE_CLIENT_SECRET=
-AZURE_TENANT_ID=common
+AZURE_TENANT_ID=
 ```
 
-Set `AZURE_TENANT_ID` to your directory's tenant ID to restrict sign-in to your
-organisation; `common` allows any Microsoft account.
+Set `AZURE_TENANT_ID` to your directory's tenant ID (Entra ID → Overview). Only users
+of that tenant can sign in. To admit more tenants, list their IDs under **Allowed Entra
+tenant IDs** in Settings; a login from any other tenant is refused.
 
 ## Data sources and marketplace postage
 

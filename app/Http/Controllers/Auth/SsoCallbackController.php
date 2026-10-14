@@ -32,7 +32,7 @@ class SsoCallbackController extends Controller
             ]);
 
             return redirect('/login')->withErrors([
-                'data.login' => 'Authentication failed: '.($request->input('error_description') ?: $request->input('error')),
+                'data.login' => 'Authentication failed. Please try again.',
             ]);
         }
 
@@ -54,6 +54,19 @@ class SsoCallbackController extends Controller
 
         if (empty($expectedNonce) || ! hash_equals($expectedNonce, $data['nonce'] ?? '')) {
             return redirect('/login')->withErrors(['data.login' => 'Authentication failed. Please try again.']);
+        }
+
+        // The broker's app registration accepts any Microsoft tenant, and accounts
+        // match by email, so only a tenant this install allows may sign in. The
+        // broker forwards `tid` only from an ID token it verified.
+        if ($provider === 'azure' && ! app(SsoLoginService::class)->azureTenantAllowed($data['extra']['tid'] ?? null)) {
+            logger()->warning('SSO login rejected: Microsoft tenant is not allowed', [
+                'tid' => $data['extra']['tid'] ?? null,
+            ]);
+
+            return redirect('/login')->withErrors([
+                'data.login' => 'Your Microsoft organization is not allowed to sign in here. Contact your admin.',
+            ]);
         }
 
         $email = $data['extra']['user_email'] ?? null;

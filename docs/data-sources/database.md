@@ -370,11 +370,24 @@ The rules, in full:
 - **One statement.** A single trailing `;` is fine; a second one is not. `SELECT 1; DROP
   TABLE orders` is rejected with *"must be a single SQL statement (remove the extra
   `;`)"*.
-- **Leading keyword only, after comments are stripped.** `-- SELECT` followed by a
+- **Leading keyword, after comments are stripped.** `-- SELECT` followed by a
   `DELETE` does not sneak through.
+- **No other statement's keyword, anywhere.** SQL Server runs statements written one
+  after another without a `;`, so words that only begin some other statement — `DELETE`,
+  `DROP`, `CREATE`, `ALTER`, `TRUNCATE`, `MERGE`, `EXEC`, `DECLARE`, `WAITFOR`, `USE`,
+  `GRANT` and the like — are refused anywhere outside a string, a comment or a quoted
+  name. A read field also refuses `INSERT`, `INTO` and any `UPDATE` other than
+  `FOR UPDATE`. A column that happens to share one of these names must be quoted:
+  `"use"`, `` `use` `` or `[use]`.
 - **`WITH` is not a read.** A CTE can lead an `UPDATE` or `DELETE` on MySQL 8 and
   PostgreSQL, so common table expressions are rejected in the read fields even when the
   CTE is innocent. Use a subquery or a view instead.
+- **Only syntax every database reads the same way.** Where MySQL, PostgreSQL, SQL Server
+  and SQLite disagree, the query is refused rather than read one way. So these are not
+  allowed: MySQL's executable comments and optimizer hints (`/*! … */`, `/*+ … */`), `#`
+  comments, `--` with no space after it, a comment nested inside a comment, PostgreSQL
+  dollar quotes (`$$ … $$`), a backslash inside a quoted string, and a quote inside a
+  `[bracketed]` or `` `backticked` `` name. Write comments as `-- ` or `/* … */`.
 
 A violation on save is a form validation error. A violation at execution time — a query
 saved before a rule tightened, say — aborts the run with the same message, recorded as a
@@ -382,7 +395,8 @@ configuration failure.
 
 This is a guard on statement *type*. It is not a substitute for
 [database privileges](#database-privileges): a `SELECT` against a table the account can
-read is allowed by the guard, whatever that table holds.
+read is allowed by the guard, whatever that table holds, and a `SELECT` can still call a
+function that has side effects. The account's grants are the real limit.
 
 ### `max_affected_rows`
 

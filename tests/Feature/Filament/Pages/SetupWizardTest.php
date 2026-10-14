@@ -195,6 +195,24 @@ it('creates a shopify DataSource record with the shop domain and an auto-created
         ->and($record->settings)->not->toHaveKey('authoritative_shipment_items');
 });
 
+it('accepts only a myshopify.com shop domain', function (string $domain, bool $valid): void {
+    setupWizardStep(6);
+
+    $component = Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
+        ->set('data.import_source', 'shopify')
+        ->set('data.shopify_shop_domain', $domain)
+        ->goToNextWizardStep();
+
+    $valid
+        ? $component->assertHasNoFormErrors(['shopify_shop_domain'])
+        : $component->assertHasFormErrors(['shopify_shop_domain' => 'regex']);
+})->with([
+    'store domain' => ['acme.myshopify.com', true],
+    'other host' => ['shop.example.com', false],
+    'lookalike host' => ['acme.myshopify.com.example.com', false],
+]);
+
 it('creates a shopify DataSource record using the selected channel', function (): void {
     $channel = Channel::factory()->create(['name' => 'My Shopify Store']);
 

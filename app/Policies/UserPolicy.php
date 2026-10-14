@@ -31,4 +31,12 @@ class UserPolicy
     {
         return $user->role->isAtLeast(Role::Admin);
     }
+
+    /**
+     * Filament's bulk delete asks this, not delete(), so it must be as strict.
+     */
+    public function deleteAny(User $user): bool
+    {
+        return $user->role->isAtLeast(Role::Admin);
+    }
 }

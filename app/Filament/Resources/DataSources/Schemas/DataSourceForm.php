@@ -11,6 +11,7 @@ use App\Enums\ScheduleInterval;
 use App\Enums\ShopifyMetafieldOwner;
 use App\Filament\Components\LazyOptionsSelect;
 use App\Filament\Pages\Settings as SettingsPage;
+use App\Http\Integrations\Shopify\ShopifyConnector;
 use App\Models\Carrier;
 use App\Models\CarrierAccountScope;
 use App\Models\Channel;
@@ -161,7 +162,7 @@ class DataSourceForm
                         ->helperText('Must be your store\'s .myshopify.com domain — this is where the store\'s API credentials are sent.')
                         ->required()
                         ->maxLength(255)
-                        ->rule('regex:/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i'),
+                        ->rule('regex:'.ShopifyConnector::SHOP_DOMAIN_PATTERN),
 
                     TextInput::make('settings.client_id')
                         ->label('App Client ID')

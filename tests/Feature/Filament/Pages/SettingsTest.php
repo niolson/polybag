@@ -23,6 +23,7 @@ use App\Services\ShipmentImport\Sources\AmazonSource;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Storage;
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
@@ -330,6 +331,19 @@ it('fedex registration service maps current fedex max retry codes to the fallbac
     }
 });
 
+it('keeps the fedex registration token out of the page and its state out of reach of the browser', function (): void {
+    $account = createFedexAccount();
+
+    $page = Livewire::test(EditCarrierAccount::class, ['record' => $account->id]);
+
+    (new ReflectionMethod(EditCarrierAccount::class, 'storeFedexAccountAuthToken'))->invoke($page->instance(), 'test-auth-token');
+
+    // The rendered page carries the component's whole snapshot.
+    expect($page->html())->not->toContain('test-auth-token');
+
+    expect(fn () => $page->set('fedexSupportFallbackActive', true))->toThrow(CannotUpdateLockedPropertyException::class);
+});
+
 it('carrier account edit page handles a fedex pin resend lockout', function (): void {
     $account = createFedexAccount();
 
@@ -343,9 +357,11 @@ it('carrier account edit page handles a fedex pin resend lockout', function (): 
         ], 400),
     ]);
 
-    Livewire::test(EditCarrierAccount::class, ['record' => $account->id])
-        ->set('fedexAccountAuthToken', 'test-auth-token')
-        ->set('fedexFactor2Method', 'SMS')
+    $page = Livewire::test(EditCarrierAccount::class, ['record' => $account->id]);
+
+    (new ReflectionMethod(EditCarrierAccount::class, 'storeFedexAccountAuthToken'))->invoke($page->instance(), 'test-auth-token');
+
+    $page->set('fedexFactor2Method', 'SMS')
         ->call('resendFedexPin')
         ->assertSet('fedexSupportFallbackActive', true)
         ->assertSet('fedexLockedFactor2Methods', ['SMS', 'CALL', 'EMAIL']);
@@ -514,6 +530,7 @@ it('defaults the label reference source to the shipment reference before it is e
 it('saves the Entra IdP-MFA trust settings from the form', function (): void {
     Livewire::test(Settings::class)
         ->fillForm([
+            'azure_sso_enabled' => true,
             'trust_idp_mfa' => true,
             'trusted_azure_tids' => ['a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d'],
         ])
@@ -530,6 +547,7 @@ it('saves the Entra IdP-MFA trust settings from the form', function (): void {
 it('canonicalizes trusted tenant ids to lowercase and de-duplicates on save', function (): void {
     Livewire::test(Settings::class)
         ->fillForm([
+            'azure_sso_enabled' => true,
             'trust_idp_mfa' => true,
             'trusted_azure_tids' => [
                 'A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D',
@@ -547,6 +565,7 @@ it('canonicalizes trusted tenant ids to lowercase and de-duplicates on save', fu
 it('rejects a non-UUID trusted tenant id', function (): void {
     Livewire::test(Settings::class)
         ->fillForm([
+            'azure_sso_enabled' => true,
             'trust_idp_mfa' => true,
             'trusted_azure_tids' => ['not-a-guid'],
         ])
@@ -557,20 +576,41 @@ it('rejects a non-UUID trusted tenant id', function (): void {
     expect(app(SettingsService::class)->get('trusted_azure_tids', []))->toBe([]);
 });
 
-it('preserves the trusted-tid allowlist when the trust toggle is turned off', function (): void {
+it('preserves the allowed tenant list when Azure SSO is turned off', function (): void {
+    app(SettingsService::class)->set('azure_sso_enabled', true, type: 'boolean');
     app(SettingsService::class)->set('trust_idp_mfa', true, type: 'boolean');
     app(SettingsService::class)->set('trusted_azure_tids', ['a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d'], type: 'json');
     app(SettingsService::class)->clearCache();
 
     Livewire::test(Settings::class)
-        ->fillForm(['trust_idp_mfa' => false])
+        ->fillForm(['azure_sso_enabled' => false])
         ->call('save')
         ->assertNotified();
 
     $settings = app(SettingsService::class);
 
-    expect($settings->get('trust_idp_mfa'))->toBeFalse()
+    expect($settings->get('azure_sso_enabled'))->toBeFalse()
         ->and($settings->get('trusted_azure_tids'))->toBe(['a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d']);
+});
+
+it('requires an allowed tenant to enable Azure SSO when AZURE_TENANT_ID names none', function (): void {
+    config(['services.azure.tenant' => 'organizations']);
+
+    Livewire::test(Settings::class)
+        ->fillForm(['azure_sso_enabled' => true, 'trusted_azure_tids' => []])
+        ->call('save')
+        ->assertHasFormErrors(['trusted_azure_tids' => 'required']);
+});
+
+it('enables Azure SSO without a listed tenant when AZURE_TENANT_ID names one', function (): void {
+    config(['services.azure.tenant' => 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d']);
+
+    Livewire::test(Settings::class)
+        ->fillForm(['azure_sso_enabled' => true, 'trusted_azure_tids' => []])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect(app(SettingsService::class)->get('azure_sso_enabled'))->toBeTrue();
 });
 
 it('does not load client fields into settings form in multi-client mode', function (): void {

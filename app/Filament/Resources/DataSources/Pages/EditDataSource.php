@@ -24,6 +24,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Filament\Support\Exceptions\Halt;
+use RuntimeException;
 use Throwable;
 
 class EditDataSource extends EditRecord
@@ -64,6 +65,7 @@ class EditDataSource extends EditRecord
     {
         return [
             Action::make('run_import')
+                ->authorize('update')
                 ->label('Run Import Now')
                 ->icon('heroicon-o-arrow-down-tray')
                 ->color('gray')
@@ -88,6 +90,7 @@ class EditDataSource extends EditRecord
                 }),
 
             Action::make('import_historical_amazon_orders')
+                ->authorize('update')
                 ->label('Import Historical Orders')
                 ->icon('heroicon-o-clock')
                 ->color('gray')
@@ -140,6 +143,7 @@ class EditDataSource extends EditRecord
                 }),
 
             Action::make('shopify_connect')
+                ->authorize('update')
                 ->label(fn (): string => app(OAuthService::class)->isDataSourceConnected($this->record) ? 'Reconnect Shopify' : 'Connect with OAuth')
                 ->icon('heroicon-o-link')
                 ->color(fn (): string => app(OAuthService::class)->isDataSourceConnected($this->record) ? 'warning' : 'primary')
@@ -152,11 +156,19 @@ class EditDataSource extends EditRecord
                     ? 'This will replace the existing OAuth token. You will be redirected to Shopify to re-authorize.'
                     : 'You will be redirected to Shopify to authorize access. Make sure Shop Domain is saved first.')
                 ->action(function (): void {
-                    $url = app(OAuthService::class)->initiateAuthorizationForDataSource('shopify', $this->record);
+                    try {
+                        $url = app(OAuthService::class)->initiateAuthorizationForDataSource('shopify', $this->record);
+                    } catch (RuntimeException $e) {
+                        Notification::make()->danger()->title('Cannot connect Shopify')->body($e->getMessage())->send();
+
+                        return;
+                    }
+
                     $this->redirect($url, navigate: false);
                 }),
 
             Action::make('shopify_disconnect')
+                ->authorize('update')
                 ->label('Disconnect Shopify')
                 ->icon('heroicon-o-x-mark')
                 ->color('danger')
@@ -171,6 +183,7 @@ class EditDataSource extends EditRecord
                 }),
 
             Action::make('amazon_connect')
+                ->authorize('update')
                 ->label(fn (): string => app(OAuthService::class)->isDataSourceConnected($this->dataSource()) ? 'Reconnect Amazon' : 'Connect Amazon')
                 ->icon('heroicon-o-link')
                 ->color(fn (): string => app(OAuthService::class)->isDataSourceConnected($this->dataSource()) ? 'warning' : 'primary')
@@ -186,6 +199,7 @@ class EditDataSource extends EditRecord
                 }),
 
             Action::make('amazon_disconnect')
+                ->authorize('update')
                 ->label('Disconnect Amazon')
                 ->icon('heroicon-o-x-mark')
                 ->color('danger')
@@ -202,6 +216,7 @@ class EditDataSource extends EditRecord
                 }),
 
             Action::make('amazon_refresh_marketplaces')
+                ->authorize('update')
                 ->label('Refresh Amazon Marketplaces')
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
@@ -248,6 +263,7 @@ class EditDataSource extends EditRecord
                 }),
 
             Action::make('sync_shopify_locations')
+                ->authorize('update')
                 ->label('Sync Shopify Locations')
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
@@ -274,6 +290,7 @@ class EditDataSource extends EditRecord
                 }),
 
             Action::make('activate_fulfillment_order_import')
+                ->authorize('update')
                 ->label('Activate Fulfillment-Order Import')
                 ->icon('heroicon-o-check-circle')
                 ->color('warning')
@@ -310,6 +327,7 @@ class EditDataSource extends EditRecord
                 }),
 
             Action::make('check_off_amazon_shipping')
+                ->authorize('update')
                 ->label('Check Again')
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')

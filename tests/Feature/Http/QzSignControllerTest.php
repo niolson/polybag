@@ -111,6 +111,22 @@ it('rejects hid feature reports other than the PS60 zero command', function (arr
     ]],
 ]);
 
+it('rejects a print job sent anywhere but a named local printer, or with fetched data', function (array $params): void {
+    $this->actingAs(User::factory()->create());
+
+    $this->postJson('/qz/sign', qzSignRequest('print', $params))
+        ->assertStatus(422)
+        ->assertJson(['error' => 'Unsupported signing request']);
+})->with([
+    'network host' => [['printer' => ['host' => '10.0.0.5', 'port' => 9100], 'data' => ['x']]],
+    'name and host' => [['printer' => ['name' => 'Zebra', 'host' => '10.0.0.5', 'port' => 9100], 'data' => ['x']]],
+    'file' => [['printer' => ['file' => 'C:\\Users\\Public\\out.txt'], 'data' => ['x']]],
+    'printer as a string' => [['printer' => 'Zebra', 'data' => ['x']]],
+    'data from a file or URL' => [['printer' => ['name' => 'Zebra'], 'data' => [['type' => 'pixel', 'format' => 'pdf', 'flavor' => 'file', 'data' => 'https://example.com/a.pdf']]]],
+    'no data' => [['printer' => ['name' => 'Zebra']]],
+    'no params' => [[]],
+]);
+
 it('returns 422 for missing request or payload parameter', function (): void {
     $this->actingAs(User::factory()->create());
 
@@ -208,7 +224,16 @@ it('signs allow-listed calls, including the hid.* scale integration family', fun
     }
 })->with([
     'printers.find' => 'printers.find',
-    'print' => 'print',
+    'print image label' => ['print', [
+        'printer' => ['name' => 'Zebra GX420d'],
+        'options' => ['size' => ['width' => 4, 'height' => 6], 'units' => 'in'],
+        'data' => [['type' => 'pixel', 'format' => 'pdf', 'flavor' => 'base64', 'data' => 'JVBERi0=']],
+    ]],
+    'print raw ZPL' => ['print', [
+        'printer' => ['name' => 'Zebra ZPL'],
+        'options' => new stdClass,
+        'data' => ['^XA^FDhello^FS^XZ'],
+    ]],
     'hid.listDevices' => 'hid.listDevices',
     'hid.claimDevice' => 'hid.claimDevice',
     'hid.releaseDevice' => 'hid.releaseDevice',

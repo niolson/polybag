@@ -10,6 +10,9 @@ use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\AbstractProvider;
 use SocialiteProviders\Azure\User as AzureUser;
 
+const ALLOWED_AZURE_TID = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+const OTHER_AZURE_TID = 'ffffffff-1111-4222-8333-444444444444';
+
 beforeEach(function (): void {
     config([
         'services.oauth.broker_url' => 'https://connect.polybag.app',
@@ -22,8 +25,34 @@ beforeEach(function (): void {
     $settings = app(SettingsService::class);
     $settings->set('google_sso_enabled', true, 'boolean', group: 'system');
     $settings->set('azure_sso_enabled', true, 'boolean', group: 'system');
+    $settings->set('trusted_azure_tids', [ALLOWED_AZURE_TID], type: 'json');
     $settings->clearCache();
 });
+
+/**
+ * An Azure Socialite user as the direct callback sees it, with the ID token
+ * from the token response carrying the tenant id.
+ */
+function azureSocialiteUser(string $upn, ?string $mail, ?string $tid = ALLOWED_AZURE_TID): AzureUser
+{
+    $azureUser = new AzureUser;
+    $azureUser->map(['email' => $upn, 'mail' => $mail]);
+
+    $encode = fn (array $part): string => rtrim(strtr(base64_encode(json_encode($part)), '+/', '-_'), '=');
+    $azureUser->setAccessTokenResponseBody([
+        'access_token' => 'graph-access-token',
+        'id_token' => $encode(['alg' => 'RS256']).'.'.$encode(array_filter(['tid' => $tid])).'.signature',
+    ]);
+
+    return $azureUser;
+}
+
+function fakeAzureSocialite(AzureUser $azureUser): void
+{
+    $provider = Mockery::mock(AbstractProvider::class);
+    $provider->shouldReceive('user')->once()->andReturn($azureUser);
+    Socialite::shouldReceive('driver')->with('azure')->andReturn($provider);
+}
 
 it('logs the IdP amr assertion on SSO login', function (): void {
     $user = User::factory()->create(['email' => 'sso-user@example.com', 'active' => true]);
@@ -69,7 +98,7 @@ it('logs in a user via the broker SSO receive flow', function (): void {
             'provider' => 'azure',
             'access_token' => 'graph-access-token',
             'nonce' => $nonce,
-            'extra' => ['user_email' => 'sso-user@example.com', 'user_name' => 'SSO User'],
+            'extra' => ['user_email' => 'sso-user@example.com', 'user_name' => 'SSO User', 'tid' => ALLOWED_AZURE_TID],
         ]),
     ]);
 
@@ -79,6 +108,31 @@ it('logs in a user via the broker SSO receive flow', function (): void {
     $response->assertRedirect('/');
     expect(auth()->id())->toBe($user->id);
 });
+
+it('refuses a broker Azure login from a tenant that is not allowed, or with no tenant', function (?string $tid): void {
+    User::factory()->create(['email' => 'sso-user@example.com', 'active' => true]);
+    $nonce = 'valid-sso-nonce';
+
+    Http::fake([
+        'connect.polybag.app/oauth/claim' => Http::response([
+            'provider' => 'azure',
+            'access_token' => 'graph-access-token',
+            'nonce' => $nonce,
+            'extra' => array_filter(['user_email' => 'sso-user@example.com', 'tid' => $tid]),
+        ]),
+    ]);
+
+    $response = $this->withSession(['oauth_state.azure' => $nonce])
+        ->get('/auth/sso/azure/receive?transfer_code=abc123');
+
+    $response->assertRedirect('/login');
+    $response->assertSessionHasErrors('data.login');
+    expect(auth()->check())->toBeFalse();
+})->with([
+    'another tenant' => [OTHER_AZURE_TID],
+    'personal Microsoft account' => ['9188040d-6c67-4c5b-b112-36a304b66dad'],
+    'no tenant' => [null],
+]);
 
 it('rejects an SSO receive with a mismatched nonce', function (): void {
     User::factory()->create(['email' => 'sso-user@example.com']);
@@ -166,7 +220,7 @@ it('handles an error redirect from the broker', function (): void {
     $response = $this->get('/auth/sso/azure/receive?error=access_denied&error_description=User+denied+access');
 
     $response->assertRedirect('/login');
-    $response->assertSessionHasErrors('data.login');
+    $response->assertSessionHasErrors(['data.login' => 'Authentication failed. Please try again.']);
     expect(auth()->check())->toBeFalse();
     Http::assertNothingSent();
 });
@@ -246,15 +300,7 @@ it('prefers the Azure mailbox address over userPrincipalName on the direct callb
 
     $user = User::factory()->create(['email' => 'mailbox@example.com', 'active' => true]);
 
-    $azureUser = new AzureUser;
-    $azureUser->map([
-        'email' => 'upn@example.onmicrosoft.com',
-        'mail' => 'mailbox@example.com',
-    ]);
-
-    $provider = Mockery::mock(AbstractProvider::class);
-    $provider->shouldReceive('user')->once()->andReturn($azureUser);
-    Socialite::shouldReceive('driver')->with('azure')->andReturn($provider);
+    fakeAzureSocialite(azureSocialiteUser('upn@example.onmicrosoft.com', 'mailbox@example.com'));
 
     $response = $this->get(route('auth.azure.callback'));
 
@@ -267,20 +313,53 @@ it('falls back to userPrincipalName when the Azure mailbox address is absent', f
 
     $user = User::factory()->create(['email' => 'upn@example.onmicrosoft.com', 'active' => true]);
 
-    $azureUser = new AzureUser;
-    $azureUser->map([
-        'email' => 'upn@example.onmicrosoft.com',
-        'mail' => null,
-    ]);
-
-    $provider = Mockery::mock(AbstractProvider::class);
-    $provider->shouldReceive('user')->once()->andReturn($azureUser);
-    Socialite::shouldReceive('driver')->with('azure')->andReturn($provider);
+    fakeAzureSocialite(azureSocialiteUser('upn@example.onmicrosoft.com', null));
 
     $response = $this->get(route('auth.azure.callback'));
 
     $response->assertRedirect('/');
     expect(auth()->id())->toBe($user->id);
+});
+
+it('refuses a direct Azure login from a tenant that is not allowed, or with no tenant', function (?string $tid): void {
+    config(['services.oauth.bypass_broker' => true]);
+
+    User::factory()->create(['email' => 'mailbox@example.com', 'active' => true]);
+
+    fakeAzureSocialite(azureSocialiteUser('someone@other.onmicrosoft.com', 'mailbox@example.com', $tid));
+
+    $response = $this->get(route('auth.azure.callback'));
+
+    $response->assertRedirect('/login');
+    $response->assertSessionHasErrors('data.login');
+    expect(auth()->check())->toBeFalse();
+})->with([
+    'another tenant' => [OTHER_AZURE_TID],
+    'no tenant' => [null],
+]);
+
+it('allows a direct Azure login from the tenant AZURE_TENANT_ID names', function (): void {
+    config(['services.oauth.bypass_broker' => true, 'services.azure.tenant' => strtoupper(OTHER_AZURE_TID)]);
+    app(SettingsService::class)->set('trusted_azure_tids', [], type: 'json');
+
+    $user = User::factory()->create(['email' => 'mailbox@example.com', 'active' => true]);
+
+    fakeAzureSocialite(azureSocialiteUser('user@contoso.onmicrosoft.com', 'mailbox@example.com', OTHER_AZURE_TID));
+
+    $this->get(route('auth.azure.callback'))->assertRedirect('/');
+    expect(auth()->id())->toBe($user->id);
+});
+
+it('allows no direct Azure login when neither AZURE_TENANT_ID nor Settings names a tenant', function (): void {
+    config(['services.oauth.bypass_broker' => true, 'services.azure.tenant' => 'common']);
+    app(SettingsService::class)->set('trusted_azure_tids', [], type: 'json');
+
+    User::factory()->create(['email' => 'mailbox@example.com', 'active' => true]);
+
+    fakeAzureSocialite(azureSocialiteUser('user@contoso.onmicrosoft.com', 'mailbox@example.com', OTHER_AZURE_TID));
+
+    $this->get(route('auth.azure.callback'))->assertRedirect('/login');
+    expect(auth()->check())->toBeFalse();
 });
 
 it('bypasses the broker for SSO when OAUTH_BYPASS_BROKER is set', function (): void {
@@ -295,5 +374,28 @@ it('bypasses the broker for SSO when OAUTH_BYPASS_BROKER is set', function (): v
 
     $response->assertRedirect();
     expect($response->headers->get('Location'))
-        ->toContain('login.microsoftonline.com');
+        ->toContain('login.microsoftonline.com')
+        ->toContain('openid');
 });
+
+it('refuses a direct Google login whose email Google has not verified', function (?bool $verified, bool $loggedIn): void {
+    config(['services.oauth.bypass_broker' => true]);
+
+    $user = User::factory()->create(['email' => 'person@example.com', 'active' => true]);
+
+    $googleUser = (new Laravel\Socialite\Two\User)
+        ->setRaw(array_filter(['email' => 'person@example.com', 'email_verified' => $verified], fn ($value): bool => $value !== null))
+        ->map(['email' => 'person@example.com']);
+
+    $provider = Mockery::mock(AbstractProvider::class);
+    $provider->shouldReceive('user')->once()->andReturn($googleUser);
+    Socialite::shouldReceive('driver')->with('google')->andReturn($provider);
+
+    $this->get(route('auth.google.callback'));
+
+    expect(auth()->id())->toBe($loggedIn ? $user->id : null);
+})->with([
+    'verified' => [true, true],
+    'unverified' => [false, false],
+    'not stated' => [null, false],
+]);

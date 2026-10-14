@@ -8,6 +8,7 @@ use App\Services\OAuthService;
 use App\Services\SettingsService;
 use App\Services\SsoLoginService;
 use Illuminate\Http\RedirectResponse;
+use Laravel\Socialite\AbstractUser;
 use Laravel\Socialite\Facades\Socialite;
 
 class GoogleController extends Controller
@@ -45,6 +46,17 @@ class GoogleController extends Controller
             logger()->error('Google SSO callback failed', ['error' => $e->getMessage()]);
 
             return redirect('/login')->with('error', 'Google authentication failed. Please try again.');
+        }
+
+        // Accounts match by email, so an address Google has not verified proves nothing.
+        $raw = $googleUser instanceof AbstractUser ? $googleUser->getRaw() : [];
+
+        if (($raw['email_verified'] ?? false) !== true) {
+            logger()->warning('SSO login rejected: Google has not verified the email address');
+
+            return redirect('/login')->withErrors([
+                'data.login' => 'Your Google account email address is not verified.',
+            ]);
         }
 
         $email = $googleUser->getEmail();

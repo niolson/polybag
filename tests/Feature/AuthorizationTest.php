@@ -16,6 +16,7 @@ use App\Filament\Resources\CarrierAccounts\Pages\ListCarrierAccounts;
 use App\Filament\Resources\Carriers\Pages\ListCarriers;
 use App\Filament\Resources\CarrierServiceResource\Pages\ListCarrierServices;
 use App\Filament\Resources\ChannelResource\Pages\ListChannels;
+use App\Filament\Resources\DataSources\Pages\EditDataSource;
 use App\Filament\Resources\LocationResource\Pages\EditLocation;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
 use App\Filament\Resources\PackageResource\Pages\ViewPackage;
@@ -23,15 +24,19 @@ use App\Filament\Resources\ProductResource\Pages\ListProducts;
 use App\Filament\Resources\ShipmentResource\Pages\CreateShipment;
 use App\Filament\Resources\ShipmentResource\Pages\EditShipment;
 use App\Filament\Resources\ShipmentResource\Pages\ListShipments;
+use App\Filament\Resources\ShipmentResource\RelationManagers\PackagesRelationManager;
 use App\Filament\Resources\ShippingMethodResource\Pages\ListShippingMethods;
 use App\Filament\Resources\SpecialServices\Pages\ListSpecialServices;
 use App\Filament\Resources\SpecialServices\SpecialServiceResource;
+use App\Filament\Resources\UserResource\Pages\EditUser;
 use App\Filament\Resources\UserResource\Pages\ListUsers;
 use App\Filament\Widgets\CarrierBreakdownChart;
 use App\Filament\Widgets\CostPerPackageTrend;
 use App\Filament\Widgets\ExceptionsWidget;
 use App\Filament\Widgets\ShippedShipmentsChart;
+use App\Models\CarrierAccount;
 use App\Models\CarrierAccountScope;
+use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\Setting;
@@ -39,8 +44,12 @@ use App\Models\Shipment;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\SettingsService;
+use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\Testing\TestAction;
+use Filament\Resources\Pages\EditRecord;
+use Illuminate\Support\Facades\Gate;
 use Livewire\Livewire;
 use PHPUnit\Framework\ExpectationFailedException;
 
@@ -445,3 +454,79 @@ describe('voiding a label', function (): void {
         expect($this->package->fresh()->status)->toBe(PackageStatus::Unshipped);
     })->with(['Manager' => Role::Manager, 'Admin' => Role::Admin]);
 });
+
+it('allows a bulk delete only to the roles that may delete one record', function (string $modelClass): void {
+    // Filament allows an action whose policy method is missing, so it must exist.
+    expect(method_exists(Gate::getPolicyFor($modelClass), 'deleteAny'))->toBeTrue();
+
+    foreach (Role::cases() as $role) {
+        $user = User::factory()->make(['role' => $role]);
+
+        expect($user->can('deleteAny', $modelClass))
+            ->toBe($user->can('delete', new $modelClass), "{$modelClass} deleteAny for {$role->name}");
+    }
+})->with(function (): array {
+    $models = [];
+
+    foreach (glob(__DIR__.'/../../app/Policies/*Policy.php') as $file) {
+        $model = 'App\\Models\\'.basename($file, 'Policy.php');
+
+        if (class_exists($model) && method_exists('App\\Policies\\'.basename($file, '.php'), 'delete')) {
+            $models[class_basename($model)] = [$model];
+        }
+    }
+
+    return $models;
+});
+
+it('refuses a Manager bulk-deleting packages from Edit Shipment', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+    $shipment = Shipment::factory()->create();
+    $package = Package::factory()->for($shipment)->create(['status' => PackageStatus::Unshipped]);
+
+    $component = Livewire::test(PackagesRelationManager::class, ['ownerRecord' => $shipment, 'pageClass' => EditShipment::class])
+        ->assertActionHidden(TestAction::make(DeleteBulkAction::class)->table()->bulk());
+
+    try {
+        $component->selectTableRecords([$package])->callAction(TestAction::make(DeleteBulkAction::class)->table()->bulk());
+    } catch (ExpectationFailedException) {
+        // Filament will not call an action it hides from this user.
+    }
+
+    expect(Package::find($package->id))->not->toBeNull();
+});
+
+it('lets an Admin bulk-delete unshipped packages from Edit Shipment', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Admin]));
+    $shipment = Shipment::factory()->create();
+    $package = Package::factory()->for($shipment)->create(['status' => PackageStatus::Unshipped]);
+
+    Livewire::test(PackagesRelationManager::class, ['ownerRecord' => $shipment, 'pageClass' => EditShipment::class])
+        ->selectTableRecords([$package])
+        ->callAction(TestAction::make(DeleteBulkAction::class)->table()->bulk());
+
+    expect(Package::find($package->id))->toBeNull();
+});
+
+it('authorizes each action on the credential pages by policy, not only by page access', function (string $page, Closure $record): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Admin]));
+    $instance = Livewire::test($page, ['record' => $record()->getKey()])->instance();
+
+    if (! $instance instanceof EditRecord) {
+        throw new LogicException("{$page} is not an edit page.");
+    }
+
+    $actions = collect($instance->getCachedHeaderActions())
+        ->flatMap(fn ($action): array => $action instanceof ActionGroup ? $action->getFlatActions() : [$action]);
+
+    expect($actions)->not->toBeEmpty()
+        ->and($actions->every(fn (Action $action): bool => $action->isAuthorized()))->toBeTrue();
+
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+
+    expect($actions->filter(fn (Action $action): bool => $action->isAuthorized())->map->getName()->values()->all())->toBe([]);
+})->with([
+    'carrier account' => [EditCarrierAccount::class, fn () => CarrierAccount::factory()->create()],
+    'connection' => [EditDataSource::class, fn () => DataSource::factory()->create()],
+    'user' => [EditUser::class, fn () => User::factory()->create()],
+]);

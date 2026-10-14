@@ -35,6 +35,14 @@ class PackagePolicy
         return $user->role->isAtLeast(Role::Admin);
     }
 
+    /**
+     * Filament's bulk delete asks this, not delete(), so it must be as strict.
+     */
+    public function deleteAny(User $user): bool
+    {
+        return $user->role->isAtLeast(Role::Admin);
+    }
+
     public function ship(User $user, Package $package): Response|bool
     {
         if (! $user->role->isAtLeast(Role::User)) {

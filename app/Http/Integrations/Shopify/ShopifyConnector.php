@@ -25,7 +25,7 @@ class ShopifyConnector extends Connector
      * OAuth credentials/access token to an arbitrary host. See security review
      * issue 16.
      */
-    private const SHOP_DOMAIN_PATTERN = '/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i';
+    public const SHOP_DOMAIN_PATTERN = '/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i';
 
     public function __construct(
         private readonly string $shopDomain,
