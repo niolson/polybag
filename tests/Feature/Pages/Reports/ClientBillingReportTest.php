@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\SettingsService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 
 /** A date inside the report's default filter window, which is last month. */
@@ -412,4 +413,122 @@ it('exports the same period the table shows when a date is cleared', function ()
     $content = ob_get_clean();
 
     expect($content)->toContain($client->name);
+});
+
+/**
+ * A client whose one shipment shipped package 1 on September 30 and package 2
+ * on October 2, with fees on every line so each can be told apart.
+ */
+function shipmentSplitAcrossSeptemberAndOctober(): Client
+{
+    $client = Client::factory()->create([
+        'is_default' => false,
+        'label_fee_per_package' => '1.00',
+        'pick_fee_first_item' => '3.00',
+        'pick_fee_additional_item' => '0.50',
+    ]);
+    $shipment = Shipment::factory()->create(['client_id' => $client->id]);
+    ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'quantity' => 3]);
+
+    Package::factory()->shipped()->create(['shipment_id' => $shipment->id, 'cost' => '8.00', 'shipped_at' => '2026-09-30 15:00:00']);
+    Package::factory()->shipped()->create(['shipment_id' => $shipment->id, 'cost' => '9.00', 'shipped_at' => '2026-10-02 15:00:00']);
+
+    return $client;
+}
+
+/** The report behind a Livewire test, typed so its own methods can be called. */
+function reportOf(Testable $page): ClientBillingReport
+{
+    $report = $page->instance();
+
+    if (! $report instanceof ClientBillingReport) {
+        throw new LogicException('Not a Client Billing report.');
+    }
+
+    return $report;
+}
+
+function billingFor(Client $client, string $from, string $until): ?object
+{
+    $records = reportOf(Livewire::test(ClientBillingReport::class)
+        ->filterTable('date_range', ['from' => $from, 'until' => $until]))
+        ->getTableRecords();
+
+    return $records->firstWhere('id', $client->id);
+}
+
+it('bills a package in the period it shipped, even when its shipment began in an earlier one', function (): void {
+    $client = shipmentSplitAcrossSeptemberAndOctober();
+
+    $row = billingFor($client, '2026-10-01', '2026-10-31');
+
+    // release-polish/28: the whole shipment was dated by its first package, so
+    // October left it out and package 2 was never billed. The pick fees fell
+    // in September, with the first package.
+    expect((int) $row->package_count)->toBe(1)
+        ->and((float) $row->total_postage)->toBe(9.00)
+        ->and((float) $row->label_fees)->toBe(1.00)
+        ->and((float) $row->pick_fees)->toBe(0.00)
+        ->and((int) $row->order_count)->toBe(0)
+        ->and((float) $row->total_billable)->toBe(10.00);
+});
+
+it('charges the shipment fees once, in the period of its first package, and does not change it later', function (): void {
+    $client = shipmentSplitAcrossSeptemberAndOctober();
+
+    $row = billingFor($client, '2026-09-01', '2026-09-30');
+
+    // $3.00 first item + 2 more at $0.50, and only package 1.
+    expect((int) $row->package_count)->toBe(1)
+        ->and((float) $row->total_postage)->toBe(8.00)
+        ->and((float) $row->pick_fees)->toBe(4.00)
+        ->and((int) $row->order_count)->toBe(1)
+        ->and((float) $row->total_billable)->toBe(13.00);
+});
+
+it('bills a shipment wholly once over a period covering both packages', function (): void {
+    $client = shipmentSplitAcrossSeptemberAndOctober();
+
+    $row = billingFor($client, '2026-09-01', '2026-10-31');
+
+    expect((int) $row->package_count)->toBe(2)
+        ->and((float) $row->pick_fees)->toBe(4.00)
+        ->and((float) $row->total_billable)->toBe(23.00);
+});
+
+it('exports the later package on its own detail line, without the shipment fees', function (): void {
+    $client = shipmentSplitAcrossSeptemberAndOctober();
+
+    $report = reportOf(Livewire::test(ClientBillingReport::class)
+        ->set('viewMode', 'detail')
+        ->set('clientId', $client->id)
+        ->filterTable('date_range', ['from' => '2026-10-01', 'until' => '2026-10-31']));
+
+    ob_start();
+    $report->exportCsv()->sendContent();
+    $lines = explode("\n", trim(ob_get_clean()));
+
+    expect($lines)->toHaveCount(2)
+        ->and(str_getcsv($lines[1]))->toBe([
+            Shipment::where('client_id', $client->id)->sole()->shipment_reference,
+            '2026-10-02 15:00:00', '1', '9.00', '0', '1.00', '0.00', '0.00', '0.00', '0.00', '', '10.00',
+        ]);
+});
+
+it('treats a date cleared to an empty string as no bound, in the table and the export', function (): void {
+    $client = shipmentSplitAcrossSeptemberAndOctober();
+
+    $report = reportOf(Livewire::test(ClientBillingReport::class)
+        ->filterTable('date_range', ['from' => '2026-10-01', 'until' => '']));
+    $row = $report->getTableRecords()->firstWhere('id', $client->id);
+
+    expect((int) $row->package_count)->toBe(1)
+        ->and((float) $row->total_postage)->toBe(9.00);
+
+    ob_start();
+    $report->exportCsv()->sendContent();
+    $content = ob_get_clean();
+
+    expect($content)->toContain($client->name)
+        ->and($content)->toContain('9.00');
 });

@@ -119,11 +119,7 @@ class ClientBillingReport extends Page implements HasTable
 
     public function exportCsv(): StreamedResponse
     {
-        // The same bounds the table applies: a cleared date is no bound, not
-        // a fallback to some other period.
-        $filters = $this->getTableFilterState('date_range') ?? ['from' => self::defaultFrom(), 'until' => self::defaultUntil()];
-        $from = $filters['from'] ?? null;
-        $until = $filters['until'] ?? null;
+        [$from, $until] = $this->billingPeriod();
 
         if ($this->viewMode === 'detail' && $this->clientId) {
             $unpricedOnly = (bool) ($this->getTableFilterState('unpriced_postage')['isActive'] ?? false);
@@ -134,10 +130,31 @@ class ClientBillingReport extends Page implements HasTable
         return $this->streamSummaryCsv($from, $until);
     }
 
+    /**
+     * The period the date filter names, as `[from, until]`.
+     *
+     * The table and both exports bill the same period: a cleared date is no
+     * bound, not a fallback to some other period.
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function billingPeriod(): array
+    {
+        $filters = $this->getTableFilterState('date_range') ?? ['from' => self::defaultFrom(), 'until' => self::defaultUntil()];
+
+        // A date input cleared in the browser arrives as '', not null.
+        return [
+            filled($filters['from'] ?? null) ? $filters['from'] : null,
+            filled($filters['until'] ?? null) ? $filters['until'] : null,
+        ];
+    }
+
     private function summaryTable(Table $table): Table
     {
         return $table
-            ->query($this->summaryQuery())
+            // The period bounds each package inside the query, so the date
+            // filter carries no query of its own (`release-polish/28`).
+            ->query(fn (): Builder => $this->summaryQuery(...$this->billingPeriod()))
             ->defaultSort('client_name')
             ->defaultKeySort(false)
             ->columns([
@@ -188,11 +205,7 @@ class ClientBillingReport extends Page implements HasTable
                             ->default(self::defaultUntil()),
                     ])
                     ->columns(2)
-                    ->default()
-                    ->query(fn ($query, array $data) => $query
-                        ->when($data['from'], fn ($q, $date) => $q->where('billing.shipped_at', '>=', $date))
-                        ->when($data['until'], fn ($q, $date) => $q->where('billing.shipped_at', '<=', $date.' 23:59:59'))
-                    ),
+                    ->default(),
             ], layout: FiltersLayout::AboveContent)
             ->deferFilters(false)
             ->filtersFormColumns(2);
@@ -202,10 +215,8 @@ class ClientBillingReport extends Page implements HasTable
     {
         $client = Client::find($this->clientId);
 
-        $query = $this->detailQuery($this->clientId, $client);
-
         return $table
-            ->query($query)
+            ->query(fn (): Builder => $this->detailQuery($this->clientId, $client, ...$this->billingPeriod()))
             ->defaultSort('pkg.shipped_at', 'desc')
             ->defaultKeySort(false)
             ->columns([
@@ -263,11 +274,7 @@ class ClientBillingReport extends Page implements HasTable
                             ->default(self::defaultUntil()),
                     ])
                     ->columns(2)
-                    ->default()
-                    ->query(fn ($query, array $data) => $query
-                        ->when($data['from'], fn ($q, $date) => $q->where('pkg.shipped_at', '>=', $date))
-                        ->when($data['until'], fn ($q, $date) => $q->where('pkg.shipped_at', '<=', $date.' 23:59:59'))
-                    ),
+                    ->default(),
                 Tables\Filters\Filter::make('unpriced_postage')
                     ->label('Unpriced postage only')
                     ->toggle()
@@ -277,16 +284,16 @@ class ClientBillingReport extends Page implements HasTable
             ->filtersFormColumns(2);
     }
 
-    private function summaryQuery(): Builder
+    private function summaryQuery(?string $from = null, ?string $until = null): Builder
     {
-        $billing = $this->buildBillingBase();
+        $billing = $this->buildBillingBase($from, $until);
 
         return Client::query()
             ->leftJoinSub($billing, 'billing', 'clients.id', '=', 'billing.client_id')
             ->select([
                 'clients.id',
                 DB::raw('clients.name as client_name'),
-                DB::raw('COUNT(billing.shipment_id) as order_count'),
+                DB::raw('COALESCE(SUM(billing.carries_shipment_fees), 0) as order_count'),
                 DB::raw('COALESCE(SUM(billing.package_count), 0) as package_count'),
                 DB::raw('COALESCE(SUM(billing.postage), 0) as total_postage'),
                 DB::raw('COALESCE(SUM(billing.uncosted_package_count), 0) as uncosted_package_count'),
@@ -297,10 +304,12 @@ class ClientBillingReport extends Page implements HasTable
                 DB::raw('COALESCE(SUM(billing.line_total), 0) as total_billable'),
             ])
             ->where('clients.active', true)
+            // A bounded period lists only the clients that shipped in it.
+            ->when($from !== null || $until !== null, fn (Builder $query): Builder => $query->whereNotNull('billing.shipment_id'))
             ->groupBy('clients.id', 'clients.name');
     }
 
-    private function detailQuery(int $clientId, ?Client $client): Builder
+    private function detailQuery(int $clientId, ?Client $client, ?string $from = null, ?string $until = null): Builder
     {
         $firstItemFee = number_format((float) ($client?->pick_fee_first_item ?? 0), 2, '.', '');
         $additionalItemFee = number_format((float) ($client?->pick_fee_additional_item ?? 0), 2, '.', '');
@@ -308,7 +317,7 @@ class ClientBillingReport extends Page implements HasTable
 
         return Shipment::query()
             ->where('shipments.client_id', $clientId)
-            ->joinSub($this->buildPackageSubquery(), 'pkg', 'shipments.id', '=', 'pkg.shipment_id')
+            ->joinSub($this->buildPackageSubquery($from, $until), 'pkg', 'shipments.id', '=', 'pkg.shipment_id')
             ->leftJoinSub($this->buildItemSubquery(), 'itm', 'shipments.id', '=', 'itm.shipment_id')
             ->select([
                 'shipments.id',
@@ -320,36 +329,73 @@ class ClientBillingReport extends Page implements HasTable
                 'pkg.weight',
                 'pkg.materials',
                 DB::raw('CASE WHEN itm.shipment_id IS NOT NULL THEN 1 ELSE 0 END as has_items'),
-                DB::raw('COALESCE(itm.product_surcharges, 0) as product_surcharges'),
+                DB::raw('pkg.carries_shipment_fees * COALESCE(itm.product_surcharges, 0) as product_surcharges'),
                 DB::raw('pkg.package_count * '.$labelFee.' as label_fee'),
-                DB::raw($firstItemFee.' as pick_fee_base'),
-                DB::raw('GREATEST(0, COALESCE(itm.total_qty, 0) - 1) * '.$additionalItemFee.' as pick_fee_extra'),
+                DB::raw('pkg.carries_shipment_fees * '.$firstItemFee.' as pick_fee_base'),
+                DB::raw('pkg.carries_shipment_fees * GREATEST(0, COALESCE(itm.total_qty, 0) - 1) * '.$additionalItemFee.' as pick_fee_extra'),
                 DB::raw(
                     'pkg.postage + '.
                     'pkg.package_count * '.$labelFee.' + '.
+                    'pkg.carries_shipment_fees * ('.
                     $firstItemFee.' + '.
                     'GREATEST(0, COALESCE(itm.total_qty, 0) - 1) * '.$additionalItemFee.' + '.
-                    'pkg.materials + '.
-                    'COALESCE(itm.product_surcharges, 0) as line_total'
+                    'COALESCE(itm.product_surcharges, 0)) + '.
+                    'pkg.materials as line_total'
                 ),
             ]);
     }
 
-    private function buildPackageSubquery(): \Illuminate\Database\Query\Builder
+    /**
+     * Each shipment's shipped packages in the period, one row per shipment.
+     *
+     * Every package bills in the period it shipped, so a shipment whose
+     * packages ship in two periods has a line in each (`release-polish/28`).
+     * The per-shipment fees — the pick fees and the product surcharges — fall
+     * once, on the line of the period its first package shipped in:
+     * `carries_shipment_fees` is 1 on that line and 0 on any later one.
+     */
+    private function buildPackageSubquery(?string $from = null, ?string $until = null): \Illuminate\Database\Query\Builder
     {
+        $inPeriod = $this->periodCondition('p.shipped_at', $from, $until);
+        $firstInPeriod = $this->periodCondition('MIN(p.shipped_at)', $from, $until);
+
         return DB::table('packages as p')
             ->leftJoin('box_sizes as bs', 'p.box_size_id', '=', 'bs.id')
             ->where('p.status', PackageStatus::Shipped->value)
-            ->select([
-                'p.shipment_id',
-                DB::raw('MIN(p.shipped_at) as shipped_at'),
-                DB::raw('COUNT(p.id) as package_count'),
-                DB::raw('COALESCE(SUM(p.cost), 0) as postage'),
-                DB::raw('COUNT(p.id) - COUNT(p.cost) as uncosted_package_count'),
-                DB::raw('COALESCE(SUM(p.weight), 0) as weight'),
-                DB::raw('COALESCE(SUM(COALESCE(bs.materials_cost, 0)), 0) as materials'),
-            ])
-            ->groupBy('p.shipment_id');
+            ->select('p.shipment_id')
+            ->selectRaw("MIN(CASE WHEN {$inPeriod['sql']} THEN p.shipped_at END) as shipped_at", $inPeriod['bindings'])
+            ->selectRaw("SUM(CASE WHEN {$inPeriod['sql']} THEN 1 ELSE 0 END) as package_count", $inPeriod['bindings'])
+            ->selectRaw("COALESCE(SUM(CASE WHEN {$inPeriod['sql']} THEN p.cost END), 0) as postage", $inPeriod['bindings'])
+            ->selectRaw("SUM(CASE WHEN {$inPeriod['sql']} AND p.cost IS NULL THEN 1 ELSE 0 END) as uncosted_package_count", $inPeriod['bindings'])
+            ->selectRaw("COALESCE(SUM(CASE WHEN {$inPeriod['sql']} THEN p.weight END), 0) as weight", $inPeriod['bindings'])
+            ->selectRaw("COALESCE(SUM(CASE WHEN {$inPeriod['sql']} THEN COALESCE(bs.materials_cost, 0) END), 0) as materials", $inPeriod['bindings'])
+            ->selectRaw("CASE WHEN {$firstInPeriod['sql']} THEN 1 ELSE 0 END as carries_shipment_fees", $firstInPeriod['bindings'])
+            ->groupBy('p.shipment_id')
+            ->havingRaw("SUM(CASE WHEN {$inPeriod['sql']} THEN 1 ELSE 0 END) > 0", $inPeriod['bindings']);
+    }
+
+    /**
+     * A SQL condition placing `$column` inside the period, with its bindings.
+     * An open bound is no condition.
+     *
+     * @return array{sql: string, bindings: array<int, string>}
+     */
+    private function periodCondition(string $column, ?string $from, ?string $until): array
+    {
+        $conditions = [];
+        $bindings = [];
+
+        if ($from !== null) {
+            $conditions[] = "{$column} >= ?";
+            $bindings[] = $from;
+        }
+
+        if ($until !== null) {
+            $conditions[] = "{$column} <= ?";
+            $bindings[] = $until.' 23:59:59';
+        }
+
+        return ['sql' => $conditions === [] ? '1 = 1' : '('.implode(' AND ', $conditions).')', 'bindings' => $bindings];
     }
 
     /**
@@ -385,11 +431,11 @@ class ClientBillingReport extends Page implements HasTable
             ->groupBy('si.shipment_id');
     }
 
-    private function buildBillingBase(): \Illuminate\Database\Query\Builder
+    private function buildBillingBase(?string $from = null, ?string $until = null): \Illuminate\Database\Query\Builder
     {
         return DB::table('shipments as s')
             ->join('clients as c', 's.client_id', '=', 'c.id')
-            ->joinSub($this->buildPackageSubquery(), 'pkg', 's.id', '=', 'pkg.shipment_id')
+            ->joinSub($this->buildPackageSubquery($from, $until), 'pkg', 's.id', '=', 'pkg.shipment_id')
             ->leftJoinSub($this->buildItemSubquery(), 'itm', 's.id', '=', 'itm.shipment_id')
             ->select([
                 's.id as shipment_id',
@@ -399,27 +445,26 @@ class ClientBillingReport extends Page implements HasTable
                 'pkg.postage',
                 'pkg.uncosted_package_count',
                 'pkg.materials',
-                DB::raw('COALESCE(itm.product_surcharges, 0) as product_surcharges'),
+                'pkg.carries_shipment_fees',
+                DB::raw('pkg.carries_shipment_fees * COALESCE(itm.product_surcharges, 0) as product_surcharges'),
                 DB::raw('pkg.package_count * COALESCE(c.label_fee_per_package, 0) as label_fee'),
-                DB::raw('COALESCE(c.pick_fee_first_item, 0) as pick_fee_base'),
-                DB::raw('GREATEST(0, COALESCE(itm.total_qty, 0) - 1) * COALESCE(c.pick_fee_additional_item, 0) as pick_fee_extra'),
+                DB::raw('pkg.carries_shipment_fees * COALESCE(c.pick_fee_first_item, 0) as pick_fee_base'),
+                DB::raw('pkg.carries_shipment_fees * GREATEST(0, COALESCE(itm.total_qty, 0) - 1) * COALESCE(c.pick_fee_additional_item, 0) as pick_fee_extra'),
                 DB::raw(
                     'pkg.postage + '.
                     'pkg.package_count * COALESCE(c.label_fee_per_package, 0) + '.
+                    'pkg.carries_shipment_fees * ('.
                     'COALESCE(c.pick_fee_first_item, 0) + '.
                     'GREATEST(0, COALESCE(itm.total_qty, 0) - 1) * COALESCE(c.pick_fee_additional_item, 0) + '.
-                    'pkg.materials + '.
-                    'COALESCE(itm.product_surcharges, 0) as line_total'
+                    'COALESCE(itm.product_surcharges, 0)) + '.
+                    'pkg.materials as line_total'
                 ),
             ]);
     }
 
     private function streamSummaryCsv(?string $from, ?string $until): StreamedResponse
     {
-        $rows = $this->summaryQuery()
-            ->when($from, fn ($q) => $q->where('billing.shipped_at', '>=', $from))
-            ->when($until, fn ($q) => $q->where('billing.shipped_at', '<=', $until.' 23:59:59'))
-            ->get();
+        $rows = $this->summaryQuery($from, $until)->get();
 
         $filename = 'client-billing-summary-'.($from ?? 'start').'-to-'.($until ?? 'today').'.csv';
 
@@ -450,9 +495,7 @@ class ClientBillingReport extends Page implements HasTable
     {
         $client = Client::find($clientId);
 
-        $rows = $this->detailQuery($clientId, $client)
-            ->when($from, fn ($q) => $q->where('pkg.shipped_at', '>=', $from))
-            ->when($until, fn ($q) => $q->where('pkg.shipped_at', '<=', $until.' 23:59:59'))
+        $rows = $this->detailQuery($clientId, $client, $from, $until)
             ->when($unpricedOnly, fn ($q) => $q->where('pkg.uncosted_package_count', '>', 0))
             ->orderBy('pkg.shipped_at')
             ->get();

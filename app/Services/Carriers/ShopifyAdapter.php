@@ -376,11 +376,32 @@ class ShopifyAdapter implements BlindPurchaseSource
     {
         return $package->shipment?->packages()
             ->whereKeyNot($package->getKey())
-            ->where(fn (Builder $query): Builder => $query
-                ->where('status', PackageStatus::Shipped)
-                ->orWhereNotNull('metadata->shopify_shipping_label_id')
-                ->orWhereNotNull('metadata->shopify_purchase_result_id'))
+            ->where(fn (Builder $query): Builder => self::whereHoldsPurchase(
+                $query->where('status', PackageStatus::Shipped),
+                'or',
+            ))
             ->exists() ?? false;
+    }
+
+    /**
+     * Narrow a package query to packages holding a Shopify purchase: one
+     * Shopify accepted and may still be running, or one that sold a label.
+     *
+     * Static for the same reason as {@see shippingLabelIdFor()}: the cleanup
+     * paths that must not delete such a package hold no adapter. On an
+     * unshipped package these markers are the only record of the purchase
+     * (`release-polish/02`).
+     *
+     * @template TQuery of Builder
+     *
+     * @param  TQuery  $query
+     * @return TQuery
+     */
+    public static function whereHoldsPurchase(Builder $query, string $boolean = 'and'): Builder
+    {
+        return $query->where(fn (Builder $markers): Builder => $markers
+            ->whereNotNull('metadata->shopify_shipping_label_id')
+            ->orWhereNotNull('metadata->shopify_purchase_result_id'), boolean: $boolean);
     }
 
     /**
