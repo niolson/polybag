@@ -455,10 +455,8 @@ describe('typed barcodes', function (): void {
             typedBarcodes(['EAN', '4006381333931'], ['NS_PID', 'MPN-9']),
         ));
 
-        expect(importedWidget())
-            ->barcode->toBe('4006381333931')
-            ->gtin->toBe('4006381333931')
-            ->manufacturer_part_number->toBe('MPN-9')
+        expect(importedWidget()->only(['barcode', 'gtin', 'manufacturer_part_number']))
+            ->toBe(['barcode' => '4006381333931', 'gtin' => '4006381333931', 'manufacturer_part_number' => 'MPN-9'])
             ->and($requests[0]['query'])->toContain('barcodes(first: 5) { nodes { type value } }')
             ->and($requests[0]['query'])->not->toContain('metafield');
     });
@@ -468,7 +466,7 @@ describe('typed barcodes', function (): void {
             typedBarcodes(['NS_PID', 'MPN-9'], ['EAN', '4006381333931']),
         ));
 
-        expect(importedWidget())->barcode->toBe('4006381333931')->manufacturer_part_number->toBe('MPN-9');
+        expect(importedWidget()->only(['barcode', 'manufacturer_part_number']))->toBe(['barcode' => '4006381333931', 'manufacturer_part_number' => 'MPN-9']);
     });
 
     it('prefers the NS_PID over the metafield and falls back to it', function (): void {
@@ -494,7 +492,7 @@ describe('typed barcodes', function (): void {
             typedBarcodes(['EAN', '4006381333932'], ['ASIN', 'B000000000'], [null, '036000291452']),
         ));
 
-        expect(importedWidget())->gtin->toBeNull()->barcode->toBe('4006381333932');
+        expect(importedWidget()->only(['gtin', 'barcode']))->toBe(['gtin' => null, 'barcode' => '4006381333932']);
     });
 
     it('fills barcode only from an untyped valid GTIN', function (): void {
@@ -502,7 +500,7 @@ describe('typed barcodes', function (): void {
             typedBarcodes([null, '036000291452']),
         ));
 
-        expect(importedWidget())->barcode->toBe('036000291452')->gtin->toBeNull();
+        expect(importedWidget()->only(['barcode', 'gtin']))->toBe(['barcode' => '036000291452', 'gtin' => null]);
     });
 
     it('leaves the barcode alone when the only barcode is an NS_PID', function (): void {
@@ -512,6 +510,6 @@ describe('typed barcodes', function (): void {
             typedBarcodes(['NS_PID', 'MPN-9']),
         ));
 
-        expect(importedWidget())->barcode->toBe('KEEP-ME')->manufacturer_part_number->toBe('MPN-9');
+        expect(importedWidget()->only(['barcode', 'manufacturer_part_number']))->toBe(['barcode' => 'KEEP-ME', 'manufacturer_part_number' => 'MPN-9']);
     });
 });
