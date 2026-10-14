@@ -88,7 +88,7 @@ function customsFieldsFulfillmentOrder(array $variant = []): array
                 'id' => 'gid://shopify/FulfillmentOrderLineItem/1001',
                 'sku' => 'WIDGET-1', 'productTitle' => 'Widget', 'remainingQuantity' => 2,
                 'requiresShipping' => true, 'weight' => null,
-                'variant' => array_merge(['id' => 'gid://shopify/ProductVariant/1', 'barcode' => null], $variant),
+                'variant' => array_merge(['id' => 'gid://shopify/ProductVariant/1', 'barcodes' => ['nodes' => []]], $variant),
                 'lineItem' => ['originalUnitPriceSet' => ['shopMoney' => ['amount' => '10.00']]],
             ]],
         ],
@@ -438,5 +438,80 @@ describe('duties terms and recipient tax ID', function (): void {
 
         expect($requests[0]['query'])->toContain('originalTotalDutiesSet { shopMoney { amount } }')
             ->and($requests[0]['query'])->toContain('localizedFields(first: 10) { nodes { key value } }');
+    });
+});
+
+describe('typed barcodes', function (): void {
+    function typedBarcodes(array ...$barcodes): array
+    {
+        return ['barcodes' => ['nodes' => array_map(
+            fn (array $barcode): array => ['type' => $barcode[0], 'value' => $barcode[1]],
+            $barcodes,
+        )]];
+    }
+
+    it('imports the EAN as barcode and gtin and the NS_PID as part number', function (): void {
+        $requests = importCustomsFieldsFulfillmentOrder(customsFieldsShopifySource(), customsFieldsFulfillmentOrder(
+            typedBarcodes(['EAN', '4006381333931'], ['NS_PID', 'MPN-9']),
+        ));
+
+        expect(importedWidget())
+            ->barcode->toBe('4006381333931')
+            ->gtin->toBe('4006381333931')
+            ->manufacturer_part_number->toBe('MPN-9')
+            ->and($requests[0]['query'])->toContain('barcodes(first: 5) { nodes { type value } }')
+            ->and($requests[0]['query'])->not->toContain('metafield');
+    });
+
+    it('does not scan the part number when the NS_PID is listed first', function (): void {
+        importCustomsFieldsFulfillmentOrder(customsFieldsShopifySource(), customsFieldsFulfillmentOrder(
+            typedBarcodes(['NS_PID', 'MPN-9'], ['EAN', '4006381333931']),
+        ));
+
+        expect(importedWidget())->barcode->toBe('4006381333931')->manufacturer_part_number->toBe('MPN-9');
+    });
+
+    it('prefers the NS_PID over the metafield and falls back to it', function (): void {
+        $dataSource = customsFieldsShopifySource([
+            'part_number_metafield' => ['owner' => 'variant', 'namespace' => 'custom', 'key' => 'mpn'],
+        ]);
+
+        importCustomsFieldsFulfillmentOrder($dataSource, customsFieldsFulfillmentOrder([
+            'partNumber' => ['jsonValue' => 'META-MPN'],
+            ...typedBarcodes(['NS_PID', 'TYPED-MPN']),
+        ]));
+        expect(importedWidget()->manufacturer_part_number)->toBe('TYPED-MPN');
+
+        importCustomsFieldsFulfillmentOrder($dataSource, customsFieldsFulfillmentOrder([
+            'partNumber' => ['jsonValue' => 'META-MPN'],
+            ...typedBarcodes(['EAN', '4006381333931']),
+        ]));
+        expect(importedWidget()->manufacturer_part_number)->toBe('META-MPN');
+    });
+
+    it('fills gtin only from a valid GTIN-family type', function (): void {
+        importCustomsFieldsFulfillmentOrder(customsFieldsShopifySource(), customsFieldsFulfillmentOrder(
+            typedBarcodes(['EAN', '4006381333932'], ['ASIN', 'B000000000'], [null, '036000291452']),
+        ));
+
+        expect(importedWidget())->gtin->toBeNull()->barcode->toBe('4006381333932');
+    });
+
+    it('fills barcode only from an untyped valid GTIN', function (): void {
+        importCustomsFieldsFulfillmentOrder(customsFieldsShopifySource(), customsFieldsFulfillmentOrder(
+            typedBarcodes([null, '036000291452']),
+        ));
+
+        expect(importedWidget())->barcode->toBe('036000291452')->gtin->toBeNull();
+    });
+
+    it('leaves the barcode alone when the only barcode is an NS_PID', function (): void {
+        Product::factory()->create(['sku' => 'WIDGET-1', 'barcode' => 'KEEP-ME']);
+
+        importCustomsFieldsFulfillmentOrder(customsFieldsShopifySource(), customsFieldsFulfillmentOrder(
+            typedBarcodes(['NS_PID', 'MPN-9']),
+        ));
+
+        expect(importedWidget())->barcode->toBe('KEEP-ME')->manufacturer_part_number->toBe('MPN-9');
     });
 });

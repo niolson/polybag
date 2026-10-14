@@ -23,6 +23,7 @@ use App\Services\ShipmentImport\ShopifyFulfillmentOrderRepointer;
 use App\Services\ShopifyFulfillmentOrderActivationService;
 use App\Services\ShopifyGoodsFingerprint;
 use App\Services\ShopifyShippingLabelService;
+use App\Support\Gtin;
 use Carbon\CarbonImmutable;
 use DomainException;
 use Illuminate\Support\Collection;
@@ -162,7 +163,8 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
               id sku productTitle remainingQuantity requiresShipping
               weight { unit value }
               variant {
-                id barcode
+                id
+                barcodes(first: 5) { nodes { type value } }
                 inventoryItem { harmonizedSystemCode countryCodeOfOrigin }
                 {{partNumberSelection}}
               }
@@ -174,8 +176,9 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
 
     /**
      * Every open fulfillment order. 250 to a page, Shopify's most, requests
-     * 464 points, or 618 with a part-number metafield, on the development
-     * store (2026-10-13): the requested cost grows far slower than the page.
+     * 926 points with a part-number metafield and `barcodes(first: 5)`, on
+     * the development store (2026-10-14). `barcodes(first: 10)` requests
+     * 1,003 and Shopify refuses it: 1,000 is the most one query may request.
      */
     private const FULFILLMENT_ORDERS_QUERY = <<<'GRAPHQL'
         query FulfillmentOrders($cursor: String{{partNumberVariables}}) {
@@ -272,7 +275,8 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
                 id sku productTitle remainingQuantity requiresShipping
                 weight { unit value }
                 variant {
-                  id barcode
+                  id
+                  barcodes(first: 5) { nodes { type value } }
                   inventoryItem { harmonizedSystemCode countryCodeOfOrigin }
                   {{partNumberSelection}}
                 }
@@ -1025,6 +1029,8 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
         $weightLbs = self::poundsFrom($item['weight'] ?? null);
 
         $variant = $item['variant'] ?? [];
+        $barcodes = data_get($variant, 'barcodes.nodes');
+        $barcodes = is_array($barcodes) ? $barcodes : [];
 
         return [
             // The same rule the goods fingerprint uses, so a fingerprint taken
@@ -1033,12 +1039,82 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
             'name' => $item['productTitle'] ?? null,
             'quantity' => (int) ($item['remainingQuantity'] ?? 0),
             'value' => (float) data_get($item, 'lineItem.originalUnitPriceSet.shopMoney.amount', 0),
-            'barcode' => $variant['barcode'] ?? null,
+            'barcode' => self::scanBarcodeFrom($barcodes),
+            'gtin' => self::gtinFrom($barcodes),
             'weight' => $weightLbs,
-            'manufacturer_part_number' => $this->partNumberFrom($variant),
+            'manufacturer_part_number' => self::typedPartNumberFrom($barcodes) ?? $this->partNumberFrom($variant),
             'hs_tariff_number' => self::filledText(data_get($variant, 'inventoryItem.harmonizedSystemCode')),
             'country_of_origin' => self::filledText(data_get($variant, 'inventoryItem.countryCodeOfOrigin')),
         ];
+    }
+
+    /**
+     * The first `NS_PID` barcode, the part number Shopify made a field for,
+     * cut to the same 100 characters as the metafield's.
+     *
+     * @param  list<array<string, mixed>>  $barcodes
+     */
+    private static function typedPartNumberFrom(array $barcodes): ?string
+    {
+        foreach ($barcodes as $barcode) {
+            if (($barcode['type'] ?? null) !== 'NS_PID') {
+                continue;
+            }
+
+            $value = self::filledText($barcode['value'] ?? null);
+
+            if ($value !== null) {
+                return self::filledText(mb_substr($value, 0, 100));
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The first barcode Shopify typed as a GTIN family standard and whose
+     * value passes the check digit. An untyped value never fills it.
+     *
+     * @param  list<array<string, mixed>>  $barcodes
+     */
+    private static function gtinFrom(array $barcodes): ?string
+    {
+        foreach ($barcodes as $barcode) {
+            if (! in_array($barcode['type'] ?? null, ['UPC', 'EAN', 'GTIN', 'ISBN'], true)) {
+                continue;
+            }
+
+            $value = self::filledText($barcode['value'] ?? null);
+
+            if ($value !== null && Gtin::isValid($value)) {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The first barcode that is not an `NS_PID`, which Pack scans. Null when
+     * every entry is a part number, which leaves the Product's barcode alone.
+     *
+     * @param  list<array<string, mixed>>  $barcodes
+     */
+    private static function scanBarcodeFrom(array $barcodes): ?string
+    {
+        foreach ($barcodes as $barcode) {
+            if (($barcode['type'] ?? null) === 'NS_PID') {
+                continue;
+            }
+
+            $value = self::filledText($barcode['value'] ?? null);
+
+            if ($value !== null) {
+                return $value;
+            }
+        }
+
+        return null;
     }
 
     /**
