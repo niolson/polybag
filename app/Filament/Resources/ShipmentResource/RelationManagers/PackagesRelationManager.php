@@ -89,6 +89,7 @@ class PackagesRelationManager extends RelationManager
                 // label at the carrier and an active label record that would
                 // cascade with it.
                 Actions\DeleteBulkAction::make()
+                    ->authorizeIndividualRecords('delete')
                     ->before(function (Actions\DeleteBulkAction $action, Collection $records): void {
                         if ($records->contains(fn (Package $record): bool => $record->status === PackageStatus::Shipped)) {
                             Notification::make()

@@ -23,6 +23,7 @@ use App\Filament\Resources\ProductResource\Pages\ListProducts;
 use App\Filament\Resources\ShipmentResource\Pages\CreateShipment;
 use App\Filament\Resources\ShipmentResource\Pages\EditShipment;
 use App\Filament\Resources\ShipmentResource\Pages\ListShipments;
+use App\Filament\Resources\ShipmentResource\RelationManagers\PackagesRelationManager;
 use App\Filament\Resources\ShippingMethodResource\Pages\ListShippingMethods;
 use App\Filament\Resources\SpecialServices\Pages\ListSpecialServices;
 use App\Filament\Resources\SpecialServices\SpecialServiceResource;
@@ -41,6 +42,7 @@ use App\Services\Carriers\CarrierRegistry;
 use App\Services\SettingsService;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\Testing\TestAction;
+use Illuminate\Support\Facades\Gate;
 use Livewire\Livewire;
 use PHPUnit\Framework\ExpectationFailedException;
 
@@ -444,4 +446,57 @@ describe('voiding a label', function (): void {
 
         expect($this->package->fresh()->status)->toBe(PackageStatus::Unshipped);
     })->with(['Manager' => Role::Manager, 'Admin' => Role::Admin]);
+});
+
+it('allows a bulk delete only to the roles that may delete one record', function (string $modelClass): void {
+    // Filament allows an action whose policy method is missing, so it must exist.
+    expect(method_exists(Gate::getPolicyFor($modelClass), 'deleteAny'))->toBeTrue();
+
+    foreach (Role::cases() as $role) {
+        $user = User::factory()->make(['role' => $role]);
+
+        expect($user->can('deleteAny', $modelClass))
+            ->toBe($user->can('delete', new $modelClass), "{$modelClass} deleteAny for {$role->name}");
+    }
+})->with(function (): array {
+    $models = [];
+
+    foreach (glob(__DIR__.'/../../app/Policies/*Policy.php') as $file) {
+        $model = 'App\\Models\\'.basename($file, 'Policy.php');
+
+        if (class_exists($model) && method_exists('App\\Policies\\'.basename($file, '.php'), 'delete')) {
+            $models[class_basename($model)] = [$model];
+        }
+    }
+
+    return $models;
+});
+
+it('refuses a Manager bulk-deleting packages from Edit Shipment', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+    $shipment = Shipment::factory()->create();
+    $package = Package::factory()->for($shipment)->create(['status' => PackageStatus::Unshipped]);
+
+    $component = Livewire::test(PackagesRelationManager::class, ['ownerRecord' => $shipment, 'pageClass' => EditShipment::class])
+        ->assertActionHidden(TestAction::make(DeleteBulkAction::class)->table()->bulk());
+
+    try {
+        $component->selectTableRecords([$package])->callAction(TestAction::make(DeleteBulkAction::class)->table()->bulk());
+    } catch (ExpectationFailedException) {
+        // Filament will not call an action it hides from this user.
+    }
+
+    expect(Package::find($package->id))->not->toBeNull();
+});
+
+it('lets an Admin bulk-delete unshipped packages from Edit Shipment', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Admin]));
+    $shipment = Shipment::factory()->create();
+    $package = Package::factory()->for($shipment)->create(['status' => PackageStatus::Unshipped]);
+
+    Livewire::test(PackagesRelationManager::class, ['ownerRecord' => $shipment, 'pageClass' => EditShipment::class])
+        ->selectTableRecords([$package])
+        ->callAction(TestAction::make(DeleteBulkAction::class)->table()->bulk());
+
+    expect(Package::find($package->id))->toBeNull();
 });
