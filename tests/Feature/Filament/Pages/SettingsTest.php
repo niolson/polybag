@@ -336,9 +336,10 @@ it('keeps the fedex registration token out of the page and its state out of reac
 
     $page = Livewire::test(EditCarrierAccount::class, ['record' => $account->id]);
 
-    (fn () => $this->storeFedexAccountAuthToken('test-auth-token'))->call($page->instance());
+    (new ReflectionMethod(EditCarrierAccount::class, 'storeFedexAccountAuthToken'))->invoke($page->instance(), 'test-auth-token');
 
-    expect(json_encode($page->snapshot))->not->toContain('test-auth-token');
+    // The rendered page carries the component's whole snapshot.
+    expect($page->html())->not->toContain('test-auth-token');
 
     expect(fn () => $page->set('fedexSupportFallbackActive', true))->toThrow(CannotUpdateLockedPropertyException::class);
 });
@@ -358,7 +359,7 @@ it('carrier account edit page handles a fedex pin resend lockout', function (): 
 
     $page = Livewire::test(EditCarrierAccount::class, ['record' => $account->id]);
 
-    (fn () => $this->storeFedexAccountAuthToken('test-auth-token'))->call($page->instance());
+    (new ReflectionMethod(EditCarrierAccount::class, 'storeFedexAccountAuthToken'))->invoke($page->instance(), 'test-auth-token');
 
     $page->set('fedexFactor2Method', 'SMS')
         ->call('resendFedexPin')

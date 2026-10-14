@@ -10,6 +10,9 @@ use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\AbstractProvider;
 use SocialiteProviders\Azure\User as AzureUser;
 
+const ALLOWED_AZURE_TID = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
+const OTHER_AZURE_TID = 'ffffffff-1111-4222-8333-444444444444';
+
 beforeEach(function (): void {
     config([
         'services.oauth.broker_url' => 'https://connect.polybag.app',
@@ -25,9 +28,6 @@ beforeEach(function (): void {
     $settings->set('trusted_azure_tids', [ALLOWED_AZURE_TID], type: 'json');
     $settings->clearCache();
 });
-
-const ALLOWED_AZURE_TID = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
-const OTHER_AZURE_TID = 'ffffffff-1111-4222-8333-444444444444';
 
 /**
  * An Azure Socialite user as the direct callback sees it, with the ID token

@@ -48,6 +48,7 @@ use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\Testing\TestAction;
+use Filament\Resources\Pages\EditRecord;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Livewire;
 use PHPUnit\Framework\ExpectationFailedException;
@@ -509,9 +510,13 @@ it('lets an Admin bulk-delete unshipped packages from Edit Shipment', function (
 
 it('authorizes each action on the credential pages by policy, not only by page access', function (string $page, Closure $record): void {
     $this->actingAs(User::factory()->create(['role' => Role::Admin]));
-    $component = Livewire::test($page, ['record' => $record()->getKey()]);
+    $instance = Livewire::test($page, ['record' => $record()->getKey()])->instance();
 
-    $actions = collect($component->instance()->getCachedHeaderActions())
+    if (! $instance instanceof EditRecord) {
+        throw new LogicException("{$page} is not an edit page.");
+    }
+
+    $actions = collect($instance->getCachedHeaderActions())
         ->flatMap(fn ($action): array => $action instanceof ActionGroup ? $action->getFlatActions() : [$action]);
 
     expect($actions)->not->toBeEmpty()
