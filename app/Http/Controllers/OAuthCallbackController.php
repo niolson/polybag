@@ -46,7 +46,11 @@ class OAuthCallbackController extends Controller
 
             return $redirect->with('oauth_notification', [
                 'status' => 'danger',
-                'title' => 'Connection failed: '.($request->input('error_description') ?: $request->input('error')),
+                // The query string is anyone's to write, so only a standard OAuth
+                // error code is shown; the provider's description goes to the log.
+                'title' => preg_match('/^[a-z_]{1,64}$/', (string) $request->input('error'))
+                    ? "Connection failed ({$request->input('error')}). Details are in the log."
+                    : 'Connection failed. Details are in the log.',
             ]);
         }
 

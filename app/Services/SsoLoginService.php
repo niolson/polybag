@@ -6,6 +6,7 @@ use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Str;
 
 /**
  * Finalizes an SSO login, enforcing the app's multi-factor requirement.
@@ -61,12 +62,11 @@ class SsoLoginService
      * Whether the identity provider's own assertion should stand in for the app's
      * MFA challenge, letting a federated MFA satisfy the second factor instead of
      * double-prompting. Opt-in per tenant (`trust_idp_mfa`), Azure/Entra only for
-     * now, and — because the shared broker app registration accepts any Microsoft
-     * tenant — gated on an allowlist of trusted `tid`s.
+     * now, and limited to an allowed `tid` (see azureTenantAllowed()).
      *
-     * Fails closed: setting off, wrong provider, no `amr:mfa`, a missing/consumer/
-     * untrusted `tid`, or an empty allowlist all return false, leaving the app's
-     * own challenge in force. Absence is never treated as satisfaction.
+     * Fails closed: setting off, wrong provider, no `amr:mfa`, or a missing/consumer/
+     * disallowed `tid` all return false, leaving the app's own challenge in force.
+     * Absence is never treated as satisfaction.
      *
      * @param  array<string, mixed>  $idpClaims  the broker's verified `extra`
      */
@@ -88,8 +88,21 @@ class SsoLoginService
             return false;
         }
 
-        $tid = $idpClaims['tid'] ?? null;
+        return $this->azureTenantAllowed($idpClaims['tid'] ?? null);
+    }
 
+    /**
+     * Whether a Microsoft Entra login from this tenant may sign in at all. The
+     * account match is by email, and an Entra tenant's admin can set any user's
+     * mail attribute, so only tenants this install trusts are accepted: the
+     * `trusted_azure_tids` setting, plus `AZURE_TENANT_ID` when it names one
+     * tenant rather than `common`/`organizations`.
+     *
+     * Fails closed: a missing tid, the consumer tenant, or an empty allowlist all
+     * return false.
+     */
+    public function azureTenantAllowed(mixed $tid): bool
+    {
         if (! is_string($tid) || trim($tid) === '') {
             return false;
         }
@@ -102,17 +115,27 @@ class SsoLoginService
             return false;
         }
 
-        return in_array($tid, $this->trustedAzureTids(), true);
+        return in_array($tid, $this->allowedAzureTids(), true);
     }
 
     /**
-     * The operator-configured allowlist of trusted Entra tenant ids, canonicalized
-     * to lowercase for case-insensitive matching. An empty list trusts nothing
-     * (fail closed).
+     * The Entra tenant id `AZURE_TENANT_ID` names, or null when it is a
+     * multi-tenant alias such as `common` or `organizations`.
+     */
+    public static function configuredAzureTenant(): ?string
+    {
+        $tenant = strtolower(trim((string) config('services.azure.tenant')));
+
+        return Str::isUuid($tenant) ? $tenant : null;
+    }
+
+    /**
+     * The allowed Entra tenant ids, canonicalized to lowercase for
+     * case-insensitive matching. An empty list allows nothing (fail closed).
      *
      * @return list<string>
      */
-    private function trustedAzureTids(): array
+    private function allowedAzureTids(): array
     {
         $configured = $this->settings->get('trusted_azure_tids', []);
 
@@ -121,8 +144,10 @@ class SsoLoginService
         }
 
         if (! is_array($configured)) {
-            return [];
+            $configured = [];
         }
+
+        $configured[] = self::configuredAzureTenant();
 
         return array_values(array_filter(
             array_map(fn ($tid): string => strtolower(trim((string) $tid)), $configured),

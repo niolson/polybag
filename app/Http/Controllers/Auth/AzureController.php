@@ -9,6 +9,7 @@ use App\Services\SettingsService;
 use App\Services\SsoLoginService;
 use Illuminate\Http\RedirectResponse;
 use Laravel\Socialite\Facades\Socialite;
+use Laravel\Socialite\Two\AbstractProvider;
 use SocialiteProviders\Azure\User as AzureUser;
 
 class AzureController extends Controller
@@ -31,7 +32,15 @@ class AzureController extends Controller
             return redirect()->away(app(OAuthService::class)->initiateSsoAuthorization('azure'));
         }
 
-        return Socialite::driver('azure')->redirect();
+        // `openid` adds an ID token to the token response, which carries the
+        // tenant id (tid) the callback checks; Graph /me does not return it.
+        $driver = Socialite::driver('azure');
+
+        if ($driver instanceof AbstractProvider) {
+            $driver->scopes(['openid']);
+        }
+
+        return $driver->redirect();
     }
 
     public function callback(): RedirectResponse
@@ -46,6 +55,18 @@ class AzureController extends Controller
             logger()->error('Azure SSO callback failed', ['error' => $e->getMessage()]);
 
             return redirect('/login')->with('error', 'Azure authentication failed. Please try again.');
+        }
+
+        $tenantId = $this->tenantId($azureUser);
+
+        if (! app(SsoLoginService::class)->azureTenantAllowed($tenantId)) {
+            logger()->warning('SSO login rejected: Microsoft tenant is not allowed', [
+                'tid' => $tenantId,
+            ]);
+
+            return redirect('/login')->withErrors([
+                'data.login' => 'Your Microsoft organization is not allowed to sign in here. Contact your admin.',
+            ]);
         }
 
         // Azure maps getEmail() to userPrincipalName, which can differ from the
@@ -77,6 +98,26 @@ class AzureController extends Controller
         // own MFA challenge (fail closed). IdP-MFA trust rides only on the broker's
         // verified ID-token claims (see SsoCallbackController).
         return app(SsoLoginService::class)->completeLogin($user, 'azure');
+    }
+
+    /**
+     * The tenant id from the ID token in the token response. The token came
+     * straight from Microsoft's token endpoint over TLS, which authenticates
+     * its issuer, so its signature need not be checked again (OIDC Core 3.1.3.7).
+     */
+    private function tenantId(object $azureUser): ?string
+    {
+        $idToken = $azureUser->accessTokenResponseBody['id_token'] ?? null;
+
+        if (! is_string($idToken) || substr_count($idToken, '.') !== 2) {
+            return null;
+        }
+
+        $payload = json_decode((string) base64_decode(strtr(explode('.', $idToken)[1], '-_', '+/')), true);
+
+        $tid = is_array($payload) ? ($payload['tid'] ?? null) : null;
+
+        return is_string($tid) ? $tid : null;
     }
 
     private function shouldUseBroker(): bool

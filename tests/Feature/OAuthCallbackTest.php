@@ -97,7 +97,7 @@ it('handles error redirect from broker', function (): void {
 
     $response->assertRedirect(route('filament.app.pages.settings'));
     $response->assertSessionHas('oauth_notification.status', 'danger');
-    $response->assertSessionHas('oauth_notification.title', 'Connection failed: User denied access');
+    $response->assertSessionHas('oauth_notification.title', 'Connection failed (access_denied). Details are in the log.');
 });
 
 it('handles missing transfer code', function (): void {
@@ -384,7 +384,7 @@ it('returns an Amazon denial to the originating data source', function (): void 
         ->get('/oauth/sp-api/receive?error=access_denied&error_description=User+denied+access');
 
     $response->assertRedirect(route('filament.app.resources.data-sources.edit', $source->id));
-    $response->assertSessionHas('oauth_notification.title', 'Connection failed: User denied access');
+    $response->assertSessionHas('oauth_notification.title', 'Connection failed (access_denied). Details are in the log.');
 });
 
 it('disconnects an Amazon OAuth data source and removes its refresh token', function (): void {

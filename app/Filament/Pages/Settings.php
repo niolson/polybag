@@ -20,6 +20,7 @@ use App\Services\PasswordPolicyService;
 use App\Services\PhoneParserService;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
+use App\Services\SsoLoginService;
 use App\Support\SvgUploadSanitizer;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -571,19 +572,22 @@ class Settings extends Page
                                             Toggle::make('azure_sso_enabled')
                                                 ->label('Azure / Microsoft Entra SSO')
                                                 ->helperText('Show "Sign in with Microsoft" button on the login page. Requires Azure credentials in .env (or broker configured).')
-                                                ->default(false),
-                                            Toggle::make('trust_idp_mfa')
-                                                ->label('Trust Entra MFA (skip app challenge)')
-                                                ->helperText('When a user signs in via Microsoft Entra SSO and Entra asserts MFA was performed, skip this app\'s own MFA challenge instead of double-prompting. Only applies to the trusted tenant IDs below, and only makes sense for tenants that enforce MFA (Conditional Access). Leave off otherwise — a login is never admitted on a missing assertion.')
                                                 ->live()
                                                 ->default(false),
                                             TagsInput::make('trusted_azure_tids')
-                                                ->label('Trusted Entra tenant IDs')
-                                                ->helperText('Only Microsoft Entra logins whose tenant ID (tid) is listed here can satisfy MFA. Add the GUID of each Entra tenant whose MFA you trust. Empty means no login is trusted.')
+                                                ->label('Allowed Entra tenant IDs')
+                                                ->helperText(fn (): string => 'Only users from a Microsoft Entra tenant (directory) listed here can sign in with Microsoft. Add the GUID of your own tenant, found under Entra ID → Overview.'
+                                                    .(SsoLoginService::configuredAzureTenant() ? ' The tenant in AZURE_TENANT_ID is always allowed.' : ''))
                                                 ->placeholder('00000000-0000-0000-0000-000000000000')
                                                 ->nestedRecursiveRules(['uuid'])
-                                                ->visible(fn (Get $get): bool => (bool) $get('trust_idp_mfa'))
+                                                ->required(fn (Get $get): bool => (bool) $get('azure_sso_enabled') && SsoLoginService::configuredAzureTenant() === null)
+                                                ->visible(fn (Get $get): bool => (bool) $get('azure_sso_enabled'))
                                                 ->columnSpanFull(),
+                                            Toggle::make('trust_idp_mfa')
+                                                ->label('Trust Entra MFA (skip app challenge)')
+                                                ->helperText('When a user signs in via Microsoft Entra SSO and Entra asserts MFA was performed, skip this app\'s own MFA challenge instead of double-prompting. Only makes sense for tenants that enforce MFA (Conditional Access). Leave off otherwise — a login is never admitted on a missing assertion.')
+                                                ->visible(fn (Get $get): bool => (bool) $get('azure_sso_enabled'))
+                                                ->default(false),
                                             TextInput::make('account_lockout_max_attempts')
                                                 ->label('Account Lockout Threshold')
                                                 ->helperText('Lock an account after this many consecutive failed login attempts.')
@@ -789,10 +793,10 @@ class Settings extends Page
             }
         }
 
-        // Persist the trusted Entra tenant-id allowlist as JSON (a list, not a
-        // scalar), trimming blanks so an empty list reliably means "trust none".
+        // Persist the allowed Entra tenant-id list as JSON (a list, not a
+        // scalar), trimming blanks so an empty list reliably means "allow none".
         // Only rewrite it when the field was actually submitted — it's hidden
-        // (and dehydrated out of state) while trust_idp_mfa is off, and we don't
+        // (and dehydrated out of state) while Azure SSO is off, and we don't
         // want toggling the feature off to silently wipe a configured allowlist.
         if (array_key_exists('trusted_azure_tids', $data)) {
             // Entra tenant ids are case-insensitive UUIDs; store them canonically
