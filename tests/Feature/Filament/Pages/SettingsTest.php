@@ -23,6 +23,7 @@ use App\Services\ShipmentImport\Sources\AmazonSource;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Storage;
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
@@ -330,6 +331,18 @@ it('fedex registration service maps current fedex max retry codes to the fallbac
     }
 });
 
+it('keeps the fedex registration token out of the page and its state out of reach of the browser', function (): void {
+    $account = createFedexAccount();
+
+    $page = Livewire::test(EditCarrierAccount::class, ['record' => $account->id]);
+
+    (fn () => $this->storeFedexAccountAuthToken('test-auth-token'))->call($page->instance());
+
+    expect(json_encode($page->snapshot))->not->toContain('test-auth-token');
+
+    expect(fn () => $page->set('fedexSupportFallbackActive', true))->toThrow(CannotUpdateLockedPropertyException::class);
+});
+
 it('carrier account edit page handles a fedex pin resend lockout', function (): void {
     $account = createFedexAccount();
 
@@ -343,9 +356,11 @@ it('carrier account edit page handles a fedex pin resend lockout', function (): 
         ], 400),
     ]);
 
-    Livewire::test(EditCarrierAccount::class, ['record' => $account->id])
-        ->set('fedexAccountAuthToken', 'test-auth-token')
-        ->set('fedexFactor2Method', 'SMS')
+    $page = Livewire::test(EditCarrierAccount::class, ['record' => $account->id]);
+
+    (fn () => $this->storeFedexAccountAuthToken('test-auth-token'))->call($page->instance());
+
+    $page->set('fedexFactor2Method', 'SMS')
         ->call('resendFedexPin')
         ->assertSet('fedexSupportFallbackActive', true)
         ->assertSet('fedexLockedFactor2Methods', ['SMS', 'CALL', 'EMAIL']);

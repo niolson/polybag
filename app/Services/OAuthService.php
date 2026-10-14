@@ -305,7 +305,7 @@ class OAuthService
                 throw new RuntimeException('The connection\'s Shopify shop domain must be a *.myshopify.com host.');
             }
 
-            return array_filter([
+            return [
                 'shop' => $shopDomain,
                 // Ask for the label-purchase scopes at connect time too, so a
                 // source that later enables Shopify Shipping does not need a
@@ -316,7 +316,7 @@ class OAuthService
                     ...ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES,
                     ...ShopifyShippingLabelService::REQUIRED_SCOPES,
                 ])),
-            ]);
+            ];
         }
 
         return [];

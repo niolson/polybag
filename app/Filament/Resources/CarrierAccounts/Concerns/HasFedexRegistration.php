@@ -25,30 +25,64 @@ use Filament\Schemas\Schema;
 use Filament\Support\Exceptions\Halt;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\HtmlString;
+use Livewire\Attributes\Locked;
 use LogicException;
 
 trait HasFedexRegistration
 {
     public bool $fedexEulaAccepted = false;
 
-    public ?string $fedexAccountAuthToken = null;
-
     public ?string $fedexFactor2Method = null;
 
+    #[Locked]
     public ?string $fedexMaskedEmail = null;
 
+    #[Locked]
     public ?string $fedexMaskedPhone = null;
 
     /** @var string[] */
+    #[Locked]
     public array $fedexSecureCodeOptions = [];
 
+    #[Locked]
     public bool $fedexInvoiceAvailable = false;
 
     /** @var string[] */
+    #[Locked]
     public array $fedexLockedFactor2Methods = [];
 
+    #[Locked]
     public bool $fedexSupportFallbackActive = false;
+
+    /**
+     * The account auth token FedEx issues mid-registration. It is a credential,
+     * so it stays on the server, encrypted in the cache for this user and this
+     * page, rather than in a property the browser holds and can set.
+     */
+    private function fedexAccountAuthToken(): ?string
+    {
+        $stored = Cache::get($this->fedexAccountAuthTokenKey());
+
+        return is_string($stored) ? Crypt::decryptString($stored) : null;
+    }
+
+    private function storeFedexAccountAuthToken(?string $token): void
+    {
+        if ($token === null) {
+            Cache::forget($this->fedexAccountAuthTokenKey());
+
+            return;
+        }
+
+        Cache::put($this->fedexAccountAuthTokenKey(), Crypt::encryptString($token), now()->addMinutes(30));
+    }
+
+    private function fedexAccountAuthTokenKey(): string
+    {
+        return 'fedex-registration-token:'.auth()->id().':'.$this->getId();
+    }
 
     private function fedexCarrierAccount(): CarrierAccount
     {
@@ -63,14 +97,16 @@ trait HasFedexRegistration
 
     public function resendFedexPin(): void
     {
-        if (! $this->fedexAccountAuthToken || ! $this->fedexFactor2Method) {
+        $accountAuthToken = $this->fedexAccountAuthToken();
+
+        if (! $accountAuthToken || ! $this->fedexFactor2Method) {
             return;
         }
 
         try {
             app(FedexRegistrationService::class)->sendPin(
                 $this->fedexCarrierAccount(),
-                $this->fedexAccountAuthToken,
+                $accountAuthToken,
                 $this->fedexFactor2Method,
             );
             Notification::make()
@@ -93,7 +129,7 @@ trait HasFedexRegistration
     private function resetFedexRegistrationState(): void
     {
         $this->fedexEulaAccepted = false;
-        $this->fedexAccountAuthToken = null;
+        $this->storeFedexAccountAuthToken(null);
         $this->fedexFactor2Method = null;
         $this->fedexMaskedEmail = null;
         $this->fedexMaskedPhone = null;
@@ -140,7 +176,7 @@ trait HasFedexRegistration
      */
     private function storeFedexVerificationState(array $result): void
     {
-        $this->fedexAccountAuthToken = $result['accountAuthToken'];
+        $this->storeFedexAccountAuthToken($result['accountAuthToken']);
         $this->fedexMaskedEmail = $result['email'];
         $this->fedexMaskedPhone = $result['phoneNumber'];
         $this->fedexSecureCodeOptions = $result['options']['secureCode'];
@@ -379,7 +415,7 @@ trait HasFedexRegistration
                             try {
                                 app(FedexRegistrationService::class)->sendPin(
                                     $this->fedexCarrierAccount(),
-                                    $this->fedexAccountAuthToken,
+                                    $this->fedexAccountAuthToken(),
                                     $this->fedexFactor2Method,
                                 );
                             } catch (FedexRegistrationMaxRetriesException $e) {
@@ -469,7 +505,7 @@ trait HasFedexRegistration
                     if ($this->fedexFactor2Method === 'INVOICE') {
                         $credentials = app(FedexRegistrationService::class)->verifyInvoice(
                             account: $this->fedexCarrierAccount(),
-                            accountAuthToken: $this->fedexAccountAuthToken,
+                            accountAuthToken: $this->fedexAccountAuthToken(),
                             invoiceNumber: (int) $data['fedex_invoice_number'],
                             invoiceDate: $data['fedex_invoice_date'],
                             invoiceAmount: (float) $data['fedex_invoice_amount'],
@@ -478,7 +514,7 @@ trait HasFedexRegistration
                     } else {
                         $credentials = app(FedexRegistrationService::class)->verifyPin(
                             account: $this->fedexCarrierAccount(),
-                            accountAuthToken: $this->fedexAccountAuthToken,
+                            accountAuthToken: $this->fedexAccountAuthToken(),
                             pin: $data['fedex_pin'],
                         );
                     }
