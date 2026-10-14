@@ -185,3 +185,16 @@ Verified: read at `12592f33`; nothing in this slice changed through `dfd842c5`. 
   - "Validation message", with the placeholder "N/A" (`ShipmentResource.php:785`) → "Address check result", with "—"
 
 ## Comments
+
+- 2026-10-14 — Demo-path findings done in the wording pass (2026-10-14): void, not cancel,
+  everywhere a Label is voided (carriers, Amazon, Shopify, sample carriers, Pack, the void
+  dialogs, the audit action); the validated-address panel names the validator; the
+  Validate toast is titled by its result; the Packages Void tab and status filter option
+  removed; "Label Bought" for the purchase toast; "Buy & Print Label", "Reprint Label",
+  one "Already Shipped" message (`PackageShippingResult::alreadyShipped()`); "Shipment
+  Cancelled"; "Picking Required"; "Rate Unavailable" with a new Get Rates Again action on
+  Ship; "Clear Shipment" and "shipment reference" on Pack; "Buy Labels" in Batch Ship;
+  Packages, not Shipments, in Reports and the dashboard chart; the demo banner; the import
+  notification; one PDF failure message. Capitalization: Title Case for titles, labels and
+  buttons, applied to touched strings only. The low findings off the demo path remain
+  open.

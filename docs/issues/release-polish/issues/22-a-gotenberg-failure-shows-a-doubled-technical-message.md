@@ -38,3 +38,7 @@ if it keeps failing, ask an admin to check the PDF service.") with the exception
 and an explicit request timeout on the connector. Wording belongs with the pass 3 list.
 
 ## Comments
+
+- 2026-10-14 — Partly done with the wording pass: one message
+  (`GotenbergService::UNAVAILABLE`) under the title "PDF Not Created", with the cause
+  logged and reported. Not done: an explicit request timeout on `GotenbergConnector`.
