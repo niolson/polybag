@@ -162,6 +162,7 @@ So:
 | `07` | [Amazon Buy Shipping is refused for identifiers it never sends](issues/07-buy-shipping-identifier-refusal.md) | `done` |
 | `08` | [Verify against a development store and a seller account](issues/08-verify-against-live-sources.md) | `done` |
 | `09` | [Declare the GTIN as the part number when a client opts in](issues/09-declare-gtin-as-part-number.md) | `ready-for-agent` |
+| `10` | [Read the part number and GTIN from Shopify's typed barcodes](issues/10-shopify-typed-barcodes.md) | `needs-triage` |
 
 `05` and `09` are independent and can go in parallel. `09` is the one that matters most
 before 1 November.
