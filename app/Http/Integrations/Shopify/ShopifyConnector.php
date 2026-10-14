@@ -31,7 +31,7 @@ class ShopifyConnector extends Connector
         private readonly string $shopDomain,
         private readonly string $clientId,
         private readonly string $clientSecret,
-        private readonly string $apiVersion = '2026-07',
+        private readonly string $apiVersion = '2026-10',
         private readonly ?string $accessToken = null,
     ) {
         // Empty is allowed through so callers can surface a friendlier
@@ -60,7 +60,7 @@ class ShopifyConnector extends Connector
             shopDomain: (string) ($settings['shop_domain'] ?? ''),
             clientId: (string) ($settings['client_id'] ?? ''),
             clientSecret: (string) ($settings['client_secret'] ?? ''),
-            apiVersion: (string) ($settings['api_version'] ?? config('services.shopify.api_version', '2026-07')),
+            apiVersion: (string) ($settings['api_version'] ?? config('services.shopify.api_version', '2026-10')),
             accessToken: $accessToken,
         );
     }

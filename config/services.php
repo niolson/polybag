@@ -61,7 +61,7 @@ return [
     ],
 
     'shopify' => [
-        'api_version' => '2026-07',
+        'api_version' => '2026-10',
         // Shopify buys shipping labels asynchronously, so a purchase is polled
         // until it settles. The product of these two is how long a packer waits
         // at the Ship page before the purchase is reported as still running.

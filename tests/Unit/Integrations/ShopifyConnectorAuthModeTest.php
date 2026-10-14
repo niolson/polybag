@@ -33,7 +33,7 @@ it('accepts a valid *.myshopify.com shop domain', function (): void {
     ]));
 
     expect($connector->resolveBaseUrl())
-        ->toBe('https://test-shop.myshopify.com/admin/api/2026-07/graphql.json');
+        ->toBe('https://test-shop.myshopify.com/admin/api/2026-10/graphql.json');
 });
 
 it('uses the per-source OAuth token when one is provided', function (): void {
