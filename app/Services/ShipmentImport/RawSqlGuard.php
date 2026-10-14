@@ -164,12 +164,17 @@ class RawSqlGuard
      * out, leaving only what every supported database reads as SQL — or the
      * reason the query is refused.
      *
-     * Only text all four drivers agree is not code is blanked: `--` comments
-     * need the whitespace MySQL requires after them, and `#` is left as code
-     * because it starts a temporary table name on SQL Server. Where the drivers
-     * disagree on a literal's end (MySQL reads a backslash as an escape, the
-     * others do not) the query is refused rather than guessed at. Bracketed
-     * identifiers keep their ";" so a bracket cannot hide one.
+     * Only text all four drivers agree is not code is blanked. Wherever they
+     * disagree, the query is refused rather than read one way, because reading
+     * it as code is not the safe choice: a quote inside what one database calls
+     * a comment opens what this scanner would call a string, and the string
+     * hides real code. So these are refused: `--` with no whitespace after it (a
+     * comment on SQL Server, code on MySQL), `#` (a comment on MySQL, a temp
+     * table on SQL Server), a `/*` inside a block comment (PostgreSQL and SQL
+     * Server nest them), a PostgreSQL dollar quote, a backslash inside a string
+     * (an escape only on MySQL), and a quote inside a bracketed or backticked
+     * name (each a quote on only some drivers). Bracketed names keep their ";"
+     * so a bracket cannot hide one.
      *
      * @return string|array{error: string}
      */
@@ -196,18 +201,34 @@ class RawSqlGuard
                     return ['error' => 'has a comment that is never closed.'];
                 }
 
+                if (str_contains(substr($sql, $i + 2, $end - $i - 2), '/*')) {
+                    return ['error' => 'may not contain a comment inside a comment.'];
+                }
+
                 $code .= str_repeat(' ', $end + 2 - $i);
                 $i = $end + 2;
 
                 continue;
             }
 
-            if ($char === '-' && $next === '-' && ($i + 2 >= $length || ctype_space($sql[$i + 2]))) {
+            if ($char === '-' && $next === '-') {
+                if ($i + 2 < $length && ! ctype_space($sql[$i + 2])) {
+                    return ['error' => 'needs a space after "--" to start a comment.'];
+                }
+
                 $end = strcspn($sql, "\r\n", $i);
                 $code .= str_repeat(' ', $end);
                 $i += $end;
 
                 continue;
+            }
+
+            if ($char === '#') {
+                return ['error' => 'may not contain "#" outside quotes (it starts a comment on MySQL only). Use -- for comments.'];
+            }
+
+            if ($char === '$' && preg_match('/\G\$[A-Za-z_0-9]*\$/', $sql, $matches, 0, $i) === 1) {
+                return ['error' => 'may not contain a PostgreSQL dollar-quoted string ($$ … $$). Use single quotes.'];
             }
 
             $close = match ($char) {
@@ -243,6 +264,10 @@ class RawSqlGuard
                     }
 
                     break;
+                }
+
+                if (($char === '`' || $char === '[') && in_array($sql[$j], ["'", '"', '`'], true)) {
+                    return ['error' => 'may not contain a quote inside a bracketed or backticked name.'];
                 }
 
                 $j++;

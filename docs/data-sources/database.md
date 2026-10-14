@@ -382,10 +382,12 @@ The rules, in full:
 - **`WITH` is not a read.** A CTE can lead an `UPDATE` or `DELETE` on MySQL 8 and
   PostgreSQL, so common table expressions are rejected in the read fields even when the
   CTE is innocent. Use a subquery or a view instead.
-- **Plain comments and literals only.** MySQL's executable comments and optimizer hints
-  (`/*! … */`, `/*+ … */`) are refused, and so is a backslash inside a quoted string,
-  because MySQL reads it as an escape and the other databases do not. A `--` comment
-  needs a space after the dashes, and `#` is not treated as a comment.
+- **Only syntax every database reads the same way.** Where MySQL, PostgreSQL, SQL Server
+  and SQLite disagree, the query is refused rather than read one way. So these are not
+  allowed: MySQL's executable comments and optimizer hints (`/*! … */`, `/*+ … */`), `#`
+  comments, `--` with no space after it, a comment nested inside a comment, PostgreSQL
+  dollar quotes (`$$ … $$`), a backslash inside a quoted string, and a quote inside a
+  `[bracketed]` or `` `backticked` `` name. Write comments as `-- ` or `/* … */`.
 
 A violation on save is a form validation error. A violation at execution time — a query
 saved before a rule tightened, say — aborts the run with the same message, recorded as a

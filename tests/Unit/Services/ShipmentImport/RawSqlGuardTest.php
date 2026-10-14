@@ -16,6 +16,8 @@ it('allows the permitted statement type', function (array $allowed, string $sql)
     'block comment' => [RawSqlGuard::READ, '/* open orders */ SELECT * FROM shipments'],
     'keyword inside a string' => [RawSqlGuard::READ, "SELECT * FROM orders WHERE note <> 'delete; drop' AND status = 'it''s open'"],
     'keyword inside a comment' => [RawSqlGuard::READ, "SELECT * FROM orders -- never delete these\nWHERE id = :id"],
+    'comment at the end' => [RawSqlGuard::READ, 'SELECT * FROM orders --'],
+    'arithmetic' => [RawSqlGuard::READ, 'SELECT qty - 1, price * - 1 FROM orders'],
     'quoted identifiers' => [RawSqlGuard::READ, 'SELECT [Print Date], "use", `exec` FROM orders'],
     'keyword as part of a name' => [RawSqlGuard::READ, 'SELECT delete_flag, drop_ship, created_at, updated_at FROM orders'],
     'subquery and union' => [RawSqlGuard::READ, 'SELECT id FROM a WHERE id IN (SELECT id FROM b) UNION ALL SELECT id FROM c'],
@@ -54,8 +56,15 @@ it('rejects a disallowed statement type', function (array $allowed, string $sql)
     'unclosed string' => [RawSqlGuard::READ, "SELECT 'abc"],
     'backslash in a string' => [RawSqlGuard::READ, "SELECT 'a\\b' AS x"],
     'semicolon in a bracket' => [RawSqlGuard::READ, 'SELECT [a;] DELETE'],
-    'hash is code' => [RawSqlGuard::MARK_EXPORTED, "UPDATE #t SET a = 1\nDELETE FROM orders"],
-    'dash comment needs whitespace' => [RawSqlGuard::READ, 'SELECT 1 --x; DELETE FROM orders'],
+    'hash' => [RawSqlGuard::MARK_EXPORTED, "UPDATE #t SET a = 1\nDELETE FROM orders"],
+    'dash comment without whitespace' => [RawSqlGuard::READ, 'SELECT 1 --x; DELETE FROM orders'],
+    'quote in a dash comment without whitespace' => [RawSqlGuard::READ, "SELECT 1 --'\n; DELETE FROM orders; -- '"],
+    'quote in a hash comment' => [RawSqlGuard::READ, "SELECT 1 #'\n; DELETE FROM orders; #'"],
+    'quote after a nested comment' => [RawSqlGuard::READ, "SELECT 1 /* /* */ ' */ ; DELETE FROM orders; -- '"],
+    'dollar quote' => [RawSqlGuard::READ, "SELECT $$'$$; DELETE FROM orders; -- '"],
+    'tagged dollar quote' => [RawSqlGuard::READ, "SELECT \$x\$'\$x\$; DELETE FROM orders; -- '"],
+    'quote in a bracketed name' => [RawSqlGuard::READ, "SELECT [a'] , ' ; DELETE FROM orders; -- '"],
+    'quote in a backticked name' => [RawSqlGuard::READ, "SELECT `a'` , ' ; DELETE FROM orders; -- '"],
 ]);
 
 it('allows an empty or whitespace-only value (nullable field)', function (): void {
