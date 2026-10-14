@@ -201,7 +201,11 @@ class RawSqlGuard
                     return ['error' => 'has a comment that is never closed.'];
                 }
 
-                if (str_contains(substr($sql, $i + 2, $end - $i - 2), '/*')) {
+                // Compared by position, not by searching the text between: in
+                // "/*/*/" the nested opener's "*" is also the closer's.
+                $nested = strpos($sql, '/*', $i + 2);
+
+                if ($nested !== false && $nested < $end) {
                     return ['error' => 'may not contain a comment inside a comment.'];
                 }
 
