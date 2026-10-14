@@ -148,3 +148,12 @@ Each finding is an issue file, `issues/NN-<slug>.md`, numbered in the order foun
 - **low** — off the path, or cosmetic
 
 ## Comments
+
+- 2026-10-14 — Triaged the pass 3 and 4 findings into three groups. Fixed now, on the demo
+  path (#421): `04`, `05`, `10`, `13`, `17`, `18`, `27`, `30`, `31`, `39`, half of `03`, and
+  the demo-path wording of `47`–`51`; `16` closed as intended. Before the first customer, kept
+  here: `02`, `06`, `20`, `23`, `28`, `29`, `32`, `34`, `35`, `40`, `43`, `44`. Deferred and
+  moved to their feature directories, numbered there: `08`, `09`, `37` to
+  `international-customs-terms` (`13`–`15`); `24`, `38` to `pii-retention` (`05`, `06`); `25`,
+  `26` to `order-reconciliation` (`12`, `13`); `41`, `42` to `eu-product-identifiers` (`08`,
+  `09`). The rest are low and off the demo path, fixed if their file is open anyway.
