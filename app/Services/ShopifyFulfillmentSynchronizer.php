@@ -25,8 +25,9 @@ use Illuminate\Support\Collection;
  * bought on Shopify's account: USPS entitles us to nothing for a barcode
  * carrying Shopify's MID (ADR-0002).
  *
- * Both answers live on the same fulfillment, so both come out of one poll. It
- * runs every fifteen minutes, which also keeps `tracking_checked_at` fresher
+ * Both answers live on the same fulfillment, so both come out of one poll,
+ * which reads many packages' fulfillment orders to a request. It runs every
+ * fifteen minutes, which also keeps `tracking_checked_at` fresher
  * than the four-hourly `packages:refresh-tracking` sweep needs, so these
  * packages never cost a second request.
  *
@@ -47,46 +48,116 @@ class ShopifyFulfillmentSynchronizer
      * Ask Shopify about every live Shopify-shipped package: un-ship the voided
      * ones, record where the rest have got to.
      *
+     * One request per connection per batch of fulfillment orders, not one per
+     * package (`shopify-shipping-carrier/27`): a parcel is polled ninety-six
+     * times a day for as long as it is in transit, and a request each made
+     * that tens of thousands a day for a busy warehouse.
+     *
      * @return array{checked: int, voided: int, tracked: int, failed: int}
      */
     public function sync(?int $limit = null): array
     {
         $packages = $this->candidates($limit);
-        $voided = 0;
-        $tracked = 0;
-        $failed = 0;
+        $counts = ['voided' => 0, 'tracked' => 0, 'failed' => 0];
 
-        foreach ($packages as $package) {
-            try {
-                $fulfillment = $this->labelService->fulfillmentFor($package);
+        // Read before any void is applied, and kept: a void re-points the
+        // shipment's fulfillment order, and a sibling package later in the batch
+        // was fetched under the one it had, which is the one that answers for it.
+        // Today the sibling's loaded shipment happens not to see the re-point
+        // (`clearShipping()` reloads the voided package's own); this does not
+        // rely on that.
+        $fulfillmentOrderIds = $packages->mapWithKeys(fn (Package $package): array => [
+            $package->id => $this->labelService->fulfillmentOrderId($package),
+        ]);
 
-                if ($this->labelService->isVoided($fulfillment)) {
-                    $this->applyVoid($package);
-                    $voided++;
+        // A package with no connection to ask, no fulfillment order or no
+        // tracking number has no answer to be had, the same as before batching:
+        // checked, and neither tracked nor failed.
+        $askable = $packages->filter(fn (Package $package): bool => $package->tracking_number !== null
+            && $fulfillmentOrderIds[$package->id] !== null
+            && $this->labelService->postageSourceFor($package) !== null);
+
+        foreach ($askable->groupBy(fn (Package $package): int => $this->labelService->postageSourceFor($package)->id) as $connectionPackages) {
+            $dataSource = $this->labelService->postageSourceFor($connectionPackages->first());
+            $byFulfillmentOrder = $connectionPackages->groupBy(fn (Package $package): string => $fulfillmentOrderIds[$package->id]);
+
+            // Packages sharing a fulfillment order are asked about once.
+            foreach ($byFulfillmentOrder->keys()->chunk(ShopifyShippingLabelService::FULFILLMENT_LOOKUP_BATCH_SIZE) as $batch) {
+                $batchPackages = $batch->flatMap(fn (string $id): Collection => $byFulfillmentOrder[$id]);
+
+                try {
+                    $lookup = $this->labelService->lookUpFulfillments($dataSource, $batch->values()->all());
+                } catch (\Exception $e) {
+                    // Left for the next run, like a failed request always was.
+                    foreach ($batchPackages as $package) {
+                        $this->recordFailure($package, $e->getMessage(), $counts);
+                    }
 
                     continue;
                 }
 
-                // No fulfillment we can identify as this package's is no answer
-                // to either question. Recording a status from it would attribute
-                // another parcel's progress to this one.
-                if ($fulfillment === null) {
-                    continue;
+                foreach ($batchPackages as $package) {
+                    $fulfillmentOrderId = $fulfillmentOrderIds[$package->id];
+
+                    if (isset($lookup->failures[$fulfillmentOrderId])) {
+                        $this->recordFailure($package, $lookup->failures[$fulfillmentOrderId], $counts);
+
+                        continue;
+                    }
+
+                    $this->apply(
+                        $package,
+                        $this->labelService->fulfillmentMatching($lookup->fulfillments[$fulfillmentOrderId] ?? null, $package->tracking_number),
+                        $counts,
+                    );
                 }
-
-                $this->trackingService->record($package, $this->postageSource->trackingFrom($fulfillment));
-                $tracked++;
-            } catch (\Exception $e) {
-                $failed++;
-
-                logger()->warning('Shopify fulfillment check failed', [
-                    'package_id' => $package->id,
-                    'error' => $e->getMessage(),
-                ]);
             }
         }
 
-        return ['checked' => $packages->count(), 'voided' => $voided, 'tracked' => $tracked, 'failed' => $failed];
+        return ['checked' => $packages->count(), ...$counts];
+    }
+
+    /**
+     * Act on what Shopify said about one package.
+     *
+     * @param  array<string, mixed>|null  $fulfillment
+     * @param  array{voided: int, tracked: int, failed: int}  $counts
+     */
+    private function apply(Package $package, ?array $fulfillment, array &$counts): void
+    {
+        try {
+            if ($this->labelService->isVoided($fulfillment)) {
+                $this->applyVoid($package);
+                $counts['voided']++;
+
+                return;
+            }
+
+            // No fulfillment we can identify as this package's is no answer
+            // to either question. Recording a status from it would attribute
+            // another parcel's progress to this one.
+            if ($fulfillment === null) {
+                return;
+            }
+
+            $this->trackingService->record($package, $this->postageSource->trackingFrom($fulfillment));
+            $counts['tracked']++;
+        } catch (\Exception $e) {
+            $this->recordFailure($package, $e->getMessage(), $counts);
+        }
+    }
+
+    /**
+     * @param  array{voided: int, tracked: int, failed: int}  $counts
+     */
+    private function recordFailure(Package $package, string $error, array &$counts): void
+    {
+        $counts['failed']++;
+
+        logger()->warning('Shopify fulfillment check failed', [
+            'package_id' => $package->id,
+            'error' => $error,
+        ]);
     }
 
     /**

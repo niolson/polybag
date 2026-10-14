@@ -396,6 +396,9 @@ function externalPackage(?DataSource $origin, float $weight = 1.52, array $items
 }
 
 /**
+ * Shopify's answer to the batched fulfillment-state lookup about the one
+ * fulfillment order every Shopify fixture here names.
+ *
  * @param  array<string, mixed>  $fulfillment  extra fields on the fulfillment node
  * @return array<string, mixed>
  */
@@ -404,20 +407,53 @@ function fulfillmentState(
     string $trackingNumber = '9400111899223197428490',
     array $fulfillment = [],
 ): array {
+    return fulfillmentStates([
+        'gid://shopify/FulfillmentOrder/12345' => [fulfillmentNode($displayStatus, $trackingNumber, $fulfillment)],
+    ]);
+}
+
+/**
+ * One fulfillment, as the fulfillment-state lookup reads it.
+ *
+ * @param  array<string, mixed>  $fulfillment  extra fields on the fulfillment node
+ * @return array<string, mixed>
+ */
+function fulfillmentNode(
+    string $displayStatus,
+    string $trackingNumber = '9400111899223197428490',
+    array $fulfillment = [],
+): array {
+    return array_merge([
+        'id' => 'gid://shopify/Fulfillment/'.$trackingNumber,
+        'status' => 'SUCCESS',
+        'displayStatus' => $displayStatus,
+        'trackingInfo' => [['number' => $trackingNumber]],
+        'events' => ['nodes' => []],
+    ], $fulfillment);
+}
+
+/**
+ * Shopify's answer to the batched fulfillment-state lookup.
+ *
+ * @param  array<string, list<array<string, mixed>>|null>  $orders  fulfillment order ID => its fulfillments; null for one Shopify no longer returns
+ * @param  array<string, string>  $nextPage  fulfillment order ID => end cursor, for one with more fulfillments than the first page
+ * @return array<string, mixed>
+ */
+function fulfillmentStates(array $orders, array $nextPage = []): array
+{
     return [
         'data' => [
-            'fulfillmentOrder' => [
-                'id' => 'gid://shopify/FulfillmentOrder/12345',
-                'status' => 'CLOSED',
-                'fulfillments' => [
-                    'nodes' => [array_merge([
-                        'id' => 'gid://shopify/Fulfillment/1',
-                        'status' => 'SUCCESS',
-                        'displayStatus' => $displayStatus,
-                        'trackingInfo' => [['number' => $trackingNumber]],
-                    ], $fulfillment)],
+            'nodes' => array_map(
+                fn (string $id, ?array $fulfillments): ?array => $fulfillments === null ? null : [
+                    'id' => $id,
+                    'fulfillments' => [
+                        'pageInfo' => ['hasNextPage' => isset($nextPage[$id]), 'endCursor' => $nextPage[$id] ?? null],
+                        'nodes' => $fulfillments,
+                    ],
                 ],
-            ],
+                array_keys($orders),
+                array_values($orders),
+            ),
         ],
     ];
 }
