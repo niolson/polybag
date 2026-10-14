@@ -7,12 +7,15 @@ use App\Enums\TrackingStatus;
 use App\Enums\VoidReason;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Models\AuditLog;
+use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\Product;
 use App\Models\Shipment;
 use App\Services\ShopifyFulfillmentSynchronizer;
 use App\Services\ShopifyGoodsFingerprint;
+use App\Services\ShopifyShippingLabelService;
 use Saloon\Http\Faking\MockResponse;
+use Saloon\Http\PendingRequest;
 use Saloon\Laravel\Facades\Saloon;
 
 beforeEach(function (): void {
@@ -618,4 +621,232 @@ it('gives no answer when the order holds more fulfillment orders than the query 
     expect($result['voided'])->toBe(1)
         ->and($package->refresh()->shipment->refresh()->metadata['shopify_fulfillment_order_id'])
         ->toBe('gid://shopify/FulfillmentOrder/12345');
+});
+
+/**
+ * A package shipped on a Shopify Shipping label bought on `$source`, against
+ * `$fulfillmentOrderId` — on its own shipment unless given one to share.
+ */
+function shopifyPackageOn(DataSource $source, string $fulfillmentOrderId, string $trackingNumber, ?Shipment $shipment = null): Package
+{
+    $shipment ??= Shipment::factory()->create([
+        'data_source_id' => $source->id,
+        'metadata' => ['shopify_fulfillment_order_id' => $fulfillmentOrderId],
+    ]);
+
+    return Package::factory()->create([
+        'shipment_id' => $shipment->id,
+        'carrier' => 'USPS',
+        'service' => 'Ground Advantage',
+        'postage_source' => PostageSource::PostageDataSource,
+        'postage_data_source_id' => $source->id,
+        'tracking_number' => $trackingNumber,
+        'status' => PackageStatus::Shipped,
+        'shipped_at' => now(),
+        'label_data' => base64_encode('LABEL-BYTES'),
+    ]);
+}
+
+function shopifyConnection(string $shopDomain = 'test-shop.myshopify.com'): DataSource
+{
+    return createShopifyDataSource(['shop_domain' => $shopDomain], ['oauth_access_token' => 'shpat_test_token']);
+}
+
+/**
+ * The fulfillment order IDs a batched lookup named.
+ *
+ * @return list<string>
+ */
+function lookedUpIds(PendingRequest|GraphQL $request): array
+{
+    $body = $request->body()->all();
+
+    return str_contains($body['query'], 'ShopifyFulfillmentStates(') ? $body['variables']['ids'] : [];
+}
+
+it('asks about six hundred packages on one connection in three requests', function (): void {
+    $source = shopifyConnection();
+
+    foreach (range(1, 600) as $n) {
+        shopifyPackageOn($source, "gid://shopify/FulfillmentOrder/{$n}", "TRACK{$n}");
+    }
+
+    Saloon::fake([GraphQL::class => MockResponse::make(fulfillmentStates([]))]);
+
+    $result = $this->synchronizer->sync();
+
+    expect($result)->toBe(['checked' => 600, 'voided' => 0, 'tracked' => 0, 'failed' => 0]);
+
+    Saloon::assertSentCount((int) ceil(600 / ShopifyShippingLabelService::FULFILLMENT_LOOKUP_BATCH_SIZE));
+    Saloon::assertSent(fn (GraphQL $request): bool => count(lookedUpIds($request)) <= ShopifyShippingLabelService::FULFILLMENT_LOOKUP_BATCH_SIZE);
+});
+
+it('asks each connection about its own packages', function (): void {
+    $east = shopifyConnection('east.myshopify.com');
+    $west = shopifyConnection('west.myshopify.com');
+    shopifyPackageOn($east, 'gid://shopify/FulfillmentOrder/1', 'TRACK1');
+    shopifyPackageOn($west, 'gid://shopify/FulfillmentOrder/2', 'TRACK2');
+    shopifyPackageOn($east, 'gid://shopify/FulfillmentOrder/3', 'TRACK3');
+
+    $asked = [];
+
+    Saloon::fake([GraphQL::class => function (PendingRequest $request) use (&$asked): MockResponse {
+        $asked[parse_url($request->getUrl(), PHP_URL_HOST)] = lookedUpIds($request);
+
+        return MockResponse::make(fulfillmentStates([]));
+    }]);
+
+    $this->synchronizer->sync();
+
+    expect($asked)->toBe([
+        'east.myshopify.com' => ['gid://shopify/FulfillmentOrder/1', 'gid://shopify/FulfillmentOrder/3'],
+        'west.myshopify.com' => ['gid://shopify/FulfillmentOrder/2'],
+    ]);
+});
+
+it('asks once about a fulfillment order several packages share', function (): void {
+    $source = shopifyConnection();
+    $first = shopifyPackageOn($source, 'gid://shopify/FulfillmentOrder/1', 'TRACK1');
+    $second = shopifyPackageOn($source, 'gid://shopify/FulfillmentOrder/1', 'TRACK2', $first->shipment);
+
+    Saloon::fake([MockResponse::make(fulfillmentStates([
+        'gid://shopify/FulfillmentOrder/1' => [
+            fulfillmentNode('IN_TRANSIT', 'TRACK1'),
+            fulfillmentNode('DELIVERED', 'TRACK2'),
+        ],
+    ]))]);
+
+    $result = $this->synchronizer->sync();
+
+    expect($result['tracked'])->toBe(2)
+        ->and($first->refresh()->tracking_status)->toBe(TrackingStatus::InTransit)
+        ->and($second->refresh()->tracking_status)->toBe(TrackingStatus::Delivered);
+
+    Saloon::assertSentCount(1);
+    Saloon::assertSent(fn (GraphQL $request): bool => lookedUpIds($request) === ['gid://shopify/FulfillmentOrder/1']);
+});
+
+it('voids, tracks and finds no match within one batched answer', function (): void {
+    $source = shopifyConnection();
+    $voided = shopifyPackageOn($source, 'gid://shopify/FulfillmentOrder/1', 'TRACK1');
+    $moving = shopifyPackageOn($source, 'gid://shopify/FulfillmentOrder/2', 'TRACK2');
+    $unmatched = shopifyPackageOn($source, 'gid://shopify/FulfillmentOrder/3', 'TRACK3');
+    $deleted = shopifyPackageOn($source, 'gid://shopify/FulfillmentOrder/4', 'TRACK4');
+
+    Saloon::fake([MockResponse::make(fulfillmentStates([
+        'gid://shopify/FulfillmentOrder/1' => [fulfillmentNode('LABEL_VOIDED', 'TRACK1')],
+        'gid://shopify/FulfillmentOrder/2' => [fulfillmentNode('IN_TRANSIT', 'TRACK2')],
+        // Another parcel's fulfillment, which must not answer for this one.
+        'gid://shopify/FulfillmentOrder/3' => [fulfillmentNode('DELIVERED', 'SOMEONE-ELSE')],
+        'gid://shopify/FulfillmentOrder/4' => null,
+    ]))]);
+
+    $result = $this->synchronizer->sync();
+
+    expect($result)->toBe(['checked' => 4, 'voided' => 1, 'tracked' => 1, 'failed' => 0])
+        ->and($voided->refresh()->status)->toBe(PackageStatus::Unshipped)
+        ->and($moving->refresh()->tracking_status)->toBe(TrackingStatus::InTransit)
+        ->and($unmatched->refresh()->tracking_status)->toBeNull()
+        ->and($unmatched->status)->toBe(PackageStatus::Shipped)
+        ->and($deleted->refresh()->status)->toBe(PackageStatus::Shipped);
+});
+
+it('finds a fulfillment past the first page', function (): void {
+    $source = shopifyConnection();
+    $package = shopifyPackageOn($source, 'gid://shopify/FulfillmentOrder/1', 'TRACK21');
+
+    Saloon::fake([
+        MockResponse::make(fulfillmentStates(
+            ['gid://shopify/FulfillmentOrder/1' => array_map(
+                fn (int $n): array => fulfillmentNode('DELIVERED', "TRACK{$n}"),
+                range(1, 20),
+            )],
+            ['gid://shopify/FulfillmentOrder/1' => 'cursor-20'],
+        )),
+        MockResponse::make(['data' => ['fulfillmentOrder' => ['fulfillments' => [
+            'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
+            'nodes' => [fulfillmentNode('IN_TRANSIT', 'TRACK21')],
+        ]]]]),
+    ]);
+
+    $result = $this->synchronizer->sync();
+
+    expect($result['tracked'])->toBe(1)
+        ->and($package->refresh()->tracking_status)->toBe(TrackingStatus::InTransit);
+
+    Saloon::assertSent(function (GraphQL $request): bool {
+        $body = $request->body()->all();
+
+        return str_contains($body['query'], 'ShopifyFulfillmentStatesPage')
+            && $body['variables'] === ['id' => 'gid://shopify/FulfillmentOrder/1', 'cursor' => 'cursor-20'];
+    });
+});
+
+it('counts a failed batch as failed and carries on with the other connections', function (): void {
+    $failing = shopifyConnection('failing.myshopify.com');
+    $working = shopifyConnection('working.myshopify.com');
+    $stuck = [
+        shopifyPackageOn($failing, 'gid://shopify/FulfillmentOrder/1', 'TRACK1'),
+        shopifyPackageOn($failing, 'gid://shopify/FulfillmentOrder/2', 'TRACK2'),
+    ];
+    $tracked = shopifyPackageOn($working, 'gid://shopify/FulfillmentOrder/3', 'TRACK3');
+
+    Saloon::fake([GraphQL::class => fn (PendingRequest $request): MockResponse => str_starts_with(parse_url($request->getUrl(), PHP_URL_HOST), 'failing')
+        ? MockResponse::make(['errors' => [['message' => 'Throttled']]])
+        : MockResponse::make(fulfillmentStates([
+            'gid://shopify/FulfillmentOrder/3' => [fulfillmentNode('IN_TRANSIT', 'TRACK3')],
+        ]))]);
+
+    $result = $this->synchronizer->sync();
+
+    expect($result)->toBe(['checked' => 3, 'voided' => 0, 'tracked' => 1, 'failed' => 2])
+        ->and($tracked->refresh()->tracking_status)->toBe(TrackingStatus::InTransit)
+        ->and($stuck[0]->refresh()->tracking_checked_at)->toBeNull()
+        ->and($stuck[1]->refresh()->tracking_checked_at)->toBeNull();
+});
+
+it('fails only the fulfillment order whose later page could not be read', function (): void {
+    $source = shopifyConnection();
+    $paged = shopifyPackageOn($source, 'gid://shopify/FulfillmentOrder/1', 'TRACK21');
+    $other = shopifyPackageOn($source, 'gid://shopify/FulfillmentOrder/2', 'TRACK2');
+
+    Saloon::fake([
+        MockResponse::make(fulfillmentStates(
+            [
+                'gid://shopify/FulfillmentOrder/1' => [fulfillmentNode('IN_TRANSIT', 'TRACK1')],
+                'gid://shopify/FulfillmentOrder/2' => [fulfillmentNode('IN_TRANSIT', 'TRACK2')],
+            ],
+            ['gid://shopify/FulfillmentOrder/1' => 'cursor-1'],
+        )),
+        MockResponse::make(['errors' => [['message' => 'Throttled']]]),
+    ]);
+
+    $result = $this->synchronizer->sync();
+
+    expect($result)->toBe(['checked' => 2, 'voided' => 0, 'tracked' => 1, 'failed' => 1])
+        ->and($paged->refresh()->tracking_checked_at)->toBeNull()
+        ->and($other->refresh()->tracking_status)->toBe(TrackingStatus::InTransit);
+});
+
+it('matches a sibling against the fulfillment order it was fetched under after a void re-points the shipment', function (): void {
+    $voided = shopifyPackageWithOrderMetadata();
+    $sibling = shopifyPackageOn($voided->postageDataSource, 'gid://shopify/FulfillmentOrder/12345', 'TRACK-SIBLING', $voided->shipment);
+
+    Saloon::fake([
+        MockResponse::make(fulfillmentStates([
+            'gid://shopify/FulfillmentOrder/12345' => [
+                fulfillmentNode('LABEL_VOIDED', '9400111899223197428490'),
+                fulfillmentNode('IN_TRANSIT', 'TRACK-SIBLING'),
+            ],
+        ])),
+        MockResponse::make(orderFulfillmentOrders([
+            ['id' => 'gid://shopify/FulfillmentOrder/54321'],
+        ])),
+    ]);
+
+    $result = $this->synchronizer->sync();
+
+    expect($voided->shipment->refresh()->metadata['shopify_fulfillment_order_id'])->toBe('gid://shopify/FulfillmentOrder/54321')
+        ->and($result)->toBe(['checked' => 2, 'voided' => 1, 'tracked' => 1, 'failed' => 0])
+        ->and($sibling->refresh()->tracking_status)->toBe(TrackingStatus::InTransit);
 });

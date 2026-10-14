@@ -1,6 +1,6 @@
 # Batch the Shopify fulfillment sync instead of one request per package
 
-Status: ready-for-agent
+Status: done — 2026-10-14
 Category: enhancement
 Repo: `polybag`
 
@@ -31,14 +31,24 @@ requests each poll makes.
 several packages can share one fulfillment order. Then match each package to its
 fulfillment by tracking number, as `fulfillmentFor()` does today.
 
-**Size the batch by measured cost.** `06` measured 14 points for its `nodes(ids:)` query
-however many IDs it named, but that query reads far less. This one reads
-`fulfillments(first: 20)` with `events(first: 50)` inside each. Measure the requested cost
-of a batch on the development store and size it to stay under the bucket. Up to 250 IDs is
-`nodes`' input cap. The `FULFILLMENT_STATE_QUERY` docblock says `events` may always come
-back empty. If the 2026-10-03 UK test label's events are the only ones ever seen and they
-inflate the cost, consider reading `events` only for a package whose `displayStatus` moved
-since the last run.
+**Size the batch by measured cost.** Two limits apply. Shopify refuses any query whose
+*requested* cost is over 1,000 points, whatever the bucket holds. Separately, the *actual*
+cost of a run has to be one the bucket restores well within fifteen minutes. `06` measured
+14 points for its `nodes(ids:)` query however many IDs it named, but that query reads far
+less. This one reads `fulfillments(first: 20)` with `events(first: 50)` inside each,
+roughly 20 × 50 per fulfillment order. Measure the requested and actual cost of a batch on
+the development store. Up to 250 IDs is `nodes`' input cap. If the requested cost goes
+over 1,000, lower the `first:` values and page through the rest rather than cutting the
+batch to a handful of IDs.
+
+**Keep `events`.** They are real tracking data, not an empty connection: `17` (2026-10-03)
+saw Shopify write nine movement events for one label, six of them `IN_TRANSIT` while
+`displayStatus` stayed `IN_TRANSIT`. So reading events only when `displayStatus` moves
+would drop the scan-level detail `ShopifyPostageSource::trackingFrom()` exists to record.
+The `FULFILLMENT_STATE_QUERY` docblock that calls them possibly always empty is out of date,
+so correct it. If `events(first:)` has to shrink to fit the cost, a fulfillment with more
+events than that is truncated. `displayStatus` still carries its state, so that is
+acceptable. Record the choice.
 
 **Every fulfillment.** `fulfillments(first: 20)` silently drops a package whose fulfillment
 is the 21st. That gap exists today too, but batching is the time to close it. Ask for
@@ -46,9 +56,24 @@ is the 21st. That gap exists today too, but batching is the time to close it. As
 `withAllFulfillments()` does.
 
 **A failed batch** marks its packages failed for this run and leaves them for the next,
-like a failed request today. The other batches carry on. A void found is applied exactly as
-now: `applyVoid()`, including `ShopifyFulfillmentOrderReplacer`, whose own request runs only
-on a void.
+like a failed request today. The other batches carry on. If fetching one fulfillment
+order's later fulfillments fails, only that order's packages count as failed, as in `06`'s
+closer. A void found is applied exactly as now: `applyVoid()`, including
+`ShopifyFulfillmentOrderReplacer`, whose own request runs only on a void.
+
+**Match against what was fetched.** The replacer rewrites the shipment's
+`shopify_fulfillment_order_id` when it applies a void. Later packages in the same batch,
+including that shipment's siblings, must be matched against the fulfillment order they were
+fetched under, not against metadata read again after the void.
+
+**`fulfillmentFor()` stays.** `ShopifyPostageSource::trackShipment()` uses it for a one-off
+refresh. The single and batched paths share one tracking-number matcher, so "no
+fulfillment carries this number is no answer" lives in one place.
+
+**Not this issue:** once a void re-points a multi-package shipment, its siblings still in
+transit are asked about the replacement fulfillment order, which carries none of their
+fulfillments. They get no answer for the rest of the window. That predates batching and
+belongs with `13`, which is still in triage.
 
 **Worth checking, not required:** whether a search for changes could replace the poll
 altogether, such as `fulfillmentOrders(includeClosed: true, query: "updated_at:>…")` or
@@ -60,14 +85,53 @@ than building it in this issue.
 
 ## Acceptance criteria
 
-- [ ] A run over 600 live packages on one connection makes `ceil(600 / batch size)`
+- [x] A run over 600 live packages on one connection makes `ceil(600 / batch size)`
       requests. A test counts them
-- [ ] Packages on different connections are batched per connection
-- [ ] Packages sharing a fulfillment order are asked about once
-- [ ] A void, a tracking update and a "no fulfillment matches this package" answer each
+- [x] Packages on different connections are batched per connection
+- [x] Packages sharing a fulfillment order are asked about once
+- [x] A void, a tracking update and a "no fulfillment matches this package" answer each
       behave as they do today, through a batched response
-- [ ] A fulfillment past the first page is found
-- [ ] A failed batch counts its packages as failed and the rest of the run completes
-- [ ] The measured cost per batch and the chosen batch size, recorded in the comments
+- [x] A fulfillment past the first page is found
+- [x] A failed batch counts its packages as failed and the rest of the run completes
+- [x] A failed page of later fulfillments counts only that fulfillment order's packages as
+      failed
+- [x] A void in a batch does not change how that shipment's other packages in the batch
+      are matched
+- [x] `fulfillmentFor()` and the batch share one tracking-number matcher
+- [x] The measured requested and actual cost per batch, the chosen batch size and `first:`
+      values, recorded in the comments
+- [x] The `FULFILLMENT_STATE_QUERY` docblock no longer says `events` may always be empty
 
 ## Comments
+
+- **2026-10-14** — Readiness review. The `events` suggestion relied on the docblock, which
+  `17` had already overturned, so it was replaced with "keep `events`". The sizing guidance
+  named only the bucket, so it now names the 1,000-point cap on requested cost as well.
+  Added: per-fulfillment-order paging failures, matching against the fetched fulfillment
+  order across a void, keeping `fulfillmentFor()` with a shared matcher, and pointing the
+  sibling re-point gap to `13`. The existing synchronizer tests fake the single
+  `fulfillmentOrder` response and move to the `nodes` shape. The cost measurement and the
+  optional search check both need the `polybag-test` development store connection.
+- **2026-10-14** — Built. Measured on the development store with the shipped query
+  (`fulfillments(first: 20)`, `events(first: 50)` inside each): **58 points requested for 1
+  ID or for 250**, under the 1,000-point cap, and **33 points actually charged** for 250 IDs
+  returning 144 fulfillments, against a 20,000-point bucket restoring 1,000 a second. Smaller
+  `first:` values (10/50, 20/20, 10/25, 5/50) requested 36–48 and saved nothing worth having,
+  so the batch is 250, `nodes`' cap
+  (`ShopifyShippingLabelService::FULFILLMENT_LOOKUP_BATCH_SIZE`), and both `first:` values
+  stay. 600 packages on one connection is 3 requests.
+
+  `ShopifyShippingLabelService::lookUpFulfillments()` reads a batch and pages each
+  fulfillment order's later fulfillments; a failed page lands in the lookup's failures for
+  that order alone. `fulfillmentFor()` is now a one-ID lookup through the same method and
+  the same `fulfillmentMatching()`, so the one-off tracking refresh gains the paging too.
+  The synchronizer groups by postage connection, asks once per fulfillment order, and reads
+  every package's fulfillment order ID before applying any void. In practice the sibling's
+  loaded shipment does not see a re-point anyway, since `clearShipping()` reloads the voided
+  package's own shipment, so the test for it documents the behavior rather than catching
+  that change. The fragment-based query was run read-only against the five Shopify-bought
+  fulfillment orders on the development store, and all five came back, including the UK test
+  label's nine events.
+
+  Not checked: whether a search for changes could replace the poll. It stays a possible
+  follow-up and nothing here depends on it.

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\DataTransferObjects\ShipmentImport\ShopifyFulfillmentOrderIdentity;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\ShipRequest;
+use App\DataTransferObjects\Shipping\ShopifyFulfillmentLookup;
 use App\DataTransferObjects\Shipping\ShopifyPurchasedLabel;
 use App\Enums\PostageSource;
 use App\Exceptions\Carriers\ShopifyLabelPurchaseException;
@@ -122,7 +123,7 @@ class ShopifyShippingLabelService
     /**
      * Everything Shopify will tell us about a label after it was bought.
      *
-     * Two questions, one request. Shopify has no "was this label voided" query,
+     * Two questions, one read. Shopify has no "was this label voided" query,
      * so the void answer comes from the fulfillment the purchase created:
      * voiding a label in the admin moves it to a LABEL_VOIDED display status,
      * and cancelling the fulfillment outright sets its status to CANCELLED. The
@@ -130,43 +131,78 @@ class ShopifyShippingLabelService
      * which is the only tracking we are entitled to for postage bought on
      * Shopify's account (ADR-0002).
      *
-     * `events` is asked for on the chance Shopify populates it. The documented
-     * way events are created is `fulfillmentEventCreate`, called by apps and
-     * fulfillment services, so it may always come back empty here — costing one
-     * field on a request already being made. It is not worth a second query and
-     * its absence is not an error.
+     * `events` is the scan-level detail `displayStatus` summarizes. Shopify
+     * writes movement events for the shipments it tracks itself — nine for one
+     * test label in `shopify-shipping-carrier/17`, six of them IN_TRANSIT while
+     * `displayStatus` stayed IN_TRANSIT — so they are read on every poll, not
+     * only when the status moves. A fulfillment with more than fifty keeps its
+     * first fifty; `displayStatus` still carries where it got to.
      */
-    private const FULFILLMENT_STATE_QUERY = <<<'GRAPHQL'
-        query ShopifyFulfillmentState($id: ID!) {
-          fulfillmentOrder(id: $id) {
-            id
-            status
-            fulfillments(first: 20) {
-              nodes {
-                id
-                status
-                displayStatus
-                inTransitAt
-                deliveredAt
-                estimatedDeliveryAt
-                trackingInfo { number company url }
-                events(first: 50) {
-                  nodes {
-                    id
-                    status
-                    happenedAt
-                    message
-                    city
-                    province
-                    zip
-                    country
-                  }
-                }
-              }
+    private const FULFILLMENT_FRAGMENT = <<<'GRAPHQL'
+        fragment FulfillmentState on Fulfillment {
+          id
+          status
+          displayStatus
+          inTransitAt
+          deliveredAt
+          estimatedDeliveryAt
+          trackingInfo { number company url }
+          events(first: 50) {
+            nodes {
+              id
+              status
+              happenedAt
+              message
+              city
+              province
+              zip
+              country
             }
           }
         }
         GRAPHQL;
+
+    /**
+     * Many fulfillment orders' fulfillments in one request
+     * (`shopify-shipping-carrier/27`).
+     *
+     * Shopify prices `nodes(ids:)` by its shape, not by how many IDs it names:
+     * 58 points requested for 1 ID or 250 on the development store
+     * (2026-10-14), under the 1,000-point cap on one query, and 33 points
+     * actually charged for 250 IDs returning 144 fulfillments, against a
+     * 20,000-point bucket restoring 1,000 a second.
+     */
+    private const FULFILLMENT_STATES_QUERY = <<<'GRAPHQL'
+        query ShopifyFulfillmentStates($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on FulfillmentOrder {
+              id
+              fulfillments(first: 20) {
+                pageInfo { hasNextPage endCursor }
+                nodes { ...FulfillmentState }
+              }
+            }
+          }
+        }
+        GRAPHQL."\n".self::FULFILLMENT_FRAGMENT;
+
+    /**
+     * The rest of one fulfillment order's fulfillments, when the batch's first
+     * page did not hold them all.
+     */
+    private const FULFILLMENT_STATES_PAGE_QUERY = <<<'GRAPHQL'
+        query ShopifyFulfillmentStatesPage($id: ID!, $cursor: String) {
+          fulfillmentOrder(id: $id) {
+            fulfillments(first: 20, after: $cursor) {
+              pageInfo { hasNextPage endCursor }
+              nodes { ...FulfillmentState }
+            }
+          }
+        }
+        GRAPHQL."\n".self::FULFILLMENT_FRAGMENT;
+
+    /** `nodes(ids:)` takes at most 250 IDs, and its cost does not grow with them. */
+    public const FULFILLMENT_LOOKUP_BATCH_SIZE = 250;
 
     /**
      * The order's fulfillment orders, for finding the one that replaced a
@@ -408,23 +444,117 @@ class ShopifyShippingLabelService
             return null;
         }
 
+        $lookup = $this->lookUpFulfillments($dataSource, [$fulfillmentOrderId]);
+
+        if (isset($lookup->failures[$fulfillmentOrderId])) {
+            throw new ShopifyLabelPurchaseException($lookup->failures[$fulfillmentOrderId]);
+        }
+
+        return $this->fulfillmentMatching($lookup->fulfillments[$fulfillmentOrderId] ?? null, $package->tracking_number);
+    }
+
+    /**
+     * Every fulfillment of each of these fulfillment orders, many to a request.
+     *
+     * A whole request that fails throws, since it answers nothing. A fulfillment
+     * order whose later pages fail is reported in the lookup's failures instead,
+     * so the others in the batch still get their answer.
+     *
+     * @param  list<string>  $fulfillmentOrderIds  at most {@see FULFILLMENT_LOOKUP_BATCH_SIZE}
+     *
+     * @throws ShopifyLabelPurchaseException
+     */
+    public function lookUpFulfillments(DataSource $dataSource, array $fulfillmentOrderIds): ShopifyFulfillmentLookup
+    {
         $connector = ShopifyConnector::fromSettings(
             array_merge($dataSource->settings ?? [], $dataSource->secret_settings ?? [])
         );
 
-        $json = $connector->send(new GraphQL(self::FULFILLMENT_STATE_QUERY, ['id' => $fulfillmentOrderId]))->json();
+        $json = $connector->send(new GraphQL(self::FULFILLMENT_STATES_QUERY, ['ids' => $fulfillmentOrderIds]))->json();
 
         $this->assertNoGraphQLErrors($json);
 
-        $fulfillments = $json['data']['fulfillmentOrder']['fulfillments']['nodes'] ?? null;
+        $nodes = $json['data']['nodes'] ?? null;
 
-        if ($fulfillments === null) {
+        if (! is_array($nodes)) {
+            throw new ShopifyLabelPurchaseException('Shopify returned no fulfillment orders.');
+        }
+
+        $fulfillments = [];
+        $failures = [];
+
+        // A deleted fulfillment order comes back null, and one that is not a
+        // fulfillment order comes back without an ID: either is no answer.
+        foreach ($nodes as $node) {
+            $id = is_array($node) ? (string) ($node['id'] ?? '') : '';
+
+            if ($id === '' || ! is_array($node['fulfillments'] ?? null)) {
+                continue;
+            }
+
+            try {
+                $fulfillments[$id] = $this->allFulfillments($connector, $id, $node['fulfillments']);
+            } catch (\Exception $e) {
+                $failures[$id] = $e->getMessage();
+            }
+        }
+
+        return new ShopifyFulfillmentLookup($fulfillments, $failures);
+    }
+
+    /**
+     * The fulfillment among these that carries this tracking number, or null.
+     *
+     * Matched on the number because an order fulfilled in several shipments
+     * carries other packages' fulfillments too, and none of them answer for
+     * this one.
+     *
+     * @param  list<array<string, mixed>>|null  $fulfillments
+     * @return array<string, mixed>|null
+     */
+    public function fulfillmentMatching(?array $fulfillments, ?string $trackingNumber): ?array
+    {
+        if ($fulfillments === null || ! filled($trackingNumber)) {
             return null;
         }
 
         return collect($fulfillments)->first(
-            fn (array $fulfillment): bool => ($fulfillment['trackingInfo'][0]['number'] ?? null) === $package->tracking_number
+            fn (array $fulfillment): bool => ($fulfillment['trackingInfo'][0]['number'] ?? null) === $trackingNumber
         );
+    }
+
+    /**
+     * One fulfillment order's fulfillments, fetching the pages after the first.
+     *
+     * Without them a package whose fulfillment is the twenty-first on its order
+     * would never be found, and so never tracked nor seen voided.
+     *
+     * @param  array<string, mixed>  $connection  the first page
+     * @return list<array<string, mixed>>
+     *
+     * @throws ShopifyLabelPurchaseException
+     */
+    private function allFulfillments(ShopifyConnector $connector, string $fulfillmentOrderId, array $connection): array
+    {
+        $fulfillments = array_values(array_filter($connection['nodes'] ?? [], 'is_array'));
+        $cursor = ($connection['pageInfo']['hasNextPage'] ?? false) ? ($connection['pageInfo']['endCursor'] ?? null) : null;
+
+        while ($cursor !== null) {
+            $json = $connector->send(new GraphQL(self::FULFILLMENT_STATES_PAGE_QUERY, ['id' => $fulfillmentOrderId, 'cursor' => $cursor]))->json();
+
+            $this->assertNoGraphQLErrors($json);
+
+            $connection = $json['data']['fulfillmentOrder']['fulfillments'] ?? null;
+
+            if (! is_array($connection)) {
+                throw new ShopifyLabelPurchaseException('Shopify returned no fulfillments.');
+            }
+
+            array_push($fulfillments, ...array_values(array_filter($connection['nodes'] ?? [], 'is_array')));
+            $cursor = ($connection['pageInfo']['hasNextPage'] ?? false) ? ($connection['pageInfo']['endCursor'] ?? null) : null;
+        }
+
+        return $fulfillments;
     }
 
     /**
