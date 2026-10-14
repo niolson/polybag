@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\SettingsService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 
 /** A date inside the report's default filter window, which is last month. */
@@ -435,11 +436,22 @@ function shipmentSplitAcrossSeptemberAndOctober(): Client
     return $client;
 }
 
+/** The report behind a Livewire test, typed so its own methods can be called. */
+function reportOf(Testable $page): ClientBillingReport
+{
+    $report = $page->instance();
+
+    if (! $report instanceof ClientBillingReport) {
+        throw new LogicException('Not a Client Billing report.');
+    }
+
+    return $report;
+}
+
 function billingFor(Client $client, string $from, string $until): ?object
 {
-    $records = Livewire::test(ClientBillingReport::class)
-        ->filterTable('date_range', ['from' => $from, 'until' => $until])
-        ->instance()
+    $records = reportOf(Livewire::test(ClientBillingReport::class)
+        ->filterTable('date_range', ['from' => $from, 'until' => $until]))
         ->getTableRecords();
 
     return $records->firstWhere('id', $client->id);
@@ -487,11 +499,10 @@ it('bills a shipment wholly once over a period covering both packages', function
 it('exports the later package on its own detail line, without the shipment fees', function (): void {
     $client = shipmentSplitAcrossSeptemberAndOctober();
 
-    $report = Livewire::test(ClientBillingReport::class)
+    $report = reportOf(Livewire::test(ClientBillingReport::class)
         ->set('viewMode', 'detail')
         ->set('clientId', $client->id)
-        ->filterTable('date_range', ['from' => '2026-10-01', 'until' => '2026-10-31'])
-        ->instance();
+        ->filterTable('date_range', ['from' => '2026-10-01', 'until' => '2026-10-31']));
 
     ob_start();
     $report->exportCsv()->sendContent();
@@ -507,15 +518,15 @@ it('exports the later package on its own detail line, without the shipment fees'
 it('treats a date cleared to an empty string as no bound, in the table and the export', function (): void {
     $client = shipmentSplitAcrossSeptemberAndOctober();
 
-    $page = Livewire::test(ClientBillingReport::class)
-        ->filterTable('date_range', ['from' => '2026-10-01', 'until' => '']);
-    $row = $page->instance()->getTableRecords()->firstWhere('id', $client->id);
+    $report = reportOf(Livewire::test(ClientBillingReport::class)
+        ->filterTable('date_range', ['from' => '2026-10-01', 'until' => '']));
+    $row = $report->getTableRecords()->firstWhere('id', $client->id);
 
     expect((int) $row->package_count)->toBe(1)
         ->and((float) $row->total_postage)->toBe(9.00);
 
     ob_start();
-    $page->instance()->exportCsv()->sendContent();
+    $report->exportCsv()->sendContent();
     $content = ob_get_clean();
 
     expect($content)->toContain($client->name)
