@@ -1,6 +1,6 @@
 # Read the part number and GTIN from Shopify's typed barcodes
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -155,7 +155,7 @@ rules above are proposals. Step 1's live check needs a human to buy a Shopify Sh
 label. And the `08`-style verification needs an order created for a typed-barcode
 variant.
 
-**2026-10-14 — built.** Two commits: the `2026-10` bump, then the typed-barcode import. The
+**2026-10-14 — built, verified and merged (#411).** Two commits: the `2026-10` bump, then the typed-barcode import. The
 precedence rule (`NS_PID` over the metafield) is confirmed by the maintainer.
 
 Checked live on the development store at `2026-10`: the import read (311 open shipments)
