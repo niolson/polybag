@@ -121,6 +121,10 @@ function importCustomsFieldsFulfillmentOrder(DataSource $dataSource, array $fulf
         ]]]);
     }]);
 
+    // Every run reads every open fulfillment order, as a first run does,
+    // rather than searching for what changed since the last.
+    DataSource::query()->whereKey($dataSource->id)->update(['import_updated_through' => null]);
+
     $result = ShipmentImportService::forRecord($dataSource)->import();
 
     expect($result->errors)->toBe([]);

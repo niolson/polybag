@@ -1,6 +1,6 @@
 # Shopify: read only the fulfillment orders that changed
 
-Status: ready-for-agent
+Status: ready-for-human
 Category: enhancement
 Repo: `polybag`
 
@@ -30,16 +30,28 @@ closed by what is *missing* from that full read.
 
 ## Desired behavior
 
-**One search imports and closes.** A scheduled run asks for every fulfillment order
-updated since the connection last read through, closed ones included:
+**One search imports and closes.** A scheduled run asks for every *order* updated since
+the connection last read through, with all of each order's fulfillment orders, closed ones
+included:
 
 ```graphql
-fulfillmentOrders(first: N, after: $cursor, includeClosed: true,
-                  sortKey: UPDATED_AT, query: "updated_at:>'<read through, less a margin>'")
+orders(first: 250, after: $cursor, sortKey: UPDATED_AT,
+       query: "updated_at:>'<read through, less a margin>'") {
+  nodes { id fulfillmentOrders(first: 50) { pageInfo { … } nodes { id status } } }
+}
 ```
 
-The 2026-07 docs list `updated_at` as a filter on `fulfillmentOrders(query:)` and
-`UPDATED_AT` as a `FulfillmentOrderSortKeys` value. What the search returns is split:
+The search reads only IDs and statuses. The open fulfillment orders it returns are then
+read in full through `nodes(ids:)`, 250 to a request, with the same fields as the full
+read. Selecting those fields under two nested connections in the search itself exceeds
+Shopify's 1,000-point limit for one query, even at 25 orders of 5 fulfillment orders.
+
+It searches orders, not `fulfillmentOrders(query: "updated_at:>…")`. A fulfillment
+order's `updatedAt` moves only when its status or location changes, and misses an
+address edit, an order edit and a partial fulfillment, which all change what the import
+writes. The order's `updatedAt` moved in every case (see Comments). Returning every
+fulfillment order of a changed order also means a Shipment whose order came back has its
+own fulfillment order in the result, open or closed. What the search returns is split:
 
 | Returned | Done with it |
 |---|---|
@@ -47,40 +59,55 @@ The 2026-07 docs list `updated_at` as a filter on `fulfillmentOrders(query:)` an
 | `CANCELLED`, `CLOSED`, or at a location the connection ignores | `06`'s closing table, through `SourceClosureApplier`, for this connection's open Shipment on it. Never imported |
 | `ON_HOLD`, `SCHEDULED`, `INCOMPLETE` | Neither, as today |
 
-The search asks for what the closing table needs: `order { cancelledAt }`, and
-`fulfillments` with `pageInfo`, `status` and `trackingInfo`. `06`'s rules for reading
+The closing table reads `06`'s `nodes(ids:)` lookup, for this connection's open Shipments
+on the fulfillment orders the search returned and did not import, rather than the search
+selecting those fields too, for the same cost reason. `06`'s rules for reading
 every fulfillment and every tracking number still apply. A closed fulfillment order this
 connection never imported creates no Shipment. A Shipment a manager reopened is left alone
 (decision 7).
 
 **Where it read through.** Reuse `data_sources.import_updated_through` and
 `import_swept_at` from `07`. Record the time the search *started*, and save it only once
-the run completes. A failed fetch or write reads the same changes again. Subtract a margin
-for fulfillment orders Shopify indexes late; measure the lag on the development store.
+the run completes and every closing lookup answered. A failed fetch or lookup reads the
+same changes again; a row that failed to write is retried by the daily full read. Two
+minutes are subtracted as a margin. `import_account_key` holds the shop domain, and a
+connection pointed at another shop reads in full.
 
 **Reading every open fulfillment order.** Today's full read, `06`'s missing-from-the-feed
 lookup included, runs instead of the search for changes when:
 - the connection has never read through
-- it last read through too long ago (pick a bound, as `07` uses `lookback_days`)
-- a location was ignored or un-ignored since the last run. That changes the result without
-  changing anything in Shopify, so the search for changes would miss it. Clearing
-  `import_updated_through` when the location settings change is enough.
+- its last full read is more than a day old, the same bound as the daily read below. A
+  connection idle longer than that, whose search for changes would return every order
+  closed in the gap, reads every open one instead
+- a location was mapped, unmapped, ignored or un-ignored after the last run started. That
+  changes the result without changing anything in Shopify, so the search for changes
+  would miss it. `data_sources.locations_remapped_at` records when; clearing
+  `import_updated_through` instead is lost when it is already null, as on a first run
+- the token lacks `read_all_orders`, on every run. Without it Shopify answers for no order
+  older than 60 days by `orders` search or `order(id:)`, so a backorder older than that
+  would never be seen to change. `fulfillmentOrders` and `nodes(ids:)` still reach them
 
-It also runs once a day after the search for changes, as in `07`, which retries a row that
-failed to import.
+It also runs once a day, which retries a row that failed to import. Unlike `07`, it runs
+*instead of* the search for changes, not after it: `06`'s missing-from-the-feed lookup
+closes everything the search would have, so a run is one read or the other.
 
 **The repointer.** `ShopifyFulfillmentOrderRepointer` today recognizes a replaced
 fulfillment order because the run no longer offers it. In a search for changes, almost
 nothing is offered, so that test stops meaning anything. When a Shopify Shipping label is
-voided, the replacement arrives `OPEN` in the same search that returns the old one
-`CLOSED`. Re-point when the Shipment's own fulfillment order came back closed in this run,
-or, on a full read, is missing as today. Re-pointing runs before closing, so a re-pointed
+voided, the void moves the order's `updatedAt` but not the closed original's, which keeps
+its purchase time. The order search still returns both, because it returns every
+fulfillment order of the order: the replacement `OPEN`, the original `CLOSED`. Re-point
+when the Shipment's own fulfillment order came back closed in this run, or, on a full
+read, is missing as today. Re-pointing runs before closing, so a re-pointed
 Shipment is never closed.
 
 **Onboarding several thousand open fulfillment orders.** The first full read is the
 largest a connection makes. Measure the requested cost of one page on the development
-store and set `N` to fit the bucket. Fail no better or worse than today if Shopify
-throttles partway, and say what happens in that case. Consider `bulkOperationRunQuery`
+store and set `N` to fit the bucket. Today a `THROTTLED` comes back as HTTP 200 with
+errors, which the connector does not retry, so the run fails and the next starts over. A
+read Shopify throttles waits for the bucket to refill, read from
+`extensions.cost.throttleStatus`, and carries on in the same run. Shopify refills in
+seconds, so no cursor is kept across runs as `07` keeps one. Consider `bulkOperationRunQuery`
 for the full read. It runs in the background with no per-page cost and returns JSONL, but
 allows at most five connections nested two deep (2026-07 docs), and the import would have
 to wait across runs for it to finish. Use it only if paged reads cannot load 5,000 open
@@ -107,8 +134,8 @@ either, keep it on the daily full read, and record which case it is in the comme
 
 ## Acceptance criteria
 
-- [ ] A connection that has read through asks only for fulfillment orders updated since,
-      open and closed, in one search. A test counts the requests of a run with nothing
+- [ ] A connection that has read through asks only for orders updated since, with their
+      fulfillment orders open and closed, in one search. A test counts the requests of a run with nothing
       changed: the access-scope check and one page
 - [ ] Each row of the split table, through a mocked run. A closed fulfillment order never
       imported creates no Shipment
@@ -121,6 +148,66 @@ either, keep it on the daily full read, and record which case it is in the comme
 - [ ] Where it read through moves only after a complete run
 - [ ] 5,000 open fulfillment orders on a new connection import, with the request count and
       elapsed time recorded in the comments
-- [ ] The seven checks above, answered in the comments
+- [x] The seven checks above, answered in the comments
 
 ## Comments
+
+- 2026-10-13 — The seven checks, run on polybag-test (Shopify Plus App Development plan)
+  against probe orders #1266–#1284. "FO" is the fulfillment order's `updatedAt`, "Order"
+  the order's:
+
+  | Check | FO moved | Order moved |
+  |---|---|---|
+  | 1. Cancelled | yes, to `CLOSED` | yes |
+  | 2. Fulfilled by hand in the admin, or by `fulfillmentCreate` | yes, to `CLOSED` | yes |
+  | 2. First partial fulfillment (`OPEN` to `IN_PROGRESS`) | yes | yes |
+  | 2. A later partial fulfillment (remaining quantity only) | **no** | yes |
+  | 3. Shopify Shipping label voided | original **no**, keeps the purchase time; the replacement is new | yes |
+  | 4. `fulfillmentOrderMove`, every line | yes; same ID, new location | yes |
+  | 4. `fulfillmentOrderMove`, some lines | the moved lines get a new FO; the original **no**, though it lost them | yes |
+  | 5. Shipping address edited | **no**, though `destination` changed | yes |
+  | 6. Line item added, removed, quantity changed | **no**, though its lines changed | yes |
+  | 7. Hold placed, and released | yes, both | yes |
+
+  A fulfillment order's `updatedAt` moves only when its status or location changes, so
+  the search is on orders (Desired behavior, revised). Every case appeared in both
+  searches within 1.5 seconds of the change. `updated_at` compares whole seconds and `>`
+  is strict, so a change in the same second the last search started is missed without
+  the margin; a margin of a minute or two covers both.
+
+  For test data: `orderCreate` defaults each line item to `requiresShipping: false` and
+  adds no shipping line, which makes an order "shipping not required", and such orders
+  cannot be edited in the admin. The development store refused `orderCreate` with "Too
+  many attempts" after about five orders in a minute. Its cost bucket is 20,000 points
+  restoring 1,000 a second, a Plus bucket, so `N` is sized against a standard shop's,
+  not measured throttling here.
+
+- 2026-10-13 — Built as the body now says. Requested query costs measured on the
+  development store, where the 1,000-point limit for one query applies whatever the
+  plan:
+
+  | Query | Requested |
+  |---|---|
+  | Full read, 20 fulfillment orders a page (before) | 212 |
+  | Full read, 250 a page (now), without / with a part-number metafield | 464 / 618 |
+  | Search for changes, 250 orders of up to 50 fulfillment order IDs | 266 |
+  | `nodes(ids:)` of 120 fulfillment orders, every import field | 56 |
+  | Orders with the import fields nested, 25 orders × 5 fulfillment orders, with metafield | 926 |
+
+  Requested cost grows far slower than the page, so the full read now takes 250 a page,
+  Shopify's most: 5,000 open fulfillment orders are 20 pages rather than 250. A throttled
+  request waits `(requested − available) ÷ restore rate` seconds, at most 30, up to ten
+  times, then fails the run as before. First live runs on polybag-test: a full read of
+  120 open fulfillment orders in 3 requests and 3.0 s; the next run, a search for
+  changes, 3 requests (scope check, search, one `nodes` read for the order created
+  between them) in 1.0 s. The 5,000-order onboarding is still to be run.
+
+- 2026-10-13 — From code review, two fixes. Without `read_all_orders`, Shopify keeps
+  orders older than 60 days out of the `orders` connection and `order(id:)` ("Order does
+  not exist"), confirmed on polybag-test: #1087 (2026-07-30) has an open fulfillment
+  order that the full read returns and the search never could. Such a connection now
+  reads in full every run, as before this change, and `docs/self-hosting.md` recommends
+  the scope. And a location's mapping changing during a first run cleared a checkpoint
+  that was already null, so the run saved its own over it; the change is now recorded in
+  `locations_remapped_at`, and a run that started no later than it is followed by a full
+  read.

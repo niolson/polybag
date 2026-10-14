@@ -58,6 +58,7 @@ class DataSource extends Model
         'import_swept_at' => 'datetime',
         'import_reads' => 'array',
         'import_account_key' => 'string',
+        'locations_remapped_at' => 'datetime',
         'global_export' => 'boolean',
         'schedule_interval' => ScheduleInterval::class,
         'settings' => 'array',

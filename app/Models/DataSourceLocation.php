@@ -37,6 +37,19 @@ class DataSourceLocation extends Model
 
     protected static function booted(): void
     {
+        // Mapping, unmapping or ignoring a location changes what an import
+        // keeps without changing anything at the source, so a search for what
+        // changed there would miss it. A run that started no later than this
+        // read with the old mapping, and the next reads every open record
+        // instead (`order-reconciliation/11`).
+        static::updated(function (DataSourceLocation $sourceLocation): void {
+            if ($sourceLocation->wasChanged(['location_id', 'ignored_at'])) {
+                DataSource::query()
+                    ->whereKey($sourceLocation->data_source_id)
+                    ->update(['locations_remapped_at' => now()]);
+            }
+        });
+
         static::saved(function (DataSourceLocation $sourceLocation): void {
             if (! $sourceLocation->wasChanged('location_id') || $sourceLocation->location_id === null) {
                 return;

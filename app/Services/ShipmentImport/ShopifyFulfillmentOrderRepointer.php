@@ -9,6 +9,7 @@ use App\Models\AuditLog;
 use App\Models\DataSource;
 use App\Models\Shipment;
 use App\Services\ShopifyGoodsFingerprint;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
 /**
@@ -30,6 +31,12 @@ use Illuminate\Support\Collection;
  * `fulfillmentOrderSplit`, and a sibling is still on offer alongside the new
  * arrival.
  *
+ * A run that searched only for changes (`order-reconciliation/11`) offers
+ * almost nothing, so "no longer offered" narrows to "returned and not
+ * offered": the search returns every fulfillment order of each changed order,
+ * and a voided label changes the order, so the closed original comes back
+ * beside its replacement. Its own `updatedAt` stays at the purchase.
+ *
  * Every ambiguity resolves toward doing nothing. A record imported twice is
  * visible in the packing queue and can be voided; a shipment re-pointed at
  * another parcel's work merges two lots of goods with nothing to show for it.
@@ -42,9 +49,10 @@ class ShopifyFulfillmentOrderRepointer
 
     /**
      * @param  Collection<int, ShopifyFulfillmentOrderIdentity>  $identities  every fulfillment order this run fetched
+     * @param  list<string>|null  $answeredIds  the fulfillment orders a search for changes returned; null after a full read
      * @return int how many shipments were re-pointed
      */
-    public function repoint(DataSource $dataSource, Collection $identities): int
+    public function repoint(DataSource $dataSource, Collection $identities, ?array $answeredIds = null): int
     {
         $offeredIds = $identities
             ->map(fn (ShopifyFulfillmentOrderIdentity $identity): string => $identity->fulfillmentOrderId)
@@ -67,6 +75,7 @@ class ShopifyFulfillmentOrderRepointer
                 ->values()
                 ->all(),
             $offeredIds,
+            $answeredIds,
         );
 
         if ($candidates->isEmpty()) {
@@ -113,9 +122,10 @@ class ShopifyFulfillmentOrderRepointer
      *
      * @param  array<int, string>  $orderIds
      * @param  array<int, string>  $offeredIds
+     * @param  list<string>|null  $answeredIds
      * @return Collection<int, Shipment>
      */
-    private function candidates(DataSource $dataSource, array $orderIds, array $offeredIds): Collection
+    private function candidates(DataSource $dataSource, array $orderIds, array $offeredIds, ?array $answeredIds): Collection
     {
         if ($orderIds === []) {
             return collect();
@@ -126,6 +136,7 @@ class ShopifyFulfillmentOrderRepointer
             ->where('status', ShipmentStatus::Open)
             ->whereIn('metadata->shopify_order_id', $orderIds)
             ->whereNotIn('source_record_id', $offeredIds)
+            ->when($answeredIds !== null, fn (Builder $query) => $query->whereIn('source_record_id', $answeredIds))
             ->with('shipmentItems.product')
             ->get();
     }
