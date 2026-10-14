@@ -101,7 +101,7 @@ function sampleFulfillmentOrder(string $id, string $locationId, int $quantity = 
                 'id' => "gid://shopify/FulfillmentOrderLineItem/{$id}",
                 'sku' => "SKU-{$id}", 'productTitle' => 'Widget', 'remainingQuantity' => $quantity,
                 'requiresShipping' => true, 'weight' => null,
-                'variant' => ['id' => "gid://shopify/ProductVariant/{$id}", 'barcode' => null],
+                'variant' => ['id' => "gid://shopify/ProductVariant/{$id}", 'barcodes' => ['nodes' => []]],
                 'lineItem' => ['originalUnitPriceSet' => ['shopMoney' => ['amount' => '10.00']]],
             ]],
         ],

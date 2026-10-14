@@ -92,7 +92,7 @@ function reconcileFeedNode(string $id, string $locationId = '1'): array
                 'id' => "gid://shopify/FulfillmentOrderLineItem/{$id}",
                 'sku' => "SKU-{$id}", 'productTitle' => 'Widget', 'remainingQuantity' => 1,
                 'requiresShipping' => true, 'weight' => null,
-                'variant' => ['id' => "gid://shopify/ProductVariant/{$id}", 'barcode' => null],
+                'variant' => ['id' => "gid://shopify/ProductVariant/{$id}", 'barcodes' => ['nodes' => []]],
                 'lineItem' => ['originalUnitPriceSet' => ['shopMoney' => ['amount' => '10.00']]],
             ]],
         ],

@@ -1,6 +1,6 @@
 # Read the part number and GTIN from Shopify's typed barcodes
 
-Status: needs-triage
+Status: ready-for-agent
 Category: enhancement
 Repo: `polybag`
 
@@ -154,3 +154,18 @@ issue.
 rules above are proposals. Step 1's live check needs a human to buy a Shopify Shipping
 label. And the `08`-style verification needs an order created for a typed-barcode
 variant.
+
+**2026-10-14 — built.** Two commits: the `2026-10` bump, then the typed-barcode import. The
+precedence rule (`NS_PID` over the metafield) is confirmed by the maintainer.
+
+Checked live on the development store at `2026-10`: the import read (311 open shipments)
+and a real import of source 7, which wrote `[EAN, NS_PID]` variants as `barcode` and
+`gtin` = the EAN and `manufacturer_part_number` = the `NS_PID`, with no part number in any
+Product's `barcode`. Also checked at `2026-10` on 2026-10-14: the closed-order lookup (a second import closed
+258 shipments with no error), the label-cost read (`packages:sync-shopify-label-costs`
+costed the new label), a `fulfillmentCreate` export and its `fulfillmentCancel` on order
+#1801, and a Shopify Shipping purchase bought by the maintainer for package 253. No
+`2026-07` note in `ShopifyShippingLabelService` or `ShopifyClosedFulfillmentOrderCloser`
+needed to change. The `[NS_PID, EAN]` ordering was checked too, once the maintainer reordered SKU
+`HM-00004`: order #1859 imported `barcode` and `gtin` = the EAN and
+`manufacturer_part_number` = the `NS_PID`.

@@ -99,7 +99,7 @@ function changesNode(string $id, string $status = 'OPEN', string $locationId = '
                 'id' => "gid://shopify/FulfillmentOrderLineItem/{$id}",
                 'sku' => "SKU-{$orderId}", 'productTitle' => 'Widget', 'remainingQuantity' => 1,
                 'requiresShipping' => true, 'weight' => null,
-                'variant' => ['id' => "gid://shopify/ProductVariant/{$orderId}", 'barcode' => null],
+                'variant' => ['id' => "gid://shopify/ProductVariant/{$orderId}", 'barcodes' => ['nodes' => []]],
                 'lineItem' => ['originalUnitPriceSet' => ['shopMoney' => ['amount' => '10.00']]],
             ]],
         ],
