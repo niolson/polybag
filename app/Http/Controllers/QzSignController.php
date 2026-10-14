@@ -12,7 +12,8 @@ class QzSignController extends Controller
      * This is an exact allow-list — deliberately not prefix-based. It covers only
      * the printer calls (find/print) and the scale integration's HID device
      * lifecycle (list/claim/release/open/close stream). HID data-transfer calls
-     * remain excluded here. The one hardware write the app uses is handled as a
+     * remain excluded here. `print` is further limited to a local, inline job
+     * (isLocalPrintJob()). The one hardware write the app uses is handled as a
      * parameter-constrained special case in isSignableCall(): the standard Scale
      * Zero feature report for the Mettler Toledo PS60 only. This prevents the
      * endpoint from minting signatures for arbitrary workstation hardware writes.
@@ -106,7 +107,41 @@ class QzSignController extends Controller
             return $this->isPs60ZeroCommand($decoded['params'] ?? null);
         }
 
+        if ($call === 'print') {
+            return $this->isLocalPrintJob($decoded['params'] ?? null);
+        }
+
         return in_array($call, self::ALLOWED_CALLS, true);
+    }
+
+    /**
+     * Allow a print job only in the shape the app sends: to a printer named on
+     * this workstation (not a file path or a network host and port), with data
+     * passed inline as raw ZPL or base64 (never a file or URL QZ would fetch).
+     */
+    private function isLocalPrintJob(mixed $params): bool
+    {
+        if (! is_array($params) || ! is_array($params['data'] ?? null)) {
+            return false;
+        }
+
+        $printer = $params['printer'] ?? null;
+
+        if (! is_array($printer) || array_keys($printer) !== ['name'] || ! is_string($printer['name'])) {
+            return false;
+        }
+
+        foreach ($params['data'] as $item) {
+            if (is_string($item)) {
+                continue;
+            }
+
+            if (! is_array($item) || ! in_array($item['flavor'] ?? null, ['base64', 'plain'], true)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
