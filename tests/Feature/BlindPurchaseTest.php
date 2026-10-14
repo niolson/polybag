@@ -89,6 +89,7 @@ it('buys nothing until the packer confirms the blind purchase', function (): voi
     $page = Livewire::test(Ship::class, ['package_id' => $package->id])
         ->assertSet('rateOptions', [])
         ->assertSet('selectedBlindOfferId', null)
+        ->assertSeeHtml('$wire.selectedBlindOfferId === \'Shopify:auto\'')
         ->set('selectedBlindOfferId', 'Shopify:auto')
         ->call('ship')
         ->assertDispatched('open-modal', id: 'blind-purchase-confirm');

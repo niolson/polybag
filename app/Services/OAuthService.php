@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\DataTransferObjects\AmazonMarketplaceDiscoveryResult;
+use App\Http\Integrations\Shopify\ShopifyConnector;
 use App\Models\CarrierAccount;
 use App\Models\DataSource;
 use App\Services\ShipmentImport\Sources\AmazonSource;
@@ -299,6 +300,10 @@ class OAuthService
     {
         if ($providerKey === 'shopify') {
             $shopDomain = $importSource->settings['shop_domain'] ?? null;
+
+            if (! is_string($shopDomain) || preg_match(ShopifyConnector::SHOP_DOMAIN_PATTERN, $shopDomain) !== 1) {
+                throw new RuntimeException('The connection\'s Shopify shop domain must be a *.myshopify.com host.');
+            }
 
             return array_filter([
                 'shop' => $shopDomain,

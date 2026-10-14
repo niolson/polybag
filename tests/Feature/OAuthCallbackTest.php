@@ -142,6 +142,12 @@ it('initiates a data source authorization via the broker', function (): void {
         ->and(session('oauth_data_source_id.shopify'))->toBe($this->dataSource->id);
 });
 
+it('refuses to send a shop domain outside myshopify.com to the broker', function (): void {
+    $this->dataSource->update(['settings' => [...$this->dataSource->settings, 'shop_domain' => 'shop.example.com']]);
+
+    app(OAuthService::class)->initiateAuthorizationForDataSource('shopify', $this->dataSource);
+})->throws(RuntimeException::class, 'must be a *.myshopify.com host');
+
 it('throws when broker is not configured', function (): void {
     config([
         'services.oauth.broker_url' => null,

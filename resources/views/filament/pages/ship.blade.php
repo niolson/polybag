@@ -398,7 +398,7 @@
                             @foreach($blindPurchaseOffers as $offer)
                                 <label
                                     wire:key="blind-{{ $offer['id'] }}"
-                                    x-bind:class="$wire.selectedBlindOfferId === '{{ $offer['id'] }}'
+                                    x-bind:class="$wire.selectedBlindOfferId === @js($offer['id'])
                                         ? 'border-warning-500 bg-warning-50 dark:bg-warning-950 dark:border-warning-500'
                                         : 'border-dashed border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'"
                                     class="flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors"

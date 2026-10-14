@@ -24,6 +24,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Filament\Support\Exceptions\Halt;
+use RuntimeException;
 use Throwable;
 
 class EditDataSource extends EditRecord
@@ -152,7 +153,14 @@ class EditDataSource extends EditRecord
                     ? 'This will replace the existing OAuth token. You will be redirected to Shopify to re-authorize.'
                     : 'You will be redirected to Shopify to authorize access. Make sure Shop Domain is saved first.')
                 ->action(function (): void {
-                    $url = app(OAuthService::class)->initiateAuthorizationForDataSource('shopify', $this->record);
+                    try {
+                        $url = app(OAuthService::class)->initiateAuthorizationForDataSource('shopify', $this->record);
+                    } catch (RuntimeException $e) {
+                        Notification::make()->danger()->title('Cannot connect Shopify')->body($e->getMessage())->send();
+
+                        return;
+                    }
+
                     $this->redirect($url, navigate: false);
                 }),
 
