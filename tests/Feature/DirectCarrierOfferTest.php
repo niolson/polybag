@@ -35,6 +35,7 @@ use App\Services\ShipDateService;
 use App\Services\ShippingRateService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\RateLimiter;
 use Livewire\Livewire;
 use Mockery\MockInterface;
 
@@ -430,6 +431,28 @@ it('re-quotes on the Ship page when the offer it holds is for an edited package'
         ->and($freshOfferId)->not->toBe($staleOfferId)
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped)
         ->and(ShippingOffer::where('public_id', $staleOfferId)->value('consumed_at'))->toBeNull();
+});
+
+it('counts a Ship page re-quote against the rate refresh limit', function (): void {
+    $user = User::factory()->admin()->create();
+    $this->actingAs($user);
+    $package = packageOnMockCarrier();
+    mockCarrierQuoting([new RateResponse('MockCarrier', 'PRIORITY_MAIL', 'Priority Mail', 9.65)]);
+
+    $component = Livewire::test(Ship::class, ['package_id' => $package->id]);
+    $staleOfferId = $component->get('rateOptions')[0]['offerId'];
+
+    foreach (range(1, 15) as $attempt) {
+        RateLimiter::hit('ship-refresh-rates:'.$user->id, decaySeconds: 60);
+    }
+
+    $package->shipment->update(['city' => 'Elsewhere']);
+
+    $component->set('selectedRateIndex', 0)
+        ->call('ship')
+        ->assertNotified();
+
+    expect($component->get('rateOptions')[0]['offerId'])->toBe($staleOfferId);
 });
 
 it('lets one direct offer be claimed once, so two purchases of it cannot both buy', function (): void {

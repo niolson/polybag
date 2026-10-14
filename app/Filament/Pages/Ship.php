@@ -332,26 +332,41 @@ class Ship extends Page
         $this->rate();
     }
 
+    /**
+     * Fresh quotes fire carrier calls, so they are capped per user whichever path
+     * asks for them, and cannot be scripted into hammering the carriers (or
+     * PolyBag). See issue 09. False once the cap is reached.
+     */
+    private function takeRateRefresh(): bool
+    {
+        if (RateLimiter::tooManyAttempts($this->rateRefreshThrottleKey(), maxAttempts: 15)) {
+            return false;
+        }
+
+        RateLimiter::hit($this->rateRefreshThrottleKey(), decaySeconds: 60);
+
+        return true;
+    }
+
+    private function rateRefreshThrottleKey(): string
+    {
+        return 'ship-refresh-rates:'.(auth()->id() ?? 'guest');
+    }
+
     public function refreshRates(): void
     {
         if (! $this->package || $this->needsShippingMethod()) {
             return;
         }
 
-        // Explicit refresh fires fresh carrier calls; cap the rate per user so it
-        // can't be scripted into hammering the carriers (or PolyBag). See issue 09.
-        $throttleKey = 'ship-refresh-rates:'.(auth()->id() ?? 'guest');
-
-        if (RateLimiter::tooManyAttempts($throttleKey, maxAttempts: 15)) {
+        if (! $this->takeRateRefresh()) {
             $this->notifyWarning(
                 'Slow down',
-                'Too many rate refreshes. Please wait '.RateLimiter::availableIn($throttleKey).'s and try again.',
+                'Too many rate refreshes. Please wait '.RateLimiter::availableIn($this->rateRefreshThrottleKey()).'s and try again.',
             );
 
             return;
         }
-
-        RateLimiter::hit($throttleKey, decaySeconds: 60);
 
         $this->previewCustomsReadiness();
 
@@ -611,7 +626,7 @@ class Ship extends Page
             // the button they just pressed. Never reached for an offer that was
             // already spent: a label may exist for that one, and re-quoting
             // would invite a second.
-            if ($result->requiresRequote) {
+            if ($result->requiresRequote && $this->takeRateRefresh()) {
                 Cache::forget($this->rateCacheKey());
                 $this->applyRateOptions($this->prepareCachedRates());
             }

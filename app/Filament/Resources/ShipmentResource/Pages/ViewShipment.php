@@ -39,6 +39,8 @@ class ViewShipment extends ViewRecord
                 ->label('Validate Address')
                 ->icon('heroicon-o-shield-check')
                 ->color('success')
+                // Each validation is a billed call to the validator.
+                ->rateLimit(5)
                 ->action(function (): void {
                     $this->record->validateAddress(ValidationTrigger::Manual);
                     $this->record->refresh();

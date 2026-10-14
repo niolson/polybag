@@ -358,6 +358,27 @@ it('re-runs validation from View Shipment on an exhausted Shipment', function ()
         ->and($shipment->validation_attempted_at->isAfter($previousAttempt))->toBeTrue();
 });
 
+it('limits how often View Shipment re-runs validation', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::User]));
+
+    Saloon::fake([
+        '*oauth*' => uspsToken(),
+        Address::class => uspsNotFound('The city in the request is missing or invalid.'),
+    ]);
+
+    $shipment = Shipment::factory()->validationExhausted()->create(['country' => 'US']);
+    $page = Livewire::test(ViewShipment::class, ['record' => $shipment->id]);
+
+    foreach (range(1, 6) as $attempt) {
+        $page->callAction('validateAddress');
+    }
+
+    $validations = collect(Saloon::mockClient()->getRecordedResponses())
+        ->filter(fn ($response): bool => $response->getRequest() instanceof Address);
+
+    expect($validations)->toHaveCount(5);
+});
+
 // Clearing the attempt
 
 it('clears the attempt when the address or shipping method changes', function (array $change): void {
