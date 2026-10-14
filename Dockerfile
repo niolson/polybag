@@ -23,7 +23,7 @@ COPY --from=vendor /app/vendor vendor
 RUN npm run build
 
 # Stage 3: PHP application
-FROM php:8.4.26-fpm@sha256:b0d7dff8f2d57155aebb5150dfcb5056a8c8d977aac3c2e21cfce32b8a4b004d AS app
+FROM php:8.4.26-fpm@sha256:1071b5609d16d60674f78eea8cf9bd7e9e79169ecb566d015c931c5ee789bb13 AS app
 
 # Changing this on every build forces apt-get to re-fetch the package index
 # instead of reusing a stale cached layer, so OS security patches (e.g. Debian
