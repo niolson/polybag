@@ -245,7 +245,7 @@ it('sends nothing from Print Both when the PDF renderer is unavailable', functio
         ->set('printMode', true)
         ->callAction('printBoth')
         ->assertNotDispatched('print-pick-batch')
-        ->assertNotified('PDF renderer unavailable');
+        ->assertNotified('PDF Not Created');
 
     expect($batch->fresh()->summary_printed_at)->toBeNull();
 });

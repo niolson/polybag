@@ -888,7 +888,7 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
             $response = $connector->send($apiRequest);
 
             if (! $response->successful()) {
-                return CancelResponse::failure('FedEx returned status '.$response->status());
+                return CancelResponse::failure('FedEx did not void the label (error '.$response->status().'). Try again, or void it on the FedEx site.');
             }
 
             return $this->readCancelReply($response, $trackingNumber);
@@ -915,13 +915,13 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
         $alert = data_get($body, 'output.alerts.0.message');
 
         if ($cancelled === true) {
-            return CancelResponse::success('FedEx shipment cancelled.');
+            return CancelResponse::success('FedEx voided the label.');
         }
 
         if ($cancelled === false) {
             return CancelResponse::failure(is_string($alert) && $alert !== ''
-                ? 'FedEx did not cancel the shipment: '.$alert
-                : 'FedEx did not cancel the shipment.');
+                ? 'FedEx did not void the label: '.$alert
+                : 'FedEx did not void the label.');
         }
 
         Log::channel('fedex-validation')->error('FedEx cancelShipment reply could not be read', [

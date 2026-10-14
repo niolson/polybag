@@ -298,7 +298,7 @@ class ManualShip extends Page implements HasForms
             $this->dispatchPrint(PrintRequest::fromShipResponse($result->response, $package));
         }
 
-        $this->notifySuccess('Shipped', $result->summaryMessage());
+        $this->notifySuccess('Label Bought', $result->summaryMessage());
         $this->resetForm();
     }
 

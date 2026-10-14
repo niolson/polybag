@@ -150,9 +150,22 @@ class EndOfDay extends Page
         $shipDateService->endShippingDay($carrier, $locationId);
 
         $nextDate = $shipDateService->getShipDate($carrier, $locationId);
-        $this->notifySuccess('Shipping Day Ended', "{$carrier->label()} ship date advanced to {$nextDate->format('M j')}.");
-
         $this->loadData();
+
+        $unmanifested = collect($this->carrierSummary)->firstWhere('carrier_id', $carrier->id)['unmanifested_count'] ?? 0;
+
+        if ($unmanifested > 0) {
+            $this->notifyWarning(
+                'Shipping Day Ended',
+                "{$carrier->label()} ship date advanced to {$nextDate->format('M j')}. "
+                    .trans_choice('{1} 1 label is|[2,*] :count labels are', $unmanifested, ['count' => $unmanifested])
+                    .' not on a manifest yet. Generate the manifest before midnight.',
+            );
+
+            return;
+        }
+
+        $this->notifySuccess('Shipping Day Ended', "{$carrier->label()} ship date advanced to {$nextDate->format('M j')}.");
     }
 
     public function generateManifest(int $carrierId): void
@@ -175,19 +188,24 @@ class EndOfDay extends Page
             return;
         }
 
-        $response = app(ManifestService::class)->createManifest($carrier->name, $packages, $shipDate, $locationId);
+        // One form per mailing date: labels still dated today after the
+        // cutoff or End Shipping Day, and any already dated for the next pickup.
+        foreach ($packages->groupBy(fn (Package $package): string => $package->ship_date->toDateString())->sortKeys() as $date => $datedPackages) {
+            $response = app(ManifestService::class)->createManifest($carrier->name, $datedPackages, CarbonImmutable::parse($date), $locationId);
 
-        if (! $response->success) {
-            $this->notifyError('Manifest Error', $response->errorMessage ?? 'Failed to create manifest.');
+            if (! $response->success) {
+                $this->notifyError('Manifest Error', $response->errorMessage ?? 'Failed to create manifest.');
+                $this->loadData();
 
-            return;
+                return;
+            }
+
+            if ($response->image && ! app(SettingsService::class)->get('suppress_printing', false)) {
+                $this->dispatch('print-report', data: $response->image);
+            }
+
+            $this->notifySuccess('Manifest Created', "Manifest {$response->manifestNumber} created for {$carrier->label()}.");
         }
-
-        if ($response->image && ! app(SettingsService::class)->get('suppress_printing', false)) {
-            $this->dispatch('print-report', data: $response->image);
-        }
-
-        $this->notifySuccess('Manifest Created', "Manifest {$response->manifestNumber} created for {$carrier->label()}.");
 
         $this->loadData();
     }
@@ -209,17 +227,25 @@ class EndOfDay extends Page
     }
 
     /**
-     * The labels a manifest for this ship date would take: bought on our own
-     * carrier account and on no manifest yet.
+     * The labels a manifest would take: bought on our own carrier account, on
+     * no manifest yet, and dated from today through the carrier's current
+     * ship date.
+     *
+     * The current ship date moves past today at the carrier's cutoff and when
+     * someone ends the shipping day, and today's labels must still reach a
+     * form then. Earlier dates are left out: their mailing date has passed.
      *
      * @return Builder<Package>
      */
     private function manifestablePackages(Carrier $carrier, CarbonImmutable $shipDate, ?int $locationId): Builder
     {
+        $today = app(ShipDateService::class)->today($locationId);
+
         return $this->shippedPackages($carrier, $locationId)
             ->boughtOnCarrierAccount()
             ->whereNull('manifest_id')
-            ->whereDate('ship_date', $shipDate);
+            ->whereDate('ship_date', '>=', $today->min($shipDate)->toDateString())
+            ->whereDate('ship_date', '<=', $shipDate->toDateString());
     }
 
     public function reprintManifest(int $manifestId): void

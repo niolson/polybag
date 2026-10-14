@@ -59,7 +59,7 @@ class BatchLabelService
         }
 
         if ($shipment->status === ShipmentStatus::Cancelled) {
-            return 'Order cancelled';
+            return 'Shipment cancelled';
         }
 
         if ($shipment->isAmazonFulfilled()) {
@@ -67,7 +67,7 @@ class BatchLabelService
         }
 
         if ($shipment->isBlockedByPicking()) {
-            return 'Not picked';
+            return 'Not picked yet';
         }
 
         if ($shipment->needsShippingMethod()) {
@@ -79,7 +79,7 @@ class BatchLabelService
         }
 
         if ($shipment->packages->where('status', PackageStatus::Unshipped)->isNotEmpty()) {
-            return 'Has existing unshipped packages';
+            return 'Has a package draft in progress';
         }
 
         // Batch ship packs the whole order into one box, so an order another
@@ -112,7 +112,7 @@ class BatchLabelService
     /**
      * Whether this batch cannot buy anything for the shipment without a report
      * printer — `shopify-shipping-carrier/07` constraint 4, the skip beside
-     * "Not picked".
+     * "Not picked yet".
      *
      * Asked of every carrier the shipping method could rate-shop, because the
      * batch has not chosen one yet: a method that offers USPS beside UPS can
@@ -163,7 +163,10 @@ class BatchLabelService
         ?int $labelDpi,
         bool $hasReportPrinter = false,
     ): LabelBatch {
-        return DB::transaction(function () use ($shipments, $boxSize, $user, $labelFormat, $labelDpi, $hasReportPrinter) {
+        // The rows commit before any job is queued: a worker that picked a job
+        // up first would find no batch item, do nothing, and leave the batch
+        // processing for good (the queue connection does not wait for commits).
+        [$batch, $jobs] = DB::transaction(function () use ($shipments, $boxSize, $user, $labelFormat, $labelDpi, $hasReportPrinter): array {
             $batch = LabelBatch::create([
                 'user_id' => $user->id,
                 'box_size_id' => $boxSize->id,
@@ -191,46 +194,48 @@ class BatchLabelService
                 $jobs[] = new GenerateLabelJob($batchItem->id, $labelFormat, $labelDpi, $hasReportPrinter);
             }
 
-            $busBatch = Bus::batch($jobs)
-                ->allowFailures()
-                ->before(function () use ($batch): void {
-                    $batch->update([
-                        'status' => LabelBatchStatus::Processing,
-                        'started_at' => now(),
-                    ]);
-                })
-                ->finally(function () use ($batch): void {
-                    $batch->refresh();
-
-                    $status = match (true) {
-                        $batch->failed_shipments === 0 => LabelBatchStatus::Completed,
-                        $batch->successful_shipments === 0 => LabelBatchStatus::Failed,
-                        default => LabelBatchStatus::CompletedWithErrors,
-                    };
-
-                    $batch->update([
-                        'status' => $status,
-                        'completed_at' => now(),
-                    ]);
-
-                    $user = User::find($batch->user_id);
-                    $user?->notify(new BatchLabelCompleted($batch));
-                })
-                ->dispatch();
-
-            $batch->update(['bus_batch_id' => $busBatch->id]);
-
-            AuditLog::record(
-                AuditAction::BatchStarted,
-                $batch,
-                metadata: [
-                    'total_shipments' => $batch->total_shipments,
-                    'box_size' => $boxSize->label,
-                    'label_format' => $labelFormat,
-                ],
-            );
-
-            return $batch;
+            return [$batch, $jobs];
         });
+
+        $busBatch = Bus::batch($jobs)
+            ->allowFailures()
+            ->before(function () use ($batch): void {
+                $batch->update([
+                    'status' => LabelBatchStatus::Processing,
+                    'started_at' => now(),
+                ]);
+            })
+            ->finally(function () use ($batch): void {
+                $batch->refresh();
+
+                $status = match (true) {
+                    $batch->failed_shipments === 0 => LabelBatchStatus::Completed,
+                    $batch->successful_shipments === 0 => LabelBatchStatus::Failed,
+                    default => LabelBatchStatus::CompletedWithErrors,
+                };
+
+                $batch->update([
+                    'status' => $status,
+                    'completed_at' => now(),
+                ]);
+
+                $user = User::find($batch->user_id);
+                $user?->notify(new BatchLabelCompleted($batch));
+            })
+            ->dispatch();
+
+        $batch->update(['bus_batch_id' => $busBatch->id]);
+
+        AuditLog::record(
+            AuditAction::BatchStarted,
+            $batch,
+            metadata: [
+                'total_shipments' => $batch->total_shipments,
+                'box_size' => $boxSize->label,
+                'label_format' => $labelFormat,
+            ],
+        );
+
+        return $batch;
     }
 }

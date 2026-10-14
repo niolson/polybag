@@ -103,7 +103,7 @@ it('reports the renderer being unavailable without dispatching a print', functio
     Livewire::test(ViewShipment::class, ['record' => $shipment->id])
         ->callAction('printPackSlip')
         ->assertNotDispatched('print-pack-slips')
-        ->assertNotified('PDF renderer unavailable');
+        ->assertNotified('PDF Not Created');
 });
 
 it('serves the browser view with a receipt for the viewing user and a Mark as printed control', function (): void {

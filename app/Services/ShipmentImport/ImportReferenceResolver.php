@@ -94,6 +94,10 @@ class ImportReferenceResolver
         }
 
         if (config('shipment-import.behavior.auto_update_products', true)) {
+            // A blank is "no value", whichever source sent it: an empty column
+            // (many ERP schemas, and SQL Server's NOT NULL DEFAULT '') must leave
+            // a hand-entered part number or origin alone, as Shopify's empty
+            // metafields do. `filled()` keeps `false`, so is_media survives.
             $updateData = array_filter([
                 'name' => $itemData['name'] ?? $sku,
                 'description' => $itemData['description'] ?? null,
@@ -105,7 +109,7 @@ class ImportReferenceResolver
                 'gtin' => $itemData['gtin'] ?? null,
                 'identifiers_checked_at' => $itemData['identifiers_checked_at'] ?? null,
                 'is_media' => $this->mediaFlagFrom($itemData, $sku),
-            ], fn ($value): bool => $value !== null);
+            ], filled(...));
 
             $product = Product::firstOrNew([
                 'client_id' => $client->id,

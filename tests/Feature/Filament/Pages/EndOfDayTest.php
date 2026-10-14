@@ -188,3 +188,33 @@ it('allows access to admins', function (): void {
 
     Livewire::test(EndOfDay::class)->assertSuccessful();
 });
+
+it('still offers a SCAN form for labels dated today once the USPS cutoff has passed', function (): void {
+    Carrier::factory()->usps()->create(['active' => true, 'pickup_cutoff_hour' => 20]);
+    $today = now('America/New_York')->toDateString();
+    Package::factory()->shipped()->create(['carrier' => 'USPS', 'tracking_number' => '9400111', 'ship_date' => $today]);
+
+    // 8:30 PM at the default timezone: the ship date has moved to the next pickup.
+    $this->travelTo(now('America/New_York')->setTime(20, 30));
+
+    Livewire::test(EndOfDay::class)
+        ->assertSet('carrierSummary.0.unmanifested_count', 1);
+});
+
+it('still offers a SCAN form for the day just ended, and warns that it is missing', function (): void {
+    $usps = Carrier::factory()->usps()->create(['active' => true]);
+    Package::factory()->shipped()->create(['carrier' => 'USPS', 'tracking_number' => '9400111', 'ship_date' => now('America/New_York')->toDateString()]);
+
+    Livewire::test(EndOfDay::class)
+        ->call('endShippingDay', $usps->id)
+        ->assertNotified('Shipping Day Ended')
+        ->assertSet('carrierSummary.0.unmanifested_count', 1);
+});
+
+it('leaves labels from an earlier day off the manifest', function (): void {
+    Carrier::factory()->usps()->create(['active' => true]);
+    Package::factory()->shipped()->create(['carrier' => 'USPS', 'tracking_number' => '9400111', 'ship_date' => now('America/New_York')->subDays(2)->toDateString()]);
+
+    Livewire::test(EndOfDay::class)
+        ->assertSet('carrierSummary.0.unmanifested_count', 0);
+});

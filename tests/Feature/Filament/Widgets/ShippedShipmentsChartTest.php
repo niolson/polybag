@@ -14,7 +14,7 @@ beforeEach(function (): void {
 
 it('renders the chart widget', function (): void {
     Livewire::test(ShippedShipmentsChart::class)
-        ->assertSee('Shipped Shipments')
+        ->assertSee('Packages Shipped')
         ->assertSuccessful();
 });
 

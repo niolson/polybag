@@ -26,7 +26,9 @@ class UserShipmentsReport extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-users';
 
-    protected static ?string $navigationLabel = 'Shipments by User';
+    protected static ?string $navigationLabel = 'Packages by User';
+
+    protected static ?string $title = 'Packages by User';
 
     protected static UnitEnum|string|null $navigationGroup = 'Reports';
 
@@ -126,7 +128,7 @@ class UserShipmentsReport extends Page implements HasTable
                     ->label('User')
                     ->sortable(),
                 Tables\Columns\TextColumn::make('shipment_count')
-                    ->label('Shipments')
+                    ->label('Packages Shipped')
                     ->sortable(),
             ])
             ->filters($filters, layout: FiltersLayout::AboveContent)
@@ -182,7 +184,7 @@ class UserShipmentsReport extends Page implements HasTable
                     ->label('Period')
                     ->sortable(),
                 Tables\Columns\TextColumn::make('shipment_count')
-                    ->label('Shipments')
+                    ->label('Packages Shipped')
                     ->sortable(),
             ])
             ->filters($filters, layout: FiltersLayout::AboveContent)

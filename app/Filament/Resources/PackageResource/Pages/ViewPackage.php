@@ -77,7 +77,7 @@ class ViewPackage extends ViewRecord
                     && auth()->user()->role->isAtLeast(Role::Manager))
                 ->url(fn (): string => '/ship/'.$this->record->id),
             Action::make('buyAndPrintLabel')
-                ->label('Buy and print label')
+                ->label('Buy & Print Label')
                 ->icon('heroicon-o-printer')
                 ->color('primary')
                 ->authorize('ship')
@@ -93,9 +93,9 @@ class ViewPackage extends ViewRecord
                     })
                     JS)
                 ->requiresConfirmation()
-                ->modalHeading('Buy and print label')
+                ->modalHeading('Buy & Print Label')
                 ->modalDescription(fn (): string => $this->buyConfirmationMessage())
-                ->modalSubmitActionLabel('Buy and print')
+                ->modalSubmitActionLabel('Buy & Print Label')
                 ->action(fn (array $arguments) => $this->buyAndPrintLabel($arguments)),
             Action::make('reprint')
                 ->label(fn (): string => $this->record->label_printed_at ? 'Reprint Label' : 'Print Label')
@@ -114,7 +114,7 @@ class ViewPackage extends ViewRecord
                     ->requiresConfirmation()
                     ->authorize('voidLabel')
                     ->modalHeading('Void Label')
-                    ->modalDescription('This will cancel the label with the carrier. The package will be kept with its dimensions so it can be re-shipped.')
+                    ->modalDescription('Voids the label with whoever sold it: the carrier, or Amazon. The package keeps its dimensions so it can be shipped again.')
                     ->visible(fn (): bool => $this->record->status === PackageStatus::Shipped
                         && $this->record->tracking_number
                         && ($this->record->carrier || $this->shopifyShipped()))
@@ -190,7 +190,7 @@ class ViewPackage extends ViewRecord
         $this->notReadyReasonResolved = true;
 
         if ($this->package()->shipment?->isBlockedByPicking()) {
-            return $this->notReadyReason = 'This shipment must be picked before it can be shipped.';
+            return $this->notReadyReason = 'This shipment has not been picked yet.';
         }
 
         try {

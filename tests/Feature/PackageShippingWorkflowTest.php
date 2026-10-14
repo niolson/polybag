@@ -1308,8 +1308,8 @@ it('refuses to buy for a shipment that must be picked first', function (): void 
 
     $result = app(PackageShippingWorkflow::class)->ship($package, new PackageShippingRequest(selectedRate: $rate, userId: $user->id));
 
-    expect($result->title)->toBe('Not Ready')
-        ->and($result->message)->toContain('must be picked');
+    expect($result->title)->toBe('Picking Required')
+        ->and($result->message)->toContain('has not been picked yet');
 });
 
 it('refuses an unready package on auto ship without quoting it, and keeps it for the packer to finish', function (): void {

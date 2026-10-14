@@ -66,6 +66,16 @@ class ShipDateService
     }
 
     /**
+     * Today's date at the location, in its timezone.
+     */
+    public function today(?int $locationId = null): CarbonImmutable
+    {
+        $tz = $this->resolveLocation($locationId)->timezone ?? 'America/New_York';
+
+        return CarbonImmutable::now($tz)->startOfDay();
+    }
+
+    /**
      * @param  array<int, int>|Carrier|null  $pickupDaysOrCarrier
      */
     public function getNextPickupDay(array|Carrier|null $pickupDaysOrCarrier, CarbonImmutable|int|null $afterOrLocationId = null, ?CarbonImmutable $after = null): CarbonImmutable

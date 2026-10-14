@@ -98,7 +98,7 @@ class AmazonPostageSource implements PostageSourceOperations
         if ($shipmentId === null) {
             return CancelResponse::failure(
                 'This package records no Amazon shipment, so there is nothing for Amazon to void. '
-                .'Cancel it in Seller Central if a label exists there.'
+                .'Void it in Seller Central if a label exists there.'
             );
         }
 
@@ -126,7 +126,7 @@ class AmazonPostageSource implements PostageSourceOperations
         // recorded: `Package::clearShipping()` drops them in its transaction
         // (`Package::LABEL_METADATA_KEYS`). Dropped here, a failure to record
         // left a shipped Package that no retry could void (`project-review/10`).
-        return CancelResponse::success('Amazon cancelled the shipment.');
+        return CancelResponse::success('Amazon voided the label.');
     }
 
     /**

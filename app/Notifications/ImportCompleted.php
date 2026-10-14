@@ -34,13 +34,13 @@ class ImportCompleted extends Notification
 
         $closed = $this->stats['shipments_closed'] ?? 0;
 
-        $body = "{$created} created, {$updated} updated".($closed > 0 ? ", {$closed} closed by the source" : '');
+        $body = "{$created} created, {$updated} updated".($closed > 0 ? ", {$closed} closed in {$this->sourceName}" : '');
         if ($hasErrors) {
             $errorCount = count($this->errors);
             $body .= " — {$errorCount} ".($errorCount === 1 ? 'error' : 'errors').': '.Str::limit($this->errors[0], 150);
 
             if ($errorCount > 1) {
-                $body .= ' (+'.($errorCount - 1).' more, see shipment-import log)';
+                $body .= ' (+'.($errorCount - 1).' more; ask your administrator to check the import log)';
             }
         }
 

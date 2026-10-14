@@ -14,6 +14,7 @@ use App\Models\PickBatch;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\User;
+use App\Services\GotenbergService;
 use App\Services\PackSlips\PackSlipQueue;
 use App\Services\PackSlips\PackSlipRenderer;
 use App\Services\PackSlips\PackSlipViews;
@@ -262,10 +263,12 @@ class PrintPackSlips extends Page implements HasTable
         try {
             $jobs = app(PackSlipRenderer::class)->printJobs($run, $this->user());
         } catch (Throwable $e) {
+            report($e);
+
             Notification::make()
                 ->danger()
-                ->title('PDF renderer unavailable')
-                ->body($e->getMessage())
+                ->title('PDF Not Created')
+                ->body(GotenbergService::UNAVAILABLE)
                 ->send();
 
             return;

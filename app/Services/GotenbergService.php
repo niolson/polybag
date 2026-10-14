@@ -9,6 +9,12 @@ use Saloon\Exceptions\Request\RequestException;
 
 class GotenbergService
 {
+    /**
+     * What a person is told when a PDF cannot be made. The cause is logged:
+     * the service's name and its HTTP error mean nothing at a packing bench.
+     */
+    public const string UNAVAILABLE = 'The PDF could not be made. Try again; if it keeps failing, ask your administrator to check the PDF service.';
+
     public function __construct(private readonly GotenbergConnector $connector) {}
 
     /**
@@ -26,9 +32,13 @@ class GotenbergService
             $response = $this->connector->send(new HtmlToPdfRequest($html));
             $response->throw();
         } catch (FatalRequestException $e) {
-            throw new \RuntimeException('PDF renderer unavailable. Is Gotenberg running?', previous: $e);
+            logger()->error('PDF renderer unreachable', ['error' => $e->getMessage()]);
+
+            throw new \RuntimeException(self::UNAVAILABLE, previous: $e);
         } catch (RequestException $e) {
-            throw new \RuntimeException('PDF renderer returned an error: '.$e->getMessage(), previous: $e);
+            logger()->error('PDF renderer returned an error', ['status' => $e->getResponse()->status(), 'error' => $e->getMessage()]);
+
+            throw new \RuntimeException(self::UNAVAILABLE, previous: $e);
         }
 
         return $response->body();

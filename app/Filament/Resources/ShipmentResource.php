@@ -229,7 +229,7 @@ class ShipmentResource extends Resource
 
                         // Validated address section (edit only, when validated)
                         Section::make('Validated Address')
-                            ->description('Address returned by USPS validation')
+                            ->description(fn (Shipment $record): string => 'Address returned by '.($record->validation_source?->getLabel() ?? 'address validation'))
                             ->icon('heroicon-o-check-badge')
                             ->schema([
                                 Forms\Components\Placeholder::make('validated_address1_display')
@@ -531,8 +531,8 @@ class ShipmentResource extends Resource
                         Components\View::make('filament.components.batch-ship-local-storage'),
                     ])
                     ->modalHeading('Batch Ship')
-                    ->modalDescription('Generate labels for all selected shipments using the same box size. Ineligible shipments will be skipped.')
-                    ->modalSubmitActionLabel('Generate Labels')
+                    ->modalDescription('Buy and print a label for each selected shipment, packed in the same box size, within its shipping method\'s rules. Shipments that can\'t be batch shipped are skipped and listed.')
+                    ->modalSubmitActionLabel('Buy Labels')
                     ->action(function (Collection $records, array $data): void {
                         if ($records->count() > 100) {
                             Notification::make()
@@ -737,7 +737,7 @@ class ShipmentResource extends Resource
                             ? 'Shipping Address (Validated)'
                             : 'Shipping Address')
                             ->description(fn (Shipment $record): ?string => $record->checked && filled($record->validated_address1)
-                                ? 'Showing USPS-validated address'
+                                ? 'Showing the validated address'
                                 : 'Not validated')
                             ->icon(fn (Shipment $record): string => $record->checked && filled($record->validated_address1)
                                 ? 'heroicon-o-check-badge'

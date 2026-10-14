@@ -270,7 +270,7 @@ it('refuses a blind purchase when the shipment hard-requires a special service',
     // The refusal comes from re-deriving what is on offer, so it carries rate
     // shopping's own reason rather than a second wording of the same rule.
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Offer No Longer Available')
+        ->and($result->title)->toBe('Rate Unavailable')
         ->and($result->message)->toContain('cannot guarantee Signature Required')
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 
@@ -320,7 +320,7 @@ it('refuses a selection the source never advertised', function (): void {
     $result = app(PackageShippingWorkflow::class)->ship($package, new PackageShippingRequest(blindOffer: $forged));
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Offer No Longer Available')
+        ->and($result->title)->toBe('Rate Unavailable')
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 
     $source->shouldNotHaveReceived('createShipment');
@@ -344,7 +344,7 @@ it('refuses an offer attributed to a source that never offered it', function ():
     // USPS quotes; it sells nothing blind, so nothing it lists can be bought
     // this way — and the rate adapter is never reached with a priceless request.
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Offer No Longer Available')
+        ->and($result->title)->toBe('Rate Unavailable')
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 
     $source->shouldNotHaveReceived('createShipment');
@@ -363,7 +363,7 @@ it('refuses to buy a second Shopify label for a shipment that already has one', 
     $result = app(PackageShippingWorkflow::class)->ship($package, new PackageShippingRequest(blindOffer: shopifyBlindOffer()));
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Offer No Longer Available')
+        ->and($result->title)->toBe('Rate Unavailable')
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 
@@ -643,7 +643,7 @@ it('refuses a forged purchase request for a rule-excluded blind offer', function
     );
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Offer No Longer Available')
+        ->and($result->title)->toBe('Rate Unavailable')
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 
     $source->shouldNotHaveReceived('createShipment');
@@ -730,7 +730,7 @@ it('revalidates a sole blind offer at the purchase boundary', function (): void 
     );
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Offer No Longer Available')
+        ->and($result->title)->toBe('Rate Unavailable')
         ->and($offerRequests)->toBe(2)
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 

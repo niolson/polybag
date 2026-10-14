@@ -1071,7 +1071,7 @@ it('lets the shipper cancel the last label they shipped', function (): void {
 
     Livewire::test(Pack::class)
         ->call('cancelLastLabel')
-        ->assertNotified('Label Cancelled');
+        ->assertNotified('Label Voided');
 
     expect($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 })->after(fn () => app(CarrierRegistry::class)->reset());
@@ -1093,7 +1093,7 @@ it('refuses the last-label commands once that label is voided and the package bo
         ->assertNotified('No Label to Reprint')
         ->assertNotDispatched('print-label')
         ->call('cancelLastLabel')
-        ->assertNotified('No Label to Cancel');
+        ->assertNotified('No Label to Void');
 
     expect($package->fresh()->status)->toBe(PackageStatus::Shipped);
 })->after(fn () => app(CarrierRegistry::class)->reset());
@@ -1193,7 +1193,7 @@ it('offers to unpack a line and to clear packing outside scan-to-add mode', func
         ->assertSet('scanToAddMode', false)
         ->assertSeeHtml('unpackItem(index)')
         ->assertSeeHtml('clearPacking()')
-        ->assertSee('Clear packing');
+        ->assertSee('Clear Shipment');
 });
 
 it('saves an unpacked line, and the Transparency code it gave up, over the draft', function (): void {

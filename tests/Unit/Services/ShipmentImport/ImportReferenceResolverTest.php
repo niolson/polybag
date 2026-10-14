@@ -167,3 +167,15 @@ it('still overwrites fields a fill-only row does not list', function (): void {
     expect($product->refresh()->name)->toBe('New name')
         ->and($product->manufacturer_part_number)->toBe('HAND-MPN');
 });
+
+it('leaves hand-entered identifiers alone when a database column returns empty strings', function (): void {
+    DB::statement('CREATE TEMPORARY TABLE ext_customs_items (shipment_id VARCHAR(255), sku VARCHAR(50), mpn VARCHAR(100), ean VARCHAR(14), tariff VARCHAR(20), origin CHAR(2))');
+
+    importCustomsColumns(['mpn' => 'MFG-1', 'ean' => '4006381333931', 'tariff' => '6912.00', 'origin' => 'CN']);
+    $after = importCustomsColumns(['mpn' => '', 'ean' => '', 'tariff' => '  ', 'origin' => '']);
+
+    expect($after->manufacturer_part_number)->toBe('MFG-1')
+        ->and($after->gtin)->toBe('4006381333931')
+        ->and($after->hs_tariff_number)->toBe('6912.00')
+        ->and($after->country_of_origin)->toBe('CN');
+});

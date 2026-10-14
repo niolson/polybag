@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Cache;
 
 class ShippedShipmentsChart extends ChartWidget
 {
-    protected ?string $heading = 'Shipped Shipments';
+    protected ?string $heading = 'Packages Shipped';
 
     protected ?string $description = 'Total packages shipped per day';
 
@@ -62,7 +62,7 @@ class ShippedShipmentsChart extends ChartWidget
             return [
                 'datasets' => [
                     [
-                        'label' => 'Shipments',
+                        'label' => 'Packages',
                         'data' => $data,
                         'backgroundColor' => 'rgba(79, 106, 245, 0.65)',
                         'borderColor' => 'rgb(79, 106, 245)',

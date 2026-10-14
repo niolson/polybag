@@ -72,7 +72,7 @@
                         </div>
                         <div>
                             <dt class="font-medium text-gray-500 dark:text-gray-400">Box</dt>
-                            <dd class="mt-1">{{ $package->boxSize?->name ?? 'Custom' }}</dd>
+                            <dd class="mt-1">{{ $package->boxSize?->label ?? 'Custom' }}</dd>
                         </div>
                         @if($package->shipment->location && app(\App\Services\SettingsService::class)->get('multi_location_enabled', false))
                             <div>
@@ -142,7 +142,7 @@
                                     <p>Tracking <span class="font-mono">{{ $package->tracking_number }}</span></p>
                                 @endif
                                 <p class="text-gray-500 dark:text-gray-400">
-                                    The label is bought and stored on the package. If it did not print, fix the printer in Device Settings and use <strong>Print again</strong>, or reprint it later from the Packages page. Buying another label for this package is not possible here.
+                                    The label is bought and stored on the package. If it did not print, fix the printer in Device Settings and use <strong>Reprint Label</strong>, or reprint it later from the Packages page. Buying another label for this package is not possible here.
                                 </p>
                             </div>
                         </div>

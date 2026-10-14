@@ -6,6 +6,7 @@ use App\Contracts\PackageDraftWorkflow;
 use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\PackageShipping\PackageShippingOptions;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
+use App\DataTransferObjects\PackageShipping\PackageShippingResult;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\PackageStatus;
@@ -19,6 +20,7 @@ use App\Models\ClientTaxRegistration;
 use App\Models\Package;
 use App\Models\ShippingMethod;
 use App\Services\Customs\CustomsReadiness;
+use App\Services\PackageLabels\SessionLastLabel;
 use App\Services\ShipmentLocationGuard;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -168,7 +170,7 @@ class Ship extends Page
         }
 
         if ($this->package->status === PackageStatus::Shipped) {
-            $this->notifyWarning('Already Shipped', 'This package has already been shipped.');
+            $this->notifyWarning('Already Shipped', PackageShippingResult::alreadyShippedMessage($this->package->tracking_number));
             $this->redirect($this->returnUrl);
 
             return;
@@ -177,7 +179,7 @@ class Ship extends Page
         // The purchase refuses these too. Turning them away here sends the
         // packer to finish the package, instead of quoting rates for it.
         if ($this->package->shipment->status === ShipmentStatus::Cancelled) {
-            $this->notifyError('Order Cancelled', 'This order is cancelled, so no label can be bought for it.');
+            $this->notifyError('Shipment Cancelled', 'This shipment is cancelled, so no label can be bought for it.');
             $this->package = null;
             $this->redirect($this->returnUrl);
 
@@ -185,7 +187,7 @@ class Ship extends Page
         }
 
         if ($this->package->shipment->isBlockedByPicking()) {
-            $this->notifyError('Not Picked', 'This shipment must be picked before it can be shipped.');
+            $this->notifyError('Picking Required', "Shipment {$this->package->shipment->shipment_reference} has not been picked yet.");
             $this->package = null;
             $this->redirect($this->returnUrl);
 
@@ -258,16 +260,26 @@ class Ship extends Page
         }
 
         return [
+            // What every "Get rates again" message points at: a stale or
+            // refused rate is cured by quoting again.
+            Action::make('getRatesAgain')
+                ->label('Get Rates Again')
+                ->icon('heroicon-o-arrow-path')
+                ->color('gray')
+                ->action(fn () => $this->refreshRates())
+                ->hidden(fn (): bool => $this->isShipped() || $this->needsShippingMethod()),
             // Once the label is bought this page has nothing left to sell. It
             // stays open only when the label could not be printed, and the
             // one thing to offer then is another attempt at printing it.
             Action::make('Ship')
+                ->label('Buy & Print Label')
                 ->action(fn () => $this->ship())
                 ->icon('heroicon-o-printer')
                 ->keybindings(['f12'])
                 ->hidden(fn (): bool => $this->isShipped())
                 ->disabled(fn (): bool => $this->selectedRateIndex === null && $this->selectedBlindOfferId === null),
             Action::make('Print again')
+                ->label('Reprint Label')
                 ->action(fn () => $this->printStoredPackageLabel($this->package->id))
                 ->icon('heroicon-o-printer')
                 ->keybindings(['f12'])
@@ -538,7 +550,7 @@ class Ship extends Page
         // The workflow refuses this too, from the database. Refusing here as
         // well keeps a stale page from re-quoting carriers on its way there.
         if ($this->package->refresh()->status === PackageStatus::Shipped) {
-            $this->notifyWarning('Already Shipped', 'This package already has a label. Print it again, or void it from the Packages page.');
+            $this->notifyWarning('Already Shipped', PackageShippingResult::alreadyShippedMessage($this->package->tracking_number));
 
             return;
         }
@@ -564,7 +576,7 @@ class Ship extends Page
         $blindOffer = $this->selectedBlindOfferId === null ? null : $this->selectedBlindOffer();
 
         if ($this->selectedBlindOfferId !== null && ! $blindOffer) {
-            $this->notifyError('Offer Unavailable', 'That option is no longer being offered. Get rates again.');
+            $this->notifyError('Rate Unavailable', 'That option is no longer being offered. Get rates again.');
 
             return;
         }
@@ -638,7 +650,12 @@ class Ship extends Page
             return;
         }
 
-        $this->notifySuccess($result->title ?? 'Package Shipped', $result->message ?? 'Package shipped.');
+        // Pack sends every Package that needs attended selection here and is
+        // returned to afterwards, so its VOID and REPRINT commands must act on
+        // this Label, not the last one auto-shipped (ADR-0007, decision 4).
+        app(SessionLastLabel::class)->remember($this->package);
+
+        $this->notifySuccess('Label Bought', $result->summaryMessage());
 
         // The page re-renders in this same request, and if the print below
         // fails the browser stays here. What it shows must be the shipped

@@ -44,7 +44,7 @@ enum Deliverability: string implements HasColor, HasIcon, HasLabel
             self::Partial => 'Partly verified',
             self::Unverified => "Couldn't verify",
             self::No => 'Not deliverable',
-            self::NotChecked => 'Not Checked',
+            self::NotChecked => 'Not checked',
         };
     }
 

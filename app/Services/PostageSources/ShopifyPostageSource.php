@@ -35,7 +35,7 @@ class ShopifyPostageSource implements PostageSourceOperations
      * source, and `ShopifyAdapter` is no longer on the path: a Shopify-bought
      * package now records its physical carrier, not "Shopify".
      */
-    public const VOID_MESSAGE = 'Shopify Shipping labels cannot be voided through the API. Cancel this label in the Shopify admin, then void it here.';
+    public const VOID_MESSAGE = 'Shopify Shipping labels cannot be voided through the API. Void this label in the Shopify admin. PolyBag returns the package to unshipped once Shopify reports it voided.';
 
     /**
      * `FulfillmentDisplayStatus` and `FulfillmentEventStatus` onto our own

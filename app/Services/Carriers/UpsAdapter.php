@@ -961,7 +961,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
 
             $errorMessage = $response->json('response.errors.0.message')
                 ?? $response->json('errors.0.message')
-                ?? 'UPS returned status '.$response->status();
+                ?? 'UPS did not void the label (error '.$response->status().'). Try again, or void it on the UPS site.';
 
             return CancelResponse::failure($errorMessage);
         } catch (\Exception $e) {
@@ -987,11 +987,11 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
         $description = is_string($description) && $description !== '' ? $description : null;
 
         if ((is_string($code) || is_int($code)) && (string) $code === '1') {
-            return CancelResponse::success($description ?? 'UPS shipment voided.');
+            return CancelResponse::success('UPS voided the label.');
         }
 
         if (is_string($code) || is_int($code)) {
-            return CancelResponse::failure('UPS did not void the shipment: '.($description ?? 'status code '.$code));
+            return CancelResponse::failure('UPS did not void the label: '.($description ?? 'status code '.$code));
         }
 
         Log::channel('ups-validation')->error('UPS cancelShipment reply could not be read', [

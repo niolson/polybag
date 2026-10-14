@@ -38,7 +38,7 @@ readonly class PackageShippingResult
     {
         return new self(
             success: true,
-            title: 'Package Shipped',
+            title: 'Label Bought',
             message: "Tracking: {$response->trackingNumber}",
             response: $response,
             selectedRate: $rate,
@@ -85,9 +85,9 @@ readonly class PackageShippingResult
      * its shipment not yet picked. Leaves the package intact, since the
      * remedy is finishing it on the Pack page.
      */
-    public static function notReady(string $message): self
+    public static function notReady(string $message, string $title = 'Not Ready'): self
     {
-        return new self(success: false, title: 'Not Ready', message: $message, leavePackageIntact: true);
+        return new self(success: false, title: $title, message: $message, leavePackageIntact: true);
     }
 
     /**
@@ -98,8 +98,8 @@ readonly class PackageShippingResult
     {
         return new self(
             success: false,
-            title: 'Order Cancelled',
-            message: 'This order is cancelled, so no label can be bought for it. Unpack the package, or ask a manager to reopen the order.',
+            title: 'Shipment Cancelled',
+            message: 'This shipment is cancelled, so no label can be bought for it. Unpack the package, or ask a manager to reopen the shipment.',
             leavePackageIntact: true,
         );
     }
@@ -192,6 +192,28 @@ readonly class PackageShippingResult
         );
     }
 
+    /**
+     * The package already has a label, found by a page that was opened before
+     * it was bought. One message wherever it is found, since the remedy is
+     * the same.
+     */
+    public static function alreadyShipped(?string $trackingNumber = null): self
+    {
+        return new self(
+            success: false,
+            title: 'Already Shipped',
+            message: self::alreadyShippedMessage($trackingNumber),
+            leavePackageIntact: true,
+        );
+    }
+
+    public static function alreadyShippedMessage(?string $trackingNumber = null): string
+    {
+        return 'This package already has a label'
+            .(filled($trackingNumber) ? " ({$trackingNumber})" : '')
+            .'. Reprint it, or void it from the Packages page.';
+    }
+
     public static function stateConflict(string $message): self
     {
         return new self(success: false, title: 'Package State Changed', message: $message, leavePackageIntact: true);
@@ -243,6 +265,6 @@ readonly class PackageShippingResult
         }
 
         return "Tracking: {$this->response->trackingNumber} via {$this->response->carrier}"
-            ." ({$this->selectedRate->serviceName}) - \$".number_format($this->response->cost, 2);
+            ." {$this->selectedRate->serviceName} — \$".number_format($this->response->cost, 2);
     }
 }

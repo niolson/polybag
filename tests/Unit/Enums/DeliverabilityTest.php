@@ -35,7 +35,7 @@ it('returns the correct labels', function (Deliverability $case, string $label):
     [Deliverability::Partial, 'Partly verified'],
     [Deliverability::Unverified, "Couldn't verify"],
     [Deliverability::No, 'Not deliverable'],
-    [Deliverability::NotChecked, 'Not Checked'],
+    [Deliverability::NotChecked, 'Not checked'],
 ]);
 
 it('returns the correct colors', function (Deliverability $case, string $color): void {

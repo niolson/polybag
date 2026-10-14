@@ -202,10 +202,12 @@ class ViewPickBatch extends ViewRecord
 
     private function notifyRendererUnavailable(Throwable $e): void
     {
+        report($e);
+
         Notification::make()
             ->danger()
-            ->title('PDF renderer unavailable')
-            ->body($e->getMessage())
+            ->title('PDF Not Created')
+            ->body(GotenbergService::UNAVAILABLE)
             ->send();
     }
 }

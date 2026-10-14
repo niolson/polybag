@@ -103,11 +103,27 @@ class ClientBillingReport extends Page implements HasTable
         ];
     }
 
+    /**
+     * The first day of last month. Without overflow, so that on October 31
+     * last month is September, not October 1.
+     */
+    public static function defaultFrom(): string
+    {
+        return now()->subMonthNoOverflow()->startOfMonth()->format('Y-m-d');
+    }
+
+    public static function defaultUntil(): string
+    {
+        return now()->subMonthNoOverflow()->endOfMonth()->format('Y-m-d');
+    }
+
     public function exportCsv(): StreamedResponse
     {
-        $filters = $this->getTableFilterState('date_range') ?? [];
-        $from = $filters['from'] ?? now()->startOfMonth()->format('Y-m-d');
-        $until = $filters['until'] ?? now()->endOfMonth()->format('Y-m-d');
+        // The same bounds the table applies: a cleared date is no bound, not
+        // a fallback to some other period.
+        $filters = $this->getTableFilterState('date_range') ?? ['from' => self::defaultFrom(), 'until' => self::defaultUntil()];
+        $from = $filters['from'] ?? null;
+        $until = $filters['until'] ?? null;
 
         if ($this->viewMode === 'detail' && $this->clientId) {
             $unpricedOnly = (bool) ($this->getTableFilterState('unpriced_postage')['isActive'] ?? false);
@@ -166,10 +182,10 @@ class ClientBillingReport extends Page implements HasTable
                     ->form([
                         DatePicker::make('from')
                             ->live(onBlur: true)
-                            ->default(now()->subMonth()->startOfMonth()->format('Y-m-d')),
+                            ->default(self::defaultFrom()),
                         DatePicker::make('until')
                             ->live(onBlur: true)
-                            ->default(now()->subMonth()->endOfMonth()->format('Y-m-d')),
+                            ->default(self::defaultUntil()),
                     ])
                     ->columns(2)
                     ->default()
@@ -241,10 +257,10 @@ class ClientBillingReport extends Page implements HasTable
                     ->form([
                         DatePicker::make('from')
                             ->live(onBlur: true)
-                            ->default(now()->subMonth()->startOfMonth()->format('Y-m-d')),
+                            ->default(self::defaultFrom()),
                         DatePicker::make('until')
                             ->live(onBlur: true)
-                            ->default(now()->subMonth()->endOfMonth()->format('Y-m-d')),
+                            ->default(self::defaultUntil()),
                     ])
                     ->columns(2)
                     ->default()
@@ -398,14 +414,14 @@ class ClientBillingReport extends Page implements HasTable
             ]);
     }
 
-    private function streamSummaryCsv(string $from, string $until): StreamedResponse
+    private function streamSummaryCsv(?string $from, ?string $until): StreamedResponse
     {
         $rows = $this->summaryQuery()
             ->when($from, fn ($q) => $q->where('billing.shipped_at', '>=', $from))
             ->when($until, fn ($q) => $q->where('billing.shipped_at', '<=', $until.' 23:59:59'))
             ->get();
 
-        $filename = 'client-billing-summary-'.$from.'-to-'.$until.'.csv';
+        $filename = 'client-billing-summary-'.($from ?? 'start').'-to-'.($until ?? 'today').'.csv';
 
         return response()->streamDownload(function () use ($rows): void {
             $out = fopen('php://output', 'w');
@@ -430,7 +446,7 @@ class ClientBillingReport extends Page implements HasTable
         }, $filename, ['Content-Type' => 'text/csv']);
     }
 
-    private function streamDetailCsv(int $clientId, string $from, string $until, bool $unpricedOnly = false): StreamedResponse
+    private function streamDetailCsv(int $clientId, ?string $from, ?string $until, bool $unpricedOnly = false): StreamedResponse
     {
         $client = Client::find($clientId);
 
@@ -441,7 +457,7 @@ class ClientBillingReport extends Page implements HasTable
             ->orderBy('pkg.shipped_at')
             ->get();
 
-        $filename = 'client-billing-'.$client?->code.'-'.$from.'-to-'.$until.'.csv';
+        $filename = 'client-billing-'.$client?->code.'-'.($from ?? 'start').'-to-'.($until ?? 'today').'.csv';
 
         return response()->streamDownload(function () use ($rows): void {
             $out = fopen('php://output', 'w');

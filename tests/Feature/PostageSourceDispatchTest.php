@@ -56,7 +56,7 @@ it('voids a Shopify-bought label through Shopify, never through the carrier carr
     $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
 
     expect($result->success)->toBeFalse()
-        ->and($result->message)->toContain('Cancel this label in the Shopify admin')
+        ->and($result->message)->toContain('Void this label in the Shopify admin')
         ->and(SpyUspsAdapter::$calls)->toBe([])
         ->and($package->refresh()->status)->toBe(PackageStatus::Shipped);
 });

@@ -14,7 +14,7 @@ it('renders the chart heading', function (): void {
 
     Livewire::actingAs($user)
         ->test(ShippedShipmentsChart::class)
-        ->assertSee('Shipped Shipments');
+        ->assertSee('Packages Shipped');
 });
 
 it('supports week and month filters', function (): void {
@@ -37,7 +37,7 @@ it('renders with daily shipping stats', function (): void {
 
     Livewire::actingAs($user)
         ->test(ShippedShipmentsChart::class)
-        ->assertSee('Shipped Shipments');
+        ->assertSee('Packages Shipped');
 });
 
 it('switches to month filter', function (): void {
@@ -46,5 +46,5 @@ it('switches to month filter', function (): void {
     Livewire::actingAs($user)
         ->test(ShippedShipmentsChart::class)
         ->set('filter', 'month')
-        ->assertSee('Shipped Shipments');
+        ->assertSee('Packages Shipped');
 });
