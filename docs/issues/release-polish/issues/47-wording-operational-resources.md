@@ -58,7 +58,7 @@ Verified: read at `12592f33`; nothing in this slice changed through `dfd842c5`. 
   - same file, `:68` — "Carrier Error" / "Unable to connect to carrier. Please try again." The postage source may be Amazon, not a carrier. → "Could not reach {source}" / "Try again in a moment."
   - same file, `:70` — "An unexpected error occurred." → add a next step: "The label may still be live. Try again, and check the carrier's site if it fails again."
   - same file, `:66`, `:91` and `:114` — "Package State Changed" with a raw `RuntimeException` message as the body → "Package changed" / "Someone else changed this package. Refresh the page and try again."
-  - same file, `:144` — "Label Not Available" / "The label for the package is not available." → "No label to print" / "This package has no active label. Buy one from the Ship page."
+  - same file, `:144` — "Label Not Available" / "The label for the package is not available." The condition covers two cases: a Package that is not shipped, and a shipped Package whose active Label has no stored document (for example, after retention cleanup removed it). Do not use "This package has no active label. Buy one." because it is wrong for the second case, which a second review reproduced. → split the message: not shipped → "No label to print" / "This package has not been shipped."; shipped without a document → "Label file not available" / "This label's file is no longer stored. Reprint it from the carrier's site, or void it and buy a new one."
   - `app/Filament/Concerns/PrintsLabels.php:30` — "Package Not Found" with no body → add "It may have been deleted. Refresh the list."
 
 **Why.** A message should say what is wrong and what to do.

@@ -165,7 +165,7 @@ Verified: read at `dfd842c5`. Fix by category, worst first. Each finding lists i
 
 - Severity: low.
 - Locations:
-  - `app/Enums/Role.php` has no `getLabel()`, so the User form and table show user / manager / admin → add User / Manager / Admin
+  - `app/Enums/Role.php` has no `getLabel()`, so the User table shows user / manager / admin → add User / Manager / Admin. The User form already shows User / Manager / Admin: without `HasLabel`, Filament's select uses the enum case names (`vendor/filament/forms/src/Components/Concerns/HasOptions.php:50`). Only the table needs the fix.
 
 **Why.** Every other enum in this slice has labels.
 

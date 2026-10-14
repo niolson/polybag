@@ -9,24 +9,25 @@ Pass: 3 — wording (slice: enums, notifications, exception messages and printed
 Page or flow: carrier and postage-source messages on Ship, Pack and void; enum labels
 everywhere; pack slips; the demo banner
 
-Severity: high — the worst finding: a carrier or channel refusing a purchase is shown as
-"Package State Changed", so the packer thinks someone else changed the package (demo steps
-3 and 5). The findings below carry their own severities.
+Severity: medium — the worst findings: raw API and exception text reaches packers, and
+"data source" appears where the UI says Connection. The first version rated this issue high
+for a "Package State Changed" finding that did not hold up (see below). The findings below
+carry their own severities.
 
 Verified: read at `dfd842c5`. Fix by category, worst first; each finding lists its
 locations with the proposed text.
 
 Code read at `origin/main` (`dfd842c5`). String list: `strings-cross-cutting.md`.
 
-### Carrier and channel refusals are titled "Package State Changed"
+### Any `RuntimeException` that reaches the workflows is titled "Package State Changed"
 
-- Severity: high — on Ship, Pack and void, a carrier or channel refusal is reported as a concurrency race, so the packer is told the wrong thing happened.
+- Severity: low — hardening. No carrier or channel refusal is known to reach this catch.
 - Page or flow: Ship / Pack / Manual Ship purchase; void from Packages, Pack and View Package.
+- Correction: the first version rated this high and said Shopify, Amazon and direct-carrier refusals land here. That missed the catches in between. `ShopifyAdapter::createShipment()` (`app/Services/Carriers/ShopifyAdapter.php:431`) and `AmazonBuyShippingAdapter` (`:451`) catch their purchase exceptions and return `ShipResponse::failure()`, which the workflow titles "Shipping Error". `UspsAdapter` purchase and void (`:700`, `:1689`) and the other direct `cancelShipment` methods end in `catch (\Exception)`. That covers `CarrierUnavailableException` and `labelAccountDeleted()`, which return a failure the label workflow titles "Void failed".
 - Locations:
-  - `app/Services/PackageShipping/EloquentPackageShippingWorkflow.php:711-712` — `catch (\RuntimeException $e)` → `stateConflict($e->getMessage())`. `CarrierException` extends `RuntimeException`, so every `ShopifyLabelPurchaseException` (`ShopifyShippingLabelService.php:354,362,412,986,1007,1015,1071,1136,1198`), `AmazonLabelPurchaseException` (`AmazonBuyShippingService.php:346,354,438,479,485,645,892`), `CarrierUnavailableException` (`USPSConnector.php:142`) and `labelAccountDeleted()` lands under "Package State Changed" → title by exception type: "Shopify Shipping Error", "Amazon Purchase Refused", "Carrier Unavailable", with `CarrierException` caught before the generic `RuntimeException`.
-  - `app/Services/PackageLabels/EloquentPackageLabelWorkflow.php:66,91` — same catch on void → "Void failed" for `CarrierException`, e.g. `ResolvesCarrierAccount::labelAccountDeleted()` ("The USPS carrier account that bought this label has been deleted…").
+  - `app/Services/PackageShipping/EloquentPackageShippingWorkflow.php:711-712` and `app/Services/PackageLabels/EloquentPackageLabelWorkflow.php:66,91` — `catch (\RuntimeException $e)` → `stateConflict($e->getMessage())` / "Package State Changed". This is right for the race it was written for. Any other `RuntimeException` that escapes would be mislabeled the same way. → Catch `CarrierException` before the generic `RuntimeException` and title it as a source failure. No user-visible change is expected today.
 
-**Why.** "Package State Changed" means someone else changed the package (`PackageShippingResult::stateConflict`). These messages say the seller refused or cannot be reached.
+**Why.** "Package State Changed" means someone else changed the package (`PackageShippingResult::stateConflict`).
 
 ### Raw API and exception text reaches packers
 
@@ -34,7 +35,7 @@ Code read at `origin/main` (`dfd842c5`). String list: `strings-cross-cutting.md`
 - Page or flow: Ship (Shipping Error), void notification, Track "Provider Message", batch item errors, End of Day, import notification, OAuth callback.
 - Locations:
   - `app/Services/Carriers/FedexAdapter.php:869` — raw FedEx exception as the purchase error → "FedEx refused the label: {first alert message}" or a fixed sentence.
-  - `app/Services/Carriers/FedexAdapter.php:809,821,831`, `UspsAdapter.php:1223,1227`, `UpsAdapter.php:802-828` — "FedEx response missing shipment data", "UPS response was not JSON", etc. → "{Carrier} answered, but the label could not be read. Try again; a second label will not be bought."
+  - `app/Services/Carriers/FedexAdapter.php:809,821,831`, `UspsAdapter.php:1223,1227`, `UpsAdapter.php:802-828` — "FedEx response missing shipment data", "UPS response was not JSON", etc. → USPS and UPS: "{Carrier} answered, but the label could not be read. Try again; a second label will not be bought." FedEx: no such promise. `FedexAdapter` (`:809`) treats an unreadable response as a failure, so another attempt can buy again; its documented reason differs from the USPS/UPS recovery path. → "FedEx answered, but the label could not be read. Check FedEx for a label before trying again."
   - `FedexAdapter.php:891`, `UspsAdapter.php:1685`, `UpsAdapter.php:964` — "{Carrier} returned status {code}" → "{Carrier} did not void the label (error {code}). Try again, or void it on {Carrier}'s site."
   - `FedexAdapter.php:902,1006`, `UspsAdapter.php:806,1690`, `UpsAdapter.php:426` — raw `$e->getMessage()` into void/tracking messages → "Could not reach {Carrier}. Try again in a moment."
   - `app/Jobs/GenerateLabelJob.php:75` — raw exception into the batch item error column → "An unexpected error stopped this label. Try it from the Ship page."
@@ -107,7 +108,7 @@ Code read at `origin/main` (`dfd842c5`). String list: `strings-cross-cutting.md`
 - Locations:
   - `app/Services/BatchLabelService.php:62` — "Order cancelled" → "Shipment cancelled"
   - `app/Services/BatchLabelService.php:82` — "Has existing unshipped packages" → "Has a Package Draft in progress"
-  - `app/Notifications/BatchLabelCompleted.php:37` — "{n} shipped, {n} failed — ${total_cost}" → format the cost with `number_format(…, 2)`; "{n} labels bought, {n} failed — ${cost}"
+  - `app/Notifications/BatchLabelCompleted.php:37` — "{n} shipped, {n} failed — ${total_cost}" → "{n} labels bought, {n} failed — ${cost}". The cost already has two decimal places from `LabelBatch`'s `decimal:2` cast (`app/Models/LabelBatch.php:40`); that part is not a defect.
   - `resources/views/pick-batches/summary.blade.php:38,55` — "{n} orders", "Orders" column → "shipments", "Shipments"
   - `app/DataTransferObjects/PackageShipping/PackageShippingResult.php:101-102` — "Order Cancelled · This order is cancelled… reopen the order." → "Shipment Cancelled … reopen the shipment."
 

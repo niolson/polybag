@@ -19,22 +19,32 @@ Export filing (EEI) needs an ITN once one classification exceeds $2,500 in a shi
 (`app/Services/Customs/CustomsReadiness.php`, from about line 420) total only the lines of
 the Package being bought.
 
-But 15 CFR 30.1 defines a shipment as all merchandise from one USPPI to one consignee on one
-conveyance on the same day. So two Packages of the same Shipment, bought the same day on the
-same carrier, are one shipment for EEI.
+But 15 CFR 30.1 defines a shipment as all merchandise from one USPPI to one consignee,
+leaving on one exporting conveyance on the same day
+(<https://www.law.cornell.edu/cfr/text/15/30.1>). Two Packages of the same Shipment can
+therefore be one shipment for EEI. Buying both labels on the same day from the same carrier
+does not establish that. The test is the conveyance and the day of export, which PolyBag
+does not record.
 
 ## Scenario
 
 1. A Shipment to GB has two Packages, each holding $2,000 of one HS code.
-2. Both are bought the same day on FedEx.
+2. Both are bought on FedEx, and both leave the US on the same exporting conveyance on the
+   same day. The second condition is the one the rule turns on. Buying them the same day
+   makes it likely but does not establish it.
 
 Each check sees $2,000, so neither blocks for a missing ITN. The classification totals
 $4,000, and the shipment needed EEI.
 
 ## What to build
 
-Sum the classification over the Shipment's unshipped Packages plus those shipped the same
-day on the same carrier. The simpler alternative is to sum over the whole Shipment, which
-errs toward requiring the ITN, as the rule already does for unclassified lines.
+PolyBag cannot know the conveyance or the export day, so it cannot apply the rule exactly.
+Same-day, same-carrier purchase is only a proxy for it. Two options:
+
+- Sum the classification over the Shipment's unshipped Packages plus those shipped the same
+  day on the same carrier, and state in the code that this approximates "same conveyance,
+  same day".
+- Sum over the whole Shipment. This is simpler and errs toward requiring the ITN, as the
+  rule already does for unclassified lines.
 
 ## Comments

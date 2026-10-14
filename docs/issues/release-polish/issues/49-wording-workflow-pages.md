@@ -42,7 +42,7 @@ Verified: read at `12592f33`; nothing in this slice changed through `dfd842c5`. 
   - `app/Filament/Pages/Ship.php:264` — the label "Ship" is derived from the action name → "Buy & print label"
   - `resources/views/components/shipping-submit-button.blade.php:123`, `:132` and `:149` — "Choose shipping service" → "Choose rate" (`CONTEXT.md`: "service" is overloaded)
   - `app/Enums/ScanCommand.php:23` — "Buy & Print Label"
-  - `Ship.php:270` says "Print again", while `manual-ship.blade.php:63` and `end-of-day.blade.php:127` say "Reprint" → "Reprint label"
+  - `Ship.php:270` says "Print again", and `manual-ship.blade.php:63` says "Reprint" → "Reprint label". Leave End of Day's "Reprint" (`end-of-day.blade.php:122`–`127`): it reprints a manifest (`reprintManifest`), not a label. If it changes, it becomes "Reprint Manifest"
 
 ### Raw carrier, library and developer text reaches the screen
 
@@ -74,7 +74,7 @@ Verified: read at `12592f33`; nothing in this slice changed through `dfd842c5`. 
 - Locations:
   - `resources/views/filament/pages/ship.blade.php:250`–`251` — "Check the shipping method configuration." → "Check the warnings above, or ask a manager to check this shipment's shipping method."
   - `app/Services/ShipmentLocationGuard.php:15` — blames the "Shopify location mapping" for any inactive location → "Ask an administrator to reactivate the location or move the shipment."
-  - `EloquentPackageShippingWorkflow.php:506` — "reactivate it under Carriers…" → start with "Ask a manager to…"
+  - `EloquentPackageShippingWorkflow.php:506` — "reactivate it under Carriers…" → start with "Ask an administrator to…". Changing a Carrier needs Admin, not Manager (`CarrierPolicy::update()`, `app/Policies/CarrierPolicy.php:26`)
 
 ### Package Draft exceptions are worded for developers
 

@@ -52,10 +52,21 @@ lane's duties payer has already changed once without a decision about territorie
 
 ## What to build
 
-Product decision first: whether a US territory is a customs crossing for
-duties terms. If not, have `crossesNoCustomsBorder()` treat a territory or military
-destination from the fifty states as not applicable (terms, registration, recipient tax ID),
-while the adapters keep sending the customs declaration and the ITN they need. Test UPS and
-FedEx bodies and the snapshot for a PR label.
+Investigate each lane before changing anything. The territories do not share one customs
+treatment, so this is not one product decision covering all of them. Puerto Rico is inside
+the US customs territory. The US Virgin Islands, Guam and the other insular possessions are
+outside it, and their imports fall under their own rules
+(19 CFR 7.2, <https://www.law.cornell.edu/cfr/text/19/7.2>). A territory-wide exemption in
+`crossesNoCustomsBorder()` is therefore not supported.
+
+For each lane (Puerto Rico, the US Virgin Islands, Guam, American Samoa, the Northern
+Mariana Islands, and military addresses), record:
+
+- whether duties can be assessed on a parcel from the fifty states
+- what UPS and FedEx expect in terms of sale, duties payment and recipient tax ID
+
+Then change only the lanes where no duties terms apply. In those lanes, treat the terms,
+registration and recipient tax ID as not applicable, and keep the customs declaration and
+ITN the adapters need. Test the UPS and FedEx bodies and the snapshot for each changed lane.
 
 ## Comments

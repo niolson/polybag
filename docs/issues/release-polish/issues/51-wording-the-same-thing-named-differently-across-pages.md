@@ -41,9 +41,16 @@ alongside those, and settle the capitalization convention at the end first.
   - `Pack.php:475` — "Auto Shipped — Tracking: {n} via {carrier} ({service}) - ${cost}"
   - `ManualShip.php:301` — "Shipped — {summary}"
   - batch — "Batch #{id} completed"
-- Recommendation: "Label Bought — Tracking {n} via {carrier} {service} — ${cost}" on all four,
-  with the same body format. The event is a Label purchase (`CONTEXT.md`), and "Shipped" reads
-  as the Shipment's status. Pack may keep "Auto Ship" as a prefix to mark the toast automatic.
+- Recommendation: "Label Bought" as the title on Ship, Pack and Manual Ship. The event is a
+  Label purchase (`CONTEXT.md`), and "Shipped" reads as the Shipment's status. Pack may keep
+  "Auto Ship" as a prefix to mark the toast automatic. The body is "Tracking {n} via
+  {carrier} {service} — ${cost}" when the source reports service and price. A Shopify blind
+  purchase reports neither, so its body is "Tracking {n} via {carrier}"; do not invent fields
+  for it.
+- Leave the batch notification out of this rename. A batch completion is not one purchase:
+  it can hold many labels, partial failures or no successes at all. Keep its counts and its
+  outcome titles ("completed", "completed with errors", "failed",
+  `app/Notifications/BatchLabelCompleted.php:30`); only its wording is in `50`.
 
 ### The picking gate has four names
 
@@ -74,12 +81,14 @@ alongside those, and settle the capitalization convention at the end first.
   Pack.
 - Locations:
   - Ship — "Print again"
-  - Manual Ship and End of Day — "Reprint"
+  - Manual Ship — "Reprint". End of Day's "Reprint" reprints a manifest, not a label
+    (`end-of-day.blade.php:122`), and is excluded from this finding
   - View Package — "Reprint Label"; the Packages row tooltip — "Reprint label"
   - the command sheet — "Reprint Last Label"
   - the results — "Label Reprinted — Reprinted label for tracking: {n}" and "Label Printed —
     Printed label for tracking: {n}"
-- Recommendation: "Reprint Label" on every button and tooltip. Keep "Reprint Last Label" only
+- Recommendation: "Reprint Label" on every label-reprint button and tooltip; End of Day keeps
+  its own name for the manifest. Keep "Reprint Last Label" only
   on the command sheet, where "last" means something. One result toast: "Label Sent to
   Printer — Tracking {n}".
 
