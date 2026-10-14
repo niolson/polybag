@@ -20,6 +20,7 @@ use App\Models\User;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\PackageShipping\PurchaseLock;
+use App\Services\RateQuoteLogger;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
@@ -42,6 +43,7 @@ class UnresolvedPurchaseResolver
         private readonly OfferStore $offerStore,
         private readonly CarrierRegistry $carrierRegistry,
         private readonly PackageLabelWorkflow $labels,
+        private readonly RateQuoteLogger $rateQuoteLogger,
     ) {}
 
     /**
@@ -219,6 +221,10 @@ class UnresolvedPurchaseResolver
                     ? AmazonBuyShippingAdapter::labelMetadata($locked, $sourceReference)
                     : [],
             ), $locked->postage_source, $user->id, $locked->carrier_service_id, $announce, $locked->declared_customs_terms);
+
+            // A recorded purchase marks its quote selected, as the purchase
+            // path's own recording does (`release-polish/03`).
+            $this->rateQuoteLogger->markSelected($locked);
         });
 
         $this->audit($offer, $package, $outcome, $user, $note, ['tracking_number' => $trackingNumber]);

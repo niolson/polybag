@@ -2,8 +2,8 @@
 
 it('names each mode of the ship button without a tooltip', function (): void {
     $this->blade('<x-shipping-submit-button />')
-        ->assertSee("'Buy & print label'", false)
-        ->assertSee('Choose shipping service')
+        ->assertSee("'Buy & Print Label'", false)
+        ->assertSee('Choose a Rate')
         ->assertDontSee('title=', false);
 });
 

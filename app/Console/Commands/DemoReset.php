@@ -146,6 +146,7 @@ class DemoReset extends Command
 
         $this->truncateTransactionalTables();
         $this->ensureChannelAliases($record, $from, $mapping);
+        $this->ensureBillingRates();
 
         $result = ShipmentImportService::forSource($source, $record)->import();
         $this->components->twoColumnDetail('Shipments imported', (string) $result->shipmentsCreated);
@@ -380,7 +381,11 @@ class DemoReset extends Command
     private function fabricateShippedHistory(DataSource $record, Carbon $cutoff): int
     {
         $locationId = Location::getDefault()?->id;
-        $boxSizeIds = BoxSize::pluck('id')->all();
+        // The warehouse's own boxes only. Carrier packaging is valid with its
+        // own carrier alone (ADR-0005), and the reference-data sync seeds it
+        // inactive, so drawing from every row put most history in another
+        // carrier's box.
+        $boxSizeIds = BoxSize::query()->active()->whereNull('carrier_packaging')->pluck('id')->all();
         $userIds = User::pluck('id')->all();
         $timezone = Location::timezone();
 
@@ -498,7 +503,73 @@ class DemoReset extends Command
             DB::table('package_items')->insert($packageItemRows);
         }
 
+        DB::table('rate_quotes')->insert($this->fabricateRateQuotes($packageId, $carrier, $service, (float) $projected['cost'], $shippedAt));
+
         return $shippedAt;
+    }
+
+    /**
+     * The quotes the packer chose from: the bought rate, selected, and one to
+     * three other services, so Rate Comparison has history to show.
+     *
+     * @param  array{code: string, name: string, weight: int, costMin: float, costMax: float}  $bought
+     * @return array<int, array<string, mixed>>
+     */
+    private function fabricateRateQuotes(int $packageId, string $carrier, array $bought, float $cost, CarbonInterface $shippedAt): array
+    {
+        $quotedAt = $shippedAt->copy()->subMinutes(mt_rand(1, 10))->format('Y-m-d H:i:s');
+
+        $alternatives = collect(self::CARRIER_CONFIG)
+            ->flatMap(fn (array $config, string $name): array => array_map(
+                fn (array $service): array => ['carrier' => $name] + $service,
+                $config['services'],
+            ))
+            ->reject(fn (array $service): bool => $service['carrier'] === $carrier && $service['code'] === $bought['code'])
+            ->shuffle()
+            ->take(mt_rand(1, 3));
+
+        return $alternatives
+            ->map(fn (array $service): array => [
+                'package_id' => $packageId,
+                'carrier' => $service['carrier'],
+                'service_code' => $service['code'],
+                'service_name' => $service['name'],
+                'quoted_price' => round(mt_rand((int) ($service['costMin'] * 100), (int) ($service['costMax'] * 100)) / 100, 2),
+                'selected' => false,
+                'created_at' => $quotedAt,
+            ])
+            ->prepend([
+                'package_id' => $packageId,
+                'carrier' => $carrier,
+                'service_code' => $bought['code'],
+                'service_name' => $bought['name'],
+                'quoted_price' => $cost,
+                'selected' => true,
+                'created_at' => $quotedAt,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Give each client and the warehouse's boxes sample fees where none are
+     * set, so Client Billing has something to bill. A fee someone entered is
+     * kept.
+     */
+    private function ensureBillingRates(): void
+    {
+        Client::query()->each(function (Client $client): void {
+            $client->update(array_filter([
+                'pick_fee_first_item' => $client->pick_fee_first_item === null ? 1.25 : null,
+                'pick_fee_additional_item' => $client->pick_fee_additional_item === null ? 0.35 : null,
+                'label_fee_per_package' => $client->label_fee_per_package === null ? 0.50 : null,
+            ], fn (?float $fee): bool => $fee !== null));
+        });
+
+        BoxSize::query()
+            ->whereNull('carrier_packaging')
+            ->whereNull('materials_cost')
+            ->update(['materials_cost' => 0.40]);
     }
 
     /**

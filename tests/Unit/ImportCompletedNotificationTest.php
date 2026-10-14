@@ -30,7 +30,7 @@ it('mentions how many additional errors were logged when there is more than one'
 
     expect($data['body'])
         ->toContain('Missing city')
-        ->toContain('+1 more, see shipment-import log');
+        ->toContain('+1 more; ask your administrator to check the import log');
 });
 
 it('omits error detail entirely when the import had none', function (): void {

@@ -148,7 +148,7 @@ class Pack extends Page
             // wasted work. Reopening it is a manager's call, on the Shipment.
             if ($this->shipment->status === ShipmentStatus::Cancelled) {
                 $this->notifyWarning(
-                    'Order Cancelled',
+                    'Shipment Cancelled',
                     "Shipment {$this->shipment->shipment_reference} is cancelled"
                     .($this->shipment->wasClosedBySource() ? ' at its source' : '')
                     .'. A manager can reopen it from the Shipment page.',
@@ -162,7 +162,7 @@ class Pack extends Page
             if ($this->shipment->isBlockedByPicking()) {
                 $this->notifyWarning(
                     'Picking Required',
-                    "Shipment {$this->shipment->shipment_reference} has not been picked. Complete picking before packing.",
+                    "Shipment {$this->shipment->shipment_reference} has not been picked yet.",
                 );
                 $this->shipment = null;
                 $this->redirect('/pack');
@@ -472,7 +472,7 @@ class Pack extends Page
             $this->dispatchPrint(PrintRequest::fromShipResponse($result->response, $package));
         }
 
-        $this->notifySuccess('Auto Shipped', $result->summaryMessage());
+        $this->notifySuccess('Label Bought (Auto Ship)', $result->summaryMessage());
         $this->resetForNextShipment();
     }
 
@@ -549,7 +549,7 @@ class Pack extends Page
         $candidates = app(ShipmentReferenceResolver::class)->matching($scan);
 
         if ($candidates->isEmpty()) {
-            $this->notifyError('Shipment Not Found', "No shipment has the order reference '{$scan}'.");
+            $this->notifyError('Shipment Not Found', "No shipment has the shipment reference '{$scan}'.");
 
             return;
         }
@@ -748,7 +748,7 @@ class Pack extends Page
      */
     public function cancelLastLabel(): void
     {
-        $package = $this->lastLabelPackage('No Label to Cancel');
+        $package = $this->lastLabelPackage('No Label to Void');
 
         if ($package === null) {
             return;
@@ -758,7 +758,7 @@ class Pack extends Page
 
         if ($result->success) {
             app(SessionLastLabel::class)->forget();
-            $this->notifySuccess('Label Cancelled', $result->message);
+            $this->notifySuccess('Label Voided', $result->message);
 
             if ($result->warning !== null) {
                 $this->notifyWarning('Sales channel not updated', $result->warning);

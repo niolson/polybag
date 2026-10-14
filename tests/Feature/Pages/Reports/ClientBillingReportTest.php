@@ -16,7 +16,7 @@ use Livewire\Livewire;
 /** A date inside the report's default filter window, which is last month. */
 function lastMonth(): Carbon
 {
-    return now()->subMonth()->startOfMonth()->addDay()->setTime(12, 0);
+    return now()->subMonthNoOverflow()->startOfMonth()->addDay()->setTime(12, 0);
 }
 
 function billingRow(ClientBillingReport $page, int $clientId): ?object
@@ -384,4 +384,32 @@ it('exports the unpriced package count in both CSVs', function (): void {
 
     expect($lines[0])->toContain('Unpriced Packages')
         ->and($lines[1])->toContain(',1,');
+});
+
+it('defaults to last month on the 31st', function (): void {
+    $this->travelTo(Carbon::parse('2026-10-31 12:00:00'));
+
+    expect(ClientBillingReport::defaultFrom())->toBe('2026-09-01')
+        ->and(ClientBillingReport::defaultUntil())->toBe('2026-09-30');
+});
+
+it('exports the same period the table shows when a date is cleared', function (): void {
+    $client = Client::factory()->create(['label_fee_per_package' => 0.50, 'is_default' => false]);
+    $shipment = Shipment::factory()->create(['client_id' => $client->id]);
+    Package::factory()->shipped()->create(['shipment_id' => $shipment->id, 'shipped_at' => now()->subMonths(4)]);
+
+    $page = Livewire::test(ClientBillingReport::class)
+        ->set('viewMode', 'summary')
+        ->filterTable('date_range', ['from' => null, 'until' => null]);
+
+    $report = $page->instance();
+    expect($report)->toBeInstanceOf(ClientBillingReport::class);
+
+    ob_start();
+    if ($report instanceof ClientBillingReport) {
+        $report->exportCsv()->sendContent();
+    }
+    $content = ob_get_clean();
+
+    expect($content)->toContain($client->name);
 });

@@ -1,15 +1,18 @@
 <?php
 
 use App\Console\Commands\DemoReset;
+use App\Enums\CarrierPackaging;
 use App\Enums\PackageStatus;
 use App\Enums\ShipmentStatus;
 use App\Enums\ShipmentStatusOrigin;
+use App\Models\BoxSize;
 use App\Models\ChannelAlias;
 use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\PackageLabel;
+use App\Models\RateQuote;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\ShippingMethodAlias;
@@ -329,4 +332,34 @@ it('fails when no active database data source exists', function (): void {
     $this->dataSource->update(['active' => false]);
 
     $this->artisan('demo:reset')->assertFailed();
+});
+
+it('fabricates rate quotes, own boxes and billing rates for the reports', function (): void {
+    $own = BoxSize::factory()->create(['materials_cost' => null]);
+    $priced = BoxSize::factory()->create(['materials_cost' => 0.90]);
+    BoxSize::factory()->inactive()->create();
+    BoxSize::factory()->carrierPackaging(CarrierPackaging::UspsFlatRateEnvelope)->create();
+    $client = Client::factory()->create(['pick_fee_first_item' => null, 'pick_fee_additional_item' => null, 'label_fee_per_package' => 0.75]);
+
+    insertImportShipment($this->dataSource, 'D00OLD0001', now('UTC')->subDays(10)->format('Y-m-d H:i:s'));
+    insertImportShipment($this->dataSource, 'D00OLD0002', now('UTC')->subDays(2)->format('Y-m-d H:i:s'));
+
+    $this->artisan('demo:reset', ['--days' => 30, '--open-hours' => 8])->assertSuccessful();
+
+    $shipped = Package::where('status', PackageStatus::Shipped)->get();
+    expect($shipped)->toHaveCount(2);
+
+    foreach ($shipped as $package) {
+        $quotes = RateQuote::where('package_id', $package->id)->get();
+
+        expect($quotes->count())->toBeGreaterThanOrEqual(2)
+            ->and($quotes->where('selected', true))->toHaveCount(1)
+            ->and((float) $quotes->firstWhere('selected', true)->quoted_price)->toBe((float) $package->cost)
+            ->and($package->box_size_id)->toBeIn([$own->id, $priced->id]);
+    }
+
+    expect((float) $client->fresh()->pick_fee_first_item)->toBe(1.25)
+        ->and((float) $client->fresh()->label_fee_per_package)->toBe(0.75)
+        ->and((float) $own->fresh()->materials_cost)->toBe(0.40)
+        ->and((float) $priced->fresh()->materials_cost)->toBe(0.90);
 });

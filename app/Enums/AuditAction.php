@@ -41,7 +41,7 @@ enum AuditAction: string implements HasLabel
         return match ($this) {
             self::PackageCreated => 'Package Created',
             self::PackageShipped => 'Package Shipped',
-            self::PackageCancelled => 'Package Cancelled',
+            self::PackageCancelled => 'Label Voided',
             self::LabelPrinted => 'Label Printed',
             self::ShipmentImported => 'Shipment Imported',
             self::ShipmentUpdated => 'Shipment Updated',

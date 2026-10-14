@@ -19,7 +19,7 @@ class BatchShipResults extends Page
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->role->isAtLeast(Role::Admin) ?? false;
+        return auth()->user()?->role->isAtLeast(Role::Manager) ?? false;
     }
 
     public function mount(int $labelBatchId): void

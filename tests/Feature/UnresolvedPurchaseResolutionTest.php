@@ -21,6 +21,7 @@ use App\Models\AuditLog;
 use App\Models\CarrierService;
 use App\Models\DataSource;
 use App\Models\Package;
+use App\Models\RateQuote;
 use App\Models\ShippingOffer;
 use App\Models\User;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
@@ -116,6 +117,16 @@ it('ships the package on the offer\'s facts and the entered tracking number', fu
         ->and($audit->new_values)->toBe(['outcome' => 'label_recorded', 'tracking_number' => '9200190380793700250067'])
         ->and($audit->metadata['offer'])->toBe($offer->public_id)
         ->and($audit->metadata['note'])->toBe('Found it in the USPS account');
+});
+
+it('marks the offer\'s quote selected once the label is recorded', function (): void {
+    $package = unshippedPackage();
+    $quote = RateQuote::factory()->create(['package_id' => $package->id, 'selected' => false]);
+    $offer = strandedDirectOffer($package, ['rate_quote_id' => $quote->id]);
+
+    resolver()->recordLabel($offer, '9200190380793700250067', User::factory()->manager()->create());
+
+    expect($quote->fresh()->selected)->toBeTrue();
 });
 
 it('ships a sale the source confirmed, keeping its reference as the label\'s', function (): void {
@@ -487,7 +498,7 @@ it('records a label already voided at the source without asking it, freeing the 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
         ->callAction(recordWhatWasFound(), data: ['outcome' => 'already_voided'])
         ->assertHasNoActionErrors()
-        ->assertNotified('Label voided');
+        ->assertNotified('Label Voided');
 
     expect($package->fresh()->status)->toBe(PackageStatus::Unshipped)
         ->and($package->labels()->sole()->tracking_number)->toBe('9200190380793700250067')

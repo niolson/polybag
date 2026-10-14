@@ -45,3 +45,9 @@ Verified: plausible. Line numbers are at `12592f33`; this area is unchanged on `
   DDP) appear nowhere in Client Billing, though the 3PL pays them.
 
 ## Comments
+
+- 2026-10-14 — Two items fixed: the default period uses `subMonthNoOverflow()`
+  (`ClientBillingReport::defaultFrom()`/`defaultUntil()`), and the CSV export applies the
+  table's bounds, so a cleared date is no bound. Tests in `ClientBillingReportTest`.
+  "Shipments by User counts Packages" is relabeled as Packages by `49`. The rest is
+  untouched.

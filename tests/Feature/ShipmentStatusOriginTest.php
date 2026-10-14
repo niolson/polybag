@@ -98,9 +98,9 @@ describe('a cancelled order', function (): void {
         $unattended = $workflow->autoShip($package, new PackageAutoShippingRequest(cleanupOnFailure: true));
 
         expect($attended->success)->toBeFalse()
-            ->and($attended->title)->toBe('Order Cancelled')
+            ->and($attended->title)->toBe('Shipment Cancelled')
             ->and($attended->leavePackageIntact)->toBeTrue()
-            ->and($unattended->title)->toBe('Order Cancelled')
+            ->and($unattended->title)->toBe('Shipment Cancelled')
             ->and(Package::find($package->id))->not->toBeNull();
     });
 
@@ -112,7 +112,7 @@ describe('a cancelled order', function (): void {
         Shipment::whereKey($shipment->id)->update(['status' => ShipmentStatus::Cancelled]);
 
         expect(app(PackageShippingWorkflow::class)->ship($package, new PackageShippingRequest(selectedRate: anyRate()))->title)
-            ->toBe('Order Cancelled');
+            ->toBe('Shipment Cancelled');
     });
 
     it('is skipped by batch ship', function (): void {
@@ -122,7 +122,7 @@ describe('a cancelled order', function (): void {
         $result = (new BatchLabelService)->validateShipmentsForBatch(collect([$shipment]));
 
         expect($result->eligible)->toBeEmpty()
-            ->and($result->ineligible->first()['reason'])->toBe('Order cancelled');
+            ->and($result->ineligible->first()['reason'])->toBe('Shipment cancelled');
     });
 
     it('turns the Ship page away before quoting', function (): void {
@@ -136,7 +136,7 @@ describe('a cancelled order', function (): void {
         app()->instance(PackageShippingWorkflow::class, $workflow);
 
         Livewire::test(Ship::class, ['package_id' => $package->id])
-            ->assertNotified('Order Cancelled')
+            ->assertNotified('Shipment Cancelled')
             ->assertRedirect();
     });
 
@@ -145,7 +145,7 @@ describe('a cancelled order', function (): void {
         $shipment = Shipment::factory()->closedBySource()->create();
 
         Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
-            ->assertNotified('Order Cancelled')
+            ->assertNotified('Shipment Cancelled')
             ->assertSet('shipment', null)
             ->assertRedirect('/pack');
     })->with([Role::User, Role::Manager]);

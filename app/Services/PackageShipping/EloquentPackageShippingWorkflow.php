@@ -237,7 +237,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         }
 
         if ($package->shipment?->isBlockedByPicking()) {
-            return PackageShippingResult::notReady('This shipment must be picked before it can be shipped.');
+            return PackageShippingResult::notReady("Shipment {$package->shipment->shipment_reference} has not been picked yet.", 'Picking Required');
         }
 
         try {
@@ -417,11 +417,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         // with a different rate selected, would otherwise pay for a second
         // label on a package that already has one.
         if (($stored = Package::query()->find($package->id)) && $stored->status === PackageStatus::Shipped) {
-            return PackageShippingResult::stateConflict(
-                'This package already has a label'
-                .(filled($stored->tracking_number) ? " ({$stored->tracking_number})" : '')
-                .'. Reprint it, or void it first, from the Packages page.'
-            );
+            return PackageShippingResult::alreadyShipped($stored->tracking_number);
         }
 
         // Nothing is bought for a shipment with no shipping method, whatever a
@@ -505,13 +501,6 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 'Service Inactive',
                 "{$reason} Choose another rate, or reactivate it under Carriers or Carrier Services.",
             );
-        }
-
-        // Marked through the offer, which points at the row the quote log
-        // wrote for exactly this rate. Nothing to mark for a blind purchase,
-        // which logged no quote (`postage-source-split/17`).
-        if ($offer !== null) {
-            $this->rateQuoteLogger->markSelected($offer);
         }
 
         $adapter = null;
@@ -683,7 +672,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
             return PackageShippingResult::failed(
                 'Carrier Timeout',
-                "The {$seller} API is not responding. Please try again in a few moments.",
+                "{$seller} is not responding. Try again in a moment.",
             );
         } catch (RequestException $e) {
             $seller = $this->sellerName($request);
@@ -696,7 +685,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
             return PackageShippingResult::failed(
                 'Carrier Error',
-                "Unable to connect to {$seller}. Please check your connection and try again.",
+                "{$seller} could not be reached. Try again in a moment.",
             );
         } catch (QueryException $e) {
             // Before the carrier sold anything: everything after the sale is
@@ -769,13 +758,13 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             return $result;
         } catch (RequestTimeOutException|FatalRequestException|ServerException) {
             logger()->error('AutoShip timeout', ['package_id' => $package->id]);
-            $result = PackageShippingResult::failed('Carrier Timeout', 'The carrier API is not responding. Please try again in a few moments.');
+            $result = PackageShippingResult::failed('Carrier Timeout', 'The carrier is not responding. Try again in a moment.');
             $this->cleanupPackage($package, $request, $result);
 
             return $result;
         } catch (RequestException $e) {
             logger()->error('AutoShip carrier error', ['package_id' => $package->id, 'error' => $e->getMessage()]);
-            $result = PackageShippingResult::failed('Carrier Error', 'Unable to connect to the carrier. Please try again.');
+            $result = PackageShippingResult::failed('Carrier Error', 'The carrier could not be reached. Try again in a moment.');
             $this->cleanupPackage($package, $request, $result);
 
             return $result;
@@ -921,7 +910,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         ]);
 
         return PackageShippingResult::offerUnavailable(
-            'Offer No Longer Available',
+            'Rate Unavailable',
             $exclusion['reason'] ?? "{$requested->sourceLabel} is not offering this option for this package. Get rates again and choose from what comes back.",
         );
     }
@@ -1188,6 +1177,15 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             DB::transaction(function () use ($package, $offer, $response, $request, $carrierServiceId, $customsTerms): void {
                 $this->recordPurchaseAgainstOffer($offer, $response->trackingNumber);
                 $package->markShipped($response, $response->postageSource, $request->userId, $carrierServiceId, customsTerms: $customsTerms);
+
+                // Only a recorded purchase marks its quote selected; a refusal,
+                // decline or lost claim leaves it as one of the rates offered.
+                // Marked through the offer, which points at the row the quote
+                // log wrote for exactly this rate. Nothing to mark for a blind
+                // purchase, which logged no quote (`postage-source-split/17`).
+                if ($offer !== null) {
+                    $this->rateQuoteLogger->markSelected($offer);
+                }
             });
 
             return null;

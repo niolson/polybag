@@ -446,7 +446,7 @@ it('refuses a stale Shopify Media Mail selection at purchase once the package no
     ));
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Offer No Longer Available')
+        ->and($result->title)->toBe('Rate Unavailable')
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 

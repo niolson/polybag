@@ -23,7 +23,10 @@ use App\Services\BatchLabelService;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\FakeCarrierAdapter;
 use App\Services\SettingsService;
+use Illuminate\Bus\Events\BatchDispatched;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 
 beforeEach(function (): void {
     $this->service = new BatchLabelService;
@@ -88,7 +91,7 @@ it('marks shipments with existing unshipped packages as ineligible', function ()
     $result = $this->service->validateShipmentsForBatch(collect([$shipment]));
 
     expect($result->ineligible)->toHaveCount(1)
-        ->and($result->ineligible->first()['reason'])->toBe('Has existing unshipped packages');
+        ->and($result->ineligible->first()['reason'])->toBe('Has a package draft in progress');
 });
 
 it('marks partly shipped shipments as ineligible', function (): void {
@@ -161,7 +164,7 @@ it('marks unpicked shipments as ineligible when picking is required before shipp
     $result = $this->service->validateShipmentsForBatch(collect([$shipment]));
 
     expect($result->ineligible)->toHaveCount(1)
-        ->and($result->ineligible->first()['reason'])->toBe('Not picked');
+        ->and($result->ineligible->first()['reason'])->toBe('Not picked yet');
 });
 
 it('marks picked shipments as eligible when picking is required before shipping', function (): void {
@@ -438,4 +441,20 @@ it('hands the report printer flag to every label job in the batch', function ():
     $this->service->createBatch(collect([$shipment]), $boxSize, $user, 'pdf', null, hasReportPrinter: true);
 
     Bus::assertBatched(fn ($batch): bool => $batch->jobs->every(fn (GenerateLabelJob $job): bool => $job->hasReportPrinter));
+});
+
+it('queues the batch only after its rows commit', function (): void {
+    $levels = [];
+    Event::listen(BatchDispatched::class, function () use (&$levels): void {
+        $levels[] = DB::transactionLevel();
+    });
+    $baseline = DB::transactionLevel();
+
+    $shipment = Shipment::factory()->create();
+    ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'product_id' => Product::factory()->create(['weight' => 1.0])->id]);
+
+    $this->service->createBatch(collect([$shipment->load('shipmentItems.product')]), BoxSize::factory()->create(), User::factory()->admin()->create(), 'pdf', null);
+
+    expect($levels)->not->toBeEmpty()
+        ->and(collect($levels)->every(fn (int $level): bool => $level === $baseline))->toBeTrue();
 });

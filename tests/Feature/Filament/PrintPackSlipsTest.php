@@ -205,7 +205,7 @@ it('reports the renderer being unavailable without dispatching a print', functio
     Livewire::test(PrintPackSlips::class)
         ->callAction('printNext')
         ->assertNotDispatched('print-pack-slips')
-        ->assertNotified('PDF renderer unavailable');
+        ->assertNotified('PDF Not Created');
 });
 
 it('says so when there is nothing to print', function (): void {

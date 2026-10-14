@@ -15,14 +15,18 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
     )
     ->withSchedule(function (Schedule $schedule): void {
-        // Rebuild today's summary stats every 15 minutes during business hours
+        // Rebuild today's summary stats every 15 minutes. All day, because the
+        // scheduler runs in UTC and a business-hours window would stop in the
+        // middle of a US afternoon. Purchases and voids also rebuild their own
+        // day as they happen (RebuildShippingStatsForShipDate).
         $schedule->command('stats:aggregate --today')
             ->everyFifteenMinutes()
-            ->between('6:00', '22:00')
             ->withoutOverlapping();
 
-        // Full rebuild of yesterday + today at midnight (includes histogram refresh)
-        $schedule->command('stats:aggregate')
+        // Nightly rebuild of the last 35 days (includes histogram refresh), to
+        // catch any change to an older day that no event rebuilt, such as a
+        // Package deleted after shipping.
+        $schedule->command('stats:aggregate --days=35')
             ->dailyAt('00:05')
             ->withoutOverlapping();
 

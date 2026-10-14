@@ -7,6 +7,7 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\PackageStatus;
 use App\Enums\ServiceCapability;
 use App\Filament\Pages\Ship;
+use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\Package;
@@ -14,6 +15,7 @@ use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
+use App\Services\PackageLabels\SessionLastLabel;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
@@ -143,4 +145,47 @@ it('prints the stored label again from the shipped page', function (): void {
         ->assertDispatched('print-label');
 
     expect($purchases)->toBe(1);
+});
+
+it('points the VOID and REPRINT commands at the label just bought here, not an earlier one', function (): void {
+    $purchases = 0;
+    registerCountingUspsAdapter($purchases);
+
+    // Auto-shipped at Pack earlier this session, and already on the truck.
+    $earlier = Package::factory()->shipped()->create(['carrier' => 'USPS', 'tracking_number' => '9400100000000000000111']);
+    app(SessionLastLabel::class)->remember($earlier);
+
+    $package = uspsPackage();
+    Livewire::test(Ship::class, ['package_id' => $package->id])
+        ->set('selectedRateIndex', 0)
+        ->call('ship')
+        ->assertDispatched('print-label');
+
+    $last = app(SessionLastLabel::class)->package();
+
+    expect($last)->toBeInstanceOf(Package::class)
+        ->and($last instanceof Package ? $last->id : null)->toBe($package->id);
+});
+
+it('names the box scanned at Pack', function (): void {
+    $package = uspsPackage();
+    $package->update(['box_size_id' => BoxSize::factory()->create(['label' => '10x8x6'])->id]);
+
+    Livewire::test(Ship::class, ['package_id' => $package->id])
+        ->assertSeeHtml('<dd class="mt-1">10x8x6</dd>')
+        ->assertDontSeeHtml('<dd class="mt-1">Custom</dd>');
+});
+
+it('offers Get Rates Again until the label is bought', function (): void {
+    $purchases = 0;
+    registerCountingUspsAdapter($purchases);
+    $package = uspsPackage();
+
+    Livewire::test(Ship::class, ['package_id' => $package->id])
+        ->assertActionVisible('getRatesAgain')
+        ->callAction('getRatesAgain')
+        ->assertSet('rateOptions', fn (array $rates): bool => count($rates) === 2)
+        ->set('selectedRateIndex', 0)
+        ->call('ship')
+        ->assertActionHidden('getRatesAgain');
 });

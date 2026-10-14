@@ -647,7 +647,7 @@ it('cancels a FedEx shipment', function (): void {
     $response = $this->adapter->cancelShipment('794644790138', $package);
 
     expect($response->success)->toBeTrue()
-        ->and($response->message)->toBe('FedEx shipment cancelled.');
+        ->and($response->message)->toBe('FedEx voided the label.');
 
     Saloon::assertSent(CancelShipment::class);
 });

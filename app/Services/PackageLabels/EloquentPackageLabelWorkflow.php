@@ -45,11 +45,11 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
     private function void(Package $package, User $user): LabelVoidResult
     {
         if ($package->status !== PackageStatus::Shipped) {
-            return LabelVoidResult::failure('Package Not Found', 'The package could not be found or is not shipped.');
+            return LabelVoidResult::failure('Not Shipped', 'This package has no active label to void. Refresh the page.');
         }
 
         if (! $package->tracking_number || ! $package->carrier) {
-            return LabelVoidResult::failure('Cannot Cancel', 'Package is missing tracking information.');
+            return LabelVoidResult::failure('Cannot Void', 'This package has no tracking number to void.');
         }
 
         try {
@@ -60,14 +60,14 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
             $response = $this->dispatcher->voidLabel($package);
 
             if (! $response->success) {
-                return LabelVoidResult::failure('Void failed', $response->message ?? 'Failed to cancel the label.');
+                return LabelVoidResult::failure('Void Failed', $response->message ?? 'The label was not voided.');
             }
         } catch (\RuntimeException $e) {
             return LabelVoidResult::failure('Package State Changed', $e->getMessage());
         } catch (RequestException) {
-            return LabelVoidResult::failure('Carrier Error', 'Unable to connect to carrier. Please try again.');
+            return LabelVoidResult::failure('Void Failed', 'Could not reach whoever sold the label. Try again in a moment.');
         } catch (\Exception) {
-            return LabelVoidResult::failure('Cancel Error', 'An unexpected error occurred.');
+            return LabelVoidResult::failure('Void Failed', 'Something went wrong, and the label may still be live. Try again, and check the carrier\'s site if it fails again.');
         }
 
         try {
@@ -101,7 +101,7 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
         }
 
         if ($package->status !== PackageStatus::Shipped) {
-            return LabelVoidResult::failure('Package Not Found', 'The package could not be found or is not shipped.');
+            return LabelVoidResult::failure('Not Shipped', 'This package has no active label to void. Refresh the page.');
         }
 
         try {
@@ -109,7 +109,7 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
         } catch (\PDOException $e) {
             logger()->error('Could not record a void', ['package_id' => $package->id, 'error' => $e->getMessage()]);
 
-            return LabelVoidResult::failure('Cancel Error', 'An unexpected error occurred. Please try again.');
+            return LabelVoidResult::failure('Void Failed', 'The void could not be recorded. Try again.');
         } catch (\RuntimeException $e) {
             return LabelVoidResult::failure('Package State Changed', $e->getMessage());
         }

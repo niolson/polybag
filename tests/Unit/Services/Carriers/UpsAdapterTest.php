@@ -2169,7 +2169,7 @@ it('voids a UPS shipment only when the summary status code is 1', function (): v
     $response = $this->adapter->cancelShipment('1Z999AA10123456784', $package);
 
     expect($response->success)->toBeTrue()
-        ->and($response->message)->toBe('Voided');
+        ->and($response->message)->toBe('UPS voided the label.');
 });
 
 it('voids a UPS shipment whose summary status code is the integer 1', function (): void {

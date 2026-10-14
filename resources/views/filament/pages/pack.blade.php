@@ -514,7 +514,7 @@
                             x-ref="scanInput"
                             type="text"
                             x-model="input"
-                            x-bind:placeholder="hasShipment ? 'Scan product barcode or box code' : 'Scan pack slip or enter order reference'"
+                            x-bind:placeholder="hasShipment ? 'Scan product barcode or box code' : 'Scan pack slip or enter shipment reference'"
                             x-bind:disabled="isShipping"
                             autofocus
                         />
@@ -653,7 +653,7 @@
                 x-on:click="clearPacking()"
                 x-bind:disabled="isShipping || !hasPackedItems()"
             >
-                Clear packing
+                Clear Shipment
             </x-filament::button>
         </x-slot>
         <x-slot name="description">
@@ -827,7 +827,7 @@
             </div>
             <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Ready to pack?</h3>
             <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                Scan a pack slip or enter an order reference above to get started.
+                Scan a pack slip or enter a shipment reference above to get started.
             </p>
         </div>
     </div>

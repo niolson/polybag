@@ -262,7 +262,7 @@ class FakeCarrierAdapter implements CreatesCarrierManifest, DirectCarrierAdapter
 
     public function cancelShipment(string $trackingNumber, Package $package): CancelResponse
     {
-        return CancelResponse::success("Fake {$this->carrierName} shipment {$trackingNumber} cancelled");
+        return CancelResponse::success("Sample {$this->carrierName} label {$trackingNumber} voided.");
     }
 
     public function supportsTracking(): bool

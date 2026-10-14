@@ -37,7 +37,9 @@ class LabelBatchResource extends Resource
 
     public static function canAccess(): bool
     {
-        return (auth()->user()?->role->isAtLeast(Role::Admin) ?? false)
+        // Manager, as the Batch Ship action is: whoever starts a batch must be
+        // able to open it to print the labels and read the failures.
+        return (auth()->user()?->role->isAtLeast(Role::Manager) ?? false)
             && app(SettingsService::class)->get('batch_shipping_enabled', true);
     }
 

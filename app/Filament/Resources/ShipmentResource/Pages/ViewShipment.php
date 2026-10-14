@@ -9,6 +9,7 @@ use App\Enums\ShipmentStatus;
 use App\Enums\ValidationTrigger;
 use App\Filament\Resources\ShipmentResource;
 use App\Models\Shipment;
+use App\Services\GotenbergService;
 use App\Services\PackSlips\PackSlipRenderer;
 use Filament\Actions;
 use Filament\Notifications\Notification;
@@ -42,20 +43,30 @@ class ViewShipment extends ViewRecord
                 // Each validation is a billed call to the validator.
                 ->rateLimit(5)
                 ->action(function (): void {
-                    $this->record->validateAddress(ValidationTrigger::Manual);
-                    $this->record->refresh();
+                    $shipment = $this->shipment();
+                    $shipment->validateAddress(ValidationTrigger::Manual);
+                    $shipment->refresh();
 
-                    if ($this->record->deliverability === Deliverability::NotChecked) {
+                    $deliverability = $shipment->deliverability;
+
+                    if ($deliverability === Deliverability::NotChecked) {
                         Notification::make()
-                            ->title('Address not checked')
-                            ->body('No address validator available for this country.')
+                            ->title('Address Not Checked')
+                            ->body('No address validator covers this country, so this address was not checked.')
                             ->info()
                             ->send();
                     } else {
+                        // Titled by the result, not by the act of checking: a
+                        // green "validated" over an undeliverable address misleads.
                         Notification::make()
-                            ->title('Address validated')
-                            ->body($this->record->validation_message ?? 'Validation complete')
-                            ->success()
+                            ->title('Address Checked: '.$deliverability->getLabel())
+                            ->body($shipment->validation_message)
+                            ->status(match ($deliverability->getColor()) {
+                                'success' => 'success',
+                                'danger' => 'danger',
+                                'warning' => 'warning',
+                                default => 'info',
+                            })
                             ->send();
                     }
                 }),
@@ -83,10 +94,12 @@ class ViewShipment extends ViewRecord
                     try {
                         $jobs = app(PackSlipRenderer::class)->printJobs(PackSlipRun::forShipment($this->shipment()->id), auth()->user());
                     } catch (Throwable $e) {
+                        report($e);
+
                         Notification::make()
                             ->danger()
-                            ->title('PDF renderer unavailable')
-                            ->body($e->getMessage())
+                            ->title('PDF Not Created')
+                            ->body(GotenbergService::UNAVAILABLE)
                             ->send();
 
                         return;

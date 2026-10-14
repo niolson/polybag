@@ -14,7 +14,8 @@ class AggregateShippingStats extends Command
     protected $signature = 'stats:aggregate
         {--from= : Start date (Y-m-d)}
         {--to= : End date (Y-m-d)}
-        {--today : Rebuild today only}';
+        {--today : Rebuild today only}
+        {--days= : Rebuild the last N days, ending today}';
 
     protected $description = 'Aggregate daily shipping stats from the packages table';
 
@@ -26,17 +27,20 @@ class AggregateShippingStats extends Command
 
         $this->info("Aggregating stats from {$from->toDateString()} to {$to->toDateString()}...");
 
-        // Delete existing rows for the date range, then re-aggregate
-        DailyShippingStat::query()
-            ->whereBetween('date', [$from->toDateString(), $to->toDateString()])
-            ->delete();
+        // Delete existing rows for the date range, then re-aggregate. One
+        // transaction, so that two rebuilds of the same day cannot both insert.
+        $inserted = DB::transaction(function () use ($from, $to): int {
+            DailyShippingStat::query()
+                ->whereBetween('date', [$from->toDateString(), $to->toDateString()])
+                ->delete();
 
-        $inserted = $this->aggregateRange($from, $to);
+            return $this->aggregateRange($from, $to);
+        });
 
         InvalidateDashboardCache::invalidateAll();
 
-        // Refresh histograms on the full nightly rebuild (not --today)
-        if (! $this->option('today') && DB::getDriverName() === 'mysql' && ! str_contains(DB::getPdo()->getAttribute(\PDO::ATTR_SERVER_VERSION), 'MariaDB')) {
+        // Refresh histograms on the nightly rebuild only, not on a single day
+        if (! $this->option('today') && ! $this->option('from') && ! $this->option('to') && DB::getDriverName() === 'mysql' && ! str_contains(DB::getPdo()->getAttribute(\PDO::ATTR_SERVER_VERSION), 'MariaDB')) {
             DB::statement('ANALYZE TABLE packages UPDATE HISTOGRAM ON status');
             DB::statement('ANALYZE TABLE shipments UPDATE HISTOGRAM ON status');
             $this->info('Updated column histograms.');
@@ -59,6 +63,10 @@ class AggregateShippingStats extends Command
 
         if ($this->option('today')) {
             return [$localToday, $localToday];
+        }
+
+        if ($this->option('days')) {
+            return [$localToday->copy()->subDays(max(1, (int) $this->option('days')) - 1), $localToday];
         }
 
         if ($this->option('from') || $this->option('to')) {

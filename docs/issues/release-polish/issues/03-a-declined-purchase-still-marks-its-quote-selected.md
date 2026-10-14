@@ -133,3 +133,10 @@ Whether a voided Label's quote should stay `selected` is a product call. If the 
 through the active Label, it is right whichever way that call goes.
 
 ## Comments
+
+- 2026-10-14 — Half done. A quote is now marked selected only when its Label is recorded:
+  in `recordBoughtLabel()`'s transaction, and in `UnresolvedPurchaseResolver::record()`
+  for a purchase settled by hand (found in code review; without it a resolved purchase
+  dropped out of Rate Comparison). Tests: `QuoteSelectedOnPurchaseTest`, and a case in
+  `UnresolvedPurchaseResolutionTest`. Not done: Rate Comparison reading the selected quote
+  through the active Label after a void and re-buy.

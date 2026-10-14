@@ -429,8 +429,13 @@ class PackageResource extends Resource
                     ->label('Location')
                     ->preload()
                     ->visible(fn () => app(SettingsService::class)->get('multi_location_enabled', false)),
+                // A void returns the Package to unshipped, so no row is ever
+                // Void; the "Last void" filter finds voided Labels instead.
                 Tables\Filters\SelectFilter::make('status')
-                    ->options(PackageStatus::class),
+                    ->options([
+                        PackageStatus::Unshipped->value => PackageStatus::Unshipped->getLabel(),
+                        PackageStatus::Shipped->value => PackageStatus::Shipped->getLabel(),
+                    ]),
                 // `postage-source-split/16`: packages that cannot be bought for
                 // until a person settles an earlier purchase.
                 Tables\Filters\Filter::make('unresolved_purchase')
@@ -627,7 +632,7 @@ class PackageResource extends Resource
                         ->requiresConfirmation()
                         ->authorize('voidLabel')
                         ->modalHeading('Void Label')
-                        ->modalDescription('This will cancel the label with the carrier. The package will be kept with its dimensions so it can be re-shipped.')
+                        ->modalDescription('Voids the label with whoever sold it: the carrier, or Amazon. The package keeps its dimensions so it can be shipped again.')
                         ->visible(fn (Package $record): bool => $record->status === PackageStatus::Shipped
                             && $record->tracking_number
                             && ($record->carrier || $record->isShopifyShipped()))

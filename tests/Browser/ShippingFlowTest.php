@@ -60,7 +60,7 @@ it('displays fake rates and completes shipment', function (): void {
     $page->assertSee('Select Shipping Rate')
         ->assertSee('Ground Advantage');
 
-    $page->click('.fi-ac-btn-action:has-text("Ship")')
+    $page->click('.fi-ac-btn-action:has-text("Buy & Print Label")')
         ->waitForEvent('load');
 
     $page->assertPathIs('/pack');

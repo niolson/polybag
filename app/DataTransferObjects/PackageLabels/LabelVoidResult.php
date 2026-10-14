@@ -22,7 +22,7 @@ final readonly class LabelVoidResult
     {
         return new self(
             success: true,
-            title: 'Label voided',
+            title: 'Label Voided',
             message: $message ?? 'The label has been voided.',
             warning: $warning,
             voidedAtSource: true,
@@ -37,7 +37,7 @@ final readonly class LabelVoidResult
     {
         return new self(
             success: false,
-            title: 'Voided, not recorded',
+            title: 'Voided, Not Recorded',
             message: $message,
             voidedAtSource: true,
         );

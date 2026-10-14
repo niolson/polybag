@@ -884,20 +884,8 @@ parameters:
 			path: app/Filament/Resources/ShipmentResource/Pages/EditShipment.php
 
 		-
-			message: '#^Cannot access property \$deliverability on Illuminate\\Database\\Eloquent\\Model\|int\|string\.$#'
-			identifier: property.nonObject
-			count: 1
-			path: app/Filament/Resources/ShipmentResource/Pages/ViewShipment.php
-
-		-
 			message: '#^Cannot access property \$id on Illuminate\\Database\\Eloquent\\Model\|int\|string\.$#'
 			identifier: property.nonObject
-			count: 1
-			path: app/Filament/Resources/ShipmentResource/Pages/ViewShipment.php
-
-		-
-			message: '#^Cannot call method validateAddress\(\) on Illuminate\\Database\\Eloquent\\Model\|int\|string\.$#'
-			identifier: method.nonObject
 			count: 1
 			path: app/Filament/Resources/ShipmentResource/Pages/ViewShipment.php
 

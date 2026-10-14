@@ -132,3 +132,26 @@ it('generateManifest suppresses printing when suppress_printing setting is true'
         ->assertNotDispatched('print-report')
         ->assertNotified();
 });
+
+it('puts labels still dated today on a form for today once the cutoff has passed', function (): void {
+    $account = createUspsAccount();
+    $today = now('America/New_York')->toDateString();
+
+    Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'carrier_account_id' => $account->id,
+        'tracking_number' => '9400111899223456789012',
+        'ship_date' => $today,
+    ]);
+
+    $this->travelTo(now('America/New_York')->setTime(20, 30));
+    fakeUspsManifestResponse($account->id);
+
+    Livewire::test(EndOfDay::class)
+        ->call('generateManifest', Carrier::where('name', Carrier::USPS)->value('id'))
+        ->assertNotified('Manifest Created');
+
+    Saloon::assertSent(fn ($request): bool => $request instanceof ScanForm
+        && $request->body()->all()['mailingDate'] === $today);
+    expect(Package::first()->manifest_id)->not->toBeNull();
+});

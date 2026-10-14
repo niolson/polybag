@@ -1633,7 +1633,7 @@ it('refuses to buy a second label for a package that already has one', function 
     $second = $workflow->ship($stale, new PackageShippingRequest(selectedRate: $rates->last()));
 
     expect($second->success)->toBeFalse()
-        ->and($second->title)->toBe('Package State Changed')
+        ->and($second->title)->toBe('Already Shipped')
         ->and($second->message)->toContain('already has a label')
         ->and($second->message)->toContain('D10012345678901');
 

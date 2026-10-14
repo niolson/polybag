@@ -251,7 +251,7 @@ it('cancels a domestic label', function (): void {
     $response = $this->adapter->cancelShipment('9400111899223456789012', $package);
 
     expect($response->success)->toBeTrue()
-        ->and($response->message)->toBe('Label voided successfully.');
+        ->and($response->message)->toBe('USPS voided the label.');
 
     Saloon::assertSent(CancelLabel::class);
 });
@@ -272,7 +272,7 @@ it('cancels an international label', function (): void {
     $response = $this->adapter->cancelShipment('LZ999999999US', $package);
 
     expect($response->success)->toBeTrue()
-        ->and($response->message)->toBe('Label voided successfully.');
+        ->and($response->message)->toBe('USPS voided the label.');
 
     Saloon::assertSent(CancelInternationalLabel::class);
 });

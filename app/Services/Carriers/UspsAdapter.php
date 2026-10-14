@@ -1682,7 +1682,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
             $response = $connector->send($apiRequest);
 
             if (! $response->successful()) {
-                return CancelResponse::failure('USPS returned status '.$response->status());
+                return CancelResponse::failure('USPS did not void the label (error '.$response->status().'). Try again, or void it on the USPS site.');
             }
 
             return $this->readCancelReply($response, $trackingNumber);
@@ -1707,7 +1707,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         $status = data_get($payload, 'status');
 
         if ($status === 'CANCELED') {
-            return CancelResponse::success('Label voided successfully.');
+            return CancelResponse::success('USPS voided the label.');
         }
 
         if ($status === 'DISPUTED') {
@@ -1726,7 +1726,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         }
 
         if (is_string($status) && $status !== '') {
-            return CancelResponse::failure("USPS did not cancel the label: it answered {$status}.");
+            return CancelResponse::failure("USPS did not void the label ({$status}).");
         }
 
         Log::channel('usps-validation')->error('USPS cancelShipment reply could not be read', [

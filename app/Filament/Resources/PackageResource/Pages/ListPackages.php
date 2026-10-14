@@ -67,7 +67,6 @@ class ListPackages extends ListRecords
                     'all' => 'All',
                     PackageStatus::Unshipped->value => 'Unshipped',
                     PackageStatus::Shipped->value => 'Shipped',
-                    PackageStatus::Void->value => 'Void',
                 ],
             ],
             [

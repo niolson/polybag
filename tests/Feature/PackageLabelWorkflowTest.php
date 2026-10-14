@@ -138,7 +138,7 @@ it('returns a failure result when carrier label voiding fails', function (): voi
     $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Void failed')
+        ->and($result->title)->toBe('Void Failed')
         ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
 });
 
@@ -152,7 +152,7 @@ it('refuses to void a package that is not shipped', function (): void {
     $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Package Not Found');
+        ->and($result->title)->toBe('Not Shipped');
 });
 
 it('refuses to void a shipped package missing tracking information', function (): void {
@@ -164,7 +164,7 @@ it('refuses to void a shipped package missing tracking information', function ()
     $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Cannot Cancel');
+        ->and($result->title)->toBe('Cannot Void');
 });
 
 it('reports a state change when voiding hits a runtime exception', function (): void {
@@ -203,7 +203,7 @@ it('reports a carrier error when voiding hits a request exception', function ():
     $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Carrier Error');
+        ->and($result->title)->toBe('Void Failed');
 });
 
 it('reports a generic error when voiding hits an unexpected exception', function (): void {
@@ -222,7 +222,7 @@ it('reports a generic error when voiding hits an unexpected exception', function
     $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Cancel Error');
+        ->and($result->title)->toBe('Void Failed');
 });
 
 it('refuses label reprint when the package is not shipped or has no label data', function (): void {
@@ -396,7 +396,7 @@ it('says a label was voided but not recorded, and lets a manager record it witho
     $voided = app(PackageLabelWorkflow::class)->voidLabel($package, $manager);
 
     expect($voided->success)->toBeFalse()
-        ->and($voided->title)->toBe('Voided, not recorded')
+        ->and($voided->title)->toBe('Voided, Not Recorded')
         ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
 
     $recorded = app(PackageLabelWorkflow::class)->recordVoid($package->fresh(), $manager);

@@ -24,7 +24,7 @@
             @if ($label)
                 <span wire:loading.remove wire:target="{{ $loadingTarget }}">{{ $label }}</span>
             @else
-                <span wire:loading.remove wire:target="{{ $loadingTarget }}" x-text="{{ $enabledVariable }} ? 'Buy & print label' : 'Choose shipping service'"></span>
+                <span wire:loading.remove wire:target="{{ $loadingTarget }}" x-text="{{ $enabledVariable }} ? 'Buy & Print Label' : 'Choose a Rate'"></span>
             @endif
             <span wire:loading wire:target="{{ $loadingTarget }}">Working...</span>
         @else
@@ -33,7 +33,7 @@
             @if ($label)
                 <span wire:loading.remove>{{ $label }}</span>
             @else
-                <span wire:loading.remove x-text="{{ $enabledVariable }} ? 'Buy & print label' : 'Choose shipping service'"></span>
+                <span wire:loading.remove x-text="{{ $enabledVariable }} ? 'Buy & Print Label' : 'Choose a Rate'"></span>
             @endif
             <span wire:loading>Working...</span>
         @endif
@@ -50,7 +50,7 @@
         @if ($label)
             <span>{{ $label }}</span>
         @else
-            <span x-text="{{ $enabledVariable }} ? 'Buy & print label' : 'Choose shipping service'"></span>
+            <span x-text="{{ $enabledVariable }} ? 'Buy & Print Label' : 'Choose a Rate'"></span>
         @endif
     @endif
 </button>

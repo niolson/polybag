@@ -1,12 +1,16 @@
 <?php
 
+use App\Enums\VoidReason;
+use App\Jobs\RebuildDailyShippingStats;
 use App\Models\DailyShippingStat;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\Shipment;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
 
@@ -145,4 +149,52 @@ it('keeps an empty service group apart from a null one when backfilling', functi
     DailyShippingStat::each(function (DailyShippingStat $stat): void {
         expect($stat->costed_package_count)->toBeLessThanOrEqual($stat->package_count);
     });
+});
+
+it('takes a label voided after its ship day out of that day\'s rollup', function (): void {
+    $shipDay = Carbon::today(Location::timezone())->subDays(3)->toDateString();
+    $package = Package::factory()->shipped()->create(['carrier' => 'USPS', 'service' => 'Ground', 'cost' => 10.00]);
+    DB::table('packages')->update(['ship_date' => $shipDay]);
+    DB::table('package_labels')->update(['ship_date' => $shipDay]);
+
+    $this->artisan('stats:aggregate', ['--from' => $shipDay, '--to' => $shipDay])->assertSuccessful();
+    expect((int) DailyShippingStat::query()->where('date', $shipDay)->sum('package_count'))->toBe(1);
+
+    $package->refresh()->clearShipping(VoidReason::Operator);
+
+    expect((int) DailyShippingStat::query()->where('date', $shipDay)->sum('package_count'))->toBe(0);
+});
+
+it('rebuilds the last N days with --days', function (): void {
+    $shipDay = Carbon::today(Location::timezone())->subDays(20)->toDateString();
+    Package::factory()->shipped()->create(['carrier' => 'USPS', 'service' => 'Ground', 'cost' => 10.00]);
+    DB::table('packages')->update(['ship_date' => $shipDay]);
+
+    $this->artisan('stats:aggregate', ['--days' => 35])->assertSuccessful();
+
+    expect((int) DailyShippingStat::query()->where('date', $shipDay)->sum('package_count'))->toBe(1);
+});
+
+it('refreshes today\'s rollup in the US evening, not only during UTC business hours', function (): void {
+    // 23:00 UTC is 7 PM Eastern and 4 PM Pacific.
+    $this->travelTo(Carbon::parse('2026-10-14 23:00:00', 'UTC'));
+    // The schedule is registered when Artisan starts.
+    $this->artisan('schedule:list')->assertSuccessful();
+
+    $refresh = collect(app(Schedule::class)->events())
+        ->first(fn ($event): bool => str_contains((string) $event->command, 'stats:aggregate --today'));
+
+    expect($refresh)->not->toBeNull()
+        ->and($refresh->isDue(app()))->toBeTrue()
+        ->and($refresh->filtersPass(app()))->toBeTrue();
+});
+
+it('queues the rebuild on the low queue, behind batch labels', function (): void {
+    Queue::fake();
+
+    $package = Package::factory()->shipped()->create();
+    $package->clearShipping(VoidReason::Operator);
+    Package::factory()->shipped()->create();
+
+    Queue::assertPushedOn('low', RebuildDailyShippingStats::class);
 });
