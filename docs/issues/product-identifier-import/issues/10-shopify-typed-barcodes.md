@@ -161,6 +161,10 @@ precedence rule (`NS_PID` over the metafield) is confirmed by the maintainer.
 Checked live on the development store at `2026-10`: the import read (311 open shipments)
 and a real import of source 7, which wrote `[EAN, NS_PID]` variants as `barcode` and
 `gtin` = the EAN and `manufacturer_part_number` = the `NS_PID`, with no part number in any
-Product's `barcode`. Not yet checked live: the closed-order lookup, label-cost read,
-fulfillment export and cancel, and the Shopify Shipping purchase (a human runs that one,
-since it buys a label). Those gate the merge.
+Product's `barcode`. Also checked at `2026-10` on 2026-10-14: the closed-order lookup (a second import closed
+258 shipments with no error), the label-cost read (`packages:sync-shopify-label-costs`
+costed the new label), a `fulfillmentCreate` export and its `fulfillmentCancel` on order
+#1801, and a Shopify Shipping purchase bought by the maintainer for package 253. No
+`2026-07` note in `ShopifyShippingLabelService` or `ShopifyClosedFulfillmentOrderCloser`
+needed to change. Not checked: a `[NS_PID, EAN]` variant, which the store lacks and the app
+cannot create; a unit test covers it.
