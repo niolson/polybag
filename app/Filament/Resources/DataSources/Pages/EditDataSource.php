@@ -65,6 +65,7 @@ class EditDataSource extends EditRecord
     {
         return [
             Action::make('run_import')
+                ->authorize('update')
                 ->label('Run Import Now')
                 ->icon('heroicon-o-arrow-down-tray')
                 ->color('gray')
@@ -89,6 +90,7 @@ class EditDataSource extends EditRecord
                 }),
 
             Action::make('import_historical_amazon_orders')
+                ->authorize('update')
                 ->label('Import Historical Orders')
                 ->icon('heroicon-o-clock')
                 ->color('gray')
@@ -141,6 +143,7 @@ class EditDataSource extends EditRecord
                 }),
 
             Action::make('shopify_connect')
+                ->authorize('update')
                 ->label(fn (): string => app(OAuthService::class)->isDataSourceConnected($this->record) ? 'Reconnect Shopify' : 'Connect with OAuth')
                 ->icon('heroicon-o-link')
                 ->color(fn (): string => app(OAuthService::class)->isDataSourceConnected($this->record) ? 'warning' : 'primary')
@@ -165,6 +168,7 @@ class EditDataSource extends EditRecord
                 }),
 
             Action::make('shopify_disconnect')
+                ->authorize('update')
                 ->label('Disconnect Shopify')
                 ->icon('heroicon-o-x-mark')
                 ->color('danger')
@@ -179,6 +183,7 @@ class EditDataSource extends EditRecord
                 }),
 
             Action::make('amazon_connect')
+                ->authorize('update')
                 ->label(fn (): string => app(OAuthService::class)->isDataSourceConnected($this->dataSource()) ? 'Reconnect Amazon' : 'Connect Amazon')
                 ->icon('heroicon-o-link')
                 ->color(fn (): string => app(OAuthService::class)->isDataSourceConnected($this->dataSource()) ? 'warning' : 'primary')
@@ -194,6 +199,7 @@ class EditDataSource extends EditRecord
                 }),
 
             Action::make('amazon_disconnect')
+                ->authorize('update')
                 ->label('Disconnect Amazon')
                 ->icon('heroicon-o-x-mark')
                 ->color('danger')
@@ -210,6 +216,7 @@ class EditDataSource extends EditRecord
                 }),
 
             Action::make('amazon_refresh_marketplaces')
+                ->authorize('update')
                 ->label('Refresh Amazon Marketplaces')
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
@@ -256,6 +263,7 @@ class EditDataSource extends EditRecord
                 }),
 
             Action::make('sync_shopify_locations')
+                ->authorize('update')
                 ->label('Sync Shopify Locations')
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
@@ -282,6 +290,7 @@ class EditDataSource extends EditRecord
                 }),
 
             Action::make('activate_fulfillment_order_import')
+                ->authorize('update')
                 ->label('Activate Fulfillment-Order Import')
                 ->icon('heroicon-o-check-circle')
                 ->color('warning')
@@ -318,6 +327,7 @@ class EditDataSource extends EditRecord
                 }),
 
             Action::make('check_off_amazon_shipping')
+                ->authorize('update')
                 ->label('Check Again')
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')

@@ -16,6 +16,7 @@ use App\Filament\Resources\CarrierAccounts\Pages\ListCarrierAccounts;
 use App\Filament\Resources\Carriers\Pages\ListCarriers;
 use App\Filament\Resources\CarrierServiceResource\Pages\ListCarrierServices;
 use App\Filament\Resources\ChannelResource\Pages\ListChannels;
+use App\Filament\Resources\DataSources\Pages\EditDataSource;
 use App\Filament\Resources\LocationResource\Pages\EditLocation;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
 use App\Filament\Resources\PackageResource\Pages\ViewPackage;
@@ -27,12 +28,15 @@ use App\Filament\Resources\ShipmentResource\RelationManagers\PackagesRelationMan
 use App\Filament\Resources\ShippingMethodResource\Pages\ListShippingMethods;
 use App\Filament\Resources\SpecialServices\Pages\ListSpecialServices;
 use App\Filament\Resources\SpecialServices\SpecialServiceResource;
+use App\Filament\Resources\UserResource\Pages\EditUser;
 use App\Filament\Resources\UserResource\Pages\ListUsers;
 use App\Filament\Widgets\CarrierBreakdownChart;
 use App\Filament\Widgets\CostPerPackageTrend;
 use App\Filament\Widgets\ExceptionsWidget;
 use App\Filament\Widgets\ShippedShipmentsChart;
+use App\Models\CarrierAccount;
 use App\Models\CarrierAccountScope;
+use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\Setting;
@@ -40,6 +44,8 @@ use App\Models\Shipment;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\SettingsService;
+use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Support\Facades\Gate;
@@ -500,3 +506,22 @@ it('lets an Admin bulk-delete unshipped packages from Edit Shipment', function (
 
     expect(Package::find($package->id))->toBeNull();
 });
+
+it('authorizes each action on the credential pages by policy, not only by page access', function (string $page, Closure $record): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Admin]));
+    $component = Livewire::test($page, ['record' => $record()->getKey()]);
+
+    $actions = collect($component->instance()->getCachedHeaderActions())
+        ->flatMap(fn ($action): array => $action instanceof ActionGroup ? $action->getFlatActions() : [$action]);
+
+    expect($actions)->not->toBeEmpty()
+        ->and($actions->every(fn (Action $action): bool => $action->isAuthorized()))->toBeTrue();
+
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+
+    expect($actions->filter(fn (Action $action): bool => $action->isAuthorized())->map->getName()->values()->all())->toBe([]);
+})->with([
+    'carrier account' => [EditCarrierAccount::class, fn () => CarrierAccount::factory()->create()],
+    'connection' => [EditDataSource::class, fn () => DataSource::factory()->create()],
+    'user' => [EditUser::class, fn () => User::factory()->create()],
+]);

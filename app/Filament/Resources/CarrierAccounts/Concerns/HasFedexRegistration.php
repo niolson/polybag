@@ -261,6 +261,7 @@ trait HasFedexRegistration
     protected function fedexRegisterAction(): Action
     {
         return Action::make('fedex_register')
+            ->authorize('update')
             ->label(fn (): string => filled($this->record?->secret('child_key')) ? 'Reconnect FedEx Account' : 'Connect FedEx Account')
             ->icon('heroicon-o-link')
             ->color(fn (): string => filled($this->record?->secret('child_key')) ? 'warning' : 'primary')
@@ -542,6 +543,7 @@ trait HasFedexRegistration
     protected function fedexDisconnectAction(): Action
     {
         return Action::make('fedex_disconnect')
+            ->authorize('update')
             ->label('Disconnect FedEx')
             ->icon('heroicon-o-x-mark')
             ->color('danger')

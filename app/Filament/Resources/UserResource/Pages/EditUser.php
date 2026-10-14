@@ -19,6 +19,7 @@ class EditUser extends EditRecord
     {
         return [
             Actions\Action::make('resetAppAuthentication')
+                ->authorize('update')
                 ->label('Reset Authenticator App')
                 ->icon('heroicon-o-device-phone-mobile')
                 ->color('warning')
@@ -34,6 +35,7 @@ class EditUser extends EditRecord
                         ->send();
                 }),
             Actions\Action::make('resetEmailAuthentication')
+                ->authorize('update')
                 ->label('Reset Email Code')
                 ->icon('heroicon-o-envelope')
                 ->color('warning')

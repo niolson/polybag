@@ -42,6 +42,7 @@ class EditCarrierAccount extends EditRecord
         return [
             // USPS OAuth actions
             Action::make('usps_connect')
+                ->authorize('update')
                 ->label(fn (): string => app(OAuthService::class)->isAccountConnected($this->record) ? 'Reconnect USPS' : 'Connect USPS')
                 ->icon('heroicon-o-link')
                 ->color(fn (): string => app(OAuthService::class)->isAccountConnected($this->record) ? 'warning' : 'primary')
@@ -59,6 +60,7 @@ class EditCarrierAccount extends EditRecord
                 }),
 
             Action::make('usps_test_connection')
+                ->authorize('update')
                 ->label('Test USPS Connection')
                 ->icon('heroicon-o-signal')
                 ->color('gray')
@@ -66,6 +68,7 @@ class EditCarrierAccount extends EditRecord
                 ->action(fn () => $this->testUspsConnection()),
 
             Action::make('usps_disconnect')
+                ->authorize('update')
                 ->label('Disconnect USPS')
                 ->icon('heroicon-o-x-mark')
                 ->color('danger')
@@ -134,6 +137,7 @@ class EditCarrierAccount extends EditRecord
 
             // UPS OAuth actions
             Action::make('ups_connect')
+                ->authorize('update')
                 ->label(fn (): string => app(OAuthService::class)->isAccountConnected($this->record) ? 'Reconnect UPS' : 'Connect UPS')
                 ->icon('heroicon-o-link')
                 ->color(fn (): string => app(OAuthService::class)->isAccountConnected($this->record) ? 'warning' : 'primary')
@@ -151,6 +155,7 @@ class EditCarrierAccount extends EditRecord
                 }),
 
             Action::make('ups_disconnect')
+                ->authorize('update')
                 ->label('Disconnect UPS')
                 ->icon('heroicon-o-x-mark')
                 ->color('danger')
