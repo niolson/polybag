@@ -201,6 +201,7 @@ function runChangesImport(DataSource $dataSource, array $feed = [], array $chang
                 fn (string $id): ?array => $lookups[$id] ?? null,
                 $variables['ids'],
             )]]),
+            default => throw new RuntimeException("The fake Shopify has no answer for {$operation}."),
         };
     }]);
 
