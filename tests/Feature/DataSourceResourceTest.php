@@ -492,7 +492,7 @@ it('parse-checks the write queries without executing them', function (): void {
             ->mountAction(TestAction::make('test_queries')->schemaComponent('database_query')),
     );
 
-    expect($html)->toContain('Mark exported query: valid');
+    expect($html)->toContain('Mark Exported Query: valid');
 
     // Parse-checked only — the write never ran against the source database.
     expect(DB::connection('preview_source_db')->table('source_orders')->where('ship_to', 'Ada')->count())->toBe(1);

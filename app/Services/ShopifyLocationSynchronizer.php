@@ -25,7 +25,7 @@ class ShopifyLocationSynchronizer
         $source = $this->factory->make($dataSource);
 
         if (! $source instanceof ShopifySource) {
-            throw new InvalidArgumentException('Only Shopify data sources can synchronize locations.');
+            throw new InvalidArgumentException('Only Shopify connections can synchronize locations.');
         }
 
         /**

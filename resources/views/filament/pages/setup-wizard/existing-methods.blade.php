@@ -13,7 +13,7 @@
                 <td class="py-2 pr-4">{{ $method->name }}</td>
                 <td class="py-2 pr-4">{{ $method->commitment_days ? $method->commitment_days . ' days' : '-' }}</td>
                 <td class="py-2 pr-4 text-gray-500">
-                    {{ $method->carrierServices->map(fn ($carrierService) => $carrierService->carrier->name . ': ' . $carrierService->name)->join(', ') ?: '-' }}
+                    {{ $method->carrierServices->map(fn ($carrierService) => $carrierService->carrier->label() . ': ' . $carrierService->name)->join(', ') ?: '-' }}
                 </td>
                 <td class="py-2 text-gray-500">{{ $method->aliases->pluck('reference')->join(', ') ?: '-' }}</td>
             </tr>

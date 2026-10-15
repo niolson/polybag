@@ -51,6 +51,7 @@ class SpecialServiceResource extends Resource
                     ->searchable(),
                 Tables\Columns\TextColumn::make('category')
                     ->badge()
+                    ->formatStateUsing(fn (string $state): string => ucfirst($state))
                     ->color(fn (string $state): string => match ($state) {
                         'compliance' => 'danger',
                         'delivery' => 'info',
@@ -93,7 +94,7 @@ class SpecialServiceResource extends Resource
             ->defaultSort('category')
             ->filters([
                 Tables\Filters\SelectFilter::make('category')
-                    ->options(fn () => SpecialService::distinct()->pluck('category', 'category')->sort()),
+                    ->options(fn () => SpecialService::distinct()->pluck('category', 'category')->map(fn (string $category): string => ucfirst($category))->sort()),
                 Tables\Filters\TernaryFilter::make('active'),
             ])
             ->recordActions([

@@ -20,7 +20,7 @@ class SpecialServicesRelationManager extends RelationManager
     {
         return $table
             ->recordTitleAttribute('name')
-            ->description('Managed in code (CarrierServiceSpecialServiceSeeder) — these rows record researched carrier restrictions and are read-only here.')
+            ->description('Set by PolyBag from researched carrier restrictions; read-only here.')
             ->columns([
                 Tables\Columns\TextColumn::make('name'),
                 Tables\Columns\TextColumn::make('category')

@@ -265,7 +265,7 @@ class Settings extends Page
                                 ->icon('heroicon-o-building-storefront')
                                 ->schema([
                                     Section::make('Ship-From Address')
-                                        ->description('Managed in Settings > Locations. The default location is used as the warehouse address on labels.')
+                                        ->description('Managed under Admin → Locations. The default location is used as the warehouse address on labels.')
                                         ->visible(fn (): bool => (bool) app(SettingsService::class)->get('multi_location_enabled', false))
                                         ->schema([
                                             Placeholder::make('default_location')

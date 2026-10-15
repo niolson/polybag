@@ -83,7 +83,7 @@ class EditCarrierAccount extends EditRecord
                 }),
 
             Action::make('usps_accept_ddp_terms')
-                ->label('Accept USPS DDP terms')
+                ->label('Accept USPS DDP Terms')
                 ->icon('heroicon-o-document-check')
                 ->color('gray')
                 ->visible(fn (): bool => $this->carrierAccountRecord()->carrier?->name === Carrier::USPS && ! $this->carrierAccountRecord()->hasAcceptedDdpTerms())
@@ -114,7 +114,7 @@ class EditCarrierAccount extends EditRecord
                 }),
 
             Action::make('usps_withdraw_ddp_terms')
-                ->label('Withdraw DDP terms')
+                ->label('Withdraw DDP Terms')
                 ->icon('heroicon-o-x-circle')
                 ->color('danger')
                 ->visible(fn (): bool => $this->carrierAccountRecord()->carrier?->name === Carrier::USPS && $this->carrierAccountRecord()->hasAcceptedDdpTerms())
@@ -246,10 +246,12 @@ class EditCarrierAccount extends EditRecord
         try {
             $pricingType = app(UspsAdapter::class)->detectPricingType($account, cache: ! $unsavedCredentials);
         } catch (\Throwable $e) {
+            logger()->error('USPS connection test failed', ['carrier_account_id' => $record->id, 'error' => $e->getMessage()]);
+
             Notification::make()
                 ->danger()
                 ->title('USPS connection failed')
-                ->body($e->getMessage())
+                ->body('USPS did not accept these credentials. Check them and try again.')
                 ->send();
 
             return;
@@ -258,13 +260,13 @@ class EditCarrierAccount extends EditRecord
         if ($pricingType === 'CONTRACT') {
             Notification::make()
                 ->success()
-                ->title('USPS connected — CONTRACT pricing')
+                ->title('USPS Connected — Contract Pricing')
                 ->body('Negotiated rates are available for this account.')
                 ->send();
         } else {
             Notification::make()
                 ->warning()
-                ->title('USPS connected — RETAIL pricing')
+                ->title('USPS Connected — Retail Pricing')
                 ->body('Authentication succeeded, but this account does not have EPS contract access. Standard retail rates will be used. Contact USPS to enable negotiated rates.')
                 ->send();
         }

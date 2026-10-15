@@ -30,7 +30,7 @@ class ShopifyFulfillmentOrderActivationService
     public function activate(DataSource $dataSource): void
     {
         if ($dataSource->source_type !== ShopifySource::class) {
-            throw new InvalidArgumentException('Only Shopify Data Sources can activate fulfillment-order imports.');
+            throw new InvalidArgumentException('Only Shopify connections can activate fulfillment-order imports.');
         }
 
         if ($dataSource->settings['fulfillment_order_import_enabled'] ?? false) {
@@ -39,7 +39,7 @@ class ShopifyFulfillmentOrderActivationService
 
         $source = $this->factory->make($dataSource);
         if (! $source instanceof ShopifySource) {
-            throw new InvalidArgumentException('The Shopify Data Source could not be initialized.');
+            throw new InvalidArgumentException('The Shopify connection could not be initialized.');
         }
 
         $scopes = $source->fetchAccessScopes();

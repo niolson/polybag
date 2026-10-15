@@ -52,7 +52,7 @@ class OffAmazonShippingCheck
     private const NOT_SET_UP_CODE = 'A-101';
 
     /** What the operator is told to do about an account that is not set up. */
-    public const NOT_SET_UP_MESSAGE = 'Amazon refused this account for orders from other channels ('.self::NOT_SET_UP_CODE.'). The seller has to finish Amazon Shipping sign-up in Seller Central first.';
+    public const NOT_SET_UP_MESSAGE = 'Amazon refused this account for orders from other channels. The seller has to finish Amazon Shipping sign-up in Seller Central first.';
 
     public function __construct(
         private readonly AmazonBuyShippingService $amazon,
@@ -75,13 +75,13 @@ class OffAmazonShippingCheck
         // The sandbox quotes every account, and `sandbox_mode` is one setting
         // shared by every carrier, so the check cannot reach production from here.
         if (SourceEnvironment::current() === SourceEnvironment::Sandbox) {
-            return $this->unknown('Not checked in sandbox mode, where Amazon quotes every account. Turn sandbox mode off and use Check again.');
+            return $this->unknown('Not checked in sandbox mode, where Amazon quotes every account. Turn sandbox mode off and use Check Again.');
         }
 
         $location = $this->shipFromLocation($source);
 
         if (! $location) {
-            return $this->unknown('Not checked: no location has a complete address to quote from. Add one, then use Check again.');
+            return $this->unknown('Not checked: no location has a complete address to quote from. Add one, then use Check Again.');
         }
 
         $request = new GetShippingRates(
@@ -106,7 +106,7 @@ class OffAmazonShippingCheck
                 'error' => $e->getMessage(),
             ]);
 
-            return $this->unknown('Could not reach Amazon to check. Use Check again later.');
+            return $this->unknown('Could not reach Amazon to check. Use Check Again later.');
         }
 
         if ($response->successful()) {
@@ -126,7 +126,7 @@ class OffAmazonShippingCheck
             'errors' => $response->json('errors'),
         ]);
 
-        return $this->unknown("Amazon did not say whether this account can ship orders from other channels (HTTP {$response->status()}). Use Check again later.");
+        return $this->unknown('Amazon did not say whether this account can ship orders from other channels right now. Use Check Again later.');
     }
 
     /**

@@ -18,7 +18,7 @@
                     <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
                         <a href="{{ \App\Filament\Pages\Settings::getUrl() }}"
                            class="font-medium text-amber-900 underline hover:no-underline dark:text-amber-100">
-                            Enable it in Settings → Authentication
+                            Enable it in App Settings → Security
                         </a>
                         <button type="button"
                                 wire:click="dismiss"

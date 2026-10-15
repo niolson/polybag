@@ -59,9 +59,9 @@ use Throwable;
 class DataSourceForm
 {
     private const DRIVERS = [
-        DatabaseSource::class => 'Database (SQL)',
+        DatabaseSource::class => 'Database',
         ShopifySource::class => 'Shopify',
-        AmazonSource::class => 'Amazon SP-API',
+        AmazonSource::class => 'Amazon',
     ];
 
     /** Reference guide for the Database driver — `docs/data-sources/database.md` in this repo. */
@@ -89,11 +89,11 @@ class DataSourceForm
                         ->options(fn () => Client::orderBy('name')->pluck('name', 'id'))
                         ->nullable()
                         ->searchable()
-                        ->helperText('Leave blank to share this source across all clients (single-tenant mode).')
+                        ->helperText('Leave blank to share this connection with every client.')
                         ->visible(fn (): bool => self::multiClientEnabled()),
 
                     Select::make('source_type')
-                        ->label('Driver')
+                        ->label('Connection Type')
                         ->options(self::DRIVERS)
                         ->required()
                         ->live()
@@ -124,7 +124,7 @@ class DataSourceForm
                         ->options(ImportExistingBehavior::class)
                         ->default(ImportExistingBehavior::default()->value)
                         ->selectablePlaceholder(false)
-                        ->helperText('What to do when an imported shipment already exists. Shipped and voided shipments are never updated.')
+                        ->helperText('What to do when an imported shipment already exists. Shipped and cancelled shipments are never updated.')
                         ->visible(self::importsOrders(...)),
                 ])
                 ->columns(2),
@@ -203,7 +203,7 @@ class DataSourceForm
                         ->visible(self::importsOrders(...)),
 
                     LazyOptionsSelect::make('settings.part_number_metafield')
-                        ->label('Manufacturer part number')
+                        ->label('Manufacturer Part Number')
                         ->searchable()
                         // Choices cost a few Shopify queries, so they are fetched
                         // when the dropdown opens rather than on every form
@@ -320,7 +320,7 @@ class DataSourceForm
                 ->schema([
                     Placeholder::make('amazon_mfa_warning')
                         ->label('')
-                        ->content('⚠ Amazon SP-API connections give access to customer PII. Multi-Factor Authentication must be required for all users before this connection can be active. Enable it in [App Settings → Authentication]('.SettingsPage::getUrl().').')
+                        ->content('⚠ Amazon SP-API connections give access to customer PII. Multi-Factor Authentication must be required for all users before this connection can be active. Enable it in [App Settings → Security]('.SettingsPage::getUrl().').')
                         ->markdown()
                         ->visible(fn (): bool => ! app(SettingsService::class)->get('require_mfa', false))
                         ->columnSpanFull(),
@@ -345,7 +345,7 @@ class DataSourceForm
                         ->afterStateHydrated(fn ($component) => $component->state(null))
                         ->dehydrated(fn ($state): bool => filled($state))
                         ->required(fn (?DataSource $record): bool => ! $record?->exists && ! app(OAuthService::class)->isBrokerConfigured())
-                        ->helperText('Required when no hosted OAuth broker is configured. Otherwise save the source and use Connect Amazon.'),
+                        ->helperText('Required when no hosted OAuth broker is configured. Otherwise save the connection and use Connect Amazon.'),
 
                     TextInput::make('settings.client_id')
                         ->label('App Client ID')
@@ -391,7 +391,7 @@ class DataSourceForm
                         ->visible(self::importsOrders(...)),
 
                     Toggle::make('settings.export_enabled')
-                        ->label('Confirm Shipment Back to Amazon')
+                        ->label('Write Shipment Confirmation Back to Amazon')
                         ->default(false),
 
                     Toggle::make('settings.import_fba_orders')
@@ -468,7 +468,7 @@ class DataSourceForm
                 ->key('database_connection', isInheritable: false)
                 ->schema([
                     Select::make('settings.db_driver')
-                        ->label('Driver')
+                        ->label('Database Driver')
                         ->options(ImportConnectionConfig::DRIVERS)
                         ->default('mysql')
                         ->required()
@@ -558,7 +558,7 @@ class DataSourceForm
                                 Notification::make()
                                     ->danger()
                                     ->title('Connection failed')
-                                    ->body($e->getMessage())
+                                    ->body($e->getMessage().' Check the host, port, database name, username and password, then try again.')
                                     ->send();
                             } finally {
                                 $tunnel?->close();
@@ -694,7 +694,7 @@ class DataSourceForm
 
                     Toggle::make('global_export')
                         ->label('Global Export Destination')
-                        ->helperText('When enabled, all shipped packages write tracking data here — regardless of which source they came from, including manual shipments.')
+                        ->helperText('When enabled, all shipped packages write tracking data here — regardless of which connection they came from, including manual shipments.')
                         ->default(false)
                         ->visible(fn (Get $get): bool => self::multiClientEnabled() && (bool) $get('settings.export_enabled')),
 
@@ -860,7 +860,7 @@ class DataSourceForm
 
         $explanation = match ($status) {
             OffAmazonShippingStatus::Enabled => 'Amazon accepts this account for orders from other channels.',
-            OffAmazonShippingStatus::NotSetUp => 'Amazon refused this account (A-101). Finish Amazon Shipping sign-up in Seller Central, then use Check Again.',
+            OffAmazonShippingStatus::NotSetUp => 'Amazon refused this account. Finish Amazon Shipping sign-up in Seller Central, then use Check Again.',
             OffAmazonShippingStatus::Unknown => 'Amazon did not answer, or the check could not run. Use Check Again.',
         };
 
@@ -1114,8 +1114,8 @@ class DataSourceForm
         }
 
         $queries = array_filter([
-            'Mark exported query' => $get('settings.mark_exported_query'),
-            'Export query' => $get('settings.export_query'),
+            'Mark Exported Query' => $get('settings.mark_exported_query'),
+            'Export Query' => $get('settings.export_query'),
         ]);
 
         $results = [];

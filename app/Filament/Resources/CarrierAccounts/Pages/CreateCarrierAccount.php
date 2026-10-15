@@ -80,7 +80,7 @@ class CreateCarrierAccount extends CreateRecord
             Notification::make()
                 ->warning()
                 ->title('No global scope assigned')
-                ->body('Another account is already the global default for this carrier. Use the Location Assignments section to assign this account to specific locations.')
+                ->body('Another account is already the global default for this carrier. Open the account after saving and use its Assignments section to assign it to specific locations.')
                 ->persistent()
                 ->send();
         }

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\CarrierAccounts\Tables;
 
+use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Location;
 use App\Services\SettingsService;
@@ -22,6 +23,7 @@ class CarrierAccountsTable
             ->columns([
                 TextColumn::make('carrier.name')
                     ->label('Carrier')
+                    ->formatStateUsing(fn (string $state): string => Carrier::labelForName($state))
                     ->sortable()
                     ->searchable(),
                 TextColumn::make('name')
@@ -54,7 +56,8 @@ class CarrierAccountsTable
             ])
             ->filters([
                 SelectFilter::make('carrier')
-                    ->relationship('carrier', 'name'),
+                    ->relationship('carrier', 'name')
+                    ->getOptionLabelFromRecordUsing(fn (Carrier $record): string => $record->label()),
                 TernaryFilter::make('active'),
             ])
             ->recordActions([

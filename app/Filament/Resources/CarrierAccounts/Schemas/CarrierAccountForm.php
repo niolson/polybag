@@ -354,8 +354,8 @@ class CarrierAccountForm
         }
 
         return match (app(UspsAdapter::class)->cachedPricingType($record)) {
-            'CONTRACT' => new HtmlString('<span class="text-success-600 dark:text-success-400 font-medium">CONTRACT</span> — negotiated rates'),
-            'RETAIL' => new HtmlString('<span class="text-warning-600 dark:text-warning-400 font-medium">RETAIL</span> — standard rates (no EPS contract access)'),
+            'CONTRACT' => new HtmlString('<span class="text-success-600 dark:text-success-400 font-medium">Contract pricing</span> — negotiated rates'),
+            'RETAIL' => new HtmlString('<span class="text-warning-600 dark:text-warning-400 font-medium">Retail pricing</span> — standard rates (no EPS contract access)'),
             default => new HtmlString('<span class="text-gray-400 dark:text-gray-500">Not tested yet</span>'),
         };
     }

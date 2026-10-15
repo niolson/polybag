@@ -301,7 +301,6 @@ it('answers a 403 A-101 with no offers and a not-set-up message, and marks the c
         ->and($service->getExclusions()[0]['carrier'])->toBe('Amazon Shipping')
         ->and($service->getExclusions()[0]['reason'])
         ->toContain('Amazon Shipping (3PL)')
-        ->toContain('A-101')
         ->toContain('Amazon Shipping sign-up in Seller Central')
         ->and($this->connection->refresh()->off_amazon_shipping_status)->toBe(OffAmazonShippingStatus::NotSetUp)
         ->and($this->connection->off_amazon_shipping_checked_at)->not->toBeNull();
@@ -351,7 +350,7 @@ it('hears A-101 on the concurrent path as a response, not as a rejected promise'
 
     expect($response->status())->toBe(403)
         ->and(fn (): Collection => $adapter->parseRateResponse($response, $request, []))
-        ->toThrow(CarrierUnavailableException::class, 'A-101');
+        ->toThrow(CarrierUnavailableException::class, 'Seller Central');
 });
 
 describe('a scope changed while the request is in flight', function (): void {

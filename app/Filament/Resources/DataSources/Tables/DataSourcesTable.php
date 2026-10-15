@@ -24,7 +24,7 @@ class DataSourcesTable
     private const DRIVER_LABELS = [
         DatabaseSource::class => 'Database',
         ShopifySource::class => 'Shopify',
-        AmazonSource::class => 'Amazon SP-API',
+        AmazonSource::class => 'Amazon',
     ];
 
     public static function configure(Table $table): Table
