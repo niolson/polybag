@@ -4,7 +4,7 @@
 
 Moved from `release-polish/42` on 2026-10-14: deferred out of the release, as off the demo path.
 
-Status: needs-triage
+Status: done
 
 Pass: 4 — bug (review of EU product identifiers)
 
@@ -41,3 +41,20 @@ USPS EU consumer label whose stripped identifier is empty (a carrier-specific ch
 carrier error. Recommend the refusal.
 
 ## Comments
+
+### 2026-10-15: refused, as recommended
+
+USPS International Labels 3.4.1 (the 2026-10-28 release) keeps the letters-and-digits
+patterns, so the stripping stays and an identifier with no letter or digit cannot be sent.
+
+- The stripping moved out of `UspsAdapter` into `App\Support\UspsProductIdentifier`, so
+  the adapter and the readiness check agree on which identifiers survive, as
+  `FedexRecipientEmail` does for FedEx.
+- `CustomsReadiness::carrierFindings()` adds `usps_product_identifier_unusable`: for an
+  EU consumer label (the same gates as `linesMissingProductIdentifiers()`, now shared as
+  `declaresEuConsumerIdentifiers()`), a line with both identifiers where either strips to
+  nothing. It blocks a USPS rate and is a warning before a carrier is chosen, since FedEx
+  and UPS take the identifier as entered. A null identifier is still reported only by
+  `product_identifier_missing`.
+- `CustomsReadinessTest` covers USPS (block), no rate (warning), UPS, a business
+  consignee, and a sendable SKU.

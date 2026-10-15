@@ -145,7 +145,7 @@
         "AESITN": { "type": "string", "minLength": 1 },
         "customsContentType": { "type": "string", "enum": ["MERCHANDISE"] },
         "invoiceNumber": { "type": "string", "minLength": 1, "maxLength": 30 },
-        "incoterm": { "type": "string", "enum": ["1", "2"], "description": "The commerce type, not DDP/DDU: 1 business to consumer, 2 business to business. Sent only to EU destinations. Added from the field definitions USPS posted on 2026-10-07; not yet in a published spec." },
+        "incoterm": { "type": "string", "enum": ["1", "2"], "description": "The commerce type, not DDP/DDU: 1 business to consumer, 2 business to business. Sent only to EU destinations. As in International Labels 3.4.1 (the 2026-10-28 release)." },
         "exportersReference": { "$ref": "#/definitions/CustomsReference", "description": "The seller registration, VAT_NUMBER whatever its regime. Printed as the Exporter's reference. Never sent with prepayDutiesTaxesFees." },
         "importersReference": { "$ref": "#/definitions/CustomsReference", "description": "The recipient's tax ID: TAX_CODE, or VAT_NUMBER for a VAT number. Printed as the Importer's Reference." },
         "contents": {
@@ -182,7 +182,7 @@
       }
     },
     "EuropeanUnionProductID": {
-      "description": "Per-line EU product identifiers, from the field definitions USPS posted on 2026-10-07 (not yet in a published spec). Letters and digits only. The standardized identifier is omitted, never a placeholder, when the product has none.",
+      "description": "Per-line EU product identifiers, as in International Labels 3.4.1 (the 2026-10-28 release). Letters and digits only. The standardized identifier is omitted, never a placeholder, when the product has none.",
       "type": "object",
       "required": ["merchantProductIdentifier", "nonstandardizedManufacturerProductIdentifier"],
       "additionalProperties": false,

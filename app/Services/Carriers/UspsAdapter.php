@@ -57,6 +57,7 @@ use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
 use App\Services\Shipping\ContentsFilter;
 use App\Support\LabelText;
+use App\Support\UspsProductIdentifier;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -1654,44 +1655,30 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
     /**
      * The `europeanUnionProductID` block for one line, or null when the line
      * lacks a merchant or manufacturer identifier (after USPS's character
-     * limits are applied). A partial block is an invalid body. The standard
-     * identifier is added only when there is one, never as a placeholder.
+     * limits are applied, {@see UspsProductIdentifier}). A partial block is an
+     * invalid body. The standard identifier is added only when there is one,
+     * never as a placeholder. A consumer label with such a line is refused by
+     * `CustomsReadiness` before it gets here, so only a business label goes
+     * without.
      *
      * @return array{merchantProductIdentifier: string, nonstandardizedManufacturerProductIdentifier: string, standardizedManufacturerProductIdentifier?: string}|null
      */
     private function euProductIdentifiers(CustomsItem $item): ?array
     {
-        $merchant = $this->alphanumericProductIdentifier($item->merchantProductId, 50);
-        $manufacturer = $this->alphanumericProductIdentifier($item->manufacturerProductId, 70);
+        $merchant = UspsProductIdentifier::merchant($item->merchantProductId);
+        $manufacturer = UspsProductIdentifier::manufacturer($item->manufacturerProductId);
 
         if ($merchant === null || $manufacturer === null) {
             return null;
         }
 
-        $standard = $this->alphanumericProductIdentifier($item->standardProductId, 50);
+        $standard = UspsProductIdentifier::standard($item->standardProductId);
 
         return [
             'merchantProductIdentifier' => $merchant,
             'nonstandardizedManufacturerProductIdentifier' => $manufacturer,
             ...($standard !== null ? ['standardizedManufacturerProductIdentifier' => $standard] : []),
         ];
-    }
-
-    /**
-     * USPS's identifier patterns allow only letters and digits. Until USPS says
-     * how punctuated SKUs are meant to be sent, strip everything else and cut
-     * to the field's length; an identifier left empty counts as missing. This
-     * is the only place that changes if USPS answers differently.
-     */
-    private function alphanumericProductIdentifier(?string $identifier, int $maxLength): ?string
-    {
-        if ($identifier === null) {
-            return null;
-        }
-
-        $stripped = mb_substr(preg_replace('/[^A-Za-z0-9]/', '', $identifier) ?? '', 0, $maxLength);
-
-        return $stripped === '' ? null : $stripped;
     }
 
     /**
