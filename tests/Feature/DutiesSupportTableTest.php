@@ -57,7 +57,7 @@ it('records the IMM table: eight countries require DDP, twelve cannot take it, t
 
     // LU is missing from IMM 360's own table but its country page requires DDP;
     // the IMM lists Monaco under France.
-    foreach (['DE', 'BE', 'DK', 'FI', 'FR', 'PT', 'LU', 'MC'] as $country) {
+    foreach (['DE', 'BE', 'DK', 'FI', 'FR', 'PT', 'LU', 'MC', 'AT', 'SE'] as $country) {
         expect($table->supportFor('USPS', $country, $today)?->support)->toBe(DutiesSupport::DdpRequired);
     }
 
@@ -65,7 +65,7 @@ it('records the IMM table: eight countries require DDP, twelve cannot take it, t
         expect($table->supportFor('USPS', $country, $today)?->support)->toBe(DutiesSupport::DduOnly);
     }
 
-    foreach (['AT', 'EE', 'IT', 'MT', 'NL', 'SK', 'ES', 'SE', 'CA', 'GB'] as $country) {
+    foreach (['EE', 'IT', 'MT', 'NL', 'SK', 'ES', 'CA', 'GB'] as $country) {
         expect($table->supportFor('USPS', $country, $today)?->support)->toBe(DutiesSupport::Either);
     }
 
@@ -146,9 +146,9 @@ it('answers AT and SE with the IOSS override only for a declared IOSS registrati
         $without = $table->supportFor('USPS', $country, $today);
         $with = $table->supportFor('USPS', $country, $today, TaxRegistrationRegime::Ioss);
 
-        expect($without?->support)->toBe(DutiesSupport::Either)
+        expect($without?->support)->toBe(DutiesSupport::DdpRequired)
             ->and($without?->registration)->toBeNull()
-            ->and($table->supportFor('USPS', $country, $today, TaxRegistrationRegime::UkVat)?->support)->toBe(DutiesSupport::Either)
+            ->and($table->supportFor('USPS', $country, $today, TaxRegistrationRegime::UkVat)?->support)->toBe(DutiesSupport::DdpRequired)
             ->and($with?->support)->toBe(DutiesSupport::Unavailable)
             ->and($with?->registration)->toBe(TaxRegistrationRegime::Ioss)
             ->and($with?->authority)->toBe('USPS API test')
@@ -228,15 +228,15 @@ it('answers a business recipient from business_support, and skips an override wi
     $today = CarbonImmutable::parse('2026-10-09');
     $ioss = TaxRegistrationRegime::Ioss;
 
-    expect($table->supportFor('USPS', 'AT', $today, $ioss, recipientIsBusiness: true)?->support)->toBe(DutiesSupport::DduOnly)
+    expect($table->supportFor('USPS', 'AT', $today, $ioss, recipientIsBusiness: true)?->support)->toBe(DutiesSupport::Unavailable)
         ->and($table->supportFor('USPS', 'DE', $today, $ioss, recipientIsBusiness: true)?->support)->toBe(DutiesSupport::Unavailable)
         ->and($table->supportFor('USPS', 'GB', $today, TaxRegistrationRegime::UkVat, recipientIsBusiness: true)?->support)->toBe(DutiesSupport::DduOnly);
 
     $withoutBusiness = committedDutiesSupport();
-    unset($withoutBusiness['carriers']['usps']['countries']['AT']['with_registration']['ioss']['business_support']);
+    unset($withoutBusiness['carriers']['usps']['countries']['EE']['with_registration']['ioss']['business_support']);
     $support = new DutiesSupportTable(temporaryDutiesSupport($withoutBusiness));
 
-    expect($support->supportFor('USPS', 'AT', $today, $ioss, recipientIsBusiness: true)?->support)->toBe(DutiesSupport::Either);
+    expect($support->supportFor('USPS', 'EE', $today, $ioss, recipientIsBusiness: true)?->support)->toBe(DutiesSupport::Either);
 });
 
 it('rejects a business_support that is not a support value', function (): void {

@@ -425,6 +425,9 @@ it('buys a DDP label to Germany through the USPS adapter and stores the prepaid 
     $label = $package->fresh()->activeLabel()->firstOrFail();
 
     expect((float) $label->duties_cost)->toBe(9.75)
+        ->and((float) $label->duties_package_fee)->toBe(2.0)
+        ->and((float) $label->duties_duty)->toBe(3.0)
+        ->and((float) $label->duties_tax)->toBe(4.75)
         ->and((float) $label->cost)->toBe(31.40)
         ->and($label->customs_terms)->toMatchArray([
             'duties_terms' => 'ddp',

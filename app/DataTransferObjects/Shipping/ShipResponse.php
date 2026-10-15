@@ -21,6 +21,7 @@ readonly class ShipResponse
      * @param  string|null  $serviceRulesetVersion  Which ruleset derived it, required when $serviceEvidence is Inferred
      * @param  string|null  $sourceLabelReference  The postage source's own identifier for the label (Shopify label ID, Amazon shipment ID), kept on the label record past the void that strips it from the package
      * @param  float|null  $dutiesCost  The duties and taxes a carrier prepaid and reports apart from the postage; kept on the label record, not in `$cost`
+     * @param  PrepaidDutiesBreakdown|null  $dutiesBreakdown  The parts of $dutiesCost, when the carrier reports them
      */
     public function __construct(
         public bool $success,
@@ -47,6 +48,7 @@ readonly class ShipResponse
         public ?string $serviceRulesetVersion = null,
         public ?string $sourceLabelReference = null,
         public ?float $dutiesCost = null,
+        public ?PrepaidDutiesBreakdown $dutiesBreakdown = null,
     ) {}
 
     /**
@@ -66,6 +68,7 @@ readonly class ShipResponse
         ?int $carrierAccountId = null,
         ?string $customsFormData = null,
         ?float $dutiesCost = null,
+        ?PrepaidDutiesBreakdown $dutiesBreakdown = null,
     ): self {
         return new self(
             success: true,
@@ -82,6 +85,7 @@ readonly class ShipResponse
             carrierAccountId: $carrierAccountId,
             customsFormData: $customsFormData,
             dutiesCost: $dutiesCost,
+            dutiesBreakdown: $dutiesBreakdown,
         );
     }
 

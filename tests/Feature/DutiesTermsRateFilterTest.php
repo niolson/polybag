@@ -218,27 +218,31 @@ it('keeps USPS DDP when the consignment is over the IOSS threshold, since no num
         ->and(droppedReasons())->toBe([]);
 });
 
-it('keeps a USPS DDU rate to Austria and Sweden when no registration is declared', function (string $country): void {
-    $package = dutiesFilterPackage($country, dutiesFilterMethod(), ['duties_terms' => DutiesTerms::Ddu]);
+it('requires prepaid duties for USPS to Austria and Sweden: DDU gets no USPS rate, DDP keeps it', function (string $country, string $name): void {
+    $method = dutiesFilterMethod();
 
-    expect(quotedCarriers($package))->toEqualCanonicalizing([Carrier::USPS, Carrier::UPS])
+    $ddu = dutiesFilterPackage($country, $method, ['duties_terms' => DutiesTerms::Ddu]);
+
+    expect(quotedCarriers($ddu))->toBe([Carrier::UPS])
+        ->and(droppedReasons())->toBe(["USPS dropped: {$name} requires prepaid duties (IMM)"]);
+
+    $ddp = dutiesFilterPackage($country, $method, ['duties_terms' => DutiesTerms::Ddp]);
+
+    expect(quotedCarriers($ddp))->toEqualCanonicalizing([Carrier::USPS, Carrier::UPS])
         ->and(droppedReasons())->toBe([]);
-})->with(['AT', 'SE']);
+})->with([['AT', 'Austria'], ['SE', 'Sweden']]);
 
-it('keeps a USPS DDU rate to Austria and Sweden for a business recipient, but not DDP, which would lose the number', function (string $country, string $name): void {
+it('gives a business recipient in Austria and Sweden under an IOSS registration no USPS rate on either term', function (string $country, string $name): void {
     $client = Client::factory()->create();
     ClientTaxRegistration::factory()->ioss()->for($client)->create();
     $method = dutiesFilterMethod();
 
-    $ddu = dutiesFilterPackage($country, $method, ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddu, 'company' => 'Acme GmbH']);
+    foreach ([DutiesTerms::Ddu, DutiesTerms::Ddp] as $terms) {
+        $package = dutiesFilterPackage($country, $method, ['client_id' => $client->id, 'duties_terms' => $terms, 'company' => 'Acme GmbH']);
 
-    expect(quotedCarriers($ddu))->toEqualCanonicalizing([Carrier::USPS, Carrier::UPS])
-        ->and(droppedReasons())->toBe([]);
-
-    $ddp = dutiesFilterPackage($country, $method, ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddp, 'company' => 'Acme GmbH']);
-
-    expect(quotedCarriers($ddp))->toBe([Carrier::UPS])
-        ->and(droppedReasons())->toBe(["USPS dropped: {$name} cannot take prepaid duties with an IOSS number (USPS API test)"]);
+        expect(quotedCarriers($package))->toBe([Carrier::UPS])
+            ->and(droppedReasons())->toBe(["USPS dropped: {$name} requires prepaid duties, which cannot be combined with an IOSS number (USPS API test)"]);
+    }
 })->with([['AT', 'Austria'], ['SE', 'Sweden']]);
 
 it('gives a business recipient in Germany no USPS rate under an IOSS registration', function (): void {
@@ -292,7 +296,7 @@ it('applies the override to an IOSS registration the order carries', function ()
 it('does not apply the override when the consignment is over the threshold and the registration is withheld', function (): void {
     $client = Client::factory()->create();
     ClientTaxRegistration::factory()->ioss()->for($client)->create();
-    $package = dutiesFilterPackage('AT', dutiesFilterMethod(), ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddu]);
+    $package = dutiesFilterPackage('NL', dutiesFilterMethod(), ['client_id' => $client->id, 'duties_terms' => DutiesTerms::Ddu]);
     ShipmentItem::query()->where('shipment_id', $package->shipment_id)->update(['value' => 400.0]);
 
     expect(quotedCarriers($package->fresh()))->toEqualCanonicalizing([Carrier::USPS, Carrier::UPS])

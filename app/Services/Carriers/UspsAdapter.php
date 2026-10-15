@@ -14,6 +14,7 @@ use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\CustomsItem;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
+use App\DataTransferObjects\Shipping\PrepaidDutiesBreakdown;
 use App\DataTransferObjects\Shipping\PreparedRateRequest;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
@@ -805,6 +806,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
             shipDate: $request->shipDate,
             carrierAccountId: $account?->id,
             dutiesCost: $isInternational ? $this->prepaidDutiesCost($response->metadata, $request) : null,
+            dutiesBreakdown: $isInternational ? $this->prepaidDutiesBreakdown($response->metadata) : null,
         );
     }
 
@@ -1157,6 +1159,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
                 ],
                 carrierAccountId: $account?->id,
                 dutiesCost: $this->prepaidDutiesCost($response->metadata, $request),
+                dutiesBreakdown: $this->prepaidDutiesBreakdown($response->metadata),
             );
         } catch (FatalRequestException|RequestTimeOutException|ServerException $e) {
             // No answer is not a refusal — see createShipment().
@@ -1579,6 +1582,36 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         }
 
         return round($total, 2);
+    }
+
+    /**
+     * The parts of the prepaid duties and taxes: USPS's package fee, and the
+     * duty and tax summed over the items. Only the purchase reply carries
+     * them, so a purchase recovered by its key has none and null is returned,
+     * as it is for a label with no prepaid duties.
+     *
+     * @param  array<array-key, mixed>  $metadata
+     */
+    private function prepaidDutiesBreakdown(array $metadata): ?PrepaidDutiesBreakdown
+    {
+        $prepaid = $metadata['prepaidDutiesTaxesFees'] ?? null;
+
+        if (! is_array($prepaid)) {
+            return null;
+        }
+
+        $amount = fn (mixed $value): float => is_numeric($value) ? (float) $value : 0.0;
+        $duty = 0.0;
+        $tax = 0.0;
+
+        foreach (is_array($prepaid['itemCosts'] ?? null) ? $prepaid['itemCosts'] : [] as $item) {
+            if (is_array($item)) {
+                $duty += $amount($item['dutyPrice'] ?? null);
+                $tax += $amount($item['taxPrice'] ?? null);
+            }
+        }
+
+        return new PrepaidDutiesBreakdown(round($amount($prepaid['packageFee'] ?? null), 2), round($duty, 2), round($tax, 2));
     }
 
     /**

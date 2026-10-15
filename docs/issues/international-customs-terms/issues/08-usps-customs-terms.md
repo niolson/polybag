@@ -250,3 +250,72 @@ enrolment instead, this shrinks to a confirmation checkbox with no terms text.
   Still open for `ready-for-human` is only what needs USPS or production: the live behavior
   of the prepay flag and service 371, `VAT_NUMBER` for non-IOSS registrations, the Zonos
   terms, and the questions in the email already sent.
+
+- 2026-10-15 — **USPS API Support answered the email.** Against what is built:
+  - **Austria and Sweden require DDP on all shipments** (not only with an IOSS number).
+    `duties-support.json` (version `2026-10-15`) now has both as `ddp_required`, so a DDU
+    Shipment gets no USPS rate there; the IOSS override's `business_support` is `unavailable`
+    (the IMM listed both as optional). Tests updated.
+  - **IOSS plus DDP is not supported today**, which is what the table and the adapter's
+    refusal already assume. USPS plans to allow it later; reverse the `unavailable`
+    overrides and the refusal together when it ships.
+  - **The IOSS number goes in the sender customs reference** (`exportersReference`), UK VAT
+    likewise. Matches the build.
+  - **New route, not built:** a client that wants USPS DDP should send no IOSS number; USPS
+    puts its DDP provider's IOSS number on the manifest. So an IOSS client could ship DDP to
+    the nine prepaid-duties countries by withholding its own number, which would replace
+    `unavailable` with `ddp_required` and a withheld registration. Cost: duties and VAT go
+    through USPS's provider, not the client's IOSS return. Needs a decision before building.
+  - **Mandatory-DDP list:** USPS wants the IMC's "Delivery Duties Paid = 3 / DDP Mandatory"
+    countries, at country level, not by declared value. USPS intends the API to refuse a
+    DDP-mandatory label with prepay false (Germany included) but says that may not be live on
+    2026-11-01. Our rate filter already hides those rates; compare the IMC list with the table
+    once more before 11-01. (Our table is from IMM country pages.)
+  - **Terms of service:** USPS says we are bound by the DDP provider's terms and to ask the
+    sales representative. Our account-level acceptance stands; the representative's answer is
+    still needed. **VOEC to Norway:** also the sales representative.
+  - **Release notes 3.24 (2026-10-15):** `customsForm.incoterm` is `"1"`/`"2"` only and ships
+    2026-10-28 (what `eu-product-identifiers/07` sends); nothing else here changes.
+- 2026-10-15 — **How IOSS works, for the decision on withholding a number (not built).**
+  General knowledge, not verified against EU sources; a tax adviser should confirm.
+  - **Per parcel:** the carrier sends the customs declaration electronically ahead of arrival
+    (for USPS, built from the label request; the number is `exportersReference`). EU customs
+    checks the number against the central IOSS register and releases the parcel without
+    collecting import VAT. Nothing is billed at that point.
+  - **Monthly:** the seller collected destination VAT at checkout. They file one IOSS return
+    per month in their member state of identification, by the end of the following month,
+    and pay it with the return, in euros. There is no invoice. A seller outside the EU
+    usually files through an intermediary. Authorities can compare parcels cleared under a
+    number with the return that number files.
+  - **The duty is separate.** IOSS covers VAT only, so the flat EU duty still has to be
+    prepaid; that is why nine countries take IOSS parcels only with DDP.
+  - **If we ship USPS DDP with the client's number withheld:** USPS's provider declares the
+    parcel under its own IOSS number and bills the account for duty and VAT (stored as
+    `duties_cost`). The client's own IOSS return must then exclude those sales, or the same
+    VAT is reported under two numbers. Shopify has no IOSS report; its ShopifyQL
+    `sales_taxes` report (`filed_by_channel`, which appears to mirror `TaxLine.channelLiable`)
+    lists every sale as the merchant's to file, and cannot know a parcel went DDP.
+  - **If built:** a Ship-page warning to acknowledge before buying; never in unattended flows;
+    a monthly export of parcels shipped this way (order, destination, date, `duties_cost`)
+    for the seller to subtract; probe `taxLines`, `taxesIncluded` and `channelLiable` on an
+    EU order on polybag-test first.
+- 2026-10-15 — **Breakdown columns.** `package_labels` gains nullable `duties_package_fee`,
+  `duties_duty` and `duties_tax` beside `duties_cost` (migration `2026_10_15_120000`). USPS fills
+  them from `prepaidDutiesTaxesFees` on the purchase reply (the package fee, and duty and tax
+  summed over the items), carried on `ShipResponse::$dutiesBreakdown`
+  (`PrepaidDutiesBreakdown`). A purchase recovered by its key has only the total from
+  service 371, so its parts stay null, and the parts may differ from `duties_cost` by a cent or
+  two. UPS and FedEx fill nothing: they bill duties and taxes to the account after clearance.
+  Next for the DDP report: a way to record the actual UPS/FedEx charge, and duty/tax *quotes*
+  marked as estimates for rate comparison (PRD *Later*: USPS `total-rates` with
+  `requestDutiesTaxesFees`, FedEx EDT, UPS Landed Cost).
+- 2026-10-15 — **Prepaid Duties report (Reports group, manager and above).** One row per Label
+  declared DDP (`customs_terms.duties_terms` is `ddp`) or carrying a `duties_cost`: ship date,
+  order, client (multi-client only), destination, tracking, carrier, postage, package fee, duty,
+  tax, duties total, postage plus duties, the registration the Label declared (`None` means the
+  carrier's own IOSS number cleared it, so the sale is not on the client's own IOSS return), and
+  voided. Filters: ship dates (default from the start of last month), active/voided/all
+  (default active), client. CSV export of the filtered rows. USPS rows are complete; a UPS or
+  FedEx DDP label is listed with "Not recorded", never zero, until their bill is entered, which
+  is deferred. Not in the report: checkout VAT from the order (needs the Shopify tax fields) and
+  duty estimates (`16`).

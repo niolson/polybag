@@ -865,6 +865,9 @@ class Package extends Model
                 'source_label_reference' => $response->sourceLabelReference,
                 'customs_terms' => $customsTerms === null ? null : json_encode($customsTerms, JSON_THROW_ON_ERROR),
                 'duties_cost' => $response->dutiesCost,
+                'duties_package_fee' => $response->dutiesBreakdown?->packageFee,
+                'duties_duty' => $response->dutiesBreakdown?->duty,
+                'duties_tax' => $response->dutiesBreakdown?->tax,
                 'created_at' => $now,
                 'updated_at' => $now,
             ]);
