@@ -319,3 +319,9 @@ enrolment instead, this shrinks to a confirmation checkbox with no terms text.
   FedEx DDP label is listed with "Not recorded", never zero, until their bill is entered, which
   is deferred. Not in the report: checkout VAT from the order (needs the Shopify tax fields) and
   duty estimates (`16`).
+- 2026-10-15 — **Decision: do not build the IOSS-withholding route yet.** The owner chose to
+  keep USPS `unavailable` for IOSS parcels to AT, BE, DE, DK, FI, FR, LU, PT and SE. UPS
+  and FedEx still carry them. Revisit when USPS supports own-IOSS plus DDP (no date given),
+  which would reverse the overrides and the adapter's refusal instead, or when a tax adviser
+  has confirmed how a withheld sale comes off the client's IOSS return. The design in the
+  comment above stays the starting point if it is ever built.
