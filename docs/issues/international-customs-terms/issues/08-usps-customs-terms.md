@@ -325,3 +325,13 @@ enrolment instead, this shrinks to a confirmation checkbox with no terms text.
   which would reverse the overrides and the adapter's refusal instead, or when a tax adviser
   has confirmed how a withheld sale comes off the client's IOSS return. The design in the
   comment above stays the starting point if it is ever built.
+- 2026-10-15 — **The IMC DDP-mandatory list could not be found.** The owner searched for the
+  IMC's "Delivery Duties Paid = 3 / DDP Mandatory" country data that USPS pointed to and found
+  it nowhere public; no source they did find disagrees with `duties-support.json`. The table
+  is unchanged: still sourced from the IMM country pages, with only AT and SE from USPS's
+  email, and no `checked` dates moved. A follow-up asking USPS for the list, and for when and
+  how the API will refuse a DDU label to a DDP-mandatory country, is drafted in
+  `.scratch/international-customs-terms/emails.md` (not sent). Until it is answered, a
+  DDP-mandatory country missing from the table gets USPS DDU rates: before USPS's refusal is
+  live such a label is bought DDU and risks refusal at the destination; after, the purchase
+  fails at USPS instead of the rate being filtered.
