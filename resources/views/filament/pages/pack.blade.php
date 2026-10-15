@@ -172,13 +172,13 @@
 
                     new FilamentNotification()
                         .title('Scale Zero Command Sent')
-                        .body('The empty scale should now read 0.00 lbs.')
+                        .body('The scale should now read 0.00 lbs.')
                         .success()
                         .send();
                 } catch (error) {
                     new FilamentNotification()
                         .title('Could Not Zero Scale')
-                        .body(error.message || 'Wait for a stable reading and try again with an empty scale.')
+                        .body(error.message || 'Wait for a stable reading and try again.')
                         .warning()
                         .send();
                 }

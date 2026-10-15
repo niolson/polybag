@@ -34,7 +34,7 @@ enum ScanCommand: string implements HasDescription, HasLabel
             self::Ship => 'Buy and print a label for the package being packed (same as F12)',
             self::ReprintLast => 'Reprint the label this browser session last bought',
             self::VoidLast => 'Void the label this browser session last bought, if you bought it',
-            self::ZeroScale => 'Re-zero the scale with its platform empty',
+            self::ZeroScale => 'Zero the scale, like its own zero button',
             self::ClearShipment => 'Clear the loaded shipment and start fresh',
         };
     }
