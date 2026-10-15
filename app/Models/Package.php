@@ -259,34 +259,6 @@ class Package extends Model
     }
 
     /**
-     * The label voided most recently, whatever the package has bought since.
-     *
-     * A screen asking who voided a package's label reads this only while
-     * `activeLabel` is empty: once the package is bought again, its last void
-     * is history, and View Package lists it with the rest.
-     *
-     * @return HasOne<PackageLabel, $this>
-     */
-    public function latestVoidedLabel(): HasOne
-    {
-        return $this->hasOne(PackageLabel::class)->ofMany(
-            ['voided_at' => 'max', 'id' => 'max'],
-            fn (Builder $query): Builder => $query->whereNotNull('voided_at'),
-        );
-    }
-
-    /**
-     * Why the package's label was voided, while it is unshipped after a void.
-     *
-     * Null for a package that has never been voided and for one bought again
-     * since: its most recent label is then the active one, not a voided one.
-     */
-    public function lastVoidReason(): ?VoidReason
-    {
-        return $this->activeLabel === null ? $this->latestVoidedLabel?->void_reason : null;
-    }
-
-    /**
      * Packages whose label can still be sent to a printer.
      *
      * Voiding a label after the fact clears both the label data and the printed
