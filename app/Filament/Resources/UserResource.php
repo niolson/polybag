@@ -69,7 +69,7 @@ class UserResource extends Resource
                 Forms\Components\Toggle::make('auto_ship_enabled')
                     ->label('Auto Ship')
                     ->default(true)
-                    ->helperText('Buy and print the cheapest on-time label as soon as a package is packed. Managers and admins can also switch this for themselves on the Pack page.'),
+                    ->helperText('Buy and print the cheapest on-time label as soon as a package is packed. Managers and admins can also switch this for themselves on the Scan & Pack page.'),
                 Forms\Components\Placeholder::make('mfa_status')
                     ->label('Multi-Factor Authentication')
                     ->content(function (?User $record): string {

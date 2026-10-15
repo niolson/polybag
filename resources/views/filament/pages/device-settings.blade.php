@@ -644,8 +644,8 @@
                 } catch (error) {
                     console.error('Failed to connect to scale:', error);
                     new FilamentNotification()
-                        .title('Connection Failed')
-                        .body(error.message || 'Could not connect to scale.')
+                        .title('Scale Not Connected')
+                        .body('Could not connect to the scale. Check that it is plugged in and selected above, then try again.')
                         .danger()
                         .send();
                 }

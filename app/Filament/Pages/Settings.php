@@ -866,7 +866,7 @@ class Settings extends Page
 
         Notification::make()
             ->success()
-            ->title('Settings saved')
+            ->title('Settings Saved')
             ->send();
     }
 

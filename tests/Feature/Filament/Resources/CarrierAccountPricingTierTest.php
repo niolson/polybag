@@ -77,5 +77,5 @@ it('reports a failure when authentication is rejected', function (): void {
 
     Livewire::test(EditCarrierAccount::class, ['record' => $this->account->id])
         ->callAction('usps_test_connection')
-        ->assertNotified('USPS connection failed');
+        ->assertNotified('USPS Not Connected');
 });

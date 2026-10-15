@@ -360,7 +360,7 @@ class ManualShip extends Page implements HasForms
         }
 
         if (! empty($data['box_size_id']) && ! BoxSize::where('id', $data['box_size_id'])->exists()) {
-            $this->notifyError('Invalid Box Size', 'The selected box size does not exist.');
+            $this->notifyError('Box Size Not Found', 'The selected box size no longer exists. Choose another.');
 
             return false;
         }

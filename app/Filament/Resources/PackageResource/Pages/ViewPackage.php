@@ -213,7 +213,7 @@ class ViewPackage extends ViewRecord
         $savedAt = $package->updated_at?->timezone(Location::timezone());
 
         return sprintf(
-            'Buys a label within this shipment\'s shipping rules at %s lbs, %s × %s × %s in, then prints it. Last saved %s. If the box has changed since, re-weigh it on the Pack page first.',
+            'Buys a label within this shipment\'s shipping rules at %s lbs, %s × %s × %s in, then prints it. Last saved %s. If the box has changed since, re-weigh it on Scan & Pack first.',
             number_format((float) $package->weight, 2),
             (float) $package->length,
             (float) $package->width,

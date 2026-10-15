@@ -13,7 +13,7 @@ class MissingDeclaredValueException extends \Exception
     {
         parent::__construct(
             'This shipment requires a declared value, but no value is set. '
-            .'Edit the shipment (or its items) to set a value, then refresh rates.'
+            .'Edit the shipment (or its items) to set a value, then get rates again.'
         );
     }
 }

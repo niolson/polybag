@@ -250,7 +250,7 @@ class EditCarrierAccount extends EditRecord
 
             Notification::make()
                 ->danger()
-                ->title('USPS connection failed')
+                ->title('USPS Not Connected')
                 ->body('USPS did not accept these credentials. Check them and try again.')
                 ->send();
 

@@ -625,7 +625,7 @@ class Pack extends Page
             // The browser applies an active box while packing; one reaching here is not that.
             ScanCodeType::BoxSize => $this->shipment === null
                 ? $this->notifyError('No Shipment Loaded', 'Scan a pack slip before scanning a box.')
-                : $this->notifyError('Box Size Not Available', "{$code->scan} is not an active box size."),
+                : $this->notifyError('Box Size Inactive', "{$code->scan} is not an active box size. Ask a manager to activate it under Box Sizes."),
             ScanCodeType::Command => $this->notifyError('Unknown Command', "'{$code->scan}' is not a command PolyBag knows. Reprint the command sheet if it is an old one."),
             ScanCodeType::Action => $this->notifyError('Not Available', 'Custom scan actions are not available yet.'),
         };

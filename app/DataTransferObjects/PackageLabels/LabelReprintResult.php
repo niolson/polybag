@@ -13,7 +13,7 @@ final readonly class LabelReprintResult
         public string $message = '',
     ) {}
 
-    public static function success(PrintRequest $printRequest, string $message, string $title = 'Label Reprinted'): self
+    public static function success(PrintRequest $printRequest, string $message, string $title = 'Label Sent to Printer'): self
     {
         return new self(
             success: true,

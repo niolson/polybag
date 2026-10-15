@@ -126,7 +126,7 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
             // A batch draft packs every item at its full quantity, so it must
             // not be built for an order another Package has partly sent.
             if (Package::where('shipment_id', $lockedShipment->id)->where('status', PackageStatus::Shipped)->exists()) {
-                throw new PackageDraftInvalidException('Shipment is partly shipped; finish it on the Pack page.');
+                throw new PackageDraftInvalidException('Shipment is partly shipped; finish it on Scan & Pack.');
             }
 
             $package = $existingDraft ?? $this->createDraft($lockedShipment);

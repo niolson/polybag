@@ -240,3 +240,15 @@ This replaces the sentence-case recommendation for notification titles in issues
   notification; one PDF failure message. Capitalization: Title Case for titles, labels and
   buttons, applied to touched strings only. The low findings off the demo path remain
   open.
+
+- 2026-10-15 — Remaining findings done: one result toast for a reprint, "Label Sent to
+  Printer" with "Tracking {n}"; the purchase body reads "Tracking {n} via {carrier} {service}
+  — ${cost}"; the Pack inactive-box scan says "Box Size Inactive" with the next step and
+  Manual Ship says "Box Size Not Found"; the scale connection failure is "Scale Not
+  Connected" and a failed USPS credentials test is "USPS Not Connected", so "Connection"
+  stays for Connections; "Settings Saved" everywhere; "Scan & Pack" replaces "the Pack
+  page" in messages; the missing-declared-value message says "get rates again".
+  Already done before this pass: the single "Already Shipped" message, "Label Bought", the
+  picking gate, "Buy & Print Label", "Reprint Label", "Shipment Cancelled", "Shipment
+  Reference", "Clear Shipment", "Rate Unavailable", the page and report names, and
+  "Completed with Errors".

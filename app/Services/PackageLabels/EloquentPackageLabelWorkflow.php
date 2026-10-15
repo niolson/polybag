@@ -159,10 +159,8 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
 
         return LabelReprintResult::success(
             printRequest: PrintRequest::fromPackage($package),
-            message: $isReprint
-                ? "Reprinted label for tracking: {$package->tracking_number}"
-                : "Printed label for tracking: {$package->tracking_number}",
-            title: $isReprint ? 'Label Reprinted' : 'Label Printed',
+            message: "Tracking {$package->tracking_number}",
+            title: 'Label Sent to Printer',
         );
     }
 
