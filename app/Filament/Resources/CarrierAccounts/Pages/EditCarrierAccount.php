@@ -233,14 +233,15 @@ class EditCarrierAccount extends EditRecord
 
     public function testUspsConnection(): void
     {
-        $account = $this->record->replicate();
-        $account->id = $this->record->id;
+        $record = $this->carrierAccountRecord();
+        $account = $record->replicate();
+        $account->id = $record->id;
         $formCredentials = array_filter(
             (array) ($this->data['credentials'] ?? []),
             fn ($value): bool => $value !== null && $value !== '',
         );
-        $account->credentials = array_merge($this->record->credentials ?? [], $formCredentials);
-        $unsavedCredentials = $account->credentials !== $this->record->credentials;
+        $account->credentials = array_merge($record->credentials ?? [], $formCredentials);
+        $unsavedCredentials = $account->credentials !== $record->credentials;
 
         try {
             $pricingType = app(UspsAdapter::class)->detectPricingType($account, cache: ! $unsavedCredentials);
