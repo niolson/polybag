@@ -207,3 +207,9 @@ international Package that lack an origin or an HS code.
   leaving the Offer unclaimed, batch recording and continuing, the Ship page, the Products
   filter), `UspsExportFilingTest`; `UspsAdapterTest`'s fixtures now give their items an
   origin.
+- 2026-10-15 — **`ddp_without_registration` reworded.** It said "VAT may be charged twice",
+  which is wrong when checkout charged import taxes: then DDP without a registration is the
+  intended route, and the carrier account pays the VAT the checkout collected. It now says
+  import VAT is paid on arrival and billed to the carrier account, and that it is paid
+  twice only if the client also reports the sale on its own registration's return. Still a
+  warning; the PRD row follows.

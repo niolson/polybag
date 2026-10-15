@@ -232,7 +232,7 @@ Run by `CustomsReadiness` (`05`), at purchase and as a Ship-page preview.
 | Recipient tax ID present | Per `recipient-tax-id.json` (BR, KR to start) | Block for BR; warn for KR (`05`: FedEx says the recipient supplies the PCCC) |
 | Line value is not zero | All international | Block (existing guard, moved) |
 | EU consumer line has M-PID and NS-PID | EU consumer | Block (existing guard, moved) |
-| DDP with no seller registration for a regime that has one | EU, GB, NO, AU | Warn: VAT may be charged twice |
+| DDP with no seller registration for a regime that has one | EU, GB, NO, AU | Warn: import VAT is billed to the carrier account; paid twice only if the sale is also on the client's own registration return |
 | Consignment over the IOSS or UK VAT threshold | EU, GB | Warn: registration not sent |
 | An item at NOK 3,000 or more in a parcel declared under VOEC | NO | Block: ship that item separately |
 | An item over AUD 1,000 in a parcel with an ARN to declare | AU | Block until `02` finds a per-item GST-paid mark |

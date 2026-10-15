@@ -628,7 +628,7 @@ class CustomsReadiness
                     CustomsFindingSeverity::Warn,
                     'ddp_without_registration',
                     'No Seller Registration',
-                    "These duties are prepaid (DDP) but there is no {$regime->getLabel()} registration for {$destination->country}, so VAT may be charged twice. Add the registration to the client or the order.",
+                    "These duties are prepaid (DDP) with no {$regime->getLabel()} registration for {$destination->country}, so import VAT is paid on arrival and billed to the carrier account. That is right when checkout charged import taxes. If the client reports this sale on the return of its own registration, add the registration to the client or the order, or the same VAT is paid twice.",
                 );
             }
         }
