@@ -4,6 +4,7 @@ namespace App\Filament\Pages\Reports;
 
 use App\Enums\PackageStatus;
 use App\Enums\Role;
+use App\Models\Carrier;
 use App\Models\Package;
 use BackedEnum;
 use Filament\Forms\Components\DatePicker;
@@ -24,6 +25,8 @@ class RateComparison extends Page implements HasTable
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-arrows-right-left';
 
     protected static ?string $navigationLabel = 'Rate Comparison';
+
+    protected static ?string $title = 'Rate Comparison';
 
     protected static UnitEnum|string|null $navigationGroup = 'Reports';
 
@@ -74,12 +77,12 @@ class RateComparison extends Page implements HasTable
                 Tables\Columns\TextColumn::make('selected_rate')
                     ->label('Selected Rate')
                     ->state(fn (Package $record): string => $record->selected_carrier
-                        ? "{$record->selected_carrier} — \${$record->selected_price}"
+                        ? Carrier::labelForName($record->selected_carrier)." — \${$record->selected_price}"
                         : '—'),
                 Tables\Columns\TextColumn::make('cheapest_rate')
                     ->label('Cheapest Rate')
                     ->state(fn (Package $record): string => $record->cheapest_carrier
-                        ? "{$record->cheapest_carrier} — \${$record->cheapest_price}"
+                        ? Carrier::labelForName($record->cheapest_carrier)." — \${$record->cheapest_price}"
                         : '—'),
                 Tables\Columns\TextColumn::make('savings')
                     ->label('Potential Savings')
@@ -109,7 +112,7 @@ class RateComparison extends Page implements HasTable
                             ->when($data['until'], fn ($q, $date) => $q->where('shipped_at', '<=', $date));
                     }),
                 Tables\Filters\SelectFilter::make('carrier')
-                    ->options(fn () => Package::query()->where('status', PackageStatus::Shipped)->where('shipped_at', '>=', now()->subDays(90))->whereNotNull('carrier')->distinct()->pluck('carrier', 'carrier')->toArray())
+                    ->options(fn () => Package::query()->where('status', PackageStatus::Shipped)->where('shipped_at', '>=', now()->subDays(90))->whereNotNull('carrier')->distinct()->pluck('carrier')->mapWithKeys(fn (string $carrier): array => [$carrier => Carrier::labelForName($carrier)])->toArray())
                     ->query(fn ($query, array $data) => $data['value'] ? $query->where('packages.carrier', $data['value']) : $query),
             ], layout: FiltersLayout::AboveContent)
             ->deferFilters(false)

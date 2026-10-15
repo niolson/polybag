@@ -130,8 +130,8 @@ class GeneratePickBatch extends Page implements HasForms
         if ($batch === null) {
             Notification::make()
                 ->warning()
-                ->title('No pending shipments')
-                ->body('There are no pending shipments matching the selected filters.')
+                ->title('No Open Shipments')
+                ->body('There are no open shipments waiting to be picked that match the selected filters.')
                 ->send();
 
             return;

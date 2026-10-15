@@ -24,5 +24,5 @@ it('generates a batch when multi-client is disabled and the client_id field is h
     Livewire::test(GeneratePickBatch::class)
         ->call('generate')
         ->assertHasNoErrors()
-        ->assertNotified('No pending shipments');
+        ->assertNotified('No Open Shipments');
 });

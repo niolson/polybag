@@ -3,6 +3,7 @@
 namespace App\Filament\Widgets;
 
 use App\Enums\Role;
+use App\Models\Carrier;
 use App\Models\DailyShippingStat;
 use App\Models\Location;
 use Filament\Widgets\ChartWidget;
@@ -71,7 +72,7 @@ class CarrierBreakdownChart extends ChartWidget
                     'backgroundColor' => array_slice($colors, 0, count($breakdown)),
                 ],
             ],
-            'labels' => array_keys($breakdown),
+            'labels' => array_map(fn (string $carrier): string => Carrier::labelForName($carrier), array_keys($breakdown)),
         ];
     }
 

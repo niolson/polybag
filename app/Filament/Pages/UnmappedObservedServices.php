@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Enums\PostageSourceKind;
 use App\Enums\Role;
 use App\Enums\SourceEnvironment;
 use App\Exceptions\CrossCarrierMappingException;
@@ -74,7 +75,7 @@ class UnmappedObservedServices extends Page implements HasTable
             ->groups([
                 Group::make('source')
                     ->label('Source')
-                    ->getTitleFromRecordUsing(fn (ObservedService $record): string => Str::headline($record->source)),
+                    ->getTitleFromRecordUsing(fn (ObservedService $record): string => PostageSourceKind::tryFrom($record->source)?->label() ?? Str::headline($record->source)),
             ])
             ->defaultGroup('source')
             ->columns([
@@ -185,7 +186,7 @@ class UnmappedObservedServices extends Page implements HasTable
                                 ->body(static::coverage($mapped))
                                 ->send();
                         } catch (CrossCarrierMappingException $e) {
-                            Notification::make()->danger()->title('Not mapped')->body($e->getMessage())->send();
+                            Notification::make()->danger()->title('Not Mapped')->body($e->getMessage())->send();
 
                             $action->halt();
                         }
@@ -205,7 +206,7 @@ class UnmappedObservedServices extends Page implements HasTable
                     ->schema([
                         Forms\Components\Select::make('carrier_id')
                             ->label('Carrier')
-                            ->options(fn (): array => Carrier::query()->orderBy('name')->pluck('name', 'id')->all())
+                            ->options(fn (): array => Carrier::query()->orderBy('name')->get()->mapWithKeys(fn (Carrier $carrier): array => [$carrier->id => $carrier->label()])->all())
                             ->default(fn (ObservedService $record): ?int => static::matchingCarrierId($record))
                             ->searchable()
                             ->required()
@@ -256,7 +257,7 @@ class UnmappedObservedServices extends Page implements HasTable
                                 ->body(static::coverage($mapped))
                                 ->send();
                         } catch (CrossCarrierMappingException $e) {
-                            Notification::make()->danger()->title('Not created')->body($e->getMessage())->send();
+                            Notification::make()->danger()->title('Not Created')->body($e->getMessage())->send();
 
                             $action->halt();
                         }
@@ -274,7 +275,7 @@ class UnmappedObservedServices extends Page implements HasTable
 
                         Notification::make()
                             ->success()
-                            ->title('Mapping removed')
+                            ->title('Mapping Removed')
                             ->body(static::coverage($observations))
                             ->send();
                     }),

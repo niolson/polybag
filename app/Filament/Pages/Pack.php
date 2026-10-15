@@ -46,6 +46,8 @@ class Pack extends Page
 
     protected static ?string $navigationLabel = 'Scan & Pack';
 
+    protected static ?string $title = 'Scan & Pack';
+
     protected static UnitEnum|string|null $navigationGroup = 'Ship';
 
     protected static ?int $navigationSort = 1;
@@ -126,7 +128,7 @@ class Pack extends Page
             $locationError = app(ShipmentLocationGuard::class)->errorFor($this->shipment, auth()->user());
 
             if ($locationError !== null) {
-                $this->notifyError('Location unavailable', $locationError);
+                $this->notifyError('Location Unavailable', $locationError);
                 $this->shipment = null;
                 $this->redirect('/pack');
 
@@ -330,7 +332,7 @@ class Pack extends Page
         $this->shipment->refresh()->load('location');
         $locationError = app(ShipmentLocationGuard::class)->errorFor($this->shipment, auth()->user());
         if ($locationError !== null) {
-            $this->notifyError('Location unavailable', $locationError);
+            $this->notifyError('Location Unavailable', $locationError);
             $this->dispatch('shipping-error');
 
             return;
@@ -761,7 +763,7 @@ class Pack extends Page
             $this->notifySuccess('Label Voided', $result->message);
 
             if ($result->warning !== null) {
-                $this->notifyWarning('Sales channel not updated', $result->warning);
+                $this->notifyWarning('Sales Channel Not Updated', $result->warning);
             }
 
             return;

@@ -248,7 +248,7 @@
                                 class="w-12 h-12 mx-auto text-warning-500"
                             />
                             <p class="mt-2 text-gray-500 dark:text-gray-400">No shipping rates available for this package.</p>
-                            <p class="text-sm text-gray-400 dark:text-gray-500">Check the shipping method configuration.</p>
+                            <p class="text-sm text-gray-400 dark:text-gray-500">Check the warnings above, or ask a manager to check this shipment's shipping method.</p>
                         </div>
                     @endif
                     @if(!empty($rateOptions))
@@ -337,9 +337,9 @@
                                             @endif
                                             @isset($rate['otdrProtection'])
                                                 @if($rate['otdrProtection']['protected'])
-                                                    <x-filament::badge color="success" size="sm">OTDR protected</x-filament::badge>
+                                                    <x-filament::badge color="success" size="sm" title="OTDR protected: a late arrival does not count against your on-time delivery rate">Protected if late</x-filament::badge>
                                                 @else
-                                                    <x-filament::badge color="warning" size="sm">Not OTDR protected</x-filament::badge>
+                                                    <x-filament::badge color="warning" size="sm" title="Not OTDR protected: a late arrival counts against your on-time delivery rate">Not protected if late</x-filament::badge>
                                                 @endif
                                             @endisset
                                         </div>
@@ -435,7 +435,7 @@
                 <x-filament::icon icon="heroicon-o-cube" class="w-8 h-8 text-primary-500" />
             </div>
             <h3 class="text-lg font-semibold text-gray-900 dark:text-white">No Package Selected</h3>
-            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Select a package from the packing page to ship.</p>
+            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Open a package from Scan & Pack to ship it.</p>
             <x-filament::button
                 href="{{ $returnUrl }}"
                 tag="a"

@@ -45,7 +45,7 @@
                         :class="printerOk ? 'bg-emerald-500' : 'bg-amber-500'"
                     ></div>
                     <span class="text-sm text-gray-600 dark:text-gray-400">
-                        <span class="font-medium text-gray-900 dark:text-gray-100">Printer:</span>
+                        <span class="font-medium text-gray-900 dark:text-gray-100">Label printer:</span>
                         <span x-text="printerStatus"></span>
                     </span>
                 </div>

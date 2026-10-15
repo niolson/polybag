@@ -183,7 +183,7 @@ class ManualShip extends Page implements HasForms
                                     ->schema([
                                         Forms\Components\TextInput::make('shipment_reference')
                                             ->label('Reference')
-                                            ->helperText('Optional - External channel reference number')
+                                            ->helperText('Optional. The reference number from the external channel.')
                                             ->maxLength(255),
                                         Forms\Components\Select::make('shipping_method_id')
                                             ->label('Shipping Method')

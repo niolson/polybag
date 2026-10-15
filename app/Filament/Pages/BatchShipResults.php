@@ -15,8 +15,6 @@ class BatchShipResults extends Page
 
     protected static ?string $slug = 'batch-ship/{labelBatchId}';
 
-    protected string $view = 'filament.pages.batch-ship-results';
-
     public static function canAccess(): bool
     {
         return auth()->user()?->role->isAtLeast(Role::Manager) ?? false;

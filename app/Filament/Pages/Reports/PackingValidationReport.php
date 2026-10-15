@@ -30,6 +30,8 @@ class PackingValidationReport extends Page implements HasTable
 
     protected static ?string $navigationLabel = 'Packing Validation';
 
+    protected static ?string $title = 'Packing Validation';
+
     protected static UnitEnum|string|null $navigationGroup = 'Reports';
 
     protected static ?int $navigationSort = 40;

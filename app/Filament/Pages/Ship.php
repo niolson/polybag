@@ -162,7 +162,7 @@ class Ship extends Page
         $locationError = app(ShipmentLocationGuard::class)->errorFor($this->package->shipment, auth()->user());
 
         if ($locationError !== null) {
-            $this->notifyError('Location unavailable', $locationError);
+            $this->notifyError('Location Unavailable', $locationError);
             $this->package = null;
             $this->redirect($this->returnUrl);
 
@@ -224,7 +224,7 @@ class Ship extends Page
         try {
             $options = $this->prepareCachedRates();
         } catch (LockTimeoutException) {
-            $this->notifyWarning('Rates are being refreshed', 'Please wait a moment and try again.');
+            $this->notifyWarning('Rates Are Being Refreshed', 'Please wait a moment and try again.');
 
             return;
         }
@@ -373,7 +373,7 @@ class Ship extends Page
 
         if (! $this->takeRateRefresh()) {
             $this->notifyWarning(
-                'Slow down',
+                'Slow Down',
                 'Too many rate refreshes. Please wait '.RateLimiter::availableIn($this->rateRefreshThrottleKey()).'s and try again.',
             );
 
@@ -390,7 +390,7 @@ class Ship extends Page
         try {
             $options = $this->prepareCachedRates();
         } catch (LockTimeoutException) {
-            $this->notifyWarning('Rates are being refreshed', 'Please wait a moment and try again.');
+            $this->notifyWarning('Rates Are Being Refreshed', 'Please wait a moment and try again.');
 
             return;
         }
@@ -568,7 +568,7 @@ class Ship extends Page
 
         $locationError = app(ShipmentLocationGuard::class)->errorFor($this->package->shipment, auth()->user());
         if ($locationError !== null) {
-            $this->notifyError('Location unavailable', $locationError);
+            $this->notifyError('Location Unavailable', $locationError);
 
             return;
         }

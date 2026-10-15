@@ -12,7 +12,7 @@ class ShipmentLocationGuard
         $shipment->loadMissing('location');
 
         if ($shipment->location !== null && ! $shipment->location->active) {
-            return "Shipment {$shipment->shipment_reference} is assigned to inactive location {$shipment->location->name}. Ask an administrator to update the Shopify location mapping.";
+            return "Shipment {$shipment->shipment_reference} is assigned to inactive location {$shipment->location->name}. Ask an administrator to reactivate the location or move the shipment.";
         }
 
         if ($shipment->location_id === null || $operator?->location_id === null) {

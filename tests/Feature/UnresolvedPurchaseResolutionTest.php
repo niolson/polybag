@@ -322,7 +322,7 @@ it('shows a refusal rather than recording it', function (): void {
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
         ->callAction(recordWhatWasFound(), data: ['outcome' => 'label_exists', 'tracking_number' => '1Z999'])
-        ->assertNotified('Not recorded');
+        ->assertNotified('Not Recorded');
 
     expect(ShippingOffer::query()->unaccounted()->count())->toBe(1)
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
@@ -519,7 +519,7 @@ it('says the label is recorded when voiding it fails', function (): void {
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
         ->callAction(recordWhatWasFound(), data: ['outcome' => 'void_label'])
-        ->assertNotified('Recorded, not voided');
+        ->assertNotified('Recorded, Not Voided');
 
     expect($package->fresh()->status)->toBe(PackageStatus::Shipped)
         ->and(ShippingOffer::query()->unaccounted()->count())->toBe(0);

@@ -211,7 +211,7 @@ it('rejects product mismatches for shipment items', function (): void {
             new PackageDraftItemInput($shipmentItem->id, $wrongProduct->id, 1),
         ],
     ));
-})->throws(PackageDraftInvalidException::class, 'Product mismatch');
+})->throws(PackageDraftInvalidException::class, 'does not match the shipment');
 
 it('requires positive measurements before a draft is ready to ship', function (): void {
     $shipment = Shipment::factory()->create();
@@ -222,7 +222,7 @@ it('requires positive measurements before a draft is ready to ship', function ()
     ), new PackageDraftOptions(requireCompletePackedItems: false));
 
     app(PackageDraftWorkflow::class)->assertReadyToShip($shipment, $snapshot->packageDraftId);
-})->throws(PackageDraftIncompleteException::class, 'Package draft is missing valid measurements');
+})->throws(PackageDraftIncompleteException::class, 'Enter the package\'s weight and dimensions');
 
 it('requires complete packed items when requested before a draft is ready to ship', function (): void {
     $shipment = Shipment::factory()->create();
@@ -242,7 +242,7 @@ it('requires complete packed items when requested before a draft is ready to shi
     ));
 
     app(PackageDraftWorkflow::class)->assertReadyToShip($shipment, $snapshot->packageDraftId);
-})->throws(PackageDraftIncompleteException::class, 'Not all shipment items are packed');
+})->throws(PackageDraftIncompleteException::class, 'Some items are not packed yet');
 
 it('returns a ready package draft when measurements and packed items are complete', function (): void {
     $shipment = Shipment::factory()->create();

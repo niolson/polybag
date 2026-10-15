@@ -9,7 +9,7 @@
             <div class="text-2xl font-bold">{{ number_format($this->getBatchFailureCount()) }}</div>
         </x-filament::section>
         <x-filament::section>
-            <div class="text-sm text-gray-500 dark:text-gray-400">Shipped with Validation Issues</div>
+            <div class="text-sm text-gray-500 dark:text-gray-400">Shipped to Unverified Addresses</div>
             <div class="text-2xl font-bold">{{ number_format($this->getValidationIssueCount()) }}</div>
         </x-filament::section>
     </div>

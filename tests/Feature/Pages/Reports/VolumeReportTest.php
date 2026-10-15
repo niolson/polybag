@@ -16,7 +16,7 @@ it('renders volume report page', function (): void {
     Livewire::actingAs($user)
         ->test(VolumeReport::class)
         ->assertOk()
-        ->assertSee('Volume Report');
+        ->assertSee('Volume');
 });
 
 it('defaults to channel grouping', function (): void {

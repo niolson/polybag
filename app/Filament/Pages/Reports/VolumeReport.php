@@ -24,7 +24,9 @@ class VolumeReport extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-chart-bar';
 
-    protected static ?string $navigationLabel = 'Volume Report';
+    protected static ?string $navigationLabel = 'Volume';
+
+    protected static ?string $title = 'Volume';
 
     protected static UnitEnum|string|null $navigationGroup = 'Reports';
 

@@ -30,7 +30,7 @@ enum PackSlipState: string implements HasColor, HasLabel
         return match ($this) {
             self::Printed => 'Printed',
             self::NotPrinted => 'Not printed',
-            self::ChangedSincePrinted => 'Changed since printed',
+            self::ChangedSincePrinted => 'Out of date',
         };
     }
 

@@ -655,7 +655,7 @@ class ShipmentResource extends Resource
                         TextEntry::make('pack_slip')
                             ->label('Pack Slip')
                             ->state(fn (Shipment $record): string => $record->hasPrintedPackSlip()
-                                ? ($record->packSlipIsOutOfDate() ? 'Changed since printed. ' : '')
+                                ? ($record->packSlipIsOutOfDate() ? 'Out of date. ' : '')
                                     .'Printed '.$record->pack_slip_printed_at?->timezone(Location::timezone())->format('M j, Y g:i A')
                                     .($record->packSlipPrintedBy ? ' by '.$record->packSlipPrintedBy->name : '')
                                 : 'Not printed')

@@ -127,7 +127,8 @@
             } catch (error) {
                 button.disabled = false;
                 status.className = 'mark-status error';
-                status.textContent = `Not recorded: ${error.message}`;
+                console.error('Pack slip print not recorded:', error);
+                status.textContent = 'Not recorded. Print the slips again to try again.';
             }
         });
     </script>

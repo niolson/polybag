@@ -25,7 +25,7 @@ class LabelVoidNotification
 
         if ($result->warning !== null) {
             Notification::make()
-                ->title('Sales channel not updated')
+                ->title('Sales Channel Not Updated')
                 ->body($result->warning)
                 ->warning()
                 ->persistent()

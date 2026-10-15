@@ -601,9 +601,9 @@ class PackageResource extends Resource
                     ->iconButton()
                     ->tooltip('Track'),
                 Actions\Action::make('reprint')
-                    ->label(fn (Package $record): string => $record->label_printed_at ? 'Reprint' : 'Print')
+                    ->label(fn (Package $record): string => $record->label_printed_at ? 'Reprint Label' : 'Print Label')
                     ->iconButton()
-                    ->tooltip(fn (Package $record): string => $record->label_printed_at ? 'Reprint label' : 'Print label')
+                    ->tooltip(fn (Package $record): string => $record->label_printed_at ? 'Reprint Label' : 'Print Label')
                     ->icon('heroicon-o-printer')
                     ->color('gray')
                     ->visible(fn (Package $record): bool => $record->status === PackageStatus::Shipped && $record->label_data)

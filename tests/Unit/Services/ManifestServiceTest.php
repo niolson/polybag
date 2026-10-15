@@ -144,7 +144,7 @@ it('returns failure for unsupported carrier', function (): void {
     $result = app(ManifestService::class)->createManifest('DHL', $packages);
 
     expect($result->success)->toBeFalse()
-        ->and($result->errorMessage)->toContain('Unsupported carrier');
+        ->and($result->errorMessage)->toContain('does not support end-of-day manifests');
 });
 
 it('returns failure for FedEx manifest stub', function (): void {
@@ -240,7 +240,7 @@ it('reports the status and body when USPS answers a SCAN form request with somet
     $result = app(ManifestService::class)->createManifest('USPS', collect([$package]));
 
     expect($result->success)->toBeFalse()
-        ->and($result->errorMessage)->toContain('HTTP 503')
+        ->and($result->errorMessage)->toContain('error 503')
         ->and($result->errorMessage)->toContain('Service Unavailable')
         ->and($result->errorMessage)->not->toContain('Syntax error');
 });

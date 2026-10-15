@@ -137,7 +137,7 @@
 
             notifyInactiveBox(code) {
                 new FilamentNotification()
-                    .title('Box size inactive')
+                    .title('Box Size Inactive')
                     .body(`${this.inactiveBoxSizes[code].label} (${code}) is inactive. Ask a manager to activate it under Box Sizes.`)
                     .warning()
                     .send();
@@ -199,8 +199,8 @@
                     this.length = box.length;
                 } else {
                     new FilamentNotification()
-                        .title('Box not found')
-                        .body(`Box code '${code}' not found`)
+                        .title('Box Size Not Found')
+                        .body(`No box size has the code ${code}.`)
                         .danger()
                         .send();
                 }
@@ -210,8 +210,8 @@
                 const idx = this.packingItems.findIndex(item => item.barcode === barcode || item.sku === barcode);
                 if (idx === -1) {
                     new FilamentNotification()
-                        .title('Item not found')
-                        .body(`Item '${barcode}' not found in shipment`)
+                        .title('Item Not Found')
+                        .body(`No item in this shipment matches ${barcode}. Check the barcode and scan again.`)
                         .danger()
                         .send();
                     return;
@@ -221,8 +221,8 @@
 
                 if (item.packed >= item.quantity) {
                     new FilamentNotification()
-                        .title('Already packed')
-                        .body('Item already fully packed')
+                        .title('Already Packed')
+                        .body('Every unit of this item is already packed.')
                         .danger()
                         .send();
                     return;
@@ -479,7 +479,7 @@
         @keydown.window="handleGlobalKey($event)"
         @keydown.f12.window.prevent="shipPackage()"
         @scan-to-add-found.window="addScannedProduct($event.detail.product)"
-        @scan-to-add-not-found.window="new FilamentNotification().title('Product not found').body(`No product found for '${$event.detail.barcode}'`).danger().send()"
+        @scan-to-add-not-found.window="new FilamentNotification().title('Product Not Found').body(`No product found for '${$event.detail.barcode}'`).danger().send()"
         @shipping-error.window="isShipping = false"
     >
         {{-- Header buttons --}}
@@ -669,7 +669,7 @@
             @if($shipment->needsShippingMethod())
                 <x-filament::badge color="danger" icon="heroicon-m-exclamation-triangle" class="mr-2">No shipping method</x-filament::badge>
             @endif
-            {{ $shipment->first_name }} {{ $shipment->last_name }} - {{ $shipment->city }}, {{ $shipment->state_or_province }}
+            {{ $shipment->first_name }} {{ $shipment->last_name }} · {{ $shipment->city }}, {{ $shipment->state_or_province }}
         </x-slot>
 
         <div class="w-full overflow-x-auto">
@@ -805,7 +805,7 @@
                                             <svg class="fi-badge-icon h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                                 <path stroke-linecap="round" stroke-linejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                             </svg>
-                                            <span>Over Packed</span>
+                                            <span>Overpacked</span>
                                         </span>
                                     </template>
                                 </td>

@@ -324,7 +324,7 @@ it('explains on the Ship page when every rate was dropped, instead of an empty l
         ->assertSet('rateOptions', [])
         ->assertSee('No rate fits the customs terms of this shipment')
         ->assertSee('USPS dropped: Germany requires prepaid duties (IMM)')
-        ->assertDontSee('Check the shipping method configuration');
+        ->assertDontSee('Check the warnings above');
 });
 
 it('refuses an unresolved EU Shipment, linking to Settings in single-client mode', function (): void {
@@ -512,7 +512,7 @@ it('keeps the shipping-method hint when no source answered at all', function ():
         ->assertSet('allRatesDroppedForCustomsTerms', false)
         ->assertSee('No rates: no duties terms are set for France')
         ->assertDontSee('No rate fits the customs terms of this shipment')
-        ->assertSee('Check the shipping method configuration');
+        ->assertSee('Check the warnings above');
 });
 
 it('does not serve stale rates on the Ship page after a client policy edit', function (): void {
@@ -602,11 +602,11 @@ it('marks a USPS DDP rate on the Ship page as charged to the account at purchase
     $usps = collect($options->rateOptions)->firstWhere('carrier', 'USPS');
     $ups = collect($options->rateOptions)->firstWhere('carrier', 'UPS');
 
-    expect($usps['dutiesCharge'])->toBe('DDP: duties charged to the account at purchase')
+    expect($usps['dutiesCharge'])->toBe('Duties prepaid: charged to the account at purchase')
         ->and($ups)->not->toHaveKey('dutiesCharge');
 
     Livewire::test(Ship::class, ['package_id' => $package->id])
-        ->assertSee('DDP: duties charged to the account at purchase');
+        ->assertSee('Duties prepaid: charged to the account at purchase');
 });
 
 it('does not mark a USPS DDU rate', function (): void {

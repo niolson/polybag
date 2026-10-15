@@ -20,7 +20,7 @@ it('displays pending shipments count', function (): void {
     Shipment::factory()->count(2)->create(['status' => ShipmentStatus::Shipped]);
 
     Livewire::test(StatsOverview::class)
-        ->assertSee('Pending Shipments')
+        ->assertSee('Open Shipments')
         ->assertSee('3');
 });
 
@@ -50,7 +50,7 @@ it('shows zero when no pending shipments', function (): void {
     Shipment::factory()->count(2)->create(['status' => ShipmentStatus::Shipped]);
 
     Livewire::test(StatsOverview::class)
-        ->assertSee('Pending Shipments')
+        ->assertSee('Open Shipments')
         ->assertSee('0');
 });
 

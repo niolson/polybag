@@ -43,7 +43,7 @@ class ExceptionsWidget extends BaseWidget
 
         return [
             Stat::make('Undeliverable Shipments', $counts['undeliverable'])
-                ->description('Last 90 days, deliverability "No"')
+                ->description('Last 90 days, not deliverable')
                 ->descriptionIcon('heroicon-m-x-circle')
                 ->color($counts['undeliverable'] > 0 ? 'danger' : 'success')
                 ->url(ShipmentResource::getUrl('index').'?status_tab='.ShipmentStatus::Open->value.'&deliverability_tab='.Deliverability::No->value),

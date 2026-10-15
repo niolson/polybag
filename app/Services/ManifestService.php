@@ -20,6 +20,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Saloon\Exceptions\Request\RequestException;
 use Saloon\Http\Connector;
 use Saloon\Http\Response;
@@ -72,7 +73,7 @@ class ManifestService
         return match ($carrier) {
             Carrier::USPS => $this->createUspsManifest($packages, $shipDate, $locationId),
             Carrier::FEDEX => $this->createFedexManifest(),
-            default => ManifestResponse::failure("Unsupported carrier: {$carrier}"),
+            default => ManifestResponse::failure(Carrier::labelForName($carrier).' does not support end-of-day manifests.'),
         };
     }
 
@@ -92,7 +93,7 @@ class ManifestService
         } catch (\Exception $e) {
             logger()->error('Carrier manifest error', ['carrier' => $carrier, 'error' => $e->getMessage()]);
 
-            return ManifestResponse::failure($e->getMessage());
+            return ManifestResponse::failure('The manifest could not be created. Try again, or ask an administrator to check the log.');
         }
 
         if (! $response->success) {
@@ -188,10 +189,12 @@ class ManifestService
 
                     if (! $result['success']) {
                         if ($totalManifested > 0) {
+                            logger()->error('USPS SCAN form batch failed after earlier batches', ['batch' => $batchNumber, 'error' => $result['error']]);
+
                             return ManifestResponse::failure(
-                                "Partial manifest: {$totalManifested} packages manifested across "
-                                .count($manifestNumbers)." form(s), but batch {$batchNumber}"
-                                ." failed: {$result['error']}"
+                                "Only part of the day was manifested: {$totalManifested} packages on "
+                                .count($manifestNumbers).' '.Str::plural('form', count($manifestNumbers))
+                                .", but batch {$batchNumber} failed. Run End of Day again for the rest."
                             );
                         }
 
@@ -214,7 +217,9 @@ class ManifestService
         } catch (\Exception $e) {
             logger()->error('USPS Scan Form Error', ['error' => $e->getMessage()]);
 
-            return ManifestResponse::failure($e->getMessage());
+            return ManifestResponse::failure($e instanceof \RuntimeException
+                ? $e->getMessage()
+                : 'The SCAN form could not be created. Try again, or ask an administrator to check the log.');
         }
     }
 
@@ -401,13 +406,13 @@ class ManifestService
         }
 
         if (is_string($message) && $message !== '') {
-            return "USPS rejected the SCAN form request (HTTP {$response->status()}): {$message}";
+            return "USPS rejected the SCAN form request (error {$response->status()}): {$message}";
         }
 
         $body = trim((string) preg_replace('/\s+/', ' ', strip_tags($response->body())));
         $detail = $body === '' ? 'empty response' : mb_substr($body, 0, 200);
 
-        return "USPS rejected the SCAN form request (HTTP {$response->status()}): {$detail}";
+        return "USPS rejected the SCAN form request (error {$response->status()}): {$detail}";
     }
 
     /**

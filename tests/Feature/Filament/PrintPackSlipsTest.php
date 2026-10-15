@@ -114,7 +114,7 @@ it('opens a view of exactly the selected Shipments, with a receipt and Mark as p
     $page = Livewire::test(PrintPackSlips::class)
         ->selectTableRecords([$second])
         ->callAction(TestAction::make('viewSelected')->table()->bulk())
-        ->assertNotified('Pack slips opened in a new tab');
+        ->assertNotified('Pack Slips Opened in a New Tab');
 
     preg_match('#/pack-slips/view/([A-Za-z0-9]+)#', effectsJson($page), $matches);
 
@@ -212,7 +212,7 @@ it('says so when there is nothing to print', function (): void {
     Livewire::test(PrintPackSlips::class)
         ->callAction('printNext')
         ->assertNotDispatched('print-pack-slips')
-        ->assertNotified('No pack slips to print');
+        ->assertNotified('No Pack Slips To Print');
 });
 
 /**
