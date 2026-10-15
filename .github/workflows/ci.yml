@@ -121,9 +121,33 @@ jobs:
       - name: Run MySQL-group tests
         run: php artisan test --compact --group=mysql
 
+  # Pint, Rector and PHPStan are independent, so they run as parallel jobs
+  # instead of one after another; the slowest of them sets the wall-clock time.
+  # PHPStan keeps the "Static Analysis" name.
   static:
-    name: Static Analysis
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Code Style
+            run: vendor/bin/pint --test
+          # Rector is gated here for the same reason Pint is. It was previously
+          # only reachable through `composer run format`, which writes in place,
+          # so every branch that ran the documented format command picked up the
+          # same backlog of unrelated files and had it reverted in review.
+          # Nothing ever committed the fix, so the next branch rediscovered it.
+          - name: Rector
+            run: vendor/bin/rector process --dry-run --no-progress-bar
+          # Dependency advisories are deliberately not gated here. The
+          # security-audit workflow runs composer and npm audit on every push
+          # and pull request across all branches, at the same --audit-level=high
+          # the pre-push hook uses. Duplicating them in the merge gate meant an
+          # overnight upstream advisory could block an unrelated branch.
+          - name: Static Analysis
+            run: vendor/bin/phpstan analyse --no-progress --memory-limit=1G
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -146,24 +170,8 @@ jobs:
           cp .env.example .env
           php artisan key:generate
 
-      - name: Check code style
-        run: vendor/bin/pint --test
-
-      # Rector is gated here for the same reason Pint is. It was previously
-      # only reachable through `composer run format`, which writes in place, so
-      # every branch that ran the documented format command picked up the same
-      # backlog of unrelated files and had it reverted in review. Nothing ever
-      # committed the fix, so the next branch rediscovered it.
-      - name: Check Rector
-        run: vendor/bin/rector process --dry-run --no-progress-bar
-
-      # Dependency advisories are deliberately not gated here. The
-      # security-audit workflow runs composer and npm audit on every push and
-      # pull request across all branches, at the same --audit-level=high the
-      # pre-push hook uses. Duplicating them in the merge gate meant an
-      # overnight upstream advisory could block an unrelated branch.
-      - name: Run static analysis
-        run: vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+      - name: ${{ matrix.name }}
+        run: ${{ matrix.run }}
 
   browser:
     name: Browser Tests
