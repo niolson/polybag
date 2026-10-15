@@ -113,7 +113,7 @@ class ProductResource extends Resource
                         Forms\Components\TextInput::make('manufacturer_part_number')
                             ->label('Manufacturer Part Number')
                             ->maxLength(100)
-                            ->helperText('The manufacturer\'s part or model number (EU NS-PID).'),
+                            ->helperText('The manufacturer\'s part or model number. Sent as the EU manufacturer product ID (NS-PID).'),
                         Forms\Components\TextInput::make('gtin')
                             ->label('GTIN')
                             ->maxLength(14)
@@ -124,7 +124,7 @@ class ProductResource extends Resource
                                     }
                                 },
                             ])
-                            ->helperText('UPC, EAN or GTIN-14 (EU S-PID). Leave blank to use the barcode when it is one.'),
+                            ->helperText('UPC, EAN or GTIN-14. Sent as the EU standard product ID (S-PID). Leave blank to use the barcode when it is one.'),
                     ]),
                 Section::make('Compliance')
                     ->description('Declarations about the contents that decide which carrier services and special handling a package gets.')
@@ -226,7 +226,7 @@ class ProductResource extends Resource
                     ->label('Missing Weight')
                     ->query(fn ($query) => $query->whereNull('weight')->orWhere('weight', '<=', 0)),
                 Tables\Filters\Filter::make('missing_customs_data')
-                    ->label('Missing customs data')
+                    ->label('Missing Customs Data')
                     ->query(fn (Builder $query) => $query->scopes('missingCustomsData')),
                 Tables\Filters\TernaryFilter::make('contains_alcohol')
                     ->label('Contains Alcohol'),

@@ -183,8 +183,8 @@ it('reports a state change when voiding hits a runtime exception', function (): 
     $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Package State Changed')
-        ->and($result->message)->toBe('Package was modified by another user.');
+        ->and($result->title)->toBe('Package Changed')
+        ->and($result->message)->toBe('Someone else changed this package. Refresh the page and try again.');
 });
 
 it('reports a carrier error when voiding hits a request exception', function (): void {
@@ -225,7 +225,17 @@ it('reports a generic error when voiding hits an unexpected exception', function
         ->and($result->title)->toBe('Void Failed');
 });
 
-it('refuses label reprint when the package is not shipped or has no label data', function (): void {
+it('refuses label reprint when the package is not shipped', function (): void {
+    $user = User::factory()->create(['role' => Role::User]);
+    $package = Package::factory()->create();
+
+    $result = app(PackageLabelWorkflow::class)->labelForReprint($package, $user);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('No Label To Print');
+});
+
+it('refuses label reprint when the shipped package has no stored label file', function (): void {
     $user = User::factory()->create(['role' => Role::User]);
     $package = Package::factory()->shipped()->create([
         'shipped_by_user_id' => $user->id,
@@ -235,7 +245,7 @@ it('refuses label reprint when the package is not shipped or has no label data',
     $result = app(PackageLabelWorkflow::class)->labelForReprint($package, $user);
 
     expect($result->success)->toBeFalse()
-        ->and($result->title)->toBe('Label Not Available');
+        ->and($result->title)->toBe('Label File Not Available');
 });
 
 it('allows a manager to reprint a label for a package shipped by someone else', function (): void {

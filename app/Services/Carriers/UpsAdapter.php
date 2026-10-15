@@ -959,11 +959,28 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
                 return $this->readVoidReply($response, $trackingNumber);
             }
 
-            $errorMessage = $response->json('response.errors.0.message')
-                ?? $response->json('errors.0.message')
-                ?? 'UPS did not void the label (error '.$response->status().'). Try again, or void it on the UPS site.';
+            logger()->error('UPS void refused', [
+                'status' => $response->status(),
+                'error' => $response->json('response.errors.0.message') ?? $response->json('errors.0.message'),
+                'tracking_number' => $trackingNumber,
+            ]);
 
-            return CancelResponse::failure($errorMessage);
+            return CancelResponse::failure('UPS did not void the label (error '.$response->status().'). Try again, or void it on the UPS site.');
+        } catch (RequestException $e) {
+            logger()->error('UPS cancelShipment refused', [
+                'status' => $e->getResponse()->status(),
+                'error' => $e->getMessage(),
+                'tracking_number' => $trackingNumber,
+            ]);
+
+            return CancelResponse::failure('UPS did not void the label (error '.$e->getResponse()->status().'). Try again, or void it on the UPS site.');
+        } catch (FatalRequestException $e) {
+            logger()->error('UPS cancelShipment unreachable', [
+                'error' => $e->getMessage(),
+                'tracking_number' => $trackingNumber,
+            ]);
+
+            return CancelResponse::failure('Could not reach UPS. Try again in a moment.');
         } catch (\Exception $e) {
             logger()->error('UPS cancelShipment error', [
                 'exception' => $e::class,

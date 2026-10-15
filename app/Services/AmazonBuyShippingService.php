@@ -536,7 +536,7 @@ class AmazonBuyShippingService
 
         if (! $source) {
             throw new AmazonLabelPurchaseException(
-                'This label was bought through an Amazon data source that is no longer active, so it cannot be voided here.'
+                'This label was bought through an Amazon connection that is no longer active, so it cannot be voided here. Reactivate it under Integrations → Connections.'
             );
         }
 
@@ -554,7 +554,7 @@ class AmazonBuyShippingService
 
         if (! $source) {
             throw new AmazonLabelPurchaseException(
-                'This label was bought through an Amazon data source that is no longer active, so it cannot be tracked here.'
+                'This label was bought through an Amazon connection that is no longer active, so it cannot be tracked here. Reactivate it under Integrations → Connections.'
             );
         }
 

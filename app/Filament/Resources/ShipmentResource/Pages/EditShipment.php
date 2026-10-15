@@ -34,7 +34,7 @@ class EditShipment extends EditRecord
                     if ($this->record->packages()->where('status', PackageStatus::Shipped)->exists()) {
                         Notification::make()
                             ->title('Cannot delete shipment')
-                            ->body('This shipment has shipped packages. Void the labels first before deleting.')
+                            ->body('This shipment has shipped packages. Void the label first.')
                             ->danger()
                             ->send();
 

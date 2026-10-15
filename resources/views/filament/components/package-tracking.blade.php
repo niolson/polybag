@@ -26,7 +26,7 @@
             <div class="mt-1">{{ $package->tracking_updated_at?->format('M j, Y g:i A') ?? '—' }}</div>
         </div>
         <div>
-            <div class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Provider Message</div>
+            <div class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Latest From the Carrier</div>
             <div class="mt-1">{{ $trackingDetails['message'] ?? '—' }}</div>
         </div>
     </div>

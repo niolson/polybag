@@ -199,7 +199,7 @@ describe('the Shipments list', function (): void {
     it('flags an open shipment with no method', function (): void {
         Shipment::factory()->withoutShippingMethod()->create();
 
-        Livewire::test(ListShipments::class)->assertSee('Needs shipping method');
+        Livewire::test(ListShipments::class)->assertSee('Needs Shipping Method');
     });
 
     it('counts them on the Exceptions widget and links to the filtered list', function (): void {

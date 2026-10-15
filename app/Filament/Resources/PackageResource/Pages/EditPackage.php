@@ -20,7 +20,7 @@ class EditPackage extends EditRecord
                     if ($this->record->status === PackageStatus::Shipped) {
                         Notification::make()
                             ->title('Cannot delete package')
-                            ->body('This package has been shipped. Void the label first before deleting.')
+                            ->body('This package has been shipped. Void the label first.')
                             ->danger()
                             ->send();
 

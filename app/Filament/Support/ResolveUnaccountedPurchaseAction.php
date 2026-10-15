@@ -50,7 +50,7 @@ class ResolveUnaccountedPurchaseAction
      */
     public static function callout(): Callout
     {
-        return Callout::make('Unfinished label purchase')
+        return Callout::make('Unfinished Label Purchase')
             ->key(self::CALLOUT_KEY)
             ->danger()
             ->columnSpanFull()

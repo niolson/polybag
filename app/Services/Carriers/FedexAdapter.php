@@ -892,6 +892,21 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
             }
 
             return $this->readCancelReply($response, $trackingNumber);
+        } catch (RequestException $e) {
+            logger()->error('FedEx cancelShipment refused', [
+                'status' => $e->getResponse()->status(),
+                'error' => $e->getMessage(),
+                'tracking_number' => $trackingNumber,
+            ]);
+
+            return CancelResponse::failure('FedEx did not void the label (error '.$e->getResponse()->status().'). Try again, or void it on the FedEx site.');
+        } catch (FatalRequestException $e) {
+            logger()->error('FedEx cancelShipment unreachable', [
+                'error' => $e->getMessage(),
+                'tracking_number' => $trackingNumber,
+            ]);
+
+            return CancelResponse::failure('Could not reach FedEx. Try again in a moment.');
         } catch (\Exception $e) {
             logger()->error('FedEx cancelShipment error', [
                 'exception' => $e::class,

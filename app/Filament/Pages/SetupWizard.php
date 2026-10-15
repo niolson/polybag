@@ -288,7 +288,7 @@ class SetupWizard extends Page
                             ->minValue(0)
                             ->maxValue(50),
                         Forms\Components\Select::make('carrier_packaging')
-                            ->label('Carrier packaging')
+                            ->label('Carrier Packaging')
                             ->options(CarrierPackaging::groupedOptions())
                             ->nullable()
                             ->placeholder('Own packaging')

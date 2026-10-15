@@ -32,8 +32,8 @@ enum VoidReason: string implements HasLabel
     public function getLabel(): string
     {
         return match ($this) {
-            self::Operator => 'Operator',
-            self::VoidedUpstream => 'Reported by postage source',
+            self::Operator => 'Voided in PolyBag',
+            self::VoidedUpstream => 'Voided at the seller',
             self::Recorded => 'Recorded by a manager',
         };
     }

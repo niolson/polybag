@@ -356,7 +356,7 @@ it('no longer keeps the requirements on the Amazon connection', function (): voi
 
     Livewire::test(EditDataSource::class, ['record' => $connection->id])
         ->assertDontSee('Automated Label Purchase')
-        ->assertDontSee('Require OTDR protection');
+        ->assertDontSee('Require On-Time Delivery Rate (OTDR) Protection');
 
     expect(Schema::hasColumn('data_sources', 'requires_on_time_offers'))->toBeFalse()
         ->and(Schema::hasColumn('data_sources', 'requires_otdr_protected_offers'))->toBeFalse();

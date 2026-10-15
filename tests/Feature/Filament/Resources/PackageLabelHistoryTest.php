@@ -73,7 +73,7 @@ it('lists every label on the package newest first with the active one distinguis
             'fi-badge fi-size-sm">', 'Voided',
         ])
         ->assertSee($second->voidedBy->name)
-        ->assertSee('Reported by postage source')
+        ->assertSee('Voided at the seller')
         ->assertSee($active->purchasedBy->name)
         ->assertSee('$11.08')
         ->assertSee('Not printed');

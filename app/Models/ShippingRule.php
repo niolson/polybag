@@ -135,7 +135,7 @@ class ShippingRule extends Model
         }
 
         $parts[] = $this->any_service
-            ? ($this->source === ShippingRuleSource::Shopify && $this->action === ShippingRuleAction::UseService ? "Shopify's choice" : 'Any service')
+            ? ($this->source === ShippingRuleSource::Shopify && $this->action === ShippingRuleAction::UseService ? "Shopify's choice (auto)" : 'Any service')
             : ($this->carrierService ? "{$this->carrierService->carrier->label()} {$this->carrierService->name}" : 'Unknown service');
 
         return implode(' · ', $parts);

@@ -42,7 +42,7 @@ class ViewPickBatch extends ViewRecord
             // On, the document actions print to the workstation's printers; off, they
             // open in a browser tab.
             ToggleAction::make('printMode')
-                ->label('Direct Print'),
+                ->label('Print Without Preview'),
 
             // View mode — open HTML in a new tab
             Action::make('viewSummary')

@@ -28,7 +28,7 @@ enum PostageSourceKind: string
     {
         return match ($this) {
             self::Direct => 'Direct',
-            self::Shopify => 'Shopify',
+            self::Shopify => 'Shopify Shipping',
             self::Amazon => 'Amazon Buy Shipping',
         };
     }
@@ -71,7 +71,7 @@ enum PostageSourceKind: string
     {
         return match ($this) {
             self::Direct => null,
-            self::Shopify => "Allow Shopify's choice (auto)",
+            self::Shopify => "Shopify's choice (auto)",
             self::Amazon => 'Any service',
         };
     }

@@ -32,6 +32,7 @@ use Filament\Schemas\Components;
 use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Filament\Support\Contracts\HasLabel;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\HtmlString;
@@ -434,7 +435,7 @@ class ViewPackage extends ViewRecord
                                 TextEntry::make('source')
                                     ->label('Source')
                                     ->badge()
-                                    ->formatStateUsing(fn ($state): string => ucwords(str_replace('_', ' ', $state instanceof \BackedEnum ? $state->value : $state)))
+                                    ->formatStateUsing(fn ($state): string => $state instanceof HasLabel ? $state->getLabel() : ucwords(str_replace('_', ' ', $state)))
                                     ->color(fn ($state): string => match ($state instanceof \BackedEnum ? $state->value : $state) {
                                         'shipping_method' => 'info',
                                         'product' => 'warning',
