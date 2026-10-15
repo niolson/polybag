@@ -6,6 +6,7 @@ use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierAccountScope;
 use App\Models\User;
+use App\Services\Carriers\UspsAdapter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Saloon\Http\Faking\MockResponse;
@@ -32,12 +33,30 @@ beforeEach(function (): void {
 it('reports CONTRACT pricing when the account has negotiated rates', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
-        ShippingOptions::class => MockResponse::make(['pricingOptions' => [[]]]),
+        ShippingOptions::class => MockResponse::make(['pricingOptions' => [[
+            'shippingOptions' => [['rateOptions' => [['rates' => [['priceType' => 'CONTRACT']]]]]],
+        ]]]),
     ]);
 
     Livewire::test(EditCarrierAccount::class, ['record' => $this->account->id])
         ->callAction('usps_test_connection')
         ->assertNotified('USPS connected — CONTRACT pricing');
+});
+
+it('probes with the unsaved EPS account from the form and does not cache the result', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        ShippingOptions::class => MockResponse::make(['error' => 'forbidden'], 403),
+    ]);
+
+    Livewire::test(EditCarrierAccount::class, ['record' => $this->account->id])
+        ->set('data.credentials.eps_account', 'UNSAVED123')
+        ->callAction('usps_test_connection')
+        ->assertNotified('USPS connected — RETAIL pricing');
+
+    Saloon::assertSent(fn ($request): bool => $request instanceof ShippingOptions
+        && ($request->body()->all()['pricingOptions'][0]['paymentAccount']['accountNumber'] ?? null) === 'UNSAVED123');
+    expect(app(UspsAdapter::class)->cachedPricingType($this->account))->toBeNull();
 });
 
 it('reports RETAIL pricing when the account lacks contract access', function (): void {

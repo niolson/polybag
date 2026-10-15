@@ -577,12 +577,6 @@ parameters:
 			path: app/Filament/Resources/CarrierAccounts/Pages/EditCarrierAccount.php
 
 		-
-			message: '#^Parameter \#1 \$account of method App\\Services\\Carriers\\UspsAdapter\:\:detectPricingType\(\) expects App\\Models\\CarrierAccount, Illuminate\\Database\\Eloquent\\Model\|int\|string\|null given\.$#'
-			identifier: argument.type
-			count: 1
-			path: app/Filament/Resources/CarrierAccounts/Pages/EditCarrierAccount.php
-
-		-
 			message: '#^Parameter \#1 \$account of method App\\Services\\OAuthService\:\:disconnectAccount\(\) expects App\\Models\\CarrierAccount, Illuminate\\Database\\Eloquent\\Model\|int\|string\|null given\.$#'
 			identifier: argument.type
 			count: 2
@@ -1020,6 +1014,12 @@ parameters:
 			identifier: nullCoalesce.offset
 			count: 1
 			path: app/Models/CarrierAccount.php
+
+		-
+			message: '#^Property App\\Models\\CarrierAccount\:\:\$credentials \(string\|null\) does not accept array\<mixed, mixed\>\.$#'
+			identifier: assign.propertyType
+			count: 1
+			path: app/Filament/Resources/CarrierAccounts/Pages/EditCarrierAccount.php
 
 		-
 			message: '#^Property App\\Models\\CarrierAccount\:\:\$credentials \(string\|null\) does not accept array\<mixed, mixed\>\.$#'

@@ -334,12 +334,12 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
      * Probe whether an account has USPS CONTRACT (negotiated) pricing access.
      *
      * Authenticates with the account's saved credentials (OAuth or client credentials),
-     * sends a CONTRACT rate probe, and caches the result per account. Returns 'CONTRACT'
+     * sends a CONTRACT rate probe, and caches the result per account unless `$cache` is false (probing unsaved credentials). Returns 'CONTRACT'
      * when negotiated rates are available or 'RETAIL' when the account lacks EPS contract
      * access (403). Authentication failures and other transport errors are thrown so the
      * caller can distinguish "no contract" from "credentials broken".
      */
-    public function detectPricingType(CarrierAccount $account): string
+    public function detectPricingType(CarrierAccount $account, bool $cache = true): string
     {
         $connector = USPSConnector::getAuthenticatedConnector($account);
 
@@ -365,15 +365,30 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         ]);
 
         try {
-            $connector->send($request);
-            $pricingType = 'CONTRACT';
+            $response = $connector->send($request);
+            $pricingType = $this->quotedContractRates($response) ? 'CONTRACT' : 'RETAIL';
         } catch (ForbiddenException) {
             $pricingType = 'RETAIL';
         }
 
-        Cache::put($this->pricingTypeCacheKey($account), $pricingType, now()->addDays(7));
+        if ($cache) {
+            Cache::put($this->pricingTypeCacheKey($account), $pricingType, now()->addDays(7));
+        }
 
         return $pricingType;
+    }
+
+    /**
+     * Whether USPS priced a CONTRACT request at contract rates. An account with a
+     * valid EPS number but no negotiated pricing still gets a 200, with published
+     * rates and a "Contract rate not found" warning on the quoted items.
+     */
+    private function quotedContractRates(Response $response): bool
+    {
+        $shippingOptions = $response->json('pricingOptions.0.shippingOptions', []);
+
+        return $shippingOptions !== []
+            && ! str_contains(json_encode($shippingOptions) ?: '', 'Contract rate not found');
     }
 
     public function getRates(RateRequest $request, array $serviceCodes): Collection
