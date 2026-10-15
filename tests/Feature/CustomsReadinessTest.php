@@ -453,7 +453,8 @@ describe('seller registrations', function (): void {
         $ddu = readinessPackage('DE', [['value' => 20.0]], ['duties_terms' => DutiesTerms::Ddu], $client);
 
         expect(findingNamed(readinessFor($without), 'ddp_without_registration')?->severity)->toBe(CustomsFindingSeverity::Warn)
-            ->and(findingNamed(readinessFor($without), 'ddp_without_registration')?->message)->toContain('VAT may be charged twice')
+            ->and(findingNamed(readinessFor($without), 'ddp_without_registration')?->message)->toContain('import VAT is paid on arrival and billed to the carrier account')
+            ->and(findingNamed(readinessFor($without), 'ddp_without_registration')?->message)->toContain('If the client reports this sale on the return of its own registration')
             ->and(findingCodes(readinessFor($with)))->not->toContain('ddp_without_registration')
             ->and(findingCodes(readinessFor($ddu)))->not->toContain('ddp_without_registration');
     });
