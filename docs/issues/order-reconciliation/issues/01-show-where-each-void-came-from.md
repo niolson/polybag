@@ -54,3 +54,12 @@ outside PolyBag.
 - Tests: `tests/Feature/Filament/Resources/PackageLastVoidTest.php`. They cover each
   `VoidReason` on both pages and in the filter, a Package never voided, one bought again,
   and the latest of several voids winning even when the older void was written later.
+
+**2026-10-15 — column and filter removed.** The Packages list column and filter and the
+Shipment view column are gone, along with `Package::latestVoidedLabel()`,
+`Package::lastVoidReason()` and `PackageLastVoidTest`. The reason was close to a
+restatement of the postage source: Shopify labels can only be voided in the Shopify admin
+(always `VoidedUpstream`), and direct and Amazon labels are voided from PolyBag
+(`Operator`), with nothing polling for voids made elsewhere. The data is untouched:
+`PackageLabel.void_reason` and the voiding user are still recorded on every void, and View
+Package's Labels history still shows them.
