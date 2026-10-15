@@ -1957,7 +1957,9 @@ it('detects CONTRACT pricing when the account has EPS contract access', function
 
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
-        ShippingOptions::class => MockResponse::make(['pricingOptions' => [[]]]),
+        ShippingOptions::class => MockResponse::make(['pricingOptions' => [[
+            'shippingOptions' => [['rateOptions' => [['rates' => [['priceType' => 'CONTRACT']]]]]],
+        ]]]),
     ]);
 
     expect($this->adapter->detectPricingType($account))->toBe('CONTRACT')
@@ -1970,6 +1972,26 @@ it('detects CONTRACT pricing when the account has EPS contract access', function
 
         return ($request->body()->all()['pricingOptions'][0]['priceType'] ?? null) === 'CONTRACT';
     });
+});
+
+it('detects RETAIL pricing when USPS answers a contract request with published rates', function (): void {
+    $account = makeUspsPricingAccount();
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        ShippingOptions::class => MockResponse::make(['pricingOptions' => [[
+            'shippingOptions' => [['rateOptions' => [[
+                'rates' => [['priceType' => 'COMMERCIAL']],
+                'extraServices' => [['warnings' => [[
+                    'warningCode' => '001',
+                    'warningDescription' => 'Contract rate not found for request. Published rate returned.',
+                ]]]],
+            ]]]],
+        ]]]),
+    ]);
+
+    expect($this->adapter->detectPricingType($account))->toBe('RETAIL')
+        ->and($this->adapter->cachedPricingType($account))->toBe('RETAIL');
 });
 
 it('falls back to RETAIL pricing when the account lacks EPS contract access', function (): void {
