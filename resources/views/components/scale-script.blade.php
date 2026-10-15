@@ -150,13 +150,8 @@
                 throw new Error('Wait for the scale to stop moving before zeroing.');
             }
 
-            // A stable non-empty reading is still stable — reject it here so a
-            // package left on the platform can't get baked into the new zero point.
-            // A negative reading is the platform reading below zero, which is
-            // exactly what zeroing fixes, however far below it is.
-            if (this._lastReading.weight > 0.1) {
-                throw new Error('Clear the platform before zeroing the scale.');
-            }
+            // Like the zero button on the scale, this zeroes whatever is on the
+            // platform. The scale itself refuses a zero outside its zero range.
 
             const deviceInfo = this.getScaleDeviceInfo();
             if (!deviceInfo) {
