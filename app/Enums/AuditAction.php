@@ -54,7 +54,7 @@ enum AuditAction: string implements HasLabel
             self::ModelUpdated => 'Updated',
             self::ModelDeleted => 'Deleted',
             self::SettingChanged => 'Setting Changed',
-            self::DataSourceQueryExecuted => 'Data Source Query Executed',
+            self::DataSourceQueryExecuted => 'Connection Query Run',
             self::LoginSucceeded => 'Login Succeeded',
             self::LoginFailed => 'Login Failed',
             self::Logout => 'Logout',

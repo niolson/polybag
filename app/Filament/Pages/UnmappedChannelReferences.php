@@ -26,6 +26,8 @@ class UnmappedChannelReferences extends Page implements HasTable
 
     protected static ?string $navigationLabel = 'Map Channel References';
 
+    protected static ?string $title = 'Map Channel References';
+
     protected static UnitEnum|string|null $navigationGroup = 'Integrations';
 
     protected static ?int $navigationSort = 91;
@@ -40,6 +42,7 @@ class UnmappedChannelReferences extends Page implements HasTable
     public function table(Table $table): Table
     {
         return $table
+            ->emptyStateHeading('No unmapped references')
             ->query(
                 Shipment::query()
                     ->selectRaw('MIN(id) as id, channel_reference, COUNT(*) as shipment_count')
@@ -62,7 +65,8 @@ class UnmappedChannelReferences extends Page implements HasTable
             ])
             ->recordActions([
                 Actions\Action::make('assign')
-                    ->label('Assign')
+                    ->label('Map')
+                    ->modalSubmitActionLabel('Map')
                     ->icon('heroicon-o-link')
                     ->form([
                         Forms\Components\Select::make('channel_id')
@@ -87,7 +91,7 @@ class UnmappedChannelReferences extends Page implements HasTable
 
                         Notification::make()
                             ->success()
-                            ->title("Alias created and {$updated} shipment(s) updated")
+                            ->title("Mapped. {$updated} shipment(s) updated")
                             ->send();
                     }),
             ]);

@@ -123,7 +123,10 @@ class AddressForm
                         ->telRegex('/^[+]?[0-9\s()\-\.\/]+(?:\s*(?:ext\.?|x|#)\s*[0-9]+)?$/i')
                         ->maxLength($phoneMaxLength)
                         ->helperText(function (Get $get) use ($field): string {
-                            $country = $get($field('country')) ?: 'the selected country';
+                            $code = $get($field('country'));
+                            $country = $code
+                                ? (\Locale::getDisplayRegion('-'.$code, 'en') ?: $code)
+                                : 'the selected country';
 
                             return "Use a valid phone number for {$country}. If the phone number is in a different country than the address, enter it in international format, such as +14155550132.";
                         })

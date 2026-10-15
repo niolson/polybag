@@ -46,8 +46,8 @@ class ImportCompleted extends Notification
 
         return FilamentNotification::make()
             ->title($hasErrors
-                ? "Import completed with errors ({$this->sourceName})"
-                : "Import completed ({$this->sourceName})")
+                ? "Import Completed with Errors ({$this->sourceName})"
+                : "Import Completed ({$this->sourceName})")
             ->body($body)
             ->icon($hasErrors ? 'heroicon-o-exclamation-triangle' : 'heroicon-o-arrow-down-tray')
             ->iconColor($hasErrors ? 'warning' : 'success')

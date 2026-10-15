@@ -68,7 +68,9 @@ class ShopifyFulfillmentCanceller
                 'error' => $e->getMessage(),
             ]);
 
-            return self::manualCancelMessage($e->getMessage());
+            // A RuntimeException is the connection's own wording (Shopify's refusal or
+            // an unconfirmed cancel); anything else is library text.
+            return self::manualCancelMessage($e instanceof \RuntimeException ? $e->getMessage() : 'Shopify could not be reached');
         }
 
         AuditLog::record(

@@ -238,6 +238,7 @@ class PackageResource extends Resource
                         // projection of the package's active label and only the
                         // label writers set them (ADR-0004 decision 3).
                         TextInput::make('shipping_method')
+                            ->label('Service (as bought)')
                             ->maxLength(255),
                         Components\Fieldset::make('Dimensions')->schema([
                             TextInput::make('length')
@@ -322,6 +323,7 @@ class PackageResource extends Resource
             ->defaultSort('created_at', 'desc')
             ->columns([
                 Tables\Columns\TextColumn::make('id')
+                    ->label('ID')
                     ->sortable(),
                 Tables\Columns\TextColumn::make('shipment.shipment_reference')
                     ->label('Shipment')
@@ -436,7 +438,7 @@ class PackageResource extends Resource
                 // `postage-source-split/16`: packages that cannot be bought for
                 // until a person settles an earlier purchase.
                 Tables\Filters\Filter::make('unresolved_purchase')
-                    ->label('Unfinished label purchase')
+                    ->label('Unfinished Label Purchase')
                     ->toggle()
                     ->query(fn (Builder $query): Builder => $query->whereIn(
                         'packages.id',
@@ -453,6 +455,7 @@ class PackageResource extends Resource
                     ->options(TrackingStatus::class)
                     ->label('Tracking Status'),
                 Tables\Filters\SelectFilter::make('carrier')
+                    ->label('Carrier or Postage Source')
                     ->options([
                         Carrier::USPS => Carrier::USPS,
                         Carrier::FEDEX => Carrier::FEDEX,
@@ -598,9 +601,9 @@ class PackageResource extends Resource
                     ->iconButton()
                     ->tooltip('Track'),
                 Actions\Action::make('reprint')
-                    ->label(fn (Package $record): string => $record->label_printed_at ? 'Reprint' : 'Print')
+                    ->label(fn (Package $record): string => $record->label_printed_at ? 'Reprint Label' : 'Print Label')
                     ->iconButton()
-                    ->tooltip(fn (Package $record): string => $record->label_printed_at ? 'Reprint label' : 'Print label')
+                    ->tooltip(fn (Package $record): string => $record->label_printed_at ? 'Reprint Label' : 'Print Label')
                     ->icon('heroicon-o-printer')
                     ->color('gray')
                     ->visible(fn (Package $record): bool => $record->status === PackageStatus::Shipped && $record->label_data)
@@ -615,7 +618,7 @@ class PackageResource extends Resource
                         ->requiresConfirmation()
                         ->authorize('voidLabel')
                         ->modalHeading('Void Label')
-                        ->modalDescription('Voids the label with whoever sold it: the carrier, or Amazon. The package keeps its dimensions so it can be shipped again.')
+                        ->modalDescription(fn (Package $record): string => "Voids the label with {$record->postageSellerLabel()}. The package keeps its dimensions so it can be shipped again.")
                         ->visible(fn (Package $record): bool => $record->status === PackageStatus::Shipped
                             && $record->tracking_number
                             && ($record->carrier || $record->isShopifyShipped()))
@@ -623,7 +626,7 @@ class PackageResource extends Resource
                         // live button here would only ever produce a failure.
                         ->disabled(fn (Package $record): bool => $record->isShopifyShipped())
                         ->tooltip(fn (Package $record): ?string => $record->isShopifyShipped()
-                            ? 'Bought through Shopify Shipping — void and refund it in the Shopify admin. PolyBag un-ships the package once Shopify reports the label voided.'
+                            ? 'Bought through Shopify Shipping — void and refund it in the Shopify admin. PolyBag returns the package to unshipped once Shopify reports the label voided.'
                             : null)
                         ->action(function (Package $record): void {
                             LabelVoidNotification::send(app(PackageLabelWorkflow::class)->voidLabel($record, auth()->user()));
@@ -639,7 +642,7 @@ class PackageResource extends Resource
                         ->requiresConfirmation()
                         ->authorize('voidLabel')
                         ->modalHeading('Record Void')
-                        ->modalDescription('Only for a label already voided with the carrier or postage source. PolyBag will un-ship the package without asking the source to void it, so a label that is still live stays billed.')
+                        ->modalDescription('Only for a label already voided with the carrier or postage source. PolyBag will return the package to unshipped without asking the source to void it, so a label that is still live stays billed.')
                         ->modalSubmitActionLabel('Record void')
                         ->visible(fn (Package $record): bool => $record->status === PackageStatus::Shipped
                             && ! $record->isShopifyShipped())

@@ -465,7 +465,7 @@ class CustomsReadiness
 
             if ($overLimit !== []) {
                 $reason = sprintf(
-                    'Under 15 CFR 30.37(a) EEI is exempt only up to $2,500 per classification, and over it: %s.',
+                    'This order needs an export filing (EEI, which gives an ITN) because it ships more than $2,500 of one classification (15 CFR 30.37(a)): %s.',
                     implode('; ', array_map(
                         fn (array $group): string => sprintf('%s totals $%s', implode('/', $group['codes']), number_format($group['value'], 2)),
                         $overLimit,
@@ -473,7 +473,7 @@ class CustomsReadiness
                 );
             } elseif ($unclassified !== [] && $total > self::ITN_THRESHOLD) {
                 $reason = sprintf(
-                    'The customs total is $%s and %s no HS code, so the 30.37(a) exemption (up to $2,500 per classification) cannot be shown: %s. Add HS codes to the products, or enter an ITN.',
+                    'The customs total is $%s and %s no HS code, so PolyBag cannot show the order is exempt from an export filing (the exemption is up to $2,500 per classification): %s. Add HS codes to the products, or enter an ITN.',
                     number_format($total, 2),
                     count($unclassified) === 1 ? 'one line has' : count($unclassified).' lines have',
                     $this->describeLines($unclassified),

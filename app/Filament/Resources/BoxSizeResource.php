@@ -87,7 +87,7 @@ class BoxSizeResource extends Resource
                 Components\Section::make('Carrier Settings')
                     ->schema([
                         Forms\Components\Select::make('carrier_packaging')
-                            ->label('Carrier packaging')
+                            ->label('Carrier Packaging')
                             ->options(CarrierPackaging::groupedOptions())
                             ->nullable()
                             ->placeholder('Own packaging')

@@ -577,3 +577,19 @@ it('records applied services from inactive-compliance packages with System sourc
         ->and($applied->source)->toBe(SpecialServiceSource::System)
         ->and($applied->source_reference)->toBeNull();
 });
+
+it('names who sold the label: the connection for marketplace postage, else the carrier', function (): void {
+    $dataSource = DataSource::factory()->create(['name' => 'Acme Amazon']);
+
+    $marketplace = Package::factory()->shipped()->create([
+        'carrier' => 'UPS',
+        'postage_source' => PostageSource::PostageDataSource,
+        'postage_data_source_id' => $dataSource->id,
+    ]);
+    $direct = Package::factory()->shipped()->create(['carrier' => 'USPS', 'postage_source' => PostageSource::CarrierAccount]);
+    $unknown = Package::factory()->shipped()->create(['carrier' => null, 'postage_source' => null]);
+
+    expect($marketplace->postageSellerLabel())->toBe('Acme Amazon')
+        ->and($direct->postageSellerLabel())->toBe('USPS')
+        ->and($unknown->postageSellerLabel())->toBe('the postage source');
+});

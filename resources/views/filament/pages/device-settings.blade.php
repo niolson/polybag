@@ -137,7 +137,7 @@
     <!-- Document Printer Section -->
     <x-filament::section>
         <x-slot name="heading">Document Printer</x-slot>
-        <x-slot name="description">8.5x11 paper for packing slips, customs forms and pick lists. Without one, international shipments whose carrier returns the customs form as a separate document cannot be bought from this workstation.</x-slot>
+        <x-slot name="description">8.5x11 paper for customs forms, manifests and pick lists. Without one, international shipments whose carrier returns the customs form as a separate document cannot be bought from this workstation.</x-slot>
 
         <x-filament::fieldset>
             <x-slot name="label">
@@ -403,7 +403,7 @@
                 localStorage.setItem(keys.dpi, labelDpiSelect.value);
                 localStorage.setItem('scaleBackend', scaleBackendSelect.value);
 
-                saveStatus.textContent = 'Settings saved!';
+                saveStatus.textContent = 'Saved.';
                 saveStatus.classList.remove('hidden');
                 setTimeout(() => saveStatus.classList.add('hidden'), 3000);
 
@@ -486,7 +486,8 @@
                     if (error.message && error.message.includes('Unable to connect')) {
                         updateQzStatus(false, 'QZ Tray not running. Please install and start QZ Tray.');
                     } else {
-                        updateQzStatus(false, `QZ Tray error: ${error.message || 'Connection failed'}`);
+                        console.error('QZ connection error:', error);
+                        updateQzStatus(false, 'Could not reach the label printing app. Check that it is running, then try again.');
                     }
 
                     // Disable printer selects
@@ -643,8 +644,8 @@
                 } catch (error) {
                     console.error('Failed to connect to scale:', error);
                     new FilamentNotification()
-                        .title('Connection Failed')
-                        .body(error.message || 'Could not connect to scale.')
+                        .title('Scale Not Connected')
+                        .body('Could not connect to the scale. Check that it is plugged in and selected above, then try again.')
                         .danger()
                         .send();
                 }

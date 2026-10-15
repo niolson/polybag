@@ -69,7 +69,7 @@ class CarrierAlias extends Model
             ->first(fn (Carrier $carrier): bool => static::lookupKey($carrier->name) === $lookupKey);
 
         if ($canonicalCarrier && $canonicalCarrier->id !== $carrierId) {
-            return "This is the canonical name of {$canonicalCarrier->name}.";
+            return "This is already {$canonicalCarrier->label()}'s own name.";
         }
 
         return null;

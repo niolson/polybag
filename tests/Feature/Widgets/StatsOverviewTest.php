@@ -18,7 +18,7 @@ it('shows pending shipments count', function (): void {
 
     Livewire::actingAs($user)
         ->test(StatsOverview::class)
-        ->assertSee('Pending Shipments')
+        ->assertSee('Open Shipments')
         ->assertSee('3');
 });
 

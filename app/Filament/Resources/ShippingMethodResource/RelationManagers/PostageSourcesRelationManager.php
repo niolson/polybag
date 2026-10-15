@@ -26,7 +26,9 @@ class PostageSourcesRelationManager extends RelationManager
 {
     protected static string $relationship = 'postageSources';
 
-    protected static ?string $title = 'Postage sources';
+    protected static ?string $title = 'Postage Sources';
+
+    protected static ?string $modelLabel = 'postage source';
 
     public function form(Schema $form): Schema
     {
@@ -67,7 +69,7 @@ class PostageSourcesRelationManager extends RelationManager
                     ->label('Source')
                     ->formatStateUsing(fn (PostageSourceKind $state): string => $state->label()),
                 Tables\Columns\TextColumn::make('unlisted_services')
-                    ->label('Beyond listed services')
+                    ->label('Beyond Listed Services')
                     ->state(fn (ShippingMethodPostageSource $record): ?string => $record->allowsUnlistedServices()
                         ? $record->source_kind->unlistedServicesLabel()
                         : $record->source_kind->listedServicesLabel()),

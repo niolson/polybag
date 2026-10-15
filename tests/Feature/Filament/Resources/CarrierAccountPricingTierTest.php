@@ -40,7 +40,7 @@ it('reports CONTRACT pricing when the account has negotiated rates', function ()
 
     Livewire::test(EditCarrierAccount::class, ['record' => $this->account->id])
         ->callAction('usps_test_connection')
-        ->assertNotified('USPS connected — CONTRACT pricing');
+        ->assertNotified('USPS Connected — Contract Pricing');
 });
 
 it('probes with the unsaved EPS account from the form and does not cache the result', function (): void {
@@ -52,7 +52,7 @@ it('probes with the unsaved EPS account from the form and does not cache the res
     Livewire::test(EditCarrierAccount::class, ['record' => $this->account->id])
         ->set('data.credentials.eps_account', 'UNSAVED123')
         ->callAction('usps_test_connection')
-        ->assertNotified('USPS connected — RETAIL pricing');
+        ->assertNotified('USPS Connected — Retail Pricing');
 
     Saloon::assertSent(fn ($request): bool => $request instanceof ShippingOptions
         && ($request->body()->all()['pricingOptions'][0]['paymentAccount']['accountNumber'] ?? null) === 'UNSAVED123');
@@ -67,7 +67,7 @@ it('reports RETAIL pricing when the account lacks contract access', function ():
 
     Livewire::test(EditCarrierAccount::class, ['record' => $this->account->id])
         ->callAction('usps_test_connection')
-        ->assertNotified('USPS connected — RETAIL pricing');
+        ->assertNotified('USPS Connected — Retail Pricing');
 });
 
 it('reports a failure when authentication is rejected', function (): void {
@@ -77,5 +77,5 @@ it('reports a failure when authentication is rejected', function (): void {
 
     Livewire::test(EditCarrierAccount::class, ['record' => $this->account->id])
         ->callAction('usps_test_connection')
-        ->assertNotified('USPS connection failed');
+        ->assertNotified('USPS Not Connected');
 });

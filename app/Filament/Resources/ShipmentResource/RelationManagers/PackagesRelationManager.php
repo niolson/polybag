@@ -26,6 +26,7 @@ class PackagesRelationManager extends RelationManager
                 // of the package's active label and only the label writers set
                 // them (ADR-0004 decision 3).
                 Forms\Components\TextInput::make('shipping_method')
+                    ->label('Service (as bought)')
                     ->maxLength(255),
                 Forms\Components\TextInput::make('weight')
                     ->numeric(),
@@ -49,7 +50,8 @@ class PackagesRelationManager extends RelationManager
                 Tables\Columns\TextColumn::make('tracking_status')
                     ->badge()
                     ->placeholder('—'),
-                Tables\Columns\TextColumn::make('shipping_method'),
+                Tables\Columns\TextColumn::make('shipping_method')
+                    ->label('Service (as bought)'),
                 Tables\Columns\TextColumn::make('weight'),
                 Tables\Columns\TextColumn::make('cost')
                     ->money('USD'),
@@ -73,7 +75,7 @@ class PackagesRelationManager extends RelationManager
                         if ($record->status === PackageStatus::Shipped) {
                             Notification::make()
                                 ->title('Cannot delete package')
-                                ->body('This package has been shipped. Void the label first before deleting.')
+                                ->body('This package has been shipped. Void the label first.')
                                 ->danger()
                                 ->send();
 

@@ -23,9 +23,9 @@ class PickBatchesTable
                 Tables\Columns\TextColumn::make('status')
                     ->badge(),
                 Tables\Columns\TextColumn::make('user.name')
-                    ->label('Created By'),
+                    ->label('Started By'),
                 Tables\Columns\TextColumn::make('total_shipments')
-                    ->label('Orders')
+                    ->label('Shipments')
                     ->numeric(),
                 Tables\Columns\TextColumn::make('created_at')
                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())

@@ -199,7 +199,7 @@ class PrintPackSlips extends Page implements HasTable
                         $this->js('window.open('.json_encode($url, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG).', "_blank")');
 
                         Notification::make()
-                            ->title('Pack slips opened in a new tab')
+                            ->title('Pack Slips Opened in a New Tab')
                             ->body('Mark them as printed there once they are on paper.')
                             ->actions([
                                 Action::make('open')
@@ -255,7 +255,7 @@ class PrintPackSlips extends Page implements HasTable
     private function print(PackSlipRun $run): void
     {
         if ($run->count() === 0) {
-            Notification::make()->warning()->title('No pack slips to print')->send();
+            Notification::make()->warning()->title('No Pack Slips To Print')->send();
 
             return;
         }

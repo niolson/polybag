@@ -61,7 +61,7 @@ class ListLabelBatches extends ListRecords
                     LabelBatchStatus::Pending->value => 'Pending',
                     LabelBatchStatus::Processing->value => 'Processing',
                     LabelBatchStatus::Completed->value => 'Completed',
-                    LabelBatchStatus::CompletedWithErrors->value => 'Completed w/ Errors',
+                    LabelBatchStatus::CompletedWithErrors->value => 'Completed with Errors',
                     LabelBatchStatus::Failed->value => 'Failed',
                 ],
             ],

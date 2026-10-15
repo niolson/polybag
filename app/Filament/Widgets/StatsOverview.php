@@ -67,7 +67,7 @@ class StatsOverview extends BaseWidget
         });
 
         return [
-            Stat::make('Pending Shipments', number_format($data['pending']))
+            Stat::make('Open Shipments', number_format($data['pending']))
                 ->description('Awaiting shipment')
                 ->descriptionIcon('heroicon-m-clock')
                 ->color('warning')

@@ -34,6 +34,7 @@ class SpecialServicesRelationManager extends RelationManager
                 Tables\Columns\TextColumn::make('name'),
                 Tables\Columns\TextColumn::make('category')
                     ->badge()
+                    ->formatStateUsing(fn (string $state): string => ucfirst($state))
                     ->color(fn (string $state): string => match ($state) {
                         'compliance' => 'danger',
                         'delivery' => 'info',

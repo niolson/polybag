@@ -265,7 +265,7 @@ class Settings extends Page
                                 ->icon('heroicon-o-building-storefront')
                                 ->schema([
                                     Section::make('Ship-From Address')
-                                        ->description('Managed in Settings > Locations. The default location is used as the warehouse address on labels.')
+                                        ->description('Managed under Admin → Locations. The default location is used as the warehouse address on labels.')
                                         ->visible(fn (): bool => (bool) app(SettingsService::class)->get('multi_location_enabled', false))
                                         ->schema([
                                             Placeholder::make('default_location')
@@ -640,7 +640,7 @@ class Settings extends Page
                                                 ->suffix('days'),
                                             TextInput::make('pii_retention_days')
                                                 ->label('PII Retention (default)')
-                                                ->helperText('Days to keep recipient PII (name, address, phone, email, tax ID) after a shipment ships or is voided. Open shipments are never purged. Per-channel overrides can be set on each channel. Set to 0 to disable.')
+                                                ->helperText('Days to keep recipient PII (name, address, phone, email, tax ID) after a shipment ships or is cancelled. Open shipments are never purged. Per-channel overrides can be set on each channel. Set to 0 to disable.')
                                                 ->numeric()
                                                 ->minValue(0)
                                                 ->maxValue(3650)
@@ -866,7 +866,7 @@ class Settings extends Page
 
         Notification::make()
             ->success()
-            ->title('Settings saved')
+            ->title('Settings Saved')
             ->send();
     }
 

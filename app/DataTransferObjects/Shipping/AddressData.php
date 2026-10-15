@@ -68,7 +68,7 @@ readonly class AddressData
         $location = Location::getDefault();
 
         if (! $location) {
-            throw new \RuntimeException('No default location configured. Go to Settings > Locations and set a default location.');
+            throw new \RuntimeException('No default location configured. Go to Admin → Locations and set a default location.');
         }
 
         return self::fromLocation($location);

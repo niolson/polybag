@@ -183,3 +183,17 @@ Verified: read at `dfd842c5`. Fix by category, worst first. Each finding lists i
   notification; one PDF failure message. Capitalization: Title Case for titles, labels and
   buttons, applied to touched strings only. The low findings off the demo path remain
   open.
+
+- 2026-10-15 — Off-path findings done: "Shipped and cancelled shipments", the Audit Log's
+  Record Type column and filter (Connection, Label) and "Connection Query Run"; Shopify,
+  Amazon and OAuth messages say connection, not data source, and name the real menus
+  (Integrations → Connections, Shipping Config → Box Sizes, App Settings → Security);
+  the Setup Wizard, carrier tables, Carrier Service form and alias message show
+  `Carrier::label()`; raw FedEx, USPS and Amazon text and codes are logged, not shown;
+  "Contract pricing" / "Retail pricing"; one connection type name and one write-back verb;
+  "Check Again", "Connect Shopify", "Connect FedEx Account"; Title Case on the listed labels;
+  "1 shipment already has a package"; next steps on the user-delete, no-marketplace and
+  failed-connection messages; and a `Role` label for the Users table. The tests that
+  asserted "A-101" in the Amazon not-set-up message now assert the sign-up advice instead.
+  Not checked against the code: the jargon list ("broker", "tenant", "write-back") no
+  longer matches anywhere in UI strings, so I took it as already fixed.

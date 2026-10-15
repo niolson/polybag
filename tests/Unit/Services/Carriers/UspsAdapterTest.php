@@ -647,7 +647,7 @@ it('handles non-json USPS tracking errors without crashing', function (): void {
     $response = $this->adapter->trackShipment($package);
 
     expect($response->success)->toBeFalse()
-        ->and($response->message)->toContain('Response')
+        ->and($response->message)->toContain('USPS tracking request failed')
         ->and(data_get($response->details, 'raw.body'))->toContain('Application Error');
 });
 

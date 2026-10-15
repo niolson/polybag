@@ -294,7 +294,7 @@ it('renders print mode as a switch that swaps the view actions for print actions
         ->assertSeeHtml('role="switch"')
         ->assertSeeHtml('aria-checked="false"')
         ->assertSeeHtml('$wire.$entangle(\'printMode\', true)')
-        ->assertSee('Direct Print')
+        ->assertSee('Print Without Preview')
         ->assertActionVisible('viewSummary')
         ->assertActionHidden('printSummary')
         ->assertActionVisible('printBoth')

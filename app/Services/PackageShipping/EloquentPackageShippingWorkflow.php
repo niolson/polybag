@@ -74,7 +74,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
      * What the Ship page says of a USPS rate bought with duties prepaid: USPS
      * charges them to the account on top of the postage shown.
      */
-    public const string USPS_DDP_NOTICE = 'DDP: duties charged to the account at purchase';
+    public const string USPS_DDP_NOTICE = 'Duties prepaid: charged to the account at purchase';
 
     public function __construct(
         private readonly ShippingRateService $shippingRateService,
@@ -499,7 +499,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
             return PackageShippingResult::failed(
                 'Service Inactive',
-                "{$reason} Choose another rate, or reactivate it under Carriers or Carrier Services.",
+                "{$reason} Choose another rate, or ask an administrator to reactivate it under Carriers or Carrier Services.",
             );
         }
 

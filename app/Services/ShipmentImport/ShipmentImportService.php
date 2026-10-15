@@ -128,7 +128,7 @@ class ShipmentImportService
         try {
             $result = $source->closeRecordsClosedAtSource($this->importSource, $shipments);
         } catch (\Exception $e) {
-            $this->runRecorder->addError('Could not check whether the source closed any open shipment: '.$e->getMessage());
+            $this->runRecorder->addError('Could not check whether the source closed any open shipment: '.ImportRunRecorder::reasonFor($e), ['error' => $e->getMessage()]);
 
             return;
         }
@@ -163,7 +163,8 @@ class ShipmentImportService
             $source->reconcileSupersededRecords($this->importSource, $shipments);
         } catch (\Exception $e) {
             $this->runRecorder->addError(
-                'Could not check whether any imported record had been replaced upstream: '.$e->getMessage(),
+                'Could not check whether any imported record had been replaced upstream: '.ImportRunRecorder::reasonFor($e),
+                ['error' => $e->getMessage()],
             );
         }
     }

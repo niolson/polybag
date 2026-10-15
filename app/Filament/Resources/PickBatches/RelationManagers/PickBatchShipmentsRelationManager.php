@@ -20,6 +20,8 @@ class PickBatchShipmentsRelationManager extends RelationManager
 
     protected static ?string $title = 'Shipments';
 
+    protected static ?string $modelLabel = 'shipment';
+
     /**
      * Re-render the table when the batch is changed by the parent page (e.g. "Mark All Picked"),
      * or when the browser records its pack slips as printed, either of which otherwise leaves

@@ -138,7 +138,7 @@ it('refuses to author a service for another carrier than the source named', func
             'service_code' => 'ONTRAC_MFN_GROUND',
             'name' => 'OnTrac Ground',
         ])
-        ->assertNotified('Not created');
+        ->assertNotified('Not Created');
 
     expect(CarrierService::where('service_code', 'ONTRAC_MFN_GROUND')->exists())->toBeFalse()
         ->and(SourceServiceMapping::count())->toBe(0);

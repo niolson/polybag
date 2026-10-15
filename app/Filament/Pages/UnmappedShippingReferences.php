@@ -28,6 +28,8 @@ class UnmappedShippingReferences extends Page implements HasTable
 
     protected static ?string $navigationLabel = 'Map Shipping References';
 
+    protected static ?string $title = 'Map Shipping References';
+
     protected static UnitEnum|string|null $navigationGroup = 'Integrations';
 
     protected static ?int $navigationSort = 90;
@@ -44,6 +46,7 @@ class UnmappedShippingReferences extends Page implements HasTable
         $multiClient = app(SettingsService::class)->get('multi_client_enabled', false);
 
         return $table
+            ->emptyStateHeading('No unmapped references')
             ->query(
                 Shipment::query()
                     ->selectRaw('MIN(id) as id, shipping_method_reference, client_id, COUNT(*) as shipment_count')
@@ -74,7 +77,8 @@ class UnmappedShippingReferences extends Page implements HasTable
             ])
             ->recordActions([
                 Actions\Action::make('assign')
-                    ->label('Assign')
+                    ->label('Map')
+                    ->modalSubmitActionLabel('Map')
                     ->icon('heroicon-o-link')
                     ->form([
                         Forms\Components\Select::make('shipping_method_id')
@@ -103,7 +107,7 @@ class UnmappedShippingReferences extends Page implements HasTable
 
                         Notification::make()
                             ->success()
-                            ->title("Alias created and {$updated} shipment(s) updated")
+                            ->title("Mapped. {$updated} shipment(s) updated")
                             ->send();
                     }),
             ]);

@@ -122,7 +122,7 @@ class ClientForm
 
         return [
             Select::make($prefix.self::DUTIES_POLICY_EU_FIELD)
-                ->label('EU duties terms')
+                ->label('EU Duties Terms')
                 ->options(DutiesTerms::class)
                 ->placeholder('Not set — EU labels are refused')
                 ->markAsRequired()
@@ -130,7 +130,7 @@ class ClientForm
                 ->helperText('Must be set before a label to an EU country can be bought for this client, unless the order carries its own terms. DDP is recommended: a DDU parcel into the EU collects duties, handling fees and the carrier\'s own fee at the door, and postal networks are starting to refuse them. DDP bills those charges to the carrier account that buys the label.')
                 ->columnSpanFull(),
             Repeater::make($prefix.self::DUTIES_POLICY_COUNTRIES_FIELD)
-                ->label('Country terms')
+                ->label('Country Terms')
                 ->helperText('A country row overrides the EU row for that country. A country outside the EU with no row ships DDU.')
                 ->schema([
                     Select::make('country')
@@ -141,7 +141,7 @@ class ClientForm
                         ->distinct()
                         ->disableOptionsWhenSelectedInSiblingRepeaterItems(),
                     Select::make('terms')
-                        ->label('Duties terms')
+                        ->label('Duties Terms')
                         ->options(DutiesTerms::class)
                         ->required()
                         ->native(false),
@@ -151,7 +151,7 @@ class ClientForm
                 ->addActionLabel('Add country')
                 ->columnSpanFull(),
             $taxRegistrations
-                ->label('Seller tax registrations')
+                ->label('Seller Tax Registrations')
                 ->helperText('One number per regime. Each is declared only to the destinations its regime covers, and only below its low-value threshold.')
                 ->schema([
                     Select::make('regime')
@@ -262,7 +262,7 @@ class ClientForm
                         Toggle::make('active')
                             ->default(true),
                         Toggle::make('is_default')
-                            ->label('Default client')
+                            ->label('Default Client')
                             ->helperText('Shipments with no client assigned use this client.')
                             ->default(false),
                         FileUpload::make('logo')

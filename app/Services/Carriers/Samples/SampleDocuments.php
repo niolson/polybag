@@ -120,7 +120,7 @@ class SampleDocuments
         $remaining = count($request->customsItems) - self::DECLARATION_LINES;
 
         if ($remaining > 0) {
-            $label->text(10, $y, 6.5, "... and {$remaining} more line(s)");
+            $label->text(10, $y, 6.5, "... and {$remaining} more ".($remaining === 1 ? 'line' : 'lines'));
             $y += 10;
         }
 
@@ -189,7 +189,7 @@ class SampleDocuments
         $remaining = count($request->customsItems) - self::INVOICE_LINES;
 
         if ($remaining > 0) {
-            $page->text(46, $y, 9, "... and {$remaining} more line(s)");
+            $page->text(46, $y, 9, "... and {$remaining} more ".($remaining === 1 ? 'line' : 'lines'));
             $y += 16;
         }
 
@@ -200,7 +200,7 @@ class SampleDocuments
             $this->money($this->totalValue($request->customsItems)),
         ), bold: true);
 
-        $page->text(40, 650, 9, 'Produced by PolyBag demo mode with a sample carrier. It is not a customs declaration');
+        $page->text(40, 650, 9, 'Produced by a PolyBag sample carrier. It is not a customs declaration');
         $page->text(40, 663, 9, 'and must not accompany a parcel.');
 
         $page->banner(686, 70, 40, self::MARKER.' - DEMO ONLY', inset: self::LETTER_MARGIN);

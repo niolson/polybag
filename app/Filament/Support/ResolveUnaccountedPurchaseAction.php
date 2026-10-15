@@ -50,7 +50,7 @@ class ResolveUnaccountedPurchaseAction
      */
     public static function callout(): Callout
     {
-        return Callout::make('Unfinished label purchase')
+        return Callout::make('Unfinished Label Purchase')
             ->key(self::CALLOUT_KEY)
             ->danger()
             ->columnSpanFull()
@@ -240,7 +240,7 @@ class ResolveUnaccountedPurchaseAction
                         Notification::make()->title('Recorded: no label')->body('The package can be bought again.')->success()->send();
                     }
                 } catch (PurchaseNotResolvableException $e) {
-                    Notification::make()->title('Not recorded')->body($e->getMessage())->danger()->send();
+                    Notification::make()->title('Not Recorded')->body($e->getMessage())->danger()->send();
 
                     $action->halt();
                 }
@@ -301,7 +301,7 @@ class ResolveUnaccountedPurchaseAction
         }
 
         Notification::make()
-            ->title('Recorded, not voided')
+            ->title('Recorded, Not Voided')
             ->body("The label is recorded on the package, but voiding it failed: {$result->message} Try Void again from this page.")
             ->danger()
             ->persistent()

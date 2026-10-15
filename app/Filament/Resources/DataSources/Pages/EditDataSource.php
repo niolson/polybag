@@ -24,6 +24,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Filament\Support\Exceptions\Halt;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
 
@@ -144,12 +145,12 @@ class EditDataSource extends EditRecord
 
             Action::make('shopify_connect')
                 ->authorize('update')
-                ->label(fn (): string => app(OAuthService::class)->isDataSourceConnected($this->record) ? 'Reconnect Shopify' : 'Connect with OAuth')
+                ->label(fn (): string => app(OAuthService::class)->isDataSourceConnected($this->record) ? 'Reconnect Shopify' : 'Connect Shopify')
                 ->icon('heroicon-o-link')
                 ->color(fn (): string => app(OAuthService::class)->isDataSourceConnected($this->record) ? 'warning' : 'primary')
                 ->visible(fn (): bool => $this->record->source_type === ShopifySource::class)
                 ->disabled(fn (): bool => ! app(OAuthService::class)->isBrokerConfigured())
-                ->tooltip(fn () => app(OAuthService::class)->brokerlessGuidance('Enter your own Shopify app Client ID and Client Secret on this source instead.'))
+                ->tooltip(fn () => app(OAuthService::class)->brokerlessGuidance('Enter your own Shopify app Client ID and Client Secret on this connection instead.'))
                 ->requiresConfirmation()
                 ->modalHeading(fn (): string => app(OAuthService::class)->isDataSourceConnected($this->record) ? 'Reconnect Shopify' : 'Connect Shopify')
                 ->modalDescription(fn (): string => app(OAuthService::class)->isDataSourceConnected($this->record)
@@ -189,7 +190,7 @@ class EditDataSource extends EditRecord
                 ->color(fn (): string => app(OAuthService::class)->isDataSourceConnected($this->dataSource()) ? 'warning' : 'primary')
                 ->visible(fn (): bool => $this->dataSource()->source_type === AmazonSource::class)
                 ->disabled(fn (): bool => ! app(OAuthService::class)->isBrokerConfigured())
-                ->tooltip(fn () => app(OAuthService::class)->brokerlessGuidance('Enter your own Amazon Refresh Token and App Client ID/Secret on this source instead.'))
+                ->tooltip(fn () => app(OAuthService::class)->brokerlessGuidance('Enter your own Amazon Refresh Token and App Client ID/Secret on this connection instead.'))
                 ->requiresConfirmation()
                 ->modalHeading(fn (): string => app(OAuthService::class)->isDataSourceConnected($this->dataSource()) ? 'Reconnect Amazon' : 'Connect Amazon')
                 ->modalDescription('You will be redirected to Seller Central to authorize this Amazon SP-API connection.')
@@ -245,6 +246,7 @@ class EditDataSource extends EditRecord
                         Notification::make()
                             ->warning()
                             ->title('No supported Amazon marketplaces found')
+                            ->body('Check that the seller account is registered in a marketplace PolyBag supports, then try connecting again.')
                             ->send();
                     } elseif ($result->selectionRequired) {
                         Notification::make()
@@ -413,7 +415,7 @@ class EditDataSource extends EditRecord
             Notification::make()
                 ->warning()
                 ->title('Packed shipments preserved')
-                ->body("{$preservedConflicts} Shipments already have a Package and were not moved to the new mapping. Resolve open location conflicts manually; shipped history remains unchanged.")
+                ->body($preservedConflicts.' '.Str::plural('shipment', $preservedConflicts).' already '.($preservedConflicts === 1 ? 'has' : 'have').' a package and '.($preservedConflicts === 1 ? 'was' : 'were').' not moved to the new mapping. Resolve open location conflicts manually; shipped history remains unchanged.')
                 ->send();
         }
     }
@@ -483,7 +485,7 @@ class EditDataSource extends EditRecord
             return;
         }
 
-        $message = 'Amazon SP-API connections give access to customer PII, so Multi-Factor Authentication must be required for all users before this connection can be active. Enable it in App Settings → Authentication first.';
+        $message = 'Amazon SP-API connections give access to customer PII, so Multi-Factor Authentication must be required for all users before this connection can be active. Enable it in App Settings → Security first.';
 
         Notification::make()
             ->title('Multi-Factor Authentication required')

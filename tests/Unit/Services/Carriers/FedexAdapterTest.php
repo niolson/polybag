@@ -1280,7 +1280,7 @@ it('returns failure response when shipment creation fails', function (): void {
     $response = $this->adapter->createShipment($request);
 
     expect($response->success)->toBeFalse()
-        ->and($response->errorMessage)->toBe('FedEx response missing shipment data');
+        ->and($response->errorMessage)->toBe('FedEx answered, but the label could not be read. Check FedEx for a label before trying again.');
 });
 
 it('maps a FedEx tracking response into normalized tracking data', function (): void {

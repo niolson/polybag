@@ -35,7 +35,7 @@ it('gives Pack the active box sizes to scan and the inactive ones to report', fu
     $component = Livewire::test(Pack::class, ['shipment_id' => Shipment::factory()->create()->id])
         ->assertSet('inactiveBoxSizes.Z9.id', $inactive->id)
         ->assertSet('inactiveBoxSizes.Z9.label', 'FedEx Tube')
-        ->assertSeeHtml('Box size inactive');
+        ->assertSeeHtml('Box Size Inactive');
 
     expect(array_keys($component->get('boxSizes')))->toBe(['A1'])
         ->and(array_keys($component->get('inactiveBoxSizes')))->toBe(['Z9']);

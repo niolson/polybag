@@ -31,6 +31,8 @@ class ClientBillingReport extends Page implements HasTable
 
     protected static ?string $navigationLabel = 'Client Billing';
 
+    protected static ?string $title = 'Client Billing';
+
     protected static UnitEnum|string|null $navigationGroup = 'Reports';
 
     protected static ?int $navigationSort = 35;

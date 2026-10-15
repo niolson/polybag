@@ -1,7 +1,7 @@
 <!-- QZ Tray Status Banner. Managed entirely by the script below; wire:ignore keeps a
      Livewire re-render (such as the one after pack slips are recorded) from resetting it. -->
 <div id="qz-status" wire:ignore class="mb-4 hidden items-center justify-between gap-4 rounded-lg border px-4 py-3 text-sm">
-    <span id="qz-status-text">Connecting to the label printer...</span>
+    <span id="qz-status-text">Connecting to the printers...</span>
     <button
         id="qz-status-button"
         type="button"
@@ -138,7 +138,8 @@
                 if (error.message && error.message.includes('Unable to connect')) {
                     showStatus('The label printing app is not running. Open QZ Tray on this computer, then try again.', 'error');
                 } else {
-                    showStatus(`QZ Tray error: ${error.message || 'Connection failed'}`, 'error');
+                    console.error('QZ connection error:', error);
+                    showStatus('Could not reach the label printing app. Check that it is running, then try again.', 'error');
                 }
 
                 return false;
@@ -282,7 +283,7 @@
                 hideStatus();
             } catch (error) {
                 console.error('Print error:', error);
-                showStatus(`Print failed: ${error.message || 'Unknown error'}`, 'error');
+                showStatus(`The label did not print${error.message ? `: ${error.message}` : ''}. Check the printer in Device Settings, then try again.`, 'error');
                 throw error;
             }
         }
@@ -329,7 +330,7 @@
                 return true;
             } catch (error) {
                 console.error('Report print error:', error);
-                showStatus(`Document print failed: ${error.message || 'Unknown error'}`, 'error');
+                showStatus(`The document did not print${error.message ? `: ${error.message}` : ''}. Check the document printer in Device Settings, then try again.`, 'error');
 
                 return false;
             }

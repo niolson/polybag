@@ -104,7 +104,7 @@ it('lets a stale label printer be cleared by saving with none selected', functio
     $page->navigate('/device-settings');
 
     $page->click('#save-settings')
-        ->assertSee('Settings saved!')
+        ->assertSee('Saved.')
         ->assertSee('No Label Printer');
 
     expect($page->script('localStorage.getItem("rawLabelPrinter")'))->toBeNull()

@@ -389,6 +389,20 @@ class Package extends Model
      * kind: Amazon Buy Shipping buys through a data source too, and its labels
      * are voidable here, priced, and carried by whoever the packer chose.
      */
+    /**
+     * Who sold the active Label, as a person would name them: the connection
+     * for marketplace postage, otherwise the carrier. Said where a void is
+     * about to go to that seller.
+     */
+    public function postageSellerLabel(): string
+    {
+        if ($this->postage_source === PostageSource::PostageDataSource && filled($this->postageDataSource?->name)) {
+            return $this->postageDataSource->name;
+        }
+
+        return filled($this->carrier) ? Carrier::labelForName($this->carrier) : 'the postage source';
+    }
+
     public function isShopifyShipped(): bool
     {
         return $this->boughtThroughDataSourceOfType(ShopifySource::class);

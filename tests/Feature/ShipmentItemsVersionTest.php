@@ -251,7 +251,7 @@ describe('printed slips', function (): void {
         $shipment = printedThenChangedShipment($this->user);
 
         Livewire::test(ViewShipment::class, ['record' => $shipment->id])
-            ->assertSee('Changed since printed');
+            ->assertSee('Out of date');
     });
 
     it('does not show a current slip as changed', function (): void {
@@ -261,7 +261,7 @@ describe('printed slips', function (): void {
 
         Livewire::test(ViewShipment::class, ['record' => $shipment->id])
             ->assertSee('Printed')
-            ->assertDontSee('Changed since printed');
+            ->assertDontSee('Out of date');
     });
 
     it('warns on Scan & Pack without blocking packing', function (): void {

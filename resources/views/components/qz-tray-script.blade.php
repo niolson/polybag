@@ -49,7 +49,7 @@
                 qzSignPlaintexts.delete(toSign);
 
                 if (!payload) {
-                    reject(new Error('Missing QZ signing payload'));
+                    reject(new Error('The printing service could not sign this request. Reload the page and try again.'));
                     return;
                 }
 

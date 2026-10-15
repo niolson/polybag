@@ -58,7 +58,7 @@ class EditUser extends EditRecord
                     if ($hasPackages || $hasBatches) {
                         Notification::make()
                             ->title('Cannot delete user')
-                            ->body('This user has shipping history.')
+                            ->body('This user has shipping history. Turn off Active instead.')
                             ->danger()
                             ->send();
 

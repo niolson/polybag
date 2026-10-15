@@ -81,7 +81,7 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
             : $this->activeDraftFor($shipment);
 
         if (! $package || $package->status !== PackageStatus::Unshipped) {
-            throw new PackageDraftIncompleteException('Shipment has no active package draft.');
+            throw new PackageDraftIncompleteException('Nothing has been packed for this shipment yet.');
         }
 
         return $this->buildReadyDraft($shipment, $package, $options);
@@ -126,7 +126,7 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
             // A batch draft packs every item at its full quantity, so it must
             // not be built for an order another Package has partly sent.
             if (Package::where('shipment_id', $lockedShipment->id)->where('status', PackageStatus::Shipped)->exists()) {
-                throw new PackageDraftInvalidException('Shipment is partly shipped; finish it on the Pack page.');
+                throw new PackageDraftInvalidException('Shipment is partly shipped; finish it on Scan & Pack.');
             }
 
             $package = $existingDraft ?? $this->createDraft($lockedShipment);
@@ -163,11 +163,11 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
         $snapshot = $this->snapshot($shipment, $package, $options);
 
         if (! $snapshot->measurements->hasPositiveValues()) {
-            throw new PackageDraftIncompleteException('Package draft is missing valid measurements.');
+            throw new PackageDraftIncompleteException('Enter the package\'s weight and dimensions.');
         }
 
         if ($options->requireCompletePackedItems && ! $this->hasCompletePackedItems($shipment, $package)) {
-            throw new PackageDraftIncompleteException('Not all shipment items are packed.');
+            throw new PackageDraftIncompleteException('Some items are not packed yet.');
         }
 
         return new ReadyPackageDraft(
@@ -260,24 +260,24 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
         foreach ($items as $item) {
             if ($item->shipmentItemId === null) {
                 if ($validShipmentItems->isNotEmpty()) {
-                    throw new PackageDraftInvalidException('Scan-to-add items are only allowed for shipments without line items.');
+                    throw new PackageDraftInvalidException('Items can only be added by scanning for a shipment without line items.');
                 }
 
                 if (! $validScanToAddProductIds->contains($item->productId)) {
-                    throw new PackageDraftInvalidException('Product not found for scan-to-add item.');
+                    throw new PackageDraftInvalidException('That product was not found.');
                 }
             } else {
                 if (! $validShipmentItems->has($item->shipmentItemId)) {
-                    throw new PackageDraftInvalidException('Package draft item does not belong to this shipment.');
+                    throw new PackageDraftInvalidException('That item is not in this shipment.');
                 }
 
                 if ($validShipmentItems[$item->shipmentItemId] !== $item->productId) {
-                    throw new PackageDraftInvalidException('Product mismatch detected in package draft item.');
+                    throw new PackageDraftInvalidException('A packed item does not match the shipment\'s products. Remove it and scan the item again.');
                 }
             }
 
             if ($item->quantity < 0 || $item->quantity > 10000) {
-                throw new PackageDraftInvalidException('Package draft item quantity is out of range.');
+                throw new PackageDraftInvalidException('A packed item has a quantity that is too low or too high. Correct the quantity.');
             }
         }
     }
@@ -324,7 +324,7 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
         }
 
         if (! is_numeric($value)) {
-            throw new PackageDraftInvalidException('Package draft measurement must be numeric.');
+            throw new PackageDraftInvalidException('Enter the weight and dimensions as numbers.');
         }
 
         return (float) $value;

@@ -27,6 +27,7 @@ use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Table;
+use Illuminate\Support\Str;
 
 class AuditLogResource extends Resource
 {
@@ -54,6 +55,22 @@ class AuditLogResource extends Resource
         return false;
     }
 
+    /**
+     * The name a record type goes by in the UI, not its class name.
+     */
+    public static function recordTypeLabel(?string $class): string
+    {
+        if ($class === null) {
+            return '—';
+        }
+
+        return match (class_basename($class)) {
+            'DataSource' => 'Connection',
+            'PackageLabel' => 'Label',
+            default => Str::headline(class_basename($class)),
+        };
+    }
+
     public static function table(Table $table): Table
     {
         return $table
@@ -70,8 +87,8 @@ class AuditLogResource extends Resource
                     ->badge()
                     ->formatStateUsing(fn (AuditAction $state): string|\Illuminate\Contracts\Support\Htmlable|null => $state->getLabel()),
                 Tables\Columns\TextColumn::make('auditable_type')
-                    ->label('Model')
-                    ->formatStateUsing(fn (?string $state): string => $state ? class_basename($state) : '—')
+                    ->label('Record Type')
+                    ->formatStateUsing(fn (?string $state): string => self::recordTypeLabel($state))
                     ->toggleable(),
                 Tables\Columns\TextColumn::make('auditable_id')
                     ->label('ID')
@@ -89,12 +106,12 @@ class AuditLogResource extends Resource
                     ->relationship('user', 'name')
                     ->preload(),
                 Tables\Filters\SelectFilter::make('auditable_type')
-                    ->label('Model')
+                    ->label('Record Type')
                     ->options(fn () => AuditLog::query()
                         ->whereNotNull('auditable_type')
                         ->distinct()
                         ->pluck('auditable_type')
-                        ->mapWithKeys(fn ($type): array => [$type => class_basename($type)])
+                        ->mapWithKeys(fn ($type): array => [$type => self::recordTypeLabel($type)])
                         ->sort()
                         ->toArray()
                     ),
@@ -144,8 +161,8 @@ class AuditLogResource extends Resource
                             ->badge()
                             ->formatStateUsing(fn (AuditAction $state): string|\Illuminate\Contracts\Support\Htmlable|null => $state->getLabel()),
                         TextEntry::make('auditable_type')
-                            ->label('Model')
-                            ->formatStateUsing(fn (?string $state): string => $state ? class_basename($state) : '—'),
+                            ->label('Record Type')
+                            ->formatStateUsing(fn (?string $state): string => self::recordTypeLabel($state)),
                         TextEntry::make('auditable_id')
                             ->label('Record ID')
                             ->url(fn (AuditLog $record): ?string => self::getAuditableUrl($record)),

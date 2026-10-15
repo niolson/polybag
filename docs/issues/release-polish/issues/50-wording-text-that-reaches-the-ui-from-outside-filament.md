@@ -172,3 +172,20 @@ Code read at `origin/main` (`dfd842c5`). String list: `strings-cross-cutting.md`
   notification; one PDF failure message. Capitalization: Title Case for titles, labels and
   buttons, applied to touched strings only. The low findings off the demo path remain
   open.
+
+- 2026-10-15 — Off-path findings done: FedEx's unreadable-reply failures say to check FedEx
+  for a label before trying again, and a FedEx purchase failure that is not a carrier
+  exception shows a fixed sentence; a batch label job that throws shows a fixed sentence and
+  is reported; import errors name a database error instead of quoting SQL; OAuth failures
+  (claim, refresh, mismatch, unregistered provider) show "The connection could not be
+  completed" and log the broker body; the self-hosting path is gone from the toast; "data
+  source" is "connection" in the Shopify label, OAuth and Database source messages; the batch
+  notification counts "labels bought" and its titles are Title Case, as are the import,
+  label-not-recorded and tracking notifications; the pick batch summary column is
+  "Shipments"; USPS and Google say "USPS could not confirm a delivery point"; the sample
+  validator says "(sample validator)"; the registration regime prints its label; the
+  default-client, no-active-services and sample document messages are plain; the Package
+  Draft scan-to-add messages say what is wrong.
+  Not done: the hardening change to catch `CarrierException` before `RuntimeException` in
+  the two workflows (no visible change today), and the sentence-case enum labels, which `51`
+  settled as Title Case.

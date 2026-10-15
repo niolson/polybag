@@ -80,10 +80,21 @@ class ImportRunRecorder
         $this->log($level, $message, $context);
     }
 
+    /**
+     * What an exception tells an operator. A database error carries SQL, so it
+     * is named, not quoted; the full text is in the log context.
+     */
+    public static function reasonFor(\Throwable $exception): string
+    {
+        return $exception instanceof \PDOException
+            ? 'a database error stopped it. See the log for details.'
+            : $exception->getMessage();
+    }
+
     public function recordImportError(array $data, \Exception $exception): void
     {
         $this->addError(
-            "Error importing shipment {$data['shipment_reference']}: ".$exception->getMessage(),
+            "Error importing shipment {$data['shipment_reference']}: ".self::reasonFor($exception),
             [
                 'shipment_reference' => $data['shipment_reference'] ?? 'unknown',
                 'error' => $exception->getMessage(),
@@ -106,7 +117,7 @@ class ImportRunRecorder
     public function recordSourceExportFailure(string $sourceRecordId, array $data, \Exception $exception): void
     {
         $this->addError(
-            "Error marking shipment {$sourceRecordId} as exported: ".$exception->getMessage(),
+            "Error marking shipment {$sourceRecordId} as exported: ".self::reasonFor($exception),
             [
                 'shipment_reference' => $data['shipment_reference'] ?? $sourceRecordId,
                 'source_record_id' => $sourceRecordId,

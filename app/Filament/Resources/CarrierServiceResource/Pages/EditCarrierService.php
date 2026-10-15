@@ -41,7 +41,7 @@ class EditCarrierService extends EditRecord
                     if ($mapping instanceof SourceServiceMapping) {
                         Notification::make()
                             ->title('Cannot delete carrier service')
-                            ->body("{$mapping->describe()} is mapped to this service. Unmap it on Map Carrier Services, or deactivate the service instead.")
+                            ->body("A {$mapping->source_kind->label()} service is mapped to this service. Unmap it on Map Carrier Services, or deactivate the service instead.")
                             ->danger()
                             ->send();
 

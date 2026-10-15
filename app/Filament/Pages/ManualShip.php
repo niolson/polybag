@@ -183,7 +183,7 @@ class ManualShip extends Page implements HasForms
                                     ->schema([
                                         Forms\Components\TextInput::make('shipment_reference')
                                             ->label('Reference')
-                                            ->helperText('Optional - External channel reference number')
+                                            ->helperText('Optional. The reference number from the external channel.')
                                             ->maxLength(255),
                                         Forms\Components\Select::make('shipping_method_id')
                                             ->label('Shipping Method')
@@ -360,7 +360,7 @@ class ManualShip extends Page implements HasForms
         }
 
         if (! empty($data['box_size_id']) && ! BoxSize::where('id', $data['box_size_id'])->exists()) {
-            $this->notifyError('Invalid Box Size', 'The selected box size does not exist.');
+            $this->notifyError('Box Size Not Found', 'The selected box size no longer exists. Choose another.');
 
             return false;
         }

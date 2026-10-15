@@ -94,7 +94,7 @@ class OAuthCallbackController extends Controller
             return redirect()->route('filament.app.pages.settings')
                 ->with('oauth_notification', [
                     'status' => 'danger',
-                    'title' => 'Connection failed: no carrier account or data source to connect.',
+                    'title' => 'Connection failed: no carrier account or connection to connect.',
                 ]);
         } catch (\Throwable $e) {
             logger()->error("OAuth receive failed for {$provider}", [
@@ -125,6 +125,9 @@ class OAuthCallbackController extends Controller
     {
         return match ($provider) {
             'sp-api' => 'Amazon',
+            'usps' => 'USPS',
+            'ups' => 'UPS',
+            'fedex' => 'FedEx',
             default => ucfirst($provider),
         };
     }

@@ -157,7 +157,7 @@ Verified: read at `12592f33`; nothing in this slice changed through `dfd842c5`. 
 ### Sentence case and Title Case are split
 
 - Severity: low.
-- Field labels, columns and headings are mostly Title Case. Departures: "Needs shipping method", "Status set by", "Carrier (shipped elsewhere)", "Shipped elsewhere by", "Amazon program", "Last void", "Unfinished label purchase", "Missing customs data", "Carrier packaging", the "Postage sources" tab (the only sentence-case tab), "Beyond listed services", "Source and service", "Require OTDR protection for", "Exclude rates that deliver after the due-by date", and every derived label.
+- Field labels, columns and headings are mostly Title Case. Departures: "Needs shipping method", "Status set by", "Shipped elsewhere by", "Amazon program", "Last void", "Unfinished label purchase", "Missing customs data", "Carrier packaging", the "Postage sources" tab (the only sentence-case tab), "Beyond listed services", "Source and service", "Require OTDR protection for", "Exclude rates that deliver after the due-by date", and every derived label.
 - Notification titles are mostly sentence case. Departures: "Package Not Found", "Access Denied", "Cannot Cancel", "Carrier Error", "Cancel Error", "Package State Changed", "Label Not Available", "Label Bought", "Shipping Error", "Attended Shipping Required", "No Labels".
 - Buttons are mostly Title Case. Departures: "Buy and print label", "Record void" (on a "Record Void" modal), "Mark as media", "Void or keep the label", "Record what I found".
 - The same words appear in both cases: "Not Checked" vs "Not deliverable"; "Not Printed" / "Not Exported" / "Not Manifested" vs "Not printed"; "Completed w/ Errors" vs "Completed with Errors".
@@ -198,3 +198,20 @@ Verified: read at `12592f33`; nothing in this slice changed through `dfd842c5`. 
   notification; one PDF failure message. Capitalization: Title Case for titles, labels and
   buttons, applied to touched strings only. The low findings off the demo path remain
   open.
+
+- 2026-10-15 — Off-path findings done: the "Carrier (shipped elsewhere)" and "Tracking number
+  (shipped elsewhere)" fields left the Shipment edit form, since only the sync writes them.
+  Void and reprint toasts: "Package Changed" with a next step, "No Label To Print" and
+  "Label File Not Available" split, a body on the Package Not Found toast, "Latest From the
+  Carrier". Carrier void failures show a status or "Could not reach {Carrier}" instead of
+  exception or API text; the raw text is logged. "Connection" replaces "source" on the
+  Shipments list and the closed-by-source notice; the void reasons read "Voided in PolyBag"
+  and "Voided at the seller". Model labels, special-service badges, "ID", one name for
+  Shopify's choice and Shopify Shipping, "Carrier or Postage Source", "Service (as bought)",
+  "Void the label first.", the pick batch wording, "Started By" / "Succeeded" / "Shipments"
+  on the batch tables, and the jargon list ("Delivery Commitment (Days)", OTDR spelled out,
+  the EU product IDs explained, "Print Without Preview", the country name in the phone
+  helper, "Address Check Result"). Title Case on the labels the finding listed.
+  Still open: the notification-title sweep and the button departures in the capitalization
+  finding, the "Not checked" / "Not deliverable" / "Not printed" value pairs, and
+  "Commitment Days" in the Setup Wizard.

@@ -13,7 +13,7 @@ it('includes the first error message in the database notification body', functio
 
     expect($data['body'])
         ->toContain('Missing city')
-        ->and($data['title'])->toBe('Import completed with errors (Amazon)');
+        ->and($data['title'])->toBe('Import Completed with Errors (Amazon)');
 });
 
 it('mentions how many additional errors were logged when there is more than one', function (): void {
@@ -43,5 +43,5 @@ it('omits error detail entirely when the import had none', function (): void {
     $data = $notification->toDatabase(new stdClass);
 
     expect($data['body'])->toBe('3 created, 1 updated')
-        ->and($data['title'])->toBe('Import completed (Amazon)');
+        ->and($data['title'])->toBe('Import Completed (Amazon)');
 });

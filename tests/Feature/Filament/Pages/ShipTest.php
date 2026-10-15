@@ -95,7 +95,7 @@ it('blocks shipping from a different explicitly configured operator location', f
     ]);
 
     Livewire::test(Ship::class, ['package_id' => $package->id])
-        ->assertNotified('Location unavailable')
+        ->assertNotified('Location Unavailable')
         ->assertSet('package', null)
         ->assertRedirect('/pack');
 });

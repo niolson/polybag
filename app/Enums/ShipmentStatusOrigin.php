@@ -25,7 +25,7 @@ enum ShipmentStatusOrigin: string implements HasLabel
     {
         return match ($this) {
             self::PolyBag => 'PolyBag',
-            self::Source => 'Reported by the source',
+            self::Source => 'Reported by the connection',
             self::Manager => 'Set by a manager',
         };
     }

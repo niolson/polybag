@@ -421,7 +421,7 @@ it('keeps a sold label recoverable when recording it fails, rather than buying a
     $offer = ShippingOffer::whereNotNull('consumed_at')->sole();
 
     // In the bell, not only a toast: the buyer and whoever can act on it.
-    expect($buyer->notifications()->sole()->data['title'])->toContain('Label bought but not recorded')
+    expect($buyer->notifications()->sole()->data['title'])->toContain('Label Bought but Not Recorded')
         ->and($buyer->notifications()->sole()->data['body'])->toContain('MockCarrier sold label TRACK123')
         ->and($manager->notifications()->count())->toBe(1)
         ->and($otherShipper->notifications()->count())->toBe(0);
@@ -1267,7 +1267,7 @@ it('refuses to buy for a package with no measurements, as when the Pack page was
 
     expect($result->success)->toBeFalse()
         ->and($result->title)->toBe('Not Ready')
-        ->and($result->message)->toBe('Package draft is missing valid measurements.')
+        ->and($result->message)->toBe('Enter the package\'s weight and dimensions.')
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 
@@ -1281,7 +1281,7 @@ it('refuses to buy for a package whose items are not all packed', function (): v
     $result = app(PackageShippingWorkflow::class)->ship($package, new PackageShippingRequest(selectedRate: $rate, userId: $user->id));
 
     expect($result->title)->toBe('Not Ready')
-        ->and($result->message)->toBe('Not all shipment items are packed.');
+        ->and($result->message)->toBe('Some items are not packed yet.');
 });
 
 it('buys for a partly packed package when packing validation is off, but still wants measurements', function (): void {
@@ -1294,7 +1294,7 @@ it('buys for a partly packed package when packing validation is off, but still w
     $package->update(['weight' => 0]);
 
     expect(fn () => app(PackageDraftWorkflow::class)->assertPackageReadyToShip($package))
-        ->toThrow(PackageDraftIncompleteException::class, 'Package draft is missing valid measurements.');
+        ->toThrow(PackageDraftIncompleteException::class, 'Enter the package\'s weight and dimensions.');
 });
 
 it('refuses to buy for a shipment that must be picked first', function (): void {

@@ -32,6 +32,7 @@ use Filament\Schemas\Components;
 use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Filament\Support\Contracts\HasLabel;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\HtmlString;
@@ -114,7 +115,7 @@ class ViewPackage extends ViewRecord
                     ->requiresConfirmation()
                     ->authorize('voidLabel')
                     ->modalHeading('Void Label')
-                    ->modalDescription('Voids the label with whoever sold it: the carrier, or Amazon. The package keeps its dimensions so it can be shipped again.')
+                    ->modalDescription(fn (): string => "Voids the label with {$this->package()->postageSellerLabel()}. The package keeps its dimensions so it can be shipped again.")
                     ->visible(fn (): bool => $this->record->status === PackageStatus::Shipped
                         && $this->record->tracking_number
                         && ($this->record->carrier || $this->shopifyShipped()))
@@ -212,7 +213,7 @@ class ViewPackage extends ViewRecord
         $savedAt = $package->updated_at?->timezone(Location::timezone());
 
         return sprintf(
-            'Buys a label within this shipment\'s shipping rules at %s lbs, %s × %s × %s in, then prints it. Last saved %s. If the box has changed since, re-weigh it on the Pack page first.',
+            'Buys a label within this shipment\'s shipping rules at %s lbs, %s × %s × %s in, then prints it. Last saved %s. If the box has changed since, re-weigh it on Scan & Pack first.',
             number_format((float) $package->weight, 2),
             (float) $package->length,
             (float) $package->width,
@@ -434,7 +435,7 @@ class ViewPackage extends ViewRecord
                                 TextEntry::make('source')
                                     ->label('Source')
                                     ->badge()
-                                    ->formatStateUsing(fn ($state): string => ucwords(str_replace('_', ' ', $state instanceof \BackedEnum ? $state->value : $state)))
+                                    ->formatStateUsing(fn ($state): string => $state instanceof HasLabel ? $state->getLabel() : ucwords(str_replace('_', ' ', $state)))
                                     ->color(fn ($state): string => match ($state instanceof \BackedEnum ? $state->value : $state) {
                                         'shipping_method' => 'info',
                                         'product' => 'warning',

@@ -903,8 +903,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
             return TrackShipmentResponse::failure(
                 data_get($rawResponse, 'error.message')
                     ?? data_get($rawResponse, 'message')
-                    ?? $e->getMessage()
-                    ?? 'USPS tracking request failed.',
+                    ?? 'USPS tracking request failed. Try again in a moment.',
                 ['raw' => $rawResponse],
             );
         } catch (\Throwable $e) {
@@ -1485,7 +1484,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         if (($registration = $this->sentRegistration($request)) !== null) {
             $country = $this->countryName($request->toAddress->country);
 
-            return "USPS cannot prepay duties and taxes on a parcel that declares a seller registration ({$registration->regime->value} {$registration->number}): "
+            return "USPS cannot prepay duties and taxes on a parcel that declares a seller registration ({$registration->regime->getLabel()} {$registration->number}): "
                 ."any exporter reference makes USPS drop the prepayment and bill the recipient instead. Nothing was bought. To {$country}, ship on DDU terms or with another carrier.";
         }
 
@@ -1701,7 +1700,28 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
             }
 
             return $this->readCancelReply($response, $trackingNumber);
+        } catch (RequestException $e) {
+            logger()->error('USPS cancelShipment refused', [
+                'status' => $e->getResponse()->status(),
+                'error' => $e->getMessage(),
+                'tracking_number' => $trackingNumber,
+            ]);
+
+            return CancelResponse::failure('USPS did not void the label (error '.$e->getResponse()->status().'). Try again, or void it on the USPS site.');
+        } catch (FatalRequestException $e) {
+            logger()->error('USPS cancelShipment unreachable', [
+                'error' => $e->getMessage(),
+                'tracking_number' => $trackingNumber,
+            ]);
+
+            return CancelResponse::failure('Could not reach USPS. Try again in a moment.');
         } catch (\Exception $e) {
+            logger()->error('USPS cancelShipment error', [
+                'exception' => $e::class,
+                'error' => $e->getMessage(),
+                'tracking_number' => $trackingNumber,
+            ]);
+
             return CancelResponse::failure($e->getMessage());
         }
     }

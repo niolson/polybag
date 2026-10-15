@@ -380,7 +380,7 @@ trait HasFedexRegistration
                                     childKey: $result['credentials']['child_Key'],
                                     childSecret: $result['credentials']['child_secret'],
                                 );
-                                Notification::make()->success()->title('FedEx Account added Successfully.')->send();
+                                Notification::make()->success()->title('FedEx Account Added')->send();
                                 $this->redirect(static::getUrl(['record' => $this->record->id]));
 
                                 throw new Halt;
@@ -535,7 +535,7 @@ trait HasFedexRegistration
                     throw new Halt;
                 }
 
-                Notification::make()->success()->title('FedEx Account added Successfully.')->send();
+                Notification::make()->success()->title('FedEx Account Added')->send();
                 $this->redirect(static::getUrl(['record' => $this->record->id]));
             });
     }
@@ -550,7 +550,7 @@ trait HasFedexRegistration
             ->visible(fn (): bool => $this->record?->carrier?->name === Carrier::FEDEX && filled($this->record?->secret('child_key')))
             ->requiresConfirmation()
             ->modalHeading('Disconnect FedEx Account')
-            ->modalDescription('This will remove your FedEx child credentials. You can reconnect anytime.')
+            ->modalDescription('This will remove the stored FedEx credentials for this account. You can reconnect anytime.')
             ->action(function (): void {
                 $childKey = $this->record->secret('child_key');
                 $childEnv = $this->record->credential('child_env') ?? 'production';

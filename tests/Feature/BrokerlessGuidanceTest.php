@@ -87,7 +87,7 @@ it('disables the Shopify and Amazon connect actions without a broker', function 
 
 it('does not tell a brokerless caller to set OAUTH_BROKER_SECRET when a broker flow is invoked', function (): void {
     expect(fn () => app(OAuthService::class)->initiateSsoAuthorization('google'))
-        ->toThrow(RuntimeException::class, 'hosted-only');
+        ->toThrow(RuntimeException::class, 'Guided sign-in is not available');
 });
 
 it('ships a self-hosting doc and keeps hosted-only hostnames out of .env.example', function (): void {

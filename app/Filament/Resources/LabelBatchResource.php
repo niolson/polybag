@@ -59,14 +59,14 @@ class LabelBatchResource extends Resource
                 Tables\Columns\TextColumn::make('status')
                     ->badge(),
                 Tables\Columns\TextColumn::make('user.name')
-                    ->label('User'),
+                    ->label('Started By'),
                 Tables\Columns\TextColumn::make('boxSize.label')
                     ->label('Box Size'),
                 Tables\Columns\TextColumn::make('total_shipments')
                     ->label('Total')
                     ->numeric(),
                 Tables\Columns\TextColumn::make('successful_shipments')
-                    ->label('Success')
+                    ->label('Succeeded')
                     ->numeric()
                     ->color('success'),
                 Tables\Columns\TextColumn::make('failed_shipments')

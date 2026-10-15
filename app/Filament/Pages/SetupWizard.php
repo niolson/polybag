@@ -144,7 +144,7 @@ class SetupWizard extends Page
                         <x-filament::button
                             type="button"
                             wire:click="skipWizard"
-                            wire:confirm="Are you sure? You can configure all of these settings later from the Settings menu."
+                            wire:confirm="Are you sure? You can configure all of these settings later from the menus on the left."
                             color="gray"
                             outlined
                             size="sm"
@@ -288,7 +288,7 @@ class SetupWizard extends Page
                             ->minValue(0)
                             ->maxValue(50),
                         Forms\Components\Select::make('carrier_packaging')
-                            ->label('Carrier packaging')
+                            ->label('Carrier Packaging')
                             ->options(CarrierPackaging::groupedOptions())
                             ->nullable()
                             ->placeholder('Own packaging')
@@ -349,7 +349,7 @@ class SetupWizard extends Page
                                 Forms\Components\TagsInput::make('aliases')
                                     ->label('Aliases')
                                     ->placeholder('Add alias')
-                                    ->helperText('Reference values from your import source that map to this channel.'),
+                                    ->helperText('Reference values from your connection that map to this channel.'),
                             ])
                             ->columns(3)
                             ->defaultItems(0)
@@ -374,7 +374,7 @@ class SetupWizard extends Page
                             )),
                         Forms\Components\Placeholder::make('alias_hint')
                             ->label('')
-                            ->content('If you know the reference values your import source will send, add them as aliases. Otherwise, map them later using the Unmapped References tools in Settings.'),
+                            ->content('If you know the reference values your connection will send, add them as aliases. Otherwise, map them later under Integrations → Map Channel References and Map Shipping References.'),
                         Forms\Components\Repeater::make('shipping_methods')
                             ->label('Add New Shipping Methods')
                             ->schema([
@@ -401,7 +401,7 @@ class SetupWizard extends Page
                                 Forms\Components\TagsInput::make('aliases')
                                     ->label('Aliases')
                                     ->placeholder('Add alias')
-                                    ->helperText('Reference values from your import source that map to this method.')
+                                    ->helperText('Reference values from your connection that map to this method.')
                                     ->columnSpanFull(),
                             ])
                             ->columns(2)
@@ -456,7 +456,7 @@ class SetupWizard extends Page
                     ->label('Import Orders From')
                     ->options([
                         'none' => 'None (manual entry only)',
-                        'database' => 'External Database',
+                        'database' => 'Database',
                         'shopify' => 'Shopify',
                         'amazon' => 'Amazon',
                     ])
@@ -569,7 +569,7 @@ class SetupWizard extends Page
                             ->helperText('Sales channel assigned to imported shipments. Leave blank to create a "Shopify" channel automatically. Add more channels in the previous step.'),
                         Forms\Components\Placeholder::make('shopify_oauth_hint')
                             ->label('')
-                            ->content('Shopify API credentials and OAuth connection can be configured in App Settings after setup.'),
+                            ->content('Shopify API credentials and OAuth connection can be configured under Integrations → Connections after setup.'),
                     ]),
 
                 // Amazon
@@ -590,7 +590,7 @@ class SetupWizard extends Page
                             ->helperText('Sales channel assigned to imported shipments. Leave blank to create an "Amazon" channel automatically. Add more channels in the previous step.'),
                         Forms\Components\Placeholder::make('amazon_hint')
                             ->label('')
-                            ->content('Amazon SP-API credentials can be configured in App Settings after setup.'),
+                            ->content('Amazon SP-API credentials can be configured under Integrations → Connections after setup.'),
                     ]),
             ])
             ->afterValidation(function (): void {
@@ -619,7 +619,7 @@ class SetupWizard extends Page
                     }),
                 Forms\Components\Placeholder::make('summary_carriers')
                     ->label('Active Carriers')
-                    ->content(fn () => Carrier::where('active', true)->pluck('name')->join(', ') ?: 'None'),
+                    ->content(fn () => Carrier::where('active', true)->get()->map->label()->join(', ') ?: 'None'),
                 Forms\Components\Placeholder::make('summary_services')
                     ->label('Active Services')
                     ->content(fn (): string => CarrierService::where('active', true)->count().' services enabled'),
@@ -662,7 +662,7 @@ class SetupWizard extends Page
                         $driverLabel = match ($source->source_type) {
                             DatabaseSource::class => 'Database',
                             ShopifySource::class => 'Shopify',
-                            AmazonSource::class => 'Amazon SP-API',
+                            AmazonSource::class => 'Amazon',
                             default => class_basename($source->source_type),
                         };
 
@@ -679,7 +679,7 @@ class SetupWizard extends Page
                         $items = $incomplete->map(function (CarrierAccount $account): string {
                             // Escaped: the display name and the account's carrier are operator-edited.
                             $url = e(CarrierAccountResource::getUrl('edit', ['record' => $account->id]));
-                            $verb = $account->carrier->name === Carrier::FEDEX ? 'Register' : 'Connect';
+                            $verb = 'Connect';
                             $carrierLabel = e($account->carrier->label());
 
                             return "<li><a href=\"{$url}\" class=\"text-primary-600 hover:underline font-medium\">{$verb} {$carrierLabel}</a> — credentials required before shipping</li>";
@@ -704,10 +704,12 @@ class SetupWizard extends Page
 
     private function carrierSection(string $carrierName, string $key): Section
     {
-        return Section::make($carrierName)
+        $carrierLabel = Carrier::labelForName($carrierName);
+
+        return Section::make($carrierLabel)
             ->schema([
                 Forms\Components\Toggle::make("carrier_{$key}_active")
-                    ->label("Enable {$carrierName}")
+                    ->label("Enable {$carrierLabel}")
                     ->live(),
                 Forms\Components\CheckboxList::make("carrier_{$key}_services")
                     ->label('Services')
@@ -824,7 +826,7 @@ class SetupWizard extends Page
             Notification::make()
                 ->info()
                 ->title('No box sizes configured')
-                ->body('You can add box sizes later in Settings, or enter dimensions manually when shipping.')
+                ->body('You can add box sizes later under Shipping Config → Box Sizes, or enter dimensions manually when shipping.')
                 ->send();
         }
     }
@@ -1066,7 +1068,7 @@ class SetupWizard extends Page
         Notification::make()
             ->info()
             ->title('Setup wizard skipped')
-            ->body('You can configure these settings anytime from the Settings menu.')
+            ->body('You can configure these settings anytime from the menus on the left.')
             ->send();
 
         $this->redirect('/');

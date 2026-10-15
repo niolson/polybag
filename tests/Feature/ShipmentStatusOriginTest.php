@@ -179,14 +179,14 @@ describe('a manager changing the status', function (): void {
         $shipment = Shipment::factory()->closedBySource('shipped')->create();
 
         Livewire::test(EditShipment::class, ['record' => $shipment->id])
-            ->fillForm(['external_tracking_number' => '1Z-SYNTHETIC-0001'])
+            ->fillForm(['shipment_reference' => 'REF-CHANGED-0001'])
             ->call('save')
             ->assertHasNoFormErrors();
 
         $fresh = $shipment->fresh();
 
         expect($fresh->status_origin)->toBe(ShipmentStatusOrigin::Source)
-            ->and($fresh->external_tracking_number)->toBe('1Z-SYNTHETIC-0001')
+            ->and($fresh->shipment_reference)->toBe('REF-CHANGED-0001')
             ->and(AuditLog::where('action', AuditAction::ShipmentUpdated)->exists())->toBeFalse();
     });
 
@@ -197,7 +197,7 @@ describe('a manager changing the status', function (): void {
 
         Livewire::test(EditShipment::class, ['record' => $shipment->id])
             ->assertSee('Test Shop reported this order cancelled on')
-            ->assertSee('Changing it here overrides the source.');
+            ->assertSee('Changing it here overrides the connection.');
 
         expect(ShipmentResource::closedBySourceNotice(Shipment::factory()->cancelled()->create()))->toBeNull();
     });

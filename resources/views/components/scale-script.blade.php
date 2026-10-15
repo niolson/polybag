@@ -166,12 +166,12 @@
             const vendorId = Number.parseInt(deviceInfo.vendorId, 16);
             const productId = Number.parseInt(deviceInfo.productId, 16);
             if (vendorId !== 0x0EB8 || productId !== 0xF000) {
-                throw new Error(`Hardware zero is not configured for scale ${deviceInfo.vendorId}:${deviceInfo.productId}.`);
+                throw new Error('PolyBag cannot zero this scale. Use the zero button on the scale.');
             }
 
             if (this.backend === 'webhid') {
                 if (!this._webHidDevice) {
-                    throw new Error('Scale not claimed. Call claimScale() first.');
+                    throw new Error('The scale is not connected. Reconnect it and try again.');
                 }
 
                 await this._webHidDevice.sendFeatureReport(0x02, new Uint8Array([0x02]));
@@ -184,7 +184,7 @@
                     type: 'HEX'
                 });
             } else {
-                throw new Error('No scale backend available.');
+                throw new Error('No scale is connected. Connect one in Device Settings.');
             }
 
             return true;
@@ -227,7 +227,7 @@
             } else if (this.backend === 'qztray') {
                 await qz.hid.claimDevice(deviceInfo);
             } else {
-                throw new Error('No scale backend available');
+                throw new Error('No scale is connected. Connect one in Device Settings.');
             }
         },
 
@@ -240,7 +240,7 @@
             if (!deviceInfo) throw new Error('No scale configured');
 
             if (this.backend === 'webhid') {
-                if (!this._webHidDevice) throw new Error('Scale not claimed. Call claimScale() first.');
+                if (!this._webHidDevice) throw new Error('The scale is not connected. Reconnect it and try again.');
 
                 this._webHidListener = (event) => {
                     const result = ScaleUtils.parseWebHidData(event.data);
@@ -263,7 +263,7 @@
                     interval: 50
                 });
             } else {
-                throw new Error('No scale backend available');
+                throw new Error('No scale is connected. Connect one in Device Settings.');
             }
         },
 

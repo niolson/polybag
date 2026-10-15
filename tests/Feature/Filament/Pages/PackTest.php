@@ -89,7 +89,7 @@ it('blocks packing at a different explicitly configured operator location', func
     $shipment = Shipment::factory()->create(['location_id' => $shipmentLocation]);
 
     Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
-        ->assertNotified('Location unavailable')
+        ->assertNotified('Location Unavailable')
         ->assertSet('shipment', null)
         ->assertRedirect('/pack');
 });
@@ -99,7 +99,7 @@ it('blocks packing at an inactive shipment location', function (): void {
     $shipment = Shipment::factory()->create(['location_id' => $location]);
 
     Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
-        ->assertNotified('Location unavailable')
+        ->assertNotified('Location Unavailable')
         ->assertRedirect('/pack');
 });
 

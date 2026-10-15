@@ -53,7 +53,7 @@
                 <th>Barcode</th>
                 @endif
                 <th>Qty</th>
-                <th>{{ $columns['totes'] ? 'Totes' : 'Orders' }}</th>
+                <th>{{ $columns['totes'] ? 'Totes' : 'Shipments' }}</th>
             </tr>
         </thead>
         <tbody>

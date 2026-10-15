@@ -269,7 +269,7 @@ class UspsAddressValidator implements AddressValidationInterface
                 // a specific address, so leave unchecked to let the fallback chain (e.g.
                 // Google) attempt it.
                 $shipment->deliverability = Deliverability::No;
-                $shipment->validation_message = "Unknown correction code: {$code}";
+                $shipment->validation_message = "USPS returned an answer PolyBag does not recognize ({$code}).";
                 break;
         }
 
@@ -323,7 +323,7 @@ class UspsAddressValidator implements AddressValidationInterface
                 'D' => [Deliverability::Partial, 'Primary address confirmed, secondary number missing'],
                 'S' => [Deliverability::Partial, 'Primary address confirmed, secondary number not confirmed'],
                 'N' => [Deliverability::No, 'Address found but not confirmed as deliverable'],
-                default => [Deliverability::No, 'DPV confirmation not available'],
+                default => [Deliverability::No, 'USPS could not confirm a delivery point'],
             };
         }
 

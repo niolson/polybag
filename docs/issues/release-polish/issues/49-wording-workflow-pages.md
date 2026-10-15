@@ -202,3 +202,18 @@ Verified: read at `12592f33`; nothing in this slice changed through `dfd842c5`. 
   notification; one PDF failure message. Capitalization: Title Case for titles, labels and
   buttons, applied to touched strings only. The low findings off the demo path remain
   open.
+
+- 2026-10-15 — Off-path findings done: Package Draft errors say what to fix; the pack slip
+  state is "Out of date"; manager-only fixes start "Ask an administrator" or "ask a manager";
+  the Reports, Pack, End of Day and Map pages set `$title` to match their navigation labels;
+  the Map pages say "Map", have an empty state, and no longer say "alias"; "Open Shipments"
+  replaces "Pending Shipments" and "No pending shipments" on the dashboard and pick batch page;
+  carrier names go through `Carrier::label()` on End of Day, Rate Comparison, the carrier
+  chart and the Carrier select; the document printer description, "Label printer:" and
+  "Connecting to the printers..."; raw scale, QZ, manifest, pack slip and Shopify cancel
+  text replaced by plain wording (the cause is logged); the OTDR badges, the DDP notice
+  and the export filing text lead with plain words; Title Case on the sentence-case
+  notification titles; the small copy items; and the unreachable batch results view removed.
+  The `BatchShipResults` page stays, as a redirect with no view, because a test covers the
+  old URL. Left as they were: the Deliverability and Label Batch enum labels, because `51`
+  settled on Title Case, and "Please", which I did not sweep.

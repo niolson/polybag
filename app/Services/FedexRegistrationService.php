@@ -260,7 +260,9 @@ class FedexRegistrationService
             ?? $response->json('output');
 
         if (! is_array($credentials) || empty($credentials)) {
-            throw new RuntimeException('Unexpected credentials response: '.$response->body());
+            logger()->error('FedEx returned an unreadable credentials response', ['body' => $response->body()]);
+
+            throw new RuntimeException('FedEx did not return credentials. Try again, or contact support if it keeps failing.');
         }
 
         return $credentials;

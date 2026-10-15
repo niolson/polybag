@@ -34,6 +34,7 @@
         <div class="rounded-lg bg-danger-50 p-4 text-danger-700 dark:bg-danger-400/10 dark:text-danger-400">
             <p class="font-medium">Connection failed</p>
             <p class="mt-1">{{ $connectionError }}</p>
+            <p class="mt-1">Check the host, port, database name, username and password, then try again.</p>
         </div>
     @else
         @foreach ($preview->errors as $label => $message)

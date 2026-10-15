@@ -27,7 +27,7 @@ trait PrintsLabels
         $package = Package::find($packageId);
 
         if (! $package) {
-            Notification::make()->danger()->title('Package Not Found')->send();
+            Notification::make()->danger()->title('Package Not Found')->body('It may have been deleted. Refresh the list.')->send();
 
             return;
         }

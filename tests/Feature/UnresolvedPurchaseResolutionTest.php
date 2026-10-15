@@ -231,12 +231,12 @@ it('explains an unfinished purchase on the package page, and offers a manager bo
     $this->actingAs(User::factory()->manager()->create());
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
-        ->assertDontSee('Unfinished label purchase');
+        ->assertDontSee('Unfinished Label Purchase');
 
     strandedDirectOffer($package, ['service_name' => 'USPS Ground Advantage', 'price' => 8.40]);
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
-        ->assertSee('Unfinished label purchase')
+        ->assertSee('Unfinished Label Purchase')
         ->assertSee('PolyBag tried to buy a USPS Ground Advantage label for $8.40')
         ->assertSee('Ask USPS again first')
         ->assertActionVisible(askAgain())
@@ -281,7 +281,7 @@ it('keeps a confirmed label from the package page, prefilled with the tracking n
         ->callMountedAction()
         ->assertHasNoActionErrors()
         ->assertNotified('Label kept')
-        ->assertDontSee('Unfinished label purchase');
+        ->assertDontSee('Unfinished Label Purchase');
 
     expect($package->fresh()->tracking_number)->toBe('9200190380793700250067')
         ->and($offer->fresh()->purchase_reference)->toBe('9200190380793700250067');
@@ -322,7 +322,7 @@ it('shows a refusal rather than recording it', function (): void {
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
         ->callAction(recordWhatWasFound(), data: ['outcome' => 'label_exists', 'tracking_number' => '1Z999'])
-        ->assertNotified('Not recorded');
+        ->assertNotified('Not Recorded');
 
     expect(ShippingOffer::query()->unaccounted()->count())->toBe(1)
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
@@ -337,7 +337,7 @@ it('leaves out an unanswered FedEx purchase, which the next attempt settles, but
     $this->actingAs(User::factory()->manager()->create());
 
     Livewire::test(ViewPackage::class, ['record' => $fedexPackage->id])
-        ->assertDontSee('Unfinished label purchase');
+        ->assertDontSee('Unfinished Label Purchase');
 
     // FedEx cannot be asked, so a confirmed FedEx sale offers only the second step.
     Livewire::test(ViewPackage::class, ['record' => $fedexConfirmed->package_id])
@@ -519,7 +519,7 @@ it('says the label is recorded when voiding it fails', function (): void {
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
         ->callAction(recordWhatWasFound(), data: ['outcome' => 'void_label'])
-        ->assertNotified('Recorded, not voided');
+        ->assertNotified('Recorded, Not Voided');
 
     expect($package->fresh()->status)->toBe(PackageStatus::Shipped)
         ->and(ShippingOffer::query()->unaccounted()->count())->toBe(0);

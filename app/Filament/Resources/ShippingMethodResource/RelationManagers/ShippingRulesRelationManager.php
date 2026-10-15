@@ -124,7 +124,7 @@ class ShippingRulesRelationManager extends RelationManager
                 Tables\Columns\TextColumn::make('action')
                     ->badge(),
                 Tables\Columns\TextColumn::make('target')
-                    ->label('Source and service')
+                    ->label('Source and Service')
                     ->state(fn (ShippingRule $record): string => $record->describeTarget()),
                 Tables\Columns\TextColumn::make('client.name')
                     ->label('Client')

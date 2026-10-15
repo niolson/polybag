@@ -233,6 +233,6 @@ it('labels the package print action by whether it has been printed before', func
     $printed = Package::factory()->shipped()->create(['label_printed_at' => now()]);
 
     Livewire::test(ListPackages::class)
-        ->assertActionHasLabel(TestAction::make('reprint')->table($unprinted), 'Print')
-        ->assertActionHasLabel(TestAction::make('reprint')->table($printed), 'Reprint');
+        ->assertActionHasLabel(TestAction::make('reprint')->table($unprinted), 'Print Label')
+        ->assertActionHasLabel(TestAction::make('reprint')->table($printed), 'Reprint Label');
 });

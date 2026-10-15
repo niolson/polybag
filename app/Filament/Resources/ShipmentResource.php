@@ -82,12 +82,12 @@ class ShipmentResource extends Resource
             return null;
         }
 
-        $source = $record->dataSource->name ?? 'The source';
+        $source = $record->dataSource->name ?? 'The connection';
         $when = $record->status_changed_at?->timezone(Location::timezone())->format('M j, Y g:i A');
 
         return "{$source} reported this order ".strtolower((string) $record->status->getLabel())
             .($when !== null ? " on {$when}" : '')
-            .'. Changing it here overrides the source.';
+            .'. Changing it here overrides the connection.';
     }
 
     /**
@@ -165,15 +165,6 @@ class ShipmentResource extends Resource
                             ->options(ShipmentStatus::class)
                             ->disabled(fn (): bool => ! auth()->user()?->role->isAtLeast(Role::Manager))
                             ->helperText(fn (?Shipment $record): ?string => self::closedBySourceNotice($record))
-                            ->visibleOn('edit'),
-                        Forms\Components\TextInput::make('external_carrier')
-                            ->label('Carrier (shipped elsewhere)')
-                            ->maxLength(255)
-                            ->visibleOn('edit'),
-                        Forms\Components\TextInput::make('external_tracking_number')
-                            ->label('Tracking number (shipped elsewhere)')
-                            ->helperText('For an order shipped without PolyBag. PolyBag does not track it.')
-                            ->maxLength(255)
                             ->visibleOn('edit'),
                         Forms\Components\Select::make('channel_id')
                             ->relationship('channel', 'name')
@@ -341,7 +332,7 @@ class ShipmentResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn ($query) => $query->with(['shippingMethod', 'channel', 'client', 'location', 'packSlipPrintedBy']))
+            ->modifyQueryUsing(fn ($query) => $query->with(['shippingMethod', 'channel', 'client', 'location', 'packSlipPrintedBy', 'dataSource']))
             ->searchable()
             ->searchUsing(function (Builder $query, string $search): void {
                 static::applyGlobalSearchAttributeConstraints($query, $search);
@@ -381,7 +372,7 @@ class ShipmentResource extends Resource
                 // so it is flagged, not left blank. Only an open shipment needs one.
                 Tables\Columns\TextColumn::make('shippingMethod.name')
                     ->label('Shipping Method')
-                    ->default(fn (Shipment $record): ?string => self::flagsMissingMethod($record) ? 'Needs shipping method' : null)
+                    ->default(fn (Shipment $record): ?string => self::flagsMissingMethod($record) ? 'Needs Shipping Method' : null)
                     ->badge(fn (Shipment $record): bool => self::flagsMissingMethod($record))
                     ->color(fn (Shipment $record): ?string => self::flagsMissingMethod($record) ? 'warning' : null),
                 Tables\Columns\TextColumn::make('deliver_by')
@@ -393,7 +384,7 @@ class ShipmentResource extends Resource
                 Tables\Columns\TextColumn::make('status')
                     ->badge()
                     ->description(fn (Shipment $record): ?string => match ($record->status_origin) {
-                        ShipmentStatusOrigin::Source => 'By the source',
+                        ShipmentStatusOrigin::Source => 'By '.($record->dataSource->name ?? 'the connection'),
                         ShipmentStatusOrigin::Manager => 'By a manager',
                         default => null,
                     }),
@@ -466,10 +457,10 @@ class ShipmentResource extends Resource
                     ->label('Shipping Method')
                     ->preload(),
                 Tables\Filters\SelectFilter::make('status_origin')
-                    ->label('Status set by')
+                    ->label('Status Set By')
                     ->options(ShipmentStatusOrigin::class),
                 Tables\Filters\Filter::make('needs_shipping_method')
-                    ->label('Needs shipping method')
+                    ->label('Needs Shipping Method')
                     ->toggle()
                     ->query(fn (Builder $query): Builder => $query->scopes('needingShippingMethod')),
                 Tables\Filters\Filter::make('created_at')
@@ -581,12 +572,12 @@ class ShipmentResource extends Resource
                     })
                     ->deselectRecordsAfterCompletion(),
                 Actions\BulkAction::make('create-picking-batch')
-                    ->label('Create Picking Batch')
+                    ->label('Create Pick Batch')
                     ->icon('heroicon-o-inbox-stack')
                     ->visible(fn (): bool => auth()->user()->role->isAtLeast(Role::Manager) && app(SettingsService::class)->get('picking_enabled', false))
                     ->requiresConfirmation()
-                    ->modalHeading('Create Picking Batch')
-                    ->modalDescription('Create a pick batch from the selected shipments. Only pending shipments will be included.')
+                    ->modalHeading('Create Pick Batch')
+                    ->modalDescription('Create a pick batch from the selected shipments. Only open shipments with pending picking status will be included.')
                     ->modalSubmitActionLabel('Create Batch')
                     ->action(function (Collection $records): void {
                         try {
@@ -639,10 +630,10 @@ class ShipmentResource extends Resource
                             ->badge()
                             ->helperText(fn (Shipment $record): ?string => self::statusOriginText($record)),
                         TextEntry::make('external_carrier')
-                            ->label('Shipped elsewhere by')
+                            ->label('Shipped Elsewhere By')
                             ->visible(fn (Shipment $record): bool => filled($record->external_carrier)),
                         TextEntry::make('external_tracking_number')
-                            ->label('Tracking (shipped elsewhere)')
+                            ->label('Tracking (Shipped Elsewhere)')
                             ->copyable()
                             ->helperText('PolyBag does not track this parcel.')
                             ->visible(fn (Shipment $record): bool => filled($record->external_tracking_number)),
@@ -654,7 +645,7 @@ class ShipmentResource extends Resource
                             ->helperText('Amazon picks, packs and ships this order. It cannot be packed or confirmed from here.')
                             ->visible(fn (Shipment $record): bool => $record->isAmazonFulfilled()),
                         TextEntry::make('amazon_programs')
-                            ->label('Amazon program')
+                            ->label('Amazon Program')
                             ->badge()
                             ->state(fn (Shipment $record): array => AmazonOrderProgram::forShipment($record))
                             ->visible(fn (Shipment $record): bool => AmazonOrderProgram::forShipment($record) !== []),
@@ -664,7 +655,7 @@ class ShipmentResource extends Resource
                         TextEntry::make('pack_slip')
                             ->label('Pack Slip')
                             ->state(fn (Shipment $record): string => $record->hasPrintedPackSlip()
-                                ? ($record->packSlipIsOutOfDate() ? 'Changed since printed. ' : '')
+                                ? ($record->packSlipIsOutOfDate() ? 'Out of date. ' : '')
                                     .'Printed '.$record->pack_slip_printed_at?->timezone(Location::timezone())->format('M j, Y g:i A')
                                     .($record->packSlipPrintedBy ? ' by '.$record->packSlipPrintedBy->name : '')
                                 : 'Not printed')
@@ -782,7 +773,8 @@ class ShipmentResource extends Resource
                             ->label('Validated by')
                             ->placeholder('—'),
                         TextEntry::make('validation_message')
-                            ->placeholder('N/A')
+                            ->label('Address Check Result')
+                            ->placeholder('—')
                             ->columnSpanFull(),
                     ]),
 

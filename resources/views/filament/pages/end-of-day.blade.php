@@ -111,7 +111,7 @@
                         <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
                             @foreach($this->manifests as $manifest)
                                 <tr class="hover:bg-gray-50 dark:hover:bg-white/5 transition-colors">
-                                    <td class="px-4 py-3 font-medium">{{ $manifest->carrier }}</td>
+                                    <td class="px-4 py-3 font-medium">{{ \App\Models\Carrier::labelForName($manifest->carrier) }}</td>
                                     <td class="px-4 py-3">{{ \Carbon\Carbon::parse($manifest->manifest_date)->format('M j') }}</td>
                                     <td class="px-4 py-3 font-mono text-xs">{{ $manifest->manifest_number }}</td>
                                     <td class="px-4 py-3">{{ $manifest->package_count }}</td>

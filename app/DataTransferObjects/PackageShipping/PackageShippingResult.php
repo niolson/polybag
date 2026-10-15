@@ -39,7 +39,7 @@ readonly class PackageShippingResult
         return new self(
             success: true,
             title: 'Label Bought',
-            message: "Tracking: {$response->trackingNumber}",
+            message: "Tracking {$response->trackingNumber}",
             response: $response,
             selectedRate: $rate,
             printRequest: $response->labelData ? PrintRequest::fromShipResponse($response, $package) : null,
@@ -109,7 +109,7 @@ readonly class PackageShippingResult
         return new self(
             success: false,
             title: 'Customs Weight Mismatch',
-            message: 'Customs item weights exceed the package weight. Please review and confirm before shipping.',
+            message: 'Customs item weights exceed the package weight. Check the item weights, then confirm to ship.',
             requiresCustomsWeightOverride: true,
         );
     }
@@ -261,10 +261,10 @@ readonly class PackageShippingResult
         }
 
         if (! $this->selectedRate) {
-            return "Tracking: {$this->response->trackingNumber}";
+            return "Tracking {$this->response->trackingNumber}";
         }
 
-        return "Tracking: {$this->response->trackingNumber} via {$this->response->carrier}"
+        return "Tracking {$this->response->trackingNumber} via {$this->response->carrier}"
             ." {$this->selectedRate->serviceName} — \$".number_format($this->response->cost, 2);
     }
 }

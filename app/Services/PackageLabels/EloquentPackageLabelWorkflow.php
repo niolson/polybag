@@ -63,7 +63,7 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
                 return LabelVoidResult::failure('Void Failed', $response->message ?? 'The label was not voided.');
             }
         } catch (\RuntimeException $e) {
-            return LabelVoidResult::failure('Package State Changed', $e->getMessage());
+            return LabelVoidResult::failure('Package Changed', 'Someone else changed this package. Refresh the page and try again.');
         } catch (RequestException) {
             return LabelVoidResult::failure('Void Failed', 'Could not reach whoever sold the label. Try again in a moment.');
         } catch (\Exception) {
@@ -85,10 +85,10 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
 
             return LabelVoidResult::voidedNotRecorded(
                 'The label was voided, but PolyBag could not record it, so the package still shows as shipped. '
-                .'A manager can use Record Void on the Packages table to un-ship it without voiding it again.',
+                .'A manager can use Record Void on the Packages table to return it to unshipped without voiding it again.',
             );
         } catch (\RuntimeException $e) {
-            return LabelVoidResult::failure('Package State Changed', $e->getMessage());
+            return LabelVoidResult::failure('Package Changed', 'Someone else changed this package. Refresh the page and try again.');
         }
 
         return LabelVoidResult::success($response->message, $this->takeBackFromChannel($package));
@@ -111,7 +111,7 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
 
             return LabelVoidResult::failure('Void Failed', 'The void could not be recorded. Try again.');
         } catch (\RuntimeException $e) {
-            return LabelVoidResult::failure('Package State Changed', $e->getMessage());
+            return LabelVoidResult::failure('Package Changed', 'Someone else changed this package. Refresh the page and try again.');
         }
 
         return LabelVoidResult::success(
@@ -140,8 +140,15 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
 
     public function labelForReprint(Package $package, User $user): LabelReprintResult
     {
-        if ($package->status !== PackageStatus::Shipped || ! $package->label_data) {
-            return LabelReprintResult::failure('Label Not Available', 'The label for the package is not available.');
+        if ($package->status !== PackageStatus::Shipped) {
+            return LabelReprintResult::failure('No Label To Print', 'This package has not been shipped.');
+        }
+
+        if (! $package->label_data) {
+            return LabelReprintResult::failure(
+                'Label File Not Available',
+                'This label\'s file is no longer stored. Reprint it from the carrier\'s site, or void it and buy a new one.',
+            );
         }
 
         if ($user->cannot('printLabel', $package)) {
@@ -152,10 +159,8 @@ class EloquentPackageLabelWorkflow implements PackageLabelWorkflow
 
         return LabelReprintResult::success(
             printRequest: PrintRequest::fromPackage($package),
-            message: $isReprint
-                ? "Reprinted label for tracking: {$package->tracking_number}"
-                : "Printed label for tracking: {$package->tracking_number}",
-            title: $isReprint ? 'Label Reprinted' : 'Label Printed',
+            message: "Tracking {$package->tracking_number}",
+            title: 'Label Sent to Printer',
         );
     }
 

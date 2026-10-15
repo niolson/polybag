@@ -29,6 +29,8 @@ class EndOfDay extends Page
 
     protected static ?string $navigationLabel = 'End of Day';
 
+    protected static ?string $title = 'End of Day';
+
     protected static \UnitEnum|string|null $navigationGroup = 'Ship';
 
     protected static ?int $navigationSort = 3;

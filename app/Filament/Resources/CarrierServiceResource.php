@@ -5,6 +5,7 @@ namespace App\Filament\Resources;
 use App\Enums\ContentClass;
 use App\Filament\Resources\CarrierServiceResource\Pages;
 use App\Filament\Support\CarrierLogoColumn;
+use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\Location;
 use BackedEnum;
@@ -29,6 +30,7 @@ class CarrierServiceResource extends Resource
             ->schema([
                 Forms\Components\Select::make('carrier_id')
                     ->relationship('carrier', 'name')
+                    ->getOptionLabelFromRecordUsing(fn (Carrier $record): string => $record->label())
                     ->required()
                     ->createOptionForm([
                         Forms\Components\TextInput::make('name')
@@ -45,17 +47,17 @@ class CarrierServiceResource extends Resource
                     ->default(true)
                     ->helperText('Disabled services will not be used for rate shopping.'),
                 Forms\Components\Toggle::make('can_ship_to_po_boxes')
-                    ->label('Can ship to PO Boxes')
+                    ->label('Can Ship to PO Boxes')
                     ->default(false)
                     ->helperText('Only USPS services and USPS-last-mile hybrids (e.g. FedEx Ground Economy, UPS Ground Saver) can deliver to PO Boxes.'),
                 Forms\Components\Toggle::make('can_ship_to_military_addresses')
-                    ->label('Can ship to military addresses')
+                    ->label('Can Ship to Military Addresses')
                     ->default(false)
                     ->helperText('APO/FPO/DPO addresses require USPS for the final leg, same as PO Boxes.'),
                 // Authored by the carrier catalog seed, which restores it on
                 // every start, so it is shown rather than edited.
                 Forms\Components\Select::make('required_contents')
-                    ->label('Requires contents')
+                    ->label('Requires Contents')
                     ->options(ContentClass::class)
                     ->placeholder('Any contents')
                     ->disabled()
