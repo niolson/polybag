@@ -283,7 +283,7 @@
                 hideStatus();
             } catch (error) {
                 console.error('Print error:', error);
-                showStatus('The label did not print. Check the printer in Device Settings, then try again.', 'error');
+                showStatus(`The label did not print${error.message ? `: ${error.message}` : ''}. Check the printer in Device Settings, then try again.`, 'error');
                 throw error;
             }
         }
@@ -330,7 +330,7 @@
                 return true;
             } catch (error) {
                 console.error('Report print error:', error);
-                showStatus('The document did not print. Check the document printer in Device Settings, then try again.', 'error');
+                showStatus(`The document did not print${error.message ? `: ${error.message}` : ''}. Check the document printer in Device Settings, then try again.`, 'error');
 
                 return false;
             }
