@@ -151,7 +151,10 @@ it('asks USPS to prepay duties on a DDP label and stores the prepaid total', fun
 
     expect($response->success)->toBeTrue()
         ->and($response->cost)->toBe(42.5)
-        ->and($response->dutiesCost)->toBe(17.75);
+        ->and($response->dutiesCost)->toBe(17.75)
+        ->and($response->dutiesBreakdown?->packageFee)->toBe(2.5)
+        ->and($response->dutiesBreakdown?->duty)->toBe(5.0)
+        ->and($response->dutiesBreakdown?->tax)->toBe(10.25);
 
     $body = sentUspsTermsBody();
 
@@ -239,7 +242,8 @@ it('records the prepaid total on a purchase recovered by its key, whose reply ha
 
     expect($response)->not->toBeNull()
         ->and($response->success)->toBeTrue()
-        ->and($response->dutiesCost)->toBe(31.16);
+        ->and($response->dutiesCost)->toBe(31.16)
+        ->and($response->dutiesBreakdown)->toBeNull();
 
     Saloon::assertSent(fn (Request $sent): bool => $sent instanceof InternationalLabelReprint);
 });

@@ -87,11 +87,17 @@ class PackageLabel extends Model
         'last_printed_at',
         'customs_terms',
         'duties_cost',
+        'duties_package_fee',
+        'duties_duty',
+        'duties_tax',
     ];
 
     protected $casts = [
         'cost' => 'decimal:2',
         'duties_cost' => 'decimal:2',
+        'duties_package_fee' => 'decimal:2',
+        'duties_duty' => 'decimal:2',
+        'duties_tax' => 'decimal:2',
         'customs_terms' => 'array',
         'postage_source' => PostageSource::class,
         'service_evidence' => ServiceEvidence::class,

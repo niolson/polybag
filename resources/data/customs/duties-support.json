@@ -1,5 +1,5 @@
 {
-    "version": "2026-10-09.1",
+    "version": "2026-10-15",
     "notes": [
         "What each carrier can do with duties terms to each destination (ADR-0008 decision 4).",
         "support is ddp_required (ships there only with duties prepaid), either, or ddu_only",
@@ -47,19 +47,20 @@
             },
             "countries": {
                 "AT": {
-                    "support": "either",
+                    "support": "ddp_required",
                     "source": "https://pe.usps.com/text/imm/ab_013.htm",
-                    "checked": "2026-10-01",
+                    "checked": "2026-10-15",
                     "with_registration": {
                         "ioss": {
                             "support": "unavailable",
-                            "business_support": "ddu_only",
+                            "business_support": "unavailable",
                             "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
                             "checked": "2026-10-09",
                             "authority": "USPS API test",
                             "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, and IOSS parcels here must be prepaid. No request shape carries both; the importer reference prints the number but is not recognised as IOSS."
                         }
-                    }
+                    },
+                    "note": "The IMM lists DDP as optional, but USPS API Support said on 2026-10-15 that Austria and Sweden require DDP on all shipments (docs/issues/international-customs-terms/issues/08-usps-customs-terms.md)."
                 },
                 "BE": {
                     "support": "ddp_required",
@@ -324,19 +325,20 @@
                     "checked": "2026-10-01"
                 },
                 "SE": {
-                    "support": "either",
+                    "support": "ddp_required",
                     "source": "https://pe.usps.com/text/imm/immc3_017.htm",
-                    "checked": "2026-10-01",
+                    "checked": "2026-10-15",
                     "with_registration": {
                         "ioss": {
                             "support": "unavailable",
-                            "business_support": "ddu_only",
+                            "business_support": "unavailable",
                             "source": "docs/issues/international-customs-terms/issues/08-usps-customs-terms.md",
                             "checked": "2026-10-09",
                             "authority": "USPS API test",
                             "note": "USPS's International Labels API drops prepayDutiesTaxesFees whenever customsForm.exportersReference is set, and IOSS parcels here must be prepaid. No request shape carries both; the importer reference prints the number but is not recognised as IOSS."
                         }
-                    }
+                    },
+                    "note": "The IMM lists DDP as optional, but USPS API Support said on 2026-10-15 that Austria and Sweden require DDP on all shipments (docs/issues/international-customs-terms/issues/08-usps-customs-terms.md)."
                 },
                 "SI": {
                     "support": "ddu_only",
