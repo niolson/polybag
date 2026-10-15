@@ -618,7 +618,7 @@ class PackageResource extends Resource
                         ->requiresConfirmation()
                         ->authorize('voidLabel')
                         ->modalHeading('Void Label')
-                        ->modalDescription('Voids the label with whoever sold it: the carrier, or Amazon. The package keeps its dimensions so it can be shipped again.')
+                        ->modalDescription(fn (Package $record): string => "Voids the label with {$record->postageSellerLabel()}. The package keeps its dimensions so it can be shipped again.")
                         ->visible(fn (Package $record): bool => $record->status === PackageStatus::Shipped
                             && $record->tracking_number
                             && ($record->carrier || $record->isShopifyShipped()))

@@ -115,7 +115,7 @@ class ViewPackage extends ViewRecord
                     ->requiresConfirmation()
                     ->authorize('voidLabel')
                     ->modalHeading('Void Label')
-                    ->modalDescription('Voids the label with whoever sold it: the carrier, or Amazon. The package keeps its dimensions so it can be shipped again.')
+                    ->modalDescription(fn (): string => "Voids the label with {$this->record->postageSellerLabel()}. The package keeps its dimensions so it can be shipped again.")
                     ->visible(fn (): bool => $this->record->status === PackageStatus::Shipped
                         && $this->record->tracking_number
                         && ($this->record->carrier || $this->shopifyShipped()))
