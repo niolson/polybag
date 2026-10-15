@@ -527,6 +527,24 @@ describe('carrier warnings', function (): void {
             ->and(findingCodes(readinessFor($short)))->not->toContain('usps_description_cut');
     });
 
+    it('blocks a USPS EU consumer label whose identifier has no letter or digit, and warns before a carrier is chosen', function (): void {
+        $usps = new RateResponse(Carrier::USPS, 'PMI', 'Priority Mail International', 40.0);
+        $ups = new RateResponse(Carrier::UPS, '07', 'UPS Worldwide Express', 60.0);
+        $punctuated = readinessPackage('FR', [['sku' => '---'], ['sku' => 'MUG-1']]);
+        $business = readinessPackage('FR', [['sku' => '---']], ['company' => 'Example SARL']);
+        $sendable = readinessPackage('FR', [['sku' => 'MUG-1']]);
+
+        $finding = findingNamed(readinessFor($punctuated, rate: $usps), 'usps_product_identifier_unusable');
+
+        expect($finding?->severity)->toBe(CustomsFindingSeverity::Block)
+            ->and($finding->lines)->toBe(['---'])
+            ->and(findingCodes(readinessFor($punctuated, rate: $usps)))->not->toContain('product_identifier_missing')
+            ->and(findingNamed(readinessFor($punctuated), 'usps_product_identifier_unusable')?->severity)->toBe(CustomsFindingSeverity::Warn)
+            ->and(findingCodes(readinessFor($punctuated, rate: $ups)))->not->toContain('usps_product_identifier_unusable')
+            ->and(findingCodes(readinessFor($business, rate: $usps)))->not->toContain('usps_product_identifier_unusable')
+            ->and(findingCodes(readinessFor($sendable, rate: $usps)))->not->toContain('usps_product_identifier_unusable');
+    });
+
     it('warns about a FedEx DDU label with no recipient email', function (): void {
         $fedex = new RateResponse(Carrier::FEDEX, 'INTL', 'FedEx International Priority', 60.0);
         $noEmail = readinessPackage('JP', [['value' => 20.0]], ['email' => null]);

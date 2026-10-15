@@ -150,3 +150,23 @@ Not verified (nothing was sent to USPS):
 - Whether a value with a hyphen fails, and what USPS wants for punctuated SKUs. The
   stripping is the stated default until USPS answers; only `alphanumericProductIdentifier()`
   changes.
+
+### 2026-10-15: checked against the 2026-10-28 spec
+
+`.scratch/international-labels-EU-updates-10-12-2026.yaml` is International Labels 3.4.1,
+the spec for the 2026-10-28 release. Diffed against 3.3.10, it adds only:
+
+- `customsForm.incoterm`, with the enum narrowed to `"1"` and `"2"` (`"3"` and `"4"`
+  are gone). We send only those two, and only to EU destinations.
+- `contents[].europeanUnionProductID` (`EUProductIDFields`): exactly the names, required
+  fields and patterns this issue built from. The standard identifier is "required only
+  when available".
+- A notice that `customsContentType` `DANGEROUS_GOODS` goes away on 2027-01-17. We send
+  only `MERCHANDISE`.
+
+`itemDescription` is still capped at 30 characters. No code change was needed. The
+fixture's descriptions now cite 3.4.1. The patterns still allow only letters and digits,
+so the stripping stays; it now lives in `App\Support\UspsProductIdentifier` (see `09`),
+not `alphanumericProductIdentifier()`.
+
+Still open: the three answers from a test label, listed above.

@@ -26,6 +26,7 @@ use App\Models\ShippingOffer;
 use App\Services\SettingsService;
 use App\Services\Shipping\DutiesTermsFilter;
 use App\Support\FedexRecipientEmail;
+use App\Support\UspsProductIdentifier;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -120,15 +121,7 @@ class CustomsReadiness
      */
     public static function linesMissingProductIdentifiers(AddressData $from, AddressData $to, array $items, bool $blindPurchase = false, ?AmazonChannelType $offerChannel = null): array
     {
-        if ($blindPurchase || $from->sharesCustomsZoneWith($to)) {
-            return [];
-        }
-
-        if ($offerChannel === AmazonChannelType::Amazon) {
-            return [];
-        }
-
-        if ($from->isInEuropeanUnion() || ! $to->isInEuropeanUnion() || filled($to->company)) {
+        if (! self::declaresEuConsumerIdentifiers($from, $to, $blindPurchase, $offerChannel)) {
             return [];
         }
 
@@ -136,6 +129,20 @@ class CustomsReadiness
             $items,
             fn (CustomsItem $item): bool => $item->merchantProductId === null || $item->manufacturerProductId === null,
         ));
+    }
+
+    /**
+     * Whether the label is an EU consumer label that declares our product
+     * identifiers, by the gates described on
+     * {@see linesMissingProductIdentifiers()}.
+     */
+    private static function declaresEuConsumerIdentifiers(AddressData $from, AddressData $to, bool $blindPurchase, ?AmazonChannelType $offerChannel): bool
+    {
+        if ($blindPurchase || $from->sharesCustomsZoneWith($to) || $offerChannel === AmazonChannelType::Amazon) {
+            return false;
+        }
+
+        return ! $from->isInEuropeanUnion() && $to->isInEuropeanUnion() && blank($to->company);
     }
 
     /**
@@ -237,7 +244,7 @@ class CustomsReadiness
             ...$this->exportFilingFindings($shipment, $lines, $products, $origin, $destination),
             ...$this->recipientTaxIdFindings($shipment, $destination),
             ...$this->registrationFindings($terms, $destination),
-            ...$this->carrierFindings($shipment, $lines, $terms, $destination, $carrier),
+            ...$this->carrierFindings($shipment, $lines, $terms, $origin, $destination, $carrier),
         );
 
         return $findings;
@@ -662,18 +669,33 @@ class CustomsReadiness
     }
 
     /**
-     * Warnings that concern one carrier. Before a rate is chosen they show for
-     * every carrier they might concern.
+     * Findings that concern one carrier. Before a rate is chosen they show for
+     * every carrier they might concern, and one that blocks that carrier's
+     * label is only a warning until that carrier's rate is the one bought.
      *
      * @param  list<CustomsItem>  $lines
      * @return list<CustomsFinding>
      */
-    private function carrierFindings(Shipment $shipment, array $lines, ResolvedCustomsTerms $terms, AddressData $destination, ?string $carrier): array
+    private function carrierFindings(Shipment $shipment, array $lines, ResolvedCustomsTerms $terms, AddressData $origin, AddressData $destination, ?string $carrier): array
     {
         $findings = [];
         $key = $carrier === null ? null : CarrierAlias::lookupKey($carrier);
 
         if ($key === null || $key === CarrierAlias::lookupKey(Carrier::USPS)) {
+            if (($unsendable = $this->linesUspsCannotIdentify($origin, $destination, $lines)) !== []) {
+                $findings[] = new CustomsFinding(
+                    $key === null ? CustomsFindingSeverity::Warn : CustomsFindingSeverity::Block,
+                    'usps_product_identifier_unusable',
+                    'USPS Cannot Send Identifier',
+                    sprintf(
+                        'USPS takes only letters and digits in an EU product identifier, and these have none, so USPS would refuse this EU consumer label: %s. '
+                        .'Give the product a SKU or Manufacturer Part Number with letters or digits, or ship with another carrier.',
+                        $this->describeLines($unsendable),
+                    ),
+                    $this->lineNames($unsendable),
+                );
+            }
+
             $long = array_filter($lines, fn (CustomsItem $line): bool => mb_strlen($line->description) > self::USPS_DESCRIPTION_LIMIT);
 
             if ($long !== []) {
@@ -702,6 +724,30 @@ class CustomsReadiness
         }
 
         return $findings;
+    }
+
+    /**
+     * The EU consumer lines that have both identifiers, and so pass
+     * {@see linesMissingProductIdentifiers()}, but lose one to USPS's
+     * letters-and-digits rule, so the adapter would send the line with no
+     * `europeanUnionProductID` block.
+     *
+     * @param  list<CustomsItem>  $lines
+     * @return list<CustomsItem>
+     */
+    private function linesUspsCannotIdentify(AddressData $origin, AddressData $destination, array $lines): array
+    {
+        if (! self::declaresEuConsumerIdentifiers($origin, $destination, blindPurchase: false, offerChannel: null)) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            $lines,
+            fn (CustomsItem $line): bool => $line->merchantProductId !== null
+                && $line->manufacturerProductId !== null
+                && (UspsProductIdentifier::merchant($line->merchantProductId) === null
+                    || UspsProductIdentifier::manufacturer($line->manufacturerProductId) === null),
+        ));
     }
 
     /**
