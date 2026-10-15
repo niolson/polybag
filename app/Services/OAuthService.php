@@ -61,7 +61,7 @@ class OAuthService
         $instanceId = config('services.oauth.instance_id');
 
         if (! $this->isBrokerConfigured()) {
-            throw new RuntimeException('OAuth broker is not configured. This flow is hosted-only; self-hosted installs enter credentials directly (see docs/self-hosting.md).');
+            throw new RuntimeException('Guided sign-in is not available on this installation. Enter the credentials directly instead.');
         }
 
         $nonce = Str::random(40);
@@ -95,7 +95,7 @@ class OAuthService
         $instanceId = config('services.oauth.instance_id');
 
         if (! $this->isBrokerConfigured()) {
-            throw new RuntimeException('OAuth broker is not configured. This flow is hosted-only; self-hosted installs enter credentials directly (see docs/self-hosting.md).');
+            throw new RuntimeException('Guided sign-in is not available on this installation. Enter the credentials directly instead.');
         }
 
         $nonce = Str::random(40);
@@ -127,7 +127,7 @@ class OAuthService
         $instanceId = config('services.oauth.instance_id');
 
         if (! $this->isBrokerConfigured()) {
-            throw new RuntimeException('OAuth broker is not configured. This flow is hosted-only; self-hosted installs enter credentials directly (see docs/self-hosting.md).');
+            throw new RuntimeException('Guided sign-in is not available on this installation. Enter the credentials directly instead.');
         }
 
         $nonce = Str::random(40);
@@ -169,19 +169,21 @@ class OAuthService
         ]);
 
         if (! $response->successful()) {
-            throw new RuntimeException('Failed to claim tokens from broker: '.$response->body());
+            logger()->error('The OAuth broker refused a token claim', ['status' => $response->status(), 'body' => $response->body()]);
+
+            throw new RuntimeException('The connection could not be completed. Start it again.');
         }
 
         $data = $response->json();
 
         if (($data['provider'] ?? null) !== $providerKey) {
-            throw new RuntimeException('OAuth provider mismatch. Please try again.');
+            throw new RuntimeException('The connection could not be completed. Start it again.');
         }
 
         $expectedNonce = session()->pull("oauth_state.{$providerKey}");
 
         if (empty($expectedNonce) || ! hash_equals($expectedNonce, $data['nonce'] ?? '')) {
-            throw new RuntimeException('OAuth state mismatch. Please try again.');
+            throw new RuntimeException('The connection could not be completed. Start it again.');
         }
 
         $settings = $importSource->settings ?? [];
@@ -343,7 +345,9 @@ class OAuthService
         ]);
 
         if (! $response->successful()) {
-            throw new RuntimeException('Failed to claim tokens from broker: '.$response->body());
+            logger()->error('The OAuth broker refused a token claim', ['status' => $response->status(), 'body' => $response->body()]);
+
+            throw new RuntimeException('The connection could not be completed. Start it again.');
         }
 
         $data = $response->json();
@@ -351,7 +355,7 @@ class OAuthService
         $expectedNonce = session()->pull("oauth_state.{$providerKey}");
 
         if (empty($expectedNonce) || ! hash_equals($expectedNonce, $data['nonce'] ?? '')) {
-            throw new RuntimeException('OAuth state mismatch. Please try again.');
+            throw new RuntimeException('The connection could not be completed. Start it again.');
         }
 
         $accessToken = $data['access_token'] ?? null;
@@ -436,13 +440,13 @@ class OAuthService
         $dataSource = DataSource::find($dataSourceId);
 
         if (! $dataSource) {
-            throw new RuntimeException("Data source {$dataSourceId} no longer exists.");
+            throw new RuntimeException('This connection no longer exists.');
         }
 
         $refreshToken = $dataSource->secret('refresh_token');
 
         if (! is_string($refreshToken) || $refreshToken === '') {
-            throw new RuntimeException("No refresh token stored for data source {$dataSourceId}. Please reconnect.");
+            throw new RuntimeException('No refresh token is stored for this connection. Reconnect it.');
         }
 
         $data = $this->refreshToken($providerKey, $refreshToken);
@@ -456,13 +460,13 @@ class OAuthService
             $lockedDataSource = DataSource::query()->lockForUpdate()->find($dataSourceId);
 
             if (! $lockedDataSource) {
-                throw new RuntimeException("Data source {$dataSourceId} no longer exists.");
+                throw new RuntimeException('This connection no longer exists.');
             }
 
             $storedRefreshToken = $lockedDataSource->secret('refresh_token');
 
             if (! is_string($storedRefreshToken) || $storedRefreshToken === '') {
-                throw new RuntimeException("No refresh token stored for data source {$dataSourceId}. Please reconnect.");
+                throw new RuntimeException('No refresh token is stored for this connection. Reconnect it.');
             }
 
             if (hash_equals($refreshToken, $storedRefreshToken)) {
@@ -496,7 +500,7 @@ class OAuthService
         $instanceId = config('services.oauth.instance_id');
 
         if (! $this->isBrokerConfigured()) {
-            throw new RuntimeException('OAuth broker is not configured. This flow is hosted-only; self-hosted installs enter credentials directly (see docs/self-hosting.md).');
+            throw new RuntimeException('Guided sign-in is not available on this installation. Enter the credentials directly instead.');
         }
 
         $signature = hash_hmac('sha256', $refreshToken, $brokerSecret);
@@ -508,7 +512,9 @@ class OAuthService
         ]);
 
         if (! $response->successful()) {
-            throw new RuntimeException('Token refresh failed: '.$response->body());
+            logger()->error('The OAuth broker refused a token refresh', ['status' => $response->status(), 'body' => $response->body()]);
+
+            throw new RuntimeException('The connection could not be refreshed. Reconnect it.');
         }
 
         $data = $response->json();

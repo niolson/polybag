@@ -212,7 +212,7 @@ class GoogleAddressValidator implements AddressValidationInterface
             'D' => [Deliverability::Partial, 'Primary address confirmed, secondary number missing', null],
             'S' => [Deliverability::Partial, 'Primary address confirmed, secondary number not confirmed', null],
             'N' => [Deliverability::No, 'Address found but not confirmed as deliverable', ValidationReason::DpvNotConfirmed],
-            default => [Deliverability::No, 'DPV confirmation not available', ValidationReason::DpvNotConfirmed],
+            default => [Deliverability::No, 'USPS could not confirm a delivery point', ValidationReason::DpvNotConfirmed],
         };
     }
 

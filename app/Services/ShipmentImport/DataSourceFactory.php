@@ -19,7 +19,7 @@ class DataSourceFactory
 
         if (! $driver || ! class_exists($driver)) {
             throw new InvalidArgumentException(
-                "Data source '{$dataSource->name}' has an invalid driver class: {$driver}"
+                "Connection '{$dataSource->name}' has an unsupported type: {$driver}"
             );
         }
 

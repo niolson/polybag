@@ -40,7 +40,7 @@ class CarrierAccountPostageSource implements PostageSourceOperations
         $adapter = $this->adapterFor($package);
 
         if (! $adapter) {
-            return TrackShipmentResponse::failure("Unknown carrier: {$package->carrier}");
+            return TrackShipmentResponse::failure("PolyBag has no tracking for the carrier {$package->carrier}.");
         }
 
         return $adapter->supportsTracking()

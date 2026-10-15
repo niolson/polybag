@@ -109,7 +109,7 @@ readonly class PackageShippingResult
         return new self(
             success: false,
             title: 'Customs Weight Mismatch',
-            message: 'Customs item weights exceed the package weight. Please review and confirm before shipping.',
+            message: 'Customs item weights exceed the package weight. Check the item weights, then confirm to ship.',
             requiresCustomsWeightOverride: true,
         );
     }

@@ -421,7 +421,7 @@ it('keeps a sold label recoverable when recording it fails, rather than buying a
     $offer = ShippingOffer::whereNotNull('consumed_at')->sole();
 
     // In the bell, not only a toast: the buyer and whoever can act on it.
-    expect($buyer->notifications()->sole()->data['title'])->toContain('Label bought but not recorded')
+    expect($buyer->notifications()->sole()->data['title'])->toContain('Label Bought but Not Recorded')
         ->and($buyer->notifications()->sole()->data['body'])->toContain('MockCarrier sold label TRACK123')
         ->and($manager->notifications()->count())->toBe(1)
         ->and($otherShipper->notifications()->count())->toBe(0);

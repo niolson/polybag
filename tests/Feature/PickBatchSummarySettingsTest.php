@@ -93,7 +93,7 @@ describe('with pick to totes off', function (): void {
 
         $this->get(route('pick-batches.summary', $batch))
             ->assertOk()
-            ->assertSee('<th>Orders</th>', escape: false)
+            ->assertSee('<th>Shipments</th>', escape: false)
             ->assertDontSee('<th>Totes</th>', escape: false)
             ->assertSeeInOrder(['ORD-1001', '×2', 'ORD-1002', '×1'])
             ->assertDontSee('T01');

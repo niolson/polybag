@@ -38,7 +38,7 @@ class LabelNotRecorded extends Notification
         $label = $this->trackingNumber !== null ? "label {$this->trackingNumber}" : 'a label';
 
         return FilamentNotification::make()
-            ->title("Label bought but not recorded for package {$this->package->id}")
+            ->title("Label Bought but Not Recorded for Package {$this->package->id}")
             ->body($this->recoverable
                 ? "{$this->seller} sold {$label}, but PolyBag could not save it. "
                     ."Buying again for this package asks {$this->seller} for this label first. "

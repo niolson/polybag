@@ -25,7 +25,7 @@ class FakeAddressValidator implements AddressValidationInterface
         $shipment->update([
             'checked' => true,
             'deliverability' => Deliverability::Yes->value,
-            'validation_message' => 'Address confirmed deliverable (fake)',
+            'validation_message' => 'Address confirmed deliverable (sample validator)',
         ]);
 
         return AddressValidationResult::settled();

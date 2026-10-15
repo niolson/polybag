@@ -29,12 +29,12 @@ class BatchLabelCompleted extends Notification
 
         return FilamentNotification::make()
             ->title(match ($status) {
-                LabelBatchStatus::Completed => "Batch #{$this->batch->id} completed",
-                LabelBatchStatus::CompletedWithErrors => "Batch #{$this->batch->id} completed with errors",
-                LabelBatchStatus::Failed => "Batch #{$this->batch->id} failed",
-                default => "Batch #{$this->batch->id} finished",
+                LabelBatchStatus::Completed => "Batch #{$this->batch->id} Completed",
+                LabelBatchStatus::CompletedWithErrors => "Batch #{$this->batch->id} Completed with Errors",
+                LabelBatchStatus::Failed => "Batch #{$this->batch->id} Failed",
+                default => "Batch #{$this->batch->id} Finished",
             })
-            ->body("{$this->batch->successful_shipments} shipped, {$this->batch->failed_shipments} failed — \${$this->batch->total_cost}")
+            ->body("{$this->batch->successful_shipments} labels bought, {$this->batch->failed_shipments} failed — \${$this->batch->total_cost}")
             ->icon(match ($status) {
                 LabelBatchStatus::Completed => 'heroicon-o-check-circle',
                 LabelBatchStatus::CompletedWithErrors => 'heroicon-o-exclamation-triangle',

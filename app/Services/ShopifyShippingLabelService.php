@@ -351,7 +351,7 @@ class ShopifyShippingLabelService
 
         if (! $dataSource) {
             throw new ShopifyLabelPurchaseException(
-                'This shipment did not come from an active Shopify data source, so no Shopify Shipping label can be bought for it.'
+                'This shipment did not come from an active Shopify connection, so no Shopify Shipping label can be bought for it.'
             );
         }
 

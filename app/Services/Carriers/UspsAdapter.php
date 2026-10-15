@@ -1484,7 +1484,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         if (($registration = $this->sentRegistration($request)) !== null) {
             $country = $this->countryName($request->toAddress->country);
 
-            return "USPS cannot prepay duties and taxes on a parcel that declares a seller registration ({$registration->regime->value} {$registration->number}): "
+            return "USPS cannot prepay duties and taxes on a parcel that declares a seller registration ({$registration->regime->getLabel()} {$registration->number}): "
                 ."any exporter reference makes USPS drop the prepayment and bill the recipient instead. Nothing was bought. To {$country}, ship on DDU terms or with another carrier.";
         }
 

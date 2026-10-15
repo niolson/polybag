@@ -28,7 +28,7 @@ class OAuthProviderRegistry
     public function get(string $key): OAuthProvider
     {
         if (! isset($this->providers[$key])) {
-            throw new RuntimeException("OAuth provider '{$key}' is not registered.");
+            throw new RuntimeException('The connection could not be completed. Start it again.');
         }
 
         return $this->providers[$key];

@@ -511,7 +511,7 @@ it('refuses to buy a label for a shipment that did not come from Shopify', funct
     $response = $this->adapter->createShipment(shopifyShipRequest($package));
 
     expect($response->success)->toBeFalse()
-        ->and($response->errorMessage)->toContain('active Shopify data source');
+        ->and($response->errorMessage)->toContain('active Shopify connection');
 });
 
 it('records the carrier Shopify actually picked, not the one that was asked for', function (): void {

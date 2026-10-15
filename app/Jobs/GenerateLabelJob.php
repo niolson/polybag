@@ -72,7 +72,9 @@ class GenerateLabelJob implements ShouldQueue
                 $this->handleFailure($item, $result->summaryMessage());
             }
         } catch (Throwable $e) {
-            $this->handleFailure($item, $e->getMessage());
+            report($e);
+
+            $this->handleFailure($item, 'An unexpected error stopped this label. Try it from the Ship page.');
         }
     }
 

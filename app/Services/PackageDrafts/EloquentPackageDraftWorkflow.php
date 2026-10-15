@@ -260,15 +260,15 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
         foreach ($items as $item) {
             if ($item->shipmentItemId === null) {
                 if ($validShipmentItems->isNotEmpty()) {
-                    throw new PackageDraftInvalidException('Scan-to-add items are only allowed for shipments without line items.');
+                    throw new PackageDraftInvalidException('Items can only be added by scanning for a shipment without line items.');
                 }
 
                 if (! $validScanToAddProductIds->contains($item->productId)) {
-                    throw new PackageDraftInvalidException('Product not found for scan-to-add item.');
+                    throw new PackageDraftInvalidException('That product was not found.');
                 }
             } else {
                 if (! $validShipmentItems->has($item->shipmentItemId)) {
-                    throw new PackageDraftInvalidException('Package draft item does not belong to this shipment.');
+                    throw new PackageDraftInvalidException('That item is not in this shipment.');
                 }
 
                 if ($validShipmentItems[$item->shipmentItemId] !== $item->productId) {

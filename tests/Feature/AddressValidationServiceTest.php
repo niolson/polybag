@@ -532,7 +532,7 @@ it('uses the fake validator when sandbox mode is enabled', function (): void {
     $shipment->refresh();
     expect($shipment->checked)->toBeTrue()
         ->and($shipment->deliverability)->toBe(Deliverability::Yes)
-        ->and($shipment->validation_message)->toBe('Address confirmed deliverable (fake)');
+        ->and($shipment->validation_message)->toBe('Address confirmed deliverable (sample validator)');
 });
 
 // Sandbox mode can opt into real validator calls (for testing the actual
@@ -582,7 +582,7 @@ it('always uses the fake validator in demo mode, even if real validation is enab
     $shipment->refresh();
     expect($shipment->checked)->toBeTrue()
         ->and($shipment->deliverability)->toBe(Deliverability::Yes)
-        ->and($shipment->validation_message)->toBe('Address confirmed deliverable (fake)');
+        ->and($shipment->validation_message)->toBe('Address confirmed deliverable (sample validator)');
 });
 
 // --- A chain that ends inconclusive -------------------------------------------

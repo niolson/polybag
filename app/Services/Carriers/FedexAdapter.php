@@ -806,7 +806,7 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
                     'output' => $this->scrubCustomsIds($responseData['output'] ?? null, $request),
                 ]);
 
-                return ShipResponse::failure('FedEx response missing shipment data');
+                return ShipResponse::failure('FedEx answered, but the label could not be read. Check FedEx for a label before trying again.');
             }
 
             $trackingNumber = $shipmentData['masterTrackingNumber']
@@ -818,7 +818,7 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
                     'shipmentData' => $this->scrubCustomsIds($shipmentData, $request),
                 ]);
 
-                return ShipResponse::failure('FedEx response missing tracking number');
+                return ShipResponse::failure('FedEx answered, but the label could not be read. Check FedEx for a label before trying again.');
             }
 
             $labelData = $shipmentData['pieceResponses'][0]['packageDocuments'][0]['encodedLabel'] ?? null;
@@ -828,7 +828,7 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
                     'pieceResponses' => $this->scrubCustomsIds($shipmentData['pieceResponses'] ?? null, $request),
                 ]);
 
-                return ShipResponse::failure('FedEx response missing label data');
+                return ShipResponse::failure('FedEx answered, but the label could not be read. Check FedEx for a label before trying again.');
             }
 
             $totalCharge = $shipmentData['completedShipmentDetail']['shipmentRating']['shipmentRateDetails'][0]['totalNetCharge']
@@ -866,7 +866,9 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
                 'trace' => $this->scrubCustomsIds($e->getTraceAsString(), $request),
             ]);
 
-            return ShipResponse::failure($this->scrubCustomsIds($e->getMessage(), $request));
+            return ShipResponse::failure($e instanceof CarrierException
+                ? $this->scrubCustomsIds($e->getMessage(), $request)
+                : 'FedEx could not buy the label. Try again in a moment.');
         }
     }
 

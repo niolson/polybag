@@ -674,16 +674,16 @@ it('keeps the tax ID out of the missing-data logs', function (array $output, str
     'no shipment' => [
         ['alerts' => [['code' => 'X', 'message' => 'tax ID 98765432100 unreadable']]],
         'FedEx createShipment missing shipment data',
-        'FedEx response missing shipment data',
+        'FedEx answered, but the label could not be read. Check FedEx for a label before trying again.',
     ],
     'no tracking number' => [
         ['transactionShipments' => [['serviceName' => 'tax ID 98765432100', 'pieceResponses' => []]]],
         'FedEx createShipment missing tracking number',
-        'FedEx response missing tracking number',
+        'FedEx answered, but the label could not be read. Check FedEx for a label before trying again.',
     ],
     'no label' => [
         ['transactionShipments' => [['masterTrackingNumber' => '794644790138', 'pieceResponses' => [['trackingNumber' => '794644790138', 'packageDocuments' => [['note' => 'tax ID 98765432100']]]]]]],
         'FedEx createShipment missing label data',
-        'FedEx response missing label data',
+        'FedEx answered, but the label could not be read. Check FedEx for a label before trying again.',
     ],
 ]);

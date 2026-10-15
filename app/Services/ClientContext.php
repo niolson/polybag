@@ -12,7 +12,7 @@ class ClientContext
         $client = Client::where('is_default', true)->first();
 
         if (! $client) {
-            throw new RuntimeException('No default client configured. Run the client seeder or create a default client.');
+            throw new RuntimeException('No default client is set up. Create a client under Admin → Clients.');
         }
 
         return $client;

@@ -156,7 +156,7 @@ it('throws when broker is not configured', function (): void {
     ]);
 
     app(OAuthService::class)->initiateAuthorizationForDataSource('shopify', $this->dataSource);
-})->throws(RuntimeException::class, 'OAuth broker is not configured');
+})->throws(RuntimeException::class, 'Guided sign-in is not available');
 
 it('reports broker configuration from the OAuth service', function (): void {
     expect(app(OAuthService::class)->isBrokerConfigured())->toBeTrue();

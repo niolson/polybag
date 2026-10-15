@@ -193,7 +193,7 @@ it('rejects package items that do not belong to the shipment', function (): void
             new PackageDraftItemInput($otherShipmentItem->id, $product->id, 1),
         ],
     ));
-})->throws(PackageDraftInvalidException::class, 'does not belong to this shipment');
+})->throws(PackageDraftInvalidException::class, 'is not in this shipment');
 
 it('rejects product mismatches for shipment items', function (): void {
     $shipment = Shipment::factory()->create();
@@ -408,7 +408,7 @@ it('rejects scan-to-add items when the product does not exist', function (): voi
             new PackageDraftItemInput(null, 99999, 1),
         ],
     ));
-})->throws(PackageDraftInvalidException::class, 'Product not found for scan-to-add item');
+})->throws(PackageDraftInvalidException::class, 'That product was not found');
 
 it('rejects scan-to-add items when the shipment already has line items', function (): void {
     $shipment = Shipment::factory()->create();
@@ -422,7 +422,7 @@ it('rejects scan-to-add items when the shipment already has line items', functio
             new PackageDraftItemInput(null, $product->id, 1),
         ],
     ));
-})->throws(PackageDraftInvalidException::class, 'Scan-to-add items are only allowed for shipments without line items');
+})->throws(PackageDraftInvalidException::class, 'Items can only be added by scanning for a shipment without line items');
 
 it('rejects scan-to-add items when the product does not belong to the shipment client', function (): void {
     $client = Client::factory()->create();
@@ -436,7 +436,7 @@ it('rejects scan-to-add items when the product does not belong to the shipment c
             new PackageDraftItemInput(null, $productFromOtherClient->id, 1),
         ],
     ));
-})->throws(PackageDraftInvalidException::class, 'Product not found for scan-to-add item');
+})->throws(PackageDraftInvalidException::class, 'That product was not found');
 
 it('rejects batch package drafts when a shipment item is missing product weight', function (): void {
     $shipment = Shipment::factory()->create();

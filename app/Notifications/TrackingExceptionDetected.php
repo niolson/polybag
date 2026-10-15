@@ -28,8 +28,8 @@ class TrackingExceptionDetected extends Notification
     {
         $trackingNumber = $this->package->tracking_number ?? 'Unknown';
         $title = $this->package->tracking_status === TrackingStatus::Exception
-            ? "Tracking exception for {$trackingNumber}"
-            : "Tracking needs attention for {$trackingNumber}";
+            ? "Tracking Exception for {$trackingNumber}"
+            : "Tracking Needs Attention for {$trackingNumber}";
 
         return FilamentNotification::make()
             ->title($title)

@@ -528,7 +528,7 @@ class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface
         $exportConfig = $this->config['export'] ?? [];
 
         if (empty($exportConfig['query'])) {
-            throw new InvalidArgumentException('Export query is not configured for database source.');
+            throw new InvalidArgumentException('Export query is not configured for this connection.');
         }
 
         $query = $this->normalizeQuery($exportConfig['query']);
@@ -558,11 +558,11 @@ class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface
         $exportConfig = $this->config['export'] ?? [];
 
         if (empty($exportConfig['enabled'])) {
-            throw new InvalidArgumentException('Export is not enabled for database source.');
+            throw new InvalidArgumentException('Export is not enabled for this connection.');
         }
 
         if (empty($exportConfig['query'])) {
-            throw new InvalidArgumentException('Export query is not configured for database source.');
+            throw new InvalidArgumentException('Export query is not configured for this connection.');
         }
 
         // Test connection
