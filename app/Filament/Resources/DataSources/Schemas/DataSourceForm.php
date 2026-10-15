@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\DataSources\Schemas;
 
+use App\DataTransferObjects\QueryPreviewResult;
 use App\DataTransferObjects\ShipmentImport\ShopifyMetafieldReference;
 use App\Enums\AmazonMarketplace;
 use App\Enums\ImportExistingBehavior;
@@ -665,9 +666,12 @@ class DataSourceForm
                         ->mountUsing(function (HasActions $livewire, Get $get, ?DataSource $record): void {
                             $token = Str::uuid()->toString();
 
+                            $built = self::buildQueryPreview($get, $record);
+
+                            // The cache will not unserialize objects, so the result goes in as an array.
                             Cache::put(
                                 self::queryPreviewCacheKey($token),
-                                self::buildQueryPreview($get, $record),
+                                [...$built, 'preview' => $built['preview']?->toArray()],
                                 self::QUERY_PREVIEW_TTL_SECONDS,
                             );
 
@@ -1022,7 +1026,7 @@ class DataSourceForm
         $cached = filled($token) ? Cache::get(self::queryPreviewCacheKey($token)) : null;
 
         if (is_array($cached)) {
-            return $cached;
+            return [...$cached, 'preview' => is_array($cached['preview']) ? QueryPreviewResult::fromArray($cached['preview']) : null];
         }
 
         return [
