@@ -239,12 +239,19 @@ class ManifestService
                 $response = $this->sendScanFormRequest($connector, $remainingPackages, $fromAddress, $shipDate);
             } catch (RequestException $e) {
                 $errorResponse = $e->getResponse();
-                $alreadyManifested = $this->extractAlreadyManifestedBarcodes(
-                    $errorResponse->json('error.errors', [])
-                );
+
+                // An error page or empty reply is not JSON, and reading it as JSON
+                // would replace USPS's answer with "Syntax error".
+                try {
+                    $errors = $errorResponse->json('error.errors', []);
+                } catch (\JsonException) {
+                    $errors = [];
+                }
+
+                $alreadyManifested = $this->extractAlreadyManifestedBarcodes($errors);
 
                 if (empty($alreadyManifested)) {
-                    throw $e;
+                    throw new \RuntimeException($this->describeScanFormFailure($errorResponse), previous: $e);
                 }
 
                 // Create a placeholder manifest for externally manifested packages
@@ -379,6 +386,28 @@ class ManifestService
         ]);
 
         return $connector->send($request);
+    }
+
+    /**
+     * What USPS answered, in a line an operator can read: its own message when the
+     * reply is JSON, otherwise the status and the start of whatever came back.
+     */
+    private function describeScanFormFailure(Response $response): string
+    {
+        try {
+            $message = $response->json('error.message');
+        } catch (\JsonException) {
+            $message = null;
+        }
+
+        if (is_string($message) && $message !== '') {
+            return "USPS rejected the SCAN form request (HTTP {$response->status()}): {$message}";
+        }
+
+        $body = trim((string) preg_replace('/\s+/', ' ', strip_tags($response->body())));
+        $detail = $body === '' ? 'empty response' : mb_substr($body, 0, 200);
+
+        return "USPS rejected the SCAN form request (HTTP {$response->status()}): {$detail}";
     }
 
     /**

@@ -29,4 +29,30 @@ final readonly class QueryPreviewResult
     {
         return $this->errors !== [];
     }
+
+    /**
+     * Plain-array form for the cache, which will not unserialize objects
+     * (`serializable_classes` is off).
+     *
+     * @return array<string, mixed>
+     */
+    public function toArray(): array
+    {
+        return get_object_vars($this);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data  a value produced by {@see toArray()}
+     */
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            $data['shipments'],
+            $data['items'],
+            $data['itemsReference'],
+            $data['errors'],
+            $data['statusRows'],
+            $data['statusReference'],
+        );
+    }
 }

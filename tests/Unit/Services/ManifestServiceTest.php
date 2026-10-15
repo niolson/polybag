@@ -207,3 +207,40 @@ it('fails the USPS manifest when a package has no resolvable carrier account', f
     expect($result->success)->toBeFalse()
         ->and($result->errorMessage)->toContain('No USPS carrier account could be resolved');
 });
+
+it('reports the status and body when USPS answers a SCAN form request with something that is not JSON', function (): void {
+    $carrier = Carrier::firstOrCreate(['name' => 'USPS']);
+    $account = CarrierAccount::create([
+        'carrier_id' => $carrier->id,
+        'name' => 'USPS Account-9001',
+        'active' => true,
+        'credentials' => ['crid' => 'test_crid'],
+        'secret_credentials' => ['client_id' => 'test_client_id', 'client_secret' => 'test_client_secret'],
+    ]);
+    $package = Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'tracking_number' => '9400111111111111111111',
+        'carrier_account_id' => $account->id,
+    ]);
+
+    Cache::put("usps_authenticator:{$account->id}", [
+        'access_token' => 'fake-test-token',
+        'refresh_token' => null,
+        'expires_at' => (new DateTimeImmutable('+1 hour'))->getTimestamp(),
+    ], 3600);
+
+    Saloon::fake([
+        ScanForm::class => MockResponse::make(
+            body: '<html><body><h1>Service Unavailable</h1></body></html>',
+            status: 503,
+            headers: ['Content-Type' => 'text/html'],
+        ),
+    ]);
+
+    $result = app(ManifestService::class)->createManifest('USPS', collect([$package]));
+
+    expect($result->success)->toBeFalse()
+        ->and($result->errorMessage)->toContain('HTTP 503')
+        ->and($result->errorMessage)->toContain('Service Unavailable')
+        ->and($result->errorMessage)->not->toContain('Syntax error');
+});

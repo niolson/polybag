@@ -1,5 +1,6 @@
 <?php
 
+use App\DataTransferObjects\QueryPreviewResult;
 use App\Enums\AmazonMarketplace;
 use App\Enums\AuditAction;
 use App\Enums\PostageSetting;
@@ -1265,4 +1266,18 @@ it('keeps import settings when a connection with import off is saved', function 
     // Turning import back on should not mean re-entering what was there.
     expect($source->import_enabled)->toBeFalse()
         ->and($source->settings['channel_name'])->toBe($channel->id);
+});
+
+it('keeps a query preview in a form the cache can unserialize', function (): void {
+    $preview = new QueryPreviewResult(
+        shipments: [['raw' => ['order_no' => 'A1'], 'mapped' => ['shipment_reference' => 'A1']]],
+        items: [],
+        itemsReference: 'order_no',
+        errors: ['Shipments query' => 'boom'],
+    );
+
+    // Laravel 13 refuses to unserialize objects from the cache (serializable_classes).
+    $stored = unserialize(serialize($preview->toArray()), ['allowed_classes' => false]);
+
+    expect(QueryPreviewResult::fromArray($stored))->toEqual($preview);
 });
