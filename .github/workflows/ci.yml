@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# A new push to a pull request supersedes the run in flight. Runs on main are
+# never cancelled, so every merge keeps its own result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   tests:
     name: Tests
@@ -20,12 +26,14 @@ jobs:
           node-version: '24'
           cache: 'npm'
 
+      # Coverage is report-only (tech-debt PLAN #4), and pcov slows the suite
+      # down, so only pushes to main measure it.
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
         with:
           php-version: '8.4'
           extensions: pdo_sqlite, zip, gd, intl, bcmath, pcntl
-          coverage: pcov
+          coverage: ${{ github.event_name == 'push' && 'pcov' || 'none' }}
 
       - name: Install Composer dependencies
         run: composer install --no-interaction --prefer-dist
@@ -44,13 +52,13 @@ jobs:
       # Paratest, one process per core. See the "Testing" section of AGENTS.md
       # for why workers must not share state.
       - name: Run tests
-        run: composer run test:ci
+        run: composer run ${{ github.event_name == 'push' && 'test:ci' || 'test' }}
         env:
           DB_CONNECTION: sqlite
           DB_DATABASE: ':memory:'
 
       - name: Upload coverage report
-        if: ${{ !cancelled() }}
+        if: ${{ github.event_name == 'push' && !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-clover
@@ -113,9 +121,33 @@ jobs:
       - name: Run MySQL-group tests
         run: php artisan test --compact --group=mysql
 
+  # Pint, Rector and PHPStan are independent, so they run as parallel jobs
+  # instead of one after another; the slowest of them sets the wall-clock time.
+  # PHPStan keeps the "Static Analysis" name.
   static:
-    name: Static Analysis
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Code Style
+            run: vendor/bin/pint --test
+          # Rector is gated here for the same reason Pint is. It was previously
+          # only reachable through `composer run format`, which writes in place,
+          # so every branch that ran the documented format command picked up the
+          # same backlog of unrelated files and had it reverted in review.
+          # Nothing ever committed the fix, so the next branch rediscovered it.
+          - name: Rector
+            run: vendor/bin/rector process --dry-run --no-progress-bar
+          # Dependency advisories are deliberately not gated here. The
+          # security-audit workflow runs composer and npm audit on every push
+          # and pull request across all branches, at the same --audit-level=high
+          # the pre-push hook uses. Duplicating them in the merge gate meant an
+          # overnight upstream advisory could block an unrelated branch.
+          - name: Static Analysis
+            run: vendor/bin/phpstan analyse --no-progress --memory-limit=1G
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -138,24 +170,8 @@ jobs:
           cp .env.example .env
           php artisan key:generate
 
-      - name: Check code style
-        run: vendor/bin/pint --test
-
-      # Rector is gated here for the same reason Pint is. It was previously
-      # only reachable through `composer run format`, which writes in place, so
-      # every branch that ran the documented format command picked up the same
-      # backlog of unrelated files and had it reverted in review. Nothing ever
-      # committed the fix, so the next branch rediscovered it.
-      - name: Check Rector
-        run: vendor/bin/rector process --dry-run --no-progress-bar
-
-      # Dependency advisories are deliberately not gated here. The
-      # security-audit workflow runs composer and npm audit on every push and
-      # pull request across all branches, at the same --audit-level=high the
-      # pre-push hook uses. Duplicating them in the merge gate meant an
-      # overnight upstream advisory could block an unrelated branch.
-      - name: Run static analysis
-        run: vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+      - name: ${{ matrix.name }}
+        run: ${{ matrix.run }}
 
   browser:
     name: Browser Tests
@@ -202,8 +218,42 @@ jobs:
           DB_CONNECTION: sqlite
           DB_DATABASE: ':memory:'
 
+  # The image build and CVE scan take minutes and only a few kinds of change
+  # can break them, so a pull request builds the image only when it touches
+  # one of those. Every push to main still builds it, and
+  # scheduled-rebuild.yml rebuilds and scans it weekly, so a new CVE in the
+  # base image does not depend on a pull request to be found.
+  docker-changes:
+    name: Docker Changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      build: ${{ steps.filter.outputs.build }}
+
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')
+          if echo "$files" | grep -qE '^(Dockerfile|\.dockerignore|docker/|docker-compose[^/]*\.yml|composer\.(json|lock)|package(-lock)?\.json|vite\.config\.[a-z]+|\.github/workflows/ci\.yml)'; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
+
   docker:
     name: Docker Build
+    needs: docker-changes
+    if: needs.docker-changes.outputs.build == 'true'
     runs-on: ubuntu-latest
 
     steps:
