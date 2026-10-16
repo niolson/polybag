@@ -954,12 +954,16 @@ badge.
 UPS and USPS show **Needs Setup** in the list, and the USPS account says "OAuth Status: Not
 connected", on the same day USPS bought four labels and UPS returned rates.
 `CarrierAccount::connectionStatus()` counts a USPS or UPS account as Connected only when it
-holds its own OAuth token; these accounts run on the install's global credentials, which
-the status ignores. The Setup Wizard uses the same check, so it also nags about them. On
-a demo, two of three carriers look broken.
+holds an OAuth token. These accounts authenticate with their own client ID and secret
+instead: `USPSConnector` and `UpsConnector` read both from the `CarrierAccount`, with no
+global fallback, and `hasUsableCredentials()` already accepts them. The Setup Wizard uses
+the same status, so it also nags about them. On a demo, two of three carriers look broken.
+The form's USPS section adds to the confusion by saying it "Overrides the global USPS
+credentials", which do not exist.
 
-Fix: a third state, "Using shared credentials", when the account has no token of its own
-but the global connection works; keep Needs Setup for an account that cannot rate.
+Fix: base USPS and UPS status on `hasUsableCredentials()`, as FedEx does, and drop the
+global-credentials sentence from the form. (Corrected 2026-10-16 after review of #439: an
+earlier version blamed shared global credentials.)
 
 ### CA2 — The account form points users at a repository path (low)
 
