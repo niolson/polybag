@@ -5,12 +5,14 @@ use App\DataTransferObjects\Shipping\ClassifiedRate;
 use App\DataTransferObjects\Shipping\OfferRequirements;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\UnattendedRateSelection;
+use App\Enums\DeliveryEstimate;
 use App\Enums\PostageSetting;
 use App\Enums\PostageSourceKind;
 use App\Enums\UnlistedServices;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\DataSource;
+use App\Models\Location;
 use App\Models\Setting;
 use App\Models\ShippingMethod;
 use App\Models\ShippingMethodPostageSource;
@@ -135,6 +137,38 @@ it('treats unknown delivery date as on-time when no deadline', function (): void
     $classified = app(RateSelector::class)->classify(collect([makeRate(5.00, null)]), null);
 
     expect($classified[0]->isOnTime)->toBeTrue();
+});
+
+it('classifies a rate with no delivery date, or one already past, as an unknown estimate', function (?Carbon $deadline): void {
+    $classified = app(RateSelector::class)->classify(collect([
+        makeRate(5.00, null),
+        makeRate(6.00, Carbon::parse('-80 days')->toDateString()),
+    ]), $deadline);
+
+    expect($classified->every(fn (ClassifiedRate $cr): bool => $cr->delivery === DeliveryEstimate::Unknown))->toBeTrue();
+})->with([
+    'with a deadline' => fn (): Carbon => Carbon::tomorrow(),
+    'without one' => fn (): ?Carbon => null,
+]);
+
+it('classifies a dated rate as on time or late against the deadline', function (): void {
+    $classified = app(RateSelector::class)->classify(collect([
+        makeRate(5.00, Carbon::today()->toDateString()),
+        makeRate(6.00, Carbon::parse('+5 days')->toDateString()),
+    ]), Carbon::tomorrow());
+
+    expect($classified[0]->delivery)->toBe(DeliveryEstimate::OnTime)
+        ->and($classified[1]->delivery)->toBe(DeliveryEstimate::Late);
+});
+
+it('keeps the automation rule for an unknown estimate: dateless is not on time, past-dated is', function (): void {
+    $classified = app(RateSelector::class)->classify(collect([
+        makeRate(5.00, null),
+        makeRate(6.00, Carbon::parse('-80 days')->toDateString()),
+    ]), Carbon::tomorrow());
+
+    expect($classified->firstWhere('rate.price', 5.00)->isOnTime)->toBeFalse()
+        ->and($classified->firstWhere('rate.price', 6.00)->isOnTime)->toBeTrue();
 });
 
 it('selectBest returns cheapest on-time rate when deadline exists', function (): void {
@@ -529,6 +563,10 @@ it('reads the method\'s rows once, not once per rate', function (): void {
         makeDiscoveredRate(5.00, 'UPS_PTP_GND', 'UPS'),
         makeDirectRate(9.00, $ground),
     ]);
+
+    // The default location's timezone is cached for an hour, so a batch
+    // reads it once at most, not once per package.
+    Location::timezone();
 
     DB::enableQueryLog();
 

@@ -26,6 +26,7 @@ use App\DataTransferObjects\Shipping\RuleEvaluationResult;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CustomsTermsOrigin;
+use App\Enums\DeliveryEstimate;
 use App\Enums\DutiesTerms;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
@@ -129,9 +130,16 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
         foreach ($classified as $key => $classifiedRate) {
             $labels[$key] = $classifiedRate->rate->formLabel();
-            $description = $classifiedRate->rate->formDescription();
-            if (! $classifiedRate->isOnTime) {
-                $description .= ' — LATE';
+            $delivery = $classifiedRate->delivery;
+            $description = $classifiedRate->rate->formDescription(showDeliveryDate: $delivery !== DeliveryEstimate::Unknown);
+            // Only against a due-by date: without one nothing is late, and a
+            // missing date is no news.
+            if ($deadline !== null) {
+                $description .= match ($delivery) {
+                    DeliveryEstimate::Late => ' — LATE',
+                    DeliveryEstimate::Unknown => ' — No delivery estimate',
+                    DeliveryEstimate::OnTime => '',
+                };
             }
             $descriptions[$key] = $description;
             $rateArray = $classifiedRate->rate->toArray();
@@ -180,7 +188,8 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             rateOptionLabels: $labels,
             rateOptionDescriptions: $descriptions,
             deliverByDate: $deadline?->format('D, M j'),
-            allRatesLate: $deadline !== null && $classified->isNotEmpty() && $classified->every(fn (ClassifiedRate $cr): bool => ! $cr->isOnTime),
+            // Every rate dated and late: an unknown date may yet be on time.
+            allRatesLate: $deadline !== null && $classified->isNotEmpty() && $classified->every(fn (ClassifiedRate $cr): bool => $cr->delivery === DeliveryEstimate::Late),
             exclusions: $exclusions,
             selectedRateIndex: $this->selectedRateIndex($classified, $ruleResult, $inactive),
             // Alongside the rates, never among them, and never pre-selected on

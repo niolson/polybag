@@ -6,8 +6,10 @@ use App\DataTransferObjects\Shipping\ClassifiedRate;
 use App\DataTransferObjects\Shipping\OfferRequirements;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\UnattendedRateSelection;
+use App\Enums\DeliveryEstimate;
 use App\Enums\PostageSourceKind;
 use App\Models\DataSource;
+use App\Models\Location;
 use App\Models\ShippingMethod;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
@@ -20,6 +22,11 @@ class RateSelector
      * Unknown delivery date with a deadline counts as late.
      * No deadline = all rates classified as on-time.
      *
+     * Each rate also carries the delivery estimate the Ship page shows, which
+     * does not change that order or what automation buys: a rate with no
+     * delivery date, or one already past, is unknown there rather than late
+     * or on time (ui-review/01).
+     *
      * A rate whose price is only known at purchase time sorts after every
      * priced rate in its group, so it is never mistaken for the cheapest one.
      * It stays in the list: this is the attended view, where a packer sees what
@@ -31,10 +38,13 @@ class RateSelector
      */
     public function classify(Collection $rates, ?Carbon $deadline): Collection
     {
+        $today = Carbon::today(Location::timezone());
+
         $classified = $rates->map(
             fn (RateResponse $rate): ClassifiedRate => new ClassifiedRate(
                 rate: $rate,
                 isOnTime: $this->isOnTime($rate, $deadline),
+                delivery: $this->deliveryEstimate($rate, $deadline, $today),
             )
         );
 
@@ -272,6 +282,21 @@ class RateSelector
     private function sortKey(RateResponse $rate): array
     {
         return [$rate->priceUnknown ? 1 : 0, $rate->price];
+    }
+
+    private function deliveryEstimate(RateResponse $rate, ?Carbon $deadline, Carbon $today): DeliveryEstimate
+    {
+        $deliveryDate = $rate->parsedDeliveryDate()?->toDateString();
+
+        if ($deliveryDate === null || $deliveryDate < $today->toDateString()) {
+            return DeliveryEstimate::Unknown;
+        }
+
+        if ($deadline === null) {
+            return DeliveryEstimate::OnTime;
+        }
+
+        return $deliveryDate <= $deadline->toDateString() ? DeliveryEstimate::OnTime : DeliveryEstimate::Late;
     }
 
     private function isOnTime(RateResponse $rate, ?Carbon $deadline): bool

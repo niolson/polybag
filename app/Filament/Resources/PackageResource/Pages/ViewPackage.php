@@ -393,7 +393,7 @@ class ViewPackage extends ViewRecord
                             ->placeholder('Not printed'),
                         TextEntry::make('ship_date')
                             ->label('Ship Date')
-                            ->date(timezone: Location::timezone()),
+                            ->date(),
                         TextEntry::make('shippedBy.name')
                             ->label('Shipped By'),
                     ]),

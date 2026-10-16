@@ -5,6 +5,7 @@ use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\CarrierPackaging;
 use App\Enums\PostageSourceKind;
+use Carbon\Carbon;
 
 it('round-trips the offer identifier through Livewire serialization', function (): void {
     $rate = new RateResponse(
@@ -226,4 +227,21 @@ it('defaults to shipper packaging, so a hand-built rate is never valid in carrie
     $rate = new RateResponse('USPS', 'USPS_GROUND_ADVANTAGE', 'Ground Advantage', 6.93);
 
     expect($rate->packagingRequirement->isShipperPackaging())->toBeTrue();
+});
+
+it('shows the year on a delivery date outside the current one', function (): void {
+    Carbon::setTestNow('2026-10-16 12:00:00');
+
+    $rate = fn (string $date): RateResponse => new RateResponse(
+        carrier: 'FedEx',
+        serviceCode: 'FEDEX_GROUND',
+        serviceName: 'FedEx Ground',
+        price: 9.5,
+        deliveryDate: $date,
+        transitTime: '3 days',
+    );
+
+    expect($rate('2026-10-20')->formDescription())->toBe('$9.50 — Delivers Tue, Oct 20')
+        ->and($rate('2027-01-05')->formDescription())->toBe('$9.50 — Delivers Tue, Jan 5, 2027')
+        ->and($rate('2026-07-28')->formDescription(showDeliveryDate: false))->toBe('$9.50 — 3 days');
 });
