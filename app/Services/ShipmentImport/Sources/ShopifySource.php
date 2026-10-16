@@ -597,7 +597,20 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
                 throw new RuntimeException('Shopify GraphQL error: '.json_encode($json['errors']));
             }
 
-            Sleep::for(self::throttleWaitSeconds($json))->seconds();
+            $waitSeconds = self::throttleWaitSeconds($json);
+            $cost = $json['extensions']['cost'] ?? [];
+
+            Log::info('Shopify throttled a read; waiting for the bucket to refill', [
+                'shop_domain' => $this->config['shop_domain'] ?? null,
+                'attempt' => $attempt,
+                'wait_seconds' => $waitSeconds,
+                'requested_cost' => $cost['requestedQueryCost'] ?? null,
+                'currently_available' => $cost['throttleStatus']['currentlyAvailable'] ?? null,
+                'maximum_available' => $cost['throttleStatus']['maximumAvailable'] ?? null,
+                'restore_rate' => $cost['throttleStatus']['restoreRate'] ?? null,
+            ]);
+
+            Sleep::for($waitSeconds)->seconds();
         }
     }
 
