@@ -9,7 +9,6 @@ use App\Models\Client;
 use App\Models\ShippingMethod;
 use App\Services\PickBatchService;
 use App\Services\SettingsService;
-use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -20,7 +19,6 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
-use UnitEnum;
 
 class GeneratePickBatch extends Page implements HasForms
 {
@@ -28,13 +26,10 @@ class GeneratePickBatch extends Page implements HasForms
 
     public ?array $data = [];
 
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-inbox-stack';
-
-    protected static ?string $navigationLabel = 'Generate Pick Batch';
-
-    protected static UnitEnum|string|null $navigationGroup = 'Operations';
-
-    protected static ?int $navigationSort = 4;
+    /**
+     * Reached from the Pick Batches list, which stays highlighted in the sidebar.
+     */
+    protected static bool $shouldRegisterNavigation = false;
 
     protected string $view = 'filament.pages.generate-pick-batch';
 

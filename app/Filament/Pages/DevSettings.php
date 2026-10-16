@@ -32,7 +32,7 @@ class DevSettings extends Page
 
     protected static UnitEnum|string|null $navigationGroup = 'Admin';
 
-    protected static ?int $navigationSort = 100;
+    protected static ?int $navigationSort = 6;
 
     protected string $view = 'filament.pages.dev-settings';
 

@@ -2,7 +2,9 @@
 
 namespace App\Filament\Resources\PickBatches\Pages;
 
+use App\Filament\Pages\GeneratePickBatch;
 use App\Filament\Resources\PickBatches\PickBatchResource;
+use Filament\Actions\Action;
 use Filament\Resources\Pages\ListRecords;
 
 class ListPickBatches extends ListRecords
@@ -11,6 +13,11 @@ class ListPickBatches extends ListRecords
 
     protected function getHeaderActions(): array
     {
-        return [];
+        return [
+            Action::make('generate')
+                ->label('Generate Pick Batch')
+                ->icon('heroicon-o-plus')
+                ->url(GeneratePickBatch::getUrl()),
+        ];
     }
 }

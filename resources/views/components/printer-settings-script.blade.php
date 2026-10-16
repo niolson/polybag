@@ -24,7 +24,7 @@
 
             // Before 2026-09 there was one `labelPrinter` and the format toggle said
             // what it was fed. Move it under the key that toggle implies, once, so
-            // nobody has to revisit Device Settings after the upgrade.
+            // nobody has to revisit Workstation Settings after the upgrade.
             function migrateLegacyLabelPrinter() {
                 const legacy = localStorage.getItem('labelPrinter');
                 if (legacy === null) return;

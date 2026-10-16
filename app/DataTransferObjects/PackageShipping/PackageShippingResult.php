@@ -180,7 +180,7 @@ readonly class PackageShippingResult
      * workstation has nowhere to print it.
      *
      * Nothing was bought. The package stays as it is and the rate list stands:
-     * the remedy is Device Settings, not a fresh quote.
+     * the remedy is Workstation Settings, not a fresh quote.
      */
     public static function reportPrinterRequired(string $message): self
     {

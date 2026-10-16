@@ -25,7 +25,7 @@ if [[ "${1:-}" == "--insecure" ]]; then
 fi
 
 # Defaults to the placeholder below; the app bakes the real URL in when the
-# script is downloaded from Device Settings. Pass the URL as an argument to override.
+# script is downloaded from Workstation Settings. Pass the URL as an argument to override.
 URL="${1:-__POLYBAG_URL__}"
 
 # Validate by shape, not by the placeholder literal: the app bakes the URL by
@@ -33,7 +33,7 @@ URL="${1:-__POLYBAG_URL__}"
 # against that token would itself be rewritten and always match.
 if [[ ! "$URL" =~ ^https?:// ]]; then
     error "No PolyBag URL set. Usage: sudo $0 <polybag-url>   (e.g. https://acme.polybag.app)"
-    error "(or download this script from the app's Device Settings page)."
+    error "(or download this script from the app's Workstation Settings page)."
     exit 1
 fi
 

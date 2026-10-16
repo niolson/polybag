@@ -16,7 +16,9 @@ use Filament\Tables;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use UnitEnum;
 
@@ -26,13 +28,13 @@ class UnmappedShippingReferences extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-arrow-path-rounded-square';
 
-    protected static ?string $navigationLabel = 'Map Shipping References';
+    protected static ?string $navigationLabel = 'Map Shipping Refs';
 
     protected static ?string $title = 'Map Shipping References';
 
     protected static UnitEnum|string|null $navigationGroup = 'Integrations';
 
-    protected static ?int $navigationSort = 90;
+    protected static ?int $navigationSort = 3;
 
     protected string $view = 'filament.pages.unmapped-shipping-references';
 
@@ -41,26 +43,48 @@ class UnmappedShippingReferences extends Page implements HasTable
         return auth()->user()->role->isAtLeast(Role::Manager);
     }
 
+    public static function getNavigationBadge(): ?string
+    {
+        $count = Cache::remember('nav:unmapped_shipping_references', 60, fn (): int => DB::query()
+            ->fromSub(static::unmappedReferences(), 'unmapped')
+            ->count());
+
+        return $count > 0 ? number_format($count) : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
+    }
+
+    /**
+     * One row per unmapped reference (per client), as the table lists them.
+     *
+     * @return Builder<Shipment>
+     */
+    public static function unmappedReferences(): Builder
+    {
+        return Shipment::query()
+            ->selectRaw('MIN(id) as id, shipping_method_reference, client_id, COUNT(*) as shipment_count')
+            ->whereNotNull('shipping_method_reference')
+            ->where('shipping_method_reference', '!=', '')
+            ->whereNull('shipping_method_id')
+            ->whereNotExists(function ($query): void {
+                $query->select(DB::raw(1))
+                    ->from('shipping_method_aliases')
+                    ->whereColumn('shipping_method_aliases.reference', 'shipments.shipping_method_reference')
+                    ->whereColumn('shipping_method_aliases.client_id', 'shipments.client_id');
+            })
+            ->groupBy('shipping_method_reference', 'client_id');
+    }
+
     public function table(Table $table): Table
     {
         $multiClient = app(SettingsService::class)->get('multi_client_enabled', false);
 
         return $table
             ->emptyStateHeading('No unmapped references')
-            ->query(
-                Shipment::query()
-                    ->selectRaw('MIN(id) as id, shipping_method_reference, client_id, COUNT(*) as shipment_count')
-                    ->whereNotNull('shipping_method_reference')
-                    ->where('shipping_method_reference', '!=', '')
-                    ->whereNull('shipping_method_id')
-                    ->whereNotExists(function ($query): void {
-                        $query->select(DB::raw(1))
-                            ->from('shipping_method_aliases')
-                            ->whereColumn('shipping_method_aliases.reference', 'shipments.shipping_method_reference')
-                            ->whereColumn('shipping_method_aliases.client_id', 'shipments.client_id');
-                    })
-                    ->groupBy('shipping_method_reference', 'client_id')
-            )
+            ->query(static::unmappedReferences())
             ->defaultSort('shipping_method_reference')
             ->defaultKeySort(false)
             ->columns([

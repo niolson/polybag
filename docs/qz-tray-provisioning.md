@@ -40,7 +40,7 @@ restart the app. No recompiled installer and no code-signing required.
 
 ### Windows — double-click installer (recommended)
 
-From the app's **Device Settings → Trust Installer (Windows)**, download
+From the app's **Workstation Settings → Trust Installer (Windows)**, download
 `install-qz-cert.cmd` (this site's URL is baked in). Hand it to the operator:
 they **double-click it and approve the admin (UAC) prompt** — no terminal, no
 typing. The `.cmd` self-elevates, extracts the bundled PowerShell, and runs it.

@@ -268,7 +268,7 @@ it('ship refuses a separate customs document when the workstation has no report 
     // shopify-shipping-carrier/07 constraint 3 from the page: `hasReportPrinter`
     // is browser state pushed on mount, and its absence refuses the purchase
     // before the carrier is called. The page stays on the package — the
-    // remedy is Device Settings, not a fresh quote.
+    // remedy is Workstation Settings, not a fresh quote.
     $package = createShippablePackageForErrorTest();
     $package->shipment->update([
         'address1' => '100 Queen St W',

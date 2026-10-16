@@ -58,7 +58,7 @@ class ShipmentResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-truck';
 
-    protected static \UnitEnum|string|null $navigationGroup = 'Operations';
+    protected static \UnitEnum|string|null $navigationGroup = 'Fulfillment';
 
     protected static ?int $navigationSort = 1;
 

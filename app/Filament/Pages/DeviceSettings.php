@@ -2,24 +2,22 @@
 
 namespace App\Filament\Pages;
 
-use BackedEnum;
 use Filament\Pages\Page;
-use UnitEnum;
 
+/**
+ * Printer, scale and label-format settings, kept in this browser's storage rather
+ * than on the user. Reached from the user menu, not the sidebar.
+ */
 class DeviceSettings extends Page
 {
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-computer-desktop';
+    protected static bool $shouldRegisterNavigation = false;
+
+    protected static ?string $title = 'Workstation Settings';
 
     public static function canAccess(): bool
     {
         return auth()->check();
     }
-
-    protected static ?string $navigationLabel = 'Device Settings';
-
-    protected static UnitEnum|string|null $navigationGroup = 'Devices';
-
-    protected static ?int $navigationSort = 100;
 
     protected string $view = 'filament.pages.device-settings';
 }

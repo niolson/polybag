@@ -28,6 +28,8 @@ class DataSourceResource extends Resource
 
     protected static \UnitEnum|string|null $navigationGroup = 'Integrations';
 
+    protected static ?int $navigationSort = 1;
+
     /**
      * The UI calls a DataSource a Connection: a connected account that may
      * import orders, sell postage, receive tracking, or several of those. The

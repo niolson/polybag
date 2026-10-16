@@ -381,7 +381,7 @@ class AmazonBuyShippingService
             ])->all(),
         ]);
 
-        // The resolution Amazon was *asked* for, not the one Device Settings
+        // The resolution Amazon was *asked* for, not the one Workstation Settings
         // prefers. They differ whenever the chosen rate did not publish the
         // configured DPI, and the label bytes are whatever Amazon generated —
         // recording the preference instead would print a 300 DPI label at 203
@@ -612,7 +612,7 @@ class AmazonBuyShippingService
 
         if ($preference === null) {
             throw new AmazonLabelPurchaseException(
-                "Amazon Buy Shipping cannot produce a {$labelFormat} label. Choose PDF or ZPL in Device Settings."
+                "Amazon Buy Shipping cannot produce a {$labelFormat} label. Choose PDF or ZPL in Workstation Settings."
             );
         }
 
@@ -644,7 +644,7 @@ class AmazonBuyShippingService
             throw new AmazonLabelPurchaseException(
                 'Amazon did not offer this rate in a format this workstation can print'
                 .($labelDpi !== null ? " ({$labelFormat} at {$labelDpi} DPI)" : " ({$labelFormat})")
-                .'. Get rates again, or choose another label format in Device Settings.'
+                .'. Get rates again, or choose another label format in Workstation Settings.'
             );
         }
 

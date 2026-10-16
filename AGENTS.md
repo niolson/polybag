@@ -150,7 +150,7 @@ Preserve these domain terms in code and prose — see `CONTEXT.md`. In particula
 - Connects via WebSocket to `wss://localhost:8181`
 - Image-label printer, raw-label printer, document printer, preferred purchase format, and
   ZPL DPI are stored in browser `localStorage`
-- Configured via Device Settings page
+- Configured via Workstation Settings page
 - PDF/PNG/GIF labels use the image printer driver; ZPL bytes use the raw printer at 203 or
   300 DPI. The two settings may name the same physical printer
 - Signing certificate generated via `app:generate-qz-cert`

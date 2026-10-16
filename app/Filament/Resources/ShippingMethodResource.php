@@ -30,7 +30,9 @@ class ShippingMethodResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-paper-airplane';
 
-    protected static \UnitEnum|string|null $navigationGroup = 'Shipping Config';
+    protected static \UnitEnum|string|null $navigationGroup = 'Shipping Setup';
+
+    protected static ?int $navigationSort = 1;
 
     public static function form(Schema $form): Schema
     {

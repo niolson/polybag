@@ -49,7 +49,7 @@ or GIF labels through the driver, and one for raw ZPL — which can be the same 
 a raw-only workstation can be a plain "Generic / Text Only" queue on Windows. The
 document printer handles pack slips, pick lists, and separate customs forms. Printer,
 preferred purchase format, DPI, and scale preferences are stored in that browser and
-managed from **Device Settings**.
+managed from **Workstation Settings**.
 
 Generate a self-signed QZ certificate for development or a private deployment:
 
@@ -144,7 +144,7 @@ the application database.
 | Carrier services, service classes, packaging, and shipping rules | Shipping Config |
 | Amazon observed-service mapping and unattended-purchase approval | Map Carrier Services |
 | Per-client return address, branding, and label reference | Clients |
-| Image-label, raw-label, and document printers; format, DPI, and scale | Device Settings in each browser |
+| Image-label, raw-label, and document printers; format, DPI, and scale | Workstation Settings in each browser |
 | Database, Redis, mail, SSO, Google validation, Gotenberg | `.env` |
 
 Secrets on Carrier Account and Connection records are encrypted. Never commit

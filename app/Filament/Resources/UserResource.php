@@ -28,6 +28,8 @@ class UserResource extends Resource
 
     protected static \UnitEnum|string|null $navigationGroup = 'Admin';
 
+    protected static ?int $navigationSort = 1;
+
     public static function form(Schema $form): Schema
     {
         return $form

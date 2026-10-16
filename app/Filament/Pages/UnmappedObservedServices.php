@@ -45,13 +45,13 @@ class UnmappedObservedServices extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-rectangle-stack';
 
-    protected static ?string $navigationLabel = 'Map Carrier Services';
+    protected static ?string $navigationLabel = 'Map Amazon Services';
 
-    protected static ?string $title = 'Map Carrier Services';
+    protected static ?string $title = 'Map Amazon Services';
 
     protected static UnitEnum|string|null $navigationGroup = 'Integrations';
 
-    protected static ?int $navigationSort = 92;
+    protected static ?int $navigationSort = 5;
 
     protected string $view = 'filament.pages.unmapped-observed-services';
 

@@ -46,7 +46,7 @@ class PrepaidDutiesReport extends Page implements HasTable
 
     protected static UnitEnum|string|null $navigationGroup = 'Reports';
 
-    protected static ?int $navigationSort = 35;
+    protected static ?int $navigationSort = 36;
 
     protected string $view = 'filament.pages.reports.prepaid-duties-report';
 

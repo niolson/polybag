@@ -24,7 +24,7 @@ class UserShipmentsReport extends Page implements HasTable
     use HasMultiClientFilter;
     use InteractsWithTable;
 
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-users';
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-user-circle';
 
     protected static ?string $navigationLabel = 'Packages by User';
 

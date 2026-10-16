@@ -30,7 +30,9 @@ class ProductResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-tag';
 
-    protected static \UnitEnum|string|null $navigationGroup = 'Shipping Config';
+    protected static \UnitEnum|string|null $navigationGroup = 'Shipping Setup';
+
+    protected static ?int $navigationSort = 3;
 
     protected static ?string $recordTitleAttribute = 'name';
 

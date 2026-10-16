@@ -1134,7 +1134,7 @@ it('refuses to buy from a seller that returns a separate customs document when n
 
     expect($result->success)->toBeFalse()
         ->and($result->title)->toBe('Document Printer Required')
-        ->and($result->message)->toContain('Device Settings')
+        ->and($result->message)->toContain('Workstation Settings')
         ->and($result->leavePackageIntact)->toBeTrue()
         ->and($result->requiresRequote)->toBeFalse()
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);

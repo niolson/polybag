@@ -142,7 +142,7 @@
                                     <p>Tracking <span class="font-mono">{{ $package->tracking_number }}</span></p>
                                 @endif
                                 <p class="text-gray-500 dark:text-gray-400">
-                                    The label is bought and stored on the package. If it did not print, fix the printer in Device Settings and use <strong>Reprint Label</strong>, or reprint it later from the Packages page. Buying another label for this package is not possible here.
+                                    The label is bought and stored on the package. If it did not print, fix the printer in Workstation Settings and use <strong>Reprint Label</strong>, or reprint it later from the Packages page. Buying another label for this package is not possible here.
                                 </p>
                             </div>
                         </div>

@@ -409,7 +409,7 @@ class AmazonShippingAdapter implements AsyncRateQuoting, CarrierPolicy, Recovers
 
     /**
      * Record every identity Amazon named that no Amazon Shipping service is
-     * authored for, eligible or not, so the Map Carrier Services page shows
+     * authored for, eligible or not, so the Map Amazon Services page shows
      * what production quotes before anyone can buy it.
      *
      * @param  Collection<string, CarrierService>  $catalog

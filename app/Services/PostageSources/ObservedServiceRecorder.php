@@ -188,7 +188,7 @@ class ObservedServiceRecorder
      * Log an unmapped service the first time a source offers it as buyable —
      * `carrier-catalog-reset/11`.
      *
-     * The Map Carrier Services page lists it either way, and deliberately
+     * The Map Amazon Services page lists it either way, and deliberately
      * raises nothing (ADR-0003 decision 8). This is the one line that says a
      * new service became real, for whoever is watching the log.
      *
