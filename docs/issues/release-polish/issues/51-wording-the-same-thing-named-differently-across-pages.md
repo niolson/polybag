@@ -252,3 +252,9 @@ This replaces the sentence-case recommendation for notification titles in issues
   picking gate, "Buy & Print Label", "Reprint Label", "Shipment Cancelled", "Shipment
   Reference", "Clear Shipment", "Rate Unavailable", the page and report names, and
   "Completed with Errors".
+
+- 2026-10-16 — Added from the ui-review walk-through (`ui-review/findings.md` SH3), medium,
+  on the demo path: an unshipped Package is **Unshipped** in a Shipment's Packages table and
+  on the Packages list's tab (`PackageStatus`), and **Ready to ship** on the Package page and
+  in the Packages list's own badges (`PackageDraftState`). One screen, the Packages list,
+  shows both. Pick one vocabulary for an unshipped Package across every page.
