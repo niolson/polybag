@@ -64,9 +64,6 @@ class PackagesRelationManager extends RelationManager
             ->filters([
                 //
             ])
-            ->headerActions([
-                Actions\CreateAction::make(),
-            ])
             ->recordActions([
                 PackageResource::makeTrackAction(),
                 Actions\EditAction::make(),

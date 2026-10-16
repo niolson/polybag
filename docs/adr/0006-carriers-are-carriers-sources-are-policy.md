@@ -24,6 +24,9 @@ reference-data sync behind a marker, not by migration (decision 2).
 Amended 2026-09-26 (`carrier-catalog-reset/16`): a shipment with no shipping method is not
 rated and cannot have a Label bought (decision 12). Its allowance is nothing.
 
+Amended 2026-10-16 (`ui-review/09`): End of Day lists only the carriers this install ships
+with, not every active carrier (decision 1).
+
 Supersedes in part:
 
 - **ADR-0002.** The 2026-09-22 amendment's choice of the `Amazon` postage-source row as the
@@ -112,9 +115,17 @@ There are no production tenants, so none of this needs a migration path.
   Amazon Shipping to Connections.
 - **A carrier with no direct adapter** (OnTrac, DHL Express, any custom carrier) is
   reached only through Shopify or Amazon Buy Shipping. No account can be created for it, and no direct adapter is asked.
-- **End of Day lists every active carrier**, with or without an adapter, because every
-  carrier dates labels (decision 9). A manifest is offered only where the integration
-  supports one.
+- **End of Day lists the active carriers this install ships with**, with or without an
+  adapter, because every carrier dates labels (decision 9): a carrier with an active
+  account (a `CarrierAccount`, or for Amazon Shipping a connection scoped to sell it), the
+  carrier a postage-selling Shopify connection dates by, and any carrier with a label on
+  its current ship date. A manifest is offered only where the integration supports one.
+
+  *Amended 2026-10-16* (`ui-review/09`). As first accepted, End of Day listed every active
+  carrier. Seeded carriers are all active, so a fresh install showed an End Shipping Day
+  button for DHL Express, Amazon Shipping and OnTrac with no account and nothing to date.
+  A carrier reached only through Amazon Buy Shipping or Shopify now appears once it has a
+  label to date.
 - A carrier's service codes are its own API codes: DHL's `P` for Express Worldwide, and
   Amazon's `std-us-swa-mfn` for Amazon Shipping Ground (from the sandbox). A later direct
   integration with OnTrac or DHL then needs no remapping.

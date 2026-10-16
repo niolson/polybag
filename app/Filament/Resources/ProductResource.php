@@ -7,6 +7,7 @@ use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\ProductResource\Pages;
 use App\Models\Location;
 use App\Models\Product;
+use App\Models\SpecialService;
 use App\Services\SettingsService;
 use App\Support\Gtin;
 use BackedEnum;
@@ -140,12 +141,34 @@ class ProductResource extends Resource
                             ->columnSpanFull(),
                         Forms\Components\Select::make('hazmat_class')
                             ->label('Hazmat Classification')
-                            ->options(HazmatClass::class)
+                            ->options(fn (?Product $record): array => static::hazmatClassOptions($record?->hazmat_class))
                             ->placeholder('None')
-                            ->helperText('Battery classes gate rates to eligible carrier services and add the carrier battery declaration where one exists. USPS battery labels assume packages physically carry the required lithium battery marks. Dry ice and cremated remains are not yet wired to carriers.')
+                            ->helperText('Battery classes gate rates to eligible carrier services and add the carrier battery declaration where one exists. USPS battery labels assume packages physically carry the required lithium battery marks. Only classes whose special service is active are offered.')
                             ->columnSpanFull(),
                     ]),
             ]);
+    }
+
+    /**
+     * The hazmat classes whose special service is active: a class with an
+     * inactive service is dropped by `SpecialServiceResolver` and would ship
+     * as if undeclared. A product's current class stays listed so editing it
+     * does not silently clear the value.
+     *
+     * @return array<string, string>
+     */
+    public static function hazmatClassOptions(?HazmatClass $current = null): array
+    {
+        $activeCodes = SpecialService::query()
+            ->where('active', true)
+            ->whereIn('code', array_column(HazmatClass::cases(), 'value'))
+            ->pluck('code')
+            ->all();
+
+        return collect(HazmatClass::cases())
+            ->filter(fn (HazmatClass $class): bool => in_array($class->value, $activeCodes, true) || $class === $current)
+            ->mapWithKeys(fn (HazmatClass $class): array => [$class->value => $class->getLabel()])
+            ->all();
     }
 
     public static function table(Table $table): Table

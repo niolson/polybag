@@ -20,9 +20,13 @@ class PackagePolicy
         return true;
     }
 
+    /**
+     * Packages are made only by Pack and Manual Ship, through
+     * `PackageDraftWorkflow`; no form creates one directly.
+     */
     public function create(User $user): bool
     {
-        return $user->role->isAtLeast(Role::Admin);
+        return false;
     }
 
     public function update(User $user, Package $package): bool

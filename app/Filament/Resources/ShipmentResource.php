@@ -727,9 +727,11 @@ class ShipmentResource extends Resource
                         Section::make(fn (Shipment $record): string => $record->checked && filled($record->validated_address1)
                             ? 'Shipping Address (Validated)'
                             : 'Shipping Address')
-                            ->description(fn (Shipment $record): ?string => $record->checked && filled($record->validated_address1)
-                                ? 'Showing the validated address'
-                                : 'Not validated')
+                            ->description(fn (Shipment $record): string => match (true) {
+                                $record->checked && filled($record->validated_address1) => 'Showing the validated address',
+                                $record->checked => 'Checked, no corrections',
+                                default => 'Not checked yet',
+                            })
                             ->icon(fn (Shipment $record): string => $record->checked && filled($record->validated_address1)
                                 ? 'heroicon-o-check-badge'
                                 : 'heroicon-o-map-pin')

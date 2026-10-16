@@ -214,3 +214,28 @@ describe('CarrierAccount cache invalidation', function (): void {
         expect(Cache::has($cacheKey))->toBeFalse();
     });
 });
+
+it('reports a USPS or UPS account connected on its own client credentials or an OAuth token', function (string $carrierName, string $identifier): void {
+    $carrier = Carrier::firstOrCreate(['name' => $carrierName], ['pickup_cutoff_hour' => 20]);
+    $account = CarrierAccount::factory()->create(['carrier_id' => $carrier->id, 'credentials' => []]);
+
+    $account->mergeSecret('client_id', 'client-id');
+
+    expect($account->connectionStatus())->toBe('Needs Setup');
+
+    $account->mergeSecret('client_secret', 'client-secret');
+
+    expect($account->connectionStatus())->toBe('Needs Setup');
+
+    $account->mergeCredential($identifier, '12345678');
+
+    expect($account->connectionStatus())->toBe('Connected');
+
+    $tokenOnly = CarrierAccount::factory()->create(['carrier_id' => $carrier->id, 'credentials' => [$identifier => '12345678']]);
+    $tokenOnly->mergeSecret('oauth_token', 'token');
+
+    expect($tokenOnly->connectionStatus())->toBe('Connected');
+})->with([
+    'USPS' => [Carrier::USPS, 'crid'],
+    'UPS' => [Carrier::UPS, 'account_number'],
+]);

@@ -50,16 +50,17 @@ issue. Low findings with no link stay here as the backlog.
 | [`02`](issues/02-ship-page-clarity.md) Ship page clarity | S2, S3, S8; S4–S6, M4 | Before the demo |
 | [`03`](issues/03-pack-page-clarity.md) Pack page clarity | P1–P3; P4, P7, P9, P10 | Before the demo |
 | [`04`](issues/04-weight-entry.md) Weight entry | M2, S9 | Before the demo |
-| [`05`](issues/05-address-check-display.md) Address check display | SH1, SH2 | Before the demo |
+| [`05`](issues/05-address-check-display.md) Address check display | SH1, SH2 | Done 2026-10-16 |
 | [`06`](issues/06-shipments-list-defaults.md) Shipments list defaults | SL1, SL2 (column), SL3 | Before the demo |
 | [`07`](issues/07-batch-ship.md) Batch Ship | LB1, BS1, BS2; LB2–LB4, BS3–BS5 | Before the demo |
 | [`08`](issues/08-dashboard.md) Dashboard | D1–D4; D5–D11 | Before the demo |
-| [`09`](issues/09-end-of-day-and-carrier-status.md) End of Day and carrier status | E1, CA1, CR1; E2–E4 | Before the demo |
+| [`09`](issues/09-end-of-day-and-carrier-status.md) End of Day and carrier status | E1, CA1, CR1; E2–E4 | Done 2026-10-16 |
 | [`10`](issues/10-report-presentation.md) Report presentation | R1, R2; R3 | Before the demo |
-| [`11`](issues/11-setup-list-quick-fixes.md) Setup list quick fixes | BX1, PR1, PK1 (remove New package) | Before the demo |
+| [`11`](issues/11-setup-list-quick-fixes.md) Setup list quick fixes | BX1, PR1, PK1 (remove New package) | Done 2026-10-16 |
 | [`12`](issues/12-manual-ship-quote-before-create.md) Manual Ship quotes before creating | M1 | Before the first customer |
 | [`13`](issues/13-connection-import-status.md) Connection import status | CN1 | After the freeze (feature) |
 | [`14`](issues/14-usps-quoted-vs-recorded-cost.md) USPS quoted vs recorded cost | S10 | Needs info |
+| [`15`](issues/15-manifest-generate-and-print.md) Manifest generate and print | E6 | Before the demo (added 2026-10-16) |
 | [`release-polish/51`](../release-polish/issues/51-wording-the-same-thing-named-differently-across-pages.md) | SH3 | Added as a comment there |
 
 ## Dashboard
@@ -512,6 +513,13 @@ pickup, then end the shipping day so new labels are dated for the next pickup."
 
 The Packages column shows "—" for a carrier with no labels today. It is a count: show 0.
 
+### E6 — Generate Manifest always prints, and prints only the last form (medium) → [`15`](issues/15-manifest-generate-and-print.md)
+
+Raised after the walk-through. Generate Manifest creates the form and prints it at once,
+with no way to only create it. When a run makes several USPS forms (one per carrier
+account), each is saved with its image, but only the last is sent to the printer. The
+table's "Reprint" button does not say it reprints a manifest.
+
 ### E5 — Demo data: no manifest can be reprinted, and nothing is ready to manifest (demo prep)
 
 All 90 seeded manifests have no image, so no row has a Reprint button; and unless labels
@@ -666,6 +674,18 @@ No seeded shipped Package has a stored label image, so none can be reprinted, an
 drafts at 0.3 lb (3566–3569, 3571, 3572), the scale reading discussed in P8 and M2.
 `demo:reset` before a demo clears the second; the first needs a sample label image on the
 seeded Packages.
+
+### PK5 — The Package edit form edits label and export state by hand (low)
+
+Found while removing Create for PK1. The Edit form, for Managers on the Package page and in
+a Shipment's Packages table, has a free-text **Service (as bought)**, raw dimensions and
+weight, and an **Exported** toggle. Service is part of the active Label's projection
+(ADR-0004 decision 3 keeps tracking number, cost and status off the form, but not this),
+and turning Exported off or on by hand changes whether the export runs again. Dimensions
+and weight on a shipped Package no longer match what was bought.
+
+Decide: drop Service and Exported from the form, and allow dimensions and weight only on an
+unshipped Package (or send edits back through Pack).
 
 ## Label Batches
 

@@ -19,9 +19,10 @@
         {{-- Carrier Summary --}}
         <x-filament::section>
             <x-slot name="heading">Carriers</x-slot>
+            <x-slot name="description">Generate a manifest for today's labels before pickup, then end the shipping day so new labels are dated for the next pickup.</x-slot>
 
             @if(empty($carrierSummary))
-                <p class="text-sm text-gray-500 dark:text-gray-400 text-center py-4">No active carriers configured.</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400 text-center py-4">No carrier has an account or a label today.</p>
             @else
                 <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
                     <table class="w-full text-sm text-left">
@@ -41,15 +42,11 @@
                                         <span class="font-medium">{{ $summary['ship_date'] }}</span>
                                     </td>
                                     <td class="px-4 py-3">
-                                        @if($summary['package_count'] > 0)
-                                            <span class="font-medium">{{ $summary['package_count'] }}</span>
-                                            @if($summary['supports_manifest'] && $summary['unmanifested_count'] > 0)
-                                                <span class="inline-flex items-center rounded-full bg-warning-50 dark:bg-warning-950 px-2 py-0.5 text-xs font-medium text-warning-700 dark:text-warning-300 ml-2">
-                                                    {{ $summary['unmanifested_count'] }} unmanifested
-                                                </span>
-                                            @endif
-                                        @else
-                                            <span class="text-gray-400 dark:text-gray-500">&mdash;</span>
+                                        <span @class(['font-medium' => $summary['package_count'] > 0, 'text-gray-400 dark:text-gray-500' => $summary['package_count'] === 0])>{{ $summary['package_count'] }}</span>
+                                        @if($summary['supports_manifest'] && $summary['unmanifested_count'] > 0)
+                                            <span class="inline-flex items-center rounded-full bg-warning-50 dark:bg-warning-950 px-2 py-0.5 text-xs font-medium text-warning-700 dark:text-warning-300 ml-2">
+                                                {{ $summary['unmanifested_count'] }} unmanifested
+                                            </span>
                                         @endif
                                     </td>
                                     <td class="px-4 py-3 text-right space-x-2">
@@ -62,15 +59,7 @@
                                                 Generate Manifest
                                             </x-filament::button>
                                         @endif
-                                        <x-filament::button
-                                            wire:click="endShippingDay({{ $summary['carrier_id'] }})"
-                                            wire:confirm="End {{ $summary['label'] }} shipping day? Ship date will advance from {{ $summary['ship_date'] }} to {{ $summary['next_ship_date'] }}."
-                                            icon="heroicon-o-sun"
-                                            size="sm"
-                                            color="info"
-                                        >
-                                            End Shipping Day
-                                        </x-filament::button>
+                                        {{ ($this->endShippingDayAction)(['carrier' => $summary['carrier_id']]) }}
                                     </td>
                                 </tr>
                             @endforeach
@@ -140,4 +129,6 @@
             @endif
         </x-filament::section>
     </div>
+
+    <x-filament-actions::modals />
 </x-filament-panels::page>

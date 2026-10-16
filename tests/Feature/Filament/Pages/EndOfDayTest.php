@@ -1,9 +1,11 @@
 <?php
 
+use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Enums\Role;
 use App\Filament\Pages\EndOfDay;
 use App\Models\Carrier;
+use App\Models\CarrierAccount;
 use App\Models\DataSource;
 use App\Models\Manifest;
 use App\Models\Package;
@@ -16,9 +18,9 @@ beforeEach(function (): void {
     $this->actingAs(User::factory()->admin()->create());
 });
 
-it('shows all active carriers with ship dates', function (): void {
-    Carrier::factory()->create(['name' => 'USPS', 'active' => true]);
-    Carrier::factory()->create(['name' => 'FedEx', 'active' => true]);
+it('shows the carriers with an account, with ship dates', function (): void {
+    CarrierAccount::factory()->create(['carrier_id' => Carrier::factory()->create(['name' => 'USPS', 'active' => true])->id]);
+    CarrierAccount::factory()->create(['carrier_id' => Carrier::factory()->create(['name' => 'FedEx', 'active' => true])->id]);
 
     Livewire::test(EndOfDay::class)
         ->assertSet('carrierSummary', function ($value): bool {
@@ -96,8 +98,9 @@ it('shows zero unmanifested count for non-USPS carriers', function (): void {
 });
 
 it('does not show inactive carriers', function (): void {
-    Carrier::factory()->create(['name' => 'USPS', 'active' => true]);
-    Carrier::factory()->create(['name' => 'DHL', 'active' => false]);
+    CarrierAccount::factory()->create(['carrier_id' => Carrier::factory()->create(['name' => 'USPS', 'active' => true])->id]);
+    $dhl = Carrier::factory()->create(['name' => 'DHL', 'active' => false]);
+    Package::factory()->shipped()->create(['carrier' => 'DHL', 'normalized_carrier_id' => $dhl->id]);
 
     Livewire::test(EndOfDay::class)
         ->assertSet('carrierSummary', function ($value): bool {
@@ -156,8 +159,59 @@ it('shows error when reprinting manifest without image', function (): void {
         ->assertNotified();
 });
 
+it('hides a carrier with no account and no label today', function (): void {
+    CarrierAccount::factory()->create(['carrier_id' => Carrier::factory()->create(['name' => 'USPS', 'active' => true])->id]);
+    Carrier::factory()->create(['name' => 'DHL Express', 'active' => true]);
+    Carrier::factory()->create(['name' => 'OnTrac', 'active' => true]);
+    CarrierAccount::factory()->inactive()->create(['carrier_id' => Carrier::factory()->create(['name' => 'FedEx', 'active' => true])->id]);
+
+    Livewire::test(EndOfDay::class)
+        ->assertSet('carrierSummary', fn (array $value): bool => collect($value)->pluck('carrier')->all() === ['USPS']);
+});
+
+it('shows a carrier with no account once it has a label today, and a zero count as 0', function (): void {
+    CarrierAccount::factory()->create(['carrier_id' => Carrier::factory()->create(['name' => 'USPS', 'active' => true])->id]);
+    $ontrac = Carrier::factory()->create(['name' => 'OnTrac', 'active' => true]);
+    Package::factory()->shipped()->create(['carrier' => 'OnTrac', 'normalized_carrier_id' => $ontrac->id]);
+
+    Livewire::test(EndOfDay::class)
+        ->assertSet('carrierSummary', fn (array $value): bool => collect($value)->pluck('package_count', 'carrier')->all() === ['OnTrac' => 1, 'USPS' => 0])
+        ->assertDontSeeHtml('&mdash;')
+        ->assertSee('Generate a manifest for today');
+});
+
+it('shows the carrier a Shopify connection that sells postage dates its labels by', function (): void {
+    $usps = Carrier::factory()->create(['name' => 'USPS', 'active' => true]);
+    $listed = fn (): array => collect(Livewire::test(EndOfDay::class)->get('carrierSummary'))->pluck('carrier')->all();
+    $shopify = createShopifyDataSource();
+    $shopify->update(['postage_setting' => PostageSetting::DoesNotSell]);
+
+    expect($listed())->toBe([]);
+
+    $shopify->update(['postage_setting' => PostageSetting::PackerOnly]);
+
+    expect($listed())->toBe(['USPS'])
+        ->and($shopify->shipDateCarrier()->is($usps))->toBeTrue();
+});
+
+it('ends a shipping day through a confirmation modal', function (): void {
+    $fedex = Carrier::factory()->create(['name' => 'FedEx', 'active' => true]);
+    CarrierAccount::factory()->create(['carrier_id' => $fedex->id]);
+
+    $component = Livewire::test(EndOfDay::class);
+    $summary = collect($component->get('carrierSummary'))->firstWhere('carrier', 'FedEx');
+
+    $component->mountAction('endShippingDay', ['carrier' => $fedex->id])
+        ->assertActionMounted('endShippingDay')
+        ->assertMountedActionModalSee("New FedEx labels will be dated {$summary['next_ship_date']} instead of {$summary['ship_date']}.")
+        ->callMountedAction()
+        ->assertNotified();
+
+    expect(collect($component->get('carrierSummary'))->firstWhere('carrier', 'FedEx')['ship_date'])->toBe($summary['next_ship_date']);
+});
+
 it('endShippingDay advances the ship date', function (): void {
-    Carrier::factory()->create(['name' => 'FedEx', 'active' => true]);
+    CarrierAccount::factory()->create(['carrier_id' => Carrier::factory()->create(['name' => 'FedEx', 'active' => true])->id]);
 
     $component = Livewire::test(EndOfDay::class);
 
