@@ -7,6 +7,7 @@ use App\Http\Integrations\Shopify\ShopifyConnector;
 use App\Models\CarrierAccount;
 use App\Models\DataSource;
 use App\Services\ShipmentImport\Sources\AmazonSource;
+use App\Services\ShipmentImport\Sources\ShopifySource;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -315,7 +316,7 @@ class OAuthService
                 // for apps with declared scopes — see ShopifyLocationSynchronizer
                 // — so the Dev Dashboard remains the authority either way.
                 'scope' => implode(',', array_unique([
-                    ...ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES,
+                    ...ShopifySource::REQUIRED_SCOPES,
                     ...ShopifyShippingLabelService::REQUIRED_SCOPES,
                 ])),
             ];

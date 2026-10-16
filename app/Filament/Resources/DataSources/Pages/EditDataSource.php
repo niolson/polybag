@@ -13,10 +13,8 @@ use App\Services\PostageSources\OffAmazonShippingCheck;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
-use App\Services\ShopifyFulfillmentOrderActivationService;
 use App\Services\ShopifyLocationSynchronizer;
 use Carbon\Carbon;
-use DomainException;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Forms\Components\DatePicker;
@@ -269,7 +267,11 @@ class EditDataSource extends EditRecord
                 ->label('Sync Shopify Locations')
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
-                ->visible(fn (): bool => $this->dataSource()->source_type === ShopifySource::class)
+                ->visible(fn (): bool => $this->dataSource()->isShopify())
+                ->disabled(fn (): bool => ! $this->dataSource()->hasShopifyCredentials())
+                ->tooltip(fn (): ?string => $this->dataSource()->hasShopifyCredentials()
+                    ? null
+                    : 'Connect Shopify before synchronizing its locations.')
                 ->action(function (): void {
                     try {
                         $dataSource = $this->dataSource();
@@ -286,43 +288,6 @@ class EditDataSource extends EditRecord
                         Notification::make()
                             ->danger()
                             ->title('Shopify location sync failed')
-                            ->body($exception->getMessage())
-                            ->send();
-                    }
-                }),
-
-            Action::make('activate_fulfillment_order_import')
-                ->authorize('update')
-                ->label('Activate Fulfillment-Order Import')
-                ->icon('heroicon-o-check-circle')
-                ->color('warning')
-                ->visible(fn (): bool => $this->dataSource()->source_type === ShopifySource::class
-                    && $this->dataSource()->import_enabled
-                    && ! ($this->dataSource()->settings['fulfillment_order_import_enabled'] ?? false))
-                ->requiresConfirmation()
-                ->modalHeading('Activate fulfillment-order imports?')
-                ->modalDescription('This one-way change imports one Shipment per Shopify fulfillment order. It cannot be switched back because doing so could create duplicate work.')
-                ->action(function (): void {
-                    try {
-                        $dataSource = $this->dataSource();
-                        app(ShopifyFulfillmentOrderActivationService::class)->activate($dataSource);
-
-                        Notification::make()
-                            ->success()
-                            ->title('Fulfillment-order imports activated')
-                            ->send();
-
-                        $this->redirect(static::getUrl(['record' => $dataSource->id]));
-                    } catch (DomainException $exception) {
-                        Notification::make()
-                            ->danger()
-                            ->title('Activation requirements not met')
-                            ->body($exception->getMessage())
-                            ->send();
-                    } catch (Throwable $exception) {
-                        Notification::make()
-                            ->danger()
-                            ->title('Shopify scope validation failed')
                             ->body($exception->getMessage())
                             ->send();
                     }

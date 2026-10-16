@@ -26,16 +26,6 @@ class CreateDataSource extends CreateRecord
     {
         $this->validateMfaRequiredForAmazon($data);
 
-        /**
-         * Fulfillment-order import is deliberately not enabled here. It is a
-         * one-way switch that requires Shopify scopes and mapped locations the
-         * source cannot have at creation time, and enabling it blindly makes a
-         * misconfigured source import nothing at all, silently: the fulfillment
-         * order query returns an empty list rather than an error when the token
-         * lacks `read_merchant_managed_fulfillment_orders`. It is turned on
-         * later through ShopifyFulfillmentOrderActivationService, which checks
-         * those prerequisites first.
-         */
         $submitted = $data['settings'] ?? [];
 
         $secrets = [];

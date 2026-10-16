@@ -20,7 +20,6 @@ use App\Models\DataSource;
 use App\Models\DataSourceLocation;
 use App\Services\ShipmentImport\ShopifyClosedFulfillmentOrderCloser;
 use App\Services\ShipmentImport\ShopifyFulfillmentOrderRepointer;
-use App\Services\ShopifyFulfillmentOrderActivationService;
 use App\Services\ShopifyGoodsFingerprint;
 use App\Services\ShopifyShippingLabelService;
 use App\Support\Gtin;
@@ -119,6 +118,21 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
      * @var array<string, mixed>|null
      */
     private ?array $pendingReadState = null;
+
+    /**
+     * Scopes a fulfillment-order import needs. Checked on every location sync
+     * and when an import starts.
+     *
+     * `read_products` is for line-item `variant`, which carries the barcode;
+     * Shopify gates `ProductVariant` behind it.
+     */
+    public const REQUIRED_SCOPES = [
+        'read_orders',
+        'read_products',
+        'read_locations',
+        'read_merchant_managed_fulfillment_orders',
+        'write_merchant_managed_fulfillment_orders',
+    ];
 
     private const CARRIER_MAP = [
         'USPS' => Carrier::USPS,
@@ -333,12 +347,6 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
 
     public function fetchShipments(): Collection
     {
-        if (! ($this->config['fulfillment_order_import_enabled'] ?? false)) {
-            throw new DomainException(
-                'Shopify shipment import is not ready. Synchronize and map Shopify locations, then activate fulfillment-order imports.'
-            );
-        }
-
         $this->orderCache = [];
         $this->answeredFulfillmentOrderIds = null;
         $this->pendingReadState = null;
@@ -419,17 +427,17 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
     /**
      * Refuse an import the live token cannot complete.
      *
-     * Activation checks the same scopes, but a connection activated before a
-     * scope joined {@see ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES}
-     * — `read_products`, which line-item `variant` needs — would otherwise run
-     * on, and the store's declared scopes can also change after activation.
+     * Every run asks, since the store's declared scopes can change at any
+     * time. Without `read_merchant_managed_fulfillment_orders` Shopify returns
+     * an empty list rather than an error, so an unchecked run would import
+     * nothing and report success.
      *
      * @return list<string> the scopes the token holds
      */
     private function assertImportScopes(): array
     {
         $scopes = $this->fetchAccessScopes();
-        $missingScopes = array_values(array_diff(ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES, $scopes));
+        $missingScopes = array_values(array_diff(self::REQUIRED_SCOPES, $scopes));
 
         if ($missingScopes !== []) {
             throw new DomainException('Reconnect Shopify with the required scopes before importing: '.implode(', ', $missingScopes).'.');
@@ -597,7 +605,20 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
                 throw new RuntimeException('Shopify GraphQL error: '.json_encode($json['errors']));
             }
 
-            Sleep::for(self::throttleWaitSeconds($json))->seconds();
+            $waitSeconds = self::throttleWaitSeconds($json);
+            $cost = $json['extensions']['cost'] ?? [];
+
+            Log::info('Shopify throttled a read; waiting for the bucket to refill', [
+                'shop_domain' => $this->config['shop_domain'] ?? null,
+                'attempt' => $attempt,
+                'wait_seconds' => $waitSeconds,
+                'requested_cost' => $cost['requestedQueryCost'] ?? null,
+                'currently_available' => $cost['throttleStatus']['currentlyAvailable'] ?? null,
+                'maximum_available' => $cost['throttleStatus']['maximumAvailable'] ?? null,
+                'restore_rate' => $cost['throttleStatus']['restoreRate'] ?? null,
+            ]);
+
+            Sleep::for($waitSeconds)->seconds();
         }
     }
 

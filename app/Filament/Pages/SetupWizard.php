@@ -1001,11 +1001,6 @@ class SetupWizard extends Page
                 ?? Channel::firstOrCreate(['name' => 'Shopify'], ['active' => true])->id,
         ];
 
-        /**
-         * Fulfillment-order import stays off until it is activated through
-         * ShopifyFulfillmentOrderActivationService, which verifies the Shopify
-         * scopes and location mappings it depends on. See CreateDataSource.
-         */
         if (! empty($data['shopify_shop_domain'])) {
             $newSettings['shop_domain'] = $data['shopify_shop_domain'];
         }

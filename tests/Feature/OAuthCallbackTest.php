@@ -4,10 +4,12 @@ use App\Enums\Role;
 use App\Http\Integrations\Amazon\Requests\GetMarketplaceParticipations;
 use App\Models\CarrierAccount;
 use App\Models\DataSource;
+use App\Models\Location;
 use App\Models\User;
 use App\Services\OAuthService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Testing\TestResponse;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
 
@@ -22,25 +24,41 @@ beforeEach(function (): void {
     $this->dataSource = createShopifyDataSource();
 });
 
-it('stores tokens on a data source on valid receive with transfer code', function (): void {
-    $user = User::factory()->admin()->create();
-    $nonce = 'valid-nonce-token';
-
+/**
+ * Receive a Shopify connect for the test connection, after which the
+ * controller synchronizes the store's locations from `$locations`.
+ *
+ * @param  list<array{id: string, name: string}>  $locations
+ */
+function receiveShopifyConnect(mixed $test, array $locations): TestResponse
+{
     Http::fake([
         'connect.polybag.app/oauth/claim' => Http::response([
             'provider' => 'shopify',
             'access_token' => 'shpat_live_token',
-            'nonce' => $nonce,
+            'nonce' => 'valid-nonce-token',
             'extra' => ['scope' => 'read_orders,write_fulfillments'],
         ]),
     ]);
 
-    $response = $this->actingAs($user)
+    Saloon::fake([
+        shopifyAccessScopesResponse(),
+        MockResponse::make(['data' => ['locations' => [
+            'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
+            'nodes' => array_map(fn (array $location): array => [...$location, 'isActive' => true, 'address' => null], $locations),
+        ]]]),
+    ]);
+
+    return $test->actingAs(User::factory()->admin()->create())
         ->withSession([
-            'oauth_state.shopify' => $nonce,
-            'oauth_data_source_id.shopify' => $this->dataSource->id,
+            'oauth_state.shopify' => 'valid-nonce-token',
+            'oauth_data_source_id.shopify' => $test->dataSource->id,
         ])
         ->get('/oauth/shopify/receive?transfer_code=abc123');
+}
+
+it('stores tokens on a data source on valid receive with transfer code', function (): void {
+    $response = receiveShopifyConnect($this, [['id' => 'gid://shopify/Location/1', 'name' => 'Main']]);
 
     $response->assertRedirect(route('filament.app.resources.data-sources.edit', $this->dataSource->id));
     $response->assertSessionHas('oauth_notification.status', 'success');
@@ -49,6 +67,47 @@ it('stores tokens on a data source on valid receive with transfer code', functio
     expect($this->dataSource->secret('oauth_access_token'))->toBe('shpat_live_token')
         ->and($this->dataSource->settings['auth_mode'])->toBe('authorization_code')
         ->and($this->dataSource->settings['oauth_connected_at'])->not->toBeNull();
+});
+
+it('maps a store with one location to the only PolyBag location on connect', function (): void {
+    $response = receiveShopifyConnect($this, [['id' => 'gid://shopify/Location/1', 'name' => 'Main']]);
+
+    $default = Location::getDefault();
+    $response->assertSessionHas('oauth_notification.title', "Shopify connected. Main was mapped to {$default->name} automatically.");
+    expect($this->dataSource->locations()->sole()->location_id)->toBe($default->id);
+});
+
+it('names the locations left to map when a store has several', function (): void {
+    $response = receiveShopifyConnect($this, [
+        ['id' => 'gid://shopify/Location/1', 'name' => 'Edmonds'],
+        ['id' => 'gid://shopify/Location/2', 'name' => 'London'],
+    ]);
+
+    $response->assertSessionHas('oauth_notification.status', 'warning');
+    $response->assertSessionHas('oauth_notification.body', 'Not yet mapped or ignored: Edmonds, London.');
+    expect($this->dataSource->locations()->whereNotNull('location_id')->exists())->toBeFalse();
+});
+
+it('keeps the connection when its locations cannot be read on connect', function (): void {
+    Http::fake([
+        'connect.polybag.app/oauth/claim' => Http::response([
+            'provider' => 'shopify',
+            'access_token' => 'shpat_live_token',
+            'nonce' => 'valid-nonce-token',
+        ]),
+    ]);
+    Saloon::fake([shopifyAccessScopesResponse(['read_orders'])]);
+
+    $response = $this->actingAs(User::factory()->admin()->create())
+        ->withSession([
+            'oauth_state.shopify' => 'valid-nonce-token',
+            'oauth_data_source_id.shopify' => $this->dataSource->id,
+        ])
+        ->get('/oauth/shopify/receive?transfer_code=abc123');
+
+    $response->assertSessionHas('oauth_notification.status', 'warning');
+    $response->assertSessionHas('oauth_notification.title', 'Shopify connected, but its locations could not be retrieved.');
+    expect($this->dataSource->refresh()->secret('oauth_access_token'))->toBe('shpat_live_token');
 });
 
 it('forbids non-admin users from receiving oauth callbacks', function (): void {

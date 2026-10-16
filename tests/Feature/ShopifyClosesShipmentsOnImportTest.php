@@ -219,7 +219,6 @@ function runReconcilingImport(DataSource $dataSource, array $feed, array|MockRes
         'shop_domain' => 'test-shop.myshopify.com',
         'client_id' => 'test-client-id',
         'client_secret' => 'test-client-secret',
-        'fulfillment_order_import_enabled' => true,
     ]), $dataSource)->import();
 
     return ['result' => $result, 'lookups' => $lookups];

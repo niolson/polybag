@@ -3,7 +3,6 @@
 use App\Exceptions\PermanentExportException;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Services\ShipmentImport\Sources\ShopifySource;
-use App\Services\ShopifyFulfillmentOrderActivationService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Faking\MockResponse;
@@ -125,24 +124,15 @@ it('throws when channel name is not configured', function (): void {
     $source->validateConfiguration();
 })->throws(InvalidArgumentException::class, 'channel name');
 
-it('blocks shipment imports until fulfillment-order import is activated', function (): void {
-    $source = new ShopifySource(shopifyConfig());
-
-    expect(fn (): Collection => $source->fetchShipments())
-        ->toThrow(DomainException::class, 'activate fulfillment-order imports');
-
-    Saloon::assertNothingSent();
-});
-
 it('refuses an import when the token lacks read_products, before fetching any fulfillment order', function (): void {
     Saloon::fake([
         GraphQL::class => shopifyAccessScopesResponse(array_values(array_diff(
-            ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES,
+            ShopifySource::REQUIRED_SCOPES,
             ['read_products'],
         ))),
     ]);
 
-    $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
+    $source = new ShopifySource(shopifyConfig());
 
     expect(fn (): Collection => $source->fetchShipments())
         ->toThrow(DomainException::class, 'Reconnect Shopify with the required scopes before importing: read_products.');
@@ -155,7 +145,7 @@ it('maps shopify fulfillment order to shipment data', function (): void {
         GraphQL::class => answeringShopifyScopes(mockShopifyFulfillmentOrders([shopifyFulfillmentOrderNode()])),
     ]);
 
-    $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
+    $source = new ShopifySource(shopifyConfig());
     $shipments = $source->fetchShipments();
 
     expect($shipments)->toHaveCount(1);
@@ -214,7 +204,7 @@ it('maps fulfillment orders as location-aware shipments', function (): void {
         ])),
     ]);
 
-    $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
+    $source = new ShopifySource(shopifyConfig());
     $shipments = $source->fetchShipments();
     $shipment = $shipments->sole();
 
@@ -261,7 +251,7 @@ it('paginates fulfillment order line items and excludes non-shipping work', func
         ),
     ]);
 
-    $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
+    $source = new ShopifySource(shopifyConfig());
     $source->fetchShipments();
 
     expect($source->fetchShipmentItems('gid://shopify/FulfillmentOrder/8001')->pluck('sku')->all())
@@ -280,7 +270,7 @@ it('handles fulfillment-order cursor pagination', function (): void {
         ),
     ]);
 
-    $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
+    $source = new ShopifySource(shopifyConfig());
     $shipments = $source->fetchShipments();
 
     expect($shipments)->toHaveCount(2);
@@ -323,7 +313,7 @@ it('maps line items using remaining quantity', function (): void {
         GraphQL::class => answeringShopifyScopes(mockShopifyFulfillmentOrders([$fulfillmentOrder])),
     ]);
 
-    $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
+    $source = new ShopifySource(shopifyConfig());
     $source->fetchShipments();
 
     $items = $source->fetchShipmentItems('gid://shopify/FulfillmentOrder/7001');
@@ -337,7 +327,7 @@ it('maps line items using remaining quantity', function (): void {
 });
 
 it('returns empty collection for unknown shipment reference', function (): void {
-    $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
+    $source = new ShopifySource(shopifyConfig());
 
     $items = $source->fetchShipmentItems('#9999');
 
@@ -353,7 +343,7 @@ it('filters fulfillment orders to OPEN and IN_PROGRESS only', function (): void 
         ])),
     ]);
 
-    $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
+    $source = new ShopifySource(shopifyConfig());
     $shipments = $source->fetchShipments();
 
     expect($shipments->pluck('source_record_id')->all())->toBe([
@@ -443,7 +433,7 @@ it('throws on shopify graphql errors during fetch', function (): void {
         ])),
     ]);
 
-    $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
+    $source = new ShopifySource(shopifyConfig());
     $source->fetchShipments();
 })->throws(RuntimeException::class, 'Throttled');
 
@@ -543,7 +533,7 @@ it('prefers the order shipping address province code over the destination provin
         ])])),
     ]);
 
-    $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
+    $source = new ShopifySource(shopifyConfig());
 
     expect($source->fetchShipments()->first()['state_or_province'])->toBe('AE');
 });
@@ -571,7 +561,7 @@ it('keeps the destination province when the fulfillment order ships somewhere el
         ])])),
     ]);
 
-    $source = new ShopifySource(shopifyConfig(['fulfillment_order_import_enabled' => true]));
+    $source = new ShopifySource(shopifyConfig());
 
     expect($source->fetchShipments()->first()['state_or_province'])->toBe('OR');
 });

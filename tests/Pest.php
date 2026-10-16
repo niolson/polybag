@@ -22,7 +22,6 @@ use App\Models\ShippingMethod;
 use App\Models\ShippingMethodPostageSource;
 use App\Models\ShippingOffer;
 use App\Services\ShipmentImport\Sources\ShopifySource;
-use App\Services\ShopifyFulfillmentOrderActivationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use JsonSchema\Validator;
 use PHPUnit\Framework\Assert;
@@ -469,7 +468,7 @@ function fulfillmentStates(array $orders, array $nextPage = []): array
  */
 function shopifyAccessScopesResponse(?array $scopes = null): MockResponse
 {
-    $scopes ??= ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES;
+    $scopes ??= ShopifySource::REQUIRED_SCOPES;
 
     return MockResponse::make([
         'data' => ['currentAppInstallation' => [

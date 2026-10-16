@@ -18,7 +18,6 @@ use App\Services\ShipmentImport\ImportResult;
 use App\Services\ShipmentImport\PackageExportService;
 use App\Services\ShipmentImport\ShipmentImportService;
 use App\Services\ShipmentImport\Sources\ShopifySource;
-use App\Services\ShopifyFulfillmentOrderActivationService;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
@@ -126,33 +125,11 @@ beforeEach(function (): void {
     ]);
 });
 
-it('reports an actionable error without contacting Shopify before fulfillment-order activation', function (): void {
-    $source = new ShopifySource([
-        'source_type' => ShopifySource::class,
-        'enabled' => true,
-        'channel_name' => 'Shopify',
-        'shop_domain' => 'test-shop.myshopify.com',
-        'client_id' => 'test-client-id',
-        'client_secret' => 'test-client-secret',
-        'shipping_method' => null,
-        'notify_customer' => false,
-        'export' => ['enabled' => false, 'field_mapping' => []],
-    ]);
-
-    $result = ShipmentImportService::forSource($source, $this->dataSource)->import();
-
-    expect($result->shipmentsCreated)->toBe(0)
-        ->and($result->errors)->toHaveCount(1)
-        ->and($result->errors[0])->toContain('activate fulfillment-order imports')
-        ->and(Shipment::count())->toBe(0);
-    Saloon::assertNothingSent();
-});
-
 it('fails an import on an active connection whose token lacks read_products, writing no shipments', function (): void {
     mapShopifyLocation($this->dataSource);
     Saloon::fake([
         GraphQL::class => shopifyAccessScopesResponse(array_values(array_diff(
-            ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES,
+            ShopifySource::REQUIRED_SCOPES,
             ['read_products'],
         ))),
     ]);
@@ -162,7 +139,6 @@ it('fails an import on an active connection whose token lacks read_products, wri
         'shop_domain' => 'test-shop.myshopify.com',
         'client_id' => 'test-client-id',
         'client_secret' => 'test-client-secret',
-        'fulfillment_order_import_enabled' => true,
     ]), $this->dataSource)->import();
 
     expect($result->shipmentsCreated)->toBe(0)
@@ -204,7 +180,6 @@ it('imports mapped fulfillment orders and skips only unmapped locations', functi
         'shop_domain' => 'test-shop.myshopify.com',
         'client_id' => 'test-client-id',
         'client_secret' => 'test-client-secret',
-        'fulfillment_order_import_enabled' => true,
         'shipping_method' => null,
     ]);
 
@@ -212,7 +187,7 @@ it('imports mapped fulfillment orders and skips only unmapped locations', functi
 
     expect($result->shipmentsCreated)->toBe(2)
         ->and($result->shipmentsSkipped)->toBe(1)
-        ->and($result->errors)->toHaveCount(1);
+        ->and($result->errors)->toBe(['Source location Warehouse 2 is not mapped to an active PolyBag location.']);
     $shipment = Shipment::where('source_record_id', 'gid://shopify/FulfillmentOrder/1001')->firstOrFail();
     expect($shipment->location_id)->toBe($location->id)
         ->and($shipment->data_source_location_id)->not->toBeNull()
@@ -241,15 +216,11 @@ it('updates a fulfillment order reassignment before packing and reports a confli
         'external_id' => 'gid://shopify/Location/2',
         'location_id' => $secondLocation,
     ]);
-    $settings = $this->dataSource->settings;
-    $settings['authoritative_shipment_items'] = true;
-    $this->dataSource->update(['settings' => $settings]);
     $sourceConfig = [
         'channel_name' => 'Shopify',
         'shop_domain' => 'test-shop.myshopify.com',
         'client_id' => 'test-client-id',
         'client_secret' => 'test-client-secret',
-        'fulfillment_order_import_enabled' => true,
     ];
 
     Saloon::fake([GraphQL::class => answeringShopifyScopes(MockResponse::make(['data' => ['fulfillmentOrders' => [
@@ -807,7 +778,6 @@ it('imports multiple pages of fulfillment orders', function (): void {
         'client_secret' => 'test-client-secret',
         'shipping_method' => null,
         'notify_customer' => false,
-        'fulfillment_order_import_enabled' => true,
         'export' => ['enabled' => false, 'field_mapping' => []],
     ]);
 
@@ -843,7 +813,6 @@ it('deduplicates shopify imports by fulfillment-order id instead of displayed or
         'client_secret' => 'test-client-secret',
         'shipping_method' => null,
         'notify_customer' => false,
-        'fulfillment_order_import_enabled' => true,
         'export' => ['enabled' => false, 'field_mapping' => []],
     ]);
 
@@ -896,7 +865,6 @@ function importFulfillmentOrders(DataSource $dataSource, array $nodes): ImportRe
         'shop_domain' => 'test-shop.myshopify.com',
         'client_id' => 'test-client-id',
         'client_secret' => 'test-client-secret',
-        'fulfillment_order_import_enabled' => true,
     ]), $dataSource)->import();
 }
 

@@ -7,6 +7,7 @@ use App\Enums\PostageSetting;
 use App\Enums\ScheduleInterval;
 use App\Models\Concerns\HasDefaultClient;
 use App\Services\ShipmentImport\Sources\AmazonSource;
+use App\Services\ShipmentImport\Sources\ShopifySource;
 use Database\Factories\DataSourceFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -183,6 +184,21 @@ class DataSource extends Model
         return $this->source_type === AmazonSource::class;
     }
 
+    public function isShopify(): bool
+    {
+        return $this->source_type === ShopifySource::class;
+    }
+
+    /**
+     * Whether this Shopify connection holds something Shopify will accept:
+     * an OAuth token, or its own app's client ID and secret.
+     */
+    public function hasShopifyCredentials(): bool
+    {
+        return filled($this->secret('oauth_access_token'))
+            || (filled($this->secret('client_id')) && filled($this->secret('client_secret')));
+    }
+
     /**
      * The seller account and marketplace an Amazon import reads, for telling
      * whether what it has read so far (`import_updated_through`,
@@ -219,14 +235,14 @@ class DataSource extends Model
 
     /**
      * Whether a re-import removes the lines the source no longer sends, while
-     * the Shipment has no Package. Shopify turns it on when fulfillment-order
-     * import is activated; Amazon always has it, since its import sends each
-     * line's ordered less fulfilled and drops one that reaches zero
-     * (`order-reconciliation/07`).
+     * the Shipment has no Package. Shopify and Amazon always do: a Shopify
+     * fulfillment order and an Amazon order (its ordered less fulfilled, a
+     * line that reaches zero dropped — `order-reconciliation/07`) each send
+     * every line still to ship.
      */
     public function hasAuthoritativeShipmentItems(): bool
     {
-        return $this->isAmazon() || (bool) ($this->settings['authoritative_shipment_items'] ?? false);
+        return $this->isAmazon() || $this->isShopify();
     }
 
     /**

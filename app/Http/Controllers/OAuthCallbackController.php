@@ -8,12 +8,16 @@ use App\Enums\Role;
 use App\Models\CarrierAccount;
 use App\Models\DataSource;
 use App\Services\OAuthService;
+use App\Services\ShopifyLocationSynchronizer;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 
 class OAuthCallbackController extends Controller
 {
-    public function __construct(private readonly OAuthService $oauthService) {}
+    public function __construct(
+        private readonly OAuthService $oauthService,
+        private readonly ShopifyLocationSynchronizer $locationSynchronizer,
+    ) {}
 
     /**
      * Handle the broker's redirect back with a transfer code.
@@ -72,7 +76,9 @@ class OAuthCallbackController extends Controller
         try {
             if ($importSource) {
                 $discoveryResult = $this->oauthService->handleReceiveForDataSource($provider, $transferCode, $importSource);
-                $notification = $this->dataSourceNotification($provider, $discoveryResult);
+                $notification = $provider === 'shopify'
+                    ? $this->synchronizeShopifyLocations($importSource)
+                    : $this->dataSourceNotification($provider, $discoveryResult);
 
                 return redirect()
                     ->route('filament.app.resources.data-sources.edit', $importSource->id)
@@ -130,6 +136,60 @@ class OAuthCallbackController extends Controller
             'fedex' => 'FedEx',
             default => ucfirst($provider),
         };
+    }
+
+    /**
+     * Read the store's locations as soon as it is connected, so a store with
+     * one location and a PolyBag with one is ready to import without a visit
+     * to the mapping. A failure leaves the connection made and says how to
+     * retry.
+     *
+     * @return array{status: string, title: string, body?: string}
+     */
+    private function synchronizeShopifyLocations(DataSource $dataSource): array
+    {
+        try {
+            $result = $this->locationSynchronizer->synchronize($dataSource);
+        } catch (\Throwable $e) {
+            logger()->warning('Shopify location sync after connect failed', [
+                'data_source_id' => $dataSource->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'status' => 'warning',
+                'title' => 'Shopify connected, but its locations could not be retrieved.',
+                'body' => $e->getMessage().' Use Sync Shopify Locations to try again.',
+            ];
+        }
+
+        $unmapped = $dataSource->locations()
+            ->where('is_active', true)
+            ->whereNull('location_id')
+            ->whereNull('ignored_at')
+            ->pluck('name');
+
+        if ($unmapped->isNotEmpty()) {
+            return [
+                'status' => 'warning',
+                'title' => 'Shopify connected. Map its locations before importing.',
+                'body' => 'Not yet mapped or ignored: '.$unmapped->implode(', ').'.',
+            ];
+        }
+
+        if ($result['auto_mapped'] > 0) {
+            $mapped = $dataSource->locations()->with('location')->where('is_active', true)->whereNotNull('location_id')->first();
+
+            return [
+                'status' => 'success',
+                'title' => "Shopify connected. {$mapped?->name} was mapped to {$mapped?->location?->name} automatically.",
+            ];
+        }
+
+        return [
+            'status' => 'success',
+            'title' => 'Shopify connected successfully.',
+        ];
     }
 
     /** @return array{status: string, title: string, body?: string} */

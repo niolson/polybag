@@ -89,7 +89,7 @@ describe('item writes', function (): void {
 
 describe('imports', function (): void {
     beforeEach(function (): void {
-        $this->source = DataSource::factory()->create(['settings' => ['authoritative_shipment_items' => true]]);
+        $this->source = DataSource::factory()->shopify()->create();
         $this->shipment = Shipment::factory()->create(['data_source_id' => $this->source]);
         $this->kept = Product::factory()->create(['sku' => 'KEPT']);
         $this->dropped = Product::factory()->create(['sku' => 'DROPPED']);

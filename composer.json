@@ -64,7 +64,7 @@
         ],
         "dev": [
             "Composer\\Config::disableProcessTimeout",
-            "npx concurrently --kill-others-on-fail -c \"#93c5fd,#c4b5fd,#a5b4fc,#fdba74,#86efac\" \"php artisan serve\" \"php artisan queue:listen --queue=default,low --tries=1\" \"php artisan queue:listen imports --queue=imports --tries=1\" \"npm run dev\" \"php artisan schedule:work\" --names='server,queue,import-queue,vite,scheduler'"
+            "npx concurrently --kill-others-on-fail -c \"#93c5fd,#c4b5fd,#a5b4fc,#fdba74,#86efac\" \"php artisan serve\" \"php artisan queue:listen --queue=default,low --tries=1\" \"php artisan queue:listen imports --queue=imports --tries=1 --timeout=1800\" \"npm run dev\" \"php artisan schedule:work\" --names='server,queue,import-queue,vite,scheduler'"
         ],
         "test": [
             "@php artisan config:clear --ansi",

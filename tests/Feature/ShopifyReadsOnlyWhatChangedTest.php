@@ -12,9 +12,10 @@ use App\Models\Shipment;
 use App\Services\ShipmentImport\ImportResult;
 use App\Services\ShipmentImport\ShipmentImportService;
 use App\Services\ShipmentImport\Sources\ShopifySource;
-use App\Services\ShopifyFulfillmentOrderActivationService;
 use Carbon\CarbonImmutable;
+use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Sleep;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\PendingRequest;
@@ -35,7 +36,6 @@ beforeEach(function (): void {
         'settings' => [
             'channel_name' => 'Shopify',
             'shop_domain' => 'test-shop.myshopify.com',
-            'fulfillment_order_import_enabled' => true,
         ],
         'secret_settings' => ['client_id' => 'test-client-id', 'client_secret' => 'test-client-secret'],
     ]);
@@ -166,7 +166,7 @@ function runChangesImport(DataSource $dataSource, array $feed = [], array $chang
 {
     $requests = [];
     $scopes = [
-        ...ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES,
+        ...ShopifySource::REQUIRED_SCOPES,
         ...($readAllOrders ? [ShopifySource::ALL_ORDERS_SCOPE] : []),
     ];
 
@@ -537,6 +537,10 @@ describe('where it read through', function (): void {
 describe('a read Shopify throttles', function (): void {
     it('waits for the bucket to refill and carries on in the same run', function (): void {
         Sleep::fake();
+        $logged = [];
+        Log::listen(function (MessageLogged $message) use (&$logged): void {
+            $logged[] = $message;
+        });
 
         $run = runChangesImport($this->dataSource, feed: [changesNode('600')], responses: ['FulfillmentOrders' => [
             MockResponse::make([
@@ -553,6 +557,15 @@ describe('a read Shopify throttles', function (): void {
             ->and(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrders', 'FulfillmentOrders']);
 
         Sleep::assertSequence([Sleep::for(5)->seconds()]);
+
+        $throttled = collect($logged)->where('message', 'Shopify throttled a read; waiting for the bucket to refill');
+        expect($throttled)->toHaveCount(1)
+            ->and($throttled->sole()->context)->toMatchArray([
+                'shop_domain' => 'test-shop.myshopify.com',
+                'wait_seconds' => 5,
+                'currently_available' => 118,
+                'maximum_available' => 2000,
+            ]);
     });
 
     it('gives up after repeated throttling, recording nothing', function (): void {
