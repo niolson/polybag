@@ -15,7 +15,10 @@ use Filament\Tables;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use UnitEnum;
 
 class UnmappedChannelReferences extends Page implements HasTable
@@ -24,13 +27,13 @@ class UnmappedChannelReferences extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-link';
 
-    protected static ?string $navigationLabel = 'Map Channel References';
+    protected static ?string $navigationLabel = 'Map Channel Refs';
 
     protected static ?string $title = 'Map Channel References';
 
     protected static UnitEnum|string|null $navigationGroup = 'Integrations';
 
-    protected static ?int $navigationSort = 91;
+    protected static ?int $navigationSort = 4;
 
     protected string $view = 'filament.pages.unmapped-channel-references';
 
@@ -39,19 +42,41 @@ class UnmappedChannelReferences extends Page implements HasTable
         return auth()->user()->role->isAtLeast(Role::Manager);
     }
 
+    public static function getNavigationBadge(): ?string
+    {
+        $count = Cache::remember('nav:unmapped_channel_references', 60, fn (): int => DB::query()
+            ->fromSub(static::unmappedReferences(), 'unmapped')
+            ->count());
+
+        return $count > 0 ? number_format($count) : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
+    }
+
+    /**
+     * One row per unmapped reference, as the table lists them.
+     *
+     * @return Builder<Shipment>
+     */
+    public static function unmappedReferences(): Builder
+    {
+        return Shipment::query()
+            ->selectRaw('MIN(id) as id, channel_reference, COUNT(*) as shipment_count')
+            ->whereNotNull('channel_reference')
+            ->where('channel_reference', '!=', '')
+            ->whereNull('channel_id')
+            ->whereNotIn('channel_reference', ChannelAlias::query()->select('reference'))
+            ->groupBy('channel_reference');
+    }
+
     public function table(Table $table): Table
     {
         return $table
             ->emptyStateHeading('No unmapped references')
-            ->query(
-                Shipment::query()
-                    ->selectRaw('MIN(id) as id, channel_reference, COUNT(*) as shipment_count')
-                    ->whereNotNull('channel_reference')
-                    ->where('channel_reference', '!=', '')
-                    ->whereNull('channel_id')
-                    ->whereNotIn('channel_reference', ChannelAlias::query()->select('reference'))
-                    ->groupBy('channel_reference')
-            )
+            ->query(static::unmappedReferences())
             ->defaultSort('channel_reference')
             ->defaultKeySort(false)
             ->columns([

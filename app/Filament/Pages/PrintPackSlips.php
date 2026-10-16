@@ -51,9 +51,9 @@ class PrintPackSlips extends Page implements HasTable
 
     protected static ?string $navigationLabel = 'Print Pack Slips';
 
-    protected static UnitEnum|string|null $navigationGroup = 'Operations';
+    protected static UnitEnum|string|null $navigationGroup = 'Picking';
 
-    protected static ?int $navigationSort = 4;
+    protected static ?int $navigationSort = 2;
 
     protected static ?string $slug = 'print-pack-slips';
 

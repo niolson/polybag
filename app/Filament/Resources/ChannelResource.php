@@ -22,6 +22,8 @@ class ChannelResource extends Resource
 
     protected static \UnitEnum|string|null $navigationGroup = 'Integrations';
 
+    protected static ?int $navigationSort = 2;
+
     public static function form(Schema $form): Schema
     {
         return $form

@@ -27,7 +27,7 @@
 [CmdletBinding()]
 param(
     # Defaults to the placeholder below; the app bakes the real URL in when the
-    # script is downloaded from Device Settings. Pass -Url to override.
+    # script is downloaded from Workstation Settings. Pass -Url to override.
     [string]$Url = "__POLYBAG_URL__",
 
     [string]$QzDir = "C:\Program Files\QZ Tray",
@@ -48,7 +48,7 @@ function Write-Err  { param($m) Write-Host "[ERROR] $m" -ForegroundColor Red }
 # against that token would itself be rewritten and always match.
 if ($Url -notmatch '^https?://') {
     Write-Err "No PolyBag URL set. Run with -Url https://your-site.example.com"
-    Write-Err "(or download this script from the app's Device Settings page)."
+    Write-Err "(or download this script from the app's Workstation Settings page)."
     exit 1
 }
 

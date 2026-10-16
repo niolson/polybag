@@ -691,7 +691,7 @@ class SetupWizard extends Page
                             $items[] = "<li><a href=\"{$url}\" class=\"text-primary-600 hover:underline font-medium\">Finish configuring {$sourceName}</a> — credentials, queries, and connection test</li>";
                         }
 
-                        $items[] = '<li class="text-gray-500">Configure your printer &amp; scale in <strong>Device Settings</strong> on each workstation</li>';
+                        $items[] = '<li class="text-gray-500">Configure your printer &amp; scale in <strong>Workstation Settings</strong> on each workstation</li>';
 
                         return new HtmlString('<ul class="list-disc ml-4 space-y-1">'.implode('', $items).'</ul>');
                     }),
@@ -1085,7 +1085,7 @@ class SetupWizard extends Page
             ->title('Setup complete!')
             ->body($hasIncomplete
                 ? 'Activate your carrier accounts to start shipping.'
-                : 'Configure your printer and scale on the Device Settings page when ready.')
+                : 'Configure your printer and scale on the Workstation Settings page when ready.')
             ->send();
 
         $this->redirect($hasIncomplete ? CarrierAccountResource::getUrl('index') : '/');

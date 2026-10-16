@@ -24,7 +24,7 @@
         const statusButton = document.getElementById('qz-status-button');
 
         // Show status during initial connection. `button` is an in-page action,
-        // `{ label, onClick }`, shown instead of the Device Settings link.
+        // `{ label, onClick }`, shown instead of the Workstation Settings link.
         function showStatus(message, type = 'info', actionLabel = null, autoHide = type === 'success', button = null) {
             statusBanner.classList.remove(
                 'hidden', 'border-green-200', 'border-red-200', 'border-amber-200', 'border-gray-200',
@@ -97,7 +97,7 @@
             }
         }
 
-        // Printer names come from this browser's Device Settings — see
+        // Printer names come from this browser's Workstation Settings — see
         // the printer-settings-script component for which label printer a format goes to.
         function getReportPrinter() {
             return PrinterSettings.documentPrinter();
@@ -194,7 +194,7 @@
             const printer = PrinterSettings.imageLabelPrinter();
 
             if (!printer) {
-                const error = new Error('No PDF/image label printer is configured. Go to Device Settings.');
+                const error = new Error('No PDF/image label printer is configured. Go to Workstation Settings.');
                 error.isConfiguration = true;
                 throw error;
             }
@@ -223,8 +223,8 @@
 
             if (!printer) {
                 const message = format === 'zpl'
-                    ? 'This label is ZPL but no raw label printer is configured. Go to Device Settings.'
-                    : 'This label is an image but no PDF/image label printer is configured. Go to Device Settings.';
+                    ? 'This label is ZPL but no raw label printer is configured. Go to Workstation Settings.'
+                    : 'This label is an image but no PDF/image label printer is configured. Go to Workstation Settings.';
                 showStatus(message, 'error');
                 throw new Error(message);
             }
@@ -233,7 +233,7 @@
                 const configDpi = PrinterSettings.labelDpi();
 
                 if (dpi && dpi !== configDpi) {
-                    showStatus(`This label was generated for ${dpi} DPI but your raw label printer is configured for ${configDpi} DPI. Go to Device Settings to change.`, 'error');
+                    showStatus(`This label was generated for ${dpi} DPI but your raw label printer is configured for ${configDpi} DPI. Go to Workstation Settings to change.`, 'error');
                     throw new Error(`Label DPI ${dpi} does not match printer DPI ${configDpi}`);
                 }
             }
@@ -283,7 +283,7 @@
                 hideStatus();
             } catch (error) {
                 console.error('Print error:', error);
-                showStatus(`The label did not print${error.message ? `: ${error.message}` : ''}. Check the printer in Device Settings, then try again.`, 'error');
+                showStatus(`The label did not print${error.message ? `: ${error.message}` : ''}. Check the printer in Workstation Settings, then try again.`, 'error');
                 throw error;
             }
         }
@@ -297,7 +297,7 @@
             const printer = getReportPrinter();
 
             if (!printer) {
-                showStatus('No document printer configured. Go to Device Settings.', 'error');
+                showStatus('No document printer configured. Go to Workstation Settings.', 'error');
                 return false;
             }
 
@@ -330,7 +330,7 @@
                 return true;
             } catch (error) {
                 console.error('Report print error:', error);
-                showStatus(`The document did not print${error.message ? `: ${error.message}` : ''}. Check the document printer in Device Settings, then try again.`, 'error');
+                showStatus(`The document did not print${error.message ? `: ${error.message}` : ''}. Check the document printer in Workstation Settings, then try again.`, 'error');
 
                 return false;
             }

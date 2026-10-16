@@ -18,7 +18,7 @@
                 <div class="mt-3 space-y-1 text-sm text-amber-800 dark:text-amber-200">
                     <p class="font-medium">To test label printing:</p>
                     <ol class="ml-4 list-decimal space-y-1">
-                        <li>Go to <strong>Devices → Device Settings</strong>, install the print bridge on this workstation, and run the trust installer.</li>
+                        <li>Open <strong>Workstation Settings</strong> from the user menu (top right), install the print bridge on this workstation, and run the trust installer.</li>
                         <li>Select your label printer and format, then ship a package to print a test label.</li>
                     </ol>
                 </div>

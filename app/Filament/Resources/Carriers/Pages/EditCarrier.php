@@ -57,7 +57,7 @@ class EditCarrier extends EditRecord
                     if ($mapping instanceof SourceServiceMapping) {
                         Notification::make()
                             ->title('Cannot delete carrier')
-                            ->body("A {$mapping->source_kind->label()} service is mapped to one of this carrier's services. Unmap it on Map Carrier Services, or deactivate the carrier instead.")
+                            ->body("A {$mapping->source_kind->label()} service is mapped to one of this carrier's services. Unmap it on Map Amazon Services, or deactivate the carrier instead.")
                             ->danger()
                             ->send();
 

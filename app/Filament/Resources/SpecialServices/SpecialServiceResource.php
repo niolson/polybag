@@ -7,7 +7,6 @@ use App\Models\SpecialService;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
-use Filament\Support\Icons\Heroicon;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
@@ -16,9 +15,11 @@ class SpecialServiceResource extends Resource
 {
     protected static ?string $model = SpecialService::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBolt;
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-plus-circle';
 
-    protected static \UnitEnum|string|null $navigationGroup = 'Shipping Config';
+    protected static \UnitEnum|string|null $navigationGroup = 'Carriers';
+
+    protected static ?int $navigationSort = 4;
 
     protected static ?string $navigationLabel = 'Special Services';
 

@@ -7,9 +7,11 @@ use App\Filament\AvatarProviders\LocalAvatarProvider;
 use App\Filament\GlobalSearch\ScanCodeGlobalSearchProvider;
 use App\Filament\Pages\Auth\EditProfile;
 use App\Filament\Pages\Auth\Login;
+use App\Filament\Pages\DeviceSettings;
 use App\Http\Middleware\EnsurePasswordNotExpired;
 use App\Http\Middleware\EnsureSetupComplete;
 use App\Services\SettingsService;
+use Filament\Actions\Action;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Enums\ThemeMode;
 use Filament\FontProviders\LocalFontProvider;
@@ -97,8 +99,14 @@ class AppPanelProvider extends PanelProvider
             ->pages([
                 Dashboard::class,
             ])
-            ->navigationGroups(['Ship', 'Operations', 'Devices', 'Reports', 'Shipping Config', 'Integrations', 'Admin'])
+            ->navigationGroups(['Ship', 'Fulfillment', 'Picking', 'Reports', 'Shipping Setup', 'Carriers', 'Integrations', 'Admin'])
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\Filament\Widgets')
+            ->userMenuItems([
+                Action::make('workstationSettings')
+                    ->label('Workstation Settings')
+                    ->icon('heroicon-o-computer-desktop')
+                    ->url(fn (): string => DeviceSettings::getUrl()),
+            ])
             ->databaseNotifications()
             ->widgets([])
             ->renderHook(

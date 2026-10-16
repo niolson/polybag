@@ -179,7 +179,7 @@
                     type: 'HEX'
                 });
             } else {
-                throw new Error('No scale is connected. Connect one in Device Settings.');
+                throw new Error('No scale is connected. Connect one in Workstation Settings.');
             }
 
             return true;
@@ -211,7 +211,7 @@
                 const device = devices.find(d => d.vendorId === vendorInt && d.productId === productInt);
 
                 if (!device) {
-                    throw new Error('Scale not found. Re-pair the scale in Device Settings.');
+                    throw new Error('Scale not found. Re-pair the scale in Workstation Settings.');
                 }
 
                 if (!device.opened) {
@@ -222,7 +222,7 @@
             } else if (this.backend === 'qztray') {
                 await qz.hid.claimDevice(deviceInfo);
             } else {
-                throw new Error('No scale is connected. Connect one in Device Settings.');
+                throw new Error('No scale is connected. Connect one in Workstation Settings.');
             }
         },
 
@@ -258,7 +258,7 @@
                     interval: 50
                 });
             } else {
-                throw new Error('No scale is connected. Connect one in Device Settings.');
+                throw new Error('No scale is connected. Connect one in Workstation Settings.');
             }
         },
 

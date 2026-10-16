@@ -43,7 +43,7 @@ class AuditLogResource extends Resource
 
     protected static \UnitEnum|string|null $navigationGroup = 'Admin';
 
-    protected static ?int $navigationSort = 10;
+    protected static ?int $navigationSort = 5;
 
     public static function canAccess(): bool
     {

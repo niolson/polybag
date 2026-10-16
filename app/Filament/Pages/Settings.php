@@ -59,7 +59,7 @@ class Settings extends Page
 
     protected static UnitEnum|string|null $navigationGroup = 'Admin';
 
-    protected static ?int $navigationSort = 99;
+    protected static ?int $navigationSort = 4;
 
     protected string $view = 'filament.pages.settings';
 

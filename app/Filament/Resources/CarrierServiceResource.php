@@ -20,9 +20,11 @@ class CarrierServiceResource extends Resource
 {
     protected static ?string $model = CarrierService::class;
 
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-bolt';
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-list-bullet';
 
-    protected static \UnitEnum|string|null $navigationGroup = 'Shipping Config';
+    protected static \UnitEnum|string|null $navigationGroup = 'Carriers';
+
+    protected static ?int $navigationSort = 3;
 
     public static function form(Schema $form): Schema
     {

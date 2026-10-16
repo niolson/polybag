@@ -24,6 +24,8 @@ class ClientResource extends Resource
 
     protected static \UnitEnum|string|null $navigationGroup = 'Admin';
 
+    protected static ?int $navigationSort = 3;
+
     protected static ?string $recordTitleAttribute = 'name';
 
     public static function canAccess(): bool
