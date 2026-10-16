@@ -34,6 +34,9 @@ data in sandbox mode.
 | Pick Batches, Generate Pick Batch, Print Pack Slips | 2026-10-16 — viewed only; no pick batch generated and nothing printed |
 | Reports | 2026-10-16 — Rate Comparison, Volume, Packages by User, Prepaid Duties, Packing Validation; Client Billing not seen (multi-client is off on this data) |
 | Shipping Methods, Box Sizes, Products | 2026-10-16 — lists and one edit form each; nothing saved |
+| Carrier Accounts, Carriers, Carrier Services, Special Services | 2026-10-16 — lists and the USPS account form; nothing saved, no connection tested |
+| Connections, Channels, mapping pages | 2026-10-16 — lists, one Shopify connection's form, and the three mapping pages (all empty here); no import run |
+| Users, Audit Log, App Settings, Dev Settings | 2026-10-16 — lists, one user form, one audit entry, the General and Shipping settings tabs, Dev Settings; nothing saved |
 
 ## Dashboard
 
@@ -901,8 +904,11 @@ text under it says they "are not yet wired to carriers". Choosing one changes no
 the label or the rates, so a product marked dry ice ships as if it were not. That is a
 compliance risk, not just a cosmetic one.
 
-Fix: hide the two options until a carrier supports them, or refuse purchase for a package
-holding one, with a message.
+Special Services lists both as **inactive**, so the product form offers two classes the
+rest of the app has switched off.
+
+Fix: offer only the classes whose special service is active, or refuse purchase for a
+package holding one, with a message.
 
 ### PR2 — The list leaves out what matters for shipping (low)
 
@@ -916,3 +922,183 @@ badge.
 ### PR3 — Small form wording (low)
 
 "Sku" should be "SKU"; "Weight in pounds" repeats the field's "lbs" suffix.
+
+## Carrier Accounts
+
+### CA1 — Working accounts say "Needs Setup" (medium)
+
+UPS and USPS show **Needs Setup** in the list, and the USPS account says "OAuth Status: Not
+connected", on the same day USPS bought four labels and UPS returned rates.
+`CarrierAccount::connectionStatus()` counts a USPS or UPS account as Connected only when it
+holds its own OAuth token; these accounts run on the install's global credentials, which
+the status ignores. The Setup Wizard uses the same check, so it also nags about them. On
+a demo, two of three carriers look broken.
+
+Fix: a third state, "Using shared credentials", when the account has no token of its own
+but the global connection works; keep Needs Setup for an account that cannot rate.
+
+### CA2 — The account form points users at a repository path (low)
+
+"Advanced / API App Credentials" says "see docs/self-hosting.md". A user of the app has no
+repository; link to the published guide instead.
+
+## Carriers
+
+### CR1 — Every carrier is active, with or without an account (low)
+
+All six carriers are active, including DHL Express, Amazon Shipping and OnTrac, which
+have no carrier account here. That is what puts six End Shipping Day buttons on End of Day
+(E1) and offers them wherever carriers are listed. The list has no column for accounts.
+
+Fix: an Accounts column; consider seeding carriers without an account as inactive, or
+treating them as such in operational pages.
+
+## Carrier Services
+
+### CS1 — 39 services with no way to narrow them (low)
+
+The list shows the carrier as a logo only, has search but no carrier filter, and does not
+say which shipping methods use each service. Finding "every UPS service in use" takes four
+pages.
+
+Fix: a carrier filter, the carrier name beside the logo, and a "Used by" column.
+
+## Special Services
+
+### SP1 — The list leads with internal codes (low)
+
+The first column is the snake_case code (`lithium_battery_in_equipment`), with the name
+second. "Needs Value" shows a red X for "no", which reads as an error. "Unrestricted"
+under Carrier Services means "no service limit", which for an inactive dry-ice service
+reads as "allowed everywhere". Active is an inline toggle again (BX2).
+
+Fix: name first and code in small text beneath; a gray dash for "no"; "Any service" or
+nothing for inactive rows.
+
+## Connections
+
+### CN1 — Nowhere says whether a connection is importing (medium)
+
+The list's Updated column is when the record was edited, not when it last imported, and
+the connection's own page has no import section at all: no last run, no result, no counts,
+no errors. "Is my store importing?", the first question after connecting one, has no
+answer in the UI.
+
+Fix: a Last Import column (time and result) on the list, and on the connection page the
+last few runs with new, updated and closed counts and any errors.
+
+### CN2 — List and header details (low)
+
+The list says "Driver" (call it Type) and leaves Schedule blank for a connection whose form
+says "Disabled (manual only)". The form's header has five actions, three of them colored
+(Reconnect Shopify in orange, Disconnect Shopify and Delete in red, side by side).
+
+Fix: "Manual" in the Schedule column; Disconnect and Delete into a menu, away from each
+other.
+
+### CN3 — Internal names in the URLs (low)
+
+Connections live at `/data-sources`, Map Amazon Services at `/unmapped-observed-services`,
+Label Batches at `/batch-shipments` (LB3). The release-polish wording pass keeps internal
+names out of the UI; the address bar is part of it, and a URL gets pasted into chats and
+support emails.
+
+## Channels
+
+### CH1 — Nothing says what a Channel is (low)
+
+The page lists names and Active only. It does not say how a Channel differs from a
+Connection (a Connection is the account PolyBag imports from; a Channel is the sales
+channel an order is attributed to), which connection feeds each one, or how many Shipments
+or aliases each has. The data also has look-alike pairs, Amazon and Amazon US, Shopify and
+Shopify Store, plus a Test Channel, which `demo:reset` should not leave behind.
+
+## Mapping pages
+
+### MP1 — The reference pages do not say what they are for (low)
+
+Map Shipping Refs and Map Channel Refs show a table and "No unmapped references", with no
+sentence on what a reference is (the text an order arrived with), where it comes from, or
+what mapping it does (adds an alias, so later orders resolve on their own). Map Amazon
+Services has exactly that kind of description; copy the pattern.
+
+## Across pages
+
+### X1 — Empty states use an X icon (low)
+
+Label Batches, Pick Batches, Prepaid Duties and the mapping pages all show an X in a circle
+over their empty message, which reads as an error rather than "nothing here yet".
+
+Fix: a neutral icon per page (the page's own sidebar icon works), and one line on what
+would appear here and how.
+
+## Users
+
+### AD1 — The list says little about who people are (low)
+
+Email is empty for every user, Auto Ship "no" is a red X (as SP1), and there is no last
+sign-in. The roles, User, Manager and Admin, are not described anywhere on the list or the
+form, so whoever adds a packer has to guess which role packs and which one buys in batches.
+
+Fix: one line per role in the Role select's help text; a Last Sign-In column.
+
+### AD2 — The password help text is wrong on both forms (low)
+
+"Leave empty for SSO-only users (no local password)." On create the field is required, so
+it cannot be left empty; on edit an empty field keeps the current password (it is not
+saved), so leaving it empty does not make anyone SSO-only. The four password rules also show
+as orange "(not met)" before anything is typed.
+
+Fix: on edit, "Leave empty to keep the current password"; show the rules only once typing
+starts.
+
+### AD3 — "Edit User" does not say which user (low)
+
+The Product form's heading names the product; the user form says only "Edit User".
+
+## Audit Log
+
+### AL1 — The log is hard to read (low)
+
+The heading says "Audit Logs" while the sidebar says "Audit Log". Rows name records as
+"Shipment 7286" rather than the reference, with no link. Rows look identical when they are
+not: each void wrote two "Shipment Updated" rows for its Shipment, and only opening one shows
+that it recorded Shopify re-pointing the fulfillment order. The entry itself shows that as
+raw JSON under Metadata, with Old and New Values empty.
+
+Fix: a one-line summary column (from the metadata's reason, or the changed fields); the
+reference with a link; the metadata as labeled fields.
+
+## App Settings
+
+### ST1 — Names and one wrong claim (low)
+
+The heading says "Settings" while the sidebar says "App Settings". The Batch Shipping toggle
+says "admins can select multiple shipments", but Batch Ship is open to Managers too. The
+**Packing Validation** toggle (scan every item) shares its name with the **Packing
+Validation** report (weight mismatches), which is about something else.
+
+### ST2 — Shipping tab text written for another context (low)
+
+The Customs section says "Must be set before a label to an EU country can be bought for
+this client" on an instance-level page with multi-client off. The Google fallback says
+"Billed to PolyBag, not this tenant", which is true only of the hosted service; on a
+self-hosted install there is no PolyBag bill and no tenant.
+
+### ST3 — Demo data: EU Duties Terms is not set (demo prep)
+
+"Not set — EU labels are refused." Any EU order in a demo is refused at purchase until this
+is set, as the release-polish PRD notes under *Demo environment*. Set it in `demo:reset`.
+
+## Dev Settings
+
+### DS1 — The sandbox switch: Amazon left out, and a tooltip that points to the wrong page (low)
+
+Dev Settings exists only in local and testing environments, which is right. But its
+Sandbox Mode text names USPS, FedEx and UPS, while Amazon follows the same setting
+(`AmazonSpApiConnector`). And the Amazon connection's import button, disabled in sandbox,
+says "Disable sandbox mode in App Settings", where there is no such switch; on any
+non-local install the switch is on no page at all.
+
+Fix: name Amazon in the Sandbox Mode text; point the tooltip at the right place, or say
+who can change it.
