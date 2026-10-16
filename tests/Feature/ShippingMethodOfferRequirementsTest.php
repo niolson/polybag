@@ -290,6 +290,57 @@ it('marks OTDR protection on the Ship page, with Amazon\'s reasons, whatever the
     expect($options->rateOptionDescriptions[$lateIndex])->toContain('LATE');
 });
 
+it('shows a rate with no delivery date, or one already past, as no estimate rather than late', function (): void {
+    $package = packageForOrderFrom(DataSource::factory()->shopify()->create());
+    registerRequirementsAdapter([
+        requirementsRate(4.00, null),
+        requirementsRate(5.00, Carbon::parse('-80 days')->toDateString()),
+        requirementsRate(6.00, Carbon::parse('+5 days')->toDateString()),
+    ]);
+
+    $options = app(PackageShippingWorkflow::class)->prepareRates($package);
+    $descriptionFor = fn (float $price): string => $options->rateOptionDescriptions[
+        collect($options->rateOptions)->search(fn (array $rate): bool => $rate['price'] === $price)
+    ];
+
+    expect($descriptionFor(4.00))->toBe('$4.00 — No delivery estimate')
+        ->and($descriptionFor(5.00))->toBe('$5.00 — No delivery estimate')
+        ->and($descriptionFor(6.00))->toEndWith(' — LATE')
+        // An unknown date may yet arrive in time, so not every option misses it.
+        ->and($options->allRatesLate)->toBeFalse();
+});
+
+it('says no option meets the deliver-by date only when every rate is dated and late', function (): void {
+    $package = packageForOrderFrom(DataSource::factory()->shopify()->create());
+    registerRequirementsAdapter([
+        requirementsRate(5.00, Carbon::parse('+4 days')->toDateString()),
+        requirementsRate(6.00, Carbon::parse('+5 days')->toDateString()),
+    ]);
+
+    expect(app(PackageShippingWorkflow::class)->prepareRates($package)->allRatesLate)->toBeTrue();
+});
+
+it('marks nothing late or unestimated for an order with no due-by date', function (): void {
+    $package = packageForOrderFrom(DataSource::factory()->shopify()->create(), deliverBy: null);
+    registerRequirementsAdapter([requirementsRate(4.00, null)]);
+
+    $options = app(PackageShippingWorkflow::class)->prepareRates($package);
+
+    expect($options->rateOptionDescriptions)->toBe([0 => '$4.00'])
+        ->and($options->allRatesLate)->toBeFalse();
+});
+
+it('still skips a rate with no delivery date when the method excludes late rates', function (): void {
+    $package = packageForOrderFrom(DataSource::factory()->shopify()->create());
+    registerRequirementsAdapter([requirementsRate(4.00, null)]);
+
+    $result = autoShipForRequirements($package);
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('No On-Time Rates')
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});
+
 it('saves both requirements from the shipping method form', function (): void {
     $this->actingAs(User::factory()->admin()->create());
     DataSource::factory()->amazon()->create(['active' => true]);

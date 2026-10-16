@@ -216,7 +216,10 @@ readonly class RateResponse
         }
     }
 
-    public function formDescription(): string
+    /**
+     * @param  bool  $showDeliveryDate  False for a date nobody can rely on, such as one already past, so the commitment or transit time is shown instead
+     */
+    public function formDescription(bool $showDeliveryDate = true): string
     {
         // Carriers that expose no rate API (Shopify Shipping) price the label at
         // purchase time; showing "$0.00" would read as a free label.
@@ -228,10 +231,11 @@ readonly class RateResponse
 
         $price = number_format($this->price, 2);
 
-        // Show actual delivery date when available
-        $parsed = $this->parsedDeliveryDate();
+        // Show actual delivery date when available, with the year when it is
+        // not this one, so a date months away does not read as next week.
+        $parsed = $showDeliveryDate ? $this->parsedDeliveryDate() : null;
         if ($parsed) {
-            $formatted = $parsed->format('D, M j');
+            $formatted = $parsed->format($parsed->year === now()->year ? 'D, M j' : 'D, M j, Y');
 
             return '$'.$price.' — Delivers '.$formatted;
         }

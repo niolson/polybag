@@ -377,7 +377,7 @@ class ShipmentResource extends Resource
                     ->color(fn (Shipment $record): ?string => self::flagsMissingMethod($record) ? 'warning' : null),
                 Tables\Columns\TextColumn::make('deliver_by')
                     ->label('Deliver By')
-                    ->date(timezone: Location::timezone())
+                    ->date()
                     ->sortable()
                     ->placeholder('—')
                     ->toggleable(isToggledHiddenByDefault: true),
@@ -688,7 +688,7 @@ class ShipmentResource extends Resource
                             ->money('USD'),
                         TextEntry::make('deliver_by')
                             ->label('Deliver By')
-                            ->date(timezone: Location::timezone())
+                            ->date()
                             ->placeholder('—'),
                         TextEntry::make('created_at')
                             ->dateTime('M j, Y g:i A', timezone: Location::timezone()),
