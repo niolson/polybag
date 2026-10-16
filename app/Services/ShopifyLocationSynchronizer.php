@@ -34,11 +34,10 @@ class ShopifyLocationSynchronizer
          * the app's scopes change in the Shopify Dev Dashboard — and for apps
          * with declared scopes Shopify ignores the scope parameter sent during
          * authorization, so the cached value can be empty or wrong while the
-         * live token is perfectly capable. ShopifyFulfillmentOrderActivationService
-         * checks the same way.
+         * live token is perfectly capable. An import checks the same way.
          */
         $missingScopes = array_values(array_diff(
-            ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES,
+            ShopifySource::REQUIRED_SCOPES,
             $source->fetchAccessScopes(),
         ));
 
@@ -73,19 +72,17 @@ class ShopifyLocationSynchronizer
             ->update(['is_active' => false]);
 
         $autoMapped = 0;
-        if (! $this->settings->get('multi_location_enabled', false) && count($seen) === 1) {
-            $defaultLocationId = Location::getDefault()?->id;
-            if ($defaultLocationId !== null) {
-                $sourceLocation = $dataSource->locations()
-                    ->where('external_id', $seen[0])
-                    ->whereNull('location_id')
-                    ->whereNull('ignored_at')
-                    ->first();
+        $targetLocationId = count($seen) === 1 ? $this->soleLocationId() : null;
+        if ($targetLocationId !== null) {
+            $sourceLocation = $dataSource->locations()
+                ->where('external_id', $seen[0])
+                ->whereNull('location_id')
+                ->whereNull('ignored_at')
+                ->first();
 
-                if ($sourceLocation !== null) {
-                    $sourceLocation->update(['location_id' => $defaultLocationId]);
-                    $autoMapped = 1;
-                }
+            if ($sourceLocation !== null) {
+                $sourceLocation->update(['location_id' => $targetLocationId]);
+                $autoMapped = 1;
             }
         }
 
@@ -94,5 +91,20 @@ class ShopifyLocationSynchronizer
             'deactivated' => $deactivated,
             'auto_mapped' => $autoMapped,
         ];
+    }
+
+    /**
+     * The PolyBag Location a store's only location can only mean: the default
+     * one in single-location mode, otherwise the only active one.
+     */
+    private function soleLocationId(): ?int
+    {
+        if (! $this->settings->get('multi_location_enabled', false)) {
+            return Location::getDefault()?->id;
+        }
+
+        $activeLocationIds = Location::active()->limit(2)->pluck('id');
+
+        return $activeLocationIds->count() === 1 ? $activeLocationIds->first() : null;
     }
 }

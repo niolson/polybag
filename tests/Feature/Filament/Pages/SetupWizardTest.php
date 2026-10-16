@@ -189,10 +189,7 @@ it('creates a shopify DataSource record with the shop domain and an auto-created
     $channel = Channel::where('name', 'Shopify')->firstOrFail();
 
     expect($record->settings['shop_domain'])->toBe('acme.myshopify.com')
-        ->and($record->settings['channel_name'])->toBe($channel->id)
-        // Activation is guarded and happens later; see ShopifyFulfillmentOrderActivationService.
-        ->and($record->settings)->not->toHaveKey('fulfillment_order_import_enabled')
-        ->and($record->settings)->not->toHaveKey('authoritative_shipment_items');
+        ->and($record->settings['channel_name'])->toBe($channel->id);
 });
 
 it('accepts only a myshopify.com shop domain', function (string $domain, bool $valid): void {

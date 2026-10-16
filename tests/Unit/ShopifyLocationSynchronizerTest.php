@@ -4,6 +4,7 @@ use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Models\DataSourceLocation;
 use App\Models\Location;
 use App\Models\Shipment;
+use App\Services\SettingsService;
 use App\Services\ShopifyLocationSynchronizer;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Faking\MockResponse;
@@ -151,4 +152,47 @@ it('surfaces Shopify authentication and GraphQL failures without changing mappin
     expect(fn () => app(ShopifyLocationSynchronizer::class)->synchronize($source))
         ->toThrow(RuntimeException::class, 'Access denied');
     expect($source->locations()->count())->toBe(0);
+});
+
+it('maps a sole shopify location to the only active PolyBag location in multi-location mode', function (int $otherActive, bool $mapped): void {
+    app(SettingsService::class)->set('multi_location_enabled', true, 'boolean');
+    $source = createShopifyDataSource();
+    Location::factory()->count($otherActive)->create(['active' => true]);
+    Location::factory()->create(['active' => false]);
+
+    Saloon::fake([
+        shopifyAccessScopesResponse(),
+        MockResponse::make(['data' => ['locations' => [
+            'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
+            'nodes' => [['id' => 'gid://shopify/Location/1', 'name' => 'Only Warehouse', 'isActive' => true, 'address' => null]],
+        ]]]),
+    ]);
+
+    $result = app(ShopifyLocationSynchronizer::class)->synchronize($source);
+
+    expect($result['auto_mapped'])->toBe($mapped ? 1 : 0)
+        ->and($source->locations()->sole()->location_id)->toBe($mapped ? Location::getDefault()->id : null);
+})->with([
+    'the default is the only active one' => [0, true],
+    'two are active' => [1, false],
+]);
+
+it('leaves several shopify locations unmapped even with one PolyBag location', function (): void {
+    $source = createShopifyDataSource();
+
+    Saloon::fake([
+        shopifyAccessScopesResponse(),
+        MockResponse::make(['data' => ['locations' => [
+            'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
+            'nodes' => [
+                ['id' => 'gid://shopify/Location/1', 'name' => 'East', 'isActive' => true, 'address' => null],
+                ['id' => 'gid://shopify/Location/2', 'name' => 'West', 'isActive' => true, 'address' => null],
+            ],
+        ]]]),
+    ]);
+
+    $result = app(ShopifyLocationSynchronizer::class)->synchronize($source);
+
+    expect($result['auto_mapped'])->toBe(0)
+        ->and($source->locations()->whereNotNull('location_id')->count())->toBe(0);
 });

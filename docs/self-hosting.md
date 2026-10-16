@@ -225,9 +225,8 @@ external vendor, this is it.
    email, destination addresses, locations, and line item variants (which carry the
    barcode), and the export path calls `fulfillmentCreate`. Imports need `read_orders`,
    `read_products`, `read_locations`, `read_merchant_managed_fulfillment_orders`, and
-   `write_merchant_managed_fulfillment_orders`. Activating fulfillment-order import,
-   synchronizing locations, and every import run check the live token for these and
-   refuse with "Reconnect Shopify with the required scopes" naming any that are missing.
+   `write_merchant_managed_fulfillment_orders`. Synchronizing locations and every import run
+   check the live token for these and refuse with "Reconnect Shopify with the required scopes" naming any that are missing.
    Choose the *merchant-managed* fulfillment-order scopes: an app scoped only for
    *assigned* fulfillment orders returns an empty list rather than an error, and no
    check catches that. Add `read_all_orders` as well. It is not required, but without it

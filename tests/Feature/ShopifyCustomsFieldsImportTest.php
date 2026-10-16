@@ -39,7 +39,6 @@ function customsFieldsShopifySource(array $settings = []): DataSource
         'settings' => array_merge([
             'channel_name' => 'Shopify',
             'shop_domain' => 'test-shop.myshopify.com',
-            'fulfillment_order_import_enabled' => true,
             'on_existing' => 'update_if_changed',
         ], $settings),
         'secret_settings' => [

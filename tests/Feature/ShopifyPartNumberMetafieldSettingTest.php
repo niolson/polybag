@@ -9,7 +9,6 @@ use App\Models\Channel;
 use App\Models\DataSource;
 use App\Models\User;
 use App\Services\ShipmentImport\Sources\ShopifySource;
-use App\Services\ShopifyFulfillmentOrderActivationService;
 use Filament\Notifications\Notification;
 use Livewire\Livewire;
 use Saloon\Http\Faking\MockResponse;
@@ -124,7 +123,7 @@ describe('choices', function (): void {
     });
 
     it('refuses to list without read_products, naming the scope', function (): void {
-        fakeShopifyMetafieldStore(array_values(array_diff(ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES, ['read_products'])));
+        fakeShopifyMetafieldStore(array_values(array_diff(ShopifySource::REQUIRED_SCOPES, ['read_products'])));
 
         expect(fn (): array => (new ShopifySource(['shop_domain' => 'test-shop.myshopify.com', 'oauth_access_token' => 'shpat_test_token']))
             ->fetchPartNumberMetafieldChoices())

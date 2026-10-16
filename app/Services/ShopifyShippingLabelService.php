@@ -55,9 +55,9 @@ class ShopifyShippingLabelService
 
     /**
      * Scopes `shippingLabelPurchase` needs, on top of the import scopes in
-     * ShopifyFulfillmentOrderActivationService. Deliberately kept separate:
-     * a data source that only imports orders must not be blocked from
-     * activating or syncing locations because it cannot buy postage.
+     * ShopifySource::REQUIRED_SCOPES. Deliberately kept separate:
+     * a connection that only imports orders must not be blocked from
+     * importing or syncing locations because it cannot buy postage.
      *
      * The staff user also needs the `buy_shipping_labels` permission, which is
      * not an OAuth scope and cannot be checked through the API.
@@ -65,7 +65,7 @@ class ShopifyShippingLabelService
      * `read_products` is here for {@see DECLARED_ITEM_WEIGHT_QUERY}, which
      * traverses `lineItem.variant` to read what Shopify will declare in customs.
      * Imports now need it too, so it is also in
-     * `ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES`; it stays
+     * `ShopifySource::REQUIRED_SCOPES`; it stays
      * listed here because this list states what purchase needs on its own.
      * Nothing enforces this list as a gate; it reaches the connect-time scope
      * parameter, and the purchase path degrades rather than fails when the

@@ -627,24 +627,25 @@ it('routes secret keys to encrypted secret_settings on create', function (): voi
 
     expect($record->secret('client_id'))->toBe('secret_client_id');
     expect($record->secret('client_secret'))->toBe('secret_client_secret');
-    // Fulfillment-order import is a guarded, one-way activation; creating a
-    // source must not switch it on before its scopes and locations are checked.
-    expect($record->settings)->not->toHaveKey('fulfillment_order_import_enabled')
-        ->and($record->settings)->not->toHaveKey('authoritative_shipment_items');
 });
 
-it('leaves fulfillment-order activation available on a newly created Shopify source', function (): void {
+it('disables Sync Shopify Locations until the connection holds credentials', function (array $secrets, bool $enabled): void {
     $this->actingAs($this->admin);
 
-    // Enabling the flag at creation used to hide this action permanently, so the
-    // scope and location checks in ShopifyFulfillmentOrderActivationService could
-    // never run and a source with insufficient Shopify scopes imported nothing
-    // while reporting no error.
-    $source = DataSource::factory()->shopify()->create();
+    $source = DataSource::factory()->shopify()->create(['secret_settings' => $secrets]);
 
-    Livewire::test(EditDataSource::class, ['record' => $source->id])
-        ->assertActionVisible('activate_fulfillment_order_import');
-});
+    $page = Livewire::test(EditDataSource::class, ['record' => $source->id])
+        ->assertActionVisible('sync_shopify_locations');
+
+    $enabled
+        ? $page->assertActionEnabled('sync_shopify_locations')
+        : $page->assertActionDisabled('sync_shopify_locations');
+})->with([
+    'nothing' => [[], false],
+    'a client ID alone' => [['client_id' => 'id'], false],
+    'an OAuth token' => [['oauth_access_token' => 'shpat_token'], true],
+    'its own client ID and secret' => [['client_id' => 'id', 'client_secret' => 'secret'], true],
+]);
 
 it('shows synchronized Shopify locations in a fixed mapping repeater', function (): void {
     $this->actingAs($this->admin);
@@ -1225,7 +1226,6 @@ it('hides the import actions on the edit page when import is off', function (): 
 
     Livewire::test(EditDataSource::class, ['record' => $source->id])
         ->assertActionHidden('run_import')
-        ->assertActionHidden('activate_fulfillment_order_import')
         ->assertActionVisible('sync_shopify_locations');
 });
 

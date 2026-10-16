@@ -137,9 +137,7 @@ test('re-importing a source item updates the uniquely identified row', function 
 /** @return array{Shipment, DataSource} */
 function authoritativeShipmentWithItems(int $count): array
 {
-    $source = DataSource::factory()->create([
-        'settings' => ['authoritative_shipment_items' => true],
-    ]);
+    $source = DataSource::factory()->shopify()->create();
     $shipment = Shipment::factory()->create(['data_source_id' => $source]);
 
     Product::factory()->count($count)->create()->each(function (Product $product) use ($shipment): void {

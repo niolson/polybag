@@ -7,6 +7,7 @@ use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule as ConsoleSchedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schedule;
+use Saloon\Laravel\Facades\Saloon;
 
 uses(RefreshDatabase::class);
 
@@ -26,10 +27,12 @@ it('--all --dry-run does not run real imports', function (): void {
     ]);
 
     // With --dry-run the command should validate + fetch shipments but not persist anything.
-    // ShopifySource::fetchShipments() will throw (no HTTP mock), so we expect a non-zero
+    // The token lacks the import scopes, so fetchShipments() throws and we expect a non-zero
     // exit code — but critically NOT a database write (shipmentsCreated = 0).
+    Saloon::fake([shopifyAccessScopesResponse(['read_orders'])]);
+
     $this->artisan('shipments:import', ['--all' => true, '--dry-run' => true])
-        ->assertExitCode(1); // dry-run fails at fetch (no HTTP mock), but no DB writes
+        ->assertExitCode(1); // dry-run fails at fetch (missing scopes), but no DB writes
 
     expect(Shipment::count())->toBe(0);
 });
@@ -70,7 +73,9 @@ it('--all without flags runs real imports (not dry-run) for each source', functi
     ]);
 
     // Without --dry-run the command proceeds past validation into fetchShipments(),
-    // which fails here (no HTTP mock). The key assertion is no Shipment rows were written.
+    // which fails here (missing scopes). The key assertion is no Shipment rows were written.
+    Saloon::fake([shopifyAccessScopesResponse(['read_orders'])]);
+
     $this->artisan('shipments:import', ['--all' => true])
         ->assertExitCode(1);
 

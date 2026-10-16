@@ -12,7 +12,6 @@ use App\Models\Shipment;
 use App\Services\ShipmentImport\ImportResult;
 use App\Services\ShipmentImport\ShipmentImportService;
 use App\Services\ShipmentImport\Sources\ShopifySource;
-use App\Services\ShopifyFulfillmentOrderActivationService;
 use Carbon\CarbonImmutable;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Cache;
@@ -37,7 +36,6 @@ beforeEach(function (): void {
         'settings' => [
             'channel_name' => 'Shopify',
             'shop_domain' => 'test-shop.myshopify.com',
-            'fulfillment_order_import_enabled' => true,
         ],
         'secret_settings' => ['client_id' => 'test-client-id', 'client_secret' => 'test-client-secret'],
     ]);
@@ -168,7 +166,7 @@ function runChangesImport(DataSource $dataSource, array $feed = [], array $chang
 {
     $requests = [];
     $scopes = [
-        ...ShopifyFulfillmentOrderActivationService::REQUIRED_SCOPES,
+        ...ShopifySource::REQUIRED_SCOPES,
         ...($readAllOrders ? [ShopifySource::ALL_ORDERS_SCOPE] : []),
     ];
 
