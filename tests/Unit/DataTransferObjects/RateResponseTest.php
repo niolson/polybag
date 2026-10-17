@@ -262,6 +262,15 @@ it('reads a USPS commitment name in words, and a military one as having no date'
         ->and($rate(null)->deliveryDescription())->toBeNull();
 });
 
+it('reads FedEx business days in transit in words', function (): void {
+    $rate = fn (string $transit): RateResponse => new RateResponse('FedEx', 'FEDEX_GROUND', 'FedEx Ground', 18.10, transitTime: $transit);
+
+    expect($rate('TWO_DAYS')->deliveryDescription())->toBe('2 business days')
+        ->and($rate('ONE_DAY')->deliveryDescription())->toBe('1 business day')
+        ->and($rate('TWENTY_DAYS')->deliveryDescription())->toBe('20 business days')
+        ->and($rate('UNKNOWN')->deliveryDescription())->toBeNull();
+});
+
 it('shows no price for a label priced at purchase', function (): void {
     $rate = new RateResponse('Shopify', 'shopify', 'Shopify Shipping', 0.0, transitTime: '2-5 days', priceUnknown: true);
 
