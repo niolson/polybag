@@ -507,15 +507,20 @@
     <x-filament::modal id="customs-weight-override" width="md">
         <x-slot name="heading">Customs Weight Mismatch</x-slot>
         <x-slot name="description">
-            The total item weight exceeds the package scale weight.
-            Would you like to adjust the customs item weights to match the package weight?
+            {{ $customsWeightMessage }}
         </x-slot>
         <x-slot name="footerActions">
-            <x-filament::button wire:click="confirmCustomsWeightOverride">
+            @if($package?->shipment)
+                <x-filament::button
+                    tag="a"
+                    href="{{ \App\Filament\Pages\Pack::getUrl(['shipment_id' => $package->shipment->id]) }}"
+                    icon="heroicon-o-scale"
+                >
+                    Back to Pack to Reweigh
+                </x-filament::button>
+            @endif
+            <x-filament::button color="gray" wire:click="confirmCustomsWeightOverride">
                 Override & Ship
-            </x-filament::button>
-            <x-filament::button color="gray" x-on:click="$dispatch('close-modal', { id: 'customs-weight-override' })">
-                Cancel
             </x-filament::button>
         </x-slot>
     </x-filament::modal>

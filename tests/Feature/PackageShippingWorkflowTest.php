@@ -1005,6 +1005,7 @@ it('prompts for a customs weight override when a military destination is overwei
     );
 
     expect($result->requiresCustomsWeightOverride)->toBeTrue()
+        ->and($result->message)->toMatch('/The customs items add up to \d+\.\d{2} lb, but this box weighed 0\.70 lb\./')
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 

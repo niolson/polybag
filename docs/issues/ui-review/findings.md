@@ -49,7 +49,7 @@ issue. Low findings with no link stay here as the backlog.
 | [`01`](issues/01-dates-and-delivery-estimates.md) Dates and delivery estimates | S11 (high), S1, M3 | Done 2026-10-16 |
 | [`02`](issues/02-ship-page-clarity.md) Ship page clarity | S2, S3, S8; S4–S6, M4 | Done 2026-10-17 |
 | [`03`](issues/03-pack-page-clarity.md) Pack page clarity | P1–P3; P4, P7, P9, P10 | Done 2026-10-17 |
-| [`04`](issues/04-weight-entry.md) Weight entry | M2, S9 | Before the demo |
+| [`04`](issues/04-weight-entry.md) Weight entry | M2, S9 | Done 2026-10-17 |
 | [`05`](issues/05-address-check-display.md) Address check display | SH1, SH2 | Done 2026-10-16 |
 | [`06`](issues/06-shipments-list-defaults.md) Shipments list defaults | SL1, SL2 (column), SL3 | Before the demo |
 | [`07`](issues/07-batch-ship.md) Batch Ship | LB1, BS1, BS2; LB2–LB4, BS3–BS5 | Before the demo |

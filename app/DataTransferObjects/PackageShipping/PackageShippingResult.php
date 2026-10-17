@@ -104,12 +104,25 @@ readonly class PackageShippingResult
         );
     }
 
-    public static function customsWeightOverrideRequired(): self
+    /**
+     * The customs items weigh more than the box was weighed at. The usual
+     * cause is a wrong scale reading, so the message names both weights; the
+     * override, which scales the declared item weights down, is the workaround
+     * for wrong product weights.
+     */
+    public static function customsWeightOverrideRequired(float $customsWeight, float $packageWeight): self
     {
         return new self(
             success: false,
             title: 'Customs Weight Mismatch',
-            message: 'Customs item weights exceed the package weight. Check the item weights, then confirm to ship.',
+            message: sprintf(
+                'The customs items add up to %s lb, but this box weighed %s lb. '
+                .'If the scale reading is wrong, go back to Pack and reweigh the box. '
+                .'Override & Ship scales the customs item weights down to %s lb.',
+                number_format($customsWeight, 2),
+                number_format($packageWeight, 2),
+                number_format($packageWeight, 2),
+            ),
             requiresCustomsWeightOverride: true,
         );
     }
