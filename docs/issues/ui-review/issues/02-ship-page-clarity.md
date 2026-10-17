@@ -55,8 +55,14 @@ that sells and then fails to record).
   each rate as `delivery`.
 - **S8.** A refused purchase is shown on the page in a callout with the result's own text,
   as well as the toast, until the next attempt. On load, a Package with a label sold but not
-  saved, or a purchase nobody heard back about, says so and that Buy & Print Label settles it
-  first; where the seller cannot be asked again, it says not to buy another. The bell
+  saved, or a purchase nobody heard back about, says so and offers **Check Earlier
+  Purchase**, which calls `checkEarlierPurchases()` without needing a rate (none may come
+  back, and Buy needs a selection): a label that comes back ships and prints, and "nothing
+  bought" frees the Package with fresh rates. Where the seller cannot hand the label over
+  again, it says not to buy another and sends a manager to the package page. A Shopify
+  blind purchase keeps no offer, so its markers on the Package are read too: the notice says
+  to buy through Shopify again, which picks that purchase up, or, with no Shopify option
+  offered, not to buy another. The bell
   notification is sent once per Package and label: a user who already has it unread is not
   sent it again.
 - **S4.** Items counts units, and says "2 lines, 3 items" when the two differ.

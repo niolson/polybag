@@ -22,6 +22,7 @@ use App\Models\Product;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
+use App\Models\ShippingOffer;
 use App\Models\User;
 use App\Notifications\LabelNotRecorded;
 use App\Services\Carriers\CarrierRegistry;
@@ -214,16 +215,31 @@ describe('a label sold but not recorded', function (): void {
         expect($this->package->fresh()->status)->toBe(PackageStatus::Unshipped);
     });
 
-    it('says on reload that a sold label is waiting and that Buy recovers it', function (): void {
+    it('says on reload that a sold label is waiting, and fetches it without a rate', function (): void {
         $component = Livewire::test(Ship::class, ['package_id' => $this->package->id]);
         selectQuotedRate($component, $this->package);
         $component->call('ship');
 
-        Livewire::test(Ship::class, ['package_id' => $this->package->id])
+        // No fresh rate comes back, so Buy stays disabled: the label is
+        // fetched by its own action.
+        $reloaded = Livewire::test(Ship::class, ['package_id' => $this->package->id])
             ->assertSet('purchaseError', null)
+            ->assertSet('rateOptions', [])
+            ->assertActionDisabled('Ship')
             ->assertSeeHtml('data-testid="unfinished-purchase"')
             ->assertSee('USPS sold label TRACK123 for this package that PolyBag did not save.')
-            ->assertSee('Buy & Print Label asks USPS for that label first');
+            ->assertSee('Use Check Earlier Purchase to fetch it from USPS')
+            ->assertActionVisible('checkEarlierPurchase')
+            ->assertActionEnabled('checkEarlierPurchase');
+
+        // Saving works again, so the label USPS hands back is recorded.
+        Schema::table('package_labels', fn (Blueprint $table) => $table->string('carrier_account_fingerprint', 64)->nullable());
+
+        $reloaded->callAction('checkEarlierPurchase')
+            ->assertNotified('Label Found');
+
+        expect($this->package->fresh()->status)->toBe(PackageStatus::Shipped)
+            ->and($this->package->fresh()->tracking_number)->toBe('TRACK123');
     });
 
     it('sends the bell notification once, however often recording fails', function (): void {
@@ -236,5 +252,60 @@ describe('a label sold but not recorded', function (): void {
             ->assertSet('purchaseError.title', 'Label Bought but Not Recorded');
 
         expect(auth()->user()->notifications()->where('type', LabelNotRecorded::class)->count())->toBe(1);
+    });
+});
+
+it('frees the package when the source says the earlier purchase bought nothing', function (): void {
+    $package = clarityPackage();
+    $adapter = Mockery::mock(DirectCarrierAdapter::class, RecoversUnresolvedPurchase::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('getCarrierName')->andReturn('USPS');
+    $adapter->shouldReceive('isConfigured')->andReturn(true);
+    $adapter->shouldReceive('prepareRateRequest')->andReturnNull();
+    $adapter->shouldReceive('getRates')->andReturn(collect());
+    $adapter->shouldReceive('recoverPurchase')->once()->andReturn(ShipResponse::failure('No label for this key.'));
+    app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
+
+    // Spent, and nobody heard back.
+    $rate = quotedDirectly($package, new RateResponse('USPS', 'USPS_GROUND_ADVANTAGE', 'USPS Ground Advantage', 8.50));
+    ShippingOffer::query()->where('public_id', $rate->offerId)->firstOrFail()->forceFill(['consumed_at' => now()])->save();
+
+    Livewire::test(Ship::class, ['package_id' => $package->id])
+        ->assertSee('never heard back from USPS')
+        ->callAction('checkEarlierPurchase')
+        ->assertNotified('Nothing Was Bought')
+        ->assertActionHidden('checkEarlierPurchase')
+        ->assertDontSeeHtml('data-testid="unfinished-purchase"');
+});
+
+describe('an unfinished Shopify purchase', function (): void {
+    beforeEach(function (): void {
+        $this->package = clarityPackage();
+        $this->package->update(['metadata' => ['shopify_purchase_result_id' => 'gid://shopify/ShippingLabelPurchaseResult/1']]);
+    });
+
+    it('says to buy through Shopify again, which picks the purchase up', function (): void {
+        app()->instance(PackageShippingWorkflow::class, fixedOptionsWorkflow(new PackageShippingOptions(
+            rateOptions: [],
+            rateOptionLabels: [],
+            rateOptionDescriptions: [],
+            deliverByDate: null,
+            allRatesLate: false,
+            blindPurchaseOffers: [['id' => 'shopify-1', 'sourceLabel' => 'Shopify Shipping', 'selectionLabel' => 'Shopify chooses']],
+        )));
+
+        Livewire::test(Ship::class, ['package_id' => $this->package->id])
+            ->assertSeeHtml('data-testid="unfinished-purchase"')
+            ->assertSee('Shopify accepted a label purchase for this package')
+            ->assertSee('Choose Shopify Shipping below and buy')
+            ->assertActionHidden('checkEarlierPurchase');
+    });
+
+    it('says not to buy another when Shopify Shipping is not offered', function (): void {
+        app()->instance(PackageShippingWorkflow::class, fixedOptionsWorkflow(noRatesOptions()));
+
+        Livewire::test(Ship::class, ['package_id' => $this->package->id])
+            ->assertSee('Shopify Shipping is not offered now')
+            ->assertSee('Do not buy another label');
     });
 });
