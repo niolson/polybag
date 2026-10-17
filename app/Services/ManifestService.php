@@ -369,9 +369,10 @@ class ManifestService
 
         $request = new ScanForm;
         $request->body()->set([
-            'form' => '5630',
-            'imageType' => 'PDF',
-            'labelType' => '8.5x11LABEL',
+            'imageInfo' => [
+                'imageType' => 'PDF',
+                'labelType' => '8.5X11LABEL',
+            ],
             'mailingDate' => $shipDate?->format('Y-m-d') ?? now()->format('Y-m-d'),
             'overwriteMailingDate' => true,
             'entryFacilityZIPCode' => $fromAddress->postalCode,
@@ -380,8 +381,7 @@ class ManifestService
                 'trackingNumbers' => $trackingNumbers,
             ],
             'fromAddress' => array_filter([
-                'firstName' => $fromAddress->firstName,
-                'lastName' => $fromAddress->lastName,
+                ...$this->scanFormNameFields($fromAddress),
                 'streetAddress' => $fromAddress->streetAddress,
                 'secondaryAddress' => $fromAddress->streetAddress2,
                 'city' => $fromAddress->city,
@@ -394,6 +394,31 @@ class ManifestService
     }
 
     /**
+     * The shipper's name as USPS requires it, the way labels send it: first
+     * and last name, or a single name as the firm, with the company as the
+     * firm when there is one.
+     *
+     * @return array{firstName?: string, lastName?: string, firm?: string}
+     */
+    private function scanFormNameFields(AddressData $address): array
+    {
+        $fields = [];
+
+        if ($address->firstName && $address->lastName) {
+            $fields['firstName'] = mb_substr($address->firstName, 0, 50);
+            $fields['lastName'] = mb_substr($address->lastName, 0, 50);
+        } elseif ($address->firstName || $address->lastName) {
+            $fields['firm'] = mb_substr((string) ($address->firstName ?: $address->lastName), 0, 50);
+        }
+
+        if ($address->company) {
+            $fields['firm'] = mb_substr($address->company, 0, 50);
+        }
+
+        return $fields;
+    }
+
+    /**
      * What USPS answered, in a line an operator can read: its own message when the
      * reply is JSON, otherwise the status and the start of whatever came back.
      */
@@ -401,8 +426,19 @@ class ManifestService
     {
         try {
             $message = $response->json('error.message');
+            $details = collect($response->json('error.errors', []))
+                ->pluck('detail')
+                ->filter(fn (mixed $detail): bool => is_string($detail) && $detail !== '')
+                ->implode('; ');
         } catch (\JsonException) {
             $message = null;
+            $details = '';
+        }
+
+        // USPS's message is only the status text ("Bad Request"); the reason
+        // is in each error's detail.
+        if ($details !== '') {
+            return "USPS rejected the SCAN form request (error {$response->status()}): {$details}";
         }
 
         if (is_string($message) && $message !== '') {
