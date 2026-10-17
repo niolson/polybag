@@ -261,7 +261,13 @@ class EndOfDay extends Page
         $this->notifySuccess('Shipping Day Ended', "{$carrier->label()} ship date advanced to {$nextDate->format('M j')}.");
     }
 
-    public function generateManifest(int $carrierId): void
+    /**
+     * Create the manifest for this carrier's labels, and with `$print` send
+     * every form it made to the document printer. One run can make several:
+     * one per ship date, and for USPS one SCAN form per account. The
+     * `suppress_printing` setting overrides `$print`.
+     */
+    public function generateManifest(int $carrierId, bool $print = true): void
     {
         $carrier = Carrier::find($carrierId);
 
@@ -272,6 +278,7 @@ class EndOfDay extends Page
         $multiLocation = (bool) app(SettingsService::class)->get('multi_location_enabled', false);
         $locationId = $multiLocation ? $this->locationId : null;
         $shipDate = app(ShipDateService::class)->getShipDate($carrier, $locationId);
+        $print = $print && ! $this->printingSuppressed();
 
         $packages = $this->manifestablePackages($carrier, $shipDate, $locationId)->get();
 
@@ -293,14 +300,44 @@ class EndOfDay extends Page
                 return;
             }
 
-            if ($response->image && ! app(SettingsService::class)->get('suppress_printing', false)) {
-                $this->dispatch('print-report', data: $response->image);
+            $printed = 0;
+
+            if ($print) {
+                foreach ($response->manifests as $manifest) {
+                    if (! empty($manifest->image)) {
+                        $this->dispatch('print-report', data: $manifest->image);
+                        $printed++;
+                    }
+                }
             }
 
-            $this->notifySuccess('Manifest Created', "Manifest {$response->manifestNumber} created for {$carrier->label()}.");
+            $this->notifySuccess('Manifest Created', $this->manifestCreatedMessage($carrier, $response->manifests, $printed));
         }
 
         $this->loadData();
+    }
+
+    /**
+     * @param  list<Manifest>  $manifests
+     */
+    private function manifestCreatedMessage(Carrier $carrier, array $manifests, int $printed): string
+    {
+        $count = count($manifests);
+        $numbers = implode(', ', array_map(fn (Manifest $manifest): string => (string) $manifest->manifest_number, $manifests));
+        $sent = $printed === $count ? ' and sent to the printer' : '';
+
+        $message = $count === 1
+            ? "Manifest {$numbers} created for {$carrier->label()}{$sent}."
+            : "{$count} manifests created for {$carrier->label()}{$sent}: {$numbers}.";
+
+        return $printed > 0 && $printed < $count
+            ? "{$message} {$printed} of {$count} sent to the printer."
+            : $message;
+    }
+
+    public function printingSuppressed(): bool
+    {
+        return (bool) app(SettingsService::class)->get('suppress_printing', false);
     }
 
     /**
@@ -346,7 +383,7 @@ class EndOfDay extends Page
         $manifest = Manifest::find($manifestId);
 
         if (! $manifest || empty($manifest->image)) {
-            $this->notifyError('Reprint Error', 'Manifest image not available.');
+            $this->notifyError('Reprint Error', 'This manifest has no image to print.');
 
             return;
         }

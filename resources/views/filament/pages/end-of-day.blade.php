@@ -52,12 +52,22 @@
                                     <td class="px-4 py-3 text-right space-x-2">
                                         @if($summary['supports_manifest'] && $summary['unmanifested_count'] > 0)
                                             <x-filament::button
-                                                wire:click="generateManifest({{ $summary['carrier_id'] }})"
+                                                wire:click="generateManifest({{ $summary['carrier_id'] }}, false)"
                                                 icon="heroicon-o-document-arrow-down"
                                                 size="sm"
+                                                color="gray"
                                             >
                                                 Generate Manifest
                                             </x-filament::button>
+                                            @unless($this->printingSuppressed())
+                                                <x-filament::button
+                                                    wire:click="generateManifest({{ $summary['carrier_id'] }}, true)"
+                                                    icon="heroicon-o-printer"
+                                                    size="sm"
+                                                >
+                                                    Generate &amp; Print
+                                                </x-filament::button>
+                                            @endunless
                                         @endif
                                         {{ ($this->endShippingDayAction)(['carrier' => $summary['carrier_id']]) }}
                                     </td>
@@ -113,8 +123,10 @@
                                                 size="xs"
                                                 color="gray"
                                             >
-                                                Reprint
+                                                Reprint Manifest
                                             </x-filament::button>
+                                        @else
+                                            <span class="text-xs text-gray-400 dark:text-gray-500">No image</span>
                                         @endif
                                     </td>
                                 </tr>
