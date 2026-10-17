@@ -60,7 +60,7 @@ issue. Low findings with no link stay here as the backlog.
 | [`12`](issues/12-manual-ship-quote-before-create.md) Manual Ship quotes before creating | M1 | Before the first customer |
 | [`13`](issues/13-connection-import-status.md) Connection import status | CN1 | After the freeze (feature) |
 | [`14`](issues/14-usps-quoted-vs-recorded-cost.md) USPS quoted vs recorded cost | S10 | Needs info |
-| [`15`](issues/15-manifest-generate-and-print.md) Manifest generate and print | E6 | Before the demo (added 2026-10-16) |
+| [`15`](issues/15-manifest-generate-and-print.md) Manifest generate and print | E6 | Done 2026-10-17 |
 | [`release-polish/51`](../release-polish/issues/51-wording-the-same-thing-named-differently-across-pages.md) | SH3 | Added as a comment there |
 
 ## Dashboard
