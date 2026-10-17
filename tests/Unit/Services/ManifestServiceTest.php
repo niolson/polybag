@@ -6,6 +6,7 @@ use App\Http\Integrations\USPS\Requests\ScanForm;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\DataSource;
+use App\Models\Location;
 use App\Models\Manifest;
 use App\Models\Package;
 use App\Services\ManifestService;
@@ -243,4 +244,102 @@ it('reports the status and body when USPS answers a SCAN form request with somet
         ->and($result->errorMessage)->toContain('error 503')
         ->and($result->errorMessage)->toContain('Service Unavailable')
         ->and($result->errorMessage)->not->toContain('Syntax error');
+});
+
+/**
+ * A USPS account with a cached token and one shipped package on it.
+ */
+function scanFormRequestPackage(): Package
+{
+    $carrier = Carrier::firstOrCreate(['name' => 'USPS']);
+    $account = CarrierAccount::create([
+        'carrier_id' => $carrier->id,
+        'name' => 'USPS '.fake()->unique()->numerify('Account-####'),
+        'active' => true,
+        'credentials' => ['crid' => 'test_crid'],
+        'secret_credentials' => ['client_id' => 'test_client_id', 'client_secret' => 'test_client_secret'],
+    ]);
+
+    Cache::put("usps_authenticator:{$account->id}", [
+        'access_token' => 'fake-test-token',
+        'refresh_token' => null,
+        'expires_at' => (new DateTimeImmutable('+1 hour'))->getTimestamp(),
+    ], 3600);
+
+    return Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'tracking_number' => '9400111111111111111111',
+        'carrier_account_id' => $account->id,
+    ]);
+}
+
+it('asks for the SCAN form image through imageInfo and sends the company as the firm', function (): void {
+    $location = Location::factory()->default()->create([
+        'first_name' => 'Shipping',
+        'last_name' => 'Center',
+        'company' => 'Acme Fulfillment',
+        'address1' => '15100 Woodinville-Redmond Rd NE',
+        'address2' => 'Ste A-600',
+        'postal_code' => '98072',
+    ]);
+    $package = scanFormRequestPackage();
+    fakeUspsScanForm([$package->carrier_account_id]);
+
+    app(ManifestService::class)->createManifest('USPS', collect([$package]), null, $location->id);
+
+    Saloon::assertSent(function (ScanForm $request): bool {
+        $body = $request->body()->all();
+
+        return $body['imageInfo'] === ['imageType' => 'PDF', 'labelType' => '8.5X11LABEL']
+            && ! array_key_exists('form', $body)
+            && ! array_key_exists('imageType', $body)
+            && ! array_key_exists('labelType', $body)
+            && $body['fromAddress']['firstName'] === 'Shipping'
+            && $body['fromAddress']['lastName'] === 'Center'
+            && $body['fromAddress']['firm'] === 'Acme Fulfillment'
+            && $body['fromAddress']['secondaryAddress'] === 'Ste A-600';
+    });
+});
+
+it('sends a single shipper name as the firm', function (): void {
+    $location = Location::factory()->default()->create([
+        'first_name' => 'Shipping',
+        'last_name' => '',
+        'company' => null,
+    ]);
+    $package = scanFormRequestPackage();
+    fakeUspsScanForm([$package->carrier_account_id]);
+
+    app(ManifestService::class)->createManifest('USPS', collect([$package]), null, $location->id);
+
+    Saloon::assertSent(fn (ScanForm $request): bool => $request->body()->all()['fromAddress']['firm'] === 'Shipping'
+        && ! array_key_exists('firstName', $request->body()->all()['fromAddress']));
+});
+
+it('reports the detail of each USPS error rather than its status text', function (): void {
+    Location::factory()->default()->create();
+    $package = scanFormRequestPackage();
+
+    Saloon::fake([
+        ScanForm::class => MockResponse::make([
+            'apiVersion' => '/scan-forms/v3',
+            'error' => [
+                'code' => '400',
+                'message' => 'Bad Request',
+                'errors' => [[
+                    'title' => 'Bad Request',
+                    'detail' => 'The address you entered was found but more information is needed (such as an apartment, suite, or box number) to match to a specific address.',
+                    'code' => '010007',
+                    'source' => ['parameter' => 'fromAddress'],
+                ]],
+            ],
+        ], 400),
+    ]);
+
+    $result = app(ManifestService::class)->createManifest('USPS', collect([$package]));
+
+    expect($result->success)->toBeFalse()
+        ->and($result->errorMessage)->toContain('error 400')
+        ->and($result->errorMessage)->toContain('more information is needed')
+        ->and($result->errorMessage)->not->toContain('Bad Request');
 });
