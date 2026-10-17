@@ -249,13 +249,29 @@ readonly class RateResponse
     }
 
     /**
-     * A carrier's commitment name in sentence case. USPS sends its own
-     * capitals ("MILITARY"), and a military commitment carries no date.
+     * A carrier's commitment name in words. USPS sends its own capitals
+     * ("MILITARY"), and a military commitment carries no date. FedEx sends
+     * business days in transit as an enum ("TWO_DAYS"), or "UNKNOWN".
      */
-    private static function readableCommitment(string $commitment): string
+    private static function readableCommitment(string $commitment): ?string
     {
-        if (in_array(strtoupper(trim($commitment)), ['MILITARY', 'DPO', 'APO', 'FPO'], true)) {
+        $upper = strtoupper(trim($commitment));
+
+        if (in_array($upper, ['MILITARY', 'DPO', 'APO', 'FPO'], true)) {
             return 'Military mail, no date';
+        }
+
+        if ($upper === 'UNKNOWN') {
+            return null;
+        }
+
+        $numbers = ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE', 'TEN',
+            'ELEVEN', 'TWELVE', 'THIRTEEN', 'FOURTEEN', 'FIFTEEN', 'SIXTEEN', 'SEVENTEEN', 'EIGHTEEN', 'NINETEEN', 'TWENTY'];
+
+        if (preg_match('/^([A-Z]+)_DAYS?$/', $upper, $match) === 1 && ($index = array_search($match[1], $numbers, true)) !== false) {
+            $days = $index + 1;
+
+            return $days === 1 ? '1 business day' : "{$days} business days";
         }
 
         return $commitment === strtoupper($commitment) ? ucfirst(strtolower($commitment)) : $commitment;
