@@ -158,10 +158,10 @@ class BoxSizeResource extends Resource
                     ->placeholder('—')
                     ->visible(fn () => app(SettingsService::class)->get('multi_client_enabled', false)),
             ])
+            ->defaultSort(fn (Builder $query): Builder => $query->orderByRaw('length * width * height')->orderBy('label'))
             ->filters([
                 Tables\Filters\SelectFilter::make('type')
                     ->options(BoxSizeType::class),
-                Tables\Filters\TernaryFilter::make('active'),
                 Tables\Filters\SelectFilter::make('carrier')
                     ->label('Packaging')
                     ->options(fn (): array => [

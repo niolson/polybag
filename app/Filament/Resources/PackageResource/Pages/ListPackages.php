@@ -8,7 +8,6 @@ use App\Filament\Concerns\KeepsStatusTabInStepWithStatusFilter;
 use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Concerns\PrintsLabels;
 use App\Filament\Resources\PackageResource;
-use Filament\Actions;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -27,13 +26,6 @@ class ListPackages extends ListRecords
 
     #[Url(as: 'tracking_tab')]
     public ?string $activeTrackingTab = 'all';
-
-    protected function getHeaderActions(): array
-    {
-        return [
-            Actions\CreateAction::make(),
-        ];
-    }
 
     public function table(Table $table): Table
     {

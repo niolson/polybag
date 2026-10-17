@@ -82,6 +82,7 @@ it('activates and deactivates box sizes in bulk without touching their dimension
     expect(BoxSize::where('active', true)->count())->toBe(0);
 
     Livewire::test(ListBoxSizes::class)
+        ->set('activeTab', 'inactive')
         ->selectTableRecords([$boxes[0]->id])
         ->callAction(TestAction::make('activate')->table()->bulk());
 
@@ -92,17 +93,30 @@ it('activates and deactivates box sizes in bulk without touching their dimension
         ->and(BoxSize::where('active', true)->count())->toBe(1);
 });
 
-it('filters the box size list by active and by packaging', function (): void {
-    $active = BoxSize::factory()->create(['carrier_packaging' => null]);
+it('opens the box size list on active boxes, smallest first', function (): void {
+    $large = BoxSize::factory()->create(['length' => 10, 'width' => 10, 'height' => 10]);
+    $small = BoxSize::factory()->create(['length' => 6, 'width' => 4, 'height' => 4]);
+    $inactive = BoxSize::factory()->inactive()->create();
+
+    Livewire::test(ListBoxSizes::class)
+        ->assertSet('activeTab', 'active')
+        ->assertCanSeeTableRecords([$small, $large], inOrder: true)
+        ->assertCanNotSeeTableRecords([$inactive])
+        ->set('activeTab', 'inactive')
+        ->assertCanSeeTableRecords([$inactive])
+        ->assertCanNotSeeTableRecords([$small, $large])
+        ->set('activeTab', 'all')
+        ->assertCanSeeTableRecords([$small, $large, $inactive]);
+});
+
+it('filters the box size list by packaging', function (): void {
+    $own = BoxSize::factory()->create(['carrier_packaging' => null]);
     $inactive = BoxSize::factory()->inactive()->create(['carrier_packaging' => null]);
 
     Livewire::test(ListBoxSizes::class)
-        ->filterTable('active', false)
-        ->assertCanSeeTableRecords([$inactive])
-        ->assertCanNotSeeTableRecords([$active])
-        ->resetTableFilters()
+        ->set('activeTab', 'all')
         ->filterTable('carrier', 'own')
-        ->assertCanSeeTableRecords([$active, $inactive]);
+        ->assertCanSeeTableRecords([$own, $inactive]);
 });
 
 it('deactivates a box size from its edit form', function (): void {

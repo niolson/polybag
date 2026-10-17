@@ -13,6 +13,7 @@ use App\Filament\Pages\EndOfDay;
 use App\Filament\Resources\DataSources\Pages\EditDataSource;
 use App\Models\BoxSize;
 use App\Models\Carrier;
+use App\Models\CarrierAccount;
 use App\Models\CarrierAccountScope;
 use App\Models\CarrierService;
 use App\Models\Channel;
@@ -283,15 +284,22 @@ describe('End of Day', function (): void {
     beforeEach(function (): void {
         onWednesdayAt('10:00');
         $this->actingAs(User::factory()->admin()->create());
+        CarrierAccount::factory()->create(['carrier_id' => $this->usps->id]);
+        CarrierAccount::factory()->create(['carrier_id' => $this->ups->id]);
     });
 
-    it('lists OnTrac and Amazon Shipping', function (): void {
-        Carrier::factory()->create(['name' => 'OnTrac']);
-        Carrier::factory()->create(['name' => 'Amazon Shipping']);
+    it('lists OnTrac once it has a label to date, and Amazon Shipping once a connection sells it', function (): void {
+        $ontrac = Carrier::factory()->create(['name' => 'OnTrac']);
+        Carrier::factory()->create(['name' => Carrier::AMAZON_SHIPPING]);
+        $listed = fn (): array => collect(Livewire::test(EndOfDay::class)->get('carrierSummary'))->pluck('carrier')->sort()->values()->all();
 
-        $listed = collect(Livewire::test(EndOfDay::class)->get('carrierSummary'))->pluck('carrier')->sort()->values()->all();
+        expect($listed())->toBe([Carrier::UPS, Carrier::USPS]);
 
-        expect($listed)->toBe(['Amazon Shipping', 'OnTrac', Carrier::UPS, Carrier::USPS]);
+        Package::factory()->shipped()->create(['carrier' => 'OnTrac', 'normalized_carrier_id' => $ontrac->id, 'ship_date' => now()]);
+        $connection = DataSource::factory()->unassigned()->offeringOffAmazonShipping()->create();
+        CarrierAccountScope::create(['data_source_id' => $connection->id]);
+
+        expect($listed())->toBe([Carrier::AMAZON_SHIPPING, 'OnTrac', Carrier::UPS, Carrier::USPS]);
     });
 
     it('moves direct USPS, Amazon USPS and Shopify labels dated as USPS when USPS day ends', function (): void {

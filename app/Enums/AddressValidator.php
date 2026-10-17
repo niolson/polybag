@@ -24,7 +24,7 @@ enum AddressValidator: string implements HasLabel
             self::Google => 'Google',
             self::Fedex => 'FedEx',
             self::Ups => 'UPS',
-            self::Fake => 'Fake',
+            self::Fake => 'Sample validator',
         };
     }
 

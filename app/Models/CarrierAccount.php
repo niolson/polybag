@@ -290,8 +290,7 @@ class CarrierAccount extends Model
     public function connectionStatus(): string
     {
         return match ($this->carrier?->name) {
-            Carrier::USPS, Carrier::UPS => filled($this->secret('oauth_token')) ? 'Connected' : 'Needs Setup',
-            Carrier::FEDEX => $this->hasUsableCredentials() ? 'Connected' : 'Needs Setup',
+            Carrier::USPS, Carrier::UPS, Carrier::FEDEX => $this->hasUsableCredentials() ? 'Connected' : 'Needs Setup',
             default => 'Active',
         };
     }

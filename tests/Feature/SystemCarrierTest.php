@@ -179,6 +179,8 @@ describe('the display name', function (): void {
         Livewire::test(CreateCarrierAccount::class)
             ->assertFormFieldExists('carrier_id', fn (Select $field): bool => $field->getOptions() === [$ups->id => 'Brown']);
 
+        CarrierAccount::factory()->create(['carrier_id' => $ups->id]);
+
         Livewire::test(EndOfDay::class)
             ->assertSet('carrierSummary', fn (array $summary): bool => collect($summary)
                 ->contains(fn (array $row): bool => $row['carrier'] === Carrier::UPS && $row['label'] === 'Brown'))

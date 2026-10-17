@@ -691,7 +691,6 @@ class PackageResource extends Resource
     {
         return [
             'index' => Pages\ListPackages::route('/'),
-            'create' => Pages\CreatePackage::route('/create'),
             'view' => Pages\ViewPackage::route('/{record}'),
             'edit' => Pages\EditPackage::route('/{record}/edit'),
         ];

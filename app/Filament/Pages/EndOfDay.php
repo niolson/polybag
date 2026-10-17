@@ -3,9 +3,13 @@
 namespace App\Filament\Pages;
 
 use App\Enums\PackageStatus;
+use App\Enums\PostageSetting;
 use App\Enums\Role;
 use App\Filament\Concerns\NotifiesUser;
 use App\Models\Carrier;
+use App\Models\CarrierAccount;
+use App\Models\CarrierAccountScope;
+use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\Manifest;
 use App\Models\Package;
@@ -13,9 +17,13 @@ use App\Services\Carriers\CarrierRegistry;
 use App\Services\ManifestService;
 use App\Services\SettingsService;
 use App\Services\ShipDateService;
+use App\Services\ShipmentImport\Sources\AmazonSource;
+use App\Services\ShipmentImport\Sources\ShopifySource;
 use BackedEnum;
 use Carbon\CarbonImmutable;
+use Filament\Actions\Action;
 use Filament\Pages\Page;
+use Filament\Support\Enums\Size;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Livewire\WithPagination;
@@ -59,10 +67,14 @@ class EndOfDay extends Page
     }
 
     /**
-     * One row per carrier, because a carrier dates every label it is expected
-     * to carry, whichever source sold it (ADR-0006, guideline 12). A carrier
-     * with no direct integration, such as OnTrac, is listed too, so its day
-     * can be ended.
+     * One row per carrier this warehouse ships with: one with an active
+     * account (a `CarrierAccount`, or for Amazon Shipping an Amazon connection
+     * scoped to sell it), or with a label on its current ship date. A carrier
+     * dates every label it is expected to carry, whichever source sold it
+     * (ADR-0006, decision 1 as amended 2026-10-16), so a carrier with no
+     * account, such as OnTrac reached through Amazon Buy Shipping, appears
+     * once it has a label to date. So does the carrier a Shopify connection
+     * dates its labels by.
      *
      * The package count is by carrier of record, from any source: a Shopify
      * `auto` label dated by USPS that Shopify put on UPS counts under UPS,
@@ -79,11 +91,12 @@ class EndOfDay extends Page
         $shipDateService = app(ShipDateService::class);
         $registry = app(CarrierRegistry::class);
         $multiLocation = (bool) app(SettingsService::class)->get('multi_location_enabled', false);
+        $carriersWithAccount = $this->carrierIdsWithAccount();
 
         $this->carrierSummary = Carrier::active()
             ->orderBy('name')
             ->get()
-            ->map(function (Carrier $carrier) use ($shipDateService, $registry, $multiLocation): array {
+            ->map(function (Carrier $carrier) use ($shipDateService, $registry, $multiLocation, $carriersWithAccount): ?array {
                 $locationId = $multiLocation ? $this->locationId : null;
                 $shipDate = $shipDateService->getShipDate($carrier, $locationId);
                 $nextShipDate = $shipDateService->getNextPickupDay($carrier, $locationId);
@@ -106,6 +119,10 @@ class EndOfDay extends Page
                     ? $this->manifestablePackages($carrier, $shipDate, $locationId)->count()
                     : 0;
 
+                if ($packageCount === 0 && $unmanifestedCount === 0 && ! in_array($carrier->id, $carriersWithAccount, true)) {
+                    return null;
+                }
+
                 return [
                     'carrier_id' => $carrier->id,
                     'carrier' => $carrier->name,
@@ -117,7 +134,81 @@ class EndOfDay extends Page
                     'next_ship_date' => $nextShipDate->format('M j'),
                 ];
             })
+            ->filter()
+            ->values()
             ->all();
+    }
+
+    /**
+     * Carriers with an active account here: a `CarrierAccount`, or, for a
+     * carrier whose account is a connection (Amazon Shipping), an active
+     * Amazon connection with a scope to sell it. The carrier an active Shopify
+     * connection that sells postage dates its labels by counts too, since
+     * ending that carrier's day is how Shopify's day is ended.
+     *
+     * @return list<int>
+     */
+    private function carrierIdsWithAccount(): array
+    {
+        $ids = CarrierAccount::active()->distinct()->pluck('carrier_id')->map(fn ($id): int => (int) $id)->all();
+
+        $shopifyDateCarrierIds = DataSource::query()
+            ->where('active', true)
+            ->where('source_type', ShopifySource::class)
+            ->get()
+            ->filter(fn (DataSource $source): bool => $source->postageSetting() !== PostageSetting::DoesNotSell)
+            ->map(fn (DataSource $source): ?int => $source->shipDateCarrier()?->id)
+            ->filter()
+            ->all();
+
+        $ids = [...$ids, ...$shopifyDateCarrierIds];
+
+        $hasConnectionAccount = CarrierAccountScope::query()
+            ->whereHas('dataSource', fn (Builder $query): Builder => $query
+                ->where('active', true)
+                ->where('source_type', AmazonSource::class)
+                ->where('offers_off_amazon_shipping', true))
+            ->exists();
+
+        if ($hasConnectionAccount) {
+            $connectionCarrierIds = Carrier::query()
+                ->whereIn('name', CarrierRegistry::connectionCarrierNames())
+                ->pluck('id')
+                ->all();
+
+            $ids = [...$ids, ...$connectionCarrierIds];
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    public function endShippingDayAction(): Action
+    {
+        return Action::make('endShippingDay')
+            ->label('End Shipping Day')
+            ->icon('heroicon-o-sun')
+            ->size(Size::Small)
+            ->color('gray')
+            ->requiresConfirmation()
+            ->modalHeading(fn (array $arguments): string => 'End '.($this->summaryFor($arguments)['label'] ?? 'the').' shipping day?')
+            ->modalDescription(function (array $arguments): string {
+                $summary = $this->summaryFor($arguments);
+
+                return $summary
+                    ? "New {$summary['label']} labels will be dated {$summary['next_ship_date']} instead of {$summary['ship_date']}."
+                    : '';
+            })
+            ->modalSubmitActionLabel('End Shipping Day')
+            ->action(fn (array $arguments) => $this->endShippingDay((int) ($arguments['carrier'] ?? 0)));
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @return array{carrier_id: int, carrier: string, label: string, package_count: int, unmanifested_count: int, supports_manifest: bool, ship_date: string, next_ship_date: string}|null
+     */
+    private function summaryFor(array $arguments): ?array
+    {
+        return collect($this->carrierSummary)->firstWhere('carrier_id', (int) ($arguments['carrier'] ?? 0));
     }
 
     public function getManifestsProperty(): LengthAwarePaginator

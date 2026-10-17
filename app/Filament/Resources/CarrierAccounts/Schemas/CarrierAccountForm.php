@@ -111,7 +111,7 @@ class CarrierAccountForm
                 // ── USPS ────────────────────────────────────────────────────────────
 
                 Section::make('USPS Credentials')
-                    ->description('Overrides the global USPS credentials for shipments assigned to this account.')
+                    ->description('The USPS identifiers labels bought on this account are billed and mailed under. The account signs in through OAuth, or with its own client ID and secret under Advanced / API App Credentials.')
                     ->schema([
                         TextEntry::make('usps_oauth_status')
                             ->label('OAuth Status')
@@ -342,6 +342,10 @@ class CarrierAccountForm
                 '<span class="text-success-600 dark:text-success-400 font-medium">Connected</span>'
                     .($time ? " — {$time}" : '')
             );
+        }
+
+        if (filled($record->secret('client_id')) && filled($record->secret('client_secret'))) {
+            return new HtmlString('<span class="text-gray-400 dark:text-gray-500">Not connected</span> — signs in with this account\'s own client ID and secret instead');
         }
 
         return new HtmlString('<span class="text-gray-400 dark:text-gray-500">Not connected</span>');
