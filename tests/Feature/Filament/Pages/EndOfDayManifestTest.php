@@ -4,7 +4,9 @@ use App\Enums\PostageSource;
 use App\Filament\Pages\EndOfDay;
 use App\Http\Integrations\USPS\Requests\ScanForm;
 use App\Models\Carrier;
+use App\Models\CarrierAccount;
 use App\Models\DataSource;
+use App\Models\Manifest;
 use App\Models\Package;
 use App\Models\Setting;
 use App\Models\User;
@@ -53,6 +55,14 @@ function fakeUspsManifestResponse(int $carrierAccountId): void
             headers: ['Content-Type' => "multipart/mixed; boundary={$boundary}"],
         ),
     ]);
+}
+
+/**
+ * How many `print-report` events the End of Day page dispatched.
+ */
+function endOfDayPrintReportCount(mixed $page): int
+{
+    return collect($page->effects['dispatches'] ?? [])->where('name', 'print-report')->count();
 }
 
 it('generateManifest creates manifest and dispatches print event', function (): void {
@@ -154,4 +164,106 @@ it('puts labels still dated today on a form for today once the cutoff has passed
     Saloon::assertSent(fn ($request): bool => $request instanceof ScanForm
         && $request->body()->all()['mailingDate'] === $today);
     expect(Package::first()->manifest_id)->not->toBeNull();
+});
+
+it('Generate Manifest saves the form without printing it', function (): void {
+    $account = createUspsAccount();
+
+    Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'carrier_account_id' => $account->id,
+        'tracking_number' => '9400111899223456789012',
+    ]);
+
+    fakeUspsManifestResponse($account->id);
+
+    Livewire::test(EndOfDay::class)
+        ->call('generateManifest', Carrier::where('name', Carrier::USPS)->value('id'), false)
+        ->assertNotDispatched('print-report')
+        ->assertNotified('Manifest Created');
+
+    expect(Manifest::count())->toBe(1)
+        ->and(Manifest::first()->image)->not->toBeEmpty();
+});
+
+it('Generate & Print prints every SCAN form a run across two USPS accounts makes', function (): void {
+    $carrier = Carrier::where('name', Carrier::USPS)->first() ?? Carrier::factory()->usps()->create();
+    $makeAccount = fn (): CarrierAccount => CarrierAccount::create([
+        'carrier_id' => $carrier->id,
+        'name' => 'USPS '.fake()->unique()->numerify('Account-####'),
+        'active' => true,
+        'credentials' => ['crid' => 'test_crid'],
+        'secret_credentials' => ['client_id' => 'test_client_id', 'client_secret' => 'test_client_secret'],
+    ]);
+    $accountA = $makeAccount();
+    $accountB = $makeAccount();
+
+    Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'carrier_account_id' => $accountA->id,
+        'tracking_number' => '9400111111111111111111',
+    ]);
+    Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'carrier_account_id' => $accountB->id,
+        'tracking_number' => '9400222222222222222222',
+    ]);
+
+    fakeUspsManifestResponse($accountA->id);
+    Cache::put("usps_authenticator:{$accountB->id}", Cache::get("usps_authenticator:{$accountA->id}"), 3600);
+
+    $page = Livewire::test(EndOfDay::class)
+        ->call('generateManifest', $carrier->id, true)
+        ->assertNotified('Manifest Created');
+
+    expect(endOfDayPrintReportCount($page))->toBe(2)
+        ->and(Manifest::count())->toBe(2)
+        ->and(Manifest::whereNull('image')->count())->toBe(0);
+});
+
+it('hides Generate & Print when printing is suppressed', function (): void {
+    $account = createUspsAccount();
+
+    Package::factory()->shipped()->create([
+        'carrier' => 'USPS',
+        'carrier_account_id' => $account->id,
+        'tracking_number' => '9400111899223456789012',
+    ]);
+
+    Livewire::test(EndOfDay::class)
+        ->assertSee('Generate Manifest')
+        ->assertSee('Generate &amp; Print', escape: false);
+
+    Setting::create(['key' => 'suppress_printing', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
+    app(SettingsService::class)->clearCache();
+
+    Livewire::test(EndOfDay::class)
+        ->assertSee('Generate Manifest')
+        ->assertDontSee('Generate &amp; Print', escape: false);
+});
+
+it('shows Reprint Manifest for a form with an image and No image for one without', function (): void {
+    Manifest::create([
+        'carrier' => Carrier::USPS,
+        'manifest_number' => 'MN-WITH-IMAGE',
+        'image' => base64_encode('fake-manifest-pdf'),
+        'manifest_date' => now()->toDateString(),
+        'package_count' => 1,
+    ]);
+
+    Livewire::test(EndOfDay::class)
+        ->assertSee('Reprint Manifest')
+        ->assertDontSee('No image');
+
+    Manifest::query()->delete();
+    Manifest::create([
+        'carrier' => Carrier::USPS,
+        'manifest_number' => 'EXTERNAL-20261017100000',
+        'manifest_date' => now()->toDateString(),
+        'package_count' => 1,
+    ]);
+
+    Livewire::test(EndOfDay::class)
+        ->assertSee('No image')
+        ->assertDontSee('Reprint Manifest');
 });

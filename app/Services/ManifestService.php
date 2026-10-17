@@ -121,6 +121,7 @@ class ManifestService
             manifestNumber: (string) $response->manifestNumber,
             carrier: $carrier,
             image: $response->image,
+            manifests: [$manifest],
         );
     }
 
@@ -176,7 +177,7 @@ class ManifestService
             }
 
             $manifestNumbers = [];
-            $lastImage = null;
+            $manifests = [];
             $totalManifested = 0;
             $batchNumber = 0;
 
@@ -201,18 +202,17 @@ class ManifestService
                         return ManifestResponse::failure($result['error']);
                     }
 
-                    $manifestNumbers[] = $result['manifestNumber'];
-                    $lastImage = $result['image'];
+                    $manifestNumbers[] = $result['manifest']->manifest_number;
+                    $manifests[] = $result['manifest'];
                     $totalManifested += $result['packageCount'];
                 }
             }
 
-            $combinedNumber = implode(', ', $manifestNumbers);
-
             return ManifestResponse::success(
-                manifestNumber: $combinedNumber,
+                manifestNumber: implode(', ', $manifestNumbers),
                 carrier: Carrier::USPS,
-                image: $lastImage,
+                image: end($manifests)->image,
+                manifests: $manifests,
             );
         } catch (\Exception $e) {
             logger()->error('USPS Scan Form Error', ['error' => $e->getMessage()]);
@@ -227,7 +227,7 @@ class ManifestService
      * Send a single USPS SCAN Form request for one chunk of packages,
      * with retry logic for already-manifested errors.
      *
-     * @return array{success: bool, manifestNumber?: string, image?: string, packageCount?: int, error?: string}
+     * @return array{success: bool, manifest?: Manifest, packageCount?: int, error?: string}
      */
     private function createUspsScanForm(
         Connector $connector,
@@ -314,8 +314,7 @@ class ManifestService
 
             return [
                 'success' => true,
-                'manifestNumber' => $manifestNumber,
-                'image' => $image,
+                'manifest' => $manifest,
                 'packageCount' => $remainingPackages->count(),
             ];
         }
