@@ -244,7 +244,7 @@ class CustomsReadiness
             ...$this->exportFilingFindings($shipment, $lines, $products, $origin, $destination),
             ...$this->recipientTaxIdFindings($shipment, $destination),
             ...$this->registrationFindings($terms, $destination),
-            ...$this->carrierFindings($shipment, $lines, $terms, $origin, $destination, $carrier),
+            ...$this->carrierFindings($shipment, $lines, $products, $terms, $origin, $destination, $carrier),
         );
 
         return $findings;
@@ -674,9 +674,10 @@ class CustomsReadiness
      * label is only a warning until that carrier's rate is the one bought.
      *
      * @param  list<CustomsItem>  $lines
+     * @param  array<int, Product|null>  $products
      * @return list<CustomsFinding>
      */
-    private function carrierFindings(Shipment $shipment, array $lines, ResolvedCustomsTerms $terms, AddressData $origin, AddressData $destination, ?string $carrier): array
+    private function carrierFindings(Shipment $shipment, array $lines, array $products, ResolvedCustomsTerms $terms, AddressData $origin, AddressData $destination, ?string $carrier): array
     {
         $findings = [];
         $key = $carrier === null ? null : CarrierAlias::lookupKey($carrier);
@@ -699,13 +700,28 @@ class CustomsReadiness
             $long = array_filter($lines, fn (CustomsItem $line): bool => mb_strlen($line->description) > self::USPS_DESCRIPTION_LIMIT);
 
             if ($long !== []) {
-                $findings[] = new CustomsFinding(
+                // The text and what it becomes, so the packer sees what customs
+                // will read, and the product it comes from.
+                $cuts = array_map(
+                    fn (CustomsItem $line): string => sprintf(
+                        '"%s" becomes "%s"',
+                        $line->description,
+                        mb_substr($line->description, 0, self::USPS_DESCRIPTION_LIMIT),
+                    ),
+                    $long,
+                );
+
+                $findings[] = $this->withProductFix(new CustomsFinding(
                     CustomsFindingSeverity::Warn,
                     'usps_description_cut',
-                    'USPS Cuts Descriptions',
-                    sprintf('USPS cuts a customs description at %d characters: %s.', self::USPS_DESCRIPTION_LIMIT, $this->describeLines($long)),
+                    'Customs Description Will Be Shortened',
+                    sprintf(
+                        'USPS keeps the first %d characters of a customs description: %s. The text is the product\'s description, or its name when it has none.',
+                        self::USPS_DESCRIPTION_LIMIT,
+                        implode('; ', $cuts),
+                    ),
                     $this->lineNames($long),
-                );
+                ), $long, $lines, $products);
             }
         }
 

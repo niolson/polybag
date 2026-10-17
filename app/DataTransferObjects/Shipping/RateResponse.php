@@ -217,34 +217,47 @@ readonly class RateResponse
     }
 
     /**
+     * The price as a packer reads it. Carriers that expose no rate API
+     * (Shopify Shipping) price the label at purchase time; "$0.00" would read
+     * as a free label.
+     */
+    public function priceDescription(): string
+    {
+        return $this->priceUnknown ? 'Price set at purchase' : '$'.number_format($this->price, 2);
+    }
+
+    /**
+     * When the parcel arrives, in words: the delivery date, else the
+     * commitment or transit time the carrier gave, else null.
+     *
      * @param  bool  $showDeliveryDate  False for a date nobody can rely on, such as one already past, so the commitment or transit time is shown instead
      */
-    public function formDescription(bool $showDeliveryDate = true): string
+    public function deliveryDescription(bool $showDeliveryDate = true): ?string
     {
-        // Carriers that expose no rate API (Shopify Shipping) price the label at
-        // purchase time; showing "$0.00" would read as a free label.
-        if ($this->priceUnknown) {
-            $detail = $this->deliveryCommitment ?? $this->transitTime;
-
-            return 'Price set at purchase'.($detail ? " — {$detail}" : '');
-        }
-
-        $price = number_format($this->price, 2);
-
-        // Show actual delivery date when available, with the year when it is
-        // not this one, so a date months away does not read as next week.
-        $parsed = $showDeliveryDate ? $this->parsedDeliveryDate() : null;
+        // With the year when it is not this one, so a date months away does
+        // not read as next week.
+        $parsed = $showDeliveryDate && ! $this->priceUnknown ? $this->parsedDeliveryDate() : null;
         if ($parsed) {
-            $formatted = $parsed->format($parsed->year === now()->year ? 'D, M j' : 'D, M j, Y');
-
-            return '$'.$price.' — Delivers '.$formatted;
+            return 'Delivers '.$parsed->format($parsed->year === now()->year ? 'D, M j' : 'D, M j, Y');
         }
 
-        // Fall back to commitment name or transit time
-        $detail = $this->carrier === Carrier::USPS
-            ? ($this->deliveryCommitment ?? '')
-            : ($this->transitTime ?? '');
+        $detail = $this->priceUnknown || $this->carrier === Carrier::USPS
+            ? ($this->deliveryCommitment ?? $this->transitTime)
+            : $this->transitTime;
 
-        return '$'.$price.($detail ? " — {$detail}" : '');
+        return filled($detail) ? self::readableCommitment($detail) : null;
+    }
+
+    /**
+     * A carrier's commitment name in sentence case. USPS sends its own
+     * capitals ("MILITARY"), and a military commitment carries no date.
+     */
+    private static function readableCommitment(string $commitment): string
+    {
+        if (in_array(strtoupper(trim($commitment)), ['MILITARY', 'DPO', 'APO', 'FPO'], true)) {
+            return 'Military mail, no date';
+        }
+
+        return $commitment === strtoupper($commitment) ? ucfirst(strtolower($commitment)) : $commitment;
     }
 }

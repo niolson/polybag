@@ -527,6 +527,17 @@ describe('carrier warnings', function (): void {
             ->and(findingCodes(readinessFor($short)))->not->toContain('usps_description_cut');
     });
 
+    it('shows the description and what USPS cuts it to, and links to the product', function (): void {
+        $this->actingAs(User::factory()->admin()->create());
+        $package = readinessPackage('JP', [['description' => 'Handmade ceramic coffee mug with lid']]);
+
+        $finding = findingNamed(readinessFor($package), 'usps_description_cut');
+
+        expect($finding?->title)->toBe('Customs Description Will Be Shortened')
+            ->and($finding?->message)->toContain('"Handmade ceramic coffee mug with lid" becomes "Handmade ceramic coffee mug wi"')
+            ->and($finding?->fixUrl)->toContain('/products/');
+    });
+
     it('blocks a USPS EU consumer label whose identifier has no letter or digit, and warns before a carrier is chosen', function (): void {
         $usps = new RateResponse(Carrier::USPS, 'PMI', 'Priority Mail International', 40.0);
         $ups = new RateResponse(Carrier::UPS, '07', 'UPS Worldwide Express', 60.0);

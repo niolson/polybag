@@ -113,6 +113,14 @@ class ShippingRateService
      */
     private bool $allRatesDroppedForCustomsTerms = false;
 
+    /**
+     * Sellers the last getShippingRates() call asked that returned no rate,
+     * by label, and not otherwise explained by an exclusion.
+     *
+     * @var list<string>
+     */
+    private array $unratedSources = [];
+
     /** Package owning the configured-source and blind-offer snapshot. */
     private ?int $ratedPackageId = null;
 
@@ -224,6 +232,7 @@ class ShippingRateService
     {
         $this->configuredSources = [];
         $this->packagingIneligibleSourceKeys = [];
+        $this->unratedSources = [];
         $this->ratedPackageId = null;
         $this->ratedShippingMethodId = null;
         $this->droppedRates = [];
@@ -261,7 +270,10 @@ class ShippingRateService
         $droppedForTerms = [];
         $quoted = 0;
 
+        $answered = [];
+
         foreach ($this->fetchRatesConcurrently($tasks, $rateRequest, $shipDates) as $taskKey => $taskRates) {
+            $answered[$taskKey] = $taskRates->isNotEmpty();
             $eligible = ContentsFilter::keepQualifying(
                 PackagingFilter::keepCompatible($taskRates, $packageData->carrierPackaging),
                 $packageData->qualifyingContents,
@@ -293,6 +305,7 @@ class ShippingRateService
             ];
         }
 
+        $this->unratedSources = $this->unratedSourcesAmong($tasks, $answered);
         $this->droppedRates = array_values($dropped);
         $this->allRatesDroppedForCustomsTerms = $quoted > 0 && $rateOptions->isEmpty() && $droppedForTerms !== [];
         $rates = $this->offer($package, $rateOptions, $rateTaskKeys, $shipDates, $rateRequest->fingerprint());
@@ -300,6 +313,41 @@ class ShippingRateService
         $this->ratedShippingMethodId = $package->shipment?->shipping_method_id;
 
         return $rates;
+    }
+
+    /**
+     * The sellers asked for a rate that gave none: answered empty, or failed
+     * without an exclusion saying why. A blind-purchase source quotes nothing
+     * by design and is never one of them.
+     *
+     * @param  array<int, RatingTask>  $tasks
+     * @param  array<string, bool>  $answered  Whether each answering task returned any rate
+     * @return list<string>
+     */
+    private function unratedSourcesAmong(array $tasks, array $answered): array
+    {
+        $registry = app(CarrierRegistry::class);
+
+        return collect($tasks)
+            ->filter(fn (array $task): bool => isset($this->configuredSources[$task['key']])
+                && ! isset($this->exclusions[$task['key']])
+                && ! ($answered[$task['key']] ?? false)
+                && ! ($registry->has($task['source']) && $registry->get($task['source']) instanceof BlindPurchaseSource))
+            ->pluck('label')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The sellers the last getShippingRates() call asked that returned no
+     * rate, by label.
+     *
+     * @return list<string>
+     */
+    public function getUnratedSources(): array
+    {
+        return $this->unratedSources;
     }
 
     /**

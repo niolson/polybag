@@ -131,18 +131,15 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         foreach ($classified as $key => $classifiedRate) {
             $labels[$key] = $classifiedRate->rate->formLabel();
             $delivery = $classifiedRate->delivery;
-            $description = $classifiedRate->rate->formDescription(showDeliveryDate: $delivery !== DeliveryEstimate::Unknown);
-            // Only against a due-by date: without one nothing is late, and a
-            // missing date is no news.
-            if ($deadline !== null) {
-                $description .= match ($delivery) {
-                    DeliveryEstimate::Late => ' — LATE',
-                    DeliveryEstimate::Unknown => ' — No delivery estimate',
-                    DeliveryEstimate::OnTime => '',
-                };
-            }
-            $descriptions[$key] = $description;
+            // The price is the page's own column; this is when it arrives.
+            $descriptions[$key] = $classifiedRate->rate->deliveryDescription(showDeliveryDate: $delivery !== DeliveryEstimate::Unknown) ?? '';
             $rateArray = $classifiedRate->rate->toArray();
+
+            // Shown as a badge, and only against a due-by date: without one
+            // nothing is late, and a missing date is no news.
+            if ($deadline !== null && $delivery !== DeliveryEstimate::OnTime) {
+                $rateArray['delivery'] = $delivery->value;
+            }
 
             if ($requestedCodes !== []) {
                 $appliedCodes = $resolver->resolveForPackageAndRate($package, $classifiedRate->rate);
@@ -205,6 +202,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                 $this->shippingRateService->getDroppedRates(),
             ),
             allRatesDroppedForCustomsTerms: $this->shippingRateService->allRatesDroppedForCustomsTerms(),
+            unratedSources: $this->shippingRateService->getUnratedSources(),
         );
     }
 
@@ -818,6 +816,9 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
                     ->whereIn('role', [Role::Manager->value, Role::Admin->value])
                     ->when($userId !== null, fn ($query) => $query->orWhere('id', $userId)))
                 ->get()
+                // Once per label: a retry that fails to record the same label
+                // again is the same news, already in the bell.
+                ->reject(fn (User $user): bool => LabelNotRecorded::isUnreadFor($user, $package, $trackingNumber))
                 ->each(fn (User $user) => $user->notify(new LabelNotRecorded($package, $seller, $trackingNumber, $recoverable)));
         } catch (\Throwable $e) {
             logger()->error('Could not send the label-not-recorded notification', [

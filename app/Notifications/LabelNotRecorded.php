@@ -4,6 +4,7 @@ namespace App\Notifications;
 
 use App\Filament\Resources\PackageResource;
 use App\Models\Package;
+use App\Models\User;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification as FilamentNotification;
 use Illuminate\Notifications\Notification;
@@ -21,6 +22,19 @@ class LabelNotRecorded extends Notification
         public ?string $trackingNumber,
         public bool $recoverable,
     ) {}
+
+    /**
+     * Whether this user already has this news unread: the same package and
+     * the same label.
+     */
+    public static function isUnreadFor(User $user, Package $package, ?string $trackingNumber): bool
+    {
+        return $user->unreadNotifications()
+            ->where('type', self::class)
+            ->get()
+            ->contains(fn ($notification): bool => ($notification->data['package_id'] ?? null) === $package->id
+                && ($notification->data['tracking_number'] ?? null) === $trackingNumber);
+    }
 
     /**
      * @return array<int, string>
@@ -52,6 +66,9 @@ class LabelNotRecorded extends Notification
                     ->label('View Package')
                     ->url(PackageResource::getUrl('view', ['record' => $this->package])),
             ])
-            ->getDatabaseMessage();
+            ->getDatabaseMessage() + [
+                'package_id' => $this->package->id,
+                'tracking_number' => $this->trackingNumber,
+            ];
     }
 }

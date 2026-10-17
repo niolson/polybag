@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Contracts\PackageDraftWorkflow;
 use App\Contracts\PackageShippingWorkflow;
+use App\Contracts\RecoversUnresolvedPurchase;
 use App\DataTransferObjects\PackageShipping\PackageShippingOptions;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingResult;
@@ -15,21 +16,26 @@ use App\Enums\ShipmentStatus;
 use App\Exceptions\PackageDraftIncompleteException;
 use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Concerns\PrintsLabels;
+use App\Filament\Resources\ShipmentResource;
 use App\Models\Client;
 use App\Models\ClientTaxRegistration;
 use App\Models\Package;
 use App\Models\ShippingMethod;
 use App\Services\Customs\CustomsReadiness;
 use App\Services\PackageLabels\SessionLastLabel;
+use App\Services\PostageSources\OfferStore;
+use App\Services\PostageSources\PostageSourceDispatcher;
 use App\Services\ShipmentLocationGuard;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Pages\Page;
 use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Session;
+use Illuminate\Support\HtmlString;
 use Illuminate\Validation\Rule;
 
 class Ship extends Page
@@ -88,6 +94,14 @@ class Ship extends Page
      */
     public array $customsFindings = [];
 
+    /**
+     * Sellers asked for a rate that gave none, named so a short list does not
+     * read as a broken carrier.
+     *
+     * @var list<string>
+     */
+    public array $unratedSources = [];
+
     /** Rates were quoted and the customs terms dropped every one. */
     public bool $allRatesDroppedForCustomsTerms = false;
 
@@ -144,6 +158,92 @@ class Ship extends Page
      * rated until one is saved to the shipment (`carrier-catalog-reset/16`).
      */
     public ?int $shippingMethodId = null;
+
+    /**
+     * The last purchase attempt's refusal, kept on the page beside the rates.
+     * A toast is easy to miss, and a label sold but not recorded must not look
+     * like nothing happened.
+     *
+     * @var array{title: string, message: string}|null
+     */
+    public ?array $purchaseError = null;
+
+    public function getTitle(): string|Htmlable
+    {
+        $reference = $this->package?->shipment?->shipment_reference;
+
+        return filled($reference) ? "Ship {$reference}" : 'Ship';
+    }
+
+    /**
+     * Who the parcel is for, and the way back to the order and to packing.
+     */
+    public function getSubheading(): string|Htmlable|null
+    {
+        $shipment = $this->package?->shipment;
+
+        if ($shipment === null) {
+            return null;
+        }
+
+        $recipient = trim(implode(' ', array_filter([$shipment->first_name, $shipment->last_name])));
+        $place = implode(', ', array_filter([$shipment->city, $shipment->state_or_province, $shipment->country === 'US' ? null : $shipment->country]));
+
+        $links = ['<a href="'.e(Pack::getUrl(['shipment_id' => $shipment->id])).'" class="text-primary-600 hover:underline dark:text-primary-400">Back to Pack</a>'];
+
+        if (ShipmentResource::canView($shipment)) {
+            $links[] = '<a href="'.e(ShipmentResource::getUrl('view', ['record' => $shipment])).'" class="text-primary-600 hover:underline dark:text-primary-400">View Shipment</a>';
+        }
+
+        return new HtmlString(
+            e(implode(' · ', array_filter([$recipient, $place, "Package {$this->package->id}"])))
+                .' — '.implode(' · ', $links),
+        );
+    }
+
+    /**
+     * What an earlier attempt left on this package: a label sold but never
+     * saved, or a purchase nobody heard back about. Read fresh, so it says so
+     * after a reload too; the next Buy settles it before buying anything new.
+     */
+    public function unfinishedPurchaseNotice(): ?string
+    {
+        if ($this->package === null || $this->isShipped() || $this->purchaseError !== null) {
+            return null;
+        }
+
+        $offers = app(OfferStore::class);
+        $offer = $offers->boughtButUnrecorded($this->package)->first()
+            ?? $offers->awaitingPurchaseConfirmation($this->package)->first();
+
+        if ($offer === null) {
+            return null;
+        }
+
+        $seller = $offer->sellerName();
+        $tracking = $offer->purchase_context[OfferStore::REPORTED_TRACKING_NUMBER] ?? null;
+        $label = is_string($tracking) ? "label {$tracking}" : 'a label';
+
+        if (is_string($offer->purchase_context[OfferStore::UNRECOVERABLE_REASON] ?? null)) {
+            return "{$seller} sold {$label} for this package that PolyBag did not save, and it cannot be fetched again. No other label can be bought until a manager records it on the package page.";
+        }
+
+        $recoverable = rescue(
+            fn (): bool => app(PostageSourceDispatcher::class)->sellerFor($offer) instanceof RecoversUnresolvedPurchase,
+            false,
+            report: false,
+        );
+
+        if (($offer->purchase_reference !== null || is_string($tracking)) && ! $recoverable) {
+            return "{$seller} sold {$label} for this package that PolyBag did not save, and cannot ask {$seller} for it again. Do not buy another label: tell a manager, who can void this one with {$seller}.";
+        }
+
+        if ($offer->purchase_reference !== null || is_string($tracking)) {
+            return "{$seller} sold {$label} for this package that PolyBag did not save. Buy & Print Label asks {$seller} for that label first, so a second one is not bought.";
+        }
+
+        return "PolyBag tried to buy a label for this package and never heard back from {$seller}, so it may already exist. Buy & Print Label settles that purchase first, and buys a new label only if none was made.";
+    }
 
     public function mount($package_id = null): void
     {
@@ -488,6 +588,7 @@ class Ship extends Page
         $this->blindPurchaseOffers = $options->blindPurchaseOffers;
         $this->droppedRates = $options->droppedRates;
         $this->allRatesDroppedForCustomsTerms = $options->allRatesDroppedForCustomsTerms;
+        $this->unratedSources = $options->unratedSources;
         $this->selectedBlindOfferId = null;
         $this->confirmedBlindPurchase = false;
     }
@@ -554,6 +655,8 @@ class Ship extends Page
 
             return;
         }
+
+        $this->purchaseError = null;
 
         $this->package->shipment->refresh()->load('location');
 
@@ -643,7 +746,11 @@ class Ship extends Page
                 $this->applyRateOptions($this->prepareCachedRates());
             }
 
-            $this->notifyError($result->title ?? 'Shipping Error', $result->message ?? 'An unexpected error occurred. Please try again.');
+            $this->purchaseError = [
+                'title' => $result->title ?? 'Shipping Error',
+                'message' => $result->message ?? 'An unexpected error occurred. Please try again.',
+            ];
+            $this->notifyError($this->purchaseError['title'], $this->purchaseError['message']);
             // A label bought but not recorded is also sent to the bell; show it now, not at the next poll.
             $this->dispatch('databaseNotificationsSent');
 

@@ -287,7 +287,7 @@ it('marks OTDR protection on the Ship page, with Amazon\'s reasons, whatever the
         ->and($byPrice['4'])->not->toHaveKey('otdrProtection');
 
     $lateIndex = collect($options->rateOptions)->search(fn (array $rate): bool => $rate['price'] === 9.00);
-    expect($options->rateOptionDescriptions[$lateIndex])->toContain('LATE');
+    expect($options->rateOptions[$lateIndex]['delivery'])->toBe('late');
 });
 
 it('shows a rate with no delivery date, or one already past, as no estimate rather than late', function (): void {
@@ -299,15 +299,29 @@ it('shows a rate with no delivery date, or one already past, as no estimate rath
     ]);
 
     $options = app(PackageShippingWorkflow::class)->prepareRates($package);
-    $descriptionFor = fn (float $price): string => $options->rateOptionDescriptions[
-        collect($options->rateOptions)->search(fn (array $rate): bool => $rate['price'] === $price)
-    ];
+    $indexFor = fn (float $price): int => collect($options->rateOptions)->search(fn (array $rate): bool => $rate['price'] === $price);
 
-    expect($descriptionFor(4.00))->toBe('$4.00 — No delivery estimate')
-        ->and($descriptionFor(5.00))->toBe('$5.00 — No delivery estimate')
-        ->and($descriptionFor(6.00))->toEndWith(' — LATE')
+    expect($options->rateOptions[$indexFor(4.00)]['delivery'])->toBe('unknown')
+        ->and($options->rateOptions[$indexFor(5.00)]['delivery'])->toBe('unknown')
+        // A past date is no estimate, so it is not shown as one.
+        ->and($options->rateOptionDescriptions[$indexFor(5.00)])->not->toContain('Delivers')
+        ->and($options->rateOptions[$indexFor(6.00)]['delivery'])->toBe('late')
         // An unknown date may yet arrive in time, so not every option misses it.
         ->and($options->allRatesLate)->toBeFalse();
+});
+
+it('names a carrier that was asked and returned no rate', function (): void {
+    $package = packageForOrderFrom(DataSource::factory()->shopify()->create());
+    registerRequirementsAdapter([]);
+
+    $options = app(PackageShippingWorkflow::class)->prepareRates($package);
+
+    expect($options->rateOptions)->toBe([])
+        ->and($options->unratedSources)->toBe(['MockCarrier']);
+
+    registerRequirementsAdapter([requirementsRate(4.00, null)]);
+
+    expect(app(PackageShippingWorkflow::class)->prepareRates($package)->unratedSources)->toBe([]);
 });
 
 it('says no option meets the deliver-by date only when every rate is dated and late', function (): void {
@@ -326,7 +340,8 @@ it('marks nothing late or unestimated for an order with no due-by date', functio
 
     $options = app(PackageShippingWorkflow::class)->prepareRates($package);
 
-    expect($options->rateOptionDescriptions)->toBe([0 => '$4.00'])
+    expect($options->rateOptionDescriptions)->toBe([0 => ''])
+        ->and($options->rateOptions[0])->not->toHaveKey('delivery')
         ->and($options->allRatesLate)->toBeFalse();
 });
 
