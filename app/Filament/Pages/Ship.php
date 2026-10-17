@@ -15,21 +15,30 @@ use App\Enums\ShipmentStatus;
 use App\Exceptions\PackageDraftIncompleteException;
 use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Concerns\PrintsLabels;
+use App\Filament\Resources\ShipmentResource;
+use App\Filament\Support\ResolveUnaccountedPurchaseAction;
 use App\Models\Client;
 use App\Models\ClientTaxRegistration;
 use App\Models\Package;
 use App\Models\ShippingMethod;
+use App\Models\ShippingOffer;
+use App\Services\Carriers\ShopifyAdapter;
 use App\Services\Customs\CustomsReadiness;
 use App\Services\PackageLabels\SessionLastLabel;
+use App\Services\PostageSources\OfferStore;
+use App\Services\PostageSources\UnresolvedPurchaseResolver;
 use App\Services\ShipmentLocationGuard;
+use App\Services\ShopifyShippingLabelService;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Pages\Page;
 use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Session;
+use Illuminate\Support\HtmlString;
 use Illuminate\Validation\Rule;
 
 class Ship extends Page
@@ -88,6 +97,14 @@ class Ship extends Page
      */
     public array $customsFindings = [];
 
+    /**
+     * Sellers asked for a rate that gave none, named so a short list does not
+     * read as a broken carrier.
+     *
+     * @var list<string>
+     */
+    public array $unratedSources = [];
+
     /** Rates were quoted and the customs terms dropped every one. */
     public bool $allRatesDroppedForCustomsTerms = false;
 
@@ -144,6 +161,137 @@ class Ship extends Page
      * rated until one is saved to the shipment (`carrier-catalog-reset/16`).
      */
     public ?int $shippingMethodId = null;
+
+    /**
+     * The last purchase attempt's refusal, kept on the page beside the rates.
+     * A toast is easy to miss, and a label sold but not recorded must not look
+     * like nothing happened.
+     *
+     * @var array{title: string, message: string}|null
+     */
+    public ?array $purchaseError = null;
+
+    public function getTitle(): string|Htmlable
+    {
+        $reference = $this->package?->shipment?->shipment_reference;
+
+        return filled($reference) ? "Ship {$reference}" : 'Ship';
+    }
+
+    /**
+     * Who the parcel is for, and the way back to the order and to packing.
+     */
+    public function getSubheading(): string|Htmlable|null
+    {
+        $shipment = $this->package?->shipment;
+
+        if ($shipment === null) {
+            return null;
+        }
+
+        $recipient = trim(implode(' ', array_filter([$shipment->first_name, $shipment->last_name])));
+        $place = implode(', ', array_filter([$shipment->city, $shipment->state_or_province, $shipment->country === 'US' ? null : $shipment->country]));
+
+        $links = ['<a href="'.e(Pack::getUrl(['shipment_id' => $shipment->id])).'" class="text-primary-600 hover:underline dark:text-primary-400">Back to Pack</a>'];
+
+        if (ShipmentResource::canView($shipment)) {
+            $links[] = '<a href="'.e(ShipmentResource::getUrl('view', ['record' => $shipment])).'" class="text-primary-600 hover:underline dark:text-primary-400">View Shipment</a>';
+        }
+
+        return new HtmlString(
+            e(implode(' · ', array_filter([$recipient, $place, "Package {$this->package->id}"])))
+                .' — '.implode(' · ', $links),
+        );
+    }
+
+    /**
+     * The earliest purchase on this package that nothing accounts for: a label
+     * sold but never saved, or a purchase nobody heard back about.
+     */
+    private function earlierPurchase(): ?ShippingOffer
+    {
+        if ($this->package === null) {
+            return null;
+        }
+
+        $offers = app(OfferStore::class);
+
+        return $offers->boughtButUnrecorded($this->package)->first()
+            ?? $offers->awaitingPurchaseConfirmation($this->package)->first();
+    }
+
+    /**
+     * Whether asking now can settle the earlier purchase: the source can be
+     * asked, or nothing says a label was sold. A sold label its source cannot
+     * hand over again is a manager's to void or keep, on the package page.
+     */
+    public function canCheckEarlierPurchase(): bool
+    {
+        $offer = $this->earlierPurchase();
+
+        if ($offer === null || $this->isShipped() || ResolveUnaccountedPurchaseAction::unrecoverableReason($offer) !== null) {
+            return false;
+        }
+
+        return ! $this->earlierPurchaseWasSold($offer) || app(UnresolvedPurchaseResolver::class)->canBeAsked($offer);
+    }
+
+    private function earlierPurchaseWasSold(ShippingOffer $offer): bool
+    {
+        return $offer->isKnownSold() || is_string($offer->purchase_context[OfferStore::REPORTED_TRACKING_NUMBER] ?? null);
+    }
+
+    /**
+     * What an earlier attempt left on this package, and the way to settle it.
+     * Read fresh, so it says so after a reload too.
+     */
+    public function unfinishedPurchaseNotice(): ?string
+    {
+        if ($this->package === null || $this->isShipped() || $this->purchaseError !== null) {
+            return null;
+        }
+
+        $offer = $this->earlierPurchase();
+
+        if ($offer === null) {
+            return $this->unfinishedShopifyPurchaseNotice();
+        }
+
+        $seller = $offer->sellerName();
+        $tracking = ResolveUnaccountedPurchaseAction::knownTrackingNumber($offer);
+        $label = $tracking !== null ? "label {$tracking}" : 'a label';
+        $sold = $this->earlierPurchaseWasSold($offer);
+
+        return match (true) {
+            ResolveUnaccountedPurchaseAction::unrecoverableReason($offer) !== null,
+            $sold && ! $this->canCheckEarlierPurchase() => "{$seller} sold {$label} for this package that PolyBag did not save, and cannot fetch it again. "
+                .'Do not buy another label: a manager can void or keep this one on the package page.',
+            $sold => "{$seller} sold {$label} for this package that PolyBag did not save. "
+                ."Use Check Earlier Purchase to fetch it from {$seller}; no second label is bought.",
+            default => "PolyBag tried to buy a label for this package and never heard back from {$seller}, so it may already exist. "
+                .'Use Check Earlier Purchase: it fetches the label if one was made, and otherwise lets a new one be bought.',
+        };
+    }
+
+    /**
+     * A Shopify blind purchase keeps no offer; its record is the markers on
+     * the package. Buying through Shopify again picks that purchase up rather
+     * than starting another ({@see ShopifyShippingLabelService::purchase()}).
+     */
+    private function unfinishedShopifyPurchaseNotice(): ?string
+    {
+        $held = ShopifyAdapter::whereHoldsPurchase(Package::query()->whereKey($this->package->id))->exists();
+
+        if (! $held) {
+            return null;
+        }
+
+        return $this->blindPurchaseOffers !== []
+            ? 'Shopify accepted a label purchase for this package that PolyBag has not finished recording. '
+                .'Choose Shopify Shipping below and buy: PolyBag picks up that purchase from Shopify instead of buying another.'
+            : 'Shopify accepted a label purchase for this package that PolyBag has not finished recording, and Shopify Shipping is not offered now. '
+                .'Do not buy another label: a manager can check the order in the Shopify admin.';
+    }
 
     public function mount($package_id = null): void
     {
@@ -278,6 +426,14 @@ class Ship extends Page
                 ->keybindings(['f12'])
                 ->hidden(fn (): bool => $this->isShipped())
                 ->disabled(fn (): bool => $this->selectedRateIndex === null && $this->selectedBlindOfferId === null),
+            // Settles an earlier purchase without a rate: none may come back
+            // while one is unaccounted for, and Buy needs a selection.
+            Action::make('checkEarlierPurchase')
+                ->label('Check Earlier Purchase')
+                ->icon('heroicon-o-magnifying-glass')
+                ->color('warning')
+                ->action(fn () => $this->checkEarlierPurchase())
+                ->visible(fn (): bool => $this->canCheckEarlierPurchase()),
             Action::make('Print again')
                 ->label('Reprint Label')
                 ->action(fn () => $this->printStoredPackageLabel($this->package->id))
@@ -488,6 +644,7 @@ class Ship extends Page
         $this->blindPurchaseOffers = $options->blindPurchaseOffers;
         $this->droppedRates = $options->droppedRates;
         $this->allRatesDroppedForCustomsTerms = $options->allRatesDroppedForCustomsTerms;
+        $this->unratedSources = $options->unratedSources;
         $this->selectedBlindOfferId = null;
         $this->confirmedBlindPurchase = false;
     }
@@ -547,29 +704,7 @@ class Ship extends Page
             return;
         }
 
-        // The workflow refuses this too, from the database. Refusing here as
-        // well keeps a stale page from re-quoting carriers on its way there.
-        if ($this->package->refresh()->status === PackageStatus::Shipped) {
-            $this->notifyWarning('Already Shipped', PackageShippingResult::alreadyShippedMessage($this->package->tracking_number));
-
-            return;
-        }
-
-        $this->package->shipment->refresh()->load('location');
-
-        // Authorized on mount, but the shipment may have shipped from another
-        // station since, which makes this a reshipment.
-        $permission = Gate::inspect('ship', $this->package);
-        if ($permission->denied()) {
-            $this->notifyError('Not Allowed', $permission->message() ?? 'You may not ship this package.');
-
-            return;
-        }
-
-        $locationError = app(ShipmentLocationGuard::class)->errorFor($this->package->shipment, auth()->user());
-        if ($locationError !== null) {
-            $this->notifyError('Location Unavailable', $locationError);
-
+        if ($this->refusesPurchase()) {
             return;
         }
 
@@ -643,19 +778,114 @@ class Ship extends Page
                 $this->applyRateOptions($this->prepareCachedRates());
             }
 
-            $this->notifyError($result->title ?? 'Shipping Error', $result->message ?? 'An unexpected error occurred. Please try again.');
+            $this->purchaseError = [
+                'title' => $result->title ?? 'Shipping Error',
+                'message' => $result->message ?? 'An unexpected error occurred. Please try again.',
+            ];
+            $this->notifyError($this->purchaseError['title'], $this->purchaseError['message']);
             // A label bought but not recorded is also sent to the bell; show it now, not at the next poll.
             $this->dispatch('databaseNotificationsSent');
 
             return;
         }
 
+        $this->labelBought($result, 'Label Bought');
+    }
+
+    /**
+     * Ask the source about the earlier purchase now: a label that comes back
+     * ships the package and prints; a definite "nothing bought" frees it to be
+     * bought, with fresh rates; anything else stays on the page.
+     */
+    public function checkEarlierPurchase(): void
+    {
+        if (! $this->package || $this->refusesPurchase()) {
+            return;
+        }
+
+        $seller = $this->earlierPurchase()?->sellerName() ?? 'the carrier';
+
+        $result = app(PackageShippingWorkflow::class)->checkEarlierPurchases(
+            $this->package,
+            $this->labelFormat,
+            $this->labelDpi,
+            auth()->id(),
+        );
+
+        if ($result === null) {
+            $this->notifySuccess('Nothing Was Bought', "{$seller} has no label for this package, so one can be bought now.");
+
+            if ($this->takeRateRefresh()) {
+                Cache::forget($this->rateCacheKey());
+                $this->applyRateOptions($this->prepareCachedRates());
+            }
+
+            return;
+        }
+
+        if (! $result->success) {
+            $this->purchaseError = [
+                'title' => $result->title ?? 'Still Unresolved',
+                'message' => $result->message ?? "{$seller} could not say what became of the earlier purchase. Try again in a few minutes.",
+            ];
+            $this->notifyError($this->purchaseError['title'], $this->purchaseError['message']);
+            $this->dispatch('databaseNotificationsSent');
+
+            return;
+        }
+
+        $this->labelBought($result, 'Label Found');
+    }
+
+    /**
+     * Refuse a purchase or a recovery this page may no longer make, saying
+     * why. True when refused.
+     */
+    private function refusesPurchase(): bool
+    {
+        // The workflow refuses this too, from the database. Refusing here as
+        // well keeps a stale page from re-quoting carriers on its way there.
+        if ($this->package->refresh()->status === PackageStatus::Shipped) {
+            $this->notifyWarning('Already Shipped', PackageShippingResult::alreadyShippedMessage($this->package->tracking_number));
+
+            return true;
+        }
+
+        $this->purchaseError = null;
+
+        $this->package->shipment->refresh()->load('location');
+
+        // Authorized on mount, but the shipment may have shipped from another
+        // station since, which makes this a reshipment.
+        $permission = Gate::inspect('ship', $this->package);
+        if ($permission->denied()) {
+            $this->notifyError('Not Allowed', $permission->message() ?? 'You may not ship this package.');
+
+            return true;
+        }
+
+        $locationError = app(ShipmentLocationGuard::class)->errorFor($this->package->shipment, auth()->user());
+        if ($locationError !== null) {
+            $this->notifyError('Location Unavailable', $locationError);
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * The package shipped on a label, bought now or fetched from an earlier
+     * purchase: remember it, print it, and go back.
+     */
+    private function labelBought(PackageShippingResult $result, string $title): void
+    {
         // Pack sends every Package that needs attended selection here and is
         // returned to afterwards, so its VOID and REPRINT commands must act on
         // this Label, not the last one auto-shipped (ADR-0007, decision 4).
         app(SessionLastLabel::class)->remember($this->package);
 
-        $this->notifySuccess('Label Bought', $result->summaryMessage());
+        $this->notifySuccess($title, $result->summaryMessage());
 
         // The page re-renders in this same request, and if the print below
         // fails the browser stays here. What it shows must be the shipped

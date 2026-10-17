@@ -68,7 +68,17 @@
                         </div>
                         <div>
                             <dt class="font-medium text-gray-500 dark:text-gray-400">Items</dt>
-                            <dd class="mt-1">{{ $package->packageItems->count() }} items</dd>
+                            @php
+                                $lineCount = $package->packageItems->count();
+                                $unitCount = (int) $package->packageItems->sum('quantity');
+                            @endphp
+                            <dd class="mt-1" data-testid="package-item-count">
+                                @if($lineCount === $unitCount)
+                                    {{ $unitCount }} {{ str('item')->plural($unitCount) }}
+                                @else
+                                    {{ $lineCount }} {{ str('line')->plural($lineCount) }}, {{ $unitCount }} {{ str('item')->plural($unitCount) }}
+                                @endif
+                            </dd>
                         </div>
                         <div>
                             <dt class="font-medium text-gray-500 dark:text-gray-400">Box</dt>
@@ -108,6 +118,9 @@
                 <x-filament::section>
                     <x-slot name="heading">Items in Package</x-slot>
 
+                    @if($package->packageItems->isEmpty())
+                        <p class="text-sm text-gray-500 dark:text-gray-400">No items: manual shipment.</p>
+                    @endif
                     <ul class="divide-y divide-gray-200 dark:divide-gray-700">
                         @foreach($package->packageItems as $item)
                             <li class="py-2 flex justify-between">
@@ -188,6 +201,31 @@
                 <x-filament::section>
                     <x-slot name="heading">Select Shipping Rate</x-slot>
 
+                    {{-- The last purchase attempt's refusal, where it happened:
+                         the toast fades, and a label sold but not saved must
+                         not look like nothing happened. --}}
+                    @if($purchaseError)
+                        <div class="rounded-lg bg-danger-50 dark:bg-danger-950 p-3 mb-4 border border-danger-300 dark:border-danger-700" data-testid="purchase-error" role="alert">
+                            <div class="flex items-start gap-2">
+                                <x-filament::icon icon="heroicon-o-x-circle" class="w-5 h-5 flex-shrink-0 text-danger-600 dark:text-danger-400" />
+                                <div class="text-sm text-danger-800 dark:text-danger-200">
+                                    <p class="font-medium">{{ $purchaseError['title'] }}</p>
+                                    <p>{{ $purchaseError['message'] }}</p>
+                                </div>
+                            </div>
+                        </div>
+                    @elseif($unfinishedPurchase = $this->unfinishedPurchaseNotice())
+                        <div class="rounded-lg bg-warning-50 dark:bg-warning-950 p-3 mb-4 border border-warning-300 dark:border-warning-700" data-testid="unfinished-purchase">
+                            <div class="flex items-start gap-2">
+                                <x-filament::icon icon="heroicon-o-exclamation-triangle" class="w-5 h-5 flex-shrink-0 text-warning-600 dark:text-warning-400" />
+                                <div class="text-sm text-warning-800 dark:text-warning-200">
+                                    <p class="font-medium">An earlier label purchase is unfinished</p>
+                                    <p>{{ $unfinishedPurchase }}</p>
+                                </div>
+                            </div>
+                        </div>
+                    @endif
+
                     {{-- What customs will hold or refuse, shown before the rates
                          because the purchase runs the same check and refuses
                          on its blocks (ADR-0008 decision 7). --}}
@@ -239,6 +277,12 @@
                                 </div>
                             </div>
                         </div>
+                    @endif
+
+                    @if(!empty($unratedSources))
+                        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4" data-testid="unrated-sources">
+                            No rate from {{ \Illuminate\Support\Arr::join($unratedSources, ', ', ' or ') }} for this package.
+                        </p>
                     @endif
 
                     @if(empty($rateOptions) && ! $allRatesDroppedForCustomsTerms)
@@ -353,8 +397,18 @@
                                                 Not protected: {{ implode('; ', $rate['otdrProtection']['reasons']) }}
                                             </div>
                                         @endif
-                                        @if(!empty($formRateOptionDescriptions[$index]))
-                                            <div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ $formRateOptionDescriptions[$index] }}</div>
+                                        @if(!empty($formRateOptionDescriptions[$index]) || isset($rate['delivery']))
+                                            <div class="flex flex-wrap items-center gap-2 text-sm text-gray-600 dark:text-gray-300 mt-0.5">
+                                                @if(!empty($formRateOptionDescriptions[$index]))
+                                                    <span>{{ $formRateOptionDescriptions[$index] }}</span>
+                                                @endif
+                                                {{-- Against the due-by date; on time needs no badge. --}}
+                                                @if(($rate['delivery'] ?? null) === \App\Enums\DeliveryEstimate::Late->value)
+                                                    <x-filament::badge color="danger" size="sm">Late</x-filament::badge>
+                                                @elseif(($rate['delivery'] ?? null) === \App\Enums\DeliveryEstimate::Unknown->value)
+                                                    <x-filament::badge color="gray" size="sm">No delivery estimate</x-filament::badge>
+                                                @endif
+                                            </div>
                                         @endif
                                         @if(!empty($rate['specialServices']['applied']) || !empty($rate['specialServices']['stripped']))
                                             <div class="flex flex-wrap gap-1 mt-1">
@@ -368,6 +422,10 @@
                                                 @endforeach
                                             </div>
                                         @endif
+                                    </div>
+                                    {{-- What the packer is choosing on, so it is the most prominent thing in the row. --}}
+                                    <div class="flex-shrink-0 text-right text-base font-semibold tabular-nums text-gray-950 dark:text-white" data-testid="rate-price">
+                                        {{ empty($rate['priceUnknown']) ? '$'.number_format((float) $rate['price'], 2) : 'Price set at purchase' }}
                                     </div>
                                 </label>
                             @endforeach

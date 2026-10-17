@@ -63,6 +63,17 @@ class Pack extends Page
         return auth()->user()?->role->isAtLeast(Role::User) ?? false;
     }
 
+    /**
+     * Ship has no sidebar item of its own and is the next step of packing, so
+     * Scan & Pack stays lit there.
+     *
+     * @return array<string>
+     */
+    public static function getNavigationItemActiveRoutePattern(): array
+    {
+        return [static::getRouteName(), Ship::getRouteName()];
+    }
+
     public ?Shipment $shipment = null;
 
     public ?string $clientName = null;

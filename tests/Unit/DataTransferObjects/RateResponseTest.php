@@ -241,7 +241,30 @@ it('shows the year on a delivery date outside the current one', function (): voi
         transitTime: '3 days',
     );
 
-    expect($rate('2026-10-20')->formDescription())->toBe('$9.50 — Delivers Tue, Oct 20')
-        ->and($rate('2027-01-05')->formDescription())->toBe('$9.50 — Delivers Tue, Jan 5, 2027')
-        ->and($rate('2026-07-28')->formDescription(showDeliveryDate: false))->toBe('$9.50 — 3 days');
+    expect($rate('2026-10-20')->deliveryDescription())->toBe('Delivers Tue, Oct 20')
+        ->and($rate('2027-01-05')->deliveryDescription())->toBe('Delivers Tue, Jan 5, 2027')
+        ->and($rate('2026-07-28')->deliveryDescription(showDeliveryDate: false))->toBe('3 days')
+        ->and($rate('2026-10-20')->priceDescription())->toBe('$9.50');
+});
+
+it('reads a USPS commitment name in words, and a military one as having no date', function (): void {
+    $rate = fn (?string $commitment): RateResponse => new RateResponse(
+        carrier: 'USPS',
+        serviceCode: 'USPS_GROUND_ADVANTAGE',
+        serviceName: 'Ground Advantage',
+        price: 8.62,
+        deliveryCommitment: $commitment,
+    );
+
+    expect($rate('MILITARY')->deliveryDescription())->toBe('Military mail, no date')
+        ->and($rate('2-DAY')->deliveryDescription())->toBe('2-day')
+        ->and($rate('2-Day')->deliveryDescription())->toBe('2-Day')
+        ->and($rate(null)->deliveryDescription())->toBeNull();
+});
+
+it('shows no price for a label priced at purchase', function (): void {
+    $rate = new RateResponse('Shopify', 'shopify', 'Shopify Shipping', 0.0, transitTime: '2-5 days', priceUnknown: true);
+
+    expect($rate->priceDescription())->toBe('Price set at purchase')
+        ->and($rate->deliveryDescription())->toBe('2-5 days');
 });
