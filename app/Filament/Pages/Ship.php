@@ -156,6 +156,8 @@ class Ship extends Page
     /** The refusal to show in that prompt — it is the only place both weights are named. */
     public ?string $declaredWeightMessage = null;
 
+    public ?string $customsWeightMessage = null;
+
     /**
      * The method chosen on this page for a shipment that has none. Nothing is
      * rated until one is saved to the shipment (`carrier-catalog-reset/16`).
@@ -750,6 +752,7 @@ class Ship extends Page
         $result = app(PackageShippingWorkflow::class)->ship($this->package, $request);
 
         if ($result->requiresCustomsWeightOverride) {
+            $this->customsWeightMessage = $result->message;
             $this->dispatch('open-modal', id: 'customs-weight-override');
 
             return;
@@ -765,6 +768,7 @@ class Ship extends Page
         $this->overrideCustomsWeights = false;
         $this->overrideDeclaredWeight = false;
         $this->declaredWeightMessage = null;
+        $this->customsWeightMessage = null;
         $this->confirmedBlindPurchase = false;
 
         if (! $result->success) {

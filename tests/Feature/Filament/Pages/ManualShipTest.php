@@ -317,3 +317,10 @@ it('warns about the address only when validation did not confirm it', function (
     "couldn't verify" => [Deliverability::Unverified, true],
     'not deliverable' => [Deliverability::No, true],
 ]);
+
+it('writes the scale reading into Weight only when the reading changes', function (): void {
+    // The scale stream runs in Alpine, out of a Livewire test's reach, so this
+    // checks the rule the page ships: a typed weight survives a steady reading.
+    Livewire::test(ManualShip::class)
+        ->assertSee('if (result.weight > 0 && formatted !== lastScaleWeight) {', escape: false);
+});

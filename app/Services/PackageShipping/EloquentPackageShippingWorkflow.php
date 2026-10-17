@@ -572,7 +572,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             }
 
             if ($request->requireCustomsWeightOverride && $this->requiresCustomsWeightOverride($shipRequest, $request->overrideCustomsWeights)) {
-                return PackageShippingResult::customsWeightOverrideRequired();
+                return PackageShippingResult::customsWeightOverrideRequired(
+                    $this->customsItemsWeight($shipRequest),
+                    $shipRequest->packageData->weight,
+                );
             }
 
             if ($request->overrideCustomsWeights) {
@@ -1659,9 +1662,15 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             return false;
         }
 
-        $totalCustomsWeight = collect($shipRequest->customsItems)->sum(fn ($item): float => $item->weight * $item->quantity);
+        return $this->customsItemsWeight($shipRequest) > $shipRequest->packageData->weight;
+    }
 
-        return $totalCustomsWeight > $shipRequest->packageData->weight;
+    /**
+     * The weight the customs declaration gives the goods, in pounds.
+     */
+    private function customsItemsWeight(ShipRequest $shipRequest): float
+    {
+        return (float) collect($shipRequest->customsItems)->sum(fn ($item): float => $item->weight * $item->quantity);
     }
 
     private function cleanupPackage(Package $package, PackageAutoShippingRequest $request, PackageShippingResult $result): void

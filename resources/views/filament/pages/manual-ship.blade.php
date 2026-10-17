@@ -28,12 +28,17 @@
                     await ScaleUtils.claimScale();
 
                     let prevStable = null;
+                    // Write the weight only when the reading changes, as Pack
+                    // does, so a weight typed over a steady reading stays.
+                    let lastScaleWeight = null;
                     await ScaleUtils.startScaleStream((result) => {
                         this.scaleStable = result.isStable;
 
-                        if (result.weight > 0) {
-                            $wire.data.weight = result.weight.toFixed(2);
+                        const formatted = result.weight.toFixed(2);
+                        if (result.weight > 0 && formatted !== lastScaleWeight) {
+                            $wire.data.weight = formatted;
                         }
+                        lastScaleWeight = formatted;
 
                         // Resync the saved-data hash when the weight settles so
                         // scale autofill doesn't trigger the unsaved-changes alert.
