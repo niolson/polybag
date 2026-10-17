@@ -1185,15 +1185,15 @@ it('warns rather than failing when packing progress cannot be saved', function (
     expect(Package::where('shipment_id', $shipment->id)->exists())->toBeFalse();
 });
 
-it('offers to unpack a line and to clear packing outside scan-to-add mode', function (): void {
+it('offers to unpack a line and to unpack every item outside scan-to-add mode', function (): void {
     $shipment = Shipment::factory()->create();
     ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'transparency' => false]);
 
     Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->assertSet('scanToAddMode', false)
         ->assertSeeHtml('unpackItem(index)')
-        ->assertSeeHtml('clearPacking()')
-        ->assertSee('Clear Shipment');
+        ->assertSeeHtml('unpackAll()')
+        ->assertSee('Unpack All Items');
 });
 
 it('saves an unpacked line, and the Transparency code it gave up, over the draft', function (): void {

@@ -31,6 +31,7 @@
             width: @js($width),
             length: @js($length),
             hasDraft: @js($hasDraft),
+            draftSavedAt: @js($draftSavedAt),
             saveTimer: null,
             lastScaleWeight: null,
             input: '',
@@ -190,6 +191,13 @@
                 }
             },
 
+            // The chosen box as the packer reads it: label and code.
+            boxName() {
+                const entry = Object.entries(this.boxSizes).find(([, box]) => box.id === this.boxSizeId);
+
+                return entry ? `${entry[1].label} (${entry[0]})` : '';
+            },
+
             scanBox(code) {
                 const box = this.boxSizes[code];
                 if (box) {
@@ -292,10 +300,9 @@
 
             // Start the box over: every item back out, with its Transparency
             // codes. The box and measurements stay, since they describe the
-            // carton, not what is in it.
-            clearPacking() {
+            // carton, not what is in it. Confirmed in the unpack-all modal.
+            unpackAll() {
                 if (!this.hasPackedItems()) return;
-                if (!window.confirm('Take every item back out of this package? The box and measurements stay.')) return;
 
                 if (this.scanToAddMode) {
                     this.packingItems = [];
@@ -355,9 +362,9 @@
                 if (!this.hasShipment || this.isShipping) return;
                 if (!this.hasDraft && !this.hasPackingProgress()) return;
 
-                this.saveTimer = setTimeout(() => {
+                this.saveTimer = setTimeout(async () => {
                     this.hasDraft = true;
-                    $wire.saveDraft(
+                    const savedAt = await $wire.saveDraft(
                         this.packingItems,
                         this.boxSizeId,
                         String(this.weight ?? ''),
@@ -365,6 +372,7 @@
                         String(this.width ?? ''),
                         String(this.length ?? '')
                     );
+                    if (savedAt) this.draftSavedAt = savedAt;
                 }, 500);
             },
 
@@ -481,6 +489,7 @@
         @scan-to-add-found.window="addScannedProduct($event.detail.product)"
         @scan-to-add-not-found.window="new FilamentNotification().title('Product Not Found').body(`No product found for '${$event.detail.barcode}'`).danger().send()"
         @shipping-error.window="isShipping = false"
+        @pack-unpack-all.window="unpackAll()"
     >
         {{-- Header buttons --}}
         <div class="flex items-center justify-between gap-3 mb-4">
@@ -491,6 +500,7 @@
             <div class="flex items-center gap-3">
             @if($this->canToggleAutoShip())
             <x-shipping-auto-ship-toggle
+                title="Buy and print the cheapest on-time label as soon as a package is packed."
                 x-on:click="autoShipEnabled = await $wire.toggleAutoShip()"
                 ::disabled="isShipping"
             />
@@ -594,6 +604,11 @@
                         </x-filament::input.wrapper>
                     </div>
                 </div>
+
+                {{-- Named, so a wrong box code is seen before the label is bought. --}}
+                <p x-show="boxName()" @if(! $this->boxName()) x-cloak @endif class="mt-3 text-sm text-gray-600 dark:text-gray-300" data-testid="box-name">
+                    Box: <span class="font-medium text-gray-950 dark:text-white" x-text="boxName()">{{ $this->boxName() }}</span>
+                </p>
             </x-filament::fieldset>
 
             <div x-show="isShipping" x-cloak class="flex items-center gap-2 mt-3 text-sm text-primary-600 dark:text-primary-400">
@@ -650,10 +665,10 @@
                 color="gray"
                 size="sm"
                 icon="heroicon-o-arrow-uturn-left"
-                x-on:click="clearPacking()"
+                x-on:click="$dispatch('open-modal', { id: 'unpack-all-confirm' })"
                 x-bind:disabled="isShipping || !hasPackedItems()"
             >
-                Clear Shipment
+                Unpack All Items
             </x-filament::button>
         </x-slot>
         <x-slot name="description">
@@ -670,6 +685,11 @@
                 <x-filament::badge color="danger" icon="heroicon-m-exclamation-triangle" class="mr-2">No shipping method</x-filament::badge>
             @endif
             {{ $shipment->first_name }} {{ $shipment->last_name }} · {{ $shipment->city }}, {{ $shipment->state_or_province }}
+            {{-- Packing is saved as it goes; say so, so set-aside work is not a surprise. --}}
+            <span x-show="draftSavedAt" @if(! $draftSavedAt) x-cloak @endif class="ml-2 inline-flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400" data-testid="draft-saved">
+                <x-filament::icon icon="heroicon-m-cloud-arrow-up" class="h-4 w-4" />
+                <span x-text="'Draft saved ' + draftSavedAt">@if($draftSavedAt)Draft saved {{ $draftSavedAt }}@endif</span>
+            </span>
         </x-slot>
 
         <div class="w-full overflow-x-auto">
@@ -750,9 +770,9 @@
                                     <div class="flex items-center justify-center gap-2">
                                         <button
                                             type="button"
-                                            x-show="packingItem.packed > 0"
+                                            x-bind:class="packingItem.packed > 0 ? '' : 'invisible'"
                                             @click="unpackItem(index)"
-                                            x-bind:disabled="isShipping"
+                                            x-bind:disabled="isShipping || packingItem.packed === 0"
                                             x-bind:title="packingItem.transparency && (packingItem.transparency_codes || []).length ? 'Unpack one (removes its last Transparency code)' : 'Unpack one'"
                                             aria-label="Unpack one"
                                             class="flex h-7 w-7 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/20 dark:bg-white/5 dark:text-gray-300 dark:hover:bg-white/10"
@@ -789,7 +809,7 @@
                                             <svg class="fi-badge-icon h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                                             </svg>
-                                            <span>Not Packed</span>
+                                            <span x-text="packingItem.packed > 0 ? `${packingItem.packed} of ${packingItem.quantity} packed` : 'Not Packed'">Not Packed</span>
                                         </span>
                                     </template>
                                     <template x-if="packingItem.packed == packingItem.quantity">
@@ -832,6 +852,22 @@
         </div>
     </div>
     @endif
+
+    <x-filament::modal id="unpack-all-confirm" width="md">
+        <x-slot name="heading">Unpack all items?</x-slot>
+        <x-slot name="description">
+            Every item comes back out of this package, with its Transparency codes. The box and measurements stay.
+            To leave this shipment instead, scan the Clear Shipment command barcode.
+        </x-slot>
+        <x-slot name="footerActions">
+            <x-filament::button color="danger" x-on:click="$dispatch('pack-unpack-all'); $dispatch('close-modal', { id: 'unpack-all-confirm' })">
+                Unpack All Items
+            </x-filament::button>
+            <x-filament::button color="gray" x-on:click="$dispatch('close-modal', { id: 'unpack-all-confirm' })">
+                Cancel
+            </x-filament::button>
+        </x-slot>
+    </x-filament::modal>
 
     @if($transparencyEnabled)
     {{-- Transparency modal - pure Alpine, no server requests --}}

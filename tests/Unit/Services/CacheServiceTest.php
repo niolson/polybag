@@ -36,7 +36,7 @@ it('returns box sizes formatted for packing', function (): void {
     $formatted = app(CacheService::class)->getBoxSizesForPacking();
 
     expect($formatted)->toHaveKey('BOX-A')
-        ->and($formatted['BOX-A'])->toHaveKeys(['id', 'code', 'height', 'width', 'length'])
+        ->and($formatted['BOX-A'])->toHaveKeys(['id', 'code', 'label', 'height', 'width', 'length'])
         ->and($formatted['BOX-A']['height'])->toBe('10.00')
         ->and($formatted['BOX-A']['width'])->toBe('8.00')
         ->and($formatted['BOX-A']['length'])->toBe('6.00');

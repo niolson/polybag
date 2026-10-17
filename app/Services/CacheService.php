@@ -47,6 +47,7 @@ class CacheService
             ->map(fn (BoxSize $box): array => [
                 'id' => $box->id,
                 'code' => $box->code,
+                'label' => $box->label,
                 'height' => (string) $box->height,
                 'width' => (string) $box->width,
                 'length' => (string) $box->length,

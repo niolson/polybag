@@ -22,6 +22,7 @@ use App\Exceptions\PackageDraftInvalidException;
 use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Concerns\PrintsLabels;
 use App\Filament\Resources\PackageResource;
+use App\Models\Location;
 use App\Models\Package;
 use App\Models\Product;
 use App\Models\Shipment;
@@ -33,6 +34,7 @@ use App\Services\SettingsService;
 use App\Services\ShipmentLocationGuard;
 use BackedEnum;
 use Filament\Pages\Page;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Session;
 use Livewire\Attributes\Renderless;
 use UnitEnum;
@@ -64,14 +66,14 @@ class Pack extends Page
     }
 
     /**
-     * Ship has no sidebar item of its own and is the next step of packing, so
-     * Scan & Pack stays lit there.
+     * Ship and Print Command Barcodes have no sidebar item of their own and
+     * belong to packing, so Scan & Pack stays lit on them.
      *
      * @return array<string>
      */
     public static function getNavigationItemActiveRoutePattern(): array
     {
-        return [static::getRouteName(), Ship::getRouteName()];
+        return [static::getRouteName(), Ship::getRouteName(), PrintCommandBarcodes::getRouteName()];
     }
 
     public ?Shipment $shipment = null;
@@ -101,6 +103,9 @@ class Pack extends Page
 
     /** Whether the shipment has a Package Draft, so every change must be saved to it — including one that empties it. */
     public bool $hasDraft = false;
+
+    /** When the Package Draft was last saved, as the packer reads the time. */
+    public ?string $draftSavedAt = null;
 
     public string $weight = '';
 
@@ -269,6 +274,7 @@ class Pack extends Page
             }
 
             $this->hasDraft = $draft !== null;
+            $this->draftSavedAt = $draft === null ? null : $this->draftSavedTime($draft->packageDraftId);
             $this->boxSizeId = $draft?->boxSizeId;
             $this->weight = (string) ($draft?->measurements->weight ?? '');
             $this->height = (string) ($draft?->measurements->height ?? '');
@@ -379,11 +385,15 @@ class Pack extends Page
      * resumed. Called from Alpine after a box or item scan and when the weight
      * or dimensions settle; the first call creates the Package Draft.
      */
+    /**
+     * Save the packing progress as the Package Draft. Returns when it was
+     * saved, for the page to say so, or null when nothing was saved.
+     */
     #[Renderless]
-    public function saveDraft(array $packingItems, ?int $boxSizeId, string $weight, string $height, string $width, string $length): void
+    public function saveDraft(array $packingItems, ?int $boxSizeId, string $weight, string $height, string $width, string $length): ?string
     {
         if (! $this->shipment) {
-            return;
+            return null;
         }
 
         // As in ship(): another station may have shipped it since mount.
@@ -391,7 +401,7 @@ class Pack extends Page
         if (! $current || ! auth()->user()->can('reship', $current)) {
             $this->notifyWarning('Progress Not Saved', $this->alreadyShippedMessage());
 
-            return;
+            return null;
         }
 
         $this->packingItems = $packingItems;
@@ -402,7 +412,7 @@ class Pack extends Page
         $this->length = $length;
 
         try {
-            app(PackageDraftWorkflow::class)->saveForShipment(
+            $draft = app(PackageDraftWorkflow::class)->saveForShipment(
                 shipment: $this->shipment,
                 input: new PackageDraftInput(
                     measurements: new Measurements($this->weight, $this->height, $this->width, $this->length),
@@ -410,9 +420,38 @@ class Pack extends Page
                     items: $this->mapPackingItems(),
                 ),
             );
+
+            $this->hasDraft = true;
+            $this->draftSavedAt = $this->draftSavedTime($draft->packageDraftId);
         } catch (PackageDraftInvalidException $e) {
             $this->notifyWarning('Progress Not Saved', $e->getMessage());
+
+            return null;
         }
+
+        return $this->draftSavedAt;
+    }
+
+    private function draftSavedTime(int $packageDraftId): ?string
+    {
+        $savedAt = Package::query()->whereKey($packageDraftId)->value('updated_at');
+
+        return $savedAt === null ? null : Carbon::parse($savedAt)->tz(Location::timezone())->format('g:i A');
+    }
+
+    /**
+     * The chosen box as the packer reads it, for the first render; the page
+     * names a box scanned after that itself.
+     */
+    public function boxName(): ?string
+    {
+        foreach ($this->boxSizes as $code => $box) {
+            if ($box['id'] === $this->boxSizeId) {
+                return "{$box['label']} ({$code})";
+            }
+        }
+
+        return null;
     }
 
     private function alreadyShippedMessage(): string
@@ -538,6 +577,8 @@ class Pack extends Page
         $this->height = '';
         $this->width = '';
         $this->length = '';
+        $this->hasDraft = false;
+        $this->draftSavedAt = null;
 
         // Refocus the scan input for the next shipment
         $this->dispatch('focus-scan-input');
