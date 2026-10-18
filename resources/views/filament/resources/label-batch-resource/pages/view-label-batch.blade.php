@@ -5,6 +5,22 @@
 
     <x-qz-tray />
 
+    @if ($this->record->isStalled())
+        <x-filament::section>
+            <div class="text-sm text-warning-600 dark:text-warning-400">
+                Waiting for the background worker. If this does not change, check that the queue service is running.
+            </div>
+        </x-filament::section>
+    @endif
+
+    @if ($this->record->isComplete() && ($unprinted = $this->record->unprintedCount()) > 0)
+        <x-filament::section>
+            <div class="text-sm font-medium text-success-600 dark:text-success-400">
+                {{ $unprinted }} {{ \Illuminate\Support\Str::plural('label', $unprinted) }} ready to print. Use Print Labels above.
+            </div>
+        </x-filament::section>
+    @endif
+
     {{-- Progress --}}
     <x-filament::section>
         <div class="space-y-4">

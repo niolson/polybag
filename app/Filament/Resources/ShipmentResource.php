@@ -511,7 +511,10 @@ class ShipmentResource extends Resource
                     ->schema([
                         Forms\Components\Select::make('box_size_id')
                             ->label('Box Size')
-                            ->options(BoxSize::query()->active()->orderBy('label')->pluck('label', 'id'))
+                            ->options(fn (): array => BoxSize::query()->active()->get()
+                                ->sortBy(fn (BoxSize $box): float => (float) $box->length * (float) $box->width * (float) $box->height)
+                                ->mapWithKeys(fn (BoxSize $box): array => [$box->id => filled($box->code) ? "{$box->code} · {$box->label}" : $box->label])
+                                ->all())
                             ->required()
                             ->searchable(),
                         Forms\Components\Hidden::make('label_format')
@@ -522,7 +525,7 @@ class ShipmentResource extends Resource
                         Components\View::make('filament.components.batch-ship-local-storage'),
                     ])
                     ->modalHeading('Batch Ship')
-                    ->modalDescription('Buy and print a label for each selected shipment, packed in the same box size, within its shipping method\'s rules. Shipments that can\'t be batch shipped are skipped and listed.')
+                    ->modalDescription('Buy a label for each selected shipment, packed in the same box size, within its shipping method\'s rules, then print them from the batch page. Shipments that can\'t be batch shipped are skipped and listed.')
                     ->modalSubmitActionLabel('Buy Labels')
                     ->action(function (Collection $records, array $data): void {
                         if ($records->count() > 100) {

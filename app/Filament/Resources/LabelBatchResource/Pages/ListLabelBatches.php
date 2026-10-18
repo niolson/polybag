@@ -3,7 +3,10 @@
 namespace App\Filament\Resources\LabelBatchResource\Pages;
 
 use App\Enums\LabelBatchStatus;
+use App\Enums\ShipmentStatus;
 use App\Filament\Resources\LabelBatchResource;
+use App\Filament\Resources\ShipmentResource;
+use Filament\Actions\Action;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\EmbeddedTable;
 use Filament\Schemas\Components\RenderHook;
@@ -38,6 +41,14 @@ class ListLabelBatches extends ListRecords
     public function table(Table $table): Table
     {
         return parent::table($table)
+            ->emptyStateHeading('No Label Batches yet')
+            ->emptyStateDescription('Select open shipments on the Shipments list and choose Batch Ship.')
+            ->emptyStateActions([
+                Action::make('openShipments')
+                    ->label('Open Shipments')
+                    ->icon('heroicon-o-arrow-right')
+                    ->url(ShipmentResource::getUrl('index', ['status_tab' => ShipmentStatus::Open->value])),
+            ])
             ->modifyQueryUsing(fn (Builder $query): Builder => $this->modifyQueryWithStatusTab($query));
     }
 

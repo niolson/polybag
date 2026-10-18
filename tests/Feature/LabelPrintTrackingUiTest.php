@@ -3,6 +3,7 @@
 use App\Enums\LabelBatchStatus;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
+use App\Filament\Resources\LabelBatchResource\Pages\ListLabelBatches;
 use App\Filament\Resources\LabelBatchResource\Pages\ViewLabelBatch;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
 use App\Models\LabelBatch;
@@ -235,4 +236,51 @@ it('labels the package print action by whether it has been printed before', func
     Livewire::test(ListPackages::class)
         ->assertActionHasLabel(TestAction::make('reprint')->table($unprinted), 'Print Label')
         ->assertActionHasLabel(TestAction::make('reprint')->table($printed), 'Reprint Label');
+});
+
+it('tells an empty Label Batches list how to start a batch', function (): void {
+    Livewire::test(ListLabelBatches::class)
+        ->assertSee('Select open shipments on the Shipments list')
+        ->assertSee('Open Shipments');
+});
+
+it('shows Reprint All only once a label in the batch has printed', function (): void {
+    $batch = LabelBatch::factory()->create([
+        'status' => LabelBatchStatus::Completed,
+        'total_shipments' => 1,
+        'successful_shipments' => 1,
+    ]);
+
+    LabelBatchItem::factory()->success()->create([
+        'label_batch_id' => $batch->id,
+        'package_id' => Package::factory()->shipped()->create(['label_printed_at' => null])->id,
+    ]);
+
+    Livewire::test(ViewLabelBatch::class, ['record' => $batch->id])
+        ->assertActionVisible(TestAction::make('printUnprintedLabels'))
+        ->assertActionHidden(TestAction::make('reprintAllLabels'))
+        ->assertSee('1 label ready to print');
+});
+
+it('says a batch is waiting for the worker once it has made no progress for a minute', function (): void {
+    $batch = LabelBatch::factory()->create([
+        'status' => LabelBatchStatus::Processing,
+        'total_shipments' => 1,
+    ]);
+
+    Livewire::test(ViewLabelBatch::class, ['record' => $batch->id])
+        ->assertDontSee('Waiting for the background worker');
+
+    $this->travel(61)->seconds();
+
+    Livewire::test(ViewLabelBatch::class, ['record' => $batch->id])
+        ->assertSee('Waiting for the background worker');
+});
+
+it('does not call a finished batch stalled', function (): void {
+    $batch = LabelBatch::factory()->create(['status' => LabelBatchStatus::Completed]);
+
+    $this->travel(5)->minutes();
+
+    expect($batch->fresh()->isStalled())->toBeFalse();
 });

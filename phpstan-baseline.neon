@@ -703,9 +703,15 @@ parameters:
 			path: app/Filament/Resources/LabelBatchResource/Pages/ViewLabelBatch.php
 
 		-
+			message: '#^Cannot call method printedCount\(\) on Illuminate\\Database\\Eloquent\\Model\|int\|string\.$#'
+			identifier: method.nonObject
+			count: 1
+			path: app/Filament/Resources/LabelBatchResource/Pages/ViewLabelBatch.php
+
+		-
 			message: '#^Cannot call method printableItems\(\) on Illuminate\\Database\\Eloquent\\Model\|int\|string\.$#'
 			identifier: method.nonObject
-			count: 4
+			count: 3
 			path: app/Filament/Resources/LabelBatchResource/Pages/ViewLabelBatch.php
 
 		-
