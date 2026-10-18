@@ -51,7 +51,7 @@ issue. Low findings with no link stay here as the backlog.
 | [`03`](issues/03-pack-page-clarity.md) Pack page clarity | P1–P3; P4, P7, P9, P10 | Done 2026-10-17 |
 | [`04`](issues/04-weight-entry.md) Weight entry | M2, S9 | Done 2026-10-17 |
 | [`05`](issues/05-address-check-display.md) Address check display | SH1, SH2 | Done 2026-10-16 |
-| [`06`](issues/06-shipments-list-defaults.md) Shipments list defaults | SL1, SL2 (column), SL3 | Before the demo |
+| [`06`](issues/06-shipments-list-defaults.md) Shipments list defaults | SL1, SL2 (column), SL3 | Done 2026-10-18 |
 | [`07`](issues/07-batch-ship.md) Batch Ship | LB1, BS1, BS2; LB2–LB4, BS3–BS5 | Before the demo |
 | [`08`](issues/08-dashboard.md) Dashboard | D1–D4; D5–D11 | Before the demo |
 | [`09`](issues/09-end-of-day-and-carrier-status.md) End of Day and carrier status | E1, CA1, CR1; E2–E4 | Done 2026-10-16 |

@@ -24,7 +24,7 @@ class ListShipments extends ListRecords
     protected static string $resource = ShipmentResource::class;
 
     #[Url(as: 'status_tab')]
-    public ?string $activeStatusTab = 'all';
+    public ?string $activeStatusTab = 'open';
 
     #[Url(as: 'deliverability_tab')]
     public ?string $activeDeliverabilityTab = 'all';
