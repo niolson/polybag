@@ -7,6 +7,12 @@ PolyBag is a shipping workstation for preparing Packages, buying labels, printin
 **Shipment**:
 An order-like shipping request containing recipient details and items that need fulfillment.
 
+**Draft Shipment**:
+A Shipment Manual Ship creates so a rate can be shown, with status `draft`. It is not an
+order until a label is bought: no list, count, pick batch or export includes it, a purchase
+makes it `shipped`, and one with no label is deleted after a day. Not a **Package Draft**.
+_Avoid_: Manual shipment, temporary shipment
+
 **Package**:
 A physical parcel prepared from a Shipment and measured before label purchase.
 

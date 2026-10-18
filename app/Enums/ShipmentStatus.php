@@ -13,13 +13,30 @@ use Illuminate\Contracts\Support\Htmlable;
  */
 enum ShipmentStatus: string implements HasColor, HasLabel
 {
+    /** Made by Manual Ship so a rate can be shown; not an order until a label is bought. */
+    case Draft = 'draft';
     case Open = 'open';
     case Shipped = 'shipped';
     case Cancelled = 'cancelled';
 
+    /**
+     * The statuses a person can set or filter by. A draft is Manual Ship's
+     * working copy and never listed.
+     *
+     * @return array<string, string>
+     */
+    public static function selectable(): array
+    {
+        return collect(self::cases())
+            ->reject(fn (self $status): bool => $status === self::Draft)
+            ->mapWithKeys(fn (self $status): array => [$status->value => $status->getLabel()])
+            ->all();
+    }
+
     public function getLabel(): string|Htmlable|null
     {
         return match ($this) {
+            self::Draft => 'Draft',
             self::Open => 'Open',
             self::Shipped => 'Shipped',
             self::Cancelled => 'Cancelled',
@@ -29,6 +46,7 @@ enum ShipmentStatus: string implements HasColor, HasLabel
     public function getColor(): string|array|null
     {
         return match ($this) {
+            self::Draft => 'gray',
             self::Open => 'warning',
             self::Shipped => 'success',
             self::Cancelled => 'danger',

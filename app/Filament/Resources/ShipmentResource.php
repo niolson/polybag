@@ -145,6 +145,15 @@ class ShipmentResource extends Resource
         ]);
     }
 
+    /**
+     * Manual Ship's drafts are not Shipments anyone works with, so no list,
+     * search or relation built on this resource shows them.
+     */
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->where('shipments.status', '!=', ShipmentStatus::Draft);
+    }
+
     public static function getGlobalSearchEloquentQuery(): Builder
     {
         return parent::getGlobalSearchEloquentQuery()->with(['client', 'dataSource']);
@@ -162,7 +171,7 @@ class ShipmentResource extends Resource
                         Forms\Components\TextInput::make('shipment_reference')
                             ->maxLength(255),
                         Forms\Components\Select::make('status')
-                            ->options(ShipmentStatus::class)
+                            ->options(ShipmentStatus::selectable())
                             ->disabled(fn (): bool => ! auth()->user()?->role->isAtLeast(Role::Manager))
                             ->helperText(fn (?Shipment $record): ?string => self::closedBySourceNotice($record))
                             ->visibleOn('edit'),
@@ -424,7 +433,7 @@ class ShipmentResource extends Resource
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('status')
-                    ->options(ShipmentStatus::class),
+                    ->options(ShipmentStatus::selectable()),
                 Tables\Filters\SelectFilter::make('picking_status')
                     ->options(PickingStatus::class)
                     ->label('Picking Status')

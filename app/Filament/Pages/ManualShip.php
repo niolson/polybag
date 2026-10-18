@@ -12,6 +12,7 @@ use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PrintRequest;
 use App\Enums\Deliverability;
 use App\Enums\Role;
+use App\Enums\ShipmentStatus;
 use App\Enums\ValidationTrigger;
 use App\Exceptions\PackageDraftIncompleteException;
 use App\Exceptions\PackageDraftInvalidException;
@@ -303,7 +304,9 @@ class ManualShip extends Page implements HasForms
     }
 
     /**
-     * Create a shipment and package, with optional address validation.
+     * Create a draft shipment and its package, with optional address validation.
+     * The shipment is a draft until a label is bought, so a packer who only
+     * wants a price, or backs out, leaves nothing on the Shipments list.
      * Returns both so callers can reference the shipment (e.g. for cleanup on failure).
      *
      * @return array{shipment: Shipment, package: Package}
@@ -312,7 +315,7 @@ class ManualShip extends Page implements HasForms
     {
         return DB::transaction(function () use ($data): array {
             $channelId = Channel::where('name', 'Manual')->first()?->id;
-            $shipment = app(PackagingService::class)->createShipment($data, $channelId);
+            $shipment = app(PackagingService::class)->createShipment($data, $channelId, ShipmentStatus::Draft);
 
             try {
                 app(AddressValidationService::class)->validate($shipment, ValidationTrigger::Manual);
