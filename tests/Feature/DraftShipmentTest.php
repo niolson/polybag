@@ -2,6 +2,8 @@
 
 use App\Enums\ShipmentStatus;
 use App\Filament\Pages\ManualShip;
+use App\Filament\Resources\PackageResource\Pages\ListPackages;
+use App\Filament\Resources\PackageResource\Pages\ViewPackage;
 use App\Filament\Resources\ShipmentResource\Pages\ListShipments;
 use App\Filament\Widgets\StatsOverview;
 use App\Models\BoxSize;
@@ -121,4 +123,21 @@ it('deletes a draft untouched for a day with its package, and nothing else', fun
         ->and(Shipment::find($young->id))->not->toBeNull()
         ->and(Shipment::find($labelled->id))->not->toBeNull()
         ->and(Shipment::find($oldOrder->id))->not->toBeNull();
+});
+
+it('names a Manual Ship draft on its package instead of leaving the shipment blank', function (): void {
+    $draft = Shipment::factory()->create(['status' => ShipmentStatus::Draft, 'shipment_reference' => null]);
+    $package = Package::factory()->create(['shipment_id' => $draft->id]);
+
+    Livewire::test(ListPackages::class)
+        ->assertCanSeeTableRecords([$package])
+        ->assertSee('Manual Ship draft');
+
+    Livewire::test(ViewPackage::class, ['record' => $package->id])
+        ->assertSee('Manual Ship draft');
+});
+
+it('calls the Packages list\'s draft state filter Packing Progress, apart from Draft Shipments', function (): void {
+    Livewire::test(ListPackages::class)
+        ->assertSee('Packing Progress');
 });

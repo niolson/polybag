@@ -6,6 +6,7 @@ use App\Contracts\PackageLabelWorkflow;
 use App\Enums\PackageDraftState;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
+use App\Enums\ShipmentStatus;
 use App\Enums\TrackingStatus;
 use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\PackageResource\Pages;
@@ -327,6 +328,9 @@ class PackageResource extends Resource
                     ->sortable(),
                 Tables\Columns\TextColumn::make('shipment.shipment_reference')
                     ->label('Shipment')
+                    ->state(fn (Package $record): ?string => $record->shipment->shipment_reference
+                        ?? ($record->shipment->status === ShipmentStatus::Draft ? 'Manual Ship draft' : null))
+                    ->placeholder('—')
                     ->fontFamily('mono')
                     ->size('sm')
                     ->sortable()
@@ -445,7 +449,7 @@ class PackageResource extends Resource
                         app(UnresolvedPurchaseResolver::class)->needingAPerson()->select('package_id'),
                     )),
                 Tables\Filters\SelectFilter::make('draft_state')
-                    ->label('Draft')
+                    ->label('Packing Progress')
                     ->options(PackageDraftState::class)
                     ->query(fn (Builder $query, array $data): Builder => $query->when(
                         PackageDraftState::tryFrom((string) ($data['value'] ?? '')),

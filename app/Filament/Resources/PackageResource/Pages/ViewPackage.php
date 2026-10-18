@@ -10,6 +10,7 @@ use App\DataTransferObjects\PrintRequest;
 use App\Enums\PackageDraftState;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
+use App\Enums\ShipmentStatus;
 use App\Exceptions\PackageDraftIncompleteException;
 use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Concerns\PrintsLabels;
@@ -316,9 +317,16 @@ class ViewPackage extends ViewRecord
                     ->schema([
                         TextEntry::make('id')
                             ->label('Package ID'),
+                        // A Manual Ship draft is not an order yet, so it has no
+                        // Shipment page to link to.
                         TextEntry::make('shipment.shipment_reference')
                             ->label('Shipment Reference')
-                            ->url(fn ($record): string => ShipmentResource::getUrl('view', ['record' => $record->shipment_id])),
+                            ->state(fn (Package $record): ?string => $record->shipment->shipment_reference
+                                ?? ($record->shipment->status === ShipmentStatus::Draft ? 'Manual Ship draft' : null))
+                            ->placeholder('—')
+                            ->url(fn (Package $record): ?string => $record->shipment->status === ShipmentStatus::Draft
+                                ? null
+                                : ShipmentResource::getUrl('view', ['record' => $record->shipment_id])),
                         TextEntry::make('shipment.client.name')
                             ->label('Client')
                             ->placeholder('—')
