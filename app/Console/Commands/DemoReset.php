@@ -50,7 +50,8 @@ class DemoReset extends Command
         {--source= : DataSource ID to seed from (defaults to the only active database source)}
         {--days=30 : Days of shipment history to import from the demo database}
         {--open-hours=8 : Shipments newer than this many hours stay open for the live demo}
-        {--skip-export : Do not write fabricated tracking data back to the import database}';
+        {--skip-export : Leave the import database untouched (its rows stay unexported)}
+        {--full-export : Run the export query for every fabricated package, writing tracking back to each row (slow)}';
 
     protected $description = '[Internal] Reset demo data: wipe transactional tables, re-seed history from a Database data source, fabricate shipped packages, and rebuild stats';
 
@@ -173,9 +174,12 @@ class DemoReset extends Command
             // try to push thousands of historical rows later.
             DB::table('packages')->where('status', PackageStatus::Shipped->value)->update(['exported' => true]);
             $this->components->twoColumnDetail('Export write-back', 'skipped (packages marked exported)');
-        } else {
+        } elseif ($this->option('full-export')) {
             $exported = $this->timed('Export write-back', fn (): int => $this->exportFabricatedPackages());
             $this->components->twoColumnDetail('Packages exported back to import DB', (string) $exported);
+        } else {
+            $marked = $this->timed('Mark exported', fn (): int => $this->markHistoryExported($record, $from));
+            $this->components->twoColumnDetail('Import rows marked exported', (string) $marked);
         }
 
         $this->timed('Demo prep', fn () => $this->prepareForDemo());
@@ -378,6 +382,24 @@ class DemoReset extends Command
         }
 
         return $pdf.'trailer << /Size '.(count($objects) + 1)." /Root 1 0 R >>\nstartxref\n{$xref}\n%%EOF\n";
+    }
+
+    /**
+     * Mark the whole history window exported at the source in one statement, so
+     * the live import only picks up genuinely new rows, and its packages
+     * exported so no scheduled export run pushes them. Nothing is written back
+     * per package; `--full-export` does that.
+     */
+    private function markHistoryExported(DataSource $record, Carbon $from): int
+    {
+        DB::table('packages')->where('status', PackageStatus::Shipped->value)->update(['exported' => true]);
+
+        $table = ($record->settings ?? [])['shipments_table'] ?? 'shipments';
+
+        return DB::connection($this->importConnection($record))
+            ->table($table)
+            ->where('created_at', '>=', $from)
+            ->update(['exported' => 'y']);
     }
 
     /**
@@ -842,7 +864,7 @@ class DemoReset extends Command
                     $bar->finish();
                     $this->newLine();
                     $this->warn('Aborting export write-back after 10 consecutive failures; last error: '.implode('; ', $result->errors));
-                    $this->warn('Fix the export configuration and re-run, or use --skip-export.');
+                    $this->warn('Fix the export configuration and re-run, or drop --full-export.');
 
                     return $succeeded;
                 }

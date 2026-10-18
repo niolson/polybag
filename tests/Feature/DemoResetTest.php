@@ -153,7 +153,7 @@ it('resets demo data end to end', function (): void {
     insertImportShipment($this->dataSource, 'D00OLD0002', now('UTC')->subDays(2)->format('Y-m-d H:i:s'), 'Amazon');
     insertImportShipment($this->dataSource, 'D00NEW0001', now('UTC')->subMinutes(30)->format('Y-m-d H:i:s'));
 
-    $this->artisan('demo:reset', ['--days' => 30, '--open-hours' => 8])->assertSuccessful();
+    $this->artisan('demo:reset', ['--days' => 30, '--open-hours' => 8, '--full-export' => true])->assertSuccessful();
 
     // Leftover data is gone; only the three imported shipments remain
     expect(Shipment::count())->toBe(3)
@@ -257,7 +257,7 @@ it('checks each row\'s shipping method against the client its client column name
 it('clears package export claims before package IDs are reused', function (): void {
     insertImportShipment($this->dataSource, 'D00REPEAT01', now('UTC')->subDays(5)->format('Y-m-d H:i:s'));
 
-    $this->artisan('demo:reset')->assertSuccessful();
+    $this->artisan('demo:reset', ['--full-export' => true])->assertSuccessful();
 
     $connection = importConnectionFor($this->dataSource);
     expect(DB::table('package_exports')->count())->toBeGreaterThan(0);
@@ -271,7 +271,7 @@ it('clears package export claims before package IDs are reused', function (): vo
             'exported_at' => null,
         ]);
 
-    $this->artisan('demo:reset')->assertSuccessful();
+    $this->artisan('demo:reset', ['--full-export' => true])->assertSuccessful();
 
     expect(DB::connection($connection)->table('shipments')->where('id', 'D00REPEAT01')->value('tracking_number'))
         ->not->toBeNull();
@@ -295,6 +295,26 @@ it('does not duplicate shipments when the live import runs after a reset', funct
     expect($result->shipmentsCreated)->toBe(0)
         ->and(Shipment::count())->toBe(2)
         ->and(Shipment::where('shipment_reference', 'D00OLD0001')->firstOrFail()->status)->toBe(ShipmentStatus::Shipped);
+});
+
+it('marks the history exported at the source in one statement by default', function (): void {
+    insertImportShipment($this->dataSource, 'D00OLD0001', now('UTC')->subDays(5)->format('Y-m-d H:i:s'));
+    insertImportShipment($this->dataSource, 'D00NEW0001', now('UTC')->subMinutes(10)->format('Y-m-d H:i:s'));
+    insertImportShipment($this->dataSource, 'D00ANCIENT', now('UTC')->subDays(90)->format('Y-m-d H:i:s'));
+
+    $exportService = Mockery::mock(PackageExportService::class);
+    $exportService->shouldNotReceive('exportPackage');
+    app()->instance(PackageExportService::class, $exportService);
+
+    $this->artisan('demo:reset', ['--days' => 30])->assertSuccessful();
+
+    $rows = DB::connection(importConnectionFor($this->dataSource))->table('shipments')->pluck('exported', 'id');
+
+    expect($rows['D00OLD0001'])->toBe('y')
+        ->and($rows['D00NEW0001'])->toBe('y')
+        ->and($rows['D00ANCIENT'])->toBe('n')
+        ->and(Package::where('exported', false)->count())->toBe(0)
+        ->and(Shipment::count())->toBe(2);
 });
 
 it('marks fabricated packages exported without touching the import database when --skip-export is passed', function (): void {
@@ -322,7 +342,7 @@ it('does not abort demo write-back when package exports are deferred', function 
         ->andReturn(new ExportResult(success: false, deferred: true));
     app()->instance(PackageExportService::class, $exportService);
 
-    $this->artisan('demo:reset')
+    $this->artisan('demo:reset', ['--full-export' => true])
         ->doesntExpectOutputToContain('Aborting export write-back')
         ->assertSuccessful();
 });
