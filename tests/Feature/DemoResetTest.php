@@ -2,14 +2,19 @@
 
 use App\Console\Commands\DemoReset;
 use App\Enums\CarrierPackaging;
+use App\Enums\LabelBatchItemStatus;
+use App\Enums\LabelBatchStatus;
 use App\Enums\PackageStatus;
 use App\Enums\ShipmentStatus;
 use App\Enums\ShipmentStatusOrigin;
+use App\Enums\TrackingStatus;
 use App\Models\BoxSize;
 use App\Models\ChannelAlias;
 use App\Models\Client;
 use App\Models\DataSource;
+use App\Models\LabelBatch;
 use App\Models\Location;
+use App\Models\Manifest;
 use App\Models\Package;
 use App\Models\PackageLabel;
 use App\Models\RateQuote;
@@ -362,4 +367,76 @@ it('fabricates rate quotes, own boxes and billing rates for the reports', functi
         ->and((float) $client->fresh()->label_fee_per_package)->toBe(0.75)
         ->and((float) $own->fresh()->materials_cost)->toBe(0.40)
         ->and((float) $priced->fresh()->materials_cost)->toBe(0.90);
+});
+
+describe('demo preparation', function (): void {
+    beforeEach(function (): void {
+        BoxSize::factory()->create(['active' => true, 'carrier_packaging' => null]);
+    });
+
+    it('sorts domestic open orders ahead of military ones', function (): void {
+        insertImportShipment($this->dataSource, 'D00DOM0001', now('UTC')->subMinutes(90)->format('Y-m-d H:i:s'));
+        insertImportShipment($this->dataSource, 'D00APO0001', now('UTC')->subMinutes(10)->format('Y-m-d H:i:s'));
+        DB::connection(importConnectionFor($this->dataSource))->table('shipments')
+            ->where('id', 'D00APO0001')->update(['city' => 'APO', 'state' => 'AE', 'zip' => '09012']);
+
+        $this->artisan('demo:reset', ['--days' => 30, '--open-hours' => 8])->assertSuccessful();
+
+        $newest = Shipment::where('status', ShipmentStatus::Open)->orderByDesc('created_at')->first();
+
+        expect($newest->shipment_reference)->toBe('D00DOM0001');
+    });
+
+    it('sets EU duties terms where a client has none and keeps a chosen one', function (): void {
+        $default = Client::query()->where('is_default', true)->first();
+        $chosen = Client::factory()->create(['duties_policy' => ['EU' => 'ddu', 'CA' => 'ddp']]);
+        insertImportShipment($this->dataSource, 'D00OLD0001', now('UTC')->subDays(2)->format('Y-m-d H:i:s'));
+
+        $this->artisan('demo:reset', ['--days' => 30, '--open-hours' => 8])->assertSuccessful();
+
+        expect($default->fresh()->duties_policy)->toBe(['EU' => 'ddp'])
+            ->and($chosen->fresh()->duties_policy)->toBe(['EU' => 'ddu', 'CA' => 'ddp']);
+    });
+
+    it('stores a sample label and manifest image so Reprint is offered', function (): void {
+        insertImportShipment($this->dataSource, 'D00OLD0001', now('UTC')->subDays(2)->format('Y-m-d H:i:s'));
+
+        $this->artisan('demo:reset', ['--days' => 30, '--open-hours' => 8])->assertSuccessful();
+
+        $package = Package::where('status', PackageStatus::Shipped)->firstOrFail();
+
+        expect(base64_decode((string) $package->label_data))->toStartWith('%PDF-')
+            ->and(base64_decode((string) Manifest::firstOrFail()->image))->toStartWith('%PDF-');
+    });
+
+    it('delivers packages shipped more than three days ago and leaves newer ones', function (): void {
+        insertImportShipment($this->dataSource, 'D00OLD0001', now('UTC')->subDays(10)->format('Y-m-d H:i:s'));
+        insertImportShipment($this->dataSource, 'D00OLD0002', now('UTC')->subHours(20)->format('Y-m-d H:i:s'));
+
+        $this->artisan('demo:reset', ['--days' => 30, '--open-hours' => 8])->assertSuccessful();
+
+        $old = Shipment::where('shipment_reference', 'D00OLD0001')->firstOrFail()->packages->first();
+        $new = Shipment::where('shipment_reference', 'D00OLD0002')->firstOrFail()->packages->first();
+
+        expect($old->tracking_status)->toBe(TrackingStatus::Delivered)
+            ->and($old->delivered_at->greaterThan($old->shipped_at))->toBeTrue()
+            ->and($new->tracking_status)->toBeNull();
+    });
+
+    it('seeds one finished label batch with two failures', function (): void {
+        foreach (range(1, 3) as $i) {
+            insertImportShipment($this->dataSource, "D00OLD000{$i}", now('UTC')->subDays(2)->format('Y-m-d H:i:s'));
+            insertImportShipment($this->dataSource, "D00NEW000{$i}", now('UTC')->subMinutes(30)->format('Y-m-d H:i:s'));
+        }
+
+        $this->artisan('demo:reset', ['--days' => 30, '--open-hours' => 8])->assertSuccessful();
+
+        $batch = LabelBatch::with('items')->sole();
+
+        expect($batch->status)->toBe(LabelBatchStatus::CompletedWithErrors)
+            ->and($batch->successful_shipments)->toBe(3)
+            ->and($batch->failed_shipments)->toBe(2)
+            ->and($batch->items->where('status', LabelBatchItemStatus::Failed))->toHaveCount(2)
+            ->and($batch->items->where('status', LabelBatchItemStatus::Failed)->first()->error_message)->not->toBeEmpty();
+    });
 });

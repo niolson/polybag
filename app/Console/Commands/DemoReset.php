@@ -2,16 +2,23 @@
 
 namespace App\Console\Commands;
 
+use App\DataTransferObjects\Shipping\AddressData;
+use App\Enums\DutiesTerms;
+use App\Enums\LabelBatchItemStatus;
+use App\Enums\LabelBatchStatus;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\ShipmentStatus;
 use App\Enums\ShipmentStatusOrigin;
+use App\Enums\TrackingStatus;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\Channel;
 use App\Models\ChannelAlias;
 use App\Models\Client;
 use App\Models\DataSource;
+use App\Models\LabelBatch;
+use App\Models\LabelBatchItem;
 use App\Models\Location;
 use App\Models\Manifest;
 use App\Models\Package;
@@ -170,15 +177,201 @@ class DemoReset extends Command
             $this->components->twoColumnDetail('Packages exported back to import DB', (string) $exported);
         }
 
+        $this->prepareForDemo();
+
         $this->call('stats:aggregate', [
             '--from' => $from->toDateString(),
             '--to' => now()->toDateString(),
         ]);
 
         $this->components->twoColumnDetail('Open shipments ready to pack', (string) Shipment::where('status', ShipmentStatus::Open)->count());
+        $this->components->info('Nothing is ready to manifest until labels are bought the same day: buy labels first, then show End of Day.');
         $this->components->info('Demo reset complete.');
 
         return self::SUCCESS;
+    }
+
+    /**
+     * What the walk-through needs that the history alone does not give it
+     * (`ui-review` findings S7, ST3, LB5, E5, PK4 and D12).
+     */
+    private function prepareForDemo(): void
+    {
+        $this->putDomesticOpenOrdersFirst();
+        $this->ensureEuDutiesTerms();
+        $this->attachSampleDocuments();
+        $this->markOlderPackagesDelivered();
+        $this->seedFinishedLabelBatch();
+    }
+
+    /**
+     * The Shipments list and Scan & Pack show the newest open order first, and a
+     * military or foreign one there quotes fewer carriers. The open orders keep
+     * the same set of timestamps, handed out so the domestic ones are the newest.
+     */
+    private function putDomesticOpenOrdersFirst(): void
+    {
+        $open = Shipment::query()->where('status', ShipmentStatus::Open)->orderByDesc('created_at')->orderByDesc('id')->get();
+
+        $timestamps = $open->pluck('created_at')->map(fn (CarbonInterface $at): string => $at->format('Y-m-d H:i:s'))->all();
+
+        $open->sortBy(fn (Shipment $shipment): int => $this->isDomestic($shipment) ? 0 : 1)
+            ->values()
+            ->each(function (Shipment $shipment, int $position) use ($timestamps): void {
+                DB::table('shipments')->where('id', $shipment->id)->update([
+                    'created_at' => $timestamps[$position],
+                    'updated_at' => $timestamps[$position],
+                ]);
+            });
+    }
+
+    private function isDomestic(Shipment $shipment): bool
+    {
+        $address = AddressData::fromShipment($shipment);
+
+        return $address->country === 'US' && ! $address->isMilitary() && ! $address->isUsTerritory();
+    }
+
+    /**
+     * An EU order is refused at purchase while its client has no EU terms. A
+     * client that already chose some keeps it.
+     */
+    private function ensureEuDutiesTerms(): void
+    {
+        Client::query()->each(function (Client $client): void {
+            $policy = $client->duties_policy ?? [];
+
+            if (! isset($policy[Client::DUTIES_POLICY_EU])) {
+                $client->update(['duties_policy' => [Client::DUTIES_POLICY_EU => DutiesTerms::Ddp->value] + $policy]);
+            }
+        });
+    }
+
+    /**
+     * A stored label on every shipped Package and an image on every manifest, so
+     * Reprint is offered on the seeded history, not only on what is bought live.
+     */
+    private function attachSampleDocuments(): void
+    {
+        $document = base64_encode($this->samplePdf('PolyBag demo label'));
+
+        DB::table('packages')->where('status', PackageStatus::Shipped->value)->whereNull('label_data')->update(['label_data' => $document]);
+        DB::table('manifests')->whereNull('image')->update(['image' => base64_encode($this->samplePdf('PolyBag demo manifest'))]);
+    }
+
+    /**
+     * Sandbox labels are never scanned, so every seeded Package would sit at
+     * Pre-Transit and Stuck Pre-Transit would always be orange. Packages shipped
+     * more than three days ago are delivered instead; newer ones stay as they are.
+     */
+    private function markOlderPackagesDelivered(): void
+    {
+        Package::query()
+            ->where('status', PackageStatus::Shipped)
+            ->where('shipped_at', '<', now()->subDays(3))
+            ->chunkById(500, function ($packages): void {
+                foreach ($packages as $package) {
+                    $deliveredAt = $package->shipped_at->copy()->addHours(mt_rand(24, 72))->format('Y-m-d H:i:s');
+
+                    DB::table('packages')->where('id', $package->id)->update([
+                        'tracking_status' => TrackingStatus::Delivered->value,
+                        'delivered_at' => $deliveredAt,
+                        'tracking_updated_at' => $deliveredAt,
+                    ]);
+                }
+            });
+    }
+
+    /**
+     * One finished Label Batch with two failures, so the page is not empty and
+     * shows how a failure reads. Its labels are the newest shipped Packages; its
+     * failures are open domestic orders.
+     */
+    private function seedFinishedLabelBatch(): void
+    {
+        $userId = User::query()->value('id');
+        $boxSizeId = BoxSize::query()->active()->whereNull('carrier_packaging')->value('id');
+        $packages = Package::query()->where('status', PackageStatus::Shipped)->orderByDesc('shipped_at')->limit(8)->get();
+        $failing = Shipment::query()->where('status', ShipmentStatus::Open)->orderByDesc('created_at')->limit(2)->get();
+
+        if ($userId === null || $boxSizeId === null || $packages->isEmpty()) {
+            return;
+        }
+
+        $completedAt = now()->subHours(2);
+        $errors = [
+            'The carrier could not validate this address.',
+            'The package weight is over the limit for the selected service.',
+        ];
+
+        $batch = LabelBatch::create([
+            'user_id' => $userId,
+            'box_size_id' => $boxSizeId,
+            'label_format' => 'pdf',
+            'status' => $failing->isEmpty() ? LabelBatchStatus::Completed : LabelBatchStatus::CompletedWithErrors,
+            'total_shipments' => $packages->count() + $failing->count(),
+            'successful_shipments' => $packages->count(),
+            'failed_shipments' => $failing->count(),
+            'total_cost' => $packages->sum(fn (Package $package): float => (float) $package->cost),
+            'started_at' => $completedAt->copy()->subMinutes(3),
+            'completed_at' => $completedAt,
+        ]);
+
+        foreach ($packages as $package) {
+            LabelBatchItem::create([
+                'label_batch_id' => $batch->id,
+                'shipment_id' => $package->shipment_id,
+                'package_id' => $package->id,
+                'status' => LabelBatchItemStatus::Success,
+                'tracking_number' => $package->tracking_number,
+                'carrier' => $package->carrier,
+                'service' => $package->service,
+                'cost' => $package->cost,
+            ]);
+        }
+
+        foreach ($failing->values() as $index => $shipment) {
+            LabelBatchItem::create([
+                'label_batch_id' => $batch->id,
+                'shipment_id' => $shipment->id,
+                'status' => LabelBatchItemStatus::Failed,
+                'error_message' => $errors[$index % count($errors)],
+            ]);
+        }
+
+        $this->components->twoColumnDetail('Label batch seeded', "{$packages->count()} labels, {$failing->count()} failed");
+    }
+
+    /**
+     * A one-page PDF saying `$text`, small enough to store on every Package.
+     */
+    private function samplePdf(string $text): string
+    {
+        $stream = "BT /F1 18 Tf 72 700 Td ({$text}) Tj ET";
+        $objects = [
+            '<< /Type /Catalog /Pages 2 0 R >>',
+            '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+            '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 288 432] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+            '<< /Length '.strlen($stream)." >>\nstream\n{$stream}\nendstream",
+            '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+        ];
+
+        $pdf = "%PDF-1.4\n";
+        $offsets = [];
+
+        foreach ($objects as $index => $object) {
+            $offsets[] = strlen($pdf);
+            $pdf .= ($index + 1)." 0 obj\n{$object}\nendobj\n";
+        }
+
+        $xref = strlen($pdf);
+        $pdf .= "xref\n0 ".(count($objects) + 1)."\n0000000000 65535 f \n";
+
+        foreach ($offsets as $offset) {
+            $pdf .= sprintf("%010d 00000 n \n", $offset);
+        }
+
+        return $pdf.'trailer << /Size '.(count($objects) + 1)." /Root 1 0 R >>\nstartxref\n{$xref}\n%%EOF\n";
     }
 
     private function resolveDataSource(): ?DataSource
