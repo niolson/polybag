@@ -4,10 +4,10 @@ namespace App\Models;
 
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
-use App\Enums\ServiceEvidence;
 use App\Enums\VoidReason;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\Carriers\ShopifyAdapter;
+use App\Services\ShipmentImport\Sources\ShopifySource;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -42,9 +42,6 @@ class PackageLabel extends Model
         'normalized_carrier_id' => 'normalized_carrier_id',
         'service' => 'service',
         'requested_service' => 'requested_service',
-        'service_evidence' => 'service_evidence',
-        'service_inference_method' => 'service_inference_method',
-        'service_ruleset_version' => 'service_ruleset_version',
         'cost' => 'cost',
         'label_format' => 'label_format',
         'label_dpi' => 'label_dpi',
@@ -68,9 +65,6 @@ class PackageLabel extends Model
         'carrier_service_id',
         'service',
         'requested_service',
-        'service_evidence',
-        'service_inference_method',
-        'service_ruleset_version',
         'cost',
         'label_format',
         'label_dpi',
@@ -100,7 +94,6 @@ class PackageLabel extends Model
         'duties_tax' => 'decimal:2',
         'customs_terms' => 'array',
         'postage_source' => PostageSource::class,
-        'service_evidence' => ServiceEvidence::class,
         'ship_date' => 'date',
         'purchased_at' => 'datetime',
         'voided_at' => 'datetime',
@@ -211,6 +204,16 @@ class PackageLabel extends Model
     public function carrierService(): BelongsTo
     {
         return $this->belongsTo(CarrierService::class);
+    }
+
+    /**
+     * Whether $service is ours rather than the postage source's: Shopify
+     * reports no purchased service, so one on its Label was inferred.
+     */
+    public function serviceIsInferred(): bool
+    {
+        return $this->postage_source === PostageSource::PostageDataSource
+            && $this->postageDataSource?->source_type === ShopifySource::class;
     }
 
     /**

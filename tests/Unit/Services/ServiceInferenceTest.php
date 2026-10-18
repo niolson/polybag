@@ -1,6 +1,5 @@
 <?php
 
-use App\Enums\ServiceEvidence;
 use App\Models\Carrier;
 use App\Models\CarrierAlias;
 use App\Models\Package;
@@ -69,7 +68,6 @@ function packageFor(array $attributes = []): Package
 {
     return new Package(array_merge([
         'carrier' => 'USPS',
-        'service_evidence' => ServiceEvidence::Unknown,
     ], $attributes));
 }
 
@@ -144,8 +142,7 @@ describe('rung 1 — tracking number', function (): void {
 
         expect($inference->isResolved())->toBeTrue()
             ->and($inference->service)->toBe('USPS Ground Advantage')
-            ->and($inference->method)->toBe(ServiceInferrer::METHOD_USPS_STC)
-            ->and($inference->rulesetVersion)->not->toBeEmpty();
+            ->and($inference->method)->toBe(ServiceInferrer::METHOD_USPS_STC);
     });
 
     it('infers the service from a 26-digit number', function (): void {
@@ -264,7 +261,6 @@ describe('exhausting the ladder', function (): void {
 
         expect($package->recordInferredService(inferrer()->infer($package)))->toBeFalse()
             ->and($package->service)->toBeNull()
-            ->and($package->service_evidence)->toBe(ServiceEvidence::Unknown)
             ->and($package->requested_service)->toBe('Ground');
     });
 });
@@ -372,8 +368,7 @@ describe('rung 3 — the honored Shopify selection', function (): void {
 
         expect($inference->isResolved())->toBeTrue()
             ->and($inference->service)->toBe('UPS 2nd Day Air A.M.')
-            ->and($inference->method)->toBe(ServiceInferrer::METHOD_SHOPIFY_SELECTION)
-            ->and($inference->rulesetVersion)->not->toBeEmpty();
+            ->and($inference->method)->toBe(ServiceInferrer::METHOD_SHOPIFY_SELECTION);
     });
 
     it('lets a decode that agrees with the selection stand, under the decode\'s own method', function (): void {
@@ -553,8 +548,7 @@ describe('the UPS 1Z rung', function (): void {
         ]));
 
         expect($inference->service)->toBe('UPS Ground Saver')
-            ->and($inference->method)->toBe(ServiceInferrer::METHOD_UPS_1Z)
-            ->and($inference->rulesetVersion)->not->toBeEmpty();
+            ->and($inference->method)->toBe(ServiceInferrer::METHOD_UPS_1Z);
     });
 
     it('infers the domestic services whose indicator matches the API service code', function (string $indicator, string $service): void {

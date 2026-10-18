@@ -2,7 +2,6 @@
 
 use App\Enums\AuditAction;
 use App\Enums\PostageSource;
-use App\Enums\ServiceEvidence;
 use App\Enums\VoidReason;
 use App\Models\AuditLog;
 use App\Models\Carrier;
@@ -34,7 +33,6 @@ it('records the pre-void label in old_values when a label is voided', function (
         'carrier' => 'USPS',
         'normalized_carrier_id' => $carrier->id,
         'service' => 'Priority Mail',
-        'service_evidence' => ServiceEvidence::Confirmed,
         'cost' => 12.34,
         'postage_source' => PostageSource::CarrierAccount,
         'label_printed_at' => now()->subMinutes(5),
@@ -53,7 +51,6 @@ it('records the pre-void label in old_values when a label is voided', function (
         ->and($old['carrier'])->toBe('USPS')
         ->and($old['normalized_carrier_id'])->toBe($carrier->id)
         ->and($old['service'])->toBe('Priority Mail')
-        ->and($old['service_evidence'])->toBe(ServiceEvidence::Confirmed->value)
         ->and($old['cost'])->toBe('12.34')
         ->and($old['postage_source'])->toBe(PostageSource::CarrierAccount->value)
         ->and($old['label_printed_at'])->toBe($before->label_printed_at->toIso8601String())

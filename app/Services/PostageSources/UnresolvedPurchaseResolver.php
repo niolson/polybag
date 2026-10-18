@@ -9,7 +9,6 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\AuditAction;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
-use App\Enums\ServiceEvidence;
 use App\Exceptions\PurchaseNotResolvableException;
 use App\Listeners\InvalidateDashboardCache;
 use App\Models\AuditLog;
@@ -213,7 +212,6 @@ class UnresolvedPurchaseResolver
                 carrierAccountId: $locked->carrier_account_id,
                 postageSource: $locked->postage_source,
                 postageDataSourceId: $locked->postage_data_source_id,
-                serviceEvidence: ServiceEvidence::Confirmed,
                 sourceLabelReference: $sourceReference,
                 // What voiding and tracking an Amazon label read, as a sale that
                 // replied would have recorded it.

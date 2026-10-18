@@ -3,7 +3,6 @@
 namespace App\DataTransferObjects\Shipping;
 
 use App\Enums\PostageSource;
-use App\Enums\ServiceEvidence;
 use Carbon\CarbonImmutable;
 
 readonly class ShipResponse
@@ -16,9 +15,7 @@ readonly class ShipResponse
      * @param  PostageSource  $postageSource  Where the postage was bought. Defaults to the direct-carrier case; sales-channel postage must say so.
      * @param  int|null  $postageDataSourceId  The data source the postage was bought through, required when $postageSource is PostageDataSource
      * @param  string|null  $requestedService  What the source was asked for. Audit metadata, never the service value — a source may ignore it.
-     * @param  ServiceEvidence  $serviceEvidence  How well $service is known. Defaults to the direct-carrier case, which reports what it sold.
-     * @param  string|null  $serviceInferenceMethod  How $service was derived, required when $serviceEvidence is Inferred
-     * @param  string|null  $serviceRulesetVersion  Which ruleset derived it, required when $serviceEvidence is Inferred
+     * @param  bool  $serviceInferred  Whether $service was derived by us rather than reported by the source (only a Shopify purchase), so it resolves to a catalog service through the ruleset
      * @param  string|null  $sourceLabelReference  The postage source's own identifier for the label (Shopify label ID, Amazon shipment ID), kept on the label record past the void that strips it from the package
      * @param  float|null  $dutiesCost  The duties and taxes a carrier prepaid and reports apart from the postage; kept on the label record, not in `$cost`
      * @param  PrepaidDutiesBreakdown|null  $dutiesBreakdown  The parts of $dutiesCost, when the carrier reports them
@@ -43,9 +40,7 @@ readonly class ShipResponse
         public PostageSource $postageSource = PostageSource::CarrierAccount,
         public ?int $postageDataSourceId = null,
         public ?string $requestedService = null,
-        public ServiceEvidence $serviceEvidence = ServiceEvidence::Confirmed,
-        public ?string $serviceInferenceMethod = null,
-        public ?string $serviceRulesetVersion = null,
+        public bool $serviceInferred = false,
         public ?string $sourceLabelReference = null,
         public ?float $dutiesCost = null,
         public ?PrepaidDutiesBreakdown $dutiesBreakdown = null,

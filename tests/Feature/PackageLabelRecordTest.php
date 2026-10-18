@@ -5,7 +5,6 @@ use App\DataTransferObjects\Shipping\ServiceInference;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
-use App\Enums\ServiceEvidence;
 use App\Enums\VoidReason;
 use App\Models\CarrierAccount;
 use App\Models\DataSource;
@@ -80,7 +79,6 @@ it('records a label row atomically with the projection when a package ships', fu
         ->and((float) $label->cost)->toBe(8.50)
         ->and($label->carrier)->toBe('USPS')
         ->and($label->service)->toBe('USPS_GROUND_ADVANTAGE')
-        ->and($label->service_evidence)->toBe(ServiceEvidence::Confirmed)
         ->and($label->postage_source)->toBe(PostageSource::CarrierAccount)
         ->and($label->carrier_account_id)->toBe($account->id)
         ->and($label->purchased_by_user_id)->toBe($user->id)
@@ -191,37 +189,31 @@ it('leaves two rows after ship, void and ship again, with the projection equal t
 it('upgrades the active label together with the package when a service is inferred', function (): void {
     $package = Package::factory()->shipped()->create([
         'service' => null,
-        'service_evidence' => ServiceEvidence::Unknown,
+        'postage_source' => PostageSource::PostageDataSource,
+        'postage_data_source_id' => DataSource::factory()->shopify()->create()->id,
     ]);
 
-    expect($package->recordInferredService(ServiceInference::resolved('USPS Ground Advantage', 'usps-impb-stc', '2026-09-06')))->toBeTrue();
+    expect($package->recordInferredService(ServiceInference::resolved('USPS Ground Advantage', 'usps-impb-stc')))->toBeTrue();
 
-    $label = $package->activeLabel;
-
-    expect($label->service)->toBe('USPS Ground Advantage')
-        ->and($label->service_evidence)->toBe(ServiceEvidence::Inferred)
-        ->and($label->service_inference_method)->toBe('usps-impb-stc')
-        ->and($label->service_ruleset_version)->toBe('2026-09-06');
+    expect($package->activeLabel->service)->toBe('USPS Ground Advantage')
+        ->and($package->activeLabel->serviceIsInferred())->toBeTrue();
 });
 
 it('leaves both rows alone when the inference is refused', function (): void {
     $package = Package::factory()->shipped()->create([
         'service' => 'Priority Mail',
-        'service_evidence' => ServiceEvidence::Confirmed,
     ]);
 
-    expect($package->recordInferredService(ServiceInference::resolved('Ground', 'usps-impb-stc', '2026-09-06')))->toBeFalse()
-        ->and($package->activeLabel->service)->toBe('Priority Mail')
-        ->and($package->activeLabel->service_evidence)->toBe(ServiceEvidence::Confirmed);
+    expect($package->recordInferredService(ServiceInference::resolved('Ground', 'usps-impb-stc')))->toBeFalse()
+        ->and($package->activeLabel->service)->toBe('Priority Mail');
 });
 
 it('refuses to infer a service onto an unshipped package', function (): void {
     $package = Package::factory()->create([
         'carrier' => 'USPS',
-        'service_evidence' => ServiceEvidence::Unknown,
     ]);
 
-    expect($package->recordInferredService(ServiceInference::resolved('Ground', 'usps-impb-stc', '2026-09-06')))->toBeFalse()
+    expect($package->recordInferredService(ServiceInference::resolved('Ground', 'usps-impb-stc')))->toBeFalse()
         ->and($package->fresh()->service)->toBeNull();
 });
 
@@ -278,7 +270,6 @@ it('creates a label row for a fixture with a bare shipped status', function (): 
     $package = Package::factory()->create(['status' => PackageStatus::Shipped]);
 
     expect($package->activeLabel)->not->toBeNull()
-        ->and($package->activeLabel->service_evidence)->toBe(ServiceEvidence::Unknown)
         ->and($package->activeLabel->label_format)->toBe('pdf');
 });
 

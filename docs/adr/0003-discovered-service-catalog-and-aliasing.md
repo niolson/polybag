@@ -203,6 +203,16 @@ is:
 | evidence | `confirmed` (the source reported it), `inferred` (derived), or `unknown` |
 | inference method + ruleset version | recorded whenever evidence is `inferred` |
 
+Amended 2026-10-18: the evidence column, the inference method and the ruleset version are
+gone. A service is inferred exactly when the postage was bought through Shopify, which
+reports none; every other source reports what it sold. So "inferred" is read off the
+postage source (`Package::serviceIsInferred()`), a Shopify Package with no derivable service
+simply has none, and re-running inference replaces an earlier inference. The rung that
+produced a value is still counted by `app:infer-package-services`, but is no longer stored.
+`requested_service` stays: what was asked for is audit metadata, not provenance. The three
+columns were dropped from `packages` and `package_labels`. What follows is the model as first
+accepted.
+
 **Channel exports publish `confirmed` only.** Amazon's `shipmentConfirmation` treats
 `shippingMethod` as optional — `AmazonSource::exportPackage()` already omits it when blank — so
 an inferred service is omitted rather than published. A guess sent to a marketplace becomes a

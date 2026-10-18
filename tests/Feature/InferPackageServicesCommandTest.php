@@ -1,18 +1,27 @@
 <?php
 
-use App\Enums\ServiceEvidence;
+use App\Enums\PostageSource;
+use App\Models\DataSource;
 use App\Models\Package;
 
 const COVERAGE_IMPB_GROUND_ADVANTAGE = '9300199999999900000011';
 const COVERAGE_IMPB_UNLISTED_STC = '9299999999999900000036';
 
+/** The attributes of a Package bought through Shopify, the one source whose service is inferred. */
+function shopifyPurchase(array $attributes = []): array
+{
+    return $attributes + [
+        'postage_source' => PostageSource::PostageDataSource,
+        'postage_data_source_id' => DataSource::factory()->shopify()->create()->id,
+    ];
+}
+
 it('reports coverage without writing anything by default', function (): void {
-    Package::factory()->shipped()->create([
+    Package::factory()->shipped()->create(shopifyPurchase([
         'carrier' => 'USPS',
         'tracking_number' => COVERAGE_IMPB_GROUND_ADVANTAGE,
         'service' => null,
-        'service_evidence' => ServiceEvidence::Unknown,
-    ]);
+    ]));
 
     $this->artisan('app:infer-package-services')
         ->expectsOutputToContain('usps-impb-stc')
@@ -23,27 +32,25 @@ it('reports coverage without writing anything by default', function (): void {
 });
 
 it('writes what it inferred under --apply', function (): void {
-    $package = Package::factory()->shipped()->create([
+    $package = Package::factory()->shipped()->create(shopifyPurchase([
         'carrier' => 'USPS',
         'tracking_number' => COVERAGE_IMPB_GROUND_ADVANTAGE,
         'service' => null,
-        'service_evidence' => ServiceEvidence::Unknown,
-    ]);
+    ]));
 
     $this->artisan('app:infer-package-services --apply')->assertSuccessful();
 
     expect($package->refresh()->service)->toBe('USPS Ground Advantage')
-        ->and($package->service_evidence)->toBe(ServiceEvidence::Inferred);
+        ->and($package->serviceIsInferred())->toBeTrue();
 });
 
 it('counts what each rung left unknown', function (): void {
-    Package::factory()->shipped()->create([
+    Package::factory()->shipped()->create(shopifyPurchase([
         'carrier' => 'USPS',
         'tracking_number' => COVERAGE_IMPB_UNLISTED_STC,
         'service' => null,
-        'service_evidence' => ServiceEvidence::Unknown,
         'label_data' => null,
-    ]);
+    ]));
 
     $this->artisan('app:infer-package-services')
         ->expectsOutputToContain('service type code names no product')
@@ -51,16 +58,15 @@ it('counts what each rung left unknown', function (): void {
         ->assertSuccessful();
 });
 
-it('leaves a confirmed service out of the measurement entirely', function (): void {
+it('leaves a service the postage source reported out of the measurement entirely', function (): void {
     Package::factory()->shipped()->create([
         'carrier' => 'USPS',
         'tracking_number' => COVERAGE_IMPB_GROUND_ADVANTAGE,
         'service' => 'Priority Mail',
-        'service_evidence' => ServiceEvidence::Confirmed,
     ]);
 
     $this->artisan('app:infer-package-services')
-        ->expectsOutputToContain('No packages with an unconfirmed service')
+        ->expectsOutputToContain('No Shopify purchases to infer a service for')
         ->assertSuccessful();
 });
 
@@ -71,16 +77,13 @@ it('withdraws an earlier inference the current ruleset contradicts, under --appl
     // honored, finds it disagrees with the decode, and refuses both -- which
     // must take the stored value with it rather than leave it reported under a
     // ruleset that now contradicts it.
-    $package = Package::factory()->shipped()->create([
+    $package = Package::factory()->shipped()->create(shopifyPurchase([
         'carrier' => 'USPS',
         'tracking_number' => COVERAGE_IMPB_GROUND_ADVANTAGE,
         'service' => 'USPS Ground Advantage',
-        'service_evidence' => ServiceEvidence::Inferred,
-        'service_inference_method' => 'usps-impb-stc',
-        'service_ruleset_version' => '2026-09-09',
         'requested_service' => "Shopify's USPS Priority Mail",
         'metadata' => ['shopify_honored_selection' => 'usps:Priority'],
-    ]);
+    ]));
 
     $this->artisan('app:infer-package-services')
         ->expectsOutputToContain('decode disagrees with the honored selection')
@@ -95,7 +98,5 @@ it('withdraws an earlier inference the current ruleset contradicts, under --appl
     $package->refresh();
 
     expect($package->service)->toBeNull()
-        ->and($package->service_evidence)->toBe(ServiceEvidence::Unknown)
-        ->and($package->service_ruleset_version)->toBeNull()
         ->and($package->activeLabel->service)->toBeNull();
 });

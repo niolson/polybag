@@ -20,7 +20,6 @@ final readonly class VoidedLabel
         public ?string $carrier,
         public ?int $normalizedCarrierId,
         public ?string $service,
-        public ?string $serviceEvidence,
         public ?string $cost,
         public ?string $postageSource,
         public ?CarbonImmutable $labelPrintedAt,
@@ -29,7 +28,7 @@ final readonly class VoidedLabel
     ) {}
 
     /**
-     * @param  object{tracking_number: ?string, carrier: ?string, normalized_carrier_id: int|string|null, service: ?string, service_evidence: ?string, cost: float|string|null, postage_source: ?string, label_printed_at: ?string, shipped_at: ?string, ship_date: ?string}  $row
+     * @param  object{tracking_number: ?string, carrier: ?string, normalized_carrier_id: int|string|null, service: ?string, cost: float|string|null, postage_source: ?string, label_printed_at: ?string, shipped_at: ?string, ship_date: ?string}  $row
      */
     public static function fromRow(object $row): self
     {
@@ -38,7 +37,6 @@ final readonly class VoidedLabel
             carrier: $row->carrier,
             normalizedCarrierId: $row->normalized_carrier_id === null ? null : (int) $row->normalized_carrier_id,
             service: $row->service,
-            serviceEvidence: $row->service_evidence,
             cost: $row->cost === null ? null : number_format((float) $row->cost, 2, '.', ''),
             postageSource: $row->postage_source,
             labelPrintedAt: filled($row->label_printed_at) ? CarbonImmutable::parse($row->label_printed_at) : null,
@@ -48,7 +46,7 @@ final readonly class VoidedLabel
     }
 
     /**
-     * @return array{tracking_number: ?string, carrier: ?string, normalized_carrier_id: ?int, service: ?string, service_evidence: ?string, cost: ?string, postage_source: ?string, label_printed_at: ?string, shipped_at: ?string, ship_date: ?string}
+     * @return array{tracking_number: ?string, carrier: ?string, normalized_carrier_id: ?int, service: ?string, cost: ?string, postage_source: ?string, label_printed_at: ?string, shipped_at: ?string, ship_date: ?string}
      */
     public function toArray(): array
     {
@@ -57,7 +55,6 @@ final readonly class VoidedLabel
             'carrier' => $this->carrier,
             'normalized_carrier_id' => $this->normalizedCarrierId,
             'service' => $this->service,
-            'service_evidence' => $this->serviceEvidence,
             'cost' => $this->cost,
             'postage_source' => $this->postageSource,
             'label_printed_at' => $this->labelPrintedAt?->toIso8601String(),

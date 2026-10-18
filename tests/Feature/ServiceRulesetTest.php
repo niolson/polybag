@@ -48,10 +48,6 @@ function temporaryRuleset(array $overrides = []): string
     return $directory;
 }
 
-it('reports the version the tables were loaded with', function (): void {
-    expect((new ServiceRuleset)->version())->toMatch('/^\d{4}-\d{2}-\d{2}$/');
-});
-
 it('resolves a service type code, and falls through on one that names no product', function (): void {
     $ruleset = new ServiceRuleset;
 
@@ -60,11 +56,6 @@ it('resolves a service type code, and falls through on one that names no product
         ->and($ruleset->uspsProductForServiceTypeCode('999'))->toBeNull();
 });
 
-// The version stamp is the whole point: a package recorded under one has to be
-// re-derivable against the tables that produced it. Caching the version and the
-// tables independently lets one outlive the other across a deploy, stamping a
-// value derived from old rules with a new version -- and the re-run path only
-// replaces stamps that are older, so that package is never re-derived.
 it('resolves a UPS service level indicator, and falls through on one it has no evidence for', function (): void {
     $ruleset = new ServiceRuleset;
 
@@ -90,16 +81,15 @@ it('resolves a Shopify selection pair, and falls through on auto and on pairs ne
         ->and($ruleset->shopifySelection('dhl_express:D'))->toBeNull();
 });
 
-it('does not serve the version and the tables from independent caches', function (): void {
-    (new ServiceRuleset)->version();
+it('does not serve the tables from independent caches', function (): void {
+    (new ServiceRuleset)->uspsProductForServiceTypeCode('001');
 
     expect(Cache::has('service-inference-ruleset:ruleset'))->toBeFalse()
         ->and(Cache::has('service-inference-ruleset:usps-impb-stc'))->toBeFalse();
 });
 
-it('reads the version and the lookup tables from the same ruleset', function (): void {
+it('reads the lookup tables from the ruleset it was given', function (): void {
     $directory = temporaryRuleset([
-        'ruleset' => ['version' => '2099-01-01'],
         'usps-impb-stc' => [
             'effective_date' => '2099-01-01',
             'codes' => ['001' => ['product' => 'Renamed Product']],
@@ -108,13 +98,12 @@ it('reads the version and the lookup tables from the same ruleset', function ():
 
     $ruleset = new ServiceRuleset($directory);
 
-    expect($ruleset->version())->toBe('2099-01-01')
-        ->and($ruleset->uspsProductForServiceTypeCode('001'))->toBe('Renamed Product');
+    expect($ruleset->uspsProductForServiceTypeCode('001'))->toBe('Renamed Product');
 });
 
 it('does not carry one ruleset over into another', function (): void {
-    $directory = temporaryRuleset(['ruleset' => ['version' => '2099-01-01']]);
+    $directory = temporaryRuleset(['usps-impb-stc' => ['effective_date' => '2099-01-01', 'codes' => ['001' => ['product' => 'Renamed Product']]]]);
 
-    expect((new ServiceRuleset($directory))->version())->toBe('2099-01-01')
-        ->and((new ServiceRuleset)->version())->not->toBe('2099-01-01');
+    expect((new ServiceRuleset($directory))->uspsProductForServiceTypeCode('001'))->toBe('Renamed Product')
+        ->and((new ServiceRuleset)->uspsProductForServiceTypeCode('001'))->not->toBe('Renamed Product');
 });

@@ -4,7 +4,6 @@ namespace App\Console\Commands;
 
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
-use App\Enums\ServiceEvidence;
 use App\Enums\ShipmentStatusOrigin;
 use App\Http\Integrations\Fedex\FedexConnector;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
@@ -361,7 +360,6 @@ class FedexRunEtdTestCase extends Command
                 'carrier' => Carrier::FEDEX,
                 'service' => data_get($shipResponse, 'output.transactionShipments.0.serviceType', 'IntegratorUS09'),
                 // FedEx names the service it sold in its own ship response.
-                'service_evidence' => ServiceEvidence::Confirmed,
                 'tracking_number' => $trackingNumber,
                 'label_data' => $encodedLabel,
                 'label_format' => $labelFormat,

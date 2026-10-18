@@ -3,7 +3,6 @@
 namespace Database\Factories;
 
 use App\Enums\PostageSource;
-use App\Enums\ServiceEvidence;
 use App\Enums\VoidReason;
 use App\Models\Package;
 use App\Models\PackageLabel;
@@ -30,7 +29,6 @@ class PackageLabelFactory extends Factory
             'postage_source' => PostageSource::CarrierAccount,
             'carrier' => fake()->randomElement(['USPS', 'FedEx']),
             'service' => 'Ground',
-            'service_evidence' => ServiceEvidence::Confirmed,
             'cost' => fake()->randomFloat(2, 5, 50),
             'label_format' => 'pdf',
             'label_orientation' => 'portrait',

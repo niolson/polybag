@@ -25,9 +25,6 @@ class PackagesRelationManager extends RelationManager
                 // No tracking number, cost or status: those are the projection
                 // of the package's active label and only the label writers set
                 // them (ADR-0004 decision 3).
-                Forms\Components\TextInput::make('shipping_method')
-                    ->label('Service (as bought)')
-                    ->maxLength(255),
                 Forms\Components\TextInput::make('weight')
                     ->numeric(),
                 Forms\Components\TextInput::make('height')
@@ -50,8 +47,9 @@ class PackagesRelationManager extends RelationManager
                 Tables\Columns\TextColumn::make('tracking_status')
                     ->badge()
                     ->placeholder('—'),
-                Tables\Columns\TextColumn::make('shipping_method')
-                    ->label('Service (as bought)'),
+                Tables\Columns\TextColumn::make('service')
+                    ->state(fn (Package $record): ?string => $record->serviceDisplayName())
+                    ->placeholder('—'),
                 Tables\Columns\TextColumn::make('weight'),
                 Tables\Columns\TextColumn::make('cost')
                     ->money('USD'),

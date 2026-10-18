@@ -11,7 +11,6 @@ use App\Enums\PackageDraftState;
 use App\Enums\PackageStatus;
 use App\Enums\PickingStatus;
 use App\Enums\PostageSource;
-use App\Enums\ServiceEvidence;
 use App\Enums\SpecialServiceSource;
 use App\Enums\TrackingStatus;
 use App\Enums\VoidReason;
@@ -71,9 +70,6 @@ class Package extends Model
         'normalized_carrier_id',
         'service',
         'requested_service',
-        'service_evidence',
-        'service_inference_method',
-        'service_ruleset_version',
         'metadata',
         'carrier_request_payload',
         'label_data',
@@ -114,7 +110,6 @@ class Package extends Model
         'label_printed_at' => 'datetime',
         'status' => PackageStatus::class,
         'postage_source' => PostageSource::class,
-        'service_evidence' => ServiceEvidence::class,
         'shipped_at' => 'datetime',
         'ship_date' => 'date',
         'exported' => 'boolean',
@@ -496,17 +491,27 @@ class Package extends Model
     }
 
     /**
+     * Whether `service` is ours rather than the postage source's. Shopify
+     * reports no purchased service, so one on a Shopify purchase was inferred;
+     * every other source reports what it sold.
+     */
+    public function serviceIsInferred(): bool
+    {
+        return $this->isShopifyShipped();
+    }
+
+    /**
      * The service as a fact fit to report outward, or null.
      *
-     * Only a `confirmed` service is one the postage source reported; an inferred
-     * one is ours, and a channel that receives it turns it into a buyer-facing
-     * promise we never made. Withholding it costs nothing — Amazon's
-     * `shipmentConfirmation` treats `shippingMethod` as optional. ADR-0003
-     * decision 7.
+     * Only a service the postage source reported is one we can vouch for; an
+     * inferred one is ours, and a channel that receives it turns it into a
+     * buyer-facing promise we never made. Withholding it costs nothing —
+     * Amazon's `shipmentConfirmation` treats `shippingMethod` as optional.
+     * ADR-0003 decision 7.
      */
     public function confirmedService(): ?string
     {
-        return $this->service_evidence->isPublishable() ? $this->service : null;
+        return $this->serviceIsInferred() ? null : $this->service;
     }
 
     /**
@@ -529,23 +534,16 @@ class Package extends Model
      * one-shot transition out of `Unshipped` under optimistic locking and cannot
      * upgrade a package after the fact.
      *
-     * The rules it enforces:
-     *
-     * - A `confirmed` service is never overwritten. The postage source reported
-     *   it; nothing we derive outranks that.
-     * - An inference never downgrades. Re-running produces a value or it does
-     *   not, and a run that produces nothing leaves the previous one standing.
-     *   The one exception is a run that produces evidence *against* it, which
-     *   is `withdrawInferredService()`'s job rather than this method's.
-     * - An inference from an older ruleset is replaced together with its version
-     *   stamp, so a value and the rules that produced it never disagree.
-     * - An inference under the same ruleset is a no-op, because re-deriving the
-     *   same value from the same tables says nothing new.
+     * Only a Shopify purchase may take one: every other source reports the
+     * service it sold, and nothing we derive outranks that. Re-running replaces
+     * an earlier inference with the new one, and a run that produces nothing
+     * leaves the previous one standing; the exception is a run that produces
+     * evidence *against* it, which is `withdrawInferredService()`'s job.
      *
      * Enforced as conditions on the update rather than as checks before it. This
-     * runs over packages in bulk while shipping continues, so a service the
-     * postage source confirms between loading a package and writing to it must
-     * lose the race rather than be silently overwritten by a guess.
+     * runs over packages in bulk while shipping continues, so a package that is
+     * no longer a Shopify purchase by the time it is written must lose the race
+     * rather than be overwritten by a guess.
      *
      * Returns whether the package was changed.
      */
@@ -555,31 +553,14 @@ class Package extends Model
             return false;
         }
 
-        $projected = [
-            'service' => $inference->service,
-            'service_evidence' => ServiceEvidence::Inferred->value,
-            'service_inference_method' => $inference->method,
-            'service_ruleset_version' => $inference->rulesetVersion,
-        ];
-
         // Snapshotted beside the name, on the Label only, as a purchase records it.
         $carrierServiceId = app(CatalogServiceResolver::class)->forInferredService($this->normalized_carrier_id, $inference->service);
 
-        $upgradable = function (QueryBuilder $query) use ($inference): void {
-            $query
-                ->where('service_evidence', ServiceEvidence::Unknown->value)
-                ->orWhere(function (QueryBuilder $query) use ($inference): void {
-                    $query
-                        ->where('service_evidence', ServiceEvidence::Inferred->value)
-                        ->where(function (QueryBuilder $query) use ($inference): void {
-                            $query
-                                ->whereNull('service_ruleset_version')
-                                ->orWhere('service_ruleset_version', '<', $inference->rulesetVersion);
-                        });
-                });
+        $changesService = function (QueryBuilder $query) use ($inference): void {
+            $query->whereNull('service')->orWhere('service', '!=', $inference->service);
         };
 
-        $updated = DB::transaction(function () use ($projected, $upgradable, $carrierServiceId): int {
+        $updated = DB::transaction(function () use ($inference, $changesService, $carrierServiceId): int {
             // Package row first, then its label — the lock order every writer
             // keeps, so this cannot deadlock against a void or a print
             // acknowledgment. Only a shipped package has a label to keep in
@@ -587,8 +568,9 @@ class Package extends Model
             $updated = DB::table('packages')
                 ->where('id', $this->id)
                 ->where('status', PackageStatus::Shipped->value)
-                ->where($upgradable)
-                ->update($projected + ['updated_at' => now()]);
+                ->where(self::boughtThroughShopify(...))
+                ->where($changesService)
+                ->update(['service' => $inference->service, 'updated_at' => now()]);
 
             if ($updated === 0) {
                 return 0;
@@ -597,8 +579,8 @@ class Package extends Model
             $labelUpdated = DB::table('package_labels')
                 ->where('package_id', $this->id)
                 ->whereNull('voided_at')
-                ->where($upgradable)
-                ->update(PackageLabel::projectionFrom($projected) + [
+                ->where(self::boughtThroughShopify(...))
+                ->update(PackageLabel::projectionFrom(['service' => $inference->service]) + [
                     'carrier_service_id' => $carrierServiceId,
                     'updated_at' => now(),
                 ]);
@@ -618,12 +600,7 @@ class Package extends Model
             return false;
         }
 
-        $this->forceFill([
-            'service' => $inference->service,
-            'service_evidence' => ServiceEvidence::Inferred,
-            'service_inference_method' => $inference->method,
-            'service_ruleset_version' => $inference->rulesetVersion,
-        ])->syncOriginal();
+        $this->forceFill(['service' => $inference->service])->syncOriginal();
 
         return true;
     }
@@ -637,14 +614,12 @@ class Package extends Model
      * an earlier inference standing, because a rung that no longer runs -- the
      * label purged, say -- is silent about whether what it once read was right.
      * A contradiction is not silent, and a value the rules that produced it now
-     * refuse is not one that should keep being reported under those rules'
-     * version stamp.
+     * refuse is not one that should keep being reported.
      *
-     * Only an `inferred` service is withdrawn, at any ruleset version -- a
-     * contradiction is evidence, not a newer edition of the tables. A `confirmed`
-     * one is the postage source's and untouchable, and `unknown` has nothing to
-     * withdraw. Both rows, in the same lock order as every other writer, and the
-     * package returns to exactly the `unknown` state a fresh purchase records.
+     * Only a Shopify purchase's service is withdrawn: any other was reported by
+     * its source and is untouchable. Both rows, in the same lock order as every
+     * other writer, and the package returns to exactly the state a fresh
+     * purchase with no inferred service records.
      *
      * Returns whether the package was changed.
      */
@@ -654,19 +629,13 @@ class Package extends Model
             return false;
         }
 
-        $projected = [
-            'service' => null,
-            'service_evidence' => ServiceEvidence::Unknown->value,
-            'service_inference_method' => null,
-            'service_ruleset_version' => null,
-        ];
-
-        $updated = DB::transaction(function () use ($projected): int {
+        $updated = DB::transaction(function (): int {
             $updated = DB::table('packages')
                 ->where('id', $this->id)
                 ->where('status', PackageStatus::Shipped->value)
-                ->where('service_evidence', ServiceEvidence::Inferred->value)
-                ->update($projected + ['updated_at' => now()]);
+                ->where(self::boughtThroughShopify(...))
+                ->whereNotNull('service')
+                ->update(['service' => null, 'updated_at' => now()]);
 
             if ($updated === 0) {
                 return 0;
@@ -675,8 +644,8 @@ class Package extends Model
             $labelUpdated = DB::table('package_labels')
                 ->where('package_id', $this->id)
                 ->whereNull('voided_at')
-                ->where('service_evidence', ServiceEvidence::Inferred->value)
-                ->update(PackageLabel::projectionFrom($projected) + [
+                ->where(self::boughtThroughShopify(...))
+                ->update(PackageLabel::projectionFrom(['service' => null]) + [
                     'carrier_service_id' => null,
                     'updated_at' => now(),
                 ]);
@@ -696,14 +665,25 @@ class Package extends Model
             return false;
         }
 
-        $this->forceFill([
-            'service' => null,
-            'service_evidence' => ServiceEvidence::Unknown,
-            'service_inference_method' => null,
-            'service_ruleset_version' => null,
-        ])->syncOriginal();
+        $this->forceFill(['service' => null])->syncOriginal();
 
         return true;
+    }
+
+    /**
+     * Restrict a `packages` or `package_labels` query to postage bought through
+     * a Shopify connection, the one source whose service is inferred.
+     *
+     * @param  QueryBuilder|Builder<Package>|Builder<PackageLabel>  $query
+     */
+    public static function boughtThroughShopify(QueryBuilder|Builder $query): void
+    {
+        $query
+            ->where('postage_source', PostageSource::PostageDataSource->value)
+            ->whereIn('postage_data_source_id', fn (QueryBuilder $sources) => $sources
+                ->select('id')
+                ->from('data_sources')
+                ->where('source_type', ShopifySource::class));
     }
 
     /**
@@ -777,21 +757,20 @@ class Package extends Model
      * @param  bool  $announce  Whether to dispatch {@see PackageShipped}, which queues the channel export. False only for a label recorded to be voided at once: the package is then also held from every other export path until {@see releaseForExport()}.
      * @param  array<string, mixed>|null  $customsTerms  What the Label declared (`CustomsTermsSnapshot`), recorded on the Label only; null when nothing was declared or the adapter does not send customs terms
      *
-     * @throws \InvalidArgumentException If the postage source and the response's pointers disagree, or the service evidence contradicts the service value
+     * @throws \InvalidArgumentException If the postage source and the response's pointers disagree
      * @throws \RuntimeException If the package state changed (optimistic locking)
      */
     public function markShipped(ShipResponse $response, PostageSource $postageSource, ?int $shippedByUserId = null, ?int $carrierServiceId = null, bool $announce = true, ?array $customsTerms = null): void
     {
         // Before the transaction, so a rejected provenance writes nothing at all.
         $this->assertProvenanceIsConsistent($postageSource, $response);
-        $this->assertServiceEvidenceIsConsistent($response);
 
         DB::transaction(function () use ($response, $postageSource, $shippedByUserId, $carrierServiceId, $announce, $customsTerms): void {
             $normalizedCarrierId = app(CarrierNormalizer::class)->resolve($response->carrier)?->id;
 
             // A blind purchase names no catalog service, but the service the
             // ladder derived from its label may be one (`postage-source-split/15`).
-            if ($carrierServiceId === null && $response->serviceEvidence === ServiceEvidence::Inferred) {
+            if ($carrierServiceId === null && $response->serviceInferred) {
                 $carrierServiceId = app(CatalogServiceResolver::class)->forInferredService($normalizedCarrierId, $response->service);
             }
 
@@ -828,9 +807,6 @@ class Package extends Model
                 'normalized_carrier_id' => $normalizedCarrierId,
                 'service' => $response->service,
                 'requested_service' => $response->requestedService,
-                'service_evidence' => $response->serviceEvidence->value,
-                'service_inference_method' => $response->serviceInferenceMethod,
-                'service_ruleset_version' => $response->serviceRulesetVersion,
                 'label_orientation' => $response->labelOrientation ?? 'portrait',
                 'label_format' => $response->labelFormat ?? 'pdf',
                 'label_dpi' => $response->labelDpi,
@@ -964,56 +940,6 @@ class Package extends Model
     }
 
     /**
-     * Reject a ship whose evidence contradicts the service value it carries.
-     *
-     * Enforced beside the provenance check and for the same reason: markShipped()
-     * writes through the query builder, so model events never fire for it.
-     *
-     * The invariants are the ones ADR-0003 decision 7 depends on. `confirmed`
-     * with no service is a source that reported nothing being recorded as having
-     * reported something. `unknown` with a service is the guess the channel
-     * export exists to withhold. And an inference nobody can reproduce — no
-     * method, no ruleset version — cannot be reviewed when the rules change.
-     *
-     * @throws \InvalidArgumentException
-     */
-    private function assertServiceEvidenceIsConsistent(ShipResponse $response): void
-    {
-        $hasService = filled($response->service);
-        $hasInferenceDetail = filled($response->serviceInferenceMethod) || filled($response->serviceRulesetVersion);
-
-        if ($response->serviceEvidence === ServiceEvidence::Confirmed && ! $hasService) {
-            throw new \InvalidArgumentException(
-                'A confirmed service must name the service the postage source reported.'
-            );
-        }
-
-        if ($response->serviceEvidence === ServiceEvidence::Unknown && $hasService) {
-            throw new \InvalidArgumentException(
-                'A service nobody confirmed or inferred cannot be recorded as the service value.'
-            );
-        }
-
-        if ($response->serviceEvidence === ServiceEvidence::Inferred) {
-            if (! $hasService) {
-                throw new \InvalidArgumentException(
-                    'An inferred service must name the service that was inferred.'
-                );
-            }
-
-            if (blank($response->serviceInferenceMethod) || blank($response->serviceRulesetVersion)) {
-                throw new \InvalidArgumentException(
-                    'An inferred service must record the inference method and the ruleset version that produced it.'
-                );
-            }
-        } elseif ($hasInferenceDetail) {
-            throw new \InvalidArgumentException(
-                'Only an inferred service may record an inference method or ruleset version.'
-            );
-        }
-    }
-
-    /**
      * `Shipped` ⇔ exactly one unvoided label; any other status ⇔ none.
      *
      * A post-condition run inside each writing transaction before commit, so a
@@ -1137,9 +1063,6 @@ class Package extends Model
                     'normalized_carrier_id' => null,
                     'service' => null,
                     'requested_service' => null,
-                    'service_evidence' => ServiceEvidence::Unknown->value,
-                    'service_inference_method' => null,
-                    'service_ruleset_version' => null,
                     'cost' => null,
                     'label_data' => null,
                     'customs_form_data' => null,

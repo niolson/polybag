@@ -8,7 +8,6 @@ use App\Enums\AuditAction;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\Role;
-use App\Enums\ServiceEvidence;
 use App\Enums\VoidReason;
 use App\Events\PackageShipped;
 use App\Exceptions\PurchaseNotResolvableException;
@@ -102,7 +101,7 @@ it('ships the package on the offer\'s facts and the entered tracking number', fu
         ->and($package->service)->toBe('Priority Mail')
         ->and((float) $package->cost)->toBe(8.40)
         ->and($package->postage_source)->toBe(PostageSource::CarrierAccount)
-        ->and($package->service_evidence)->toBe(ServiceEvidence::Confirmed)
+        ->and($package->serviceIsInferred())->toBeFalse()
         ->and($package->label_data)->toBeNull()
         ->and($package->shipped_by_user_id)->toBe($manager->id)
         ->and($label->carrier_service_id)->toBe($priority->id)

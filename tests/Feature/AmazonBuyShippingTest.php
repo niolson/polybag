@@ -13,7 +13,6 @@ use App\Enums\PackageStatus;
 use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Enums\PostageSourceKind;
-use App\Enums\ServiceEvidence;
 use App\Http\Integrations\Amazon\Requests\CancelAmazonShipment;
 use App\Http\Integrations\Amazon\Requests\ConfirmShipment;
 use App\Http\Integrations\Amazon\Requests\GetAdditionalInputsSchema;
@@ -1271,7 +1270,7 @@ it('buys the offer that was chosen and records what Amazon called the shipment',
         // sold it. ADR-0002's split, on one row.
         ->and($package->carrier)->toBe('OnTrac')
         ->and($package->service)->toBe('OnTrac Ground')
-        ->and($package->service_evidence)->toBe(ServiceEvidence::Confirmed)
+        ->and($package->serviceIsInferred())->toBeFalse()
         ->and((float) $package->cost)->toBe(5.79)
         ->and($package->postage_source)->toBe(PostageSource::PostageDataSource)
         ->and($package->postage_data_source_id)->toBe($this->source->id)
@@ -2033,7 +2032,6 @@ function amazonShippedPackage(DataSource $source, array $attributes = []): Packa
         'tracking_number' => 'D10012345678901',
         'carrier' => 'OnTrac',
         'service' => 'OnTrac Ground',
-        'service_evidence' => ServiceEvidence::Confirmed,
         'cost' => 5.79,
         'postage_source' => PostageSource::PostageDataSource,
         'postage_data_source_id' => $source->id,
