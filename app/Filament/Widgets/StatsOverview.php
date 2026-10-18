@@ -10,6 +10,7 @@ use App\Models\Location;
 use App\Models\Shipment;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 
 class StatsOverview extends BaseWidget
@@ -17,6 +18,8 @@ class StatsOverview extends BaseWidget
     protected static ?int $sort = -4;
 
     protected ?string $pollingInterval = '60s';
+
+    protected int|array|null $columns = 3;
 
     /**
      * Packages counted but never priced. A null `costed_package_count` predates
@@ -42,11 +45,10 @@ class StatsOverview extends BaseWidget
             ];
         }
 
-        $data = Cache::remember('widget:stats_overview:v3', 60, function (): array {
+        $data = Cache::remember('widget:stats_overview:v5', 60, function (): array {
             $tz = Location::timezone();
             $localToday = now($tz)->startOfDay();
             $thisWeekStart = now($tz)->startOfWeek();
-            $thisMonthStart = now($tz)->startOfMonth();
             $lastWeekStart = now($tz)->subWeek()->startOfWeek();
             // The same days of last week: Monday through today's weekday, so an
             // early-week total is not set against a whole week.
@@ -55,8 +57,7 @@ class StatsOverview extends BaseWidget
             return [
                 'pending' => Shipment::query()->where('status', ShipmentStatus::Open)->count(),
                 'shipped_today' => (int) DailyShippingStat::where('date', $localToday->toDateString())->sum('package_count'),
-                'shipped_week' => (int) DailyShippingStat::where('date', '>=', $thisWeekStart->toDateString())->sum('package_count'),
-                'shipped_month' => (int) DailyShippingStat::where('date', '>=', $thisMonthStart->toDateString())->sum('package_count'),
+                'daily_counts' => $this->dailyCounts($localToday, 60),
                 'cost_this_week' => (float) DailyShippingStat::where('date', '>=', $thisWeekStart->toDateString())->sum('total_cost'),
                 'cost_last_week' => (float) DailyShippingStat::whereBetween('date', [$lastWeekStart->toDateString(), $lastWeekEnd->toDateString()])->sum('total_cost'),
                 'uncosted_week' => (int) DailyShippingStat::where('date', '>=', $thisWeekStart->toDateString())
@@ -68,24 +69,23 @@ class StatsOverview extends BaseWidget
             ];
         });
 
+        $last7 = array_slice($data['daily_counts'], -7);
+        $previous7 = array_slice($data['daily_counts'], -14, 7);
+        $last30 = array_slice($data['daily_counts'], -30);
+        $previous30 = array_slice($data['daily_counts'], 0, 30);
+
         return [
+            Stat::make('Shipped Today', number_format(end($last7)))
+                ->description('Since midnight')
+                ->descriptionIcon('heroicon-m-check-circle')
+                ->color('success'),
+            $this->buildShippedStat('Shipped Last 7 Days', $last7, $previous7, 'previous 7 days'),
+            $this->buildShippedStat('Shipped Last 30 Days', $last30, $previous30, 'previous 30 days'),
             Stat::make('Open Shipments', number_format($data['pending']))
                 ->description('Awaiting shipment')
                 ->descriptionIcon('heroicon-m-clock')
                 ->color('warning')
                 ->url(ShipmentResource::getUrl('index').'?status_tab='.ShipmentStatus::Open->value),
-            Stat::make('Shipped Today', number_format($data['shipped_today']))
-                ->description('Since midnight')
-                ->descriptionIcon('heroicon-m-check-circle')
-                ->color('success'),
-            Stat::make('Shipped This Week', number_format($data['shipped_week']))
-                ->description('Since Monday')
-                ->descriptionIcon('heroicon-m-calendar')
-                ->color('primary'),
-            Stat::make('Shipped This Month', number_format($data['shipped_month']))
-                ->description('Since the 1st')
-                ->descriptionIcon('heroicon-m-calendar-days')
-                ->color('primary'),
             $this->buildCostStat(
                 $data['cost_this_week'],
                 $data['cost_last_week'],
@@ -127,6 +127,54 @@ class StatsOverview extends BaseWidget
         }
 
         return $stat;
+    }
+
+    /**
+     * A shipped-package total with its daily sparkline and how it moved against
+     * the period before. With nothing shipped before, there is no percentage
+     * to give, so the card stays neutral.
+     *
+     * @param  list<float>  $days
+     * @param  list<float>  $previousDays
+     */
+    private function buildShippedStat(string $label, array $days, array $previousDays, string $previousLabel): Stat
+    {
+        $total = array_sum($days);
+        $previous = array_sum($previousDays);
+
+        $stat = Stat::make($label, number_format($total))->chart($days)->color('primary');
+
+        if ($previous <= 0) {
+            return $stat->description('Nothing shipped in the '.$previousLabel);
+        }
+
+        $change = (($total - $previous) / $previous) * 100;
+
+        return $stat
+            ->description(number_format(abs($change), 1).'% '.($change >= 0 ? 'increase' : 'decrease').' on the '.$previousLabel)
+            ->descriptionIcon($change >= 0 ? 'heroicon-m-arrow-trending-up' : 'heroicon-m-arrow-trending-down')
+            ->color($change >= 0 ? 'success' : 'danger');
+    }
+
+    /**
+     * Packages shipped on each of the last $days local days, oldest first,
+     * today last, with days that shipped nothing as zero.
+     *
+     * @return list<float> floats because that is what a Stat chart takes
+     */
+    private function dailyCounts(Carbon $localToday, int $days): array
+    {
+        $from = $localToday->copy()->subDays($days - 1);
+
+        $counts = DailyShippingStat::query()
+            ->where('date', '>=', $from->toDateString())
+            ->selectRaw('date, SUM(package_count) as packages')
+            ->groupBy('date')
+            ->pluck('packages', 'date');
+
+        return collect(range(0, $days - 1))
+            ->map(fn (int $offset): float => (float) ($counts[$from->copy()->addDays($offset)->toDateString()] ?? 0))
+            ->all();
     }
 
     private function uncostedNote(int $uncostedThisWeek, int $uncostedLastWeek): string
