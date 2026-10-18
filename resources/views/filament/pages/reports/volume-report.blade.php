@@ -1,43 +1,15 @@
 <x-filament-panels::page>
-    <div class="mb-6 flex flex-wrap items-center gap-2">
-        <x-filament::button
-            :color="$groupBy === 'channel' ? 'primary' : 'gray'"
-            wire:click="$set('groupBy', 'channel')"
-            size="sm"
-        >
-            By Channel
-        </x-filament::button>
-        <x-filament::button
-            :color="$groupBy === 'shipping_method' ? 'primary' : 'gray'"
-            wire:click="$set('groupBy', 'shipping_method')"
-            size="sm"
-        >
-            By Shipping Method
-        </x-filament::button>
-
-        <div class="mx-2 h-6 border-l border-gray-300 dark:border-gray-600"></div>
-
-        <x-filament::button
-            :color="$groupBy === 'day' ? 'primary' : 'gray'"
-            wire:click="$set('groupBy', 'day')"
-            size="sm"
-        >
-            By Day
-        </x-filament::button>
-        <x-filament::button
-            :color="$groupBy === 'week' ? 'primary' : 'gray'"
-            wire:click="$set('groupBy', 'week')"
-            size="sm"
-        >
-            By Week
-        </x-filament::button>
-        <x-filament::button
-            :color="$groupBy === 'month' ? 'primary' : 'gray'"
-            wire:click="$set('groupBy', 'month')"
-            size="sm"
-        >
-            By Month
-        </x-filament::button>
+    <div class="mb-6 flex items-center gap-3">
+        <label for="volume-group-by" class="text-sm font-medium text-gray-700 dark:text-gray-200">Group by</label>
+        <x-filament::input.wrapper class="w-56">
+            <x-filament::input.select id="volume-group-by" wire:model.live="groupBy">
+                <option value="channel">Channel</option>
+                <option value="shipping_method">Shipping Method</option>
+                <option value="day">Day</option>
+                <option value="week">Week</option>
+                <option value="month">Month</option>
+            </x-filament::input.select>
+        </x-filament::input.wrapper>
     </div>
 
     {{ $this->table }}

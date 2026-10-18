@@ -55,3 +55,18 @@ it('restricts access to managers and above', function (): void {
 
     expect(RateComparison::canAccess())->toBeTrue();
 });
+
+it('labels the savings with its period, its share of spend and how it is counted', function (): void {
+    $user = User::factory()->create(['role' => Role::Manager]);
+
+    $package = Package::factory()->shipped()->create(['shipped_at' => now()]);
+    RateQuote::factory()->create(['package_id' => $package->id, 'carrier' => 'FedEx', 'quoted_price' => 15.00, 'selected' => true]);
+    RateQuote::factory()->create(['package_id' => $package->id, 'carrier' => 'USPS', 'quoted_price' => 10.00, 'selected' => false]);
+
+    $component = Livewire::actingAs($user)->test(RateComparison::class);
+
+    $component
+        ->assertSee('Last 30 days')
+        ->assertSee('33.3% of the $15.00 spent on postage for 1 compared packages')
+        ->assertSee('whatever delivery time that cheaper rate offered');
+});

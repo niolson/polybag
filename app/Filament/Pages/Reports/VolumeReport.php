@@ -3,6 +3,7 @@
 namespace App\Filament\Pages\Reports;
 
 use App\Enums\Role;
+use App\Filament\Concerns\DescribesReportRange;
 use App\Filament\Resources\ShipmentResource;
 use App\Models\DailyShippingStat;
 use BackedEnum;
@@ -10,6 +11,7 @@ use Carbon\Carbon;
 use Filament\Forms\Components\DatePicker;
 use Filament\Pages\Page;
 use Filament\Tables;
+use Filament\Tables\Columns\Summarizers\Sum;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Enums\FiltersLayout;
@@ -20,6 +22,7 @@ use UnitEnum;
 
 class VolumeReport extends Page implements HasTable
 {
+    use DescribesReportRange;
     use InteractsWithTable;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-chart-bar';
@@ -108,13 +111,17 @@ class VolumeReport extends Page implements HasTable
                         default => 'Channel',
                     })
                     ->sortable()
+                    ->formatStateUsing(fn (string $state): string => $this->periodLabel($state))
+                    ->description(fn (Model $record): ?string => $this->isCurrentPeriod((string) $record->getAttribute('group_name')) ? 'In progress, not a full '.$this->groupBy : null)
                     ->url(fn (Model $record): ?string => $this->buildDrillDownUrl($record)),
                 Tables\Columns\TextColumn::make('package_count')
                     ->label('Packages')
+                    ->summarize(Sum::make()->label('Total'))
                     ->sortable(),
                 Tables\Columns\TextColumn::make('total_cost')
                     ->label('Total Cost')
                     ->money('USD')
+                    ->summarize(Sum::make()->money('USD')->label('Total'))
                     ->description(fn (Model $record): ?string => $this->uncostedNote($record))
                     ->sortable(),
                 Tables\Columns\TextColumn::make('avg_cost')
@@ -203,6 +210,43 @@ class VolumeReport extends Page implements HasTable
         return 'over '.number_format($costed).' priced';
     }
 
+    /**
+     * The row's heading: a week as its dates ("Oct 12–18"), a month by name,
+     * anything else as it is.
+     */
+    private function periodLabel(string $groupName): string
+    {
+        return match ($this->groupBy) {
+            'week' => $this->weekLabel($groupName),
+            'month' => Carbon::createFromFormat('Y-m', $groupName)->format('F Y'),
+            default => $groupName,
+        };
+    }
+
+    private function weekLabel(string $groupName): string
+    {
+        $range = $this->weekDateRange($groupName);
+        $start = Carbon::parse($range['created_from']);
+        $end = Carbon::parse($range['created_until']);
+
+        return $start->month === $end->month
+            ? $start->format('M j').'–'.$end->format('j')
+            : $start->format('M j').' – '.$end->format('M j');
+    }
+
+    /**
+     * Whether the period is still running, so its figures are partial.
+     */
+    private function isCurrentPeriod(string $groupName): bool
+    {
+        return match ($this->groupBy) {
+            'day' => $groupName === now()->toDateString(),
+            'week' => Carbon::parse($this->weekDateRange($groupName)['created_until'])->gte(today()) && Carbon::parse($this->weekDateRange($groupName)['created_from'])->lte(today()),
+            'month' => $groupName === now()->format('Y-m'),
+            default => false,
+        };
+    }
+
     private function buildDrillDownUrl(Model $record): ?string
     {
         $filters = [];
@@ -228,15 +272,13 @@ class VolumeReport extends Page implements HasTable
     }
 
     /**
-     * Parse "YYYY-W##" into a created_from/created_until range.
+     * A week is named by its Monday ("YYYY-MM-DD"); give its created_from/created_until range.
      *
      * @return array{created_from: string, created_until: string}
      */
     private function weekDateRange(string $groupName): array
     {
-        // Format: "2026-W10"
-        [$year, $week] = explode('-W', $groupName);
-        $start = Carbon::now()->setISODate((int) $year, (int) $week)->startOfWeek();
+        $start = Carbon::parse($groupName)->startOfDay();
 
         return [
             'created_from' => $start->format('Y-m-d'),
@@ -269,8 +311,8 @@ class VolumeReport extends Page implements HasTable
                 default => 'DATE(date) as group_name',
             },
             'week' => match ($driver) {
-                'sqlite' => 'strftime("%Y-W%W", date) as group_name',
-                default => 'CONCAT(YEAR(date), "-W", LPAD(WEEK(date, 3), 2, "0")) as group_name',
+                'sqlite' => 'date(date, "weekday 0", "-6 days") as group_name',
+                default => 'DATE_SUB(DATE(date), INTERVAL WEEKDAY(date) DAY) as group_name',
             },
             default => match ($driver) {
                 'sqlite' => 'strftime("%Y-%m", date) as group_name',
