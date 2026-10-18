@@ -4,6 +4,7 @@ namespace App\Filament\Pages\Reports;
 
 use App\Enums\PackageStatus;
 use App\Enums\Role;
+use App\Filament\Concerns\DescribesReportRange;
 use App\Models\Carrier;
 use App\Models\Package;
 use BackedEnum;
@@ -20,6 +21,7 @@ use UnitEnum;
 
 class RateComparison extends Page implements HasTable
 {
+    use DescribesReportRange;
     use InteractsWithTable;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-arrows-right-left';
@@ -126,6 +128,17 @@ class RateComparison extends Page implements HasTable
 
     public function getTotalPotentialSavings(): float
     {
+        return $this->getSavingsSummary()['savings'];
+    }
+
+    /**
+     * What the page's rows would have saved, against what the same Packages
+     * actually paid for the rate selected.
+     *
+     * @return array{savings: float, spend: float, packages: int}
+     */
+    public function getSavingsSummary(): array
+    {
         $baseQuery = Package::query()
             ->where('packages.status', PackageStatus::Shipped->value)
             ->join('rate_quotes as rq_all', 'rq_all.package_id', '=', 'packages.id')
@@ -139,9 +152,17 @@ class RateComparison extends Page implements HasTable
         // Apply active table filters (date range, carrier)
         $baseQuery = $this->applyFiltersToTableQuery($baseQuery)->reorder();
 
-        return (float) DB::query()
+        $totals = DB::query()
             ->selectRaw('COALESCE(SUM(CASE WHEN sub.selected_price > sub.cheapest_price THEN sub.selected_price - sub.cheapest_price ELSE 0 END), 0) as total_savings')
+            ->selectRaw('COALESCE(SUM(sub.selected_price), 0) as total_spend')
+            ->selectRaw('COUNT(*) as package_count')
             ->fromSub($baseQuery, 'sub')
-            ->value('total_savings');
+            ->first();
+
+        return [
+            'savings' => (float) $totals->total_savings,
+            'spend' => (float) $totals->total_spend,
+            'packages' => (int) $totals->package_count,
+        ];
     }
 }

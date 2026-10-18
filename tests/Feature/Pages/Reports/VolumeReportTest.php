@@ -149,3 +149,32 @@ it('reports an unknown average when nothing in the group was priced', function (
         ->assertSee('Unknown')
         ->assertSee('excludes 4 with no reported cost');
 });
+
+it('offers one Group by choice with every grouping in it', function (): void {
+    $user = User::factory()->create(['role' => Role::Manager]);
+
+    Livewire::actingAs($user)
+        ->test(VolumeReport::class)
+        ->assertSee('Group by')
+        ->assertSeeInOrder(['Channel', 'Shipping Method', 'Day', 'Week', 'Month'])
+        ->assertSee('Last 30 days');
+});
+
+it('labels weeks by their dates and marks the current one as in progress', function (): void {
+    $user = User::factory()->create(['role' => Role::Manager]);
+
+    DailyShippingStat::create(['date' => now()->toDateString(), 'package_count' => 4, 'total_cost' => 40, 'total_weight' => 0]);
+
+    $monday = now()->startOfWeek();
+    $sunday = now()->endOfWeek();
+    $label = $monday->month === $sunday->month
+        ? $monday->format('M j').'–'.$sunday->format('j')
+        : $monday->format('M j').' – '.$sunday->format('M j');
+
+    Livewire::actingAs($user)
+        ->test(VolumeReport::class)
+        ->set('groupBy', 'week')
+        ->assertSee($label)
+        ->assertDontSee('-W')
+        ->assertSee('In progress, not a full week');
+});
