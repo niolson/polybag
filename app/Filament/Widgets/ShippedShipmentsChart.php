@@ -14,7 +14,7 @@ class ShippedShipmentsChart extends ChartWidget
 
     protected ?string $description = 'Total packages shipped per day';
 
-    protected static ?int $sort = -3;
+    protected static ?int $sort = 1;
 
     protected int|string|array $columnSpan = 1;
 

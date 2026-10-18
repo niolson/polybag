@@ -15,7 +15,7 @@ class CarrierBreakdownChart extends ChartWidget
 
     protected ?string $description = 'Package distribution by carrier';
 
-    protected static ?int $sort = -1;
+    protected static ?int $sort = 2;
 
     protected int|string|array $columnSpan = 1;
 

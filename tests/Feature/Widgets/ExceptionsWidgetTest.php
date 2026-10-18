@@ -5,9 +5,15 @@ use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
 use App\Enums\ShipmentStatus;
 use App\Enums\TrackingStatus;
+use App\Filament\Pages\UnmappedShippingReferences;
 use App\Filament\Resources\PackageResource;
 use App\Filament\Resources\ShipmentResource;
+use App\Filament\Widgets\CarrierBreakdownChart;
+use App\Filament\Widgets\CostPerPackageTrend;
+use App\Filament\Widgets\DatabaseHealthWidget;
 use App\Filament\Widgets\ExceptionsWidget;
+use App\Filament\Widgets\ShippedShipmentsChart;
+use App\Filament\Widgets\StatsOverview;
 use App\Listeners\InvalidateDashboardCache;
 use App\Models\LabelBatchItem;
 use App\Models\Shipment;
@@ -111,4 +117,26 @@ it('is cleared by the dashboard cache invalidation, under the key it caches by',
     InvalidateDashboardCache::invalidateAll();
 
     expect(Cache::has('widget:exceptions:v4'))->toBeFalse();
+});
+
+it('counts unmapped references the way the Map Shipping Refs page lists them', function (): void {
+    // Open or closed, any age, one row per (reference, client); an alias removes it.
+    Shipment::factory()->count(2)->create(['status' => ShipmentStatus::Open, 'shipping_method_reference' => 'A', 'shipping_method_id' => null]);
+    Shipment::factory()->create(['status' => ShipmentStatus::Shipped, 'shipping_method_reference' => 'B', 'shipping_method_id' => null, 'created_at' => now()->subDays(200)]);
+
+    expect(UnmappedShippingReferences::unmappedCount())->toBe(2);
+
+    Livewire::actingAs(User::factory()->manager()->create())
+        ->test(ExceptionsWidget::class)
+        ->assertSeeInOrder(['Unmapped Shipping References', '2']);
+});
+
+it('puts the exceptions between the stats and the charts', function (): void {
+    $sorts = fn (string $class): int => (new ReflectionClass($class))->getStaticPropertyValue('sort');
+
+    expect($sorts(StatsOverview::class))->toBeLessThan($sorts(ExceptionsWidget::class))
+        ->and($sorts(ExceptionsWidget::class))->toBeLessThan($sorts(ShippedShipmentsChart::class))
+        ->and($sorts(ShippedShipmentsChart::class))->toBeLessThan($sorts(CarrierBreakdownChart::class))
+        ->and($sorts(CarrierBreakdownChart::class))->toBeLessThan($sorts(CostPerPackageTrend::class))
+        ->and($sorts(CostPerPackageTrend::class))->toBeLessThan($sorts(DatabaseHealthWidget::class));
 });
