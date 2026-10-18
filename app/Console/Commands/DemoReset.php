@@ -28,6 +28,7 @@ use App\Models\User;
 use App\Services\ClientContext;
 use App\Services\ShipmentImport\DataSourceFactory;
 use App\Services\ShipmentImport\ImportReferenceResolver;
+use App\Services\ShipmentImport\ImportResult;
 use App\Services\ShipmentImport\PackageExportService;
 use App\Services\ShipmentImport\ShipmentImportService;
 use App\Services\ShipmentImport\Sources\DatabaseSource;
@@ -154,17 +155,17 @@ class DemoReset extends Command
         $this->ensureChannelAliases($record, $from, $mapping);
         $this->ensureBillingRates();
 
-        $result = ShipmentImportService::forSource($source, $record)->import();
+        $result = $this->timed('Import', fn (): ImportResult => ShipmentImportService::forSource($source, $record)->import());
         $this->components->twoColumnDetail('Shipments imported', (string) $result->shipmentsCreated);
 
         if ($result->errors !== []) {
             $this->warn(count($result->errors).' import error(s); first: '.$result->errors[0]);
         }
 
-        $this->backdateShipments($record, $from, $mapping);
+        $this->timed('Backdate', fn () => $this->backdateShipments($record, $from, $mapping));
 
         $cutoff = now()->subHours($openHours);
-        $shippedCount = $this->fabricateShippedHistory($record, $cutoff);
+        $shippedCount = $this->timed('Fabricate history', fn (): int => $this->fabricateShippedHistory($record, $cutoff));
         $this->components->twoColumnDetail('Historical packages fabricated', (string) $shippedCount);
 
         if ($this->option('skip-export')) {
@@ -173,11 +174,11 @@ class DemoReset extends Command
             DB::table('packages')->where('status', PackageStatus::Shipped->value)->update(['exported' => true]);
             $this->components->twoColumnDetail('Export write-back', 'skipped (packages marked exported)');
         } else {
-            $exported = $this->exportFabricatedPackages();
+            $exported = $this->timed('Export write-back', fn (): int => $this->exportFabricatedPackages());
             $this->components->twoColumnDetail('Packages exported back to import DB', (string) $exported);
         }
 
-        $this->prepareForDemo();
+        $this->timed('Demo prep', fn () => $this->prepareForDemo());
 
         $this->call('stats:aggregate', [
             '--from' => $from->toDateString(),
@@ -266,20 +267,25 @@ class DemoReset extends Command
      */
     private function markOlderPackagesDelivered(): void
     {
-        Package::query()
-            ->where('status', PackageStatus::Shipped)
-            ->where('shipped_at', '<', now()->subDays(3))
-            ->chunkById(500, function ($packages): void {
-                foreach ($packages as $package) {
-                    $deliveredAt = $package->shipped_at->copy()->addHours(mt_rand(24, 72))->format('Y-m-d H:i:s');
+        $sqlite = DB::connection()->getDriverName() === 'sqlite';
 
-                    DB::table('packages')->where('id', $package->id)->update([
-                        'tracking_status' => TrackingStatus::Delivered->value,
-                        'delivered_at' => $deliveredAt,
-                        'tracking_updated_at' => $deliveredAt,
-                    ]);
-                }
-            });
+        // Three delivery lags by package ID, each one statement, not one
+        // update per package.
+        foreach ([30, 48, 66] as $bucket => $hours) {
+            $deliveredAt = $sqlite
+                ? DB::raw("datetime(shipped_at, '+{$hours} hours')")
+                : DB::raw("shipped_at + interval {$hours} hour");
+
+            DB::table('packages')
+                ->where('status', PackageStatus::Shipped->value)
+                ->where('shipped_at', '<', now()->subDays(3))
+                ->whereRaw('id % 3 = ?', [$bucket])
+                ->update([
+                    'tracking_status' => TrackingStatus::Delivered->value,
+                    'delivered_at' => $deliveredAt,
+                    'tracking_updated_at' => $deliveredAt,
+                ]);
+        }
     }
 
     /**
@@ -372,6 +378,24 @@ class DemoReset extends Command
         }
 
         return $pdf.'trailer << /Size '.(count($objects) + 1)." /Root 1 0 R >>\nstartxref\n{$xref}\n%%EOF\n";
+    }
+
+    /**
+     * Runs a phase and says how long it took, so a slow reset shows where.
+     *
+     * @template T
+     *
+     * @param  \Closure(): T  $phase
+     * @return T
+     */
+    private function timed(string $label, \Closure $phase): mixed
+    {
+        $started = microtime(true);
+        $result = $phase();
+
+        $this->components->twoColumnDetail("{$label} took", number_format(microtime(true) - $started, 1).'s');
+
+        return $result;
     }
 
     private function resolveDataSource(): ?DataSource
