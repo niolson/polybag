@@ -31,6 +31,12 @@ Schedule::command('shipments:validate')
     ->runInBackground()
     ->appendOutputTo(storage_path('logs/validate-'.now()->format('Y-m-d').'.log'));
 
+// Manual Ship's working copies: a Shipment made only so a rate could be shown
+// and never bought for is not an order, so it goes after a day.
+Schedule::command('shipments:delete-abandoned-drafts')
+    ->hourly()
+    ->withoutOverlapping();
+
 Schedule::command('packages:export --scheduled')
     ->everyFiveMinutes()
     ->withoutOverlapping()

@@ -60,6 +60,7 @@ final class ValidationQualityReport
             ->groupBy('packages.shipment_id');
 
         Shipment::query()
+            ->withoutDrafts()
             ->joinSub($firstLabels, 'first_labels', fn (JoinClause $join) => $join->on('first_labels.shipment_id', '=', 'shipments.id'))
             ->when($since, fn ($query) => $query->where('first_labels.first_label_at', '>=', $since->toDateTimeString()))
             ->when($until, fn ($query) => $query->where('first_labels.first_label_at', '<=', $until->toDateTimeString()))

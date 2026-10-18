@@ -282,6 +282,17 @@ class Shipment extends Model
     }
 
     /**
+     * Everything but Manual Ship's drafts: the Shipments anyone works with.
+     *
+     * @param  Builder<Shipment>  $query
+     * @return Builder<Shipment>
+     */
+    public function scopeWithoutDrafts(Builder $query): Builder
+    {
+        return $query->where($query->qualifyColumn('status'), '!=', ShipmentStatus::Draft);
+    }
+
+    /**
      * Recalculate and persist the status based on package status.
      */
     public function updateShippedStatus(): void
@@ -298,7 +309,11 @@ class Shipment extends Model
         $hasShippedPackage = $this->packages()->where('status', PackageStatus::Shipped)->exists();
 
         if (! $hasShippedPackage) {
-            $this->reopen();
+            // A draft with nothing shipped is still a draft; it becomes an
+            // order only when a label is bought.
+            if ($this->status !== ShipmentStatus::Draft) {
+                $this->reopen();
+            }
 
             return;
         }

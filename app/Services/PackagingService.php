@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\ShipmentStatus;
 use App\Events\PackageCreated;
 use App\Models\Location;
 use App\Models\Package;
@@ -13,7 +14,7 @@ class PackagingService
      * Create a shipment from manually-entered data.
      * Does not validate the address — callers opt in to that separately.
      */
-    public function createShipment(array $data, ?int $channelId = null): Shipment
+    public function createShipment(array $data, ?int $channelId = null, ShipmentStatus $status = ShipmentStatus::Open): Shipment
     {
         return Shipment::create([
             'shipment_reference' => $data['shipment_reference'] ?: null,
@@ -30,7 +31,7 @@ class PackagingService
             'email' => $data['email'] ?: null,
             'shipping_method_id' => $data['shipping_method_id'] ?: null,
             'channel_id' => $channelId,
-            'status' => 'open',
+            'status' => $status,
         ]);
     }
 

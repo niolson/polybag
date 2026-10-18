@@ -31,7 +31,7 @@ class ValidateShipmentsCommand extends Command
     {
         // A Shipment every validator has already answered for is left alone
         // until someone validates it by hand or changes its address or method.
-        $due = Shipment::where('checked', false)
+        $due = Shipment::withoutDrafts()->where('checked', false)
             ->whereNull('validation_attempted_at')
             ->where('validation_attempts', '<', self::MAX_SCHEDULED_ATTEMPTS)
             ->with('shippingMethod');
@@ -194,7 +194,7 @@ class ValidateShipmentsCommand extends Command
      */
     private function warnAboutCappedShipments(): void
     {
-        $capped = Shipment::where('checked', false)
+        $capped = Shipment::withoutDrafts()->where('checked', false)
             ->whereNull('validation_attempted_at')
             ->where('validation_attempts', '>=', self::MAX_SCHEDULED_ATTEMPTS)
             ->count();

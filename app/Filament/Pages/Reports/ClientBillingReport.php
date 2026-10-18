@@ -318,6 +318,7 @@ class ClientBillingReport extends Page implements HasTable
         $labelFee = number_format((float) ($client?->label_fee_per_package ?? 0), 2, '.', '');
 
         return Shipment::query()
+            ->withoutDrafts()
             ->where('shipments.client_id', $clientId)
             ->joinSub($this->buildPackageSubquery($from, $until), 'pkg', 'shipments.id', '=', 'pkg.shipment_id')
             ->leftJoinSub($this->buildItemSubquery(), 'itm', 'shipments.id', '=', 'itm.shipment_id')
