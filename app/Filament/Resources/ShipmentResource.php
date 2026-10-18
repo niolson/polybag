@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\DataTransferObjects\Shipping\AddressData;
 use App\Enums\AmazonOrderProgram;
 use App\Enums\Deliverability;
 use App\Enums\DutiesTerms;
@@ -23,6 +24,7 @@ use App\Filament\Support\AddressForm;
 use App\Models\BoxSize;
 use App\Models\Location;
 use App\Models\Shipment;
+use App\Services\AddressReferenceService;
 use App\Services\BatchLabelService;
 use App\Services\PickBatchService;
 use App\Services\SettingsService;
@@ -101,6 +103,21 @@ class ShipmentResource extends Resource
 
         return $record->status_origin->getLabel()
             .($record->status_changed_at ? ', '.$record->status_changed_at->timezone(Location::timezone())->format('M j, Y g:i A') : '');
+    }
+
+    /**
+     * Where the Shipment is going: "City, ST" in the United States (a military
+     * post office keeps its APO/FPO/DPO city), the country's name abroad.
+     */
+    public static function destinationText(Shipment $record): ?string
+    {
+        $address = AddressData::fromShipment($record);
+
+        if ($address->country !== 'US') {
+            return app(AddressReferenceService::class)->getCountryOptions()[$address->country] ?? $address->country;
+        }
+
+        return collect([$address->city, $address->stateOrProvince])->filter(fn (?string $part): bool => filled($part))->join(', ') ?: null;
     }
 
     private static function flagsMissingMethod(Shipment $record): bool
@@ -384,12 +401,15 @@ class ShipmentResource extends Resource
                     ->default(fn (Shipment $record): ?string => self::flagsMissingMethod($record) ? 'Needs Shipping Method' : null)
                     ->badge(fn (Shipment $record): bool => self::flagsMissingMethod($record))
                     ->color(fn (Shipment $record): ?string => self::flagsMissingMethod($record) ? 'warning' : null),
+                Tables\Columns\TextColumn::make('destination')
+                    ->label('Destination')
+                    ->state(fn (Shipment $record): ?string => self::destinationText($record)),
                 Tables\Columns\TextColumn::make('deliver_by')
                     ->label('Deliver By')
                     ->date()
                     ->sortable()
                     ->placeholder('—')
-                    ->toggleable(isToggledHiddenByDefault: true),
+                    ->toggleable(),
                 Tables\Columns\TextColumn::make('status')
                     ->badge()
                     ->description(fn (Shipment $record): ?string => match ($record->status_origin) {
@@ -511,6 +531,7 @@ class ShipmentResource extends Resource
                 $filters['created_at'],
             ])))
             ->defaultSort('created_at', 'desc')
+            ->defaultPaginationPageOption(25)
             ->recordActions([])
             ->toolbarActions([
                 Actions\BulkAction::make('batch-ship')

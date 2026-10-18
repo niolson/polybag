@@ -220,6 +220,7 @@ describe('the Shipments list', function (): void {
         $byPolyBag = Shipment::factory()->shipped()->create();
 
         Livewire::test(ListShipments::class)
+            ->set('activeStatusTab', 'all')
             ->filterTable('status_origin', ShipmentStatusOrigin::Source->value)
             ->assertCanSeeTableRecords([$bySource])
             ->assertCanNotSeeTableRecords([$byPolyBag]);

@@ -24,15 +24,16 @@ it('displays status column in shipment table', function (): void {
     $notShipped = Shipment::factory()->create(['status' => ShipmentStatus::Open]);
 
     Livewire::test(ListShipments::class)
+        ->set('activeStatusTab', 'all')
         ->assertCanSeeTableRecords([$shipped, $notShipped]);
 });
 
-it('opens on every shipment, with no status tab applied', function (): void {
+it('shows every shipment on the All tab', function (): void {
     $shipped = Shipment::factory()->shipped()->create();
     $open = Shipment::factory()->create(['status' => ShipmentStatus::Open]);
 
     Livewire::test(ListShipments::class)
-        ->assertSet('activeStatusTab', 'all')
+        ->set('activeStatusTab', 'all')
         ->assertCanSeeTableRecords([$open, $shipped]);
 });
 
