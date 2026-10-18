@@ -59,7 +59,7 @@ class ViewLabelBatch extends ViewRecord
                 ->modalHeading('Reprint every label in this batch')
                 ->modalDescription(fn (): string => 'This reprints all '.$this->record->printableItems()->count()
                     .' labels, including ones already printed.')
-                ->visible(fn (): bool => $this->record->isComplete() && $this->record->printableItems()->count() > 0)
+                ->visible(fn (): bool => $this->record->isComplete() && $this->record->printedCount() > 0)
                 ->action(fn () => $this->dispatchBatchPrint(unprintedOnly: false)),
             Action::make('backToShipments')
                 ->label('Back to Shipments')

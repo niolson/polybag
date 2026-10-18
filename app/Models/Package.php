@@ -403,6 +403,22 @@ class Package extends Model
         return filled($this->carrier) ? Carrier::labelForName($this->carrier) : 'the postage source';
     }
 
+    /**
+     * What the void confirmation says it will do: the postage source's void,
+     * and, for a Package whose export put a fulfillment on a Shopify order,
+     * taking the tracking number back off it.
+     */
+    public function voidDescription(): string
+    {
+        $description = "Voids the label with {$this->postageSellerLabel()}";
+
+        if (filled($this->labels()->latest('id')->value('shopify_fulfillment_id'))) {
+            $description .= ' and removes the tracking number from the Shopify order';
+        }
+
+        return $description.'. The package keeps its dimensions so it can be shipped again.';
+    }
+
     public function isShopifyShipped(): bool
     {
         return $this->boughtThroughDataSourceOfType(ShopifySource::class);
