@@ -45,9 +45,7 @@ class UnmappedShippingReferences extends Page implements HasTable
 
     public static function getNavigationBadge(): ?string
     {
-        $count = Cache::remember('nav:unmapped_shipping_references', 60, fn (): int => DB::query()
-            ->fromSub(static::unmappedReferences(), 'unmapped')
-            ->count());
+        $count = Cache::remember('nav:unmapped_shipping_references', 60, fn (): int => static::unmappedCount());
 
         return $count > 0 ? number_format($count) : null;
     }
@@ -55,6 +53,15 @@ class UnmappedShippingReferences extends Page implements HasTable
     public static function getNavigationBadgeColor(): ?string
     {
         return 'warning';
+    }
+
+    /**
+     * How many rows the table lists. The sidebar badge and the dashboard card
+     * count with this, so all three agree.
+     */
+    public static function unmappedCount(): int
+    {
+        return DB::query()->fromSub(static::unmappedReferences(), 'unmapped')->count();
     }
 
     /**

@@ -23,7 +23,7 @@ use Illuminate\Support\Facades\Cache;
 
 class ExceptionsWidget extends BaseWidget
 {
-    protected static ?int $sort = 1;
+    protected static ?int $sort = -3;
 
     protected int|string|array $columnSpan = 'full';
 
@@ -63,17 +63,17 @@ class ExceptionsWidget extends BaseWidget
                 ->color($counts['stuck_pre_transit'] > 0 ? 'warning' : 'success')
                 ->url(PackageResource::getUrl('index').'?status_tab='.PackageStatus::Shipped->value.'&tracking_tab='.TrackingStatus::PreTransit->value),
             Stat::make('Needs Shipping Method', $counts['needs_shipping_method'])
-                ->description('Open shipments no label can be bought for')
+                ->description('Open shipments with no shipping method that can buy a label')
                 ->descriptionIcon('heroicon-m-exclamation-circle')
                 ->color($counts['needs_shipping_method'] > 0 ? 'warning' : 'success')
                 ->url(ShipmentResource::needsShippingMethodUrl()),
             Stat::make('Unfinished Label Purchases', $counts['unresolved_purchases'])
-                ->description('Packages that cannot be bought for until settled')
+                ->description('Purchases waiting on a carrier answer before the package can ship')
                 ->descriptionIcon('heroicon-m-question-mark-circle')
                 ->color($counts['unresolved_purchases'] > 0 ? 'danger' : 'success')
                 ->url(PackageResource::unresolvedPurchasesUrl()),
             Stat::make('Unmapped Shipping References', $counts['unmapped_references'])
-                ->description('Last 90 days, need mapping')
+                ->description('Order references with no shipping method')
                 ->descriptionIcon('heroicon-m-link')
                 ->color($counts['unmapped_references'] > 0 ? 'warning' : 'success')
                 ->url(UnmappedShippingReferences::getUrl()),
@@ -92,13 +92,7 @@ class ExceptionsWidget extends BaseWidget
                 ->where('status', LabelBatchItemStatus::Failed)
                 ->where('created_at', '>=', now()->subDays(7))
                 ->count(),
-            'unmapped_references' => Shipment::query()
-                ->where('status', ShipmentStatus::Open)
-                ->where('created_at', '>=', now()->subDays(90))
-                ->whereNotNull('shipping_method_reference')
-                ->whereNull('shipping_method_id')
-                ->distinct('shipping_method_reference')
-                ->count('shipping_method_reference'),
+            'unmapped_references' => UnmappedShippingReferences::unmappedCount(),
             'needs_shipping_method' => Shipment::query()->needingShippingMethod()->count(),
             'unresolved_purchases' => app(UnresolvedPurchaseResolver::class)->needingAPerson()->distinct()->count('package_id'),
             'tracking_exceptions' => Package::query()

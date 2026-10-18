@@ -42,13 +42,15 @@ class StatsOverview extends BaseWidget
             ];
         }
 
-        $data = Cache::remember('widget:stats_overview:v2', 60, function (): array {
+        $data = Cache::remember('widget:stats_overview:v3', 60, function (): array {
             $tz = Location::timezone();
             $localToday = now($tz)->startOfDay();
             $thisWeekStart = now($tz)->startOfWeek();
             $thisMonthStart = now($tz)->startOfMonth();
             $lastWeekStart = now($tz)->subWeek()->startOfWeek();
-            $lastWeekEnd = now($tz)->subWeek()->endOfWeek();
+            // The same days of last week: Monday through today's weekday, so an
+            // early-week total is not set against a whole week.
+            $lastWeekEnd = now($tz)->subWeek()->endOfDay();
 
             return [
                 'pending' => Shipment::query()->where('status', ShipmentStatus::Open)->count(),
@@ -73,15 +75,15 @@ class StatsOverview extends BaseWidget
                 ->color('warning')
                 ->url(ShipmentResource::getUrl('index').'?status_tab='.ShipmentStatus::Open->value),
             Stat::make('Shipped Today', number_format($data['shipped_today']))
-                ->description('Packages shipped today')
+                ->description('Since midnight')
                 ->descriptionIcon('heroicon-m-check-circle')
                 ->color('success'),
             Stat::make('Shipped This Week', number_format($data['shipped_week']))
-                ->description('Packages this week')
+                ->description('Since Monday')
                 ->descriptionIcon('heroicon-m-calendar')
                 ->color('primary'),
             Stat::make('Shipped This Month', number_format($data['shipped_month']))
-                ->description('Packages this month')
+                ->description('Since the 1st')
                 ->descriptionIcon('heroicon-m-calendar-days')
                 ->color('primary'),
             $this->buildCostStat(
@@ -119,7 +121,7 @@ class StatsOverview extends BaseWidget
 
         if ($lastWeekCost > 0) {
             $change = (($thisWeekCost - $lastWeekCost) / $lastWeekCost) * 100;
-            $stat = $stat->description(($change >= 0 ? '+' : '').number_format($change, 1).'% vs last week')
+            $stat = $stat->description(($change >= 0 ? '+' : '').number_format($change, 1).'% vs same days last week')
                 ->descriptionIcon($change <= 0 ? 'heroicon-m-arrow-trending-down' : 'heroicon-m-arrow-trending-up')
                 ->color($change <= 0 ? 'success' : 'danger');
         }
@@ -131,14 +133,14 @@ class StatsOverview extends BaseWidget
     {
         if ($uncostedThisWeek > 0 && $uncostedLastWeek > 0) {
             return 'excludes '.number_format($uncostedThisWeek).' this week and '
-                .number_format($uncostedLastWeek).' last week with no reported cost';
+                .number_format($uncostedLastWeek).' in the same days last week with no reported cost';
         }
 
         if ($uncostedThisWeek > 0) {
             return 'excludes '.number_format($uncostedThisWeek).' with no reported cost';
         }
 
-        return 'no comparison — last week excludes '
+        return 'no comparison — the same days last week exclude '
             .number_format($uncostedLastWeek).' with no reported cost';
     }
 }
