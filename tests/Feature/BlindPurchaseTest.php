@@ -17,7 +17,6 @@ use App\Enums\PackageStatus;
 use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
-use App\Enums\ServiceEvidence;
 use App\Enums\ShippingRuleAction;
 use App\Enums\ShippingRuleSource;
 use App\Exceptions\ShopifyDeclaredWeightException;
@@ -1062,7 +1061,6 @@ function blindShipResponse(): ShipResponse
         cost: null,
         carrier: 'USPS',
         service: null,
-        serviceEvidence: ServiceEvidence::Unknown,
         labelData: base64_encode('LABEL-BYTES'),
         labelFormat: 'pdf',
         postageSource: PostageSource::PostageDataSource,

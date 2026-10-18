@@ -11,7 +11,6 @@ use App\Enums\PackageStatus;
 use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Enums\PostageSourceKind;
-use App\Enums\ServiceEvidence;
 use App\Enums\VoidReason;
 use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
@@ -594,15 +593,12 @@ it('leaves the service unknown and keeps the selection as a requested preference
     $response = $this->adapter->createShipment(shopifyShipRequest($package, 'usps:usps_ground_advantage'));
 
     expect($response->service)->toBeNull()
-        ->and($response->serviceEvidence)->toBe(ServiceEvidence::Unknown)
-        ->and($response->serviceInferenceMethod)->toBeNull()
-        ->and($response->serviceRulesetVersion)->toBeNull()
+        ->and($response->serviceInferred)->toBeFalse()
         ->and($response->requestedService)->toBe('USPS Ground Advantage');
 
     $package->markShipped($response, $response->postageSource);
 
     expect($package->refresh()->service)->toBeNull()
-        ->and($package->service_evidence)->toBe(ServiceEvidence::Unknown)
         ->and($package->requested_service)->toBe('USPS Ground Advantage')
         // Nothing to publish outward: a preference is not a purchase.
         ->and($package->confirmedService())->toBeNull();
@@ -622,9 +618,7 @@ it('infers the service from the label at purchase time, and records how it was i
 
     // Shopify reported no service; the IMpb's service type code did.
     expect($response->service)->toBe('USPS Ground Advantage')
-        ->and($response->serviceEvidence)->toBe(ServiceEvidence::Inferred)
-        ->and($response->serviceInferenceMethod)->toBe('usps-impb-stc')
-        ->and($response->serviceRulesetVersion)->not->toBeEmpty()
+        ->and($response->serviceInferred)->toBeTrue()
         // The preference survives beside the inference rather than being
         // replaced by it: what was asked for and what was derived are different
         // facts, and a selection Shopify ignored has to stay visible.
@@ -633,9 +627,7 @@ it('infers the service from the label at purchase time, and records how it was i
     $package->markShipped($response, $response->postageSource);
 
     expect($package->refresh()->service)->toBe('USPS Ground Advantage')
-        ->and($package->service_evidence)->toBe(ServiceEvidence::Inferred)
-        ->and($package->service_inference_method)->toBe('usps-impb-stc')
-        ->and($package->service_ruleset_version)->not->toBeEmpty()
+        ->and($package->serviceIsInferred())->toBeTrue()
         // ADR-0003 decision 7: however good the inference, it is ours and never
         // the postage source's, so nothing publishes it outward.
         ->and($package->confirmedService())->toBeNull();
@@ -657,16 +649,13 @@ it('falls back to the honored selection when the number and the label both decli
     $response = $this->adapter->createShipment(shopifyShipRequest($package, 'usps:GroundAdvantage'));
 
     expect($response->service)->toBe('USPS Ground Advantage')
-        ->and($response->serviceEvidence)->toBe(ServiceEvidence::Inferred)
-        ->and($response->serviceInferenceMethod)->toBe(ServiceInferrer::METHOD_SHOPIFY_SELECTION)
-        ->and($response->serviceRulesetVersion)->not->toBeEmpty()
+        ->and($response->serviceInferred)->toBeTrue()
         ->and($response->requestedService)->toBe('USPS Ground Advantage');
 
     $package->markShipped($response, $response->postageSource);
 
     expect($package->refresh()->service)->toBe('USPS Ground Advantage')
-        ->and($package->service_evidence)->toBe(ServiceEvidence::Inferred)
-        ->and($package->service_inference_method)->toBe(ServiceInferrer::METHOD_SHOPIFY_SELECTION)
+        ->and($package->serviceIsInferred())->toBeTrue()
         // Still ours, still not published.
         ->and($package->confirmedService())->toBeNull();
 });
@@ -688,7 +677,7 @@ it('does not let the selection vouch for itself when Shopify omits the tracking 
 
     expect($response->carrier)->toBe('USPS')
         ->and($response->service)->toBeNull()
-        ->and($response->serviceEvidence)->toBe(ServiceEvidence::Unknown);
+        ->and($response->serviceInferred)->toBeFalse();
 });
 
 it('does not let a voided label\'s carrier vouch for the selection on the label bought after it', function (): void {
@@ -706,8 +695,7 @@ it('does not let a voided label\'s carrier vouch for the selection on the label 
     $response = $this->adapter->createShipment(shopifyShipRequest($package, 'usps:GroundAdvantage'));
     $package->markShipped($response, $response->postageSource);
 
-    expect($package->refresh()->metadata['shopify_honored_selection'])->toBe('usps:GroundAdvantage')
-        ->and($package->service_inference_method)->toBe(ServiceInferrer::METHOD_SHOPIFY_SELECTION);
+    expect($package->refresh()->metadata['shopify_honored_selection'])->toBe('usps:GroundAdvantage');
 
     // Void it the way `ShopifyFulfillmentSynchronizer::applyVoid()` does: the
     // label identifiers go, so the next purchase cannot recover this label, and
@@ -733,7 +721,6 @@ it('does not let a voided label\'s carrier vouch for the selection on the label 
     $package->refresh();
 
     expect($package->service)->toBeNull()
-        ->and($package->service_evidence)->toBe(ServiceEvidence::Unknown)
         ->and($package->metadata['shopify_honored_selection'])->toBeNull()
         // And the historical re-run path reads the same answer off the row.
         ->and(app(ServiceInferrer::class)->infer($package)->isResolved())->toBeFalse();
@@ -757,8 +744,7 @@ it('reads the label bytes at purchase time, before the retention period can null
     $response = $this->adapter->createShipment(shopifyShipRequest($package));
 
     expect($response->service)->toBe('DHL SmartMail Parcel Ground')
-        ->and($response->serviceEvidence)->toBe(ServiceEvidence::Inferred)
-        ->and($response->serviceInferenceMethod)->toStartWith('label-text');
+        ->and($response->serviceInferred)->toBeTrue();
 });
 
 it('declines the IMpb on a Shopify UPS label rather than decoding the last mile', function (): void {
@@ -782,8 +768,7 @@ it('declines the IMpb on a Shopify UPS label rather than decoding the last mile'
 
     expect($response->success)->toBeTrue()
         ->and($response->service)->toBeNull()
-        ->and($response->serviceEvidence)->toBe(ServiceEvidence::Unknown)
-        ->and($response->serviceInferenceMethod)->toBeNull();
+        ->and($response->serviceInferred)->toBeFalse();
 });
 
 it('still returns the bought label when inference itself throws', function (): void {
@@ -815,8 +800,7 @@ it('still returns the bought label when inference itself throws', function (): v
     expect($response->success)->toBeTrue()
         ->and($response->trackingNumber)->toBe(SHOPIFY_IMPB_GROUND_ADVANTAGE)
         ->and($response->service)->toBeNull()
-        ->and($response->serviceEvidence)->toBe(ServiceEvidence::Unknown)
-        ->and($response->serviceInferenceMethod)->toBeNull();
+        ->and($response->serviceInferred)->toBeFalse();
 
     // And the package still ships, which is the outcome that actually matters.
     $package->markShipped($response, $response->postageSource);
@@ -842,8 +826,7 @@ it('infers Ground Saver from the 1Z Shopify actually reports for a UPS label', f
     $response = $this->adapter->createShipment(shopifyShipRequest($package));
 
     expect($response->service)->toBe('UPS Ground Saver')
-        ->and($response->serviceEvidence)->toBe(ServiceEvidence::Inferred)
-        ->and($response->serviceInferenceMethod)->toBe('ups-1z-service-indicator');
+        ->and($response->serviceInferred)->toBeTrue();
 });
 
 it('never lets an inference overwrite a service the postage source confirmed', function (): void {
@@ -853,16 +836,15 @@ it('never lets an inference overwrite a service the postage source confirmed', f
     // purchase-time hook cannot become a second way in.
     $package = Package::factory()->create([
         'service' => 'Priority Mail',
-        'service_evidence' => ServiceEvidence::Confirmed,
     ]);
 
     $changed = $package->recordInferredService(
-        ServiceInference::resolved('USPS Ground Advantage', 'usps-impb-stc', '2099-01-01')
+        ServiceInference::resolved('USPS Ground Advantage', 'usps-impb-stc')
     );
 
     expect($changed)->toBeFalse()
         ->and($package->refresh()->service)->toBe('Priority Mail')
-        ->and($package->service_evidence)->toBe(ServiceEvidence::Confirmed);
+        ->and($package->serviceIsInferred())->toBeFalse();
 });
 
 it('records no requested preference when the rate was left to Shopify', function (): void {
@@ -878,7 +860,7 @@ it('records no requested preference when the rate was left to Shopify', function
     $response = $this->adapter->createShipment(shopifyShipRequest($package));
 
     expect($response->requestedService)->toBeNull()
-        ->and($response->serviceEvidence)->toBe(ServiceEvidence::Unknown);
+        ->and($response->serviceInferred)->toBeFalse();
 });
 
 it('uses the requested carrier code when Shopify omits the tracking company', function (): void {

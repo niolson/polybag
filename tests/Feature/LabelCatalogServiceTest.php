@@ -5,7 +5,6 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\PostageSource;
 use App\Enums\PostageSourceKind;
 use App\Enums\Role;
-use App\Enums\ServiceEvidence;
 use App\Filament\Resources\LabelBatchResource\Pages\ViewLabelBatch;
 use App\Filament\Resources\LabelBatchResource\RelationManagers\LabelBatchItemsRelationManager;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
@@ -53,14 +52,16 @@ function carrierId(string $carrier): int
  *
  * @param  array<string, mixed>  $attributes
  */
-function labelWithoutCatalogService(string $carrier, ?string $service, ServiceEvidence $evidence, array $attributes = []): Package
+function labelWithoutCatalogService(string $carrier, ?string $service, bool $inferred = false, array $attributes = []): Package
 {
     $package = Package::factory()->shipped()->create([
         'carrier' => $carrier,
         'service' => $service,
-        'service_evidence' => $evidence,
-        'service_inference_method' => $evidence === ServiceEvidence::Inferred ? 'usps-impb-stc' : null,
-        'service_ruleset_version' => $evidence === ServiceEvidence::Inferred ? '2026-09-17' : null,
+        // An inferred service is a Shopify purchase's: it reports none.
+        ...($inferred ? [
+            'postage_source' => PostageSource::PostageDataSource,
+            'postage_data_source_id' => DataSource::factory()->shopify()->create()->id,
+        ] : []),
         ...$attributes,
     ]);
 
@@ -164,9 +165,7 @@ it('snapshots an inferred service onto the Label of a blind purchase', function 
         trackingNumber: '9200190380793700250012',
         carrier: 'USPS',
         service: 'USPS Ground Advantage',
-        serviceEvidence: ServiceEvidence::Inferred,
-        serviceInferenceMethod: 'usps-impb-stc',
-        serviceRulesetVersion: '2026-10-02',
+        serviceInferred: true,
         postageSource: PostageSource::PostageDataSource,
         postageDataSourceId: $source->id,
     ), PostageSource::PostageDataSource);
@@ -185,9 +184,7 @@ it('ships an inferred service the catalog has no row for, naming none', function
         trackingNumber: '1Z28X87GYW27798425',
         carrier: 'UPS',
         service: 'UPS Ground Saver',
-        serviceEvidence: ServiceEvidence::Inferred,
-        serviceInferenceMethod: 'ups-1z-service-indicator',
-        serviceRulesetVersion: '2026-10-02',
+        serviceInferred: true,
         postageSource: PostageSource::PostageDataSource,
         postageDataSourceId: $source->id,
     ), PostageSource::PostageDataSource);
@@ -213,9 +210,9 @@ it('keeps the raw service exactly as the source reported it', function (): void 
 });
 
 it('writes the catalog service with a later inference, and clears it when the inference is withdrawn', function (): void {
-    $package = labelWithoutCatalogService('USPS', null, ServiceEvidence::Unknown);
+    $package = labelWithoutCatalogService('USPS', null, true);
 
-    expect($package->recordInferredService(ServiceInference::resolved('Priority Mail', 'usps-impb-stc', '2026-10-02')))->toBeTrue()
+    expect($package->recordInferredService(ServiceInference::resolved('Priority Mail', 'usps-impb-stc')))->toBeTrue()
         ->and($package->activeLabel()->value('carrier_service_id'))->toBe(catalogService('USPS', 'PRIORITY_MAIL')->id);
 
     expect($package->withdrawInferredService(ServiceInference::contradicted('disagree')))->toBeTrue()
@@ -243,7 +240,7 @@ it('does not recompute a past Label when the catalog is edited, and refuses to d
 // --- Backfill ------------------------------------------------------------------
 
 it('reports without writing unless told to apply', function (): void {
-    $package = labelWithoutCatalogService('USPS', 'USPS Ground Advantage Machinable Cubic Non-Soft Pack Tier 2', ServiceEvidence::Confirmed);
+    $package = labelWithoutCatalogService('USPS', 'USPS Ground Advantage Machinable Cubic Non-Soft Pack Tier 2', false);
 
     $this->artisan('app:backfill-label-catalog-services')
         ->expectsOutputToContain('Nothing written')
@@ -253,16 +250,16 @@ it('reports without writing unless told to apply', function (): void {
 });
 
 it('backfills reported, inferred and Amazon-mapped Labels, leaves the rest, and is idempotent', function (): void {
-    $direct = labelWithoutCatalogService('USPS', 'USPS Ground Advantage Machinable Cubic Non-Soft Pack Tier 2', ServiceEvidence::Confirmed);
-    $inferred = labelWithoutCatalogService('USPS', 'Media Mail', ServiceEvidence::Inferred);
-    $unknown = labelWithoutCatalogService('UPS', null, ServiceEvidence::Unknown);
-    $groundSaver = labelWithoutCatalogService('UPS', 'UPS Ground Saver', ServiceEvidence::Inferred);
+    $direct = labelWithoutCatalogService('USPS', 'USPS Ground Advantage Machinable Cubic Non-Soft Pack Tier 2', false);
+    $inferred = labelWithoutCatalogService('USPS', 'Media Mail', true);
+    $unknown = labelWithoutCatalogService('UPS', null, false);
+    $groundSaver = labelWithoutCatalogService('UPS', 'UPS Ground Saver', true);
 
     // Amazon's own name for a service whose mapping says what it is.
     $amazon = DataSource::factory()->create(['name' => 'Amazon store']);
     $priority = catalogService('USPS', 'PRIORITY_MAIL');
     SourceServiceMapping::map(PostageSourceKind::Amazon, 'USPS', 'std-us-usps-priority', $priority->id);
-    $mapped = labelWithoutCatalogService('USPS', 'Amazon says USPS Priority', ServiceEvidence::Confirmed, [
+    $mapped = labelWithoutCatalogService('USPS', 'Amazon says USPS Priority', false, [
         'postage_source' => PostageSource::PostageDataSource,
         'postage_data_source_id' => $amazon->id,
         'metadata' => [
@@ -287,7 +284,7 @@ it('backfills reported, inferred and Amazon-mapped Labels, leaves the rest, and 
 });
 
 it('backfills a Label older than its normalized carrier from the carrier the source named', function (): void {
-    $package = labelWithoutCatalogService('USPS', 'Priority Mail Machinable Single-piece', ServiceEvidence::Confirmed, [
+    $package = labelWithoutCatalogService('USPS', 'Priority Mail Machinable Single-piece', false, [
         'normalized_carrier_id' => null,
     ]);
 
@@ -318,7 +315,7 @@ it('lists the catalog name with the source name on hover, and filters by catalog
     $groundAdvantage = catalogService('USPS', 'USPS_GROUND_ADVANTAGE');
     $cubic = Package::factory()->shipped()->create(['carrier' => 'USPS', 'service' => 'USPS Ground Advantage Machinable Cubic Non-Soft Pack Tier 2']);
     $cubic->activeLabel->update(['carrier_service_id' => $groundAdvantage->id]);
-    $inferred = Package::factory()->shipped()->create(['carrier' => 'USPS', 'service' => 'USPS Ground Advantage', 'service_evidence' => ServiceEvidence::Inferred, 'service_inference_method' => 'usps-impb-stc', 'service_ruleset_version' => '2026-10-02']);
+    $inferred = Package::factory()->shipped()->create(['carrier' => 'USPS', 'service' => 'USPS Ground Advantage']);
     $inferred->activeLabel->update(['carrier_service_id' => $groundAdvantage->id]);
     $unmapped = Package::factory()->shipped()->create(['carrier' => 'UPS', 'service' => 'UPS Ground Saver']);
 

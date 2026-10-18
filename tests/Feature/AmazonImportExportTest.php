@@ -4,7 +4,6 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\PackageExportStatus;
 use App\Enums\PostageSource;
-use App\Enums\ServiceEvidence;
 use App\Enums\ShipmentStatus;
 use App\Events\PackageShipped;
 use App\Http\Integrations\Amazon\AmazonSpApiConnector;
@@ -656,7 +655,6 @@ it('confirms a Shopify-bought label under the carrier that carries it', function
         postageSource: PostageSource::PostageDataSource,
         postageDataSourceId: $shopifySource->id,
         requestedService: 'Standard',
-        serviceEvidence: ServiceEvidence::Unknown,
     ), PostageSource::PostageDataSource);
 
     Saloon::fake([ConfirmShipment::class => amazonConfirmShipmentResponse()]);

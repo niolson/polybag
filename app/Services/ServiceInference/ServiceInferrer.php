@@ -210,7 +210,7 @@ class ServiceInferrer
             return ServiceInference::inconclusive("service indicator {$ups->serviceIndicator} names no service");
         }
 
-        return ServiceInference::resolved($service, self::METHOD_UPS_1Z, $this->ruleset->version());
+        return ServiceInference::resolved($service, self::METHOD_UPS_1Z);
     }
 
     /**
@@ -242,7 +242,7 @@ class ServiceInferrer
             return ServiceInference::inconclusive("service type code {$impb->serviceTypeCode} names no product");
         }
 
-        return ServiceInference::resolved($product, self::METHOD_USPS_STC, $this->ruleset->version());
+        return ServiceInference::resolved($product, self::METHOD_USPS_STC);
     }
 
     /**
@@ -302,7 +302,6 @@ class ServiceInferrer
         return ServiceInference::resolved(
             (string) array_key_first($matches),
             self::METHOD_LABEL_TEXT.($format === null ? '' : "-{$format}"),
-            $this->ruleset->version(),
         );
     }
 
@@ -338,7 +337,7 @@ class ServiceInferrer
             );
         }
 
-        return ServiceInference::resolved($selection['service'], self::METHOD_SHOPIFY_SELECTION, $this->ruleset->version());
+        return ServiceInference::resolved($selection['service'], self::METHOD_SHOPIFY_SELECTION);
     }
 
     /**

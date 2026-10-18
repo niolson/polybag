@@ -22,7 +22,6 @@ use App\Enums\CarrierPackaging;
 use App\Enums\PostageSource;
 use App\Enums\PostageSourceKind;
 use App\Enums\ServiceCapability;
-use App\Enums\ServiceEvidence;
 use App\Exceptions\Carriers\AmazonLabelPurchaseException;
 use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Exceptions\MissingAmazonOrderItemsException;
@@ -576,7 +575,6 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
             service: $offer->service_name,
             // Amazon sold exactly the rate that was chosen by ID, so the service
             // is reported rather than guessed.
-            serviceEvidence: ServiceEvidence::Confirmed,
             labelData: $label->labelData,
             labelOrientation: 'portrait',
             labelFormat: $label->labelFormat,

@@ -6,7 +6,6 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
-use App\Enums\ServiceEvidence;
 use App\Http\Integrations\Amazon\AmazonSpApiConnector;
 use App\Http\Integrations\Amazon\Requests\CancelAmazonShipment;
 use App\Http\Integrations\Amazon\Requests\ConfirmShipment;
@@ -118,7 +117,7 @@ it('buys a Shopify order\'s Amazon Shipping label on the scoped connection and r
         ->and($package->carrier)->toBe('Amazon Shipping')
         ->and($package->carrierOfRecordName())->toBe('Amazon Shipping')
         ->and($package->service)->toBe('Amazon Shipping Ground')
-        ->and($package->service_evidence)->toBe(ServiceEvidence::Confirmed)
+        ->and($package->serviceIsInferred())->toBeFalse()
         ->and((float) $package->cost)->toBe(7.9)
         ->and($package->postage_source)->toBe(PostageSource::PostageDataSource)
         // The connection that sold the Offer — not the Shopify import source,

@@ -3,7 +3,6 @@
 namespace App\Console\Commands;
 
 use App\Enums\PostageSource;
-use App\Enums\ServiceEvidence;
 use App\Models\Carrier;
 use App\Models\PackageLabel;
 use App\Models\Shipment;
@@ -451,7 +450,6 @@ class GenerateTestData extends Command
                     'tracking_number' => $pkgShipped ? $this->generateTrackingNumber($carrier) : null,
                     'carrier' => $pkgShipped ? $carrier : null,
                     'service' => $pkgShipped ? $service['code'] : null,
-                    'service_evidence' => ($pkgShipped ? ServiceEvidence::Confirmed : ServiceEvidence::Unknown)->value,
                     'postage_source' => $pkgShipped ? PostageSource::CarrierAccount->value : null,
                     'label_orientation' => 'portrait',
                     'label_format' => 'pdf',

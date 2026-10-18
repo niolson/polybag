@@ -11,7 +11,6 @@ use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\PostageSourceKind;
 use App\Enums\ServiceCapability;
-use App\Enums\ServiceEvidence;
 use App\Enums\ShippingRuleAction;
 use App\Enums\ShippingRuleSource;
 use App\Enums\UnlistedServices;
@@ -123,7 +122,6 @@ function shopifyBuyingFake(): array
             carrier: 'USPS',
             service: null,
             requestedService: $request->blindOffer?->isSourceChoice() ? null : $request->blindOffer?->selectionLabel,
-            serviceEvidence: ServiceEvidence::Unknown,
             labelData: base64_encode('LABEL-BYTES'),
             labelFormat: 'pdf',
             postageSource: PostageSource::PostageDataSource,
@@ -270,7 +268,7 @@ describe('unattended', function (): void {
         expect($ruled->success)->toBeTrue()
             ->and($bought['request']->blindOffer->serviceCode)->toBe('usps:GroundAdvantage')
             ->and($label->carrier_service_id)->toBeNull()
-            ->and($label->service_evidence)->not->toBe(ServiceEvidence::Confirmed)
+            ->and($label->service)->toBeNull()
             ->and($package->fresh()->requested_service)->toBe('USPS Ground Advantage');
     });
 });

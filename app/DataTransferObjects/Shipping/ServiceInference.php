@@ -5,25 +5,22 @@ namespace App\DataTransferObjects\Shipping;
 /**
  * What a run of the inference ladder concluded about a package's service.
  *
- * A conclusive result names the service, the rung that produced it, and the
- * ruleset it was produced under — the three things
- * `Package::assertServiceEvidenceIsConsistent()` requires before an inferred
- * service may be written. An inconclusive one names only why it stopped, which is
- * what the coverage measurement in ADR-0003 is counted from.
+ * A conclusive result names the service and the rung that produced it. An
+ * inconclusive one names only why it stopped, which is what the coverage
+ * measurement in ADR-0003 is counted from.
  */
 readonly class ServiceInference
 {
     private function __construct(
         public ?string $service,
         public ?string $method,
-        public ?string $rulesetVersion,
         public string $reason,
         public bool $contradicted = false,
     ) {}
 
-    public static function resolved(string $service, string $method, string $rulesetVersion): self
+    public static function resolved(string $service, string $method): self
     {
-        return new self($service, $method, $rulesetVersion, 'resolved');
+        return new self($service, $method, 'resolved');
     }
 
     /**
@@ -31,7 +28,7 @@ readonly class ServiceInference
      */
     public static function inconclusive(string $reason): self
     {
-        return new self(null, null, null, $reason);
+        return new self(null, null, $reason);
     }
 
     /**
@@ -45,7 +42,7 @@ readonly class ServiceInference
      */
     public static function contradicted(string $reason): self
     {
-        return new self(null, null, null, $reason, contradicted: true);
+        return new self(null, null, $reason, contradicted: true);
     }
 
     public function isResolved(): bool

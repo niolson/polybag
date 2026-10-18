@@ -238,9 +238,10 @@ class PackageResource extends Resource
                         // No tracking number, cost or status: those are the
                         // projection of the package's active label and only the
                         // label writers set them (ADR-0004 decision 3).
-                        TextInput::make('shipping_method')
-                            ->label('Service (as bought)')
-                            ->maxLength(255),
+                        Forms\Components\Placeholder::make('service')
+                            ->label('Service')
+                            ->content(fn (?Package $record): string => ($record?->serviceDisplayName() ?? '—')
+                                .($record?->service !== null && $record->serviceIsInferred() ? ' (inferred)' : '')),
                         Components\Fieldset::make('Dimensions')->schema([
                             TextInput::make('length')
                                 ->numeric()

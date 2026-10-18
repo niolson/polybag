@@ -2,7 +2,6 @@
 
 namespace App\Console\Commands;
 
-use App\Enums\ServiceEvidence;
 use App\Models\Package;
 use App\Services\ServiceInference\ServiceInferrer;
 use Illuminate\Console\Command;
@@ -37,7 +36,7 @@ class InferPackageServices extends Command
         $apply = (bool) $this->option('apply');
 
         $query = Package::query()
-            ->whereIn('service_evidence', [ServiceEvidence::Unknown->value, ServiceEvidence::Inferred->value])
+            ->where(Package::boughtThroughShopify(...))
             ->whereNotNull('carrier')
             ->when($source !== null, fn ($q) => $q->where('postage_source', $source))
             ->when($limit > 0, fn ($q) => $q->limit($limit));
@@ -75,14 +74,14 @@ class InferPackageServices extends Command
         });
 
         if ($total === 0) {
-            $this->info('No packages with an unconfirmed service.');
+            $this->info('No Shopify purchases to infer a service for.');
 
             return self::SUCCESS;
         }
 
         $resolved = array_sum($byMethod);
 
-        $this->line(sprintf('%d package(s) with an unconfirmed service.', $total));
+        $this->line(sprintf('%d Shopify purchase(s) with no confirmed service.', $total));
         $this->newLine();
         $this->line('Resolved:');
 

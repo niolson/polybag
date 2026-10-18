@@ -15,7 +15,6 @@ use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\PostageSourceKind;
 use App\Enums\ServiceCapability;
-use App\Enums\ServiceEvidence;
 use App\Exceptions\Carriers\ShopifyLabelPurchaseException;
 use App\Models\CarrierService;
 use App\Models\DataSource;
@@ -527,15 +526,13 @@ class ShopifyAdapter implements BlindPurchaseSource
             carrier: $carrier,
             // Shopify reports no purchased service, before or after the buy —
             // `ShippingLabel` has no service, service code, rate or price. What
-            // the ladder derives from the label is `inferred` and never
-            // `confirmed`; what was asked for is kept as the requested
+            // the ladder derives from the label is inferred, and a service
+            // on a Shopify purchase always is; what was asked for is kept as the requested
             // preference, which is audit metadata and not the service value,
             // and stays recorded either way. ADR-0003 decisions 5 and 7.
             service: $inference->service,
             requestedService: $serviceCode === null ? null : $offer->selectionLabel,
-            serviceEvidence: $inference->isResolved() ? ServiceEvidence::Inferred : ServiceEvidence::Unknown,
-            serviceInferenceMethod: $inference->method,
-            serviceRulesetVersion: $inference->rulesetVersion,
+            serviceInferred: $inference->isResolved(),
             labelData: $label->labelData,
             labelOrientation: 'portrait',
             labelFormat: $label->labelFormat,

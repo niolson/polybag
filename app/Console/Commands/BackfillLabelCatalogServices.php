@@ -4,7 +4,6 @@ namespace App\Console\Commands;
 
 use App\Enums\PostageSource;
 use App\Enums\PostageSourceKind;
-use App\Enums\ServiceEvidence;
 use App\Models\PackageLabel;
 use App\Models\SourceServiceMapping;
 use App\Services\CarrierNormalizer;
@@ -118,12 +117,8 @@ class BackfillLabelCatalogServices extends Command
     {
         $carrierId = $label->normalized_carrier_id ?? $this->normalizer->resolve($label->carrier)?->id;
 
-        if ($label->service_evidence === ServiceEvidence::Inferred) {
+        if ($label->serviceIsInferred()) {
             return $this->resolver->forInferredService($carrierId, $label->service);
-        }
-
-        if ($label->service_evidence !== ServiceEvidence::Confirmed) {
-            return null;
         }
 
         return $this->amazonMapping($label)

@@ -5,13 +5,12 @@ namespace App\Services\ServiceInference;
 use App\Models\CarrierAlias;
 
 /**
- * The versioned tables the inference ladder reads.
+ * The lookup tables the inference ladder reads.
  *
  * Committed under `resources/data/service-inference/` rather than seeded, because
- * an inference has to be re-derivable later: a package stamped with a ruleset
- * version must be comparable against the tables that produced it, and a database
- * row that has since been reseeded cannot offer that. `ruleset.json` carries the
- * version; each table carries its own upstream provenance.
+ * an inference has to be re-derivable later from tables a reviewer can read in
+ * git, which a database row that has since been reseeded cannot offer. Each
+ * table carries its own upstream provenance and effective date.
  */
 class ServiceRuleset
 {
@@ -19,11 +18,8 @@ class ServiceRuleset
      * Every table, loaded together or not at all.
      *
      * Loaded as one unit and memoized per instance rather than cached per table.
-     * Independent cache entries can outlive a deploy separately, which would let a
-     * value derived from an old lookup table be stamped with a newly deployed
-     * version -- and a value whose stamp says it came from rules it did not come
-     * from is one that never gets re-derived, which defeats the versioning this
-     * whole ruleset exists to provide.
+     * Independent cache entries can outlive a deploy separately, which would let
+     * one answer come from an old table and the next from a new one.
      *
      * @var array<string, array<string, mixed>>|null
      */
@@ -35,14 +31,6 @@ class ServiceRuleset
      *                                  which must never write to that one.
      */
     public function __construct(private readonly ?string $directory = null) {}
-
-    /**
-     * The version stamped onto anything this ruleset infers.
-     */
-    public function version(): string
-    {
-        return (string) $this->table('ruleset')['version'];
-    }
 
     /**
      * The USPS product a Service Type Code names, or null if it names none.
@@ -143,7 +131,7 @@ class ServiceRuleset
 
             $directory = $this->directory ?? resource_path('data/service-inference');
 
-            foreach (['ruleset', 'usps-impb-stc', 'ups-1z-service-indicator', 'label-tokens', 'shopify-preferred-rate-selection', 'catalog-services'] as $table) {
+            foreach (['usps-impb-stc', 'ups-1z-service-indicator', 'label-tokens', 'shopify-preferred-rate-selection', 'catalog-services'] as $table) {
                 $path = "{$directory}/{$table}.json";
 
                 $this->tables[$table] = json_decode(
