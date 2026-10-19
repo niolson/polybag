@@ -14,7 +14,6 @@ return new class extends Migration
             $table->foreignId('shipment_id')->constrained()->cascadeOnDelete();
             $table->string('tote_code')->nullable();
             $table->timestamp('picked_at')->nullable();
-            $table->timestamp('pack_slip_printed_at')->nullable();
             $table->timestamps();
 
             $table->unique(['pick_batch_id', 'shipment_id']);

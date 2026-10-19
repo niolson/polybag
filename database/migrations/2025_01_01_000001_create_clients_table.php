@@ -28,6 +28,13 @@ return new class extends Migration
             $table->decimal('pick_fee_additional_item', 8, 2)->nullable();
             $table->decimal('label_fee_per_package', 8, 2)->nullable();
             $table->string('label_reference_source', 40)->nullable();
+            // A map from destination (`EU` or an ISO 3166 alpha-2 code) to `ddp` or
+            // `ddu` (ADR-0008 decision 1). Null and empty both mean nothing has been
+            // chosen, which is where every client starts: no default would be safe.
+            $table->json('duties_policy')->nullable();
+            // The client's own EIN, sent with an export ITN. Nine digits, no hyphen.
+            // Origin-side, so not a `client_tax_registrations` row.
+            $table->string('exporter_ein', 9)->nullable();
             $table->boolean('is_default')->default(false)->index();
             $table->boolean('active')->default(true)->index();
             $table->timestamps();

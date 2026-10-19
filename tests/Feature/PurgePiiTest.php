@@ -48,23 +48,6 @@ it('leaves a customs form inside the retention period alone', function (): void 
     expect($package->refresh()->customs_form_data)->not->toBeNull();
 });
 
-it('rolls the city constraint back over shipments the purge has already nulled', function (): void {
-    // Rolling back is the one direction that meets rows the purge forgot, and a
-    // NOT NULL column has nowhere to put a null — without the backfill, the
-    // rollback fails instead of reversing.
-    $shipment = Shipment::factory()->create();
-    DB::table('shipments')->where('id', $shipment->id)->update(['city' => null]);
-
-    $migration = require database_path('migrations/2026_09_10_000100_make_shipment_city_nullable.php');
-
-    $migration->down();
-
-    expect(DB::table('shipments')->where('id', $shipment->id)->value('city'))->toBe('');
-
-    // Leave the schema as the rest of the suite expects to find it.
-    $migration->up();
-});
-
 it('purges a company-only shipment once, and marks it purged', function (): void {
     // With no first name, the purge used to take the Shipment for already
     // purged and keep its company, address and tax ID for good.
@@ -223,19 +206,6 @@ it('counts every eligible shipment on a dry run without purging', function (): v
     expect($shipped->refresh()->address1)->not->toBeNull()
         ->and($shipped->pii_purged_at)->toBeNull()
         ->and($cancelled->refresh()->first_name)->not->toBeNull();
-});
-
-it('marks shipments an earlier purge cleared, so they are not purged again', function (): void {
-    $purged = Shipment::factory()->shipped()->create();
-    $kept = Shipment::factory()->shipped()->create();
-    DB::table('shipments')->where('id', $purged->id)->update(['address1' => null, 'city' => null]);
-
-    $migration = require database_path('migrations/2026_10_08_044316_add_pii_purged_at_to_shipments_table.php');
-    $migration->down();
-    $migration->up();
-
-    expect($purged->refresh()->pii_purged_at)->not->toBeNull()
-        ->and($kept->refresh()->pii_purged_at)->toBeNull();
 });
 
 it('restarts retention when a manager restores recipient data to a purged shipment', function (): void {

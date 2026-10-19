@@ -18,6 +18,9 @@ return new class extends Migration
             $table->unsignedInteger('failed_login_attempts')->default(0);
             $table->timestamp('locked_until')->nullable();
             $table->string('role')->default('user');
+            $table->boolean('auto_ship_enabled')->default(true);
+            // How many slips "Print next N" on Print Pack Slips takes for this user.
+            $table->unsignedSmallInteger('pack_slip_batch_size')->default(25);
             $table->boolean('active')->default(true);
             $table->text('app_authentication_secret')->nullable();
             $table->text('app_authentication_recovery_codes')->nullable();

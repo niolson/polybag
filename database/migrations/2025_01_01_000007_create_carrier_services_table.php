@@ -17,6 +17,10 @@ return new class extends Migration
             $table->timestamps();
             $table->boolean('can_ship_to_po_boxes')->default(false);
             $table->boolean('can_ship_to_military_addresses')->default(false);
+            // The contents a service is valid for, as a `ContentClass`. Null means no
+            // requirement. A property of the service, so it binds every source that
+            // sells it (ADR-0006 decision 10).
+            $table->string('required_contents', 32)->nullable();
         });
     }
 
