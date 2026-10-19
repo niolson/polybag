@@ -17,6 +17,10 @@ return new class extends Migration
             $table->foreignId('shipping_method_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignId('location_id')->nullable()->constrained()->nullOnDelete();
             $table->unsignedInteger('package_count')->default(0);
+            // How many of `package_count` actually carried a cost. Nullable rather than
+            // `default(0)`: null means "never computed for this row", and readers fall
+            // back to `package_count`.
+            $table->unsignedInteger('costed_package_count')->nullable();
             $table->decimal('total_cost', 12, 2)->default(0);
             $table->decimal('total_weight', 12, 2)->default(0);
             $table->timestamps();

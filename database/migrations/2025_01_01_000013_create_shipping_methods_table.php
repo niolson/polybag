@@ -14,6 +14,9 @@ return new class extends Migration
             $table->integer('commitment_days')->nullable();
             $table->boolean('active')->default(true);
             $table->boolean('is_expedited')->default(false);
+            // What automation insists on before buying an Amazon Buy Shipping Label.
+            $table->boolean('excludes_late_rates')->default(true);
+            $table->json('otdr_protection_orders')->nullable();
             $table->timestamps();
         });
     }

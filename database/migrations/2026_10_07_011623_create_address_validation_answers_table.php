@@ -25,6 +25,26 @@ return new class extends Migration
             $table->string('reason', 32)->nullable();
             $table->string('country')->nullable();
             $table->string('trigger', 16);
+            // FedEx shadow answers and the evidence that would otherwise go with the
+            // address (`address-validation-routing/10`). The comparison flags say whether
+            // FedEx returned the same address as the answer it shadows, without keeping
+            // either address.
+            $table->boolean('shadow')->default(false);
+            $table->foreignId('shadows_answer_id')->nullable()->unique()
+                ->constrained('address_validation_answers')->cascadeOnDelete();
+            $table->boolean('street_differs')->nullable();
+            $table->boolean('house_number_differs')->nullable();
+            $table->boolean('city_differs')->nullable();
+            $table->boolean('postcode_differs')->nullable();
+            // An edit after validation, which otherwise survives only in the audit log, and
+            // which part of the address it changed (`address-validation-routing/11`): adding
+            // a missing unit and correcting a wrong street say different things about the
+            // validator. Flags rather than the old or new values.
+            $table->timestamp('address_changed_at')->nullable();
+            $table->boolean('street_changed')->nullable();
+            $table->boolean('unit_changed')->nullable();
+            $table->boolean('locality_changed')->nullable();
+            $table->boolean('postcode_changed')->nullable();
             $table->timestamp('created_at')->nullable();
 
             $table->index(['validator', 'created_at']);

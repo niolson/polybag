@@ -31,19 +31,31 @@ return new class extends Migration
             $table->string('tracking_number')->nullable()->index();
             $table->string('postage_source', 32)->nullable();
             $table->foreignId('carrier_account_id')->nullable()->constrained()->nullOnDelete();
+            // The digest of the account's billing identity (`CarrierAccount::fingerprint()`).
+            // `carrier_account_id` is null-on-delete, so once the account is deleted the id
+            // alone cannot tell "bought on an account that no longer exists" from "bought
+            // before accounts were recorded"; only the second may fall back to scope
+            // resolution. A direct Label is voided and tracked on the account that bought it.
+            $table->string('carrier_account_fingerprint', 64)->nullable();
             $table->foreignId('postage_data_source_id')->nullable()->constrained('data_sources')->nullOnDelete();
             $table->string('carrier')->nullable();
             $table->foreignId('normalized_carrier_id')->nullable()->constrained('carriers')->restrictOnDelete();
+            // The catalog service a Label was bought as. Beside `normalized_carrier_id`,
+            // and restricting deletion as it does: a Label is history. Null for a blind
+            // purchase; what Shopify was asked for stays the requested preference
+            // (ADR-0003 decision 7), never the service bought.
+            $table->foreignId('carrier_service_id')->nullable()->constrained()->restrictOnDelete();
             $table->string('service')->nullable();
             $table->string('requested_service')->nullable();
-            $table->string('service_evidence', 16)->default('unknown');
-            $table->string('service_inference_method', 64)->nullable();
-            $table->string('service_ruleset_version', 32)->nullable();
             $table->decimal('cost', 8, 2)->nullable();
             $table->string('label_format', 10)->default('pdf');
             $table->unsignedSmallInteger('label_dpi')->nullable();
             $table->string('label_orientation')->nullable();
             $table->date('ship_date')->nullable();
+            // Which manifest the Label was on, kept after the Label is voided:
+            // `packages.manifest_id` describes the active Label, and a void clears it so
+            // the re-shipped Label reaches the next SCAN form.
+            $table->foreignId('manifest_id')->nullable()->constrained()->nullOnDelete();
             $table->timestamp('purchased_at')->nullable();
             $table->foreignId('purchased_by_user_id')->nullable()->constrained('users')->nullOnDelete();
             // The postage source's own identifier for the label (Shopify label
@@ -51,6 +63,10 @@ return new class extends Migration
             // it from `packages.metadata` on void so a dead purchase cannot be
             // resumed, so it has to be recorded before the void.
             $table->string('source_label_reference')->nullable();
+            // The Shopify fulfillment an export created for the Label. A void cancels it so
+            // Shopify stops showing the dead tracking number. It lives here because the void
+            // deletes the Package's export rows, and the fulfillment belongs to one Label.
+            $table->string('shopify_fulfillment_id')->nullable();
             $table->timestamp('voided_at')->nullable();
             $table->foreignId('voided_by_user_id')->nullable()->constrained('users')->nullOnDelete();
             $table->string('void_reason', 32)->nullable();
@@ -66,6 +82,17 @@ return new class extends Migration
             $table->unsignedBigInteger('active_package_id')
                 ->nullable()
                 ->virtualAs('case when voided_at is null then package_id else null end');
+            // What the Label declared at purchase (ADR-0008 decision 6). `customs_terms` is a
+            // snapshot of the resolved duties term, seller registration and ITN, and never
+            // holds the recipient's tax ID. `duties_cost` is the prepaid duties amount a
+            // carrier reports; its parts are the package fee, the customs duty and the import
+            // tax, all null when the carrier reports only a total, so they may not add up to
+            // `duties_cost` to the cent.
+            $table->json('customs_terms')->nullable();
+            $table->decimal('duties_cost', 10, 2)->nullable();
+            $table->decimal('duties_package_fee', 10, 2)->nullable();
+            $table->decimal('duties_duty', 10, 2)->nullable();
+            $table->decimal('duties_tax', 10, 2)->nullable();
             $table->unique('active_package_id');
         });
     }

@@ -13,13 +13,24 @@ return new class extends Migration
             $table->foreignId('shipment_id')->constrained()->cascadeOnDelete();
             $table->foreignId('location_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignId('carrier_account_id')->nullable()->constrained()->nullOnDelete();
+            // Where the postage was bought, which is not necessarily the shipment's import
+            // source and is recorded separately from the carrier of record (ADR-0002).
+            // nullOnDelete matches carrier_account_id: deleting a data source costs us the
+            // pointer on labels bought through it, as deleting a carrier account does.
+            $table->foreignId('postage_data_source_id')->nullable()->constrained('data_sources')->nullOnDelete();
+            $table->string('postage_source', 32)->nullable();
             $table->foreignId('box_size_id')->nullable()->constrained()->nullOnDelete();
             $table->string('tracking_number')->nullable();
             $table->string('carrier')->nullable();
+            $table->foreignId('normalized_carrier_id')->nullable()->constrained('carriers')->restrictOnDelete();
             $table->string('service')->nullable();
+            // What we asked the postage source for: audit metadata, never the service value.
+            $table->string('requested_service')->nullable();
             $table->longText('metadata')->nullable();
             $table->json('carrier_request_payload')->nullable();
             $table->longText('label_data')->nullable();
+            $table->longText('customs_form_data')->nullable();
+            $table->string('customs_form_format', 10)->default('pdf');
             $table->string('label_orientation')->nullable();
             $table->string('label_format', 10)->default('pdf');
             $table->unsignedSmallInteger('label_dpi')->nullable();

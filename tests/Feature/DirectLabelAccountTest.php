@@ -327,15 +327,3 @@ it('records the buying account fingerprint on the Label when a package ships', f
     expect(PackageLabel::query()->where('package_id', $package->id)->value('carrier_account_fingerprint'))
         ->toBe($account->fingerprint());
 });
-
-it('backfills existing Labels with the same fingerprint the model computes', function (): void {
-    $account = fedexAccount('global_account', 'k1');
-    $package = directLabel(Carrier::FEDEX, $this->client, $account, '794600000001');
-    $migration = require database_path('migrations/2026_09_29_004045_add_carrier_account_fingerprint_to_package_labels_table.php');
-
-    $migration->down();
-    $migration->up();
-
-    expect(PackageLabel::query()->where('package_id', $package->id)->value('carrier_account_fingerprint'))
-        ->toBe($account->fingerprint());
-});

@@ -18,8 +18,11 @@ return new class extends Migration
             $table->decimal('materials_cost', 8, 2)->nullable();
             $table->string('label');
             $table->string('code')->unique();
+            // An inactive Box Size stays in the catalog but leaves the barcode sheet,
+            // the Pack lookup and the box pickers.
+            $table->boolean('active')->default(true);
             $table->string('type');
-            $table->string('fedex_package_type')->nullable()->default('YOUR_PACKAGING');
+            $table->string('carrier_packaging')->nullable();
             $table->timestamps();
         });
     }

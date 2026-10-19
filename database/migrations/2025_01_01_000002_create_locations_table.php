@@ -17,7 +17,7 @@ return new class extends Migration
             $table->string('address1');
             $table->string('address2')->nullable();
             $table->string('city');
-            $table->string('state_or_province');
+            $table->string('state_or_province')->nullable();
             $table->string('postal_code');
             $table->string('country', 2)->default('US');
             $table->string('phone')->nullable();

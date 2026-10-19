@@ -16,9 +16,9 @@ return new class extends Migration
      * exactly that case: OnTrac, eligible and cheapest, with no `Carrier` row,
      * no account and no adapter.
      *
-     * Durable, unlike `shipping_offers`: an identity keeps its mapping and its
-     * first-seen date for as long as the source keeps offering it. Nothing
-     * purges this table.
+     * Durable, unlike `shipping_offers`: an identity keeps its first-seen date
+     * for as long as the source keeps offering it. Nothing purges this table.
+     * What an identity maps to lives in `source_service_mappings`, not here.
      */
     public function up(): void
     {
@@ -46,12 +46,6 @@ return new class extends Migration
             $table->string('external_service_id', 128);
             $table->string('external_service_name')->nullable();
 
-            // Mapping state. Null is a valid terminal state (ADR-0003 decision
-            // 8): an observation nobody promotes stays human-selectable rather
-            // than sitting in a queue. Filled only by a deliberate human act —
-            // see amazon-buy-shipping/05.
-            $table->foreignId('carrier_service_id')->nullable()->constrained()->nullOnDelete();
-
             $table->timestamp('first_seen_at');
             $table->timestamp('last_seen_at');
 
@@ -65,6 +59,8 @@ return new class extends Migration
             $table->timestamp('last_eligible_at')->nullable();
 
             $table->unsignedInteger('observation_count')->default(0);
+            $table->json('additional_inputs_schema')->nullable();
+            $table->timestamp('additional_inputs_schema_seen_at')->nullable();
             $table->timestamps();
 
             $table->unique([
@@ -75,8 +71,6 @@ return new class extends Migration
                 'external_service_id',
             ], 'observed_services_identity_unique');
 
-            // The mapping page's query: everything unmapped for one source.
-            $table->index(['source', 'environment', 'carrier_service_id'], 'observed_services_mapping_index');
         });
     }
 

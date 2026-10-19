@@ -19,7 +19,6 @@ use App\Services\ShipmentImport\Sources\AmazonSource;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Http\Faking\MockResponse;
@@ -385,24 +384,4 @@ describe('direct accounts on the Amazon row', function (): void {
             });
     });
 
-    it('have their scopes removed by the migration', function (): void {
-        $amazon = Carrier::firstOrCreate(['name' => AmazonBuyShippingAdapter::SOURCE_NAME]);
-        // A legacy row: the model now refuses an account on the Amazon carrier.
-        $account = CarrierAccount::withoutEvents(fn () => CarrierAccount::factory()->create(['carrier_id' => $amazon->id]));
-        $legacyId = DB::table('carrier_account_scopes')->insertGetId([
-            'carrier_account_id' => $account->id,
-            'carrier_id' => $amazon->id,
-            'rate_shop' => false,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
-        $kept = CarrierAccountScope::factory()->create();
-
-        $migration = require database_path('migrations/2026_09_22_214300_add_off_amazon_shipping_to_data_sources_and_scopes.php');
-        (fn () => $this->deleteCarrierAccountScopesOnAmazon())->call($migration);
-
-        expect(DB::table('carrier_account_scopes')->where('id', $legacyId)->exists())->toBeFalse()
-            ->and($kept->fresh())->not->toBeNull()
-            ->and($account->fresh())->not->toBeNull();
-    });
 });

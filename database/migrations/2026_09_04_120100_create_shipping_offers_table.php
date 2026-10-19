@@ -39,12 +39,21 @@ return new class extends Migration
             $table->string('postage_source', 32);
             $table->foreignId('carrier_account_id')->nullable()->constrained()->nullOnDelete();
             $table->foreignId('postage_data_source_id')->nullable()->constrained('data_sources')->nullOnDelete();
+            $table->foreignId('rate_quote_id')->nullable()->constrained('rate_quotes')->nullOnDelete();
 
             // Descriptive facts, never purchase identity. Price is nullable
             // because not every offer has one: a Shopify blind purchase prices
             // the label at purchase time and reports no service at all.
             $table->string('carrier');
+            // Which catalog carrier and service the offer is for, so a Ship-page purchase
+            // restores both from the server's copy rather than the browser's. The carrier is
+            // the one expected to carry the parcel, and dates the purchase by id, so a
+            // rename between quote and purchase changes nothing. Both null on delete, like
+            // the offer's other pointers: offers are short-lived and must never be what
+            // stops a catalog row being removed.
+            $table->foreignId('carrier_id')->nullable()->constrained()->nullOnDelete();
             $table->string('service_code')->nullable();
+            $table->foreignId('carrier_service_id')->nullable()->constrained()->nullOnDelete();
             $table->string('service_name')->nullable();
             $table->decimal('price', 8, 2)->nullable();
             $table->string('currency', 3)->nullable();
@@ -71,6 +80,8 @@ return new class extends Migration
             // means the source published no window — not that the offer is
             // eternal.
             $table->timestamp('expires_at')->nullable();
+            $table->string('quote_fingerprint', 64)->nullable();
+            $table->string('carrier_account_fingerprint', 64)->nullable();
 
             // Set by the atomic claim in OfferStore::redeem(). Once set, the
             // offer is spent whether or not the purchase went on to succeed.
@@ -88,8 +99,16 @@ return new class extends Migration
             // block further spending on the package.
             $table->timestamp('purchase_failed_at')->nullable();
             $table->string('purchase_failure_reason')->nullable();
+            $table->timestamp('recovery_unanswered_at')->nullable();
 
             $table->timestamps();
+
+            // What the carrier was sent for this Offer's purchase, recorded at claim time
+            // (ADR-0008 decision 6). A purchase whose reply never arrived is recorded later,
+            // and the Shipment may have been edited in between, so the Label's
+            // `customs_terms` snapshot is read back from here. Holds no recipient tax ID,
+            // only its type.
+            $table->json('declared_customs_terms')->nullable();
 
             $table->index(['package_id', 'consumed_at']);
 

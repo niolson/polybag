@@ -353,41 +353,6 @@ it('deletes every label row with its package', function (): void {
     expect(PackageLabel::query()->where('package_id', $packageId)->count())->toBe(0);
 })->group('mysql');
 
-it('backfills one label row per shipped package and nothing for the rest, idempotently', function (): void {
-    $shipped = Package::factory()->shipped()->create([
-        'label_printed_at' => now()->subHour(),
-        'metadata' => ['shopify_shipping_label_id' => 'gid://shopify/ShippingLabel/7'],
-    ]);
-    $unshipped = Package::factory()->create();
-    PackageLabel::query()->delete();
-
-    $migration = require base_path('database/migrations/2026_09_14_000100_backfill_package_labels.php');
-    $migration->up();
-    $migration->up();
-
-    $labels = PackageLabel::query()->get();
-
-    expect($labels)->toHaveCount(1)
-        ->and($labels->sole()->package_id)->toBe($shipped->id)
-        ->and($labels->sole()->tracking_number)->toBe($shipped->tracking_number)
-        ->and($labels->sole()->source_label_reference)->toBe('gid://shopify/ShippingLabel/7')
-        ->and($labels->sole()->last_printed_at->toDateTimeString())->toBe($shipped->label_printed_at->toDateTimeString())
-        ->and($labels->sole()->purchased_by_user_id)->toBe($shipped->shipped_by_user_id)
-        ->and($unshipped->labels()->count())->toBe(0);
-})->group('mysql');
-
-it('is ready to ship a package the backfill covered', function (): void {
-    $package = Package::factory()->shipped()->create();
-    PackageLabel::query()->delete();
-
-    (require base_path('database/migrations/2026_09_14_000100_backfill_package_labels.php'))->up();
-
-    $package->clearShipping(VoidReason::Operator);
-
-    expect($package->labels()->sole()->isVoided())->toBeTrue()
-        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
-});
-
 // --- Shipment relationship -------------------------------------------------
 
 it('reaches a label\'s shipment through its package', function (): void {

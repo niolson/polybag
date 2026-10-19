@@ -26,11 +26,6 @@ function amazonMapping(string $carrierId, string $serviceId): ?SourceServiceMapp
     return SourceServiceMapping::query()->forIdentity(PostageSourceKind::Amazon, $carrierId, $serviceId)->first();
 }
 
-function groundSaverRenameMigration(): object
-{
-    return require database_path('migrations/2026_09_26_040921_name_ups_ground_saver_weight_bands.php');
-}
-
 describe('the catalog', function (): void {
     beforeEach(function (): void {
         $this->seed(CarrierSeeder::class);
@@ -77,29 +72,6 @@ describe('the catalog', function (): void {
         $this->seed(CarrierSeeder::class);
 
         expect(upsService('95')->required_contents)->toBe(ContentClass::Media);
-    });
-});
-
-describe('the Ground Saver rename migration', function (): void {
-    it('renames rows still carrying the seeded name, and leaves an Admin rename alone', function (): void {
-        $this->seed(CarrierSeeder::class);
-        upsService('92')->update(['name' => 'UPS Ground Saver']);
-        upsService('93')->update(['name' => 'Heavy Ground Saver']);
-
-        groundSaverRenameMigration()->up();
-
-        expect(upsService('92')->name)->toBe('UPS Ground Saver (under 1 lb)')
-            ->and(upsService('93')->name)->toBe('Heavy Ground Saver');
-    });
-
-    it('touches no other carrier\'s service with the same code', function (): void {
-        $other = CarrierService::factory()
-            ->for(Carrier::factory()->create(['name' => 'Elsewhere']))
-            ->create(['service_code' => '92', 'name' => 'UPS Ground Saver']);
-
-        groundSaverRenameMigration()->up();
-
-        expect($other->fresh()->name)->toBe('UPS Ground Saver');
     });
 });
 
