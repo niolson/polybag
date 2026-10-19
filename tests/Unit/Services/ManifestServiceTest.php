@@ -9,9 +9,11 @@ use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\Manifest;
 use App\Models\Package;
+use App\Models\ScanFormRequest;
 use App\Services\ManifestService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
 
@@ -299,6 +301,64 @@ it('asks for the SCAN form image through imageInfo and sends the company as the 
             && $body['fromAddress']['firm'] === 'Acme Fulfillment'
             && $body['fromAddress']['secondaryAddress'] === 'Ste A-600';
     });
+});
+
+it('sends a UUID idempotency key with each SCAN form request', function (): void {
+    $location = Location::factory()->default()->create();
+    $package = scanFormRequestPackage();
+    fakeUspsScanForm([$package->carrier_account_id]);
+
+    app(ManifestService::class)->createManifest('USPS', collect([$package]), null, $location->id);
+
+    Saloon::assertSent(function (ScanForm $request): bool {
+        $key = $request->headers()->get('X-Idempotency-Key');
+
+        return is_string($key) && Str::isUuid($key);
+    });
+});
+
+it('sends the same idempotency key again when the SCAN form reply never arrived', function (): void {
+    $location = Location::factory()->default()->create();
+    $package = scanFormRequestPackage();
+    fakeUspsScanForm([$package->carrier_account_id]);
+    Saloon::fake([
+        ScanForm::class => MockResponse::make(
+            body: json_encode(['error' => ['code' => '400', 'message' => 'Bad Request', 'errors' => []]]),
+            status: 400,
+            headers: ['Content-Type' => 'application/json'],
+        ),
+    ]);
+
+    $service = app(ManifestService::class);
+    $service->createManifest('USPS', collect([$package]), null, $location->id);
+    $service->createManifest('USPS', collect([$package]), null, $location->id);
+
+    $keys = array_map(
+        fn ($response) => $response->getPendingRequest()->headers()->get('X-Idempotency-Key'),
+        Saloon::mockClient()->getRecordedResponses(),
+    );
+
+    expect($keys)->toHaveCount(2)
+        ->and($keys[0])->toBe($keys[1])
+        ->and(ScanFormRequest::count())->toBe(1);
+});
+
+it('forgets the idempotency key once the SCAN form is saved', function (): void {
+    $location = Location::factory()->default()->create();
+    $package = scanFormRequestPackage();
+    fakeUspsScanForm([$package->carrier_account_id]);
+
+    app(ManifestService::class)->createManifest('USPS', collect([$package]), null, $location->id);
+
+    expect(ScanFormRequest::count())->toBe(0);
+});
+
+it('uses a different idempotency key for a different set of packages', function (): void {
+    $first = ScanFormRequest::forTrackingNumbers('2026-10-19', ['9400111', '9400222']);
+
+    expect(ScanFormRequest::forTrackingNumbers('2026-10-19', ['9400222', '9400111'])->is($first))->toBeTrue()
+        ->and(ScanFormRequest::forTrackingNumbers('2026-10-19', ['9400111'])->idempotency_key)->not->toBe($first->idempotency_key)
+        ->and(ScanFormRequest::forTrackingNumbers('2026-10-20', ['9400111', '9400222'])->idempotency_key)->not->toBe($first->idempotency_key);
 });
 
 it('sends a single shipper name as the firm', function (): void {
