@@ -15,6 +15,7 @@ use App\Models\CarrierAccount;
 use App\Models\Location;
 use App\Models\Manifest;
 use App\Models\Package;
+use App\Models\ScanFormRequest;
 use App\Services\Carriers\CarrierRegistry;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -295,7 +296,7 @@ class ManifestService
             $manifestNumber = $response->metadata['manifestNumber'] ?? '';
             $image = $response->image;
 
-            $manifest = DB::transaction(function () use ($manifestNumber, $image, $remainingPackages, $locationId) {
+            $manifest = DB::transaction(function () use ($manifestNumber, $image, $remainingPackages, $locationId, $shipDate) {
                 $manifest = Manifest::create([
                     'carrier' => Carrier::USPS,
                     'location_id' => $locationId,
@@ -306,6 +307,11 @@ class ManifestService
                 ]);
 
                 $this->markManifested($remainingPackages->pluck('tracking_number')->all(), $manifest);
+
+                ScanFormRequest::forgetTrackingNumbers(
+                    $shipDate?->format('Y-m-d') ?? now()->format('Y-m-d'),
+                    $remainingPackages->pluck('tracking_number')->all(),
+                );
 
                 return $manifest;
             });
@@ -366,13 +372,18 @@ class ManifestService
     ): Response {
         $trackingNumbers = $packages->pluck('tracking_number')->values()->all();
 
+        $mailingDate = $shipDate?->format('Y-m-d') ?? now()->format('Y-m-d');
+
         $request = new ScanForm;
+        $request->headers()->set([
+            'X-Idempotency-Key' => ScanFormRequest::forTrackingNumbers($mailingDate, $trackingNumbers)->idempotency_key,
+        ]);
         $request->body()->set([
             'imageInfo' => [
                 'imageType' => 'PDF',
                 'labelType' => '8.5X11LABEL',
             ],
-            'mailingDate' => $shipDate?->format('Y-m-d') ?? now()->format('Y-m-d'),
+            'mailingDate' => $mailingDate,
             'overwriteMailingDate' => true,
             'entryFacilityZIPCode' => $fromAddress->postalCode,
             'destinationEntryFacilityType' => 'NONE',
