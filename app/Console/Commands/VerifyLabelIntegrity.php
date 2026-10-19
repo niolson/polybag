@@ -18,21 +18,13 @@ use Illuminate\Support\Facades\DB;
  * one" a database fact. Whether a shipped package's projected columns still
  * match its active label's is checked nowhere else, so this is detection, not
  * prevention. Exits non-zero when anything is found; the scheduler runs the
- * report nightly.
- *
- * `--repair` handles one case and one only: a shipped package with no label
- * row gets one inserted from its projection, the same way the backfill did.
- * That case is a deploy — a previous image's worker finishing a purchase after
- * the backfill ran — and it is a person who runs the repair, never the
- * scheduler, the entrypoint or a writer. Everything else is reported for a
- * person to look at.
+ * report nightly. Nothing is repaired: each finding is for a person to look at.
  */
 class VerifyLabelIntegrity extends Command
 {
-    protected $signature = 'app:verify-label-integrity
-                            {--repair : Insert the missing label row for a shipped package that has none; report everything else}';
+    protected $signature = 'app:verify-label-integrity';
 
-    protected $description = 'Report every package whose label record disagrees with it, and optionally repair a shipped package with no label row';
+    protected $description = 'Report every package whose label record disagrees with it';
 
     public function handle(): int
     {
@@ -44,14 +36,7 @@ class VerifyLabelIntegrity extends Command
         $this->report('Not shipped but holding an active label', $unshippedWithLabel);
         $this->report('Shipped with a projection that disagrees with its label', $drifted);
 
-        $repaired = 0;
-
-        if ($this->option('repair') && $shippedWithoutLabel !== []) {
-            $repaired = $this->repair($shippedWithoutLabel);
-            $this->info("Inserted a label row for {$repaired} shipped package(s) from their own columns.");
-        }
-
-        $remaining = count($shippedWithoutLabel) - $repaired + count($unshippedWithLabel) + count($drifted);
+        $remaining = count($shippedWithoutLabel) + count($unshippedWithLabel) + count($drifted);
 
         if ($remaining === 0) {
             $this->info('Every package agrees with its label record.');
@@ -154,27 +139,6 @@ class VerifyLabelIntegrity extends Command
             'ship_date' => CarbonImmutable::parse($value)->format('Y-m-d'),
             default => (string) $value,
         };
-    }
-
-    /**
-     * @param  array<int, string>  $packageIds
-     */
-    private function repair(array $packageIds): int
-    {
-        $repaired = 0;
-
-        foreach (array_keys($packageIds) as $packageId) {
-            $package = Package::query()->find($packageId);
-
-            if ($package === null || $package->status !== PackageStatus::Shipped) {
-                continue;
-            }
-
-            PackageLabel::createFromPackage($package);
-            $repaired++;
-        }
-
-        return $repaired;
     }
 
     /**

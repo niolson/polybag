@@ -600,7 +600,7 @@ it('does not share sandbox parent tokens between FedEx carrier accounts', functi
             'sandbox_api_secret' => 'second-sandbox-secret',
         ],
         'credentials' => [
-            'account_number' => 'second-production-account',
+            'production_account_number' => 'second-production-account',
             'child_env' => 'production',
             'sandbox_account_number' => 'second-sandbox-account',
         ],

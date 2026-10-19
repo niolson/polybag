@@ -64,6 +64,7 @@ it('totals the last 7 and 30 days from the daily counts, today included', functi
         DailyShippingStat::create([
             'date' => $today->copy()->subDays($daysAgo)->toDateString(),
             'package_count' => $count,
+            'costed_package_count' => $count,
             'total_cost' => 0,
             'total_weight' => 0,
         ]);
@@ -86,6 +87,7 @@ it('compares the last 7 and 30 days with the period before', function (): void {
         DailyShippingStat::create([
             'date' => $today->copy()->subDays($daysAgo)->toDateString(),
             'package_count' => $count,
+            'costed_package_count' => $count,
             'total_cost' => 0,
             'total_weight' => 0,
         ]);
@@ -105,6 +107,7 @@ it('gives no percentage when nothing shipped in the period before', function ():
     DailyShippingStat::create([
         'date' => now(Location::timezone())->toDateString(),
         'package_count' => 3,
+        'costed_package_count' => 3,
         'total_cost' => 0,
         'total_weight' => 0,
     ]);

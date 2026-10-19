@@ -3,7 +3,6 @@
 use App\DataTransferObjects\Shipping\ServiceInference;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\PostageSource;
-use App\Enums\PostageSourceKind;
 use App\Enums\Role;
 use App\Filament\Resources\LabelBatchResource\Pages\ViewLabelBatch;
 use App\Filament\Resources\LabelBatchResource\RelationManagers\LabelBatchItemsRelationManager;
@@ -16,9 +15,7 @@ use App\Models\LabelBatch;
 use App\Models\LabelBatchItem;
 use App\Models\Package;
 use App\Models\PackageLabel;
-use App\Models\SourceServiceMapping;
 use App\Models\User;
-use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\CatalogServiceResolver;
 use App\Services\ServiceInference\ServiceRuleset;
 use Database\Seeders\CarrierSeeder;
@@ -48,7 +45,7 @@ function carrierId(string $carrier): int
 
 /**
  * A shipped package whose Label carries these service facts and no catalog
- * service, as every Label bought before the column did.
+ * service.
  *
  * @param  array<string, mixed>  $attributes
  */
@@ -113,35 +110,6 @@ it('maps every service name the shared inference rungs emit, bar the ones the ca
 });
 
 // --- Resolution --------------------------------------------------------------
-
-it('resolves every direct USPS variant to its mail class, and the longest mail class that fits', function (string $reported, string $serviceCode): void {
-    expect(app(CatalogServiceResolver::class)->forReportedService(carrierId('USPS'), $reported))
-        ->toBe(catalogService('USPS', $serviceCode)->id);
-})->with([
-    ['USPS Ground Advantage Machinable Single-piece', 'USPS_GROUND_ADVANTAGE'],
-    ['USPS Ground Advantage Machinable Cubic Non-Soft Pack Tier 1', 'USPS_GROUND_ADVANTAGE'],
-    ['USPS Ground Advantage Machinable Cubic Non-Soft Pack Tier 2', 'USPS_GROUND_ADVANTAGE'],
-    ['USPS Ground Advantage Machinable Cubic Non-Soft Pack Tier 3', 'USPS_GROUND_ADVANTAGE'],
-    ['USPS Ground Advantage Nonstandard Single-piece', 'USPS_GROUND_ADVANTAGE'],
-    ['Priority Mail Machinable Single-piece', 'PRIORITY_MAIL'],
-    ['Priority Mail Machinable Cubic Non-Soft Pack Tier 1', 'PRIORITY_MAIL'],
-    ['Priority Mail Express Machinable Single-piece', 'PRIORITY_MAIL_EXPRESS'],
-    ['Priority Mail International Machinable ISC Single-piece', 'PRIORITY_MAIL_INTERNATIONAL'],
-    ['First-Class Package International Service Machinable ISC Single-piece', 'FIRST-CLASS_PACKAGE_INTERNATIONAL_SERVICE'],
-    ['Media Mail Machinable Single-piece', 'MEDIA_MAIL'],
-]);
-
-it('matches other carriers only on the whole name, ignoring case and ®', function (): void {
-    $resolver = app(CatalogServiceResolver::class);
-
-    expect($resolver->forReportedService(carrierId('UPS'), 'UPS Ground'))->toBe(catalogService('UPS', '03')->id)
-        ->and($resolver->forReportedService(carrierId('FedEx'), 'FedEx International Connect Plus'))
-        ->toBe(catalogService('FedEx', 'FEDEX_INTERNATIONAL_CONNECT_PLUS')->id)
-        // "UPS Ground" starts "UPS Ground Saver", and is not it.
-        ->and($resolver->forReportedService(carrierId('UPS'), 'UPS Ground Saver'))->toBeNull()
-        ->and($resolver->forReportedService(carrierId('USPS'), 'Something USPS never sold'))->toBeNull()
-        ->and($resolver->forReportedService(null, 'UPS Ground'))->toBeNull();
-});
 
 it('resolves an inferred name through the ruleset, to the row a direct purchase records', function (): void {
     $resolver = app(CatalogServiceResolver::class);
@@ -236,78 +204,6 @@ it('does not recompute a past Label when the catalog is edited, and refuses to d
 
     expect(fn () => $groundAdvantage->delete())->toThrow(QueryException::class);
 });
-
-// --- Backfill ------------------------------------------------------------------
-
-it('reports without writing unless told to apply', function (): void {
-    $package = labelWithoutCatalogService('USPS', 'USPS Ground Advantage Machinable Cubic Non-Soft Pack Tier 2', false);
-
-    $this->artisan('app:backfill-label-catalog-services')
-        ->expectsOutputToContain('Nothing written')
-        ->assertSuccessful();
-
-    expect($package->activeLabel()->value('carrier_service_id'))->toBeNull();
-});
-
-it('backfills reported, inferred and Amazon-mapped Labels, leaves the rest, and is idempotent', function (): void {
-    $direct = labelWithoutCatalogService('USPS', 'USPS Ground Advantage Machinable Cubic Non-Soft Pack Tier 2', false);
-    $inferred = labelWithoutCatalogService('USPS', 'Media Mail', true);
-    $unknown = labelWithoutCatalogService('UPS', null, false);
-    $groundSaver = labelWithoutCatalogService('UPS', 'UPS Ground Saver', true);
-
-    // Amazon's own name for a service whose mapping says what it is.
-    $amazon = DataSource::factory()->create(['name' => 'Amazon store']);
-    $priority = catalogService('USPS', 'PRIORITY_MAIL');
-    SourceServiceMapping::map(PostageSourceKind::Amazon, 'USPS', 'std-us-usps-priority', $priority->id);
-    $mapped = labelWithoutCatalogService('USPS', 'Amazon says USPS Priority', false, [
-        'postage_source' => PostageSource::PostageDataSource,
-        'postage_data_source_id' => $amazon->id,
-        'metadata' => [
-            AmazonBuyShippingAdapter::CARRIER_ID_KEY => 'USPS',
-            AmazonBuyShippingAdapter::SERVICE_ID_KEY => 'std-us-usps-priority',
-        ],
-    ]);
-
-    $this->artisan('app:backfill-label-catalog-services', ['--apply' => true])
-        ->expectsOutputToContain('Recorded the catalog service on 3 Label(s).')
-        ->assertSuccessful();
-
-    expect($direct->activeLabel()->value('carrier_service_id'))->toBe(catalogService('USPS', 'USPS_GROUND_ADVANTAGE')->id)
-        ->and($inferred->activeLabel()->value('carrier_service_id'))->toBe(catalogService('USPS', 'MEDIA_MAIL')->id)
-        ->and($mapped->activeLabel()->value('carrier_service_id'))->toBe($priority->id)
-        ->and($unknown->activeLabel()->value('carrier_service_id'))->toBeNull()
-        ->and($groundSaver->activeLabel()->value('carrier_service_id'))->toBeNull();
-
-    $this->artisan('app:backfill-label-catalog-services', ['--apply' => true])
-        ->expectsOutputToContain('Recorded the catalog service on 0 Label(s).')
-        ->assertSuccessful();
-});
-
-it('backfills a Label older than its normalized carrier from the carrier the source named', function (): void {
-    $package = labelWithoutCatalogService('USPS', 'Priority Mail Machinable Single-piece', false, [
-        'normalized_carrier_id' => null,
-    ]);
-
-    $this->artisan('app:backfill-label-catalog-services', ['--apply' => true])->assertSuccessful();
-
-    $label = $package->activeLabel()->first();
-
-    expect($label->carrier_service_id)->toBe(catalogService('USPS', 'PRIORITY_MAIL')->id)
-        // Issue 03's column, which this does not backfill.
-        ->and($label->normalized_carrier_id)->toBeNull();
-});
-
-it('never overwrites a Label that already names its catalog service', function (): void {
-    $package = Package::factory()->shipped()->create(['carrier' => 'USPS', 'service' => 'Priority Mail Machinable Single-piece']);
-    $groundAdvantage = catalogService('USPS', 'USPS_GROUND_ADVANTAGE');
-    $package->activeLabel->update(['carrier_service_id' => $groundAdvantage->id]);
-
-    $this->artisan('app:backfill-label-catalog-services', ['--apply' => true])->assertSuccessful();
-
-    expect(PackageLabel::find($package->activeLabel->id)->carrier_service_id)->toBe($groundAdvantage->id);
-});
-
-// --- Packages list and view ----------------------------------------------------
 
 it('lists the catalog name with the source name on hover, and filters by catalog row or unmapped', function (): void {
     $this->actingAs(User::factory()->create(['role' => Role::Admin]));

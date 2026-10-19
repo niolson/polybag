@@ -51,7 +51,7 @@ class PackageResource extends Resource
     /**
      * The Service filter's value for a shipped package whose Label names no
      * catalog service: a blind purchase nothing was inferred for, an inferred
-     * name the catalog splits, or a Label older than the backfill reached.
+     * name the catalog splits.
      */
     private const UNMAPPED_SERVICE = 'unmapped';
 

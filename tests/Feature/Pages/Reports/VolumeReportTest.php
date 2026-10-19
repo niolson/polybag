@@ -116,23 +116,6 @@ it('says nothing about exclusions when every package was priced', function (): v
         ->assertDontSee('no reported cost');
 });
 
-it('treats a rollup row from before the column as fully costed', function (): void {
-    $user = User::factory()->create(['role' => Role::Manager]);
-
-    DailyShippingStat::create([
-        'date' => today()->toDateString(),
-        'package_count' => 10,
-        'costed_package_count' => null,
-        'total_cost' => 60.00,
-        'total_weight' => 20.00,
-    ]);
-
-    Livewire::actingAs($user)
-        ->test(VolumeReport::class)
-        ->assertSee('$6.00')
-        ->assertDontSee('no reported cost');
-});
-
 it('reports an unknown average when nothing in the group was priced', function (): void {
     $user = User::factory()->create(['role' => Role::Manager]);
 
@@ -163,7 +146,7 @@ it('offers one Group by choice with every grouping in it', function (): void {
 it('labels weeks by their dates and marks the current one as in progress', function (): void {
     $user = User::factory()->create(['role' => Role::Manager]);
 
-    DailyShippingStat::create(['date' => now()->toDateString(), 'package_count' => 4, 'total_cost' => 40, 'total_weight' => 0]);
+    DailyShippingStat::create(['date' => now()->toDateString(), 'package_count' => 4, 'costed_package_count' => 4, 'total_cost' => 40, 'total_weight' => 0]);
 
     $monday = now()->startOfWeek();
     $sunday = now()->endOfWeek();

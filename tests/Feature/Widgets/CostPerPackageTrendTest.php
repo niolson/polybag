@@ -25,6 +25,7 @@ it('renders with daily shipping stats', function (): void {
     DailyShippingStat::create([
         'date' => now()->subDay()->toDateString(),
         'package_count' => 10,
+        'costed_package_count' => 10,
         'total_cost' => '125.00',
     ]);
 
@@ -78,9 +79,9 @@ it('plots no point on a day where nothing reported a cost', function (): void {
 });
 
 it('leaves out today and days with too few packages', function (): void {
-    DailyShippingStat::create(['date' => now()->subDays(3)->toDateString(), 'package_count' => 20, 'total_cost' => '200.00']);
-    DailyShippingStat::create(['date' => now()->subDays(2)->toDateString(), 'package_count' => 1, 'total_cost' => '8.40']);
-    DailyShippingStat::create(['date' => now()->toDateString(), 'package_count' => 20, 'total_cost' => '400.00']);
+    DailyShippingStat::create(['date' => now()->subDays(3)->toDateString(), 'package_count' => 20, 'costed_package_count' => 20, 'total_cost' => '200.00']);
+    DailyShippingStat::create(['date' => now()->subDays(2)->toDateString(), 'package_count' => 1, 'costed_package_count' => 1, 'total_cost' => '8.40']);
+    DailyShippingStat::create(['date' => now()->toDateString(), 'package_count' => 20, 'costed_package_count' => 20, 'total_cost' => '400.00']);
 
     $chart = (fn (): array => $this->getData())->call(new CostPerPackageTrend);
 

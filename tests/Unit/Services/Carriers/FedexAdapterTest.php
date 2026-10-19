@@ -107,7 +107,6 @@ it('uses the sandbox account number for sandbox rate requests', function (): voi
             'sandbox_api_secret' => 'sandbox_secret',
         ],
         credentials: [
-            'account_number' => 'production_account',
             'production_account_number' => 'production_account',
             'sandbox_account_number' => 'sandbox_account',
         ],
@@ -146,12 +145,12 @@ it('prepares FedEx rates without keeping account state on the adapter', function
 
     $firstAccount = CarrierAccount::factory()->fedex()->create([
         'carrier_id' => $carrier->id,
-        'credentials' => ['account_number' => 'first_account'],
+        'credentials' => ['production_account_number' => 'first_account', 'sandbox_account_number' => 'first_account'],
         'secret_credentials' => ['api_key' => 'first_key', 'api_secret' => 'first_secret'],
     ]);
     $secondAccount = CarrierAccount::factory()->fedex()->create([
         'carrier_id' => $carrier->id,
-        'credentials' => ['account_number' => 'second_account'],
+        'credentials' => ['production_account_number' => 'second_account', 'sandbox_account_number' => 'second_account'],
         'secret_credentials' => ['api_key' => 'second_key', 'api_secret' => 'second_secret'],
     ]);
 
@@ -210,12 +209,12 @@ it('keeps the client account through FedEx Saturday retry and One Rate follow-up
 
     $globalAccount = CarrierAccount::factory()->fedex()->create([
         'carrier_id' => $carrier->id,
-        'credentials' => ['account_number' => 'global_account'],
+        'credentials' => ['production_account_number' => 'global_account', 'sandbox_account_number' => 'global_account'],
         'secret_credentials' => ['api_key' => 'global_key', 'api_secret' => 'global_secret'],
     ]);
     $clientAccount = CarrierAccount::factory()->fedex()->create([
         'carrier_id' => $carrier->id,
-        'credentials' => ['account_number' => 'client_account'],
+        'credentials' => ['production_account_number' => 'client_account', 'sandbox_account_number' => 'client_account'],
         'secret_credentials' => ['api_key' => 'client_key', 'api_secret' => 'client_secret'],
     ]);
 

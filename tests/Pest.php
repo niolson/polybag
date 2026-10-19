@@ -160,7 +160,8 @@ function createFedexAccount(array $secrets = [], array $credentials = []): Carri
         'api_key' => 'test_api_key',
         'api_secret' => 'test_api_secret',
     ], $secrets), array_merge([
-        'account_number' => 'test_account',
+        'production_account_number' => 'test_account',
+        'sandbox_account_number' => 'test_account',
     ], $credentials));
 }
 
