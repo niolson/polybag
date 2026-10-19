@@ -29,6 +29,7 @@ it('displays packages shipped today count', function (): void {
     DailyShippingStat::create([
         'date' => today()->toDateString(),
         'package_count' => 5,
+        'costed_package_count' => 5,
         'total_cost' => 0,
         'total_weight' => 0,
     ]);
@@ -37,6 +38,7 @@ it('displays packages shipped today count', function (): void {
     DailyShippingStat::create([
         'date' => now()->subDay()->toDateString(),
         'package_count' => 2,
+        'costed_package_count' => 2,
         'total_cost' => 0,
         'total_weight' => 0,
     ]);

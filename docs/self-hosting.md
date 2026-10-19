@@ -329,9 +329,8 @@ $COMPOSE up -d --build app            # migrates, then reports healthy
 $COMPOSE up -d --build                # the workers start against the migrated schema
 ```
 
-If a purchase did slip through, `php artisan app:verify-label-integrity` names it, and
-`--repair` records the label row it is missing from the package's own columns. The
-report runs nightly on the scheduler; the repair is yours to run.
+If a purchase did slip through, `php artisan app:verify-label-integrity` names it. The
+report runs nightly on the scheduler.
 
 ## Internal tooling
 

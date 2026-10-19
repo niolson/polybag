@@ -22,10 +22,9 @@ class StatsOverview extends BaseWidget
     protected int|array|null $columns = 3;
 
     /**
-     * Packages counted but never priced. A null `costed_package_count` predates
-     * the column, so it falls back to `package_count` and reports no gap.
+     * Packages counted but never priced.
      */
-    private const UNCOSTED = 'SUM(package_count) - SUM(COALESCE(costed_package_count, package_count)) as uncosted';
+    private const UNCOSTED = 'SUM(package_count) - SUM(costed_package_count) as uncosted';
 
     protected function getStats(): array
     {

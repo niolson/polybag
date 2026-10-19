@@ -16,7 +16,7 @@ it('requires sandbox client credentials when FedEx child credentials belong to p
 
     $account = createFedexAccount(
         ['child_key' => 'production-child-key', 'child_secret' => 'production-child-secret'],
-        ['child_env' => 'production'],
+        ['child_env' => 'production', 'sandbox_account_number' => null],
     );
 
     expect($account->hasUsableCredentials())->toBeFalse();
@@ -37,7 +37,7 @@ it('reports FedEx connection status for the active environment', function (): vo
 
     $account = createFedexAccount(
         ['child_key' => 'production-child-key', 'child_secret' => 'production-child-secret'],
-        ['child_env' => 'production'],
+        ['child_env' => 'production', 'sandbox_account_number' => null],
     );
 
     expect($account->connectionStatus())->toBe('Needs Setup');

@@ -228,25 +228,7 @@ class CarrierAccount extends Model
 
         $accountNumber = $this->credential($environment.'_account_number');
 
-        if (filled($accountNumber)) {
-            return (string) $accountNumber;
-        }
-
-        $legacyAccountNumber = $this->credential('account_number');
-
-        if (blank($legacyAccountNumber)) {
-            return null;
-        }
-
-        if ($this->hasFedexChildCredentials()) {
-            $childEnvironment = $this->credential('child_env') ?? 'production';
-
-            if ($childEnvironment !== $environment) {
-                return null;
-            }
-        }
-
-        return (string) $legacyAccountNumber;
+        return filled($accountNumber) ? (string) $accountNumber : null;
     }
 
     /**

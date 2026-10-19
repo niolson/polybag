@@ -414,7 +414,8 @@ it('carrier account edit page saves separate FedEx account numbers by environmen
     $account = createFedexAccount(
         secrets: ['child_key' => 'production-child-key', 'child_secret' => 'production-child-secret'],
         credentials: [
-            'account_number' => '210726418',
+            'production_account_number' => '210726418',
+            'sandbox_account_number' => null,
             'child_env' => 'production',
         ],
     );
@@ -431,8 +432,7 @@ it('carrier account edit page saves separate FedEx account numbers by environmen
     $account->refresh();
 
     expect($account->credential('production_account_number'))->toBe('210726418')
-        ->and($account->credential('sandbox_account_number'))->toBe('740561073')
-        ->and($account->credential('account_number'))->toBe('210726418');
+        ->and($account->credential('sandbox_account_number'))->toBe('740561073');
 });
 
 it('fedex registration service routes through proxy when broker url is configured', function (): void {

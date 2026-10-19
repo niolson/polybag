@@ -74,7 +74,7 @@ function directLabel(string $carrier, Client $client, ?CarrierAccount $boughtOn,
 
 function fedexAccount(string $accountNumber, string $apiKey, ?Client $client = null): CarrierAccount
 {
-    return scopedAccount(Carrier::FEDEX, ['account_number' => $accountNumber], ['api_key' => $apiKey, 'api_secret' => 's'], $client);
+    return scopedAccount(Carrier::FEDEX, ['production_account_number' => $accountNumber, 'sandbox_account_number' => $accountNumber], ['api_key' => $apiKey, 'api_secret' => 's'], $client);
 }
 
 function uspsAccount(string $crid, string $clientId, ?Client $client = null): CarrierAccount
@@ -231,7 +231,7 @@ it('voids on the recorded account after its billing identity is edited, and logs
 
     $globalAccount = fedexAccount('global_account', 'k1');
     $package = directLabel(Carrier::FEDEX, $this->client, $globalAccount, '794600000001');
-    $globalAccount->update(['credentials' => ['account_number' => 'edited_account']]);
+    $globalAccount->update(['credentials' => ['production_account_number' => 'edited_account', 'sandbox_account_number' => 'edited_account']]);
 
     $response = app(PostageSourceDispatcher::class)->voidLabel($package);
 

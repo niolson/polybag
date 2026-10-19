@@ -19,6 +19,7 @@ it('shows shipping cost this week', function (): void {
     DailyShippingStat::create([
         'date' => today()->toDateString(),
         'package_count' => 2,
+        'costed_package_count' => 2,
         'total_cost' => 25.75,
         'total_weight' => 0,
     ]);

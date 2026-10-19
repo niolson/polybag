@@ -31,11 +31,10 @@ class CostPerPackageTrend extends ChartWidget
     private const MIN_PACKAGES_PER_DAY = 5;
 
     /**
-     * Packages that reported a cost. A null `costed_package_count` predates the
-     * column, so it falls back to counting every package, as those rows already
-     * read. Unpriced packages belong in neither side of the average.
+     * Packages that reported a cost. Unpriced packages belong in neither side
+     * of the average.
      */
-    private const COSTED_COUNT = 'SUM(COALESCE(costed_package_count, package_count))';
+    private const COSTED_COUNT = 'SUM(costed_package_count)';
 
     protected function getData(): array
     {

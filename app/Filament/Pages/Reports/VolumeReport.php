@@ -161,14 +161,10 @@ class VolumeReport extends Page implements HasTable
 
     /**
      * Packages the rollup counted but could not price.
-     *
-     * A null `costed_package_count` is a row aggregated before the column
-     * existed; falling back to `package_count` reports no gap, which is how
-     * those rows already read.
      */
     private function uncostedCountExpression(string $prefix = ''): string
     {
-        return "SUM({$prefix}package_count) - SUM(COALESCE({$prefix}costed_package_count, {$prefix}package_count)) as uncosted_package_count";
+        return "SUM({$prefix}package_count) - SUM({$prefix}costed_package_count) as uncosted_package_count";
     }
 
     /**
@@ -181,7 +177,7 @@ class VolumeReport extends Page implements HasTable
      */
     private function averageCostExpression(string $prefix = ''): string
     {
-        $costed = "SUM(COALESCE({$prefix}costed_package_count, {$prefix}package_count))";
+        $costed = "SUM({$prefix}costed_package_count)";
 
         return "CASE WHEN {$costed} > 0 THEN SUM({$prefix}total_cost) / {$costed} ELSE NULL END as avg_cost";
     }

@@ -196,8 +196,7 @@ class PackageLabel extends Model
 
     /**
      * The catalog service this Label was bought as. Null for a blind purchase,
-     * whose service Shopify chose, and for a Label bought before the column
-     * existed.
+     * whose service Shopify chose.
      *
      * @return BelongsTo<CarrierService, $this>
      */

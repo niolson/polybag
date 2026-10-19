@@ -1096,8 +1096,7 @@ class Package extends Model
 
             // Package row first, then its label: the lock order every writer
             // keeps. A shipped package with no active label is a broken
-            // invariant, not a void — `app:verify-label-integrity --repair`
-            // is what puts the row back.
+            // invariant, not a void — `app:verify-label-integrity` reports it.
             $voided = DB::table('package_labels')
                 ->where('package_id', $this->id)
                 ->whereNull('voided_at')

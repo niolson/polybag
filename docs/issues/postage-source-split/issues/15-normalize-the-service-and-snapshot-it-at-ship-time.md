@@ -1,6 +1,6 @@
 # Normalize the service and snapshot it at ship time
 
-Status: done — catalog service on the Label only, read through the active Label; run `app:backfill-label-catalog-services --apply` on each database
+Status: done — catalog service on the Label only, read through the active Label. The one-off backfill command was removed once migrations were squashed
 
 Repo: `polybag`
 

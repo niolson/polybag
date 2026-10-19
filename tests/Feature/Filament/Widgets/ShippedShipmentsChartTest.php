@@ -46,6 +46,7 @@ it('counts shipped shipments for the last week', function (): void {
     DailyShippingStat::create([
         'date' => now()->subDays(2)->toDateString(),
         'package_count' => 3,
+        'costed_package_count' => 3,
         'total_cost' => 0,
         'total_weight' => 0,
     ]);
@@ -54,6 +55,7 @@ it('counts shipped shipments for the last week', function (): void {
     DailyShippingStat::create([
         'date' => now()->subDays(10)->toDateString(),
         'package_count' => 2,
+        'costed_package_count' => 2,
         'total_cost' => 0,
         'total_weight' => 0,
     ]);
@@ -74,6 +76,7 @@ it('counts shipped shipments for the last month', function (): void {
     DailyShippingStat::create([
         'date' => now()->subDays(15)->toDateString(),
         'package_count' => 5,
+        'costed_package_count' => 5,
         'total_cost' => 0,
         'total_weight' => 0,
     ]);
@@ -81,6 +84,7 @@ it('counts shipped shipments for the last month', function (): void {
     DailyShippingStat::create([
         'date' => now()->subDays(3)->toDateString(),
         'package_count' => 3,
+        'costed_package_count' => 3,
         'total_cost' => 0,
         'total_weight' => 0,
     ]);
@@ -89,6 +93,7 @@ it('counts shipped shipments for the last month', function (): void {
     DailyShippingStat::create([
         'date' => now()->subDays(35)->toDateString(),
         'package_count' => 2,
+        'costed_package_count' => 2,
         'total_cost' => 0,
         'total_weight' => 0,
     ]);

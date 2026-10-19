@@ -30,6 +30,7 @@ it('renders with daily shipping stats', function (): void {
     DailyShippingStat::create([
         'date' => now()->toDateString(),
         'package_count' => 5,
+        'costed_package_count' => 5,
         'total_cost' => '60.00',
     ]);
 
