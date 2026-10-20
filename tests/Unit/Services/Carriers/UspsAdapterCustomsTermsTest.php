@@ -234,7 +234,7 @@ it('records the prepaid total on a purchase recovered by its key, whose reply ha
         ['serviceID' => '370', 'serviceName' => 'USPS Delivery Duties Paid Fee', 'price' => 0],
         ['serviceID' => '371', 'serviceName' => 'Prepaid Duties, Taxes, and Fees', 'price' => 31.16],
     ]]);
-    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+    $offer = ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->awaitingConfirmation()->create([
         'purchase_context' => [UspsAdapter::PURCHASE_CONTEXT_KEY => '3a2befe8-4475-48c7-a327-fe53439b355b'],
     ]);
 
@@ -250,7 +250,7 @@ it('records the prepaid total on a purchase recovered by its key, whose reply ha
 
 it('still records no duties cost on a recovered DDU purchase', function (): void {
     fakeUspsTermsReprint();
-    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+    $offer = ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->awaitingConfirmation()->create([
         'purchase_context' => [UspsAdapter::PURCHASE_CONTEXT_KEY => '3a2befe8-4475-48c7-a327-fe53439b355b'],
     ]);
 

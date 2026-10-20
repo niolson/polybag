@@ -298,7 +298,7 @@ it('refuses to track a label whose account has been deleted', function (): void 
     Saloon::assertNotSent(FedexTrackShipment::class);
 });
 
-it('resolves through scopes for a label that never recorded an account', function (): void {
+it('refuses to void a label that recorded no account rather than guessing one', function (): void {
     $sent = [];
     Saloon::fake(fedexCancelFakes($sent));
 
@@ -307,8 +307,8 @@ it('resolves through scopes for a label that never recorded an account', functio
 
     $response = app(PostageSourceDispatcher::class)->voidLabel($package);
 
-    expect($response->success)->toBeTrue()
-        ->and($sent)->toBe(['global_account']);
+    expect($response->success)->toBeFalse()
+        ->and($sent)->toBe([]);
 });
 
 it('records the buying account fingerprint on the Label when a package ships', function (): void {

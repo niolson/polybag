@@ -637,7 +637,7 @@ it('cancels a FedEx shipment', function (): void {
 
     $shipment = Shipment::factory()->create();
     $package = Package::factory()->shipped()->for($shipment)->create([
-        'carrier' => 'FedEx',
+        'carrier' => 'FedEx', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '794644790138',
     ]);
 
@@ -664,7 +664,7 @@ it('does not read a FedEx reply that cancelled nothing as a void', function (): 
     ]);
 
     $package = Package::factory()->shipped()->for(Shipment::factory())->create([
-        'carrier' => 'FedEx', 'tracking_number' => '794644790138',
+        'carrier' => 'FedEx', 'carrier_account_id' => CarrierAccount::query()->value('id'), 'tracking_number' => '794644790138',
     ]);
     config(['services.fedex.account_number' => 'test_account']);
 
@@ -681,7 +681,7 @@ it('does not read a FedEx 2xx it cannot read as a void', function (MockResponse 
     ]);
 
     $package = Package::factory()->shipped()->for(Shipment::factory())->create([
-        'carrier' => 'FedEx', 'tracking_number' => '794644790138',
+        'carrier' => 'FedEx', 'carrier_account_id' => CarrierAccount::query()->value('id'), 'tracking_number' => '794644790138',
     ]);
     config(['services.fedex.account_number' => 'test_account']);
 
@@ -706,7 +706,7 @@ it('returns failure when FedEx cancel errors', function (): void {
 
     $shipment = Shipment::factory()->create();
     $package = Package::factory()->shipped()->for($shipment)->create([
-        'carrier' => 'FedEx',
+        'carrier' => 'FedEx', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '000000000000',
     ]);
 
@@ -1322,7 +1322,7 @@ it('maps a FedEx tracking response into normalized tracking data', function (): 
     ]);
 
     $package = Package::factory()->fedex()->create([
-        'carrier' => 'FedEx',
+        'carrier' => 'FedEx', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '794644790138',
     ]);
 
@@ -1375,7 +1375,7 @@ it('defers to the FedEx summary delivery timestamp when the delivered scan event
     ]);
 
     $package = Package::factory()->fedex()->create([
-        'carrier' => 'FedEx',
+        'carrier' => 'FedEx', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '794644790139',
     ]);
 
@@ -1408,7 +1408,7 @@ it('maps FedEx delivery exceptions and returns into tracking statuses', function
     ]);
 
     $package = Package::factory()->fedex()->create([
-        'carrier' => 'FedEx',
+        'carrier' => 'FedEx', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '794644790138',
     ]);
 
@@ -1440,7 +1440,7 @@ it('maps FedEx ready for pickup statuses away from pre-transit', function (): vo
     ]);
 
     $package = Package::factory()->fedex()->create([
-        'carrier' => 'FedEx',
+        'carrier' => 'FedEx', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '794644790138',
     ]);
 
@@ -1459,7 +1459,7 @@ it('reads FedEx delivery-stage statuses that are not a delivery', function (stri
         ]]]]]]),
     ]);
 
-    $package = Package::factory()->fedex()->create(['carrier' => 'FedEx', 'tracking_number' => '794644790138']);
+    $package = Package::factory()->fedex()->create(['carrier' => 'FedEx', 'carrier_account_id' => CarrierAccount::query()->value('id'), 'tracking_number' => '794644790138']);
     $response = $this->adapter->trackShipment($package);
 
     expect($response->status)->toBe($expected)
@@ -1486,7 +1486,7 @@ it('reads a FedEx estimated delivery date by its type, not its position', functi
         ]]]]]]),
     ]);
 
-    $package = Package::factory()->fedex()->create(['carrier' => 'FedEx', 'tracking_number' => '794644790138']);
+    $package = Package::factory()->fedex()->create(['carrier' => 'FedEx', 'carrier_account_id' => CarrierAccount::query()->value('id'), 'tracking_number' => '794644790138']);
     $response = $this->adapter->trackShipment($package);
 
     expect($response->estimatedDeliveryAt?->toIso8601String())->toBe('2026-04-11T20:00:00+00:00');

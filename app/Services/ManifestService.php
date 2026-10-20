@@ -11,7 +11,6 @@ use App\Events\ManifestCreated as ManifestCreatedEvent;
 use App\Http\Integrations\USPS\Requests\ScanForm;
 use App\Http\Integrations\USPS\USPSConnector;
 use App\Models\Carrier;
-use App\Models\CarrierAccount;
 use App\Models\Location;
 use App\Models\Manifest;
 use App\Models\Package;
@@ -131,23 +130,6 @@ class ManifestService
      */
     private const USPS_MANIFEST_CHUNK_SIZE = 10_000;
 
-    private function resolveUspsAccount(Package $package, ?int $locationId): ?CarrierAccount
-    {
-        if ($package->carrierAccount) {
-            return $package->carrierAccount;
-        }
-
-        $carrierId = Carrier::where('name', Carrier::USPS)->value('id');
-
-        return $carrierId
-            ? CarrierAccount::resolveForShipment(
-                $carrierId,
-                $package->location_id ?? $locationId,
-                $package->shipment?->client_id,
-            )->first()
-            : null;
-    }
-
     private function createUspsManifest(Collection $packages, ?CarbonImmutable $shipDate = null, ?int $locationId = null): ManifestResponse
     {
         try {
@@ -155,14 +137,16 @@ class ManifestService
             $fromAddress = $location ? AddressData::fromLocation($location) : AddressData::fromConfig();
             $resolvedAccounts = [];
 
-            // Batch-eager-load the relations the account resolution needs (2 queries
-            // total) rather than one query per package. loadMissing mutates the shared
-            // model instances, so $packages sees the loaded relations.
+            // Batch-eager-load the account rather than one query per package.
+            // loadMissing mutates the shared model instances, so $packages sees
+            // the loaded relation.
             EloquentCollection::make($packages->all())
-                ->loadMissing(['carrierAccount', 'shipment']);
+                ->loadMissing('carrierAccount');
 
-            $packagesByAccount = $packages->groupBy(function (Package $package) use (&$resolvedAccounts, $locationId): string {
-                $account = $this->resolveUspsAccount($package, $locationId);
+            // The account that bought each Label, never whichever one scopes prefer
+            // now; a package whose account is gone cannot be manifested.
+            $packagesByAccount = $packages->groupBy(function (Package $package) use (&$resolvedAccounts): string {
+                $account = $package->carrierAccount;
 
                 if (! $account) {
                     return 'unresolved';

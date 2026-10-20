@@ -192,7 +192,7 @@ it('maps a UPS tracking response into normalized tracking data', function (): vo
     ]);
 
     $package = Package::factory()->shipped()->create([
-        'carrier' => 'UPS',
+        'carrier' => 'UPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '1Z999AA10123456784',
     ]);
 
@@ -260,7 +260,7 @@ it('maps UPS delivered responses into delivered tracking status', function (): v
     ]);
 
     $package = Package::factory()->shipped()->create([
-        'carrier' => 'UPS',
+        'carrier' => 'UPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '1Z999AA10123456784',
     ]);
 
@@ -315,7 +315,7 @@ it('falls back to the UPS summary delivery date when no delivered scan event exi
     ]);
 
     $package = Package::factory()->shipped()->create([
-        'carrier' => 'UPS',
+        'carrier' => 'UPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '1Z999AA10123456785',
     ]);
 
@@ -368,7 +368,7 @@ it('defers to the UPS summary delivery date when the delivered scan event has no
     ]);
 
     $package = Package::factory()->shipped()->create([
-        'carrier' => 'UPS',
+        'carrier' => 'UPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '1Z999AA10123456786',
     ]);
 
@@ -403,7 +403,7 @@ it('maps UPS exception responses into exception tracking status', function (): v
     ]);
 
     $package = Package::factory()->shipped()->create([
-        'carrier' => 'UPS',
+        'carrier' => 'UPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '1Z999AA10123456784',
     ]);
 
@@ -428,7 +428,7 @@ it('returns failure when UPS tracking API errors', function (): void {
     ]);
 
     $package = Package::factory()->shipped()->create([
-        'carrier' => 'UPS',
+        'carrier' => 'UPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '1Z999AA10123456784',
     ]);
 
@@ -449,7 +449,7 @@ it('handles non-json UPS tracking errors without crashing', function (): void {
     ]);
 
     $package = Package::factory()->shipped()->create([
-        'carrier' => 'UPS',
+        'carrier' => 'UPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '1Z999AA10123456784',
     ]);
 
@@ -1943,7 +1943,7 @@ function upsLabelRecoveryError(string $code, string $message): MockResponse
 
 it('spends the first reference slot on the offer, and the client keeps one', function (): void {
     fakeUpsShipEndpoints();
-    $offer = ShippingOffer::factory()->direct()->create(['carrier' => 'UPS']);
+    $offer = ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->create(['carrier' => 'UPS']);
 
     expect($this->adapter->createShipment(upsOfferShipRequest($offer, ['ORD-10042', 'PO-77']))->success)->toBeTrue();
 
@@ -1974,7 +1974,7 @@ it('lets a ship request that got no answer escape, sent once', function (): void
         },
     ]);
 
-    expect(fn () => $this->adapter->createShipment(upsOfferShipRequest(ShippingOffer::factory()->direct()->create(['carrier' => 'UPS']))))
+    expect(fn () => $this->adapter->createShipment(upsOfferShipRequest(ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->create(['carrier' => 'UPS']))))
         ->toThrow(FatalRequestException::class);
 
     expect($attempts)->toBe(1);
@@ -1986,7 +1986,7 @@ it('still answers a refusal as a failed response, not an exception', function ()
         CreateShipment::class => MockResponse::make(['response' => ['errors' => [['code' => '120100', 'message' => 'Missing or invalid shipper number']]]], 400),
     ]);
 
-    $response = $this->adapter->createShipment(upsOfferShipRequest(ShippingOffer::factory()->direct()->create(['carrier' => 'UPS'])));
+    $response = $this->adapter->createShipment(upsOfferShipRequest(ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->create(['carrier' => 'UPS'])));
 
     expect($response->success)->toBeFalse()
         ->and($response->errorMessage)->toBe('Missing or invalid shipper number');
@@ -1997,7 +1997,7 @@ it('recovers the label by the offer reference instead of buying again', function
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         LabelRecovery::class => upsLabelRecoveryFound(format: 'zpl'),
     ]);
-    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['carrier' => 'UPS']);
+    $offer = ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->awaitingConfirmation()->create(['carrier' => 'UPS']);
 
     $response = $this->adapter->recoverPurchase(upsOfferShipRequest($offer, labelFormat: 'zpl', labelDpi: 300));
 
@@ -2031,7 +2031,7 @@ it('names no stock size when recovering a GIF label, which UPS refuses', functio
         LabelRecovery::class => upsLabelRecoveryFound(),
     ]);
 
-    $response = $this->adapter->recoverPurchase(upsOfferShipRequest(ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['carrier' => 'UPS'])));
+    $response = $this->adapter->recoverPurchase(upsOfferShipRequest(ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->awaitingConfirmation()->create(['carrier' => 'UPS'])));
 
     expect($response?->success)->toBeTrue()
         ->and($response->labelFormat)->toBe('image')
@@ -2047,7 +2047,7 @@ it('settles the offer when UPS is certain nothing was created, or the shipment w
         LabelRecovery::class => upsLabelRecoveryError($code, $message),
     ]);
 
-    $response = $this->adapter->recoverPurchase(upsOfferShipRequest(ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['carrier' => 'UPS'])));
+    $response = $this->adapter->recoverPurchase(upsOfferShipRequest(ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->awaitingConfirmation()->create(['carrier' => 'UPS'])));
 
     expect($response)->not->toBeNull()
         ->and($response->success)->toBeFalse()
@@ -2063,7 +2063,7 @@ it('leaves the question open on any other Label Recovery answer', function (Mock
         LabelRecovery::class => $recovery,
     ]);
 
-    expect($this->adapter->recoverPurchase(upsOfferShipRequest(ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['carrier' => 'UPS']))))->toBeNull();
+    expect($this->adapter->recoverPurchase(upsOfferShipRequest(ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->awaitingConfirmation()->create(['carrier' => 'UPS']))))->toBeNull();
 })->with([
     'a different 400' => fn (): MockResponse => upsLabelRecoveryError('9801050', 'Label Stock Size not allowed for specified Label Image Type.'),
     'a 503' => fn () => MockResponse::make(['response' => ['errors' => [['code' => '10429', 'message' => 'Service Unavailable']]]], 503),
@@ -2080,7 +2080,7 @@ it('lets a 5xx on the ship request escape rather than settle it as a decline', f
         CreateShipment::class => MockResponse::make(['response' => ['errors' => [['code' => '10429', 'message' => 'Service Unavailable']]]], 503),
     ]);
 
-    expect(fn () => $this->adapter->createShipment(upsOfferShipRequest(ShippingOffer::factory()->direct()->create(['carrier' => 'UPS']))))
+    expect(fn () => $this->adapter->createShipment(upsOfferShipRequest(ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->create(['carrier' => 'UPS']))))
         ->toThrow(ServerException::class);
 });
 
@@ -2090,7 +2090,7 @@ it('recovers the international forms with the label', function (): void {
         LabelRecovery::class => upsLabelRecoveryFound(form: 'JVBERi0xLjQ='),
     ]);
 
-    $response = $this->adapter->recoverPurchase(upsInternationalOfferShipRequest(ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['carrier' => 'UPS'])));
+    $response = $this->adapter->recoverPurchase(upsInternationalOfferShipRequest(ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->awaitingConfirmation()->create(['carrier' => 'UPS'])));
 
     expect($response?->success)->toBeTrue()
         ->and($response->customsFormData)->toBe('JVBERi0xLjQ=');
@@ -2104,7 +2104,7 @@ it('leaves a cross-border recovery open when the label comes back without its fo
         LabelRecovery::class => upsLabelRecoveryFound(),
     ]);
 
-    expect($this->adapter->recoverPurchase(upsInternationalOfferShipRequest(ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['carrier' => 'UPS']))))->toBeNull();
+    expect($this->adapter->recoverPurchase(upsInternationalOfferShipRequest(ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->awaitingConfirmation()->create(['carrier' => 'UPS']))))->toBeNull();
 });
 
 it('asks UPS with the shipper number of the account the offer was bought on', function (): void {
@@ -2120,7 +2120,7 @@ it('asks UPS with the shipper number of the account the offer was bought on', fu
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
         LabelRecovery::class => upsLabelRecoveryFound(),
     ]);
-    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+    $offer = ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->awaitingConfirmation()->create([
         'carrier' => 'UPS',
         'carrier_account_id' => $original->id,
         'carrier_account_fingerprint' => $original->fingerprint(),
@@ -2137,7 +2137,7 @@ it('asks UPS with the shipper number of the account the offer was bought on', fu
 it('leaves the question open when the account the offer was bought on is gone or bills someone else', function (string $change): void {
     Saloon::fake(['*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600])]);
     $account = CarrierAccount::query()->firstOrFail();
-    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+    $offer = ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->awaitingConfirmation()->create([
         'carrier' => 'UPS',
         'carrier_account_id' => $account->id,
         'carrier_account_fingerprint' => $account->fingerprint(),
@@ -2163,7 +2163,7 @@ it('voids a UPS shipment only when the summary status code is 1', function (): v
     ]);
 
     $package = Package::factory()->shipped()->for(Shipment::factory())->create([
-        'carrier' => 'UPS', 'tracking_number' => '1Z999AA10123456784',
+        'carrier' => 'UPS', 'carrier_account_id' => CarrierAccount::query()->value('id'), 'tracking_number' => '1Z999AA10123456784',
     ]);
 
     $response = $this->adapter->cancelShipment('1Z999AA10123456784', $package);
@@ -2181,7 +2181,7 @@ it('voids a UPS shipment whose summary status code is the integer 1', function (
     ]);
 
     $package = Package::factory()->shipped()->for(Shipment::factory())->create([
-        'carrier' => 'UPS', 'tracking_number' => '1Z999AA10123456784',
+        'carrier' => 'UPS', 'carrier_account_id' => CarrierAccount::query()->value('id'), 'tracking_number' => '1Z999AA10123456784',
     ]);
 
     expect($this->adapter->cancelShipment('1Z999AA10123456784', $package)->success)->toBeTrue();
@@ -2197,7 +2197,7 @@ it('does not read a UPS reply whose summary status is not voided as a void', fun
     ]);
 
     $package = Package::factory()->shipped()->for(Shipment::factory())->create([
-        'carrier' => 'UPS', 'tracking_number' => '1Z999AA10123456784',
+        'carrier' => 'UPS', 'carrier_account_id' => CarrierAccount::query()->value('id'), 'tracking_number' => '1Z999AA10123456784',
     ]);
 
     $response = $this->adapter->cancelShipment('1Z999AA10123456784', $package);
@@ -2213,7 +2213,7 @@ it('does not read a UPS 2xx it cannot read as a void', function (MockResponse $r
     ]);
 
     $package = Package::factory()->shipped()->for(Shipment::factory())->create([
-        'carrier' => 'UPS', 'tracking_number' => '1Z999AA10123456784',
+        'carrier' => 'UPS', 'carrier_account_id' => CarrierAccount::query()->value('id'), 'tracking_number' => '1Z999AA10123456784',
     ]);
 
     $response = $this->adapter->cancelShipment('1Z999AA10123456784', $package);
@@ -3132,7 +3132,7 @@ it('recovers a tracking number untouched when the EIN is a substring of it, and 
     Log::extend('ups-validation-scrub', fn (): MonologLogger => new MonologLogger('ups-validation', [$handler]));
     config()->set('logging.channels.ups-validation', ['driver' => 'ups-validation-scrub']);
     Log::forgetChannel('ups-validation');
-    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['carrier' => 'UPS']);
+    $offer = ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->awaitingConfirmation()->create(['carrier' => 'UPS']);
 
     // The EIN 030388962 sits inside the tracking number 1Z14A6G90303889622.
     Saloon::fake([

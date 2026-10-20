@@ -244,7 +244,7 @@ it('cancels a domestic label', function (): void {
 
     $shipment = Shipment::factory()->create(['country' => 'US']);
     $package = Package::factory()->shipped()->for($shipment)->create([
-        'carrier' => 'USPS',
+        'carrier' => 'USPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '9400111899223456789012',
     ]);
 
@@ -265,7 +265,7 @@ it('cancels an international label', function (): void {
 
     $shipment = Shipment::factory()->create(['country' => 'CA']);
     $package = Package::factory()->shipped()->for($shipment)->create([
-        'carrier' => 'USPS',
+        'carrier' => 'USPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => 'LZ999999999US',
     ]);
 
@@ -286,7 +286,7 @@ it('voids a label USPS can only refund, naming the dispute', function (): void {
     ]);
 
     $package = Package::factory()->shipped()->for(Shipment::factory()->create(['country' => 'US']))->create([
-        'carrier' => 'USPS',
+        'carrier' => 'USPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '9400111899223456789012',
     ]);
 
@@ -304,7 +304,7 @@ it('does not read a USPS cancel reply without CANCELED as a void', function (Moc
     ]);
 
     $package = Package::factory()->shipped()->for(Shipment::factory()->create(['country' => 'US']))->create([
-        'carrier' => 'USPS',
+        'carrier' => 'USPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '9400111899223456789012',
     ]);
 
@@ -327,7 +327,7 @@ it('does not read an international USPS cancel reply without CANCELED as a void'
     ]);
 
     $package = Package::factory()->shipped()->for(Shipment::factory()->create(['country' => 'CA']))->create([
-        'carrier' => 'USPS',
+        'carrier' => 'USPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => 'LZ999999999US',
     ]);
 
@@ -346,7 +346,7 @@ it('returns failure when cancel API errors', function (): void {
 
     $shipment = Shipment::factory()->create(['country' => 'US']);
     $package = Package::factory()->shipped()->for($shipment)->create([
-        'carrier' => 'USPS',
+        'carrier' => 'USPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '9400111899223456789012',
     ]);
 
@@ -385,7 +385,7 @@ it('maps a USPS tracking response into normalized tracking data', function (): v
     ]);
 
     $package = Package::factory()->shipped()->create([
-        'carrier' => 'USPS',
+        'carrier' => 'USPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '9400111899223456789012',
     ]);
 
@@ -425,7 +425,7 @@ it('maps USPS delivered responses into delivered tracking status', function (): 
     ]);
 
     $package = Package::factory()->shipped()->create([
-        'carrier' => 'USPS',
+        'carrier' => 'USPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '9400111899223456789012',
     ]);
 
@@ -461,7 +461,7 @@ it('does not record a delivery date for an out-for-delivery scan', function (): 
     ]);
 
     $package = Package::factory()->shipped()->create([
-        'carrier' => 'USPS',
+        'carrier' => 'USPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '9400111899223456789012',
     ]);
 
@@ -499,7 +499,7 @@ it('records a delivery date for a delivered-to-agent scan', function (): void {
     ]);
 
     $package = Package::factory()->shipped()->create([
-        'carrier' => 'USPS',
+        'carrier' => 'USPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '9400111899223456789012',
     ]);
 
@@ -536,7 +536,7 @@ it('treats a picked-up scan as delivered even without delivered status text', fu
     ]);
 
     $package = Package::factory()->shipped()->create([
-        'carrier' => 'USPS',
+        'carrier' => 'USPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '9400111899223456789012',
     ]);
 
@@ -572,7 +572,7 @@ it('reports delivered status without a date when the delivered scan has no times
     ]);
 
     $package = Package::factory()->shipped()->create([
-        'carrier' => 'USPS',
+        'carrier' => 'USPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '9400111899223456789012',
     ]);
 
@@ -598,7 +598,7 @@ it('maps USPS hold and pickup responses into exception tracking status', functio
     ]);
 
     $package = Package::factory()->shipped()->create([
-        'carrier' => 'USPS',
+        'carrier' => 'USPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '9400111899223456789012',
     ]);
 
@@ -619,7 +619,7 @@ it('returns failure when USPS tracking API errors', function (): void {
     ]);
 
     $package = Package::factory()->shipped()->create([
-        'carrier' => 'USPS',
+        'carrier' => 'USPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '9400111899223456789012',
     ]);
 
@@ -640,7 +640,7 @@ it('handles non-json USPS tracking errors without crashing', function (): void {
     ]);
 
     $package = Package::factory()->shipped()->create([
-        'carrier' => 'USPS',
+        'carrier' => 'USPS', 'carrier_account_id' => CarrierAccount::query()->value('id'),
         'tracking_number' => '9400111899223456789012',
     ]);
 
@@ -1812,7 +1812,7 @@ it('sends domestic ZPL text with no ASCII form as entered rather than blank', fu
 
 it('refuses an international label whose address cannot be romanized, before asking USPS anything', function (string $labelFormat, string $lastName, string $field): void {
     fakeUspsLabelsBothWays();
-    $offer = ShippingOffer::factory()->direct()->create();
+    $offer = ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->create();
 
     $request = uspsAddressTextShipRequest(
         new AddressData(firstName: 'Taro', lastName: $lastName, streetAddress: '1-1 Chiyoda', city: 'Tokyo', stateOrProvince: null, postalCode: '100-0001', country: 'JP'),
@@ -2648,7 +2648,7 @@ function fakeUspsAuth(): array
 
 it('stores a fresh idempotency key on the offer and sends it with the label request', function (string $country, string $labelClass): void {
     Saloon::fake([...fakeUspsAuth(), $labelClass => uspsLabelMultipart('9200190414219000000011')]);
-    $offer = ShippingOffer::factory()->direct()->create();
+    $offer = ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->create();
 
     $response = $this->adapter->createShipment(uspsOfferShipRequest($offer, $country));
 
@@ -2696,7 +2696,7 @@ it('lets a label request that got no answer escape, with the key already on the 
             return MockResponse::make()->throw(new FatalRequestException(new RuntimeException('Connection timed out'), $pending));
         },
     ]);
-    $offer = ShippingOffer::factory()->direct()->create();
+    $offer = ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->create();
 
     expect(fn () => $this->adapter->createShipment(uspsOfferShipRequest($offer)))
         ->toThrow(FatalRequestException::class);
@@ -2710,7 +2710,7 @@ it('lets a label request that got no answer escape, with the key already on the 
 it('still answers a refusal as a failed response, not an exception', function (): void {
     Saloon::fake([...fakeUspsAuth(), Label::class => uspsLabelError('160138', 'ZIP Code not in service')]);
 
-    $response = $this->adapter->createShipment(uspsOfferShipRequest(ShippingOffer::factory()->direct()->create()));
+    $response = $this->adapter->createShipment(uspsOfferShipRequest(ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->create()));
 
     expect($response->success)->toBeFalse()
         ->and($response->errorMessage)->toContain('no longer in service');
@@ -2718,7 +2718,7 @@ it('still answers a refusal as a failed response, not an exception', function ()
 
 it('recovers the label by the stored key instead of buying again', function (string $country, string $reprintClass): void {
     Saloon::fake([...fakeUspsAuth(), $reprintClass => uspsLabelMultipart('9200190414219000000011', reprint: true)]);
-    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+    $offer = ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->awaitingConfirmation()->create([
         'purchase_context' => [UspsAdapter::PURCHASE_CONTEXT_KEY => '3a2befe8-4475-48c7-a327-fe53439b355b'],
     ]);
 
@@ -2748,7 +2748,7 @@ it('recovers the label by the stored key instead of buying again', function (str
 
 it('settles the offer when USPS is certain nothing was bought, or the label was cancelled', function (string $code, string $detail, string $expected): void {
     Saloon::fake([...fakeUspsAuth(), LabelReprint::class => uspsLabelError($code, $detail)]);
-    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+    $offer = ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->awaitingConfirmation()->create([
         'purchase_context' => [UspsAdapter::PURCHASE_CONTEXT_KEY => (string) Str::uuid()],
     ]);
 
@@ -2764,7 +2764,7 @@ it('settles the offer when USPS is certain nothing was bought, or the label was 
 
 it('leaves the question open on any other reprint answer', function (MockResponse $reprint): void {
     Saloon::fake([...fakeUspsAuth(), LabelReprint::class => $reprint]);
-    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+    $offer = ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->awaitingConfirmation()->create([
         'purchase_context' => [UspsAdapter::PURCHASE_CONTEXT_KEY => (string) Str::uuid()],
     ]);
 
@@ -2777,7 +2777,7 @@ it('leaves the question open on any other reprint answer', function (MockRespons
 
 it('settles an offer spent before any key was recorded, since USPS cannot be asked about it', function (): void {
     Saloon::fake(fakeUspsAuth());
-    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create(['purchase_context' => null]);
+    $offer = ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->awaitingConfirmation()->create(['purchase_context' => null]);
 
     $response = $this->adapter->recoverPurchase(uspsOfferShipRequest($offer));
 
@@ -2808,7 +2808,7 @@ it('asks USPS on the account the offer was bought on, not the one scopes prefer 
         },
         LabelReprint::class => uspsLabelMultipart('9200190414219000000011', reprint: true),
     ]);
-    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+    $offer = ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->awaitingConfirmation()->create([
         'carrier_account_id' => $original->id,
         'carrier_account_fingerprint' => $original->fingerprint(),
         'purchase_context' => [UspsAdapter::PURCHASE_CONTEXT_KEY => (string) Str::uuid()],
@@ -2824,7 +2824,7 @@ it('asks USPS on the account the offer was bought on, not the one scopes prefer 
 it('leaves the question open when the account the offer was bought on is gone or bills someone else', function (string $change): void {
     Saloon::fake(fakeUspsAuth());
     $account = CarrierAccount::query()->firstOrFail();
-    $offer = ShippingOffer::factory()->direct()->awaitingConfirmation()->create([
+    $offer = ShippingOffer::factory()->direct()->state(['carrier_account_id' => CarrierAccount::query()->value('id')])->awaitingConfirmation()->create([
         'carrier_account_id' => $account->id,
         'carrier_account_fingerprint' => $account->fingerprint(),
         'purchase_context' => [UspsAdapter::PURCHASE_CONTEXT_KEY => (string) Str::uuid()],

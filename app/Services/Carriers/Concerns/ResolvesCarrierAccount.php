@@ -53,14 +53,14 @@ trait ResolvesCarrierAccount
      * offer that recorded an account is asked on that account, and left
      * unresolved when the row is gone or its billing identity has changed
      * since the quote — the same digest the purchase path compares.
+     *
+     * A direct offer always records its account, so a null id is an account
+     * deleted since (the FK is nullOnDelete), and cannot be asked either.
      */
     private function purchasingAccountChanged(ShippingOffer $offer): bool
     {
         if ($offer->carrier_account_id === null) {
-            // Deleting the account nulls the id (the FK is nullOnDelete) but
-            // leaves the fingerprint, so a fingerprint with no id is a gone
-            // account; neither is an offer that never recorded one.
-            return $offer->carrier_account_fingerprint !== null;
+            return true;
         }
 
         $account = CarrierAccount::query()->find($offer->carrier_account_id);
@@ -72,15 +72,11 @@ trait ResolvesCarrierAccount
     /**
      * The account an offer was bought on, for asking what became of it.
      *
-     * Only after {@see purchasingAccountChanged()} said no. An offer that
-     * recorded no account (issued before rates carried one) falls back to the
-     * resolution the purchase used.
+     * Only after {@see purchasingAccountChanged()} said no.
      */
-    private function purchasingAccount(ShippingOffer $offer, ?int $locationId, ?int $clientId = null): ?CarrierAccount
+    private function purchasingAccount(ShippingOffer $offer): ?CarrierAccount
     {
-        return $offer->carrier_account_id === null
-            ? $this->resolveAccount($locationId, $clientId)
-            : CarrierAccount::query()->find($offer->carrier_account_id);
+        return CarrierAccount::query()->find($offer->carrier_account_id);
     }
 
     /**
@@ -92,8 +88,8 @@ trait ResolvesCarrierAccount
      * scope, would otherwise send the void to an account that never bought
      * the label and gets told "not found" (`project-review/06`). A
      * deactivated account is still used: the label it bought exists either
-     * way. Only a Label that never recorded an account, bought before
-     * accounts were recorded, is resolved through the scopes.
+     * way. A direct Label always records its account, so none on record means
+     * the account was deleted.
      *
      * @throws CarrierException when the account that bought the Label has been deleted
      */
@@ -101,15 +97,9 @@ trait ResolvesCarrierAccount
     {
         $fingerprint = $package->activeLabel()->value('carrier_account_fingerprint');
 
+        // Deleting the account nulls the id (the FK is nullOnDelete).
         if ($package->carrier_account_id === null) {
-            // Deleting the account nulls the id (the FK is nullOnDelete) but
-            // leaves the fingerprint, so a fingerprint with no id is a gone
-            // account — see purchasingAccountChanged().
-            if ($fingerprint !== null) {
-                throw $this->labelAccountDeleted();
-            }
-
-            return $this->resolveAccount($package->location_id, $package->shipment?->client_id);
+            throw $this->labelAccountDeleted();
         }
 
         $account = CarrierAccount::query()->find($package->carrier_account_id)
