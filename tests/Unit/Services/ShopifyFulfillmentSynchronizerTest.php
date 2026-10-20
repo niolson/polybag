@@ -547,9 +547,8 @@ it('never re-points at a fulfillment order another shipment already holds', func
         ->not->toHaveKey('shopify_fulfillment_order_id');
 });
 
-it('re-points on the shipment items when the fingerprint predates them', function (): void {
-    // A shipment imported before the fingerprint existed still has evidence,
-    // as long as its items were imported.
+it('does not re-point on the shipment items when no fingerprint was recorded', function (): void {
+    // The import records the fingerprint; items are not evidence without it.
     $package = shopifyPackageWithOrderMetadata([ShopifyGoodsFingerprint::METADATA_KEY => null]);
     $shipment = $package->shipment;
     $shipment->shipmentItems()->create([
@@ -566,8 +565,8 @@ it('re-points on the shipment items when the fingerprint predates them', functio
 
     $this->synchronizer->sync();
 
-    expect($shipment->refresh()->metadata['shopify_fulfillment_order_id'])
-        ->toBe('gid://shopify/FulfillmentOrder/54321');
+    expect($shipment->refresh()->metadata)
+        ->not->toHaveKey('shopify_fulfillment_order_id');
 });
 
 it('clears rather than guesses when the shipment records no goods at all', function (): void {
