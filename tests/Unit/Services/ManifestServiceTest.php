@@ -197,8 +197,9 @@ it('creates a separate USPS SCAN form per purchasing carrier account', function 
     Saloon::assertSent(ScanForm::class);
 });
 
-it('fails the USPS manifest when a package has no resolvable carrier account', function (): void {
-    // Shipped package with no stored account and no carrier account configured to resolve.
+it('fails the USPS manifest for a package whose buying account is gone, even with another account in scope', function (): void {
+    // The scope-preferred account never bought this label, so it cannot tender it.
+    createUspsAccount();
     $package = Package::factory()->shipped()->create([
         'carrier' => 'USPS',
         'tracking_number' => '9400333333333333333333',

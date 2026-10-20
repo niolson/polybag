@@ -1277,7 +1277,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
             return null;
         }
 
-        $account = $this->purchasingAccount($offer, $request->locationId, $request->clientId);
+        $account = $this->purchasingAccount($offer);
         $shipperNumber = $this->resolveAccountNumber($account);
 
         if ($shipperNumber === null) {

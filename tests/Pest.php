@@ -92,7 +92,16 @@ function quotedDirectly(Package $package, RateResponse $rate): RateResponse
     // an offer for the edited parcel, the way a real re-quote would.
     $stored = Package::query()->with('shipment')->find($package->id) ?? $package;
 
-    $offer = ShippingOffer::factory()->direct()->forRate($rate)->quotedFor($stored)->create();
+    // The account this package would buy on, which a real quote records on the offer.
+    $carrierId = Carrier::query()->where('name', $rate->carrier)->value('id');
+    $account = $carrierId === null ? null : CarrierAccount::resolveForShipment(
+        $carrierId,
+        $stored->location_id,
+        $stored->shipment?->client_id,
+    )->first();
+
+    $offer = ShippingOffer::factory()->direct()->forRate($rate)->quotedFor($stored)
+        ->create(['carrier_account_id' => $account?->id]);
 
     return RateResponse::fromArray($rate->withOfferId($offer->public_id)->toArray());
 }

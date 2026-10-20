@@ -691,7 +691,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         }
 
         $isInternational = $request->toAddress->country !== 'US';
-        $account = $this->purchasingAccount($offer, $request->locationId, $request->clientId);
+        $account = $this->purchasingAccount($offer);
 
         try {
             $connector = USPSConnector::getAuthenticatedConnector($account);
