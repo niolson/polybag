@@ -507,9 +507,9 @@ class ShipmentResource extends Resource
                         'today_or_overdue' => 'Today or past due',
                     ])
                     ->query(fn (Builder $query, array $data): Builder => match ($data['value'] ?? null) {
-                        'today' => $query->shipByToday(),
-                        'overdue' => $query->dueToShip(includeToday: false),
-                        'today_or_overdue' => $query->dueToShip(),
+                        'today' => $query->scopes('shipByToday'),
+                        'overdue' => $query->scopes(['dueToShip' => [false]]),
+                        'today_or_overdue' => $query->scopes('dueToShip'),
                         default => $query,
                     }),
                 Tables\Filters\Filter::make('needs_shipping_method')
