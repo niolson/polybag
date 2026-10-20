@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\Shipment;
-use App\Models\ShipmentItem;
 
 /**
  * A comparable fingerprint of the goods a Shopify fulfillment order is for.
@@ -20,8 +19,7 @@ use App\Models\ShipmentItem;
  * Recorded on the shipment at import time rather than derived from
  * `shipment_items`, because item import is a per-source setting: a source with
  * it switched off has no items to compare and would otherwise have no evidence
- * at all. Items remain the fallback for shipments imported before the
- * fingerprint existed.
+ * at all.
  */
 class ShopifyGoodsFingerprint
 {
@@ -64,22 +62,14 @@ class ShopifyGoodsFingerprint
     }
 
     /**
-     * The fingerprint a shipment carries, or the one its items imply.
+     * The fingerprint the import recorded on a shipment; null when it recorded
+     * none, which is no evidence rather than "no goods".
      */
     public function forShipment(Shipment $shipment): ?string
     {
         $stored = $shipment->metadata[self::METADATA_KEY] ?? null;
 
-        if (filled($stored)) {
-            return (string) $stored;
-        }
-
-        $shipment->loadMissing('shipmentItems.product');
-
-        return $this->forLineItems($shipment->shipmentItems->map(fn (ShipmentItem $item): array => [
-            'sku' => $item->product->sku,
-            'quantity' => $item->quantity,
-        ]));
+        return filled($stored) ? (string) $stored : null;
     }
 
     /**
